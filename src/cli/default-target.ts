@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
+import { projectChosenTargetUrl } from "../core/project-target-urls.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import {
 	describeMissing,
@@ -74,10 +75,12 @@ function setupFactsFor(settings: Readonly<ClioSettings>): SetupFacts {
 	const auth = bootAuthStatus(target, runtime);
 	const envVariable = target.auth?.apiKeyEnvVar?.trim();
 	if (auth.required) {
+		const projectUrl = projectChosenTargetUrl(target, true);
 		facts.credential = {
 			available: auth.available,
 			provider: auth.providerId,
 			...(envVariable ? { envVariable } : {}),
+			...(projectUrl !== null ? { projectUrl } : {}),
 		};
 	}
 	return { chat: settings.chat, target: facts };
@@ -107,6 +110,13 @@ export function classifyDefaultTarget(settings: Readonly<ClioSettings> = readSet
 export function firstMissing(settings: Readonly<ClioSettings>): Missing | null {
 	const status = setupStatus(setupFactsFor(settings));
 	return status.stage === "needs" ? (status.missing[0] ?? null) : null;
+}
+
+/** The key or sign-in a saved target still needs from this shell, or null when it has what it needs. */
+export function credentialMissing(settings: Readonly<ClioSettings>, targetId: string): Missing | null {
+	const status = setupStatus(setupFactsFor({ ...settings, chat: { ...settings.chat, target: targetId } }));
+	if (status.stage !== "needs") return null;
+	return status.missing.find((missing) => missing.kind === "credential" || missing.kind === "env") ?? null;
 }
 
 /** One sentence naming what is wrong, for the causes target selection can fix. */

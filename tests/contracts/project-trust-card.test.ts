@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	buildProjectTrustCard,
+	launchTrustNotices,
+	projectConnectionNeeds,
 	projectTrustCardChoice,
 	projectTrustCardReviewFiles,
 	renderProjectTrustCard,
 	trustProjectCard,
 } from "../../src/cli/project-trust-card.js";
+import { readStrictLayeredSettings } from "../../src/core/settings-layers.js";
 import {
 	captureProjectSurface,
 	recordProjectSurfaceTrust,
@@ -59,6 +62,81 @@ test("S-76: the card names each untrusted surface, its connections, rule counts 
 			[["safety", true]],
 		);
 	} finally {
+		home.restore();
+	}
+});
+
+test("after Trust all, each project connection names the key or sign-in it still needs", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-card-");
+	const saved = process.env.OPENAI_API_KEY;
+	delete process.env.OPENAI_API_KEY;
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		writeFileSync(
+			join(workspace, ".clio-coder", "settings.yaml"),
+			[
+				"targets:",
+				"  - id: team-openai",
+				"    runtime: openai",
+				"  - id: lab-gateway",
+				"    runtime: openai",
+				"    url: https://llm.lab.example.org/v1",
+				"  - id: local",
+				"    runtime: openai-compat",
+				"    url: http://127.0.0.1:8000/v1",
+				"",
+			].join("\n"),
+		);
+		const model = buildProjectTrustCard(workspace);
+		ok(model);
+		trustProjectCard(model);
+		const needs = () => projectConnectionNeeds(workspace, readStrictLayeredSettings(workspace).settings);
+		const gateway =
+			"lab-gateway points at https://llm.lab.example.org/v1, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings.";
+		deepStrictEqual(needs(), [
+			"openai has no key or sign-in stored. Run: clio-coder auth login openai (or press Enter on /config)",
+			gateway,
+		]);
+		// A key in the shell serves the provider's own address, never the address the project chose.
+		process.env.OPENAI_API_KEY = "sk-test";
+		deepStrictEqual(needs(), [gateway]);
+	} finally {
+		if (saved === undefined) delete process.env.OPENAI_API_KEY;
+		else process.env.OPENAI_API_KEY = saved;
+		home.restore();
+	}
+});
+
+test("a launch with the project trusted, as after /trust restarts into the session, names the connection needs too", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-card-");
+	const saved = process.env.OPENAI_API_KEY;
+	delete process.env.OPENAI_API_KEY;
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		writeFileSync(
+			join(workspace, ".clio-coder", "settings.yaml"),
+			"targets:\n  - id: team-openai\n    runtime: openai\n",
+		);
+		writeFileSync(join(workspace, ".clio-coder", "safety.yaml"), "version: 1\nnoWritePaths:\n  - secrets/\n");
+		const settings = () => readStrictLayeredSettings(workspace).settings;
+		const need = "openai has no key or sign-in stored. Run: clio-coder auth login openai (or press Enter on /config)";
+		// No card over untrusted configuration (no terminal to ask): the per-file notices stay.
+		strictEqual(launchTrustNotices("none", workspace, settings()), undefined);
+		// Open without it: the header's /trust reminder answers it, nothing else.
+		deepStrictEqual(launchTrustNotices("skipped", workspace, settings()), []);
+		const model = buildProjectTrustCard(workspace);
+		ok(model);
+		trustProjectCard(model);
+		deepStrictEqual(launchTrustNotices("trusted", workspace, settings()), [need]);
+		// The restarted session's card has nothing left to ask; the need is still named.
+		deepStrictEqual(launchTrustNotices("none", workspace, settings()), [need]);
+		process.env.OPENAI_API_KEY = "sk-test";
+		strictEqual(launchTrustNotices("none", workspace, settings()), undefined);
+	} finally {
+		if (saved === undefined) delete process.env.OPENAI_API_KEY;
+		else process.env.OPENAI_API_KEY = saved;
 		home.restore();
 	}
 });

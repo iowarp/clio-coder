@@ -1,4 +1,5 @@
 import { readSettings } from "../../../../../src/core/config.js";
+import { projectChosenTargetUrl } from "../../../../../src/core/project-target-urls.js";
 import { readLayeredSettings } from "../../../../../src/core/settings-layers.js";
 import { describeMissing, setupStatus } from "../../../../../src/domains/lifecycle/setup-status.js";
 import {
@@ -24,6 +25,7 @@ export function readSetupStatus(cwd?: string): SetupStatus {
 	const runtime = target ? registry.get(target.runtime) : undefined;
 	const authTarget = target && runtime ? resolveAuthTarget(target, runtime) : undefined;
 	const envVariable = target?.auth?.apiKeyEnvVar?.trim();
+	const projectUrl = target ? projectChosenTargetUrl(target, true) : null;
 	const status = setupStatus({
 		chat: settings.chat,
 		...(target && runtime?.kind === "http" && authTarget
@@ -40,6 +42,7 @@ export function readSetupStatus(cwd?: string): SetupStatus {
 										available: openAuthStorage().statusForTarget(authTarget, { includeFallback: false }).available,
 										provider: authTarget.providerId,
 										...(envVariable ? { envVariable } : {}),
+										...(projectUrl !== null ? { projectUrl } : {}),
 									},
 								}
 							: {}),

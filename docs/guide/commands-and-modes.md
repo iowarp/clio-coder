@@ -194,7 +194,12 @@ session as `/restart` does (when the restart is refused, the header reads
 `Project configuration trusted · restart Clio to apply it`), and **Not now** or
 Esc trusts nothing. `/reload` raises the card by itself only when a surface is
 new or has changed since the session started or since the card was last closed
-without trusting. Headless runs, ACP and the GUI keep the per-file notices.
+without trusting. After **Trust all**, and whenever a session starts with the
+project's configuration trusted (as after `/trust`'s restart), Clio names what
+each project connection still needs from you: a missing key or sign-in with its
+command, or, for a connection at an address the project chose, that Clio sends
+it none of your keys until you define it in your user settings. Headless runs,
+ACP and the GUI keep the per-file notices.
 
 | Surface | Files |
 | --- | --- |

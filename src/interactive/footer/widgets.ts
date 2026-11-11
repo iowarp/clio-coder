@@ -1366,7 +1366,7 @@ export function idleReadinessPresentation(
 	const fit = (list: ReadonlyArray<RailFact>): string => fitRailFacts(list, room, slot);
 	const shown = (): { subjectShown?: boolean } => (slot !== undefined ? { subjectShown: slot.shown } : {});
 	const quiet = { token: "counter" as const, live: false, namesRoute: true };
-	const fix = facts.missing !== undefined ? describeMissing(facts.missing) : null;
+	const fix = facts.missing !== undefined ? describeMissing(facts.missing, { inSession: true }) : null;
 	if (!facts.available) {
 		const why = facts.reason.trim();
 		const login = /^missing auth \((?:\S+ or )?store:([^)\s]+)\)$/u.exec(why)?.[1];

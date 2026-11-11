@@ -40,7 +40,7 @@ The first question is **What do you have?**: **An API key**, **A subscription** 
 
 When Clio finds a route before asking (a provider key in the environment, a sign-in or key it stored, a saved target, or a model server on a default loopback port), the first screen is **Clio found a way to reach a model:** with one row per route, such as `Anthropic, with the key in ANTHROPIC_API_KEY` or `A model server at http://127.0.0.1:11434 (Ollama)`, and **Set up something else**. Choosing one skips the provider, address and credential steps and goes to the test request, or to the model step when the detection carried no model. The detection rules are in [Chat route detection](#chat-route-detection).
 
-When setup still needs something, Clio says it the same way everywhere (startup, `doctor`, `run`, the footer and the desktop app): one sentence naming what is missing, followed by the command that fixes it, for example `openai has no key or sign-in stored. Run: clio-coder auth login openai`.
+When setup still needs something, Clio says it the same way everywhere (startup, `doctor`, `run`, the footer and the desktop app): one sentence naming what is missing, followed by the command that fixes it, for example `openai has no key or sign-in stored. Run: clio-coder auth login openai`. In the terminal app the footer and a failed prompt add `(or press Enter on /config)` to a missing sign-in. A chat target at an address a project's settings chose gets none of your keys, so its sentence says to define the target in your user settings instead of naming a login.
 
 `clio-coder configure --quick` retains the URL-first shortcut. It identifies compatible local runtimes where possible, requires live model discovery, and is intended for users who already know the endpoint.
 

@@ -296,7 +296,7 @@ export function providerFailureAdvice(route: ProviderFailureRoute, text?: string
 		// The setup status's sentence for a route with no credential, so the banner, `run` and `doctor` read the same.
 		const provider = /No API key for provider: (\S+?)\.?(?:\s|$)/u.exec(text ?? "")?.[1];
 		if (provider !== undefined && errorClass !== "credential_expired" && httpStatusOf(errorClass) === null)
-			return `${describeMissing({ kind: "credential", target: route.targetId, provider }).sentence} · ${SWITCH_ROUTE}.`;
+			return `${describeMissing({ kind: "credential", target: route.targetId, provider }, { inSession: true }).sentence} · ${SWITCH_ROUTE}.`;
 		return `${configure} replaces it · ${SWITCH_ROUTE}.`;
 	}
 	const unanswered = missingFromFailedCall(route);

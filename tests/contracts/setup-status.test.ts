@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { firstMissing } from "../../src/cli/default-target.js";
 import { chatReadinessFinding } from "../../src/cli/doctor.js";
 import { assistantError } from "../../src/cli/modes/print.js";
-import { updateSettings } from "../../src/core/config.js";
+import { readSettings, updateSettings } from "../../src/core/config.js";
 import { initializeClioHome } from "../../src/core/init.js";
+import { noteProjectTargets } from "../../src/core/project-target-urls.js";
 import {
 	describeMissing,
 	type Missing,
@@ -97,6 +99,11 @@ test("every surface prints the setup status's sentence for a missing credential 
 	};
 	for (const [surface, text] of Object.entries(credentialSurfaces))
 		assert.ok(text?.includes(credential), `${surface}: ${text}`);
+	// Inside the TUI the same line also names the way in from the session.
+	for (const text of [credentialSurfaces.banner, credentialSurfaces.failedPrompt])
+		assert.ok(text.includes(`${credential} (or press Enter on /config)`), text);
+	for (const text of [credentialSurfaces.run, credentialSurfaces.doctor])
+		assert.ok(!text?.includes("/config"), text ?? "");
 
 	updateSettings((settings) => {
 		settings.targets = [
@@ -136,4 +143,32 @@ test("every surface prints the setup status's sentence for a missing credential 
 	};
 	for (const [surface, text] of Object.entries(unreachableSurfaces))
 		assert.ok(text?.includes(unreachable), `${surface}: ${text}`);
+});
+
+test("a chat route at an address a project chose says to define it in user settings, not to sign in", async (t) => {
+	const home = await isolateClioEnv("clio-setup-status-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const url = "https://llm.lab.example.org/v1";
+	updateSettings((settings) => {
+		settings.targets = [{ id: "lab-gateway", runtime: "openai", url, defaultModel: "gpt-x" }];
+		settings.chat.target = "lab-gateway";
+		settings.chat.model = "gpt-x";
+	});
+	noteProjectTargets([{ id: "lab-gateway", url }]);
+	// A key in the shell does not change it: Clio sends none to an address a project chose.
+	process.env.OPENAI_API_KEY = "sk-test";
+	const sentence = `lab-gateway points at ${url}, an address this project chose, so Clio sends it none of your keys. To use it, define lab-gateway in your user settings.`;
+	const missing = firstMissing(readSettings());
+	assert.ok(missing);
+	assert.deepEqual(describeMissing(missing), { sentence });
+	assert.equal(describeMissing(missing, { inSession: true }).sentence, sentence);
+	assert.equal(chatReadinessFinding(false, []).detail, `target 'lab-gateway', model 'gpt-x'; ${sentence}`);
+	const pure = setupStatus({
+		chat: { target: "t" },
+		target: { ...base, credential: { available: false, provider: "openai", envVariable: "LAB_KEY", projectUrl: url } },
+	});
+	assert.deepEqual(pure.stage === "needs" && pure.missing, [
+		{ kind: "credential", target: "t", provider: "openai", projectUrl: url },
+	]);
 });

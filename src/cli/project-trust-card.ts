@@ -1,5 +1,6 @@
 import { relative } from "node:path";
 import { parse as parseYaml } from "yaml";
+import type { ClioSettings } from "../core/config.js";
 import {
 	captureProjectSurface,
 	type ProjectSurfaceSnapshot,
@@ -8,9 +9,11 @@ import {
 	recordProjectPackageTrust,
 	recordProjectSurfaceTrust,
 } from "../core/workspace-trust.js";
+import { describeMissing } from "../domains/lifecycle/setup-status.js";
 import { loadUserHooks, type UserHookDeclarationBatch } from "../domains/middleware/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { loadProjectSafetyPolicy } from "../domains/safety/project-policy.js";
+import { credentialMissing } from "./default-target.js";
 import { canSelect, promptSelect, type SelectResult } from "./select.js";
 
 const CARD_SURFACES: ReadonlyArray<ProjectTrustSurface> = ["settings", "safety", "hooks", "extensions", "plugins"];
@@ -56,6 +59,45 @@ function settingsSummary(snapshot: ProjectSurfaceSnapshot): string[] {
 		}
 	}
 	return [`areas: ${areas.size > 0 ? [...areas].join(", ") : "(none)"}`, ...connections];
+}
+
+/**
+ * For each connection the project's settings define, the key or sign-in it still needs from this shell, in the
+ * setup status's words. Read after trust, so a team member is told at once what the project's connections need.
+ * Project layers carry no credentials, so every key named here is the member's own.
+ */
+export function projectConnectionNeeds(cwd: string, settings: Readonly<ClioSettings>): string[] {
+	const ids = new Set<string>();
+	for (const blob of parsedFiles(captureProjectSurface(cwd, "settings"))) {
+		const targets = (blob as { targets?: unknown } | null)?.targets;
+		if (!Array.isArray(targets)) continue;
+		for (const target of targets) {
+			const id = (target as { id?: unknown } | null)?.id;
+			if (typeof id === "string") ids.add(id);
+		}
+	}
+	return [...ids].flatMap((id) => {
+		const missing = settings.targets.some((entry) => entry.id === id) ? credentialMissing(settings, id) : null;
+		return missing === null ? [] : [clean(describeMissing(missing, { inSession: true }).sentence)];
+	});
+}
+
+/**
+ * The notices a launch passes to the session after the card. Undefined keeps the per-file notices, which a
+ * launch that showed no card over untrusted configuration still needs. Trust all, and a launch with nothing
+ * left to trust (as after `/trust` restarts into the session), name what each project connection still needs.
+ */
+export function launchTrustNotices(
+	outcome: Exclude<ProjectTrustCardOutcome, "quit">,
+	cwd: string,
+	settings: Readonly<ClioSettings> | undefined,
+): string[] | undefined {
+	if (outcome === "skipped") return [];
+	if (settings === undefined) return outcome === "trusted" ? [] : undefined;
+	if (outcome === "trusted") return projectConnectionNeeds(cwd, settings);
+	if (buildProjectTrustCard(cwd) !== null) return undefined;
+	const needs = projectConnectionNeeds(cwd, settings);
+	return needs.length > 0 ? needs : undefined;
 }
 
 function safetySummary(workspaceRoot: string): string[] {

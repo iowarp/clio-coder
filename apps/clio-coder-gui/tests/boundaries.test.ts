@@ -76,6 +76,7 @@ const adapters = new Set([
 	"src/domains/dispatch/council-topology.ts",
 	"src/domains/dispatch/gate-topology.ts",
 	"src/core/settings-layers.ts",
+	"src/core/project-target-urls.ts",
 	"src/core/settings-controls.ts",
 	"src/core/settings-navigation.ts",
 	"src/core/config.ts",

@@ -17,8 +17,11 @@ export interface RouteFact {
 }
 
 export type Missing =
-	/** No stored key or sign-in for the provider the target authenticates as. */
-	| { kind: "credential"; target: string; provider: string }
+	/**
+	 * No stored key or sign-in for the provider the target authenticates as. With `projectUrl` the target points at
+	 * an address a project chose, which never receives the operator's keys, so only defining it in user settings helps.
+	 */
+	| { kind: "credential"; target: string; provider: string; projectUrl?: string }
 	/** The target names the environment variable its key comes from, and it is not set. */
 	| { kind: "env"; target: string; variable: string }
 	| { kind: "unreachable"; target: string; url: string; detail: string }
@@ -54,7 +57,7 @@ export interface SetupTargetFacts {
 	/** For a runtime that `drivesChat` is false for because it was removed: the runtime that replaced it. */
 	replacement?: string;
 	/** Absent when the target needs no credential. */
-	credential?: { available: boolean; provider: string; envVariable?: string };
+	credential?: { available: boolean; provider: string; envVariable?: string; projectUrl?: string };
 	/** The last reachability check, when one ran. */
 	probe?: { ok: true } | { ok: false; detail: string };
 	/** False when a check showed the endpoint does not offer the chat model. */
@@ -101,9 +104,11 @@ export function setupStatus<TargetDraft = unknown>(facts: SetupFacts<TargetDraft
 		const credential = target.credential;
 		if (credential !== undefined && !credential.available) {
 			missing.push(
-				credential.envVariable !== undefined
-					? { kind: "env", target: target.id, variable: credential.envVariable }
-					: { kind: "credential", target: target.id, provider: credential.provider },
+				credential.projectUrl !== undefined
+					? { kind: "credential", target: target.id, provider: credential.provider, projectUrl: credential.projectUrl }
+					: credential.envVariable !== undefined
+						? { kind: "env", target: target.id, variable: credential.envVariable }
+						: { kind: "credential", target: target.id, provider: credential.provider },
 			);
 		}
 		if (target.probe !== undefined && !target.probe.ok && target.url !== undefined) {
@@ -121,11 +126,20 @@ export function setupStatus<TargetDraft = unknown>(facts: SetupFacts<TargetDraft
  * The one sentence every surface prints for a missing item, and the command in it when there is one.
  * The sentences name the thing to fix and the way to fix it; no surface rewords them.
  */
-export function describeMissing(missing: Missing): { sentence: string; command?: string } {
+export function describeMissing(
+	missing: Missing,
+	/** Inside the TUI: a missing sign-in also names /config, where Enter on the connection signs in. */
+	options: { inSession?: boolean } = {},
+): { sentence: string; command?: string } {
 	switch (missing.kind) {
 		case "credential": {
+			if (missing.projectUrl !== undefined)
+				return {
+					sentence: `${missing.target} points at ${missing.projectUrl}, an address this project chose, so Clio sends it none of your keys. To use it, define ${missing.target} in your user settings.`,
+				};
 			const command = `clio-coder auth login ${missing.provider}`;
-			return { sentence: `${missing.provider} has no key or sign-in stored. Run: ${command}`, command };
+			const sentence = `${missing.provider} has no key or sign-in stored. Run: ${command}`;
+			return { sentence: options.inSession ? `${sentence} (or press Enter on /config)` : sentence, command };
 		}
 		case "env":
 			return { sentence: `${missing.target} reads its key from ${missing.variable}, which is not set in this shell.` };

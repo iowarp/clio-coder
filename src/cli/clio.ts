@@ -225,13 +225,14 @@ export async function runClioCommand(
 	if (terminalLeaseEligible(options)) {
 		// One card for the repository's own configuration, before anything reads it into the session (S-76).
 		// It runs after the workspace relaunch so only the process that hosts the session asks.
-		const { runProjectTrustCard } = await import("./project-trust-card.js");
+		const { launchTrustNotices, runProjectTrustCard } = await import("./project-trust-card.js");
 		const outcome = await runProjectTrustCard(process.cwd());
 		// Quitting the card opens no session, like declining the workspace check.
 		if (outcome === "quit") return 1;
 		if (outcome === "trusted") startupSettings = readStrictLayeredSettings(process.cwd()).settings;
-		// Either way the per-file notices are held: a skipped card is answered by the header's `/trust` reminder.
-		if (outcome === "trusted" || outcome === "skipped") trustCardNotices = [];
+		// The per-file notices are held after the card: a skipped card is answered by the header's `/trust`
+		// reminder, and a trusted project names what its connections still need, also after `/trust`'s restart.
+		trustCardNotices = launchTrustNotices(outcome, process.cwd(), startupSettings);
 	}
 	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
 		// Every completed hosted process releases its workspace, including a
