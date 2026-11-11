@@ -135,3 +135,15 @@ test("a headless run that wrote and then ran a failing check says so on stderr a
 		env.restore();
 	}
 });
+
+test("a scoped unittest pass does not replace a full-suite unittest failure", () => {
+	const scoped = [call("b3", "bash", { command: "python3 -m unittest test_stats -v 2>&1" }), result("b3", 0)];
+	const checks = standingChecksFrom([...edit, ...failingCheck, ...scoped], 0, root);
+	deepStrictEqual(
+		checks.map((check) => [check.name, check.passed]),
+		[
+			["python -m unittest discover", false],
+			["python -m unittest test_stats", true],
+		],
+	);
+});

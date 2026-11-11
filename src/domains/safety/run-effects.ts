@@ -204,7 +204,17 @@ export function validationCommandOf(
 		const command = commandOf(args);
 		if (command === null) return null;
 		const detected = detectValidationCommand(command, scope);
-		return detected.kind === "validation" ? detected.matched : null;
+		if (detected.kind !== "validation") return null;
+		// A scoped unittest run must not stand in for the full suite, so the first positional target names the check.
+		if (detected.matched === "python -m unittest") {
+			const target = /\s-m\s+unittest((?:\s+\S+)*)/u
+				.exec(command)?.[1]
+				?.trim()
+				.split(/\s+/u)
+				.find((token) => token.length > 0 && !token.startsWith("-") && !/^[0-9]*[<>|&]/u.test(token));
+			return target ? `${detected.matched} ${target}` : detected.matched;
+		}
+		return detected.matched;
 	}
 	return typedValidationSummary(toolName, { args: args ?? {} });
 }
