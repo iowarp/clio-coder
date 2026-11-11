@@ -127,14 +127,17 @@ describe("clio-coder run --timeout", () => {
 		ok(turn.elapsedMs >= 15_000, `exited before the limit: ${turn.elapsedMs}ms`);
 		match(turn.stderr, /timed out after 15s \(--timeout\)/);
 		strictEqual(turn.stderr.split("\n").filter((line) => line.includes("--timeout")).length, 1);
-		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		const runJournal = readRunJournal(scratch.stateDir);
+		ok(runJournal);
+		const envelope = [...runJournal.envelopes.values()][0];
 		ok(envelope);
 		strictEqual(envelope.outcome, "timed_out");
 		strictEqual(envelope.exitCode, 124);
 		// The status a dispatched worker's timed_out receipt seals with, which
 		// orphan recovery re-derives from the outcome when it re-verifies.
 		strictEqual(envelope.status, "failed");
-		strictEqual(envelope.status, runStatusForOutcome(envelope.outcome!));
+		ok(envelope.outcome);
+		strictEqual(envelope.status, runStatusForOutcome(envelope.outcome));
 		match(envelope.outcomeDetail ?? "", /timed out after 15s \(--timeout\)/);
 	});
 
@@ -142,7 +145,9 @@ describe("clio-coder run --timeout", () => {
 		const { turn, scratch } = await headlessTurn([], "default", ["--timeout", "300"]);
 		strictEqual(turn.code, 0, turn.stderr);
 		ok(turn.elapsedMs < 30_000, `an unref'd timer must not hold the process: ${turn.elapsedMs}ms`);
-		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		const runJournal = readRunJournal(scratch.stateDir);
+		ok(runJournal);
+		const envelope = [...runJournal.envelopes.values()][0];
 		ok(envelope);
 		strictEqual(envelope.outcome, "succeeded");
 		strictEqual(envelope.exitCode, 0);
@@ -167,7 +172,9 @@ describe("clio-coder run --timeout", () => {
 			"off",
 		);
 		strictEqual(turn.code, 124, turn.stderr);
-		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		const runJournal = readRunJournal(scratch.stateDir);
+		ok(runJournal);
+		const envelope = [...runJournal.envelopes.values()][0];
 		ok(envelope);
 		strictEqual(envelope.outcome, "timed_out");
 		notStrictEqual(envelope.outcomeDetail, "noop");

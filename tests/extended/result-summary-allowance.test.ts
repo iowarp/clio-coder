@@ -318,8 +318,8 @@ const intent = { read_roots: ["."], write_roots: [] };
 /** The integrity-verified receipt whose sealed output is exactly `text`. */
 function sealedReceipt(bundle: ReturnType<typeof setup>["bundle"], text: string): SettledRunRecord {
 	for (const run of bundle.contract.listRuns()) {
-		if (!readVerifiedRun(clioStateDir(), run.id)) continue;
-		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		const receipt = readVerifiedRun(clioStateDir(), run.id);
+		if (!receipt) continue;
 		if (resolvedRunResult(receipt).output?.text !== text) continue;
 
 		return receipt;

@@ -235,7 +235,9 @@ for (const agent of ["scout", "coder"] as const) {
 				.filter((run) => run.agentId === agent)
 				.map((run) => {
 					ok(run);
-					return readVerifiedRun(clioStateDir(), run.id)!;
+					const receipt = readVerifiedRun(clioStateDir(), run.id);
+					ok(receipt);
+					return receipt;
 				});
 			strictEqual(receipts.length, 2);
 			const candidateEvidence = judgeTask
@@ -262,7 +264,8 @@ for (const agent of ["scout", "coder"] as const) {
 			strictEqual(allRuns.length, 3, "exactly two candidate executions plus one judge; no council substitution");
 			const judgeRun = allRuns.find((run) => run.gate?.role === "judge");
 			ok(judgeRun);
-			const judgeReceipt = readVerifiedRun(clioStateDir(), judgeRun.id)!;
+			const judgeReceipt = readVerifiedRun(clioStateDir(), judgeRun.id);
+			ok(judgeReceipt);
 			strictEqual(judgeReceipt.settled.outcome, "succeeded");
 
 			deepStrictEqual(
@@ -494,7 +497,8 @@ for (const phase of ["candidates", "judge"] as const) {
 				strictEqual(runs.length, phase === "judge" ? 3 : 2);
 				for (const run of runs) {
 					ok(run);
-					const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+					const receipt = readVerifiedRun(clioStateDir(), run.id);
+					ok(receipt);
 					const interrupted = phase === "candidates" || bundle.contract.getRun(receipt.row.runId)?.gate?.role === "judge";
 					strictEqual(receipt.settled.outcome, interrupted ? "canceled" : "succeeded");
 					if (interrupted)

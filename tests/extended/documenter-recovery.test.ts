@@ -82,7 +82,8 @@ it("gives the parent a bounded exit for an unchanged terminal Documenter report 
 		if (result.kind !== "ok") return;
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		const receipt = readVerifiedRun(clioStateDir(), run.id);
+		ok(receipt);
 		strictEqual(receipt.settled.outcome, "succeeded");
 		strictEqual(resolvedRunResult(receipt).output?.text, report());
 		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
@@ -156,7 +157,8 @@ it("does not advance a dependent step after a conforming Documenter report with 
 		if (result.kind === "error") match(result.message, /result quality=fail.*skipped 1/u);
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		const receipt = readVerifiedRun(clioStateDir(), run.id);
+		ok(receipt);
 		strictEqual(receipt.settled.outcome, "succeeded", "execution and quality remain distinct");
 		strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
 		strictEqual(receipt.settled.quality?.resultContract?.quality, "fail");
@@ -190,7 +192,8 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		);
 		const receipts = bundle.contract.listRuns().map((run) => {
 			ok(run);
-			const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+			const receipt = readVerifiedRun(clioStateDir(), run.id);
+			ok(receipt);
 
 			return receipt;
 		});
@@ -203,7 +206,8 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		strictEqual(dependent?.settled.quality?.resultContract?.conformance, "pass");
 		// A conforming report does not turn unobserved validation claims into measured quality.
 		strictEqual(dependent?.settled.quality?.resultContract?.quality, "unmeasured");
-		strictEqual(bundle.contract.getRun(dependent!.row.runId)?.pipeline?.fromRunId, first?.row.runId);
+		ok(dependent);
+		strictEqual(bundle.contract.getRun(dependent.row.runId)?.pipeline?.fromRunId, first?.row.runId);
 		strictEqual(resolvedRunResult(dependent).output?.text, report(DELIVERED));
 		deepStrictEqual(bundle.contract.snapshot().running, []);
 		strictEqual(capacityLeaseUsage().global, 0);
@@ -244,7 +248,8 @@ it("preserves explicit Coder and delivers its bounded explanation through the co
 		match(prompt, /`commitMessage` 1000/u);
 		for (const run of bundle.contract.listRuns()) {
 			ok(run);
-			const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+			const receipt = readVerifiedRun(clioStateDir(), run.id);
+			ok(receipt);
 
 			strictEqual(receipt.settled.agentId, "coder");
 			strictEqual(receipt.settled.quality?.resultContract?.conformance, "pass");
@@ -271,7 +276,8 @@ it("keeps failed Coder JSON sealed failed independently of terminal dispatch lif
 		strictEqual(specs.length, 1);
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
-		const receipt = readVerifiedRun(clioStateDir(), run.id)!;
+		const receipt = readVerifiedRun(clioStateDir(), run.id);
+		ok(receipt);
 		const original = JSON.stringify(receipt.settled);
 		strictEqual(receipt.settled.outcome, "failed");
 		strictEqual(receipt.settled.outcomeCode, "result_contract_invalid");

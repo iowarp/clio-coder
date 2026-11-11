@@ -54,7 +54,15 @@ function serve(expandPrompt?: ClioAcpServerOptions["expandPrompt"]) {
 		const session = (await call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
 		return { image: init.agentCapabilities.promptCapabilities.image, sessionId: session.sessionId };
 	};
-	return { call, start, submitted, stop: async () => (transport.close(), await served) };
+	return {
+		call,
+		start,
+		submitted,
+		stop: async () => {
+			transport.close();
+			return await served;
+		},
+	};
 }
 
 const invalid = (pattern: RegExp) => (error: unknown) =>

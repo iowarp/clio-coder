@@ -353,7 +353,8 @@ describe("private pane host layout (POSIX)", () => {
 		const platform = createPosixHostPlatform({ platform: "linux", stateDir: () => join(scratch, "state") });
 		const input = { session: "clio-coder-atomic", env: { XDG_RUNTIME_DIR: tmpdir() } };
 		const layout = platform.hostLayout(input);
-		const shim = layout.shell.defaultShell!;
+		const shim = layout.shell.defaultShell;
+		ok(shim);
 		writeFileSync(shim, "previous complete shim\n");
 		const reader = openSync(shim, "r");
 		try {

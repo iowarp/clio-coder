@@ -403,7 +403,9 @@ for (const hosted of [false, true]) {
 			strictEqual(attempts[1]?.settled.outcome, "succeeded");
 			const first = attempts[0];
 			ok(first);
-			deepStrictEqual(journal.envelopes.get(attempts[1]!.row.runId)?.lineage, {
+			const secondAttempt = attempts[1];
+			ok(secondAttempt);
+			deepStrictEqual(journal.envelopes.get(secondAttempt.row.runId)?.lineage, {
 				parentRunId: first.row.runId,
 				rootRunId: hosted ? hostRun.lineage.rootRunId : first.row.runId,
 				depth: hosted ? 4 : 0,

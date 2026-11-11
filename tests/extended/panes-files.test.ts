@@ -706,12 +706,16 @@ describe("plain-terminal files chooser cleanup", () => {
 				requestRender: () => undefined,
 				resolveBinaries: () => ({ yaziPath: "/bin/yazi", yaPath: null, missingYaziDetail: "" }),
 				spawnYazi: (_file, args) => {
-					failedPath = args[4]!;
+					const cwdFile = args[4];
+					ok(cwdFile !== undefined);
+					failedPath = cwdFile;
 					rmSync(failedPath);
 					mkdirSync(failedPath);
 					writeFileSync(join(failedPath, "held"), "");
 					if (outcome === "error") return { error: new Error("launch failed") };
-					writeFileSync(args[2]!, "selected.ts\n");
+					const chosenFile = args[2];
+					ok(chosenFile !== undefined);
+					writeFileSync(chosenFile, "selected.ts\n");
 					return {};
 				},
 			});
@@ -745,8 +749,10 @@ describe("plain-terminal files chooser cleanup", () => {
 					if (outcome === "throw") throw new Error("failed");
 					if (outcome === "error") return { error: new Error("failed") };
 					if (outcome === "chosen") {
-						writeFileSync(args[2]!, "selected.ts\n");
-						writeFileSync(args[4]!, cacheDir);
+						const [chosenFile, cwdFile] = [args[2], args[4]];
+						ok(chosenFile !== undefined && cwdFile !== undefined);
+						writeFileSync(chosenFile, "selected.ts\n");
+						writeFileSync(cwdFile, cacheDir);
 					}
 					return {};
 				},

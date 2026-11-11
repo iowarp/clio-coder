@@ -127,7 +127,8 @@ for (const scenario of [
 			strictEqual(envelope.budget?.effective.mode, "advisory");
 			strictEqual(receipt.budget?.enforcement.perTool, "unobserved-not-enforced");
 			strictEqual(receipt.budget?.effective.toolCalls, 1000);
-			const persisted = readVerifiedRun(clioStateDir(), envelope.id)!;
+			const persisted = readVerifiedRun(clioStateDir(), envelope.id);
+			ok(persisted);
 			strictEqual(persisted.settled.digest, receipt.digest);
 			const stateDir = process.env.CLIO_CODER_STATE_DIR;
 			ok(stateDir);

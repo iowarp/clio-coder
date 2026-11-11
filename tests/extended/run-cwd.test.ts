@@ -61,7 +61,9 @@ describe("clio-coder run --cwd", () => {
 		ok(fixture.requests.length > 0, "the run must reach the model");
 		strictEqual(readFileSync(join(project, "c1-proof.txt"), "utf8"), PROOF);
 		ok(!existsSync(join(launch, "c1-proof.txt")), "the write must not land in the launch directory");
-		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		const runJournal = readRunJournal(scratch.stateDir);
+		ok(runJournal);
+		const envelope = [...runJournal.envelopes.values()][0];
 		ok(envelope);
 		strictEqual(envelope.cwd, realpathSync(project));
 		strictEqual(envelope.outcome, "succeeded");

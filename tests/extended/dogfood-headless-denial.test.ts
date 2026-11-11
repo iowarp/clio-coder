@@ -244,7 +244,9 @@ describe("headless no-op contract through the built binary", () => {
 			],
 			{ env: scratch.env, cwd: project },
 		);
-		const envelope = [...readRunJournal(scratch.stateDir)!.envelopes.values()][0];
+		const runJournal = readRunJournal(scratch.stateDir);
+		ok(runJournal);
+		const envelope = [...runJournal.envelopes.values()][0];
 		ok(envelope);
 		strictEqual(envelope.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
