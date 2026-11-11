@@ -161,6 +161,8 @@ test("/run hands a configured external agent the task and refuses fleet-only fla
 	} as unknown as SlashCommandContext;
 	equal(dispatchSlashCommand(parseSlashCommand("/run --model m peer Inspect"), context), "rejected");
 	match(notices.join("\n"), /peer is an external agent, which ignores --model/);
+	// `acp:` is decided at parse time, so the editor keeps the draft like any usage error.
+	equal(parseSlashCommand("/run --model m acp:peer Inspect").kind, "usage-error");
 	equal(dispatchSlashCommand(parseSlashCommand("/run --read-only peer Inspect"), context), "accepted");
 	const request = await requested;
 	equal(request.delegationAgentId, "peer");

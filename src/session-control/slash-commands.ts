@@ -2143,6 +2143,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
 
+			// `acp:<id>` is external whatever the settings say, so its refusal is a parse error and the draft stays.
+			const forced = agentId.startsWith("acp:") ? externalIgnoredFlags(options) : [];
+			if (forced.length > 0) {
+				return usageError(
+					"run",
+					`${agentId.slice("acp:".length)} is an external agent, which ignores ${forced.join(", ")}`,
+				);
+			}
 			return { kind: "run", agentId, task, options, source: trimmed };
 		},
 		handle(command, ctx) {
