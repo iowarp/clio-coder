@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium, type Page } from "playwright-core";
+import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 
@@ -150,8 +151,14 @@ class Done extends Error {}
  * Resume a saved conversation the fixture replays as HISTORY rich turns, then report how long the
  * page took to show its last turn, and what the open transcript costs at rest.
  */
+/** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
+async function launch() {
+	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
+	if (ticket === null) throw new Error("The perf server issued no launch ticket.");
+	return `ticket=${ticket}`;
+}
 async function resumeHistory(page: Page, id: string) {
-	await page.goto(`${origin}/#token=test-token`);
+	await page.goto(`${origin}/#${await launch()}`);
 	await page.getByPlaceholder("Describe a task or ask a question").waitFor();
 	await setRunning(page, true);
 	const started = await page.evaluate(() => performance.now());
@@ -269,7 +276,7 @@ try {
 		throw new Done();
 	}
 	// A task starts from the home composer; its first, plain turn settles before measuring begins.
-	await page.goto(`${origin}/#token=test-token`);
+	await page.goto(`${origin}/#${await launch()}`);
 	const home = page.getByPlaceholder("Describe a task or ask a question");
 	await home.fill("Ready when you are.");
 	await home.press("Enter");

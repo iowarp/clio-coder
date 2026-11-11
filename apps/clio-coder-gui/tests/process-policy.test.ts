@@ -13,7 +13,7 @@ import { staticClient } from "../server/http/static.js";
 import { fixtureOptions } from "./fixtures/toolchain.js";
 import { pinnedFetcher } from "./harness/adapter.js";
 import { harness, json, terminal } from "./harness/app.js";
-import { exchangeLaunchToken } from "./harness/exchange.js";
+import { exchangeLaunchTicket } from "./harness/exchange.js";
 
 test("pin allowlist rejects arbitrary URLs before the injected fetcher is called", async () => {
 	let calls = 0;
@@ -84,14 +84,14 @@ for (const signal of ["SIGTERM", "SIGHUP"] as const)
 			let output = "";
 			child.stdout.on("data", (chunk) => {
 				output += String(chunk);
-				const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/);
+				const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#ticket=[\w-]+/);
 				if (match) resolve(match[0]);
 			});
 			child.once("error", reject);
 			child.once("exit", () => reject(new Error("Server exited before printing a URL")));
 		});
 		const launch = new URL(url);
-		const token = new URLSearchParams(launch.hash.slice(1)).get("token");
+		const ticket = new URLSearchParams(launch.hash.slice(1)).get("ticket");
 		const get = (headers: Record<string, string>) =>
 			new Promise<{ status?: number; data: string }>((resolve, reject) => {
 				const req = request(new URL("/api/meta", launch), { headers }, (response) => {
@@ -106,9 +106,11 @@ for (const signal of ["SIGTERM", "SIGHUP"] as const)
 			});
 		assert.equal((await get({})).status, 401);
 		assert.equal((await get({ Host: "example.com" })).status, 421);
-		// The launch token opens only the exchange; the credential it buys reads meta.
-		assert.equal((await get({ Authorization: `Bearer ${token}` })).status, 401);
-		assert.equal((await get({ Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` })).status, 200);
+		// The printed link carries a single-use ticket; the credential it buys reads meta.
+		assert.equal(
+			(await get({ Authorization: `Bearer ${await exchangeLaunchTicket(launch, ticket ?? "")}` })).status,
+			200,
+		);
 		child.kill(signal);
 		// Exit code 0 means the awaited close path ran; an unhandled signal exits with null.
 		assert.equal(await exited, 0);

@@ -67,7 +67,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	const nodeClients = new ClientRegistry();
 	upstream.use(
 		"*",
-		auth(REMOTE_TOKEN, () => `http://127.0.0.1:${REMOTE_LISTENER_PORT}`, nodeClients),
+		auth(() => `http://127.0.0.1:${REMOTE_LISTENER_PORT}`, nodeClients),
 	);
 	authRoutes(upstream, nodeHub, nodeClients, new SessionControls(nodeClients, nodeHub), {
 		token: REMOTE_TOKEN,
@@ -109,7 +109,7 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	const localClients = new ClientRegistry();
 	app.use(
 		"*",
-		auth(LOCAL_TOKEN, () => ORIGIN, localClients),
+		auth(() => ORIGIN, localClients),
 	);
 	authRoutes(app, hub, localClients, new SessionControls(localClients, hub), {
 		token: LOCAL_TOKEN,
@@ -131,11 +131,10 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 		const response = await request("/api/auth/clients", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${LOCAL_TOKEN}`,
 				"Content-Type": "application/json",
 				"Idempotency-Key": crypto.randomUUID(),
 			},
-			body: JSON.stringify({ label }),
+			body: JSON.stringify({ label, ticket: localClients.launchTicket().ticket }),
 		});
 		assert.equal(response.status, 200);
 		return ((await response.json()) as { credential: string }).credential;

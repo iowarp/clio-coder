@@ -46,7 +46,8 @@ export function openapi() {
 			security: route.stream
 				? [{ bearer: [] }, { eventTicket: [] }]
 				: route === routes.authClients
-					? [{ launchToken: [] }]
+					? // A launch ticket or launch proof in the body, or a live credential of this browser.
+						[{}, { bearer: [] }]
 					: route === routes.authChallenge
 						? []
 						: [{ bearer: [] }],
@@ -104,11 +105,6 @@ export function openapi() {
 					type: "http",
 					scheme: "bearer",
 					description: "This client's credential from POST /api/auth/clients.",
-				},
-				launchToken: {
-					type: "http",
-					scheme: "bearer",
-					description: "The launch token. Accepted only by POST /api/auth/clients.",
 				},
 				eventTicket: {
 					type: "apiKey",

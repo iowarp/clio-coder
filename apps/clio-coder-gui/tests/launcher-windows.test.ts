@@ -127,7 +127,7 @@ test("managed Windows app uses its owned profile and shell identity and uninstal
 	const manifest = JSON.parse(await readFile(join(directory, "windows.json"), "utf8"));
 	assert.equal(
 		await openManagedWindowsApp(
-			"http://127.0.0.1:43981/#token=clio_install_hardening_isolated_desktop_token_00001",
+			"http://127.0.0.1:43981/#ticket=clio_install_hardening_isolated_ticket_000001",
 			directory,
 		),
 		true,
@@ -135,10 +135,7 @@ test("managed Windows app uses its owned profile and shell identity and uninstal
 	// Two simultaneous relaunches must serialize, focus the existing window and preserve its identity.
 	await Promise.all(
 		[0, 1].map(() =>
-			openManagedWindowsApp(
-				"http://127.0.0.1:43981/#token=clio_install_hardening_isolated_desktop_token_00001",
-				directory,
-			),
+			openManagedWindowsApp("http://127.0.0.1:43981/#ticket=clio_install_hardening_isolated_ticket_000001", directory),
 		),
 	);
 	const result = await runWindowsPowerShell(

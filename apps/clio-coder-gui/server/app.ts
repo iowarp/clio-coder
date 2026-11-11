@@ -95,7 +95,7 @@ export function createApp(options: {
 	const clients = options.clients ?? new ClientRegistry();
 	app.onError(problemResponse);
 	const controls = new SessionControls(clients, hub);
-	app.use("*", auth(options.token, options.origin, clients));
+	app.use("*", auth(options.origin, clients));
 	app.use("/api/sessions/*", controlGuard(controls));
 	if (process.env.NODE_ENV === "test" && options.runtime) {
 		const inspect = options.runtime;

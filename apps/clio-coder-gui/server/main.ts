@@ -104,10 +104,6 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	const values = serverOptions(args);
-	if (values.token !== undefined)
-		console.error(
-			"[clio-coder:gui] --token puts the launch token in this process's argv, which other local users can read; use --token-stdin. --token will be removed in a later release.",
-		);
 	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
 	const openLink = (href: string) =>
 		openApp(href).catch(() => {
@@ -233,7 +229,7 @@ export async function main(args = process.argv.slice(2)) {
 			);
 	void applyTurnCapacity();
 	const setup = new SetupService(reads, env, workspaces);
-	const token = persistent?.token ?? values.token ?? stdinToken ?? randomBytes(32).toString("base64url");
+	const token = persistent?.token ?? stdinToken ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;
 	try {
 		log = await lifecycleLog(values.logFile);
@@ -298,7 +294,8 @@ export async function main(args = process.argv.slice(2)) {
 	server.once("listening", () => {
 		const info = server.address() as AddressInfo;
 		origin = `http://127.0.0.1:${info.port}`;
-		const launchUrl = `${origin}${values.path}#token=${token}`;
+		// A single-use ticket, never the launch token: the printed link and the opener's argv each spend their own.
+		const launchUrl = () => `${origin}${values.path}#ticket=${clients.launchTicket().ticket}`;
 		if (scratch) console.log(`[clio-coder:gui] Fabricated tool fixture; isolated state: ${scratch}`);
 		// A parent that wrote the token over stdin already holds it; its ready line carries only the address.
 		console.log(
@@ -306,7 +303,7 @@ export async function main(args = process.argv.slice(2)) {
 				? `[clio-coder:gui] Background app ready at ${origin}.`
 				: values.tokenStdin
 					? `[clio-coder:gui] ${origin}${values.path}`
-					: `[clio-coder:gui] ${launchUrl}`,
+					: `[clio-coder:gui] ${launchUrl()}`,
 		);
 		void log.write(`Listening at ${origin}; idle exit ${values.idleMs ?? "disabled"}.`).catch(fail);
 		if (!persistent) {
@@ -321,7 +318,7 @@ export async function main(args = process.argv.slice(2)) {
 				);
 		}
 		if (open)
-			void openBrowser(`${origin}${values.path}#ticket=${clients.launchTicket().ticket}`).catch(() => {
+			void openBrowser(launchUrl()).catch(() => {
 				console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
 				void log.write("Could not open the browser; server remains available.").catch(fail);
 			});

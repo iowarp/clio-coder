@@ -4,6 +4,7 @@ import { type Input, type Output, type Route, routes } from "../../contracts/run
 import { tokenRejected } from "./auth-state.js";
 import { clock } from "./clock.js";
 import { CredentialProblem, type Credentials, createCredentials, unauthorizedProblem } from "./credentials.js";
+import type { LaunchSecret } from "./token.js";
 
 export class ApiProblem extends Error {
 	constructor(readonly problem: Problem) {
@@ -17,15 +18,14 @@ export class ApiProblem extends Error {
  * and ticket the browser holds, whichever server the call reaches.
  */
 export function createClient(
-	token: string,
+	launch: LaunchSecret = {},
 	fetcher: typeof fetch = fetch,
 	prefix = "",
-	credentials: Credentials = createCredentials(token, fetcher),
+	credentials: Credentials = createCredentials(launch, fetcher),
 ) {
 	let epoch: string | undefined;
 	return {
-		token,
-		/** Whether this document opened with anything that can open a client; the launch token alone no longer says so. */
+		/** Whether this document opened with anything that can open a client. */
 		signedIn: credentials.available(),
 		prefix,
 		credentials,
@@ -56,7 +56,7 @@ export function createClient(
 			signal?: AbortSignal,
 			expectedEpoch?: string,
 		): Promise<Output<R>> {
-			// A refused token only recovers through a reload, so nothing else is read in this document.
+			// A refused link only recovers through a fresh one, so nothing else is read in this document.
 			if (tokenRejected()) throw new ApiProblem(unauthorizedProblem());
 			// Retained requests pin their original preflight epoch. The server checks it before
 			// admitting a write, including a restart that raced the preflight response.

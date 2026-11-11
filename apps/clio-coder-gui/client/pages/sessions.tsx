@@ -440,7 +440,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
 									Rename task
 								</MenuItem>
-								<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`, client.token)}>
+								<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`)}>
 									Open in new window
 								</MenuItem>
 								<MenuItem icon="sliders" onClick={() => void navigate(`/settings/advanced?workspace=${snapshot.workspaceId}`)}>

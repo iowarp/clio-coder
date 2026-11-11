@@ -1,23 +1,22 @@
 import { useId, useState } from "react";
-import { originFromLaunchInput, ticketFromLaunchInput, tokenFromLaunchInput } from "../api/auth-state.js";
+import { originFromLaunchInput, ticketFromLaunchInput } from "../api/auth-state.js";
 import { adoptLaunchSecret } from "../api/token.js";
 
 /**
- * Shown when this browser has no launch token or the server refused the one it had. A refused token
+ * Shown when this browser has no launch link or the server refused the one it had. A refused link
  * never starts working again, so this names the command that prints a fresh link and accepts one.
  */
 export function Reconnect({ refused }: { refused: boolean }) {
 	const field = useId();
 	const [text, setText] = useState("");
 	const ticket = ticketFromLaunchInput(text);
-	const token = ticket === null ? tokenFromLaunchInput(text) : null;
-	const secret = ticket !== null ? { ticket } : token !== null ? { token } : null;
+	const secret = ticket !== null ? { ticket } : null;
 	return (
 		<div className="reconnect" role="alert">
 			<h1>{refused ? "This browser is no longer connected" : "Open your launch link"}</h1>
 			<p>
 				{refused
-					? "The server refused this browser's launch link. That happens when the server restarted with a new token, or the app was reinstalled. Nothing is wrong with your data, and the old token has been removed from this browser."
+					? "The server refused this browser's launch link. That happens when the server restarted, or the app was reinstalled. Nothing is wrong with your data, and the old credential has been removed from this browser."
 					: "This browser has no launch link yet."}
 			</p>
 			<p>

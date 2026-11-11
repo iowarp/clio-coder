@@ -236,8 +236,8 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const openWorkspace = useCallback(() => setWorkspaceOpen(true), []);
 	const openHelp = useCallback(() => setHelpOpen(true), []);
 	const openWindow = useCallback(
-		() => openAppWindow(`${client.prefix}${sessionId ? `/sessions/${sessionId}` : "/"}`, client.token),
-		[sessionId, client.token, client.prefix],
+		() => openAppWindow(`${client.prefix}${sessionId ? `/sessions/${sessionId}` : "/"}`),
+		[sessionId, client.prefix],
 	);
 	// Launching the installed app again focuses this window (`launch_handler` in the manifest) and
 	// hands the launch here, so a launch that named a page still arrives at it.

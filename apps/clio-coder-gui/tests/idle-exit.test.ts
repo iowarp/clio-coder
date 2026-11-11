@@ -14,9 +14,8 @@ test("two live clients hold the server; last disconnect exits after 2000 ms and 
 }, async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "clio-web-idle-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
-	const token = "fixture-token-with-more-than-thirty-two-characters",
-		log = join(dir, "web.log");
-	const s = await serverProcess(t, ["--idle-exit", "2000", "--token", token, "--log-file", log]);
+	const log = join(dir, "web.log");
+	const s = await serverProcess(t, ["--idle-exit", "2000", "--log-file", log]);
 	const disconnect = await s.connect(),
 		second = await s.connect();
 	assert.equal((await s.json("/api/meta")).status, 200);
@@ -31,7 +30,7 @@ test("two live clients hold the server; last disconnect exits after 2000 ms and 
 	const text = await readFile(log, "utf8");
 	assert.match(text, /Listening/);
 	assert.match(text, /Stopped/);
-	assert.ok(!text.includes(token));
+	assert.ok(!/#(?:ticket|token)=/.test(text));
 	assert.equal((await stat(log)).mode & 0o777, 0o600);
 });
 

@@ -2,16 +2,11 @@
 // is already open, so this is the one place the app opens another.
 
 /**
- * Open a page of this app in its own window. The launch token travels in the fragment, as it does in
- * a launch link, because a private server's token lives in this window's own storage and a new window
- * starts without it.
+ * Open a page of this app in its own window. The new window opens its own client with the credential
+ * this browser remembers (`credentials.ts`), as a reopened window does.
  */
-export function openAppWindow(path: string, token: string): void {
-	window.open(
-		`${path}#token=${encodeURIComponent(token)}`,
-		"_blank",
-		`popup,noopener,width=${window.outerWidth},height=${window.outerHeight}`,
-	);
+export function openAppWindow(path: string): void {
+	window.open(path, "_blank", `popup,noopener,width=${window.outerWidth},height=${window.outerHeight}`);
 }
 
 /** How long a launch waits for this window to become the one the launcher brought forward. */

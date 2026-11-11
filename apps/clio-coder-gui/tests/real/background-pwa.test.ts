@@ -53,7 +53,9 @@ async function connected(page: Page) {
 	await page.locator('.connection[data-connected="true"]').waitFor({ timeout: 15000 });
 	assert.equal(new URL(page.url()).hash, "");
 	const meta = await page.evaluate(async () => {
-		const token = localStorage.getItem("clio-coder-pwa-token");
+		// The credential this browser remembers opens its own client; no launch token is ever stored.
+		const token = (JSON.parse(localStorage.getItem("clio-coder-credential") ?? "{}") as { credential?: string })
+			.credential;
 		const opened = await fetch("/api/auth/clients", {
 			method: "POST",
 			headers: {
@@ -153,7 +155,7 @@ test("native user service and installed Chrome PWA retain access through window,
 			() => readFile(openerLog, "utf8").catch(() => ""),
 			(value) => !!value,
 		);
-		assert.equal(opened.trim(), `${origin}/#token=${config.token}`);
+		assert.match(opened.trim(), new RegExp(`^${origin}/#ticket=[\\w-]{43}$`));
 		checks.push(
 			"native GLib background launcher opens the authenticated URL from arbitrary cwd with literal special-character paths",
 		);

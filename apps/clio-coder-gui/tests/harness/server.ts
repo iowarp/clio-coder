@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { request } from "node:http";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { exchangeLaunchToken } from "./exchange.js";
+import { exchangeLaunchTicket } from "./exchange.js";
 
 export async function serverProcess(t: TestContext, args: string[] = [], env: NodeJS.ProcessEnv = {}) {
 	const child = spawn(
@@ -33,14 +33,14 @@ export async function serverProcess(t: TestContext, args: string[] = [], env: No
 		let output = "";
 		child.stdout.on("data", (chunk) => {
 			output += String(chunk);
-			const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/[^\s#]*#token=[\w-]+/);
+			const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/[^\s#]*#ticket=[\w-]+/);
 			if (match) resolve(new URL(match[0]));
 		});
 		child.once("error", reject);
 		child.once("exit", () => reject(new Error(`Server exited before printing URL: ${stderr}`)));
 	});
-	const token = new URLSearchParams(launch.hash.slice(1)).get("token");
-	const headers = { Authorization: `Bearer ${await exchangeLaunchToken(launch, token ?? "")}` };
+	const ticket = new URLSearchParams(launch.hash.slice(1)).get("ticket");
+	const headers = { Authorization: `Bearer ${await exchangeLaunchTicket(launch, ticket ?? "")}` };
 	return {
 		child,
 		exited,

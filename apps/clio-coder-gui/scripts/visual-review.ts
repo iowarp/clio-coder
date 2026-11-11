@@ -3,7 +3,7 @@
 //   npx vite build --outDir <scratch>/client-build --emptyOutDir
 //   pnpm run visual --client <scratch>/client-build/ --out <scratch>/shots/before
 //   pnpm run visual --client <scratch>/client-build/ --out <scratch>/shots/after --only conv,fleet,steer --route
-//   pnpm run visual --serve    # then `pnpm dev:client` and open http://127.0.0.1:4318/#token=test-token
+//   pnpm run visual --serve    # then `pnpm dev:client` and open the printed http://127.0.0.1:4318/#ticket=… link
 //
 // `--route` makes the fixture advertise safe settings and a healthy target, so the composer shows a
 // reported model. Prompts containing [approval], [fleet] and [stream] reach those fixture turns.
@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium } from "playwright-core";
+import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -107,10 +108,17 @@ const stop = async () => {
 	await h.close();
 };
 
+/** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
+const launch = async () => {
+	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
+	if (ticket === null) throw new Error("The fixture server issued no launch ticket.");
+	return `ticket=${ticket}`;
+};
+
 if (values.serve) {
-	// Vite's proxy presents the API origin, so the origin stays the served one.
+	// Vite's proxy presents the API origin, so the origin stays the served one. The ticket opens one window.
 	console.log(
-		`[visual] Fixture API on ${origin}. Run pnpm dev:client, then open http://127.0.0.1:4318/#token=test-token`,
+		`[visual] Fixture API on ${origin}. Run pnpm dev:client, then open http://127.0.0.1:4318/#${await launch()}`,
 	);
 	console.log(`[visual] Scratch home ${h.home.path}; project ${project}. Ctrl+C stops it.`);
 	for (const signal of ["SIGINT", "SIGTERM"] as const)
@@ -146,7 +154,7 @@ if (values.serve) {
 				}, edge);
 			// The app opens on a blank task: the home composer is the first thing that renders.
 			const homeField = page.getByPlaceholder("Describe a task or ask a question");
-			await page.goto(`${origin}/#token=test-token`);
+			await page.goto(`${origin}/#${await launch()}`);
 			await homeField.waitFor();
 			if (want("home") || want("empty")) await shot(want("home") ? "home" : "empty");
 			if (want("history") || want("delete")) {

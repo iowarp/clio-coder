@@ -101,9 +101,9 @@ test("the remote GUI command comes from the installed worker entry, else the cli
 	assert.throws(() => remoteGuiCommand(null, 0), /positive/);
 });
 
-test("the ready line yields the port with or without a token fragment and nothing else does", () => {
+test("the ready line yields the port with or without a launch fragment and nothing else does", () => {
 	assert.equal(parseReadyLine("[clio-coder:gui] http://127.0.0.1:38211/"), 38211);
-	assert.equal(parseReadyLine("[clio-coder:gui] http://127.0.0.1:38211/#token=abc\n"), 38211);
+	assert.equal(parseReadyLine("[clio-coder:gui] http://127.0.0.1:38211/#ticket=abc\n"), 38211);
 	assert.equal(parseReadyLine("[clio-coder:gui] http://127.0.0.1:38211/sessions"), 38211);
 	assert.equal(parseReadyLine("[clio-coder:gui] Background app ready at http://127.0.0.1:4343."), null);
 	assert.equal(parseReadyLine("[clio-coder:gui] http://10.0.0.5:38211/"), null);

@@ -330,10 +330,10 @@ export function subscribe(
 		const current = ++attempt;
 		let url: string;
 		try {
-			// A single-use ticket from this app; the launch token and the credential stay out of the URL.
+			// A single-use ticket from this app; the credential stays out of the URL.
 			url = await client.eventsUrl(cursor);
 		} catch {
-			// A refused launch token is learned by the exchange itself; anything else retries.
+			// A refused launch link is learned by the exchange itself; anything else retries.
 			if (!disposed && current === attempt) retry();
 			return;
 		}
@@ -369,7 +369,7 @@ export function subscribe(
 			buffer.flush();
 			// The browser's own retry would present the same ticket, which the server has already
 			// spent, so every loss reconnects here with a fresh one. Minting it is an ordinary request,
-			// whose 401 handling also learns of a refused launch token.
+			// whose 401 handling also learns of a refused launch link.
 			source.close();
 			stream = null;
 			retry();

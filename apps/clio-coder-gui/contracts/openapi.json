@@ -21572,8 +21572,9 @@
 				"operationId": "authClients",
 				"summary": "Open this client's own short-lived credential from a launcher's proof of the launch token over a challenge, a launch ticket, or a live credential; the launch token opens nothing else",
 				"security": [
+					{},
 					{
-						"launchToken": []
+						"bearer": []
 					}
 				],
 				"parameters": [
@@ -22684,11 +22685,6 @@
 				"type": "http",
 				"scheme": "bearer",
 				"description": "This client's credential from POST /api/auth/clients."
-			},
-			"launchToken": {
-				"type": "http",
-				"scheme": "bearer",
-				"description": "The launch token. Accepted only by POST /api/auth/clients."
 			},
 			"eventTicket": {
 				"type": "apiKey",

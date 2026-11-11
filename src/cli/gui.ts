@@ -27,10 +27,11 @@ prints its launch link and opens it; press Ctrl+C to stop it.
 
 A browser opens by itself only from an interactive terminal on a desktop.
 --open always opens one, --no-open never does. --foreground always starts a
-private server, and so does any of --port, --idle-exit <milliseconds>, --token
+private server, and so does any of --port, --idle-exit <milliseconds>
 or --log-file. --path opens a particular page. --reuse-background fails instead
 of starting a private server when the background app cannot be used.
---token-stdin takes the launch token from the first line of stdin instead.
+--token-stdin takes the launch token from the first line of stdin; the app on
+another machine starts this one that way to drive it over SSH.
 
 On Linux with a systemd user session, background install keeps the app at a
 stable address from login, so the browser can install it as an app. That

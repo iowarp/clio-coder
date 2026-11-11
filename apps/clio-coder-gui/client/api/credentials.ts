@@ -22,7 +22,7 @@ const problem = (status: number, code: Problem["code"], title: string, detail: s
 	instance: "browser",
 });
 export const unauthorizedProblem = () =>
-	problem(401, "unauthorized", "unauthorized", "A valid launch token is required.");
+	problem(401, "unauthorized", "unauthorized", "A fresh launch link is required.");
 const unavailableProblem = () =>
 	problem(503, "unavailable", "Server unavailable", "Cannot reach Clio Coder. Check that the server is running.");
 
@@ -35,13 +35,11 @@ interface Held {
 }
 
 export interface Credentials {
-	/** The launch token a link from before 0.8.0 opened this document with; empty otherwise. */
-	readonly launchToken: string;
-	/** Whether this window holds anything that can open a client: a launch secret, a credential or a remembered one. */
+	/** Whether this window holds anything that can open a client: a launch ticket, a credential or a remembered one. */
 	available(): boolean;
-	/** This window's credential, exchanging the launch token or rotating first when needed. */
+	/** This window's credential, opening a client or rotating first when needed. */
 	bearer(): Promise<string>;
-	/** The server refused `credential`: forget it so the next bearer() exchanges the launch token again. */
+	/** The server refused `credential`: forget it so the next bearer() opens a client again. */
 	refused(credential: string): void;
 	/** A single-use ticket that opens one event stream for this client. */
 	ticket(): Promise<string>;
@@ -66,7 +64,7 @@ function write(storage: () => Storage, key: string, value: string | null) {
 		if (value === null) storage().removeItem(key);
 		else storage().setItem(key, value);
 	} catch {
-		/* Without storage a reload exchanges the launch token again under a new id. */
+		/* Without storage a reload needs a fresh launch link. */
 	}
 }
 const session = () => sessionStorage;
@@ -89,25 +87,18 @@ function remembered() {
 }
 
 /**
- * One per document, shared by every client in it. A launch ticket (or a legacy launch token) goes to
- * POST /api/auth/clients and nowhere else; the credential it buys lives in memory, rotates at half-life
- * and is handed to the next page only across a reload, so a duplicated tab never inherits it and gets
- * its own client id. The latest credential is also remembered in this browser, never the launch token,
- * so a window reopened while it lives opens its own client with it.
+ * One per document, shared by every client in it. A launch ticket goes to POST /api/auth/clients and
+ * nowhere else; the credential it buys lives in memory, rotates at half-life and is handed to the next
+ * page only across a reload, so a duplicated tab never inherits it and gets its own client id. The
+ * latest credential is also remembered in this browser, so a window reopened while it lives opens its
+ * own client with it.
  */
 export function createCredentials(
-	launch: LaunchSecret | string = {},
+	launch: LaunchSecret = {},
 	fetcher: typeof fetch = fetch,
 	label = "Browser window",
 ): Credentials {
-	const {
-		ticket: launchTicket,
-		token: launchToken = "",
-		legacy: legacyToken,
-	} = typeof launch === "string" ? { token: launch } : launch;
-	let ticket = launchTicket;
-	// A stored launch token from before 0.8.0 is spent on the first exchange and never kept.
-	let legacy = legacyToken;
+	let ticket = launch.ticket;
 	let held: Held | null = null;
 	let pending: Promise<Held> | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
@@ -123,11 +114,10 @@ export function createCredentials(
 				clientId: string;
 				credential: string;
 				expiresAt: number;
-				launchToken: string;
 			};
 			const left = value.expiresAt - Date.now();
-			// A document opened from a different launch link exchanges that link, so a link that fails says so at once.
-			if (left > 30_000 && !launchTicket && value.launchToken === launchToken)
+			// A document opened from a fresh launch link exchanges that link, so a link that fails says so at once.
+			if (left > 30_000 && !ticket)
 				held = {
 					clientId: value.clientId,
 					credential: value.credential,
@@ -147,7 +137,6 @@ export function createCredentials(
 					clientId: held.clientId,
 					credential: held.credential,
 					expiresAt: Date.now() + (held.expiresAt - now()),
-					launchToken,
 				}),
 			);
 	};
@@ -211,8 +200,7 @@ export function createCredentials(
 		// The ticket is single use, so it is spent on the first exchange whatever the answer.
 		const spend = ticket;
 		ticket = undefined;
-		const bearer = spend ? null : launchToken || remembered() || legacy || null;
-		legacy = undefined;
+		const bearer = spend ? null : remembered();
 		if ((!spend && !bearer) || tokenRejected()) throw new CredentialProblem(unauthorizedProblem());
 		const resume = held?.clientId ?? read(session, clientIdKey) ?? undefined;
 		const response = await post(routes.authClients.path, bearer, {
@@ -243,8 +231,7 @@ export function createCredentials(
 	};
 
 	return {
-		launchToken,
-		available: () => !tokenRejected() && !revoked && !!(ticket || launchToken || legacy || held || remembered()),
+		available: () => !tokenRejected() && !revoked && !!(ticket || held || remembered()),
 		async bearer() {
 			if (tokenRejected() || revoked) throw new CredentialProblem(unauthorizedProblem());
 			if (pending) return (await pending).credential;

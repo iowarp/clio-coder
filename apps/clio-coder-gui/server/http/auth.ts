@@ -1,7 +1,6 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { machinePrefix } from "../../contracts/pages.js";
 import { routes } from "../../contracts/routes.js";
-import { sameSecret as same } from "../launch-proof.js";
 import type { ClientRecord, ClientRegistry } from "../services/clients.js";
 import { AppProblem } from "../services/problem.js";
 import { SECURITY_HEADERS } from "./security-headers.js";
@@ -33,11 +32,10 @@ export function requestClient(context: Context): ClientRecord {
 /**
  * POST /api/auth/clients, which issues the caller its own credential, admits its caller itself
  * (`routes-auth.ts`): a launcher's proof of the launch token over a challenge from POST
- * /api/auth/challenge (which needs nothing), a launch ticket, a live credential, or the launch token
- * as a bearer. Every other API request names its client with that credential, and the
+ * /api/auth/challenge (which needs nothing), a launch ticket, or a live credential. Every other API request names its client with that credential, and the
  * event stream, which a browser cannot give a header, with a single-use ticket.
  */
-export function auth(token: string, origin: () => string, clients: ClientRegistry): MiddlewareHandler {
+export function auth(origin: () => string, clients: ClientRegistry): MiddlewareHandler {
 	return async (context, next) => {
 		const expected = new URL(origin());
 		const host = context.req.header("host") ?? new URL(context.req.url).host;
@@ -62,11 +60,7 @@ export function auth(token: string, origin: () => string, clients: ClientRegistr
 				if (!client)
 					throw new AppProblem(
 						"unauthorized",
-						bearer && same(token, bearer)
-							? "The launch token only opens a client at POST /api/auth/clients; send that client's credential instead."
-							: ticket
-								? "The event stream ticket is unknown, used or expired."
-								: "A valid client credential is required.",
+						ticket ? "The event stream ticket is unknown, used or expired." : "A valid client credential is required.",
 					);
 				context.set("clioClient", client);
 				context.header("X-Clio-Client", client.clientId);

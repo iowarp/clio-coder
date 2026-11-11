@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -91,7 +91,7 @@ async function publishOwned(directory: string, config: BackgroundConfig, files: 
 		await writeFile(join(staging, files.unit), unit, { flag: "wx", mode: 0o600 });
 		await writeFile(
 			join(staging, "owner.json"),
-			`${JSON.stringify({ v: 1, owner: "clio-coder-gui-background", config: hash(configText), unit: hash(unit) })}\n`,
+			`${JSON.stringify({ v: OWNER_VERSION, owner: "clio-coder-gui-background", config: hash(configText), unit: hash(unit) })}\n`,
 			{ flag: "wx", mode: 0o600 },
 		);
 		if (replace) {
@@ -108,6 +108,8 @@ async function publishOwned(directory: string, config: BackgroundConfig, files: 
 	}
 }
 
+/** The manifest version 0.8.0 writes; 0.7.0 wrote 1 (`upgradeLegacyBackground`). */
+const OWNER_VERSION = 2;
 async function owned(directory: string) {
 	const files = backgroundPaths(directory);
 	const manifest = await contents(files.manifest),
@@ -117,7 +119,7 @@ async function owned(directory: string) {
 	try {
 		const owner = JSON.parse(manifest ?? "null");
 		if (
-			owner?.v !== 1 ||
+			(owner?.v !== 1 && owner?.v !== OWNER_VERSION) ||
 			owner?.owner !== "clio-coder-gui-background" ||
 			!configText ||
 			!unit ||
@@ -127,7 +129,7 @@ async function owned(directory: string) {
 			throw new Error("Ownership mismatch");
 		const config = await readBackgroundConfig(files.config);
 		if (unit !== backgroundUnit(config, directory)) throw new Error("Unit does not match configuration");
-		return { status: "installed" as const, files, config };
+		return { status: "installed" as const, files, config, legacy: owner.v === 1 };
 	} catch {
 		throw new Error(
 			"Background files are incomplete, modified or not private; ownership could not be verified. No files were changed.",
@@ -406,6 +408,11 @@ export async function preferBackground(
 			reason: "The background app belongs to another Clio Coder installation, so this one will not take it over.",
 		};
 	try {
+		if (state.legacy) {
+			await upgradeLegacyBackground(directory, control);
+			state = await owned(directory);
+		}
+		if (state.status !== "installed") return { kind: "absent" };
 		if (launch) return { kind: "open", ...publicStart(await startCurrentBackground(directory, launch, control, ready)) };
 		const started = await startOwned(state, control, ready);
 		if (version && started.running && started.running !== version && started.idle === true) {
@@ -416,6 +423,21 @@ export async function preferBackground(
 	} catch (error) {
 		return { kind: "unavailable", reason: error instanceof Error ? error.message : String(error) };
 	}
+}
+/**
+ * A background app 0.7.0 installed (manifest v1) put its launch token in `#token=` links, opener argv and
+ * browser storage, and its running process cannot answer this version's launch proof. The first 0.8.0
+ * command to touch it replaces the token, so every stored copy opens nothing, and restarts a running
+ * service on it; conversations resume from their saved sessions. True when it restarted the service.
+ */
+export async function upgradeLegacyBackground(directory: string, control: Control = controlService) {
+	const state = await owned(directory);
+	if (state.status !== "installed" || !state.legacy) return false;
+	const active = (await serviceState(state.files, control)).ActiveState === "active";
+	await publishOwned(directory, { ...state.config, token: randomBytes(32).toString("base64url") }, state.files, true);
+	await control("reload", state.files.unit, state.files.unitFile);
+	if (active) await control("restart", state.files.unit, state.files.unitFile);
+	return active;
 }
 export async function restartBackgroundIfIdle(
 	directory: string,
@@ -428,7 +450,7 @@ export async function restartBackgroundIfIdle(
 	if (state.status === "absent") return { status: "absent" as const };
 	const report = serverReport(await probe(state.config.port, state.config.token));
 	if (report.running === null) {
-		// An app from before 0.8.0 cannot answer this launcher's proof; it is never stopped unproven.
+		// A service whose app cannot answer this launcher's proof is never stopped unproven.
 		const active = (await serviceState(state.files, control)).ActiveState === "active";
 		return { status: "left" as const, reason: active ? ("unproven" as const) : ("stopped" as const), running: null };
 	}
@@ -456,6 +478,7 @@ export async function tryStartBackground(
 		throw new Error(
 			"Background setup belongs to another installation. Use that installation or run gui without --reuse-background.",
 		);
+	await upgradeLegacyBackground(directory, control);
 	return startBackground(directory, control, ready);
 }
 export async function stopBackground(directory: string, control: Control = controlService) {
@@ -553,6 +576,8 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 	const directory = values.directory ?? join(resolveClioDirs().state, "gui/background");
 	if (!isAbsolute(directory) || resolve(directory) !== directory)
 		throw new Error("--directory must be an absolute normalized path.");
+	// The first command after an upgrade from 0.7.0 fixes that version's state before anything reads it.
+	const upgraded = command !== "uninstall" && (await upgradeLegacyBackground(directory));
 	if (command === "status") {
 		console.log(JSON.stringify(await backgroundStatus(directory), null, 2));
 		return;
@@ -608,6 +633,10 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 	}
 	if (command === "restart") {
 		if (values["if-idle"]) {
+			if (upgraded) {
+				console.log("Clio Coder background app restarted.");
+				return;
+			}
 			const result = await restartBackgroundIfIdle(directory, undefined, undefined, undefined, launch);
 			const line =
 				result.status === "absent"
@@ -619,7 +648,7 @@ export async function background(args: string[], launch: LaunchPaths, platform: 
 							: result.reason === "unknown"
 								? "Clio Coder background app was left running because it does not report whether it is idle."
 								: result.reason === "unproven"
-									? "Clio Coder background app is running an older version that this one cannot verify, so it was left running. Run: clio-coder gui background restart"
+									? "Clio Coder background app is running but did not prove it is this installation's app, so it was left running. See clio-coder gui background status."
 									: "Clio Coder background app was left stopped.";
 			console.log(line);
 			return;

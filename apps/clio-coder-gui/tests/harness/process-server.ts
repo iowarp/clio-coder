@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { fileURLToPath } from "node:url";
-import { exchangeLaunchToken } from "./exchange.js";
+import { exchangeLaunchTicket } from "./exchange.js";
 export async function processServer(env: NodeJS.ProcessEnv) {
 	const child = spawn(
 		process.execPath,
@@ -37,15 +37,15 @@ export async function processServer(env: NodeJS.ProcessEnv) {
 		});
 		child.stdout.on("data", (chunk) => {
 			stdout += String(chunk);
-			const match = stdout.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/);
+			const match = stdout.match(/http:\/\/127\.0\.0\.1:\d+\/[^\s#]*#ticket=[\w-]+/);
 			if (match) {
 				clearTimeout(timer);
 				resolve(new URL(match[0]));
 			}
 		});
 	});
-	const token = new URLSearchParams(launch.hash.slice(1)).get("token");
-	const credential = await exchangeLaunchToken(launch, token ?? "");
+	const ticket = new URLSearchParams(launch.hash.slice(1)).get("ticket");
+	const credential = await exchangeLaunchTicket(launch, ticket ?? "");
 	const request = (path: string, method = "GET", body?: unknown) =>
 		new Promise<Response>((resolve, reject) => {
 			const call = httpRequest(

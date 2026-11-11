@@ -304,6 +304,6 @@ export async function waitForLocalServer(port: number, token: string): Promise<L
 		await setTimeout(200);
 	}
 	throw new Error(
-		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. If the background app was started by an older Clio Coder, run: clio-coder gui background restart. Otherwise check clio-coder gui background status; another application may be using those ports.`,
+		`Clio did not become ready on port ${listenPorts(port).join(" or ")}. Check clio-coder gui background status; another application may be using those ports.`,
 	);
 }

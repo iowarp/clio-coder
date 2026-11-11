@@ -1,27 +1,15 @@
-/** What a launch link carried: a single-use launch ticket, or a launch token from a link made before 0.8.0. */
+/** What a launch link carried: a single-use launch ticket. */
 export interface LaunchSecret {
 	ticket?: string;
-	token?: string;
-	/** The launch token an earlier version stored in this browser, already deleted; it opens one client. */
-	legacy?: string;
 }
 /**
- * Read once and cleared from the address bar. The launch token is never stored: a reloaded or reopened
- * window reconnects with its own expiring credential (`credentials.ts`), and a stored token from an
- * earlier version is deleted here and handed over once, so an upgraded browser stays connected.
+ * Read once and cleared from the address bar. A reloaded or reopened window reconnects with its own
+ * expiring credential (`credentials.ts`). A launch token 0.7.0 stored in this browser opens nothing
+ * since the upgrade replaced it, so it is deleted unread.
  */
 export function launchSecret(): LaunchSecret {
-	const params = new URLSearchParams(location.hash.slice(1));
-	const ticket = params.get("ticket") ?? undefined;
-	const token = params.get("token") ?? undefined;
-	let legacy: string | null = null;
-	try {
-		legacy = localStorage.getItem(legacyTokenKey);
-	} catch {
-		/* Storage may be disabled; then nothing was stored either. */
-	}
 	for (const drop of [
-		() => localStorage.removeItem(legacyTokenKey),
+		() => localStorage.removeItem("clio-coder-pwa-token"),
 		() => sessionStorage.removeItem("clio-coder-token"),
 	])
 		try {
@@ -29,20 +17,16 @@ export function launchSecret(): LaunchSecret {
 		} catch {
 			/* Storage may be disabled; then nothing was stored either. */
 		}
-	if (ticket === undefined && token === undefined)
-		return legacy !== null && /^[\w-]{1,256}$/.test(legacy) ? { legacy } : {};
+	const ticket = new URLSearchParams(location.hash.slice(1)).get("ticket") ?? undefined;
+	if (ticket === undefined) return {};
 	history.replaceState(null, "", location.pathname + location.search);
 	try {
 		sessionStorage.removeItem(refusedKey);
 	} catch {
 		/* The fresh link still works without browser storage. */
 	}
-	if (ticket !== undefined) return /^[\w-]{43}$/.test(ticket) ? { ticket } : {};
-	if (token === undefined || !/^[\w-]{1,256}$/.test(token)) return {};
-	console.warn("Clio Coder: #token= links are deprecated; open the app with clio-coder gui.");
-	return { token };
+	return /^[\w-]{43}$/.test(ticket) ? { ticket } : {};
 }
-const legacyTokenKey = "clio-coder-pwa-token";
 /** This browser's latest live credential, which lets a reopened window open its own client while it lasts. */
 export const rememberedCredentialKey = "clio-coder-credential";
 const refusedKey = "clio-coder-token-refused";
@@ -96,7 +80,7 @@ export function listenForForget(revoke: () => Promise<void>) {
 	if (typeof BroadcastChannel !== "function") return;
 	new BroadcastChannel(forgetChannel).onmessage = () => void forgetBrowser(revoke, false);
 }
-/** A refused token is dropped at once, so a reload asks for a link instead of failing the same way again. */
+/** A refused credential is dropped at once, so a reload asks for a link instead of failing the same way again. */
 export function dropStoredToken() {
 	for (const drop of [
 		() => localStorage.removeItem(rememberedCredentialKey),
@@ -110,12 +94,11 @@ export function dropStoredToken() {
 		}
 }
 /**
- * Adopt a ticket or token the operator pasted. It goes through the same launch path as a link, so it is
+ * Adopt a ticket the operator pasted. It goes through the same launch path as a link, so it is
  * validated once.
  */
-export function adoptLaunchSecret(secret: { ticket: string } | { token: string }, origin = location.origin) {
-	const hash =
-		"ticket" in secret ? `ticket=${encodeURIComponent(secret.ticket)}` : `token=${encodeURIComponent(secret.token)}`;
+export function adoptLaunchSecret(secret: { ticket: string }, origin = location.origin) {
+	const hash = `ticket=${encodeURIComponent(secret.ticket)}`;
 	if (origin !== location.origin) {
 		location.assign(`${origin}/#${hash}`);
 		return;

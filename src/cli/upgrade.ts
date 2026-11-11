@@ -618,21 +618,14 @@ export async function runUpgradeCommand(
 						"clio-coder gui background install --handover",
 					);
 				}
-			} else if (opts.postInstall) {
-				presenter.commandAdvice(
-					"The background app is installed. Restart it when its open conversations can move to this version:",
-					"clio-coder gui background restart",
-				);
 			} else {
+				// The new installation restarts an idle app itself, and an app 0.7.0 started at once; a busy one
+				// moves on the next clio-coder gui after its work is done.
 				try {
 					presenter.note(await deps.runBackgroundRestart(activeInstallation));
 				} catch (error) {
 					presenter.warn(
 						`Upgrade succeeded, but the background app was not checked: ${error instanceof Error ? error.message : String(error)}`,
-					);
-					presenter.commandAdvice(
-						"Restart it when its open conversations can move to this version:",
-						"clio-coder gui background restart",
 					);
 				}
 			}

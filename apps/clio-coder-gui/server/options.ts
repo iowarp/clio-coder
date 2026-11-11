@@ -12,7 +12,6 @@ export function serverOptions(args: string[]) {
 			open: { type: "boolean", default: false },
 			"no-open": { type: "boolean", default: false },
 			"idle-exit": { type: "string" },
-			token: { type: "string" },
 			"token-stdin": { type: "boolean", default: false },
 			"log-file": { type: "string" },
 			persistent: { type: "string" },
@@ -27,10 +26,6 @@ export function serverOptions(args: string[]) {
 			throw new Error(`--${name} must be an integer from ${min} to ${max}.`);
 		return number;
 	};
-	if (values.token !== undefined && !/^[\w-]{32,256}$/.test(values.token))
-		throw new Error("--token must contain 32–256 URL-safe letters, digits, underscores or hyphens.");
-	if (values["token-stdin"] && values.token !== undefined)
-		throw new Error("--token-stdin and --token both supply the launch token; choose one.");
 	if (values["log-file"] === "") throw new Error("--log-file must name a file.");
 	const path = values.path ?? "/";
 	let decoded: string;
@@ -53,7 +48,6 @@ export function serverOptions(args: string[]) {
 	// Any flag that configures this process's own listener asks for a private foreground server.
 	const configuresForeground =
 		values.port !== undefined ||
-		values.token !== undefined ||
 		values["token-stdin"] ||
 		values.fixture ||
 		values.persistent !== undefined ||
@@ -62,7 +56,6 @@ export function serverOptions(args: string[]) {
 	if (
 		values["reuse-background"] &&
 		(values.port !== undefined ||
-			values.token !== undefined ||
 			values["token-stdin"] ||
 			values.fixture ||
 			values.persistent !== undefined ||
@@ -74,14 +67,13 @@ export function serverOptions(args: string[]) {
 		values.persistent !== undefined &&
 		(!values.persistent ||
 			values.port !== undefined ||
-			values.token !== undefined ||
 			values["token-stdin"] ||
 			values["idle-exit"] !== undefined ||
 			values.fixture ||
 			values.open)
 	)
 		throw new Error(
-			"--persistent requires a configuration file and cannot be combined with --port, --token, --token-stdin, --idle-exit, --fixture or --open.",
+			"--persistent requires a configuration file and cannot be combined with --port, --token-stdin, --idle-exit, --fixture or --open.",
 		);
 	return {
 		port: integer("port", values.port ?? "0", 0, 65535),
@@ -89,7 +81,6 @@ export function serverOptions(args: string[]) {
 		fixture: values.fixture,
 		/** `auto` opens a browser only for a person at a desktop terminal; see `autoOpenBrowser`. */
 		open: values["no-open"] || values.persistent !== undefined ? "never" : values.open ? "always" : ("auto" as OpenMode),
-		token: values.token,
 		/** The token arrives as the first line of stdin, and stdin's end tells the server its parent is gone. */
 		tokenStdin: values["token-stdin"],
 		logFile: values["log-file"],

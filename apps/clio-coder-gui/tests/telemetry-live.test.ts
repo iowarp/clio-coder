@@ -56,7 +56,7 @@ test("named telemetry updates refresh their session and operator windows, not ot
 		queries.setQueryData([key, "session-2"], {});
 	}
 	let url = "";
-	const client = createClient("token", credentialFetch());
+	const client = createClient({ ticket: "ticket" }, credentialFetch());
 	t.after(() => client.credentials.dispose());
 	const eventsUrl = client.eventsUrl;
 	client.eventsUrl = async (after) => {

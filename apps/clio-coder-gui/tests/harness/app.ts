@@ -10,6 +10,7 @@ import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { getVersionInfo, runningBuildId } from "../../server/clio/http-shims.js";
 import { parse } from "../../server/http/validate.js";
+import { launcherProof } from "../../server/launch-proof.js";
 import { ArenaService } from "../../server/services/arena.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
 import { EventHub } from "../../server/services/event-hub.js";
@@ -129,16 +130,22 @@ export async function harness(
 		...(options.clientDir ? { clientDir: options.clientDir } : {}),
 	});
 	const base = "http://127.0.0.1:4317";
-	/** Exchange the launch token as a browser window does; null when the listener refuses the exchange. */
+	/** Open a client as a launcher does, by proving the launch token; null when the listener refuses the exchange. */
 	const exchange = async (label = "Test client", resume?: string): Promise<ClientCredential | null> => {
-		const response = await app.request(`${base}/api/auth/clients`, {
-			method: "POST",
-			headers: {
-				Authorization: "Bearer test-token",
-				"Content-Type": "application/json",
-				"Idempotency-Key": crypto.randomUUID(),
-			},
-			body: JSON.stringify({ label, ...(resume ? { resume } : {}) }),
+		const post = (path: string, body: unknown) =>
+			app.request(`${base}${path}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+				body: JSON.stringify(body),
+			});
+		const issued = await post("/api/auth/challenge", {});
+		if (issued.status !== 200) return null;
+		const { challenge } = (await issued.json()) as { challenge: string };
+		const response = await post("/api/auth/clients", {
+			label,
+			...(resume ? { resume } : {}),
+			challenge,
+			proof: launcherProof("test-token", challenge, 4317),
 		});
 		return response.status === 200 ? ((await response.json()) as ClientCredential) : null;
 	};

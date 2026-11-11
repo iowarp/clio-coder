@@ -64,7 +64,7 @@ test("a launch on a Linux desktop raises an open app window and otherwise report
 	);
 });
 
-test("--open uses the actual bound URL with its explicit token; invalid flags and unsafe log paths fail", {
+test("--open uses the actual bound URL with its own launch ticket; a removed --token, invalid flags and unsafe log paths fail", {
 	timeout: 10000,
 }, async (t) => {
 	for (const args of [
@@ -73,8 +73,7 @@ test("--open uses the actual bound URL with its explicit token; invalid flags an
 		["--port", "65536"],
 		["--idle-exit", "0"],
 		["--idle-exit", "NaN"],
-		["--token", "short"],
-		["--token", "a".repeat(300)],
+		["--token", "a".repeat(43)],
 		["--log-file", ""],
 		...[
 			"https://example.com",
@@ -104,11 +103,11 @@ test("--open uses the actual bound URL with its explicit token; invalid flags an
 		OPENER_LOG: log,
 	});
 	assert.equal(await s.exited, 0);
-	// The opener's argv carries a single-use launch ticket, never the launch token (S-09).
+	// The opener's argv carries its own single-use launch ticket, never the one the printed link spends.
 	const opened = new URL(await readFile(log, "utf8"));
 	assert.equal(`${opened.origin}${opened.pathname}`, `${s.launch.origin}${s.launch.pathname}`);
 	assert.match(opened.hash, /^#ticket=[\w-]{43}$/);
-	assert.ok(!opened.href.includes(new URLSearchParams(s.launch.hash.slice(1)).get("token") ?? "unset"));
+	assert.notEqual(opened.hash, s.launch.hash);
 	assert.equal(s.launch.pathname, "/docs/architecture/safety-model.md");
 	const target = join(dir, "unrelated");
 	await writeFile(target, "keep");

@@ -193,13 +193,7 @@ test("background setup on a host without systemd reports it unavailable instead 
 
 test("persistent mode cannot accidentally become transient and service control accepts only fixed Clio units", () => {
 	const persistent = ["--persistent", "/private/server.json"];
-	for (const extra of [
-		["--port", "0"],
-		["--token", "a".repeat(43)],
-		["--idle-exit", "60000"],
-		["--open"],
-		["--fixture"],
-	])
+	for (const extra of [["--port", "0"], ["--token-stdin"], ["--idle-exit", "60000"], ["--open"], ["--fixture"]])
 		assert.throws(() => serverOptions([...persistent, ...extra]), /cannot be combined/);
 	assert.equal(serverOptions(persistent).idleMs, undefined);
 	assert.equal(serverOptions([]).persistent, undefined);
@@ -466,6 +460,44 @@ test("restart --if-idle restarts only an idle background app and says why it lef
 		reason: "unproven",
 		running: null,
 	});
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+});
+
+test("the first launch after an upgrade from 0.7.0 replaces its stored token and restarts its running app without being asked", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-070-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const config = await newBackgroundConfig(4320, launch, join(root, "desktop"), { PATH: "/usr/bin" });
+	const calls: string[] = [];
+	const control: typeof controlService = async (action) => {
+		calls.push(action);
+		return `FragmentPath=${calls.includes("enable") ? files.unitFile : ""}\nActiveState=active\nUnitFileState=enabled\nMainPID=123\n`;
+	};
+	const tokens: string[] = [];
+	const ready = async (_port: number, token: string) => {
+		tokens.push(token);
+		return { clio: "0.8.0", idle: true };
+	};
+	await installBackground(directory, config, control, ready);
+	// The state 0.7.0 left behind: the same files under the version 1 manifest, its service running.
+	const owner = JSON.parse(await readFile(files.manifest, "utf8"));
+	await writeFile(files.manifest, JSON.stringify({ ...owner, v: 1 }), { mode: 0o600 });
+	calls.splice(0, calls.length, "enable");
+	tokens.length = 0;
+	const first = await preferBackground(directory, config.packageRoot, control, ready, "linux");
+	assert.equal(first.kind, "open");
+	const upgraded = await readBackgroundConfig(files.config);
+	assert.notEqual(upgraded.token, config.token, "the token 0.7.0 stored in links and browsers opens nothing now");
+	assert.deepEqual({ ...upgraded, token: config.token }, config);
+	assert.equal(JSON.parse(await readFile(files.manifest, "utf8")).v, 2);
+	assert.ok(calls.includes("restart"), "the running 0.7.0 app was restarted on the new token");
+	assert.ok(!tokens.includes(config.token), "nothing proved the stale token after the upgrade");
+	// Fixed once: a later launch neither replaces the token again nor restarts the app.
+	calls.splice(0, calls.length, "enable");
+	assert.equal((await preferBackground(directory, config.packageRoot, control, ready, "linux")).kind, "open");
+	assert.equal((await readBackgroundConfig(files.config)).token, upgraded.token);
+	assert.ok(!calls.includes("restart"));
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
 });
 

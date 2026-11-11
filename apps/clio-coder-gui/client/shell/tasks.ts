@@ -76,7 +76,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 			queries.setQueryData(["session", session.id], sessionBuffer(session.id).snapshot(session) ?? session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
 			void queries.invalidateQueries({ queryKey: ["session-overview"] });
-			if (request.window) return openAppWindow(`/sessions/${session.id}`, client.token);
+			if (request.window) return openAppWindow(`/sessions/${session.id}`);
 			afterNavigate?.();
 			void navigate(`/sessions/${session.id}`);
 		},
@@ -103,7 +103,7 @@ export function useTaskActions(client: Client, afterNavigate?: () => void): Task
 		newTask,
 		resume: (sessionId, workspaceId) => resume.mutate({ sessionId, workspaceId }),
 		openWindow: (sessionId, workspaceId, held) => {
-			if (held) openAppWindow(`/sessions/${sessionId}`, client.token);
+			if (held) openAppWindow(`/sessions/${sessionId}`);
 			else resume.mutate({ sessionId, workspaceId, window: true });
 		},
 		resuming: resume.isPending ? (resume.variables?.sessionId ?? null) : null,

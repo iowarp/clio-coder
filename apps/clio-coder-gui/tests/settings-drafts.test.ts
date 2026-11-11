@@ -4,7 +4,7 @@ import { createClient } from "../client/api/client.js";
 import { settingsDraftStore } from "../client/pages/settings-drafts.js";
 
 test("a save settling after the editor reopens preserves the newer draft", async () => {
-	const client = createClient("test-token");
+	const client = createClient({ ticket: "test-ticket" });
 	const firstEditor = settingsDraftStore(client, "project-one");
 	const path = "chat.thinkingLevel";
 	firstEditor.set(path, "medium");

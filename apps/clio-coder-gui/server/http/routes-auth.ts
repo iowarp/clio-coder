@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { routes } from "../../contracts/routes.js";
-import { answerLaunchProof, sameSecret } from "../launch-proof.js";
+import { answerLaunchProof } from "../launch-proof.js";
 import type { ClientRegistry } from "../services/clients.js";
 import type { EventHub } from "../services/event-hub.js";
 import { AppProblem } from "../services/problem.js";
@@ -31,16 +31,17 @@ export function authRoutes(
 				? answerLaunchProof(launch.token, body.challenge, body.proof, Number(new URL(launch.origin()).port))
 				: null;
 		const admitted = bearer
-			? // The launch token as a bearer is what launchers and links from before 0.8.0 send; remove in 0.8.2.
-				// A live credential is a window of this browser opening its own client, which buys nothing it lacks.
-				sameSecret(launch.token, bearer) || clients.authenticate(bearer) !== null
+			? // A live credential is a window of this browser opening its own client, which buys nothing it lacks.
+				clients.authenticate(bearer) !== null
 			: body.ticket !== undefined
 				? clients.redeemLaunch(body.ticket)
 				: answer !== null;
 		if (!admitted)
 			throw new AppProblem(
 				"unauthorized",
-				body.ticket !== undefined ? "The launch ticket is unknown, used or expired." : "A valid launch token is required.",
+				body.ticket !== undefined
+					? "The launch ticket is unknown, used or expired."
+					: "A launch ticket, a launch proof or a live credential is required.",
 			);
 		const opened = clients.open(body.label, body.resume);
 		return answer === null ? opened : { ...opened, serverProof: answer };

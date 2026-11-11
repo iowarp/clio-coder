@@ -2,7 +2,7 @@ import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { chromium } from "playwright-core";
 
 /**
- * The client is ready once it has exchanged the launch token and read `/api/meta`. That takes about a second; the cap
+ * The client is ready once it has exchanged the launch ticket and read `/api/meta`. That takes about a second; the cap
  * only bounds a hung boot on a loaded host, the way the package smoke bounds the server's launch line.
  */
 const BROWSER_READY_TIMEOUT_MS = 60_000;
@@ -11,7 +11,7 @@ const BROWSER_READY_TIMEOUT_MS = 60_000;
  * One real browser on the same installed server the package smoke owns. The
  * `chrome` channel finds the installed browser on Linux, macOS and Windows.
  */
-export async function checkInstalledBrowser(origin: string, token: string): Promise<void> {
+export async function checkInstalledBrowser(origin: string, ticket: string): Promise<void> {
 	const browser = await chromium.launch({ channel: "chrome", headless: true });
 	try {
 		const page = await browser.newPage();
@@ -37,7 +37,7 @@ export async function checkInstalledBrowser(origin: string, token: string): Prom
 		);
 		meta.catch(() => {});
 		try {
-			await page.goto(`${origin}/#token=${token}`);
+			await page.goto(`${origin}/#ticket=${ticket}`);
 			await meta;
 		} catch (error) {
 			if (error instanceof Error && error.name === "TimeoutError")

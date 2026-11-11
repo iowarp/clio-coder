@@ -20,15 +20,15 @@ import { harness } from "./harness/app.js";
 
 const launch = { Authorization: "Bearer test-token" };
 
-test("the launch token opens only the exchange; each window gets its own attributed credential", async (t) => {
+test("the launch token itself opens nothing; each window gets its own attributed credential", async (t) => {
 	const h = await harness();
 	t.after(h.close);
-	// The launch token is refused everywhere else, with a reason that names the exchange.
+	// Sent as a bearer, the launch token is refused everywhere, the exchange included: launchers only prove it.
 	const meta = await h.request("/api/meta", { headers: launch });
 	assert.equal(meta.status, 401);
 	const refusal = (await meta.json()) as Problem;
 	assert.ok(Value.Check(Problem, refusal));
-	assert.match(refusal.detail, /only opens a client at POST \/api\/auth\/clients/);
+	assert.match(refusal.detail, /valid client credential/);
 	assert.equal((await h.request("/api/events", { headers: launch })).status, 401);
 	assert.equal((await h.request("/api/events?token=test-token", { headers: { Authorization: "" } })).status, 401);
 	const a = await h.client("Window A");
@@ -42,7 +42,7 @@ test("the launch token opens only the exchange; each window gets its own attribu
 	assert.equal(answered.status, 200);
 	assert.equal(answered.headers.get("X-Clio-Client"), a.clientId);
 	assert.equal((await b.request("/api/meta")).headers.get("X-Clio-Client"), b.clientId);
-	// A wrong launch token buys nothing.
+	// The launch token as a bearer buys nothing at the exchange either.
 	const wrong = await h.app.request("http://127.0.0.1:4317/api/auth/clients", {
 		method: "POST",
 		headers: { Authorization: "Bearer nope", "Content-Type": "application/json", "Idempotency-Key": "k" },
@@ -163,7 +163,7 @@ test("a restart revokes every credential: a fresh registry knows none of them", 
 	assert.equal(after.open("Window A", issued.clientId).clientId, issued.clientId);
 });
 
-test("a window whose credential a restarted server no longer knows exchanges again under the same id", async (t) => {
+test("a launch ticket opens the window's client without an Authorization header, and a restarted server needs a fresh link", async (t) => {
 	const server = { clients: new ClientRegistry() };
 	const exchanges: { authorization: string | null; resume: string | undefined }[] = [];
 	const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -179,18 +179,14 @@ test("a window whose credential a restarted server no longer knows exchanges aga
 		if (!client) return Response.json({ status: 401 }, { status: 401 });
 		return Response.json({ apiVersion: 1, client: client.clientId });
 	}) as typeof fetch;
-	const client = createClient("launch-token", fetcher);
+	const client = createClient({ ticket: "launch-ticket" }, fetcher);
 	t.after(() => client.credentials.dispose());
 	await client.call(routes.meta, { params: {}, query: {}, body: {} });
-	const id = client.credentials.clientId();
-	assert.ok(id);
+	assert.ok(client.credentials.clientId());
 	server.clients = new ClientRegistry();
-	await client.call(routes.meta, { params: {}, query: {}, body: {} });
-	assert.equal(client.credentials.clientId(), id);
-	assert.deepEqual(exchanges, [
-		{ authorization: "Bearer launch-token", resume: undefined },
-		{ authorization: "Bearer launch-token", resume: id },
-	]);
+	// The ticket was spent on the first exchange, so nothing in this window can open a client again.
+	await assert.rejects(client.call(routes.meta, { params: {}, query: {}, body: {} }), /fresh launch link/);
+	assert.deepEqual(exchanges, [{ authorization: null, resume: undefined }]);
 	assert.equal(tokenRejected(), false);
 });
 
@@ -223,24 +219,25 @@ test("a reload keeps the window's credential, but a document opened from another
 		exchanges.push({ authorization: new Headers(init.headers).get("Authorization"), resume: body.resume });
 		return Response.json(clients.open(body.label, body.resume));
 	}) as typeof fetch;
-	const open = async (launchToken: string, previous?: ReturnType<typeof createCredentials>) => {
+	const open = async (ticket: string | undefined, previous?: ReturnType<typeof createCredentials>) => {
 		for (const listener of listeners.get("pagehide") ?? []) listener();
 		previous?.dispose();
-		const credentials = createCredentials(launchToken, fetcher);
+		const credentials = createCredentials(ticket === undefined ? {} : { ticket }, fetcher);
 		t.after(() => credentials.dispose());
 		return { credentials, bearer: await credentials.bearer() };
 	};
-	const first = await open("token-a");
+	const first = await open("ticket-a");
 	const bought = first.bearer;
 	const id = first.credentials.clientId();
-	const same = await open("token-a", first.credentials);
+	// The address bar no longer holds the spent ticket, so a reload opens with nothing but the handoff.
+	const same = await open(undefined, first.credentials);
 	assert.equal(same.bearer, bought, "a plain reload exchanged again instead of keeping its credential");
-	// The page carried a different launch token in its address: the old credential must not cover for it.
-	const relinked = await open("token-b", same.credentials);
+	// The page carried a different launch ticket in its address: the old credential must not cover for it.
+	const relinked = await open("ticket-b", same.credentials);
 	assert.notEqual(relinked.bearer, bought);
 	assert.deepEqual(exchanges, [
-		{ authorization: "Bearer token-a", resume: undefined },
-		{ authorization: "Bearer token-b", resume: id },
+		{ authorization: null, resume: undefined },
+		{ authorization: null, resume: id },
 	]);
 });
 
@@ -258,13 +255,13 @@ test("a window that signs out is refused by the server and hands nothing to the 
 		const body = JSON.parse(String(init.body)) as { label?: string; resume?: string };
 		return Response.json(clients.open(body.label, body.resume));
 	}) as typeof fetch;
-	const credentials = createCredentials("token-a", fetcher);
+	const credentials = createCredentials({ ticket: "ticket-a" }, fetcher);
 	t.after(() => credentials.dispose());
 	const bearer = await credentials.bearer();
 	assert.ok(clients.authenticate(bearer));
 	await credentials.revoke();
 	assert.equal(clients.authenticate(bearer), null);
-	await assert.rejects(credentials.bearer(), /launch token/);
+	await assert.rejects(credentials.bearer(), /launch link/);
 	// The reload that follows a sign-out must not carry the credential, or the id, into the next document.
 	for (const listener of listeners.get("pagehide") ?? []) listener();
 	assert.deepEqual([...stored.keys()], []);

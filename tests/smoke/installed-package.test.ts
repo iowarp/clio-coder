@@ -20,6 +20,7 @@ import { describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { launcherProof } from "../../apps/clio-coder-gui/server/launch-proof.js";
 import { checkInstalledBrowser } from "../../apps/clio-coder-gui/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -373,11 +374,36 @@ function webRequest(origin: string, token: string | undefined, path: string, bod
 	});
 }
 
-/** A window's first request: the launch token buys a per-client credential that every other request carries. */
-async function exchangeLaunchToken(origin: string, token: string): Promise<string> {
-	const response = await webRequest(origin, token, "/api/auth/clients", { label: "Installed package smoke" });
-	strictEqual(response.status, 200, "the launch token exchanges for a client credential");
+/** A window's first request: the single-use ticket in a launch link buys a per-client credential. */
+async function exchangeLaunchTicket(origin: string, ticket: string): Promise<string> {
+	const response = await webRequest(origin, undefined, "/api/auth/clients", {
+		label: "Installed package smoke",
+		ticket,
+	});
+	strictEqual(response.status, 200, "the launch ticket exchanges for a client credential");
 	return ((await response.json()) as { credential: string }).credential;
+}
+
+/** A launcher's way in: it proves the launch token over a fresh challenge and never sends the token. */
+async function proveLaunchToken(origin: string, token: string): Promise<string> {
+	const issued = await webRequest(origin, undefined, "/api/auth/challenge", {});
+	strictEqual(issued.status, 200, "the app issues a launch challenge");
+	const { challenge } = (await issued.json()) as { challenge: string };
+	const proof = launcherProof(token, challenge, Number(new URL(origin).port));
+	const response = await webRequest(origin, undefined, "/api/auth/clients", {
+		label: "Installed package smoke",
+		challenge,
+		proof,
+	});
+	strictEqual(response.status, 200, "a proof of the launch token opens a client credential");
+	return ((await response.json()) as { credential: string }).credential;
+}
+
+/** A fresh single-use launch ticket, as a launcher puts in the link it opens. */
+async function mintLaunchTicket(origin: string, credential: string): Promise<string> {
+	const response = await webRequest(origin, credential, "/api/auth/launch-ticket", {});
+	strictEqual(response.status, 200, "a client can mint a launch ticket");
+	return ((await response.json()) as { ticket: string }).ticket;
 }
 
 /** Files the CLI evaluated for one invocation, from a fresh V8 coverage directory. */
@@ -458,16 +484,17 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 
 	const server = await startInstalledWeb(
 		bin,
-		["--no-open", "--port", "0", "--token", GUI_TEST_TOKEN],
+		["--no-open", "--port", "0"],
 		foreign,
 		env,
-		/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/u,
+		/http:\/\/127\.0\.0\.1:\d+\/#ticket=[\w-]{43}$/mu,
 	);
 	try {
 		const { origin } = server;
-		match(server.stdout(), new RegExp(`/#token=${GUI_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
+		const ticket = server.stdout().match(/#ticket=([\w-]{43})$/mu)?.[1];
+		ok(ticket, "the printed link carries a single-use launch ticket");
 		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires a credential");
-		const credential = await exchangeLaunchToken(origin, GUI_TEST_TOKEN);
+		const credential = await exchangeLaunchTicket(origin, ticket);
 		const request = (path: string, body?: unknown) => webRequest(origin, credential, path, body);
 		const meta = (await (await request("/api/meta")).json()) as {
 			clio: string;
@@ -508,7 +535,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		);
 		ok(threads[0] !== threads[1], "reads and ops are distinct worker threads");
 
-		await checkInstalledBrowser(origin, GUI_TEST_TOKEN);
+		await checkInstalledBrowser(origin, await mintLaunchTicket(origin, credential));
 
 		const tools = await request("/api/toolchain/tools");
 		strictEqual(tools.status, 200);
@@ -622,7 +649,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const { origin } = service;
 		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
-		const credential = await exchangeLaunchToken(origin, GUI_TEST_TOKEN);
+		const credential = await proveLaunchToken(origin, GUI_TEST_TOKEN);
 		const request = (path: string) => webRequest(origin, credential, path);
 		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
 		strictEqual(meta.pwa, true, "service configuration enables the installable app");

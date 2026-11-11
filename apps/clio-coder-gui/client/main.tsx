@@ -18,7 +18,6 @@ import "./render/markdown.css";
 // and Machines keep talking to this machine's app, so the window can always come back or move on.
 const prefix = machinePrefix(location.pathname)?.prefix ?? "";
 const launch = launchSecret();
-const token = launch.token ?? "";
 // One client identity per window: both clients below speak for it, and the event stream's ticket
 // comes from this machine's app even while the window drives a node.
 const credentials = createCredentials(
@@ -27,8 +26,8 @@ const credentials = createCredentials(
 	matchMedia("(display-mode: standalone)").matches ? "Installed app window" : "Browser window",
 );
 listenForForget(credentials.revoke);
-const client = createClient(token, fetch, prefix, credentials);
-const local = prefix ? createClient(token, fetch, "", credentials) : client;
+const client = createClient(launch, fetch, prefix, credentials);
+const local = prefix ? createClient(launch, fetch, "", credentials) : client;
 const queries = new QueryClient({
 	// A few seconds of freshness stops two views that mount together from asking for the same thing twice.
 	defaultOptions: { queries: { retry: false, staleTime: 5_000 } },

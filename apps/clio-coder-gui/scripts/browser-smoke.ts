@@ -8,6 +8,7 @@ import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator, type Route } from "playwright-core";
 import { SETTINGS_SECTIONS } from "../client/shell/shell-model.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
+import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -69,6 +70,12 @@ await new Promise<void>((resolve) => server.on("listening", resolve));
 const address = server.address();
 assert.ok(address && typeof address !== "string");
 origin = `http://127.0.0.1:${address.port}`;
+/** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
+const launch = async () => {
+	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
+	if (ticket === null) throw new Error("The smoke server issued no launch ticket.");
+	return `ticket=${ticket}`;
+};
 const browser = await chromium
 	.launch({
 		executablePath: values.chrome,
@@ -254,7 +261,7 @@ try {
 		async function dark(on: boolean) {
 			await page.emulateMedia({ colorScheme: on ? "dark" : "light" });
 		}
-		await page.goto(`${origin}/#token=test-token`);
+		await page.goto(`${origin}/#${await launch()}`);
 		await page.getByRole("heading", { level: 1 }).waitFor();
 		if (zoom === 2) {
 			const measurement = await page.evaluate(() => ({
@@ -632,7 +639,7 @@ try {
 			} else await refuse(route);
 		});
 		try {
-			await noticePage.goto(`${noticeSessionUrl}#token=test-token`);
+			await noticePage.goto(`${noticeSessionUrl}#${await launch()}`);
 			const draft = noticePage.getByLabel("Message Clio Coder", { exact: true });
 			await draft.fill("A draft line\n".repeat(12));
 			await noticePage.locator(".approval-banner:not(.approval-banner--strip)").waitFor();
@@ -1111,7 +1118,7 @@ try {
 			const probe = await context.newPage();
 			try {
 				await probe.setViewportSize({ width: 1400, height: 900 });
-				await probe.goto(`${page.url()}#token=test-token`);
+				await probe.goto(`${page.url()}#${await launch()}`);
 				const bar = probe.locator(".conversation .wb-bar");
 				const tokens = bar.locator(".wb-chip--figure summary").first();
 				await tokens.waitFor();
@@ -1862,7 +1869,7 @@ try {
 		const viewer = await context.newPage();
 		failedPage = viewer;
 		viewer.on("pageerror", (error) => errors.push(error.message));
-		await viewer.goto(`${page.url()}#token=test-token`);
+		await viewer.goto(`${page.url()}#${await launch()}`);
 		const viewerNote = viewer.locator(".composer__delivery-note");
 		const viewing = (note: typeof viewerNote) => note.locator("strong", { hasText: /^Viewing$/ });
 		await viewing(viewerNote).waitFor();
@@ -1918,21 +1925,20 @@ try {
 		// The code and reference sit under the toast's Technical details disclosure.
 		await toast.locator("summary", { hasText: "Technical details" }).click();
 		assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);
-		// A stale token must not brick the app: the shell says what happened, stops reconnecting, and a
+		// A refused launch link must not brick the app: the shell says what happened, stops reconnecting, and a
 		// pasted launch link brings the same tab back.
-		await page.goto(`${origin}/#token=${"stale".repeat(8)}`);
+		await page.goto(`${origin}/#ticket=${"s".repeat(43)}`);
 		await page.reload();
 		await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
 		// The refused shell shows no task rail, so nothing behind the panel keeps reading.
 		assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a refused token still renders the task rail");
 		if ((await page.locator(".notice-region .notice").count()) > 0)
 			throw new Error("A refused token raised toasts on top of the reconnect panel.");
-		await page.getByLabel("Launch link or token", { exact: true }).fill("not a link");
-		await page.getByText("That text holds no launch token.", { exact: true }).waitFor();
+		await page.getByLabel("Launch link", { exact: true }).fill("not a link");
+		await page.getByText("That text is not a launch link.", { exact: true }).waitFor();
 		await check("reconnect");
 		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `reconnect-${width}.png`) });
-		// test-token is shorter than a bare token may be, so it is pasted as the link the server prints.
-		await page.getByLabel("Launch link or token", { exact: true }).fill(`[clio-coder:gui] ${origin}/#token=test-token`);
+		await page.getByLabel("Launch link", { exact: true }).fill(`[clio-coder:gui] ${origin}/#${await launch()}`);
 		await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
 		// The connected rail reports installation health once its diagnostics settle; it defers the doctor until System
 		// is opened, so "Not checked" is a settled connected state too.

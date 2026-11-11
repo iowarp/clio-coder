@@ -31,7 +31,7 @@ test("table adapter parses path, numeric and boolean queries; typed client uses 
 		enabled: true,
 	});
 	const client = createClient(
-		"token",
+		{ ticket: "ticket" },
 		credentialFetch(async (url, options) => {
 			assert.equal(url, "/api/toolchain/tools/herdr/install");
 			assert.equal(options?.method, "POST");

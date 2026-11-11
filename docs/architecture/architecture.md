@@ -324,7 +324,7 @@ Neither `src/session-control/**` nor `src/engine/**` may import `src/interactive
 
 ## The graphical application boundary
 
-The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that requires a bearer token, random per launch unless the background app or `--token` supplies one. The guide to using it is [the GUI guide](../guide/gui.md).
+The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that requires a bearer token, random per launch unless the background app supplies one. The guide to using it is [the GUI guide](../guide/gui.md).
 
 The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly four ways to reach root `src/`:
 
