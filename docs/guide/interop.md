@@ -9,7 +9,11 @@ adopt safe text resources into its library after approval. The canonical
 and loadable by Codex without a converted copy. Inspection and adoption use
 zero model tokens. Gemini, Cursor, and the shared Agent Skills convention
 retain their existing presence detection; this inventory does not extend their
-capabilities.
+capabilities. Windsurf, Cline and Aider are detected the same way and get a row
+on the Interop page; `context init --adopt` reads their instruction files
+([context engine](../architecture/context-engine.md)). As for every registered
+agent, their directories (`.windsurf/`, `.clinerules/`, `~/.codeium/windsurf/`,
+`~/Documents/Cline/` and `~/.aider/`) are default no-write paths for Clio's tools.
 
 ## Delegate work to an installed coding agent
 
