@@ -25,6 +25,10 @@ Every command takes `--json`. Exit codes: 0 success, 1 operational failure, 2 in
 
 A dispatched worker reads the store but does not write it, unless its dispatch grants tags: `dispatch` with `tags: ["results"]` lets the worker `put` and `note` into `results` only. The tag must exist before the dispatch. A parallel writer granted tags that declares no write roots is confined to its tags' store directories; declare `intent.write_roots` when it must also edit the workspace.
 
+## Concurrent writers
+
+Puts and removes of one blob are serialized across processes, whether they come from the CLI or the `store` tool, so a put's record always lands before the next writer starts. Each put record identifies the bytes that put stored: the sha256, size and modification time it computed while streaming them, never a later read of the blob's name, which another writer may already own. A put whose record was written exits 0. On either backend, the record's hash is omitted above 64 MiB, as for other observed files, and `store verify --hash-large` hashes such a blob and records its digest as a note.
+
 ## Choosing a backend
 
 The store uses the **local** backend unless you choose otherwise: blobs are plain files under the Clio data directory. Nothing needs to be installed, and `clio-coder doctor` reports `store backend: local (no selection; the default)`.
