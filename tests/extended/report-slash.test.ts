@@ -28,4 +28,20 @@ describe("/report", () => {
 		dispatchSlashCommand(parseSlashCommand("/report send rpt_01JABCDEF"), ctx);
 		deepStrictEqual(opened, [{ kind: "draft", draftId: "rpt_01JABCDEF" }]);
 	});
+
+	it("tells the terminal operator that --comment and --new are chosen in the review", () => {
+		const notices: string[] = [];
+		const opened: SlashReportRequest[] = [];
+		const ctx = {
+			notice: (_level: string, text: string) => notices.push(text),
+			render: () => {},
+			openReport: (request: SlashReportRequest) => {
+				opened.push(request);
+			},
+		} as unknown as SlashCommandContext;
+		dispatchSlashCommand(parseSlashCommand("/report send rpt_01JABCDEF --new"), ctx);
+		deepStrictEqual(opened, [{ kind: "draft", draftId: "rpt_01JABCDEF" }]);
+		strictEqual(notices.length, 1);
+		strictEqual(notices[0]?.includes("--new"), true);
+	});
 });

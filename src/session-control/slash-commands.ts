@@ -3470,8 +3470,15 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				unavailable();
 				return;
 			}
-			if (command.kind === "report-send") ctx.openReport({ kind: "draft", draftId: command.draftId });
-			else if (command.kind === "report-security") ctx.openReport({ kind: "security" });
+			if (command.kind === "report-send") {
+				// The review asks about a matching open issue itself; the flags steer only the text surfaces.
+				if (command.duplicate !== undefined)
+					ctx.notice(
+						"info",
+						`${command.duplicate === "new" ? "--new" : "--comment"} is not used here: the review asks whether to comment on a matching issue`,
+					);
+				ctx.openReport({ kind: "draft", draftId: command.draftId });
+			} else if (command.kind === "report-security") ctx.openReport({ kind: "security" });
 			else if (command.kind === "report")
 				ctx.openReport({ kind: command.report, ...(command.summary !== undefined ? { summary: command.summary } : {}) });
 		},
