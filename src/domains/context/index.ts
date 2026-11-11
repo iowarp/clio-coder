@@ -7,6 +7,8 @@ export {
 	scanAgentConfigs,
 } from "./adoption.js";
 export {
+	type AcceptProposalResult,
+	acceptHandbookProposal,
 	applyHandbookVerification,
 	type BootstrapFallbackMode,
 	type BootstrapFallbackResult,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
-import { runBootstrap } from "../../src/domains/context/bootstrap.js";
+import { acceptHandbookProposal, proposalId, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import {
 	applyInitImplications,
 	bootstrapInputFromInitOptions,
@@ -193,6 +193,33 @@ describe("contracts/context lifecycle", () => {
 		ok(result.summary.proposalPath && existsSync(result.summary.proposalPath));
 		strictEqual(existsSync(join(cwd, "CLIO-CODER.md")), false);
 		strictEqual(readClioState(cwd)?.lastBootstrap, undefined);
+	});
+
+	it("accepts a proposal byte for byte, and refuses once the handbook changed after the draft", async () => {
+		const cwd = isolated.dir;
+		const path = join(cwd, "CLIO-CODER.md");
+		writeFileSync(join(cwd, "index.py"), "value = 1\n");
+		writeFileSync(path, "# Project\n\nAuthored notes.\n");
+		let text = "";
+		const io = {
+			stdout: (chunk: string) => {
+				text += chunk;
+			},
+			stderr: () => {},
+		};
+		const first = await runBootstrap({ cwd, proposeClioMd: true, io });
+		const proposal = first.summary.proposalPath ?? "";
+		ok(text.includes(`context init --accept ${proposalId(proposal)}`), text);
+		const accepted = acceptHandbookProposal(cwd, proposalId(proposal));
+		strictEqual(accepted.ok, true);
+		deepStrictEqual(readFileSync(path), readFileSync(proposal));
+
+		const second = await runBootstrap({ cwd, proposeClioMd: true });
+		writeFileSync(path, "# Project\n\nEdited after the draft.\n");
+		const refused = acceptHandbookProposal(cwd, second.summary.proposalPath);
+		strictEqual(refused.ok, false);
+		ok(!refused.ok && refused.reason.includes("CLIO-CODER.md changed since the proposal was written"));
+		strictEqual(readFileSync(path, "utf8"), "# Project\n\nEdited after the draft.\n");
 	});
 
 	it("resumes from the latest persisted snapshot and bounds loaded-window recall to its target", async () => {

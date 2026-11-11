@@ -1,5 +1,10 @@
 import { formatContextOperationResult } from "../core/context-operation.js";
-import { applyHandbookVerification, runBootstrap, verifyHandbook } from "../domains/context/index.js";
+import {
+	acceptHandbookProposal,
+	applyHandbookVerification,
+	runBootstrap,
+	verifyHandbook,
+} from "../domains/context/index.js";
 import {
 	bootstrapInputFromInitOptions,
 	CONTEXT_INIT_FLAG_TABLE,
@@ -15,6 +20,7 @@ const HELP = `Usage:
   clio-coder context init [--preview] [--heuristic] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
   clio-coder context init --verify [--apply] [--json]
+  clio-coder context init --accept [<proposal path or id>] [--json]
 
 Explore the repository and bootstrap the project context in one pass: CLIO-CODER.md,
 the codewiki index, and the .clio-coder state. The configured Clio
@@ -42,6 +48,8 @@ Options:
                    lists rules as verified, stale, contradicted or unverifiable with file:line, records the
                    verdicts in the handbook ledger, and exits 1 when any rule is stale or contradicted.
                    With --apply, removes the flagged rules (correcting renumbered rule ids) and prints the diff
+  --accept [<id>]  write a reviewed .clio-coder/proposals draft (newest when no path or id is given) to
+                   CLIO-CODER.md byte for byte; refuses when the handbook changed since the draft was written
 `;
 
 const VERDICT_ORDER = ["verified", "stale", "contradicted", "unverifiable"] as const;
@@ -98,6 +106,25 @@ async function runVerifyCommand(args: ReadonlyArray<string>): Promise<number> {
 		process.stdout.write(`${lines.join("\n")}\n`);
 	}
 	return flagged.length > 0 ? 1 : 0;
+}
+
+function runAcceptCommand(args: ReadonlyArray<string>): number {
+	const json = args.includes("--json");
+	const rest = args.filter((arg) => arg !== "--accept" && arg !== "--json");
+	if (rest.length > 1 || rest.some((arg) => arg.startsWith("-"))) {
+		process.stderr.write(
+			`clio-coder context init: --accept takes one proposal path or id and --json, not ${rest.join(" ")}\n`,
+		);
+		return 2;
+	}
+	const result = acceptHandbookProposal(process.cwd(), rest[0]);
+	if (json) process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
+	else if (result.ok) process.stdout.write(`Wrote ${result.handbookPath} from ${result.proposalPath}\n`);
+	else
+		process.stderr.write(
+			`clio-coder context init --accept refused${result.proposalPath ? ` ${result.proposalPath}` : ""}: ${result.reason}\n`,
+		);
+	return result.ok ? 0 : 1;
 }
 
 function hasFlag(args: ReadonlyArray<string>, name: string): boolean {
@@ -173,6 +200,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		return 0;
 	}
 	if (hasFlag(args, "--verify")) return runVerifyCommand(args);
+	if (hasFlag(args, "--accept")) return runAcceptCommand(args);
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
 		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);

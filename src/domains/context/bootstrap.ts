@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, parse, posix, relative, resolve } from "node:path";
 import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
@@ -2578,7 +2578,9 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 			"clio-coder context init proposed CLIO-CODER.md",
 			`  ${contextLine}; codemap reconciled ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; state refreshed; ${dirtyLine}`,
 			...(proposalLine ? [proposalLine] : []),
-			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
+			summary.proposalPath
+				? `  CLIO-CODER.md was not changed. After reviewing the proposal, write it with clio-coder context init --accept ${proposalId(summary.proposalPath)}`
+				: "  CLIO-CODER.md was not changed.",
 			...(adoptionLine ? [adoptionLine] : []),
 			...formatCompileLines(summary),
 			...formatAbsorbLines(summary),
@@ -2855,6 +2857,80 @@ function writeClioMdProposal(
 		{ encoding: "utf8", flag: "wx" },
 	);
 	return proposalPath;
+}
+
+function proposalsDir(cwd: string): string {
+	return join(cwd, ".clio-coder", "proposals");
+}
+
+/** A proposal's id: its file name without `CLIO-CODER-` and `.md`, which `--accept` takes. */
+export function proposalId(proposalPath: string): string {
+	return parse(proposalPath).name.replace(/^CLIO-CODER-/, "");
+}
+
+function resolveProposal(cwd: string, ref: string | undefined): { path: string } | { error: string } {
+	const dir = proposalsDir(cwd);
+	let names: string[];
+	try {
+		names = readdirSync(dir)
+			.filter((name) => /^CLIO-CODER-.+\.md$/.test(name))
+			.sort((a, b) => a.localeCompare(b));
+	} catch {
+		names = [];
+	}
+	if (ref === undefined) {
+		const latest = names.at(-1);
+		return latest ? { path: join(dir, latest) } : { error: "no proposal in .clio-coder/proposals" };
+	}
+	if (ref.includes("/") || ref.includes("\\")) {
+		const path = resolve(cwd, ref);
+		if (dirname(path) !== dir || !names.includes(parse(path).base))
+			return { error: `${ref} is not a proposal in .clio-coder/proposals` };
+		return { path };
+	}
+	const matches = names.filter(
+		(name) => name === ref || name === `${ref}.md` || name === `CLIO-CODER-${ref}.md` || name.endsWith(`-${ref}.md`),
+	);
+	if (matches.length === 1) return { path: join(dir, matches[0] as string) };
+	return { error: matches.length === 0 ? `no proposal matches ${ref}` : `${ref} matches ${matches.length} proposals` };
+}
+
+export type AcceptProposalResult =
+	| { ok: true; proposalPath: string; handbookPath: string }
+	| { ok: false; proposalPath?: string; reason: string };
+
+/**
+ * Writes a stored proposal's bytes to CLIO-CODER.md, but only while the handbook
+ * still hashes to the sidecar's `sourceHash`, so an edit made after the draft
+ * was written is never overwritten. `ref` is a proposal path, file name or id;
+ * without it the newest proposal is taken.
+ */
+export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposalResult {
+	const resolved = resolveProposal(cwd, ref);
+	if ("error" in resolved) return { ok: false, reason: resolved.error };
+	const proposalPath = resolved.path;
+	let sidecar: { sourceHash?: unknown; proposalHash?: unknown };
+	let bytes: Buffer;
+	try {
+		sidecar = JSON.parse(readFileSync(`${proposalPath}.json`, "utf8")) as typeof sidecar;
+		bytes = readFileSync(proposalPath);
+	} catch {
+		return { ok: false, proposalPath, reason: "the proposal or its .json sidecar cannot be read" };
+	}
+	const sha = (data: string | Buffer): string => createHash("sha256").update(data).digest("hex");
+	if (sidecar.proposalHash !== sha(bytes))
+		return { ok: false, proposalPath, reason: "the proposal was edited after it was written" };
+	const current = readExistingClioMdText(cwd);
+	const currentHash = current === null ? null : sha(current);
+	if (sidecar.sourceHash !== currentHash)
+		return {
+			ok: false,
+			proposalPath,
+			reason: "CLIO-CODER.md changed since the proposal was written; run context init --propose again",
+		};
+	const handbookPath = join(cwd, "CLIO-CODER.md");
+	safeResourceWrite(handbookPath, bytes);
+	return { ok: true, proposalPath, handbookPath };
 }
 
 function boundedStateString(value: string | undefined, maxChars: number): string | undefined {
