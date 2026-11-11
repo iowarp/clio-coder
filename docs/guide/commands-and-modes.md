@@ -185,9 +185,16 @@ surface that changed is marked `changed since you trusted it`. **Review** (the
 default) prints each file in full, and for hooks the repository scripts the
 hooks file names, whose bytes the approval pins, then returns to the card; **Trust all** records
 the same approvals the `--hash` form below records and applies them to this
-launch; **Open without it** (also Esc) starts without them and shows one notice instead of
-a notice per file. `q` or Ctrl+C quits without opening a session and exits 1.
-Headless runs, ACP and the GUI keep the per-file notices.
+launch; **Open without it** (also Esc) starts without them, and the header
+reads `Project configuration not active · /trust` instead of a notice per file.
+`q` or Ctrl+C quits without opening a session and exits 1. In the session,
+`/trust` opens the same card: Enter on a surface shows its summary and files in
+full, **Trust all and restart** records the approvals and restarts into the
+session as `/restart` does (when the restart is refused, the header reads
+`Project configuration trusted · restart Clio to apply it`), and **Not now** or
+Esc trusts nothing. `/reload` raises the card by itself only when a surface is
+new or has changed since the session started or since the card was last closed
+without trusting. Headless runs, ACP and the GUI keep the per-file notices.
 
 | Surface | Files |
 | --- | --- |
@@ -442,6 +449,7 @@ Commands renamed or removed in 0.8.0 are gone and answer like any unknown comman
 | `/quit` | `/quit` | Exit Clio Coder. Alias: `/exit`. |
 | `/reload` | `/reload [settings\|library\|extensions\|prompts\|all]` | Re-read resources and report what applied and what needs a restart. Defaults to `all`. `prompts` re-reads prompt fragments, agent recipes, the project handbook and project rules and names the fragments that changed, and drops the cached `clio_docs` index; the safety rule pack still needs a restart. `library` reports what it reloaded. |
 | `/restart` | `/restart [text]` | Save and restart into this session and workspace. It first checks that the build on disk can start and refuses, keeping the session, when it cannot. Text after the command becomes the restarted session's first turn. In Clio Coder's own source tree, running from that tree's build, the model can ask for the same restart with `restart_session`: at `default` autonomy an approval card shows the text it would continue with, and the restart runs after the turn settles; at `yolo` or without a terminal the request is refused, and three model-requested restarts in a row without an operator `/restart` are refused. |
+| `/trust` | `/trust` | Open the project trust card for this repository's untrusted or changed configuration: review each surface, or trust all of it and restart into the session to apply it. Says so when nothing is waiting. |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill <name> [task]` or `/skill off` | Invoke a skill or clear its active tool surface; bare `/skill` opens the Library on Skills. |
 | `/loop` | `/loop <every> <task> [flags]`, `/loop`, or `/loop status\|pause\|resume\|stop [id]` with `stop <id> --now` | Create or control a bounded recurring job. Bare `/loop` lists this session's jobs; `stop` lets the current run finish and `stop --now` aborts it. Use [job tool usage](tool-usage.md#bounded-main-runner-jobs) for the runner and limits. |

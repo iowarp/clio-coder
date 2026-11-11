@@ -20,6 +20,8 @@ export function createInteractiveReload(
 	notice: (level: "info" | "warn", text: string) => void,
 	print: (report: ReloadReport) => void,
 	openExtensions?: () => void,
+	/** After the report prints; the project trust card rises here for configuration that is new since it was declined. */
+	afterReport?: () => void,
 ): (target: ReloadTarget) => void {
 	return (target) => {
 		if (!controller) return notice("warn", "Reload is unavailable: reload coordinator is not loaded.");
@@ -46,6 +48,7 @@ export function createInteractiveReload(
 				print(report);
 				// The retired `/extensions reload` opened the overlay after a commit; `/reload extensions` keeps that.
 				if (committed && target === "extensions") openExtensions?.();
+				else afterReport?.();
 			})
 			.catch((error) => notice("warn", `Reload failed: ${error instanceof Error ? error.message : String(error)}`));
 	};

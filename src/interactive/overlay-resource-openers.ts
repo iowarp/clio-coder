@@ -1,3 +1,4 @@
+import type { ProjectTrustCardModel } from "../cli/project-trust-card.js";
 import { promptRefs } from "../domains/extensions/operator-commands.js";
 import type { ExtensionPanel } from "../domains/extensions/public-api.js";
 import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
@@ -13,6 +14,7 @@ import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
 import { openLibraryOverlay } from "./overlays/library.js";
 import { createLibraryLifecycle, type LibrarySessionReload, libraryRefreshHost } from "./overlays/library-lifecycle.js";
+import { openProjectTrustOverlay } from "./overlays/project-trust.js";
 
 export type { LibraryBrowseRequest as LibraryOpenRequest } from "../session-control/slash-commands.js";
 
@@ -41,6 +43,8 @@ export interface OverlayResourceOpeners {
 	openSkillsHubState(request?: LibraryBrowseRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;
+	/** The project trust card; `done` runs once when it closes, true for Trust all. False while another overlay is up. */
+	openProjectTrustState(model: ProjectTrustCardModel, done: (trusted: boolean) => void): boolean;
 }
 
 /**
@@ -165,6 +169,31 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 					closed = true;
 					handle.hide();
 					panelDeps.onClosed();
+				},
+			};
+			deps.tui.requestRender();
+			return true;
+		},
+		openProjectTrustState(model, done) {
+			if (deps.transitions.state !== "closed") return false;
+			deps.transitions.state = "project-trust";
+			let trusted = false;
+			let closed = false;
+			const handle = openProjectTrustOverlay(deps.tui, model, {
+				onTrust: () => {
+					trusted = true;
+					deps.closeOverlay();
+				},
+				onClose: deps.closeOverlay,
+			});
+			// Every way out (Esc, Not now, a session change that closes all overlays) settles the card once.
+			deps.transitions.handle = {
+				...handle,
+				hide() {
+					if (closed) return;
+					closed = true;
+					handle.hide();
+					done(trusted);
 				},
 			};
 			deps.tui.requestRender();

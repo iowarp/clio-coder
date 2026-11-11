@@ -711,6 +711,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		help: "Help",
 		extensions: "Extensions",
 		interop: "Interop",
+		"project-trust": "Project configuration",
 		"skills-hub": "Library",
 		"side-question": "Side question",
 		draft: "Drafts",

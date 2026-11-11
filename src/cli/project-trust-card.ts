@@ -154,6 +154,14 @@ export function projectTrustCardReviewFiles(model: ProjectTrustCardModel): Array
 	);
 }
 
+/** One reviewed file as display lines: control sequences neutralized, indentation kept. */
+export function projectTrustCardReviewLines(file: { path: string; text: string }): string[] {
+	return [
+		`── ${clean(file.path)}`,
+		...file.text.split(/\r?\n/).map((line) => `${/^[ \t]*/.exec(line)?.[0] ?? ""}${clean(line)}`),
+	];
+}
+
 export type ProjectTrustCardOutcome = "trusted" | "skipped" | "quit" | "none";
 
 type CardChoice = "review" | "trust" | "skip";
@@ -194,12 +202,7 @@ export async function runProjectTrustCard(cwd: string = process.cwd()): Promise<
 		}
 		reviewed = true;
 		for (const file of projectTrustCardReviewFiles(model)) {
-			process.stdout.write(
-				`\n── ${clean(file.path)}\n${file.text
-					.split(/\r?\n/)
-					.map((line) => `${/^[ \t]*/.exec(line)?.[0] ?? ""}${clean(line)}`)
-					.join("\n")}\n`,
-			);
+			process.stdout.write(`\n${projectTrustCardReviewLines(file).join("\n")}\n`);
 		}
 	}
 }

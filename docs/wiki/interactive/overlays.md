@@ -7,6 +7,8 @@ sources:
   - "src/interactive/overlays/library-review.ts"
   - "src/interactive/overlays/library-model.ts"
   - "src/interactive/overlays/interop.ts"
+  - "src/interactive/overlays/project-trust.ts"
+  - "src/interactive/project-trust-session.ts"
   - "src/interactive/overlays/ask-user.ts"
   - "src/interactive/overlays/model-selector.ts"
   - "src/interactive/overlays/settings.ts"
@@ -20,6 +22,8 @@ symbols:
   - "buildLibraryRows"
   - "interopOverlaySurface"
   - "openInteropOverlay"
+  - "openProjectTrustOverlay"
+  - "createProjectTrustSession"
   - "openAskUserOverlay"
   - "AskUserOverlayView"
   - "openModelOverlay"
@@ -31,6 +35,7 @@ tests:
   - "tests/extended/ask-user-layout.test.ts"
   - "tests/contracts/ask-user-tool.test.ts"
   - "tests/contracts/settings-target-wizard.test.ts"
+  - "tests/extended/project-trust-session.test.ts"
 invariants:
   - "The Library browser reads and reviews only; a managed change is written only through a plan the operator reviews and accepts, and closing the browser releases any pending review's staged source."
   - "A list overlay with tabs re-reads each tab's rows on switch, and its title names the active tab."
@@ -160,6 +165,22 @@ an `outcome` projection so the import result can be shown in the same outcome wi
 
 The browser module comment states the division of responsibility: the browser reads and reviews,
 and every managed change goes through a plan the operator sees first.
+
+## Project trust card
+
+`src/interactive/overlays/project-trust.ts` is the launch trust card's in-session form, built on
+`openListOverlay`. Each untrusted surface is a row under `Review` whose detail pane holds the
+surface summary and every file from `projectTrustCardReviewFiles`; Enter opens the pane. Under
+`Decide`, `Trust all and restart` and `Not now` close it. `openProjectTrustState` in
+`overlay-resource-openers.ts` mounts it as overlay state `project-trust` and reports the outcome
+once on any close, true only for Trust all.
+
+`createProjectTrustSession` in `src/interactive/project-trust-session.ts` owns when the card rises
+and the header's reminder. It reads the workspace once off the boot path, counts what is untrusted
+then as declined, and serves `reminder()` from a cache, so the welcome header reads no files per
+frame. `/trust` calls `open()`; `/reload` calls `reloaded()` after its report, which raises the card
+only when a surface's content hash differs from the declined one. Trust all writes the records with
+`trustProjectCard`, then calls the interactive restart.
 
 ## Interop peers
 

@@ -93,6 +93,11 @@ export interface WelcomeDashboardDeps {
 	 * serve a cached value and do its own refreshing off the render path.
 	 */
 	getQuotaSummary?: () => string | null;
+	/**
+	 * The reminder that this repository's own configuration is not applied, or
+	 * null. Read on every frame, so the supplier serves a cached line.
+	 */
+	getProjectConfigReminder?: () => string | null;
 	/** Called when an off-render refresh lands, so the frame owner can ask for one. */
 	onFactsRefreshed?: () => void;
 	/**
@@ -126,6 +131,8 @@ export interface WelcomeDashboardStats {
 	fleet: string;
 	/** One line of connected subscription usage; null hides the row entirely. */
 	quota: string | null;
+	/** Project configuration that is not applied, and the command that reviews it. */
+	projectConfig?: string | null;
 }
 
 export type WelcomeDashboardMode = "launchpad" | "session";
@@ -316,6 +323,7 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 	}
 	if (stats.route === "unavailable") return say("error", `route unavailable ${GLYPH.dot} /settings targets`);
 	if (stats.route === "degraded") return say("warning", `route degraded ${GLYPH.dot} /settings targets`);
+	if (stats.projectConfig) return say("warning", stats.projectConfig);
 	if (stats.projectContext === "malformed")
 		return say("warning", `CLIO-CODER.md malformed ${GLYPH.dot} /context to inspect`);
 	if (stats.projectContext === "none") return say("guidance", "/context init to index this repo");
@@ -353,12 +361,14 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	const units: Unit[] = [
 		{
 			text: visibleWidth(identity) + visibleWidth(route) + 3 <= room ? identity : versionTag,
-			rank: 1,
+			rank: 2,
 		},
 		{
 			text: route,
 			rank: 0,
 		},
+		// Outlasts the identity: it is the one thing on this line the operator has to act on.
+		...(stats.projectConfig ? [{ text: theme.fg("warning", plainOneLine(stats.projectConfig)), rank: 1 }] : []),
 	];
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
@@ -747,6 +757,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.yoloConfinement,
 		stats.outputStyle,
 		stats.quota,
+		stats.projectConfig,
 	].join("\0");
 }
 
@@ -903,6 +914,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 				launchpad && settings?.interface?.outputDetail === "detailed" ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			targets: "",
 			fleet: "",
+			projectConfig: this.deps.getProjectConfigReminder?.() ?? null,
 		};
 	}
 

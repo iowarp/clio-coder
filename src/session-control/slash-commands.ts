@@ -192,6 +192,7 @@ type SlashCommandVariant =
 	| { kind: "quit" }
 	| { kind: "reload"; target: ReloadTarget }
 	| { kind: "restart"; continuation?: string }
+	| { kind: "trust" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
 	| { kind: "context-clear"; options: ContextClearCommandOptions }
@@ -1094,6 +1095,8 @@ export interface SessionCommandContext {
 	shutdown?: () => void;
 	reloadClasses?: (target: ReloadTarget) => void;
 	restart?: (continuation?: string) => void;
+	/** Open the project trust card for this workspace's untrusted configuration. */
+	openProjectTrust?: () => void;
 	runInit: (options: InitCommandOptions) => void;
 	/** Write the current session transcript (all tool segments expanded, ANSI-stripped) to a Markdown file. */
 	exportTranscript: (path?: string) => void;
@@ -1642,6 +1645,23 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			ctx.restart(command.kind === "restart" ? command.continuation : undefined);
+		},
+	},
+	{
+		name: "trust",
+		rank: 3,
+		acp: false,
+		description: "Review this repository's own configuration and trust it, then restart to apply it",
+		group: "Clio",
+		kinds: ["trust"],
+		args: {},
+		fromArgs: fromArgsOrUsage("trust", { kind: "trust" }),
+		handle(_command, ctx) {
+			if (!ctx.openProjectTrust) {
+				ctx.notice("warn", "/trust is available only in an interactive terminal; use clio-coder config trust.");
+				return;
+			}
+			ctx.openProjectTrust();
 		},
 	},
 	{

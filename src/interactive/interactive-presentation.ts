@@ -157,6 +157,8 @@ export interface InteractivePresentationDeps {
 	getLastCommand?: () => string | null;
 	/** How many of the main turn's own calls are parked on the operator. */
 	getParkedCallCount?: () => number;
+	/** The header's reminder about project configuration that is not applied; cached by its owner. */
+	getProjectConfigReminder?: () => string | null;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	/** Session facts that dim or omit palette rows: `/panes` without a pane host, `/music` while off. */
@@ -470,6 +472,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		// Subscription usage is read lazily off the render path and cached, so the
 		// banner reads a string and never awaits a provider.
 		getQuotaSummary: () => quotaSummary.peek(),
+		...(deps.getProjectConfigReminder ? { getProjectConfigReminder: deps.getProjectConfigReminder } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	// A boot-time `--continue`/`--session` resume opens onto an existing

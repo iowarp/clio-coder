@@ -97,6 +97,7 @@ import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
 import { suspendProcessUntilContinued } from "./process-suspend.js";
+import { createProjectTrustSession } from "./project-trust-session.js";
 import { writeInputWedgeDump } from "./render-trace.js";
 import { renderContextOperationResult } from "./renderers/context-operation.js";
 import { hydrateResumedSessionPresentation } from "./resumed-session-presentation.js";
@@ -852,8 +853,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const musicAvailable = (): boolean =>
 		deps.music !== undefined && deps.getSettings?.().integrations.music.enabled === true;
 	const commandHidden = (command: string): boolean => command === "music" && !musicAvailable();
+	// The in-session trust card: `/trust`, a `/reload` that finds new project configuration, and the header reminder.
+	const projectTrust = createProjectTrustSession({
+		cwd: () => process.cwd(),
+		openCard: (model, done) => overlayLifecycle.openProjectTrustState(model, done),
+		restart: () => interactiveRestart(),
+		notice: (level, text) => notify(level === "warn" ? "warning" : "info", text, "project-trust"),
+		onChange: () => tui.requestRender(),
+	});
 	const presentation = createInteractivePresentation({
 		getLastCommand: () => lastSlashCommand,
+		getProjectConfigReminder: () => projectTrust.reminder(),
 		commandUnavailable: (command) =>
 			command === "panes" && deps.panes === undefined ? "needs a pane host; this session has none" : undefined,
 		commandHidden,
@@ -1408,8 +1418,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			(level, text) => slashRuntime.notice(level, text),
 			(report) => appendReloadReport(report, busNoticeSink),
 			() => openExtensionsOverlayState(),
+			() => projectTrust.reloaded(),
 		),
 		restart: interactiveRestart,
+		openProjectTrust: () => projectTrust.open(),
 		startUpgrade: () => {
 			// Keep package-manager and lifecycle code out of boot. The footer does
 			// no more than point at /upgrade; this graph loads only after the operator

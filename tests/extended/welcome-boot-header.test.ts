@@ -92,6 +92,7 @@ interface BannerOptions {
 	onFactsRefreshed?: () => void;
 	countContextReads?: { value: number };
 	countSubmitKeyReads?: { value: number };
+	projectConfig?: string;
 }
 
 function banner(options: BannerOptions = {}) {
@@ -120,6 +121,7 @@ function banner(options: BannerOptions = {}) {
 		scheduleRefresh: options.scheduleRefresh ?? ((run) => run()),
 		...(options.now ? { now: options.now } : {}),
 		...(options.onFactsRefreshed ? { onFactsRefreshed: options.onFactsRefreshed } : {}),
+		...(options.projectConfig ? { getProjectConfigReminder: () => options.projectConfig ?? null } : {}),
 	};
 	return createWelcomeDashboard(deps);
 }
@@ -215,6 +217,18 @@ test("a target id absent from the list directs the operator to route settings", 
 		80,
 	);
 	ok(actionLine(lines).includes("route unavailable · /settings targets"), actionLine(lines));
+});
+
+test("project configuration that is not applied leads the action row and stays on the session header", () => {
+	const reminder = "Project configuration not active · /trust";
+	const launchpad = banner({ clioMd: "none", projectConfig: reminder });
+	ok(actionLine(rows(launchpad, 120)).startsWith(reminder), "the reminder outranks the context guidance");
+	launchpad.collapseToSessionHeader();
+	const header = rows(launchpad, 120)[0] ?? "";
+	ok(header.includes("dynamo · qwen3.8-27b") && header.includes(reminder), header);
+	// Narrow, the reminder outlasts the product name; the route outlasts both.
+	const narrow = rows(launchpad, 72)[0] ?? "";
+	ok(narrow.includes("dynamo · qwen3.8-27b") && narrow.includes(reminder) && !narrow.includes("Clio Coder"), narrow);
 });
 
 test("a malformed CLIO-CODER.md points at the read-only view, never at a regenerating command", () => {

@@ -229,12 +229,9 @@ export async function runClioCommand(
 		const outcome = await runProjectTrustCard(process.cwd());
 		// Quitting the card opens no session, like declining the workspace check.
 		if (outcome === "quit") return 1;
-		if (outcome === "trusted") {
-			trustCardNotices = [];
-			startupSettings = readStrictLayeredSettings(process.cwd()).settings;
-		} else if (outcome === "skipped") {
-			trustCardNotices = ["Project configuration not active · restart Clio to review it, or run clio-coder config trust"];
-		}
+		if (outcome === "trusted") startupSettings = readStrictLayeredSettings(process.cwd()).settings;
+		// Either way the per-file notices are held: a skipped card is answered by the header's `/trust` reminder.
+		if (outcome === "trusted" || outcome === "skipped") trustCardNotices = [];
 	}
 	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
 		// Every completed hosted process releases its workspace, including a

@@ -34,6 +34,7 @@ export type OverlayState =
 	| "help"
 	| "extensions"
 	| "interop"
+	| "project-trust"
 	| "skills-hub"
 	| "side-question"
 	| "draft"
@@ -412,6 +413,7 @@ export function routeOverlayKey(
 		overlayState === "help" ||
 		overlayState === "extensions" ||
 		overlayState === "interop" ||
+		overlayState === "project-trust" ||
 		overlayState === "skills-hub"
 	) {
 		return false;

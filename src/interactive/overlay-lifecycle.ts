@@ -212,6 +212,7 @@ export interface OverlayLifecycleController {
 	openSkillsHubState(request?: LibraryOpenRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;
+	openProjectTrustState: import("./overlay-resource-openers.js").OverlayResourceOpeners["openProjectTrustState"];
 	toggleDispatchBoardOverlay(): void;
 	openQueueNavigatorState(): void;
 	confirmPermission(): void;
@@ -747,6 +748,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openExtensionPanelState: overlayResourceOpeners.openExtensionPanelState,
 		openExtensionViewPanelState: overlayResourceOpeners.openExtensionViewPanelState,
 		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,
+		openProjectTrustState: overlayResourceOpeners.openProjectTrustState,
 		toggleDispatchBoardOverlay,
 		openQueueNavigatorState,
 		isPermissionSettling: () =>

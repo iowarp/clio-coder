@@ -129,6 +129,7 @@ export interface InteractiveSlashRuntimeDeps {
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	reloadClasses?: SlashCommandContext["reloadClasses"];
 	restart?: SlashCommandContext["restart"];
+	openProjectTrust?: SlashCommandContext["openProjectTrust"];
 	interop?: SlashCommandContext["interop"];
 	agents?: SlashAgents;
 	share?: SlashShare;
@@ -806,6 +807,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(deps.reloadPlugins ? { reloadPlugins: deps.reloadPlugins } : {}),
 		...(deps.reloadClasses ? { reloadClasses: deps.reloadClasses } : {}),
 		...(deps.restart ? { restart: deps.restart } : {}),
+		...(deps.openProjectTrust ? { openProjectTrust: deps.openProjectTrust } : {}),
 		...(deps.openInterop ? { openInterop: deps.openInterop } : {}),
 		...(deps.interop ? { interop: deps.interop } : {}),
 		setEditorText: (text) => {
