@@ -7,8 +7,8 @@ surfaces: [attended, headless]
 
 # Using the harness
 
-- Finding code: the code index for symbols, outlines and importers, then a text search, then read the region.
-  The shell is for what no typed tool covers.
+- Finding code, never through the shell: {code_nav} `code_nav` for a symbol, an outline or importers. {grep} The
+  `grep` tool for text. {read} Then `read` the region with `line_numbers: true` if you will cite a line.
 - {context} A specialized domain or a named method (a scheduler, a data format, a release process) usually has a
   skill that carries this project's way of doing it. Load the one the [Skills] note or the Skills catalog names
   before your first edit, follow it, and load the next only when its step arrives. Ask the catalog once; do not

@@ -142,10 +142,14 @@ describe("prompts.profile v2 (S-82)", () => {
 
 	it("renders each harness row only with its capability", () => {
 		const base = session("attended-default").systemPrompt;
+		ok(base.includes("- Finding code, never through the shell:"), "finding-code row");
 		const rows: Record<string, string> = {
 			job: "create a `job` that polls",
 			decide: "record it with `decide`",
 			tasks: "on the `tasks` board",
+			code_nav: "`code_nav` for a symbol",
+			grep: "`grep` tool for text",
+			read: "`read` the region with `line_numbers: true` if",
 		};
 		for (const [tool, text] of Object.entries(rows)) {
 			const tier = JSON.parse(readFileSync(join(dir, "attended-default.inputs.json"), "utf8")) as Tier;
