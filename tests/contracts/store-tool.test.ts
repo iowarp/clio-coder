@@ -57,6 +57,18 @@ describe("store tool", () => {
 			strictEqual((await tool.run({ op: "stat", ref: "results:summary.csv" })).kind, "error");
 		}));
 
+	it("get says its path is a read-only store copy the caller may read outside the workspace", () =>
+		withWorkspace(async (root) => {
+			const tool = createStoreTool({ getCwd: () => root, writable: true });
+			body(await tool.run({ op: "create", tag: "inputs" }));
+			body(await tool.run({ op: "put", tag: "inputs", path: "out/summary.csv" }));
+			const got = body(await tool.run({ op: "get", ref: "inputs:summary.csv" }));
+			strictEqual(String(got.path).startsWith(root), false);
+			match(String(got.access), /read-only copy of inputs:summary\.csv/u);
+			match(String(got.access), /outside the workspace/u);
+			match(String(got.access), /read it there with read, data or run_script/u);
+		}));
+
 	it("refuses the four write ops in a read-only session", () =>
 		withWorkspace(async (root) => {
 			const tool = createStoreTool({ getCwd: () => root, writable: false });

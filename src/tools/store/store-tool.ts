@@ -424,7 +424,14 @@ async function runOp(
 		const got = await backend.getBlobAsPath(tag, blob, signal);
 		const stat = await backend.statBlob(tag, blob);
 		return {
-			payload: { ref: `${tag}:${blob}`, path: got.path, copied: got.copied, bytes: stat?.bytes ?? null },
+			payload: {
+				ref: `${tag}:${blob}`,
+				path: got.path,
+				copied: got.copied,
+				bytes: stat?.bytes ?? null,
+				// A worker in a task worktree read a path outside its root as a stop sign; say it is meant to be read.
+				access: `A read-only copy of ${tag}:${blob} that the store keeps outside the workspace; read it there with read, data or run_script. Writing it does not change the store.`,
+			},
 			unit: "results",
 			shown: 1,
 			total: 1,

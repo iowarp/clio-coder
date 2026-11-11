@@ -24,7 +24,7 @@ Every command takes `--json`. Exit codes: 0 success, 1 operational failure, 2 in
 
 ## Workers and tags
 
-A dispatched worker reads the store but does not write it, unless its dispatch grants tags: `dispatch` with `tags: ["results"]` lets the worker `put` and `note` into `results` only. The tag must exist before the dispatch. A parallel writer granted tags that declares no write roots is confined to its tags' store directories; declare `intent.write_roots` when it must also edit the workspace.
+A dispatched worker reads the store but does not write it, unless its dispatch grants tags: `dispatch` with `tags: ["results"]` lets the worker `put` and `note` into `results` only. The tag must exist before the dispatch. A worker's `get` result says the path is a read-only store copy outside the workspace that it may read with `read`, `data` or `run_script`, so a worker in a task worktree reads it instead of stopping at the boundary. A parallel writer granted tags that declares no write roots is confined to its tags' store directories; declare `intent.write_roots` when it must also edit the workspace.
 
 To run several granted writers at once on the local node, check the worker limit first. `fleet.concurrency: auto` sizes the local node from free memory, and in a container the clio-core runtime's shared memory counts against the cgroup headroom, so a small container beside the runtime can get one worker and refuse the rest (`capacity exceeded (3/1)`). Set `fleet.concurrency` to the number of writers you dispatch, for example `3`, when the host has room for them ([Worker limits](fleet-dispatch.md#worker-limits-and-fleetconcurrency-auto)).
 
