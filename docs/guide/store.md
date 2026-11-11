@@ -26,6 +26,8 @@ Every command takes `--json`. Exit codes: 0 success, 1 operational failure, 2 in
 
 A dispatched worker reads the store but does not write it, unless its dispatch grants tags: `dispatch` with `tags: ["results"]` lets the worker `put` and `note` into `results` only. The tag must exist before the dispatch. A parallel writer granted tags that declares no write roots is confined to its tags' store directories; declare `intent.write_roots` when it must also edit the workspace.
 
+To run several granted writers at once on the local node, check the worker limit first. `fleet.concurrency: auto` sizes the local node from free memory, and in a container the clio-core runtime's shared memory counts against the cgroup headroom, so a small container beside the runtime can get one worker and refuse the rest (`capacity exceeded (3/1)`). Set `fleet.concurrency` to the number of writers you dispatch, for example `3`, when the host has room for them ([Worker limits](fleet-dispatch.md#worker-limits-and-fleetconcurrency-auto)).
+
 ## Concurrent writers
 
 Puts and removes of one blob are serialized across processes, whether they come from the CLI or the `store` tool, so a put's record always lands before the next writer starts. Each put record identifies the bytes that put stored: the sha256, size and modification time it computed while streaming them, never a later read of the blob's name, which another writer may already own. A put whose record was written exits 0. On either backend, the record's hash is omitted above 64 MiB, as for other observed files, and `store verify --hash-large` hashes such a blob and records its digest as a note.
