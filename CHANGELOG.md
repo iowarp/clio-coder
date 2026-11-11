@@ -57,6 +57,10 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Setup sends the model one short test request before it saves a route and saves only after the model answers or you choose Save anyway; `--no-verify` skips it.
 - A task merge into a checkout with overlapping uncommitted work is refused even when `merge.autoStash` is set, instead of reporting merged and leaving that work conflicted.
 - Headless `run` prints one `observed:` line on stderr after the answer (tool calls, refusals, writes, standing checks) when the run called a tool; `--json-events terminal` carries it as `turn_end.observed`. Stdout and exit codes are unchanged.
+- More retired slash spellings answer in 0.8.0 only and name their replacement: `/doctor deep` → `/doctor --deep`, `/loop list` → `/loop`, `/loop cancel <id>` → `/loop stop <id> --now`, and `/delegate` → `/run`.
+- `clio-coder` with a piped stdout (`clio-coder | tee log`) boots non-interactively instead of drawing the TUI into the pipe. `CLIO_CODER_INTERACTIVE=1` still forces the TUI.
+- `/settings` lists the settings people change. About 40 tuning rows (keybindings, memory and working-set tuning, route cooldown, model favorites, safety judge rules and others) left the menu; Advanced gains "Edit settings file" and "Check setup", and every key still works in `settings.yaml`.
+- Typed tools refuse the same home credential files the shell sandbox masks (`gh`, `hub` and `cargo` credentials, `~/.password-store`, keyrings) and every `/proc/*/environ`, so a typed read no longer returns what a contained `cat` cannot.
 
 ### Project store
 
@@ -72,6 +76,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An opt-in clio-core backend: `clio-coder store backend clio-core` probes the interpreter, the clio-core daemon, its version, the host and durability, and selects clio-core for the data directory only when every check passes. Clio Coder processes share one daemon through a bundled Python host. A selected clio-core that cannot attach fails the call and never falls back to local. `store backend local` removes the selection, and switching never moves data. Local stays the default.
 - A dispatch can grant a worker store tags (`tags`) to `put` and `note` into; without a grant the worker's store stays read-only and the dispatching session puts results.
 - The science-data skill starts from the store and grants its output tag to the workers it dispatches.
+- The store guide in the docs covers choosing a backend and what clio-core keeps across a restart. A clio-core put over an existing blob is refused and points to `store remove`, and tag and blob names can no longer alias each other.
 
 ### Reports to the maintainers
 
@@ -103,6 +108,12 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Attended sessions ask the model for a one-line reason before a call that will park for approval, and `ask_user` options describe what choosing each one leads to.
 - Headless `run` reports what the harness observed beside the answer (`observed:` on stderr, `turn_end.observed` in terminal JSON events).
 - `run --agent` handles SIGHUP and exits 129, 130 or 143 on HUP, INT or TERM after writing its result.
+- One grammar for slash commands: every command declares its verbs and flags, and a mistyped flag or bare command answers with one usage line and keeps your line in the composer. `/mcp`, `/files` and `/music` list their verbs, and the palette groups commands as Session, Model and context, Work, and Clio.
+- `/run <id>` also starts a configured external (ACP) agent. A fleet agent of the same name wins; `acp:<id>` forces the external one, and flags an external agent cannot take (`--model`, `--target`, `--worktree` and the like) are refused in one error before the draft is cleared.
+- `/settings` has seven areas named for what they hold (Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, Advanced). Old area names still open them, typing always filters and `*` pins a row.
+- Alt+U opens a one-page dashboard and closes it on the next press; the machine readings moved to the Health tab of `/usage`.
+- Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, and PgUp, PgDn, Home and End move through `/tree`.
+- `x` in Tasks, the steering queue and Memory, and `s` in Decisions, ask once before they act.
 
 ### Sign-in, setup and providers
 
@@ -188,6 +199,10 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Under `safety.sandbox: required`, outward git with `GIT_CONFIG_SYSTEM=` or a `-c core.sshCommand=`-style program override stays in the sandbox.
 - On macOS, the sandbox's temp-directory write grant no longer overrides read-only paths.
 - ACP: renaming a session requires authentication.
+- Opening a repository with its own Clio Coder configuration shows one card that sums it up (connections, rule counts, hook commands) with Review, Trust all and Open without it, instead of one notice per file.
+- The grep presence check on secret files is exempt only for the bare `^NAME=` pattern, so a pattern can no longer guess a value.
+- Protected-file rails follow a literal `cd` in a shell command and recognize `dd of=`, `install` and `cp`/`mv -t` destinations. A path argument with more segments than any real path is refused at once instead of stalling the safety check.
+- A peer pane's sender id keeps only pane id characters, so it cannot inject control text into the transcript.
 
 ### Desktop app
 
@@ -225,6 +240,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `ls` on very large directories is several times faster.
 - The footer's dirty-state probe gives a large repository more time instead of killing `git status` on every poll.
 - Resuming a long session reads its ledger one fewer time.
+- Very large tool results render faster: only the shown prefix is sanitized.
 
 ### Telemetry
 
@@ -342,6 +358,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Report drafts no longer mask a target name inside `copilot-sdk` or `github-copilot`.
 - Doctor warns when a user or project playbook replaces another of the same name.
 - Clio Coder's own worktree, landing and listing git calls no longer follow a `GIT_DIR` inherited from a git hook or `git bisect run`.
+- An Esc followed quickly by another key no longer splits arrow and Alt sequences in local terminals.
+- A second Clio Coder in the same workspace no longer takes over, and closes, the first one's workers dock.
+- The pane event stream backs off when the pane host refuses or drops the subscription instead of reconnecting at once.
 
 ### Internal
 
