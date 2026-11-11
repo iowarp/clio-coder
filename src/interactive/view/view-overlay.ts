@@ -422,7 +422,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, filtered: bool
 				{ key: "↑↓", verb: "select" },
 				{ key: "←→", verb: "category" },
 				{ key: "type", verb: "filter" },
-				{ key: "Enter", verb: "content" },
+				{ key: "Enter", verb: "detail" },
 			],
 			listEsc,
 		);

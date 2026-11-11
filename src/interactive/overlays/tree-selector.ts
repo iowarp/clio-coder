@@ -413,7 +413,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 		return fitHintEntries(
 			[
 				{ key: "Enter", verb: "continue from here", short: "continue", critical: true },
-				{ key: "↑↓", verb: "move" },
+				{ key: "↑↓", verb: "select" },
 				{ key: "e", verb: "label" },
 				{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
 				{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },

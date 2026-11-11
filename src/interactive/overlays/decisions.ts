@@ -395,7 +395,7 @@ class DecisionsOverlayBody implements Component {
 		return [
 			this.correctionInput !== null && { verb: "back, keeps draft", short: "back", back: () => {} },
 			this.expandedKey !== null && {
-				verb: "fold",
+				verb: "back",
 				back: () => {
 					this.expandedKey = null;
 				},

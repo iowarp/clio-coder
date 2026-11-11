@@ -161,7 +161,7 @@ class ResearchOverlayBody implements Component {
 		const entries: HintEntry[] =
 			this.openId !== null
 				? [{ key: "↑↓", verb: "scroll" }, esc]
-				: [{ key: "↑↓", verb: "select" }, { key: "Enter", verb: "timeline" }, esc];
+				: [{ key: "↑↓", verb: "select" }, { key: "Enter", verb: "detail" }, esc];
 		return fitHintEntries(entries, innerWidth - 3);
 	}
 

@@ -109,7 +109,7 @@ const HINTS: Readonly<Record<ReportReviewStep, ReadonlyArray<HintEntry>>> = {
 	],
 	masks: [
 		{ key: "Space", verb: "mask or unmask", short: "toggle", critical: true },
-		{ key: "↑↓", verb: "move" },
+		{ key: "↑↓", verb: "select" },
 		{ key: "Esc", verb: "back", critical: true },
 	],
 	attach: [
@@ -125,7 +125,7 @@ const HINTS: Readonly<Record<ReportReviewStep, ReadonlyArray<HintEntry>>> = {
 	sending: [],
 	duplicates: [
 		{ key: "Enter", verb: "choose", critical: true },
-		{ key: "↑↓", verb: "move" },
+		{ key: "↑↓", verb: "select" },
 		{ key: "Esc", verb: "cancel", critical: true },
 	],
 	done: [{ key: "Enter", verb: "close", critical: true }],

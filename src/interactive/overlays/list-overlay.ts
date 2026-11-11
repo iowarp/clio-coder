@@ -673,7 +673,7 @@ export class ListOverlayView implements Component {
 		const hasDetail = !!this.filteredItems()[this.selectedIndex]?.detail;
 		if (hasDetail && this.detailPaneDrawn) hintEntries.push({ key: "PgUp/PgDn", verb: "scroll detail" });
 		if (this.options.filterable) {
-			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "search", critical: true } : FILTER_HINT);
+			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "filter", critical: true } : FILTER_HINT);
 		}
 		hintEntries.push(...(this.options.globalHints ?? []));
 
