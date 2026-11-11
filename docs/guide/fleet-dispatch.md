@@ -1020,6 +1020,29 @@ keeps every tool, and raises `write_root_dot_unconfined` instead. The seatbelt b
 on macOS does not count as covering the run for this purpose
 ([safety-model.md](../architecture/safety-model.md) owns the sandbox).
 
+#### Asking for wider write roots
+
+A write worker whose change needs a path outside its write roots stops before editing
+and calls `limitation` with reason `write-root`, the paths it needs (relative to the
+run's working directory) and a scope. That attempt ends `worker_no_work`, and its
+detail names the paths. When the dispatch came from a main session that answers worker
+requests, the assignment stays open on a main-authority request whose `tool` is
+`write_roots`. The request is pushed like any worker ask (the `approval.requested` event
+and the `grants.onPending` listeners), the dispatch call yields with the exact `steer`
+line, and `monitor` lists it. At autonomy `yolo` the main agent's
+`steer(action="approve", request_id=...)` stands; below `yolo` the request goes to the
+operator's approval card, and with nobody to ask it is denied. An approval starts a new
+attempt of the same assignment with the paths added to `intent.write_roots` and the
+run's write roots, plus a briefing note naming the attempt that asked. The attempt goes
+through admission exactly like a new dispatch, so anything admission refuses settles
+the assignment with that refusal named. A denial, the request expiring
+(`fleet.limits.internalRunTimeoutMs`), cancelling the assignment, or the session
+shutting down settles it as not done and says which. The request is refused at once,
+with the reason in the detail, when a path lies outside the working directory, the
+roots already cover every path, the assignment declared no write roots, or the widened
+list would pass 32 entries. A dispatch that cannot pause for a decision settles with a
+detail naming the re-dispatch, with `intent.write_roots` including the paths.
+
 Each scope notice reaches every operator surface: the terminal transcript, headless
 stderr in text mode and a `dispatch_scope_notice` event in `--json`, the ACP
 `dispatch.scopeNotice` event for a client that opted into events, and the GUI's
