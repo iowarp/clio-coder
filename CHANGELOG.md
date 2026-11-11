@@ -133,6 +133,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An old-school arcade cabinet is hiding in the composer; it only wakes up for the right two words.
 - `--session-file <path>` keeps a live record of the session: it is rewritten at every turn boundary and on every move into or out of a wait (working, idle, awaiting), and replaced by the exit record when the session ends.
 - The guidance tips no longer suggest `/library skills`.
+- A running Clio Coder names its build in its process title (`clio-coder 0.8.0-dev@67b3247`), so `ps` and pane managers can tell which build a session runs; the expanded footer dashboard shows the same label.
 
 ### Sign-in, setup and providers
 
@@ -344,7 +345,11 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Workers can use up to `fleet.limits.toolCallsPerRun` tool calls unless their recipe sets a lower maximum, instead of stopping at the recipe's estimate. The defaults rise to 300 tool calls and 45 minutes per run, the coder estimate to 150 and the tester estimate to 100, and the board's budget projection and the wiki repair cap follow the same ceiling.
 - A worker that hits its tool-call cap keeps its edits: they are committed to its task branch as a partial result to review or land.
 - A worker that reports it is blocked without changing anything settles as no work, not completed, and `monitor collect` names every run of a batch before the per-run detail.
-- Host verification runs lint and format checks on the files a task changed, and rejects a whole-repo check failure only when the task's base commit does not fail the same way.
+- Host verification runs lint and format checks on the files a task changed, and rejects a whole-repo check failure only when the task's base commit does not fail the same way. The base's replay of a check runs under that check's own timeout instead of five seconds and is kept per base commit, so tasks cut from one base pay for it once. A failure the base shares still rejects the task when the task's output has a line the base's does not, and the verification note quotes that line.
+- Host verification checks run one at a time per state root, so parallel batches and sessions queue their typechecks and test suites instead of overloading the machine; the workers dashboard shows `waiting for a verification slot` while a check queues.
+- When a detached dispatch batch settles after its turn ended, or one of its workers waits on the main agent's permission decision, the interactive terminal wakes the agent with a turn of its own once the session is idle and the composer is clear, with the batch's results collected into it. Coordinators no longer poll `monitor` collect.
+- A turn that ends while dispatched workers still run closes with "Turn ended · N workers running" instead of "✓ Done", and a `monitor` wait or collect that runs out its time ends "timed out !" instead of showing a success mark.
+- The fleet dispatch guide no longer says Clio Coder reruns the whole-repo lint when a task branch merges; it does not.
 
 ### Extensions and MCP
 
