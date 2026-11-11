@@ -2034,7 +2034,10 @@ function stabilizeGeneratedOutput(
 				if (!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block)) return true;
 				if (restatesKept(block) || restatesArchitecture(block)) return false;
 				if (!carriedSection) {
-					const tokens = handbookRuleTokens(block);
+					// Plurals fold to one word here so "links" and "link" match between two bullets of one section.
+					const tokens = new Set(
+						[...handbookRuleTokens(block)].map((token) => (token.startsWith("`") ? token : token.replace(/s$/, ""))),
+					);
 					const match = rewordedRule(
 						tokens,
 						[...keptHere].filter(([, kept]) => sameRuleIds(block, kept)).map(([keys]) => keys),

@@ -1118,3 +1118,35 @@ it("merges a handbook's restated rules, keeps the first wording and corrects a r
 	ok(stdout.includes("merged 2 restated rules"), stdout);
 	ok(stdout.includes("rule id rule1 rewritten to rule2"), stdout);
 });
+
+it("merges same-section bullets that restate each other in other words, keeping the first wording", async () => {
+	const docsFirst =
+		"- Every relative link, heading anchor, and backticked `src/`, `tests/`, `scripts/`, or `apps/` path in `docs/**/*.md`, `README.md`, and `CONTRIBUTING.md` must resolve; the documentation-links check fails on a missing target, anchor, or cited path.";
+	const docsAgain =
+		"- Links in `docs/**`, `README.md` and `CONTRIBUTING.md` are checked by check-hygiene's documentation-links rule: targets must exist, heading anchors must match the slugified heading, and backticked `src/`, `tests/`, `scripts/`, `apps/` paths must resolve in the checkout.";
+	const gotchaFirst =
+		"- A function used only by its own file must not carry the `export` keyword: export-hygiene sweeps `src/core` and `src/tools`.";
+	const gotchaAgain =
+		"- Export hygiene: a function used only by the file that declares it must not carry the `export` keyword; the hygiene check sweeps `src/core` and `src/tools` and fails on dead exports.";
+	const distinct = "- Retired HTML documentation must not return: no `docs/html/` directory and no links to it.";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		serializeClioMd({
+			projectName: "harbor",
+			identity: "A widget renderer.",
+			invariants: [],
+			conventions: [],
+			sections: [
+				{ title: "Docs and prose", body: [docsFirst, distinct, docsAgain].join("\n") },
+				{ title: "Gotchas", body: [gotchaFirst, gotchaAgain].join("\n") },
+			],
+		}),
+	);
+	let stdout = "";
+	await runBootstrap({ cwd, applyClioMd: true, io: { stdout: (text) => (stdout += text), stderr: () => {} } });
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(docsFirst) && !handbook.includes(docsAgain), handbook);
+	ok(handbook.includes(gotchaFirst) && !handbook.includes(gotchaAgain), handbook);
+	ok(handbook.includes(distinct), handbook);
+	ok(stdout.includes("merged 2 restated rules"), stdout);
+});
