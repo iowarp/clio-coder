@@ -246,6 +246,11 @@ interface HeadlessMainAgentRunStats {
 	mergedTaskWorktrees: number;
 	/** Blocked action classes not followed by successful substantive work of that class. */
 	unresolvedBlocks: Set<string>;
+	/**
+	 * Whether the task asked for a change. Only an explicit `--turn-mode answer`
+	 * or `proposal` says it did not; the no-op verdict applies only when it did.
+	 */
+	changeAsked: boolean;
 }
 
 /**
@@ -623,8 +628,11 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
  * A run is a no-op when a block remains unresolved and no mutating call succeeded, or
  * when it ran tools and none of them succeeded. A run that called no tool and
  * answered in prose is not a no-op; answering a question is a legitimate run.
+ * Neither is a turn the operator marked `--turn-mode answer` or `proposal`:
+ * it asked for no change, so a blocked call along the way left nothing unmet.
  */
 function headlessNoop(stats: HeadlessMainAgentRunStats): boolean {
+	if (!stats.changeAsked) return false;
 	const totals = toolTotals(stats.toolStats);
 	if (stats.unresolvedBlocks.size > 0 && !changedWorkspace(stats)) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
@@ -657,6 +665,21 @@ function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeede
 		totals.blocked += stat.blocked;
 	}
 	return totals;
+}
+
+/** Names an answer turn's blocked calls, which the run's exit code no longer reports. */
+function blockedCallsNotice(stats: HeadlessMainAgentRunStats): string | null {
+	const total = stats.blockedAttempts.length + stats.blockedAttemptsTruncated;
+	if (total === 0) return null;
+	const named = stats.blockedAttempts
+		.slice(0, 5)
+		.map((attempt) => {
+			const why = attempt.ruleId ?? attempt.reasonCode;
+			return why === undefined ? attempt.tool : `${attempt.tool} (${why})`;
+		})
+		.join(", ");
+	const rest = total > 5 ? `, and ${total - 5} more` : "";
+	return `clio-coder run: answered with ${total} blocked call${total === 1 ? "" : "s"}: ${named}${rest}`;
 }
 
 function noopFailureMessage(stats: HeadlessMainAgentRunStats, failOnNoop: boolean): string {
@@ -933,6 +956,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		mutatingSucceeded: 0,
 		mergedTaskWorktrees: 0,
 		unresolvedBlocks: new Set<string>(),
+		changeAsked: options.constraints?.mode !== "answer" && options.constraints?.mode !== "proposal",
 	};
 	// The ledger row is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
@@ -1347,7 +1371,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		// block with no applied change. Judge settled tool outcomes, not prose
 		// or the presence of a validation contract. Recovered failures may succeed.
 		const limited = (runStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
-		const blockedWithoutChange = runStats.unresolvedBlocks.size > 0 && !changedWorkspace(runStats);
+		const blockedWithoutChange =
+			runStats.changeAsked && runStats.unresolvedBlocks.size > 0 && !changedWorkspace(runStats);
 		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(runStats))) {
 			const failureMessage = limited
 				? "clio-coder run: the agent recorded an explicit limitation; the task is incomplete"
@@ -1382,6 +1407,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					? result.terminatingToolText
 					: answerAfterCitationCheck(result.citationCheckedAnswer, result.text);
 			stdoutMessage = answer.length > 0 ? settledAnswer(answer) : null;
+		}
+		if (terminal.exitCode === 0 && !runStats.changeAsked) {
+			const notice = blockedCallsNotice(runStats);
+			if (notice !== null) stderrMessage = [stderrMessage, notice].filter(Boolean).join("\n");
 		}
 		// The answer stands, so the run still succeeds; the caller still learns that its last calls never ran.
 		if (result.callsNotRun !== null && !result.sawTerminatingToolResult) {

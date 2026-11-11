@@ -291,7 +291,7 @@ Known confusions, as found on recorded sessions:
 | `--agent <recipe-id>` | Dispatch a user-facing fleet agent instead of the main agent. Unknown ids and shadow agents (`oracle`, `provenance`, `researcher`, `scout`, `world-knowledge`) fail fast; for their read-only work use `--agent coder --read-only`. |
 | `--skill <path>` | Make one explicit skill file or skill directory available for this run. Repeatable; the model loads its instructions with `context(scope="skills", name=...)`. |
 | `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
-| `--turn-mode <mode>` | Main-agent workflow guidance (`answer`, `proposal`, `change`). Guides prompt and turn continuation (`answer` and `proposal` disable autonomous continuation turns; `proposal` renders `tasks` `plan`/`add` as blocked proposals). Not an authorization grant: mutating tools (`write`, `edit`) are not denied by `mode` alone; use `--allow-tools` to restrict execution. See [Turn Constraints](#turn-constraints). |
+| `--turn-mode <mode>` | Main-agent workflow guidance (`answer`, `proposal`, `change`). Guides prompt and turn continuation (`answer` and `proposal` disable autonomous continuation turns; `proposal` renders `tasks` `plan`/`add` as blocked proposals). Not an authorization grant: mutating tools (`write`, `edit`) are not denied by `mode` alone; use `--allow-tools` to restrict execution. `answer` and `proposal` also exempt the run from the no-op verdict; see [Headless No-op Runs](#headless-no-op-runs). See [Turn Constraints](#turn-constraints). |
 | `--no-delegate` | Forbid worker delegation (`dispatch`) for this run; the agent must work directly. |
 | `--delegate-tools <names\|none>` | Comma-separated capability names the workers this run dispatches may hold, independent of `--allow-tools`; `none` gives them no tools. Main agent only; with `--agent` it is a usage error. |
 | `--allow-tools <names\|none>` | Comma-separated allowlist of capability names permitted for this turn, or `none` to disable all tools. Enforces mechanical restriction at admission and runtime. Main agent only; with `--agent` it is a usage error. |
@@ -353,6 +353,13 @@ A refusal from the operator's `--read-only` ceiling stays in
 `safety.blockedAttempts` but does not add an unresolved block. A redundant repeat
 of a successful read withheld by the loop guard also adds no unresolved block.
 The separate rule for a run with no successful tools still applies.
+
+A run started with `--turn-mode answer` or `--turn-mode proposal` asked for no
+change, so `noop` is always false for it and neither rule fails it. A blocked
+call along the way stays in `safety.blockedAttempts`, and when the run exits 0
+stderr names those calls in one line, for example
+`clio-coder run: answered with 1 blocked call: bash (yolo-sandbox-required)`.
+Without `--turn-mode`, or with `change`, the rules above apply.
 
 A mutating call is one the tool registry admitted with action class `write`, which `default` runs without asking inside write roots: `write`, `edit`, and an outward `web_fetch` (a method other than GET or HEAD, or any `body`) after its separate outward approval. A bodiless GET or HEAD `web_fetch` is read class: it runs without asking and does not count. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
 

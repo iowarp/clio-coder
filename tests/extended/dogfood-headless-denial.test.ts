@@ -219,6 +219,8 @@ describe("headless no-op contract through the built binary", () => {
 		failOnNoop: boolean;
 		reply?: string;
 		packageScripts?: Record<string, string>;
+		turnMode?: "answer" | "proposal" | "change";
+		prompt?: string;
 	}) {
 		const scratch = headlessScratch("clio-coder-noop-");
 		scratches.push(scratch);
@@ -240,7 +242,8 @@ describe("headless no-op contract through the built binary", () => {
 				"--autonomy",
 				input.autonomy,
 				...(input.failOnNoop ? ["--fail-on-noop"] : []),
-				"Apply the change.",
+				...(input.turnMode ? ["--turn-mode", input.turnMode] : []),
+				input.prompt ?? "Apply the change.",
 			],
 			{ env: scratch.env, cwd: project },
 		);
@@ -275,6 +278,24 @@ describe("headless no-op contract through the built binary", () => {
 			}
 		});
 	}
+
+	test("an answer turn whose command was blocked still succeeds and names the blocked call", async () => {
+		// A question asks for no change, so a refused command along the way is no unmet part of the task.
+		const { turn, envelope, project } = await headlessTurn({
+			autonomy: "default",
+			steps: [deniedInline],
+			failOnNoop: true,
+			turnMode: "answer",
+			prompt: "What does sentinel.txt say?",
+			reply: "It says the fixture text.",
+		});
+		ok(!existsSync(join(project, "c2-proof.txt")), "the denied write must not land");
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(envelope.outcome, "succeeded");
+		match(turn.stdout, /It says the fixture text\./);
+		doesNotMatch(turn.stderr, /no-op/);
+		match(turn.stderr, /answered with 1 blocked call: bash \(/);
+	});
 
 	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
 		const { turn, envelope, project } = await headlessTurn({

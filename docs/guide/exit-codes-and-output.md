@@ -67,7 +67,7 @@ In headless execution (`clio-coder run`):
    ```text
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
-   The denial is delivered to the model so it can recover through permitted work or report a limitation. An unresolved block with no successful write exits `1` with run outcome `failed` and `outcomeDetail: "noop"`; this does not require `--fail-on-noop`. A later substantive success of the same action class can resolve a block. A successful `limitation` call fails with detail `limitation`. `--fail-on-noop` also rejects runs whose attempted tools all failed without a block. The no-op rules are in [commands and modes](commands-and-modes.md).
+   The denial is delivered to the model so it can recover through permitted work or report a limitation. An unresolved block with no successful write exits `1` with run outcome `failed` and `outcomeDetail: "noop"`; this does not require `--fail-on-noop`. A later substantive success of the same action class can resolve a block. A successful `limitation` call fails with detail `limitation`. `--fail-on-noop` also rejects runs whose attempted tools all failed without a block. A run started with `--turn-mode answer` or `proposal` asked for no change, so neither rule applies to it; it exits `0` and names its blocked calls on stderr. The no-op rules are in [commands and modes](commands-and-modes.md).
 
 ### Failures before output starts
 
