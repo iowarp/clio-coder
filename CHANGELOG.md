@@ -94,6 +94,8 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Per-session facts (Git state, the last session, the orientation time) moved out of the cached system prompt into the session's first message, and dispatched workers of one recipe get the same tool list whatever their task says, so prompt prefixes cache across sessions and workers. The system prompt no longer tells a session things that are false for it, such as `/rewind` in a headless run, and its safety section describes only the session's own situation: sandboxed, unsandboxed, or a worker with or without a shell.
 - The per-turn capability hint names only strongly matching capabilities, offers Clio Coder's own docs, library and configure capabilities only for questions about Clio Coder, and is left out when nothing fits.
 - The system prompt describes each capability once, with its example and usage note together, and lists the project's declared `verify` checks; the `verify` example uses one of them.
+- The attended prompt is about 6.5 KB shorter: Clio Coder's own procedures (docs, settings, playbooks and agents) now arrive under Guidance in the results of `clio_docs`, `clio_library`, `context` (settings) and `configure_clio` instead of on every request.
+- An experimental `prompts.profile: v2` setting (restart to apply) uses a leaner main prompt, about 24 KB attended against 33 KB; `v1` stays the default.
 - The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
 - A missing key, an unreachable model server or a missing model reads as one sentence that names the fix, the same in `doctor`, `run`, the TUI banner, a failed prompt and the desktop app.
 - First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first.
@@ -124,7 +126,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Contained commands no longer write the operator's `~/.cache` or `~/.npm`: `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` point at a sandbox cache, which closes a delayed escape through executable caches.
 - A worker under `safety.sandbox: auto` no longer runs unsandboxed after one slow bubblewrap probe; a timed-out probe is retried, and on a client with no `fleet.nodes`, or when placement puts the worker on this host, a worker expected to be sandboxed refuses instead. The main session keeps its sandbox when only network isolation fails.
 - Project settings can only tighten safety, sandbox, fleet permission and limit settings and the review watchdog, and can no longer load runtime plugins (see Upgrade notes).
-- Yolo with `safety.sandbox: required` keeps a command in the sandbox when it reaches a project file under an outward command's name: a `PATH=` assignment, a sourced file, an alias, a function or `hash`, and `npx`, `pnpx` or `bunx`. It also refuses scheduled command jobs, which always run outside the sandbox.
+- Yolo with `safety.sandbox: required` keeps a command in the sandbox when it reaches a project file under an outward command's name: a `PATH=` assignment or a loader or exec-hook variable (`LD_PRELOAD`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`, `PYTHONPATH` and similar), a sourced file, an alias, a function or `hash`, and `npx`, `pnpx` or `bunx`. It also refuses scheduled command jobs, which always run outside the sandbox.
 - An `sh -c '<script>'` wrapper is judged by its script only in its bare form, so env prefixes, extra operands, redirects or startup options on the wrapper no longer bypass the approval ask. `grep <path> -e <pattern>` is no longer treated as a workspace read.
 - The approval card and the Exact invocation view show every character of a command, with control bytes as visible `\u{..}` text, and a clipped card says how many characters remain and that Alt+V shows them all.
 - An Enter already in flight when an approval card opens (two Enters in one read, a double tap, or an Enter meant for an overlay the card interrupted) no longer allows the call: the card ignores Enter for its first 400 ms, while Esc and Alt+X act at once.
@@ -277,6 +279,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Typecheck runs on tsrs `--fast` and falls back to `tsc` with a visible notice where tsrs cannot run (`CLIO_CODER_TYPECHECK=tsc` forces it). Release preparation keeps `tsc` 7.1 as the reference and fails a candidate on any difference, and a conformance corpus holds both to recorded diagnostics. `pnpm run check` runs typecheck and Biome as one fast pre-commit loop, hygiene checks run faster, and tsx 4.23.15 cuts per-file test startup from about 300 ms to about 170 ms.
 - In Clio Coder's own checkout, the tracked, hand-written `CLIO-DEV.md` is the contributor handbook Clio loads, and a generated `CLIO-CODER.md` stays local for comparison.
 - Prompt fragments declare when they apply (`requires`, `surfaces`, `when`, row conditions), and a hygiene check fails when a fragment names a tool or command its session may not have.
+- Prompt size budgets per tier are a contract test for the v2 profile, and v2 leaves the capability map's examples out when the context window is under 48,000 tokens.
 
 ### Known limits
 
@@ -288,7 +291,6 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - A `NO_PROXY` IP wildcard such as `192.168.*` is ignored without a warning; list LAN hosts by name or exact address.
 - When a project's settings define `targets`, headless `run` with no saved chat route borrows none of your own saved targets either, since the project's list replaces yours; pass `--target <id>`.
 - A short `ghp_` token in streaming output can show on a card until the rest of it arrives and masking applies.
-- `clio-coder auth login` echoes the key when `TERM=dumb`; pipe it on stdin instead.
 - A command job at unconfined yolo ignores a `sandbox: required` request.
 - An OAuth target that also names `auth.apiKeyEnvVar` becomes unusable while that variable is set.
 - The sandbox does not mask macOS keychain or Application Support credential stores, and the macOS sandbox cache is unverified on hardware.
