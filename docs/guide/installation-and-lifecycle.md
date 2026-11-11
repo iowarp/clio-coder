@@ -746,7 +746,7 @@ a dry run prints the same and exits 0. The commands are
 `brew upgrade clio-coder` and `winget upgrade --id IOWarp.ClioCoder --exact`; an unknown
 layout is told to use its original manager and then run
 `clio-coder upgrade --post-install`. Keep the original manager's global directory or
-prefix when updating or removing the package. Package removal preserves Clio Coder's user configuration and
+prefix when updating or removing the package. On Windows, where npm, pnpm and npx are `.cmd` shims, Clio starts them through `cmd.exe /d /s /c` and only with arguments `cmd.exe` cannot reinterpret; an update whose arguments would need quoting is refused instead of run. Package removal preserves Clio Coder's user configuration and
 sessions; the uninstall operation below deliberately removes those roots.
 
 After a successful upgrade, and when this state root has an owned graphical
