@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 export const coreTests = [
 	"arcade-egg",
 	"check-lane-selection",
+	"handbook-bench",
 	"reload-prompts",
 	"memory-off-marker",
 	"headless-observed",
