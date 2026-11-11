@@ -1,4 +1,4 @@
-import { match, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -6,8 +6,10 @@ import { classifyDefaultTarget, describeVerdict } from "../../src/cli/default-ta
 import { runClioRun } from "../../src/cli/run.js";
 import { readSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { runDoctorModelChecks } from "../../src/domains/lifecycle/doctor.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
+import { runDoctor, runDoctorModelChecks, withDoctorCommand } from "../../src/domains/lifecycle/doctor.js";
 import { createProvidersBundle } from "../../src/domains/providers/extension.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -112,4 +114,16 @@ test("run --agent with an API key names the replacement for a target on a retire
 		process.chdir(original);
 		home.restore();
 	}
+});
+
+test("a session with no prompt-cache verdict is information, not a warning that sends the operator to configure", async (t) => {
+	const home = await isolateClioEnv("clio-doctor-cache-");
+	t.after(() => home.restore());
+	const directory = telemetrySessionDirectory(resolveClioDirs().state, "s-quiet");
+	mkdirSync(directory, { recursive: true });
+	writeFileSync(join(directory, "journal.jsonl"), "");
+	const row = runDoctor().find((finding) => finding.name === "cache telemetry");
+	ok(row, "the cache telemetry row is reported");
+	strictEqual(row.level, "info");
+	ok(!withDoctorCommand(row).detail.includes("configure"), withDoctorCommand(row).detail);
 });

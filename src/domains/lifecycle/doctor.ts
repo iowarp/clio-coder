@@ -325,8 +325,9 @@ function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
 	const counts = report.verdicts;
 	if (counts.hot + counts.partial + counts.cold + counts.small + counts.unknown === 0) {
 		return {
+			// A session that made no cached model call has nothing to judge; no setting changes that, so no advice.
 			ok: true,
-			level: "warn",
+			level: "info",
 			name: "cache telemetry",
 			detail: `last session ${latest.sessionId}: no prompt-cache verdict journaled`,
 		};
