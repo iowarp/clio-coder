@@ -220,6 +220,27 @@ test("on a git without --show-scope the drift guard still sees config and a repo
 	rmSync(scratch, { recursive: true, force: true });
 });
 
+test("a repository filter whose key no -c can name refuses Clio's read at every autonomy, drift or not", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	for (const autonomy of ["default", "yolo"] as const) {
+		const { root, scratch } = repository();
+		const marker = join(scratch, "unnamed-filter-ran");
+		git(root, "config", "filter.a=b.clean", markerScript(join(scratch, "clean.sh"), marker, "cat\n"));
+		const { records } = session(root, scratch, autonomy);
+		filtered(root, "a=b");
+		probeGit(root);
+		strictEqual(existsSync(marker), false, `the filter did not run at ${autonomy}`);
+		deepStrictEqual(
+			records.map(({ outcome, unneutralized }) => ({ outcome, unneutralized })),
+			[{ outcome: "skipped", unneutralized: ["filter.a=b.clean"] }],
+		);
+		match(records[0]?.message ?? "", /own config sets a filter driver .*filter\.a=b\.clean/u);
+		spawnSync("git", ["-C", root, "status", "--porcelain"]);
+		ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
+		rmSync(scratch, { recursive: true, force: true });
+	}
+});
+
 test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line does not", () => {
 	const { root, scratch } = repository();
 	const fingerprinter = createGitHooksFingerprinter(root);

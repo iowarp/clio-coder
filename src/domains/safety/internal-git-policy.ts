@@ -222,6 +222,8 @@ function noticeFor(record: Omit<InternalGitDriftRecord, "message" | "announce">,
 	const changed = `${named.join("; ")}${more}`;
 	if (record.outcome === "yolo")
 		return `[safety] Clio ran ${record.operation} under yolo with changed git hooks or config: ${changed}.`;
+	if (record.outcome === "skipped" && record.changes.length === 0)
+		return `[safety] Clio does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
 	if (record.outcome === "skipped")
 		return `[safety] Clio stopped running its own status and diff probes in ${record.repository}, because executable git config changed during this session and cannot be overridden from the command line: ${changed}. They resume once the change is reverted or you approve it on the agent's next git command.`;
 	if (record.outcome === "overridden")
@@ -300,9 +302,12 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 		configWord("core.hooksPath", emptyDirectory(deps.emptyHooksDir) ?? UNREACHABLE_HOOKS_DIR);
 
 	const report = (record: Omit<InternalGitDriftRecord, "message" | "announce">): void => {
-		const changes = [record.outcome, ...record.changes.map((change) => `${gitHookEntryId(change)}\0${change.hash}`)].join(
-			"\n",
-		);
+		// A refusal with no drift is told apart by its repository and keys.
+		const subject =
+			record.changes.length > 0
+				? record.changes.map((change) => `${gitHookEntryId(change)}\0${change.hash}`)
+				: [record.repository, ...record.unneutralized];
+		const changes = [record.outcome, ...subject].join("\n");
 		const key = `${record.operation}\n${changes}`;
 		if (told.has(key)) return;
 		told.add(key);
@@ -347,10 +352,23 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 			// repository's own config names, there before the session or not, never runs from Clio's
 			// probes, at any autonomy.
 			const local = guard.executableConfig(operation.repository).filter(repositoryFilter);
+			const filters = neutralize(local);
+			// Such a filter has no -c that turns it off, so the read is refused, drift or not.
+			if (filters.unneutralized.length > 0) {
+				report({
+					repository: operation.repository,
+					operation: INTERNAL_GIT_READS,
+					hardened: true,
+					outcome: "skipped",
+					changes: [],
+					unneutralized: filters.unneutralized,
+				});
+				return null;
+			}
 			// Yolo trusts the run otherwise; its drift check is skipped outright, so the footer pays nothing more.
-			if (deps.autonomy() === "yolo") return neutralize(local).overrides;
+			if (deps.autonomy() === "yolo") return filters.overrides;
 			const changes = guard.configDrift(operation.repository);
-			if (changes.length === 0) return neutralize(local).overrides;
+			if (changes.length === 0) return filters.overrides;
 			const { overrides, unneutralized } = neutralize([...local, ...changes]);
 			const record = { repository: operation.repository, operation: INTERNAL_GIT_READS, hardened: true, changes };
 			// A planted command no -c can reach must not run from Clio's own probes: the read is refused instead.
