@@ -492,19 +492,18 @@ async function confirmAndSend(
 	};
 	const identity = await identityFor(io);
 	let transport: ReportTransport | null = null;
-	let planTransport: ReportPlanTransport;
 	const findGh = await loadFindGh(io.deps);
-	if (options.dryRun) planTransport = offlineTransport(io, findGh);
-	else {
-		transport = await detectTransport(io.env, {
+	// gh is asked nothing until the reporter consents: --yes is that consent up front, the prompt's send is it later.
+	const detect = async (): Promise<ReportTransport> =>
+		detectTransport(io.env, {
 			findGh,
 			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
 			...(io.deps.browserAvailable !== undefined ? { browserAvailable: io.deps.browserAvailable } : {}),
 		});
-		planTransport = transport;
-	}
-	if (transport?.kind === "gh" && outboxEntry(io.stateDir, initial.id)?.state === "sending") {
-		const last = await checkLastAttempt(initial.id, transport, {
+	/** For a report left `sending`, settles its last attempt; a number is the exit code to return now. */
+	const settleLastAttempt = async (found: ReportTransport): Promise<number | null> => {
+		if (found.kind !== "gh" || outboxEntry(io.stateDir, initial.id)?.state !== "sending") return null;
+		const last = await checkLastAttempt(initial.id, found, {
 			stateDir: io.stateDir,
 			env: io.env,
 			...(io.deps.run !== undefined ? { run: io.deps.run } : {}),
@@ -523,18 +522,26 @@ async function confirmAndSend(
 			return 0;
 		}
 		if (!options.json) io.out(`GitHub has nothing from the last attempt to send ${initial.id}; it is a draft again.\n`);
-	}
+		return null;
+	};
+	let planTransport: ReportPlanTransport;
+	if (!options.dryRun && options.yes) {
+		transport = await detect();
+		const settled = await settleLastAttempt(transport);
+		if (settled !== null) return settled;
+		planTransport = transport;
+	} else planTransport = offlineTransport(io, findGh);
 	const interactive = io.interactive && !options.json;
 	let draft = rememberIdentity(initial, identity);
 	// Only the prompt below is a review; --yes sends what the preview printed without one.
 	const reviewed = !options.yes;
 	// The share id is fixed now so the preview names it; the gist id exists only once sending uploads it.
 	const shareId = options.share === true && source !== null ? newShareId() : null;
-	const sharing = shareId !== null && planTransport.kind === "gh";
+	let sharing = shareId !== null && planTransport.kind === "gh";
 	if (shareId !== null && !sharing && !options.json)
 		io.err("not shared: --share needs an authenticated gh; the bundle stays on this machine.\n");
 	const consent: ReportSharePointer["consent"] = source?.scopes.includes("dataset") === true ? "debug,dataset" : "debug";
-	const preview = sharing ? { share: { bundle: `gist:<created on send>#${shareId}`, consent } } : {};
+	let preview = sharing ? { share: { bundle: `gist:<created on send>#${shareId}`, consent } } : {};
 	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed, ...preview });
 	const emit = (result?: unknown) =>
 		io.out(
@@ -584,7 +591,21 @@ async function confirmAndSend(
 				settleMs: REPORT_PROMPT_SETTLE_MS,
 			});
 			const picked = choice.kind === "selected" ? choice.value : "cancel";
-			if (picked === "send") break;
+			if (picked === "send") {
+				// Consent given: only now is gh asked who is signed in, and about a last attempt left sending.
+				const planned = planTransport.kind;
+				transport = await detect();
+				const settled = await settleLastAttempt(transport);
+				if (settled !== null) return settled;
+				planTransport = transport;
+				sharing = sharing && transport.kind === "gh";
+				if (!sharing) preview = {};
+				plan = planReport(draft, { identity, transport, stateDir: io.stateDir, reviewed, ...preview });
+				if (transport.kind === planned && plan.gates.length === 0) break;
+				// gh is not signed in, so the report would go another way than the preview said: review it again.
+				io.out(formatReportPreview(plan, bundled, draft.id));
+				continue;
+			}
 			if (picked === "edit") {
 				const edited = editDraft(draft, io);
 				if (typeof edited === "string") io.err(`${edited}\n`);
@@ -616,7 +637,7 @@ async function confirmAndSend(
 	keepBundle();
 	if (plan.rateWarning !== null && !options.json) io.err(`${plan.rateWarning}\n`);
 	const share =
-		sharing && transport.kind === "gh" && source !== null
+		sharing && shareId !== null && transport.kind === "gh" && source !== null
 			? shareHook(io, transport.path, shareId, consent, source)
 			: null;
 	const outcome = await runReportSend(draft, plan.rendered, {

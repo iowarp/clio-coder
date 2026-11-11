@@ -83,6 +83,16 @@ test("outside a terminal without --yes nothing is sent and the exit names --yes"
 	strictEqual(calls.filter((call) => call.args[0] === "issue").length, 0);
 });
 
+test("the preview before consent asks gh nothing, not even auth status", async () => {
+	const { bodyFile, calls, deps, output } = scratch();
+	strictEqual(await runReport(compose(bodyFile), deps), 2);
+	ok(output().out.includes("fix: x fails on y"));
+	deepStrictEqual(
+		calls.filter((call) => call.file !== "git"),
+		[],
+	);
+});
+
 test("--yes with a signed-in gh files the issue once and status lists it", async () => {
 	const { bodyFile, calls, deps, output } = scratch();
 	strictEqual(await runReport([...compose(bodyFile), "--yes"], deps), 0);
