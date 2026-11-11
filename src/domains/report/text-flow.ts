@@ -57,18 +57,28 @@ export interface ReportTextDeps {
 	now?: () => Date;
 }
 
+/** Body lines a text preview shows, so the actions, gates and send line still fit an ACP command result. */
+const REPORT_TEXT_BODY_LINES = 150;
+
 /** The plan as text: destination, title, the body in a fence, masks, the numbered actions and how to send it. */
 export function formatReportPlanText(plan: ReportPlan, draftId: string): string {
 	const body = plan.rendered.body.replace(/\n$/u, "");
 	const fence = body.includes("```") ? "~~~~" : "```";
+	const shownLines = body.split("\n").filter((line) => line.trim() !== "");
+	const hidden = Math.max(0, shownLines.length - REPORT_TEXT_BODY_LINES);
 	return [
 		`${plan.postedAs === "writes a file" ? "Writes a file for" : "Goes to"} ${plan.destination} (${plan.postedAs}); nothing sent yet`,
 		`Draft: ${draftId}`,
 		`Title: ${plan.rendered.title}`,
-		`Body, exactly as it will be sent (${Buffer.byteLength(plan.rendered.body, "utf8")} bytes; this view leaves out blank lines):`,
+		hidden > 0
+			? `Body (${Buffer.byteLength(plan.rendered.body, "utf8")} bytes; this view leaves out blank lines and shows the first ${REPORT_TEXT_BODY_LINES} lines):`
+			: `Body, exactly as it will be sent (${Buffer.byteLength(plan.rendered.body, "utf8")} bytes; this view leaves out blank lines):`,
 		`${fence}markdown`,
-		body,
+		hidden > 0 ? shownLines.slice(0, REPORT_TEXT_BODY_LINES).join("\n") : body,
 		fence,
+		...(hidden > 0
+			? [`${hidden} more body lines are not shown here; \`clio-coder report show ${draftId}\` shows the whole body.`]
+			: []),
 		plan.maskSummary,
 		"No diagnostic bundle is attached.",
 		...(plan.credit ? ["Credit: the report block asks for credit in the release notes (credit: yes)."] : []),

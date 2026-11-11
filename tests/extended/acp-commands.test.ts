@@ -6,6 +6,8 @@ import { test } from "node:test";
 import type { PendingSkillRequest } from "../../src/core/skill-activation.js";
 import {
 	createReportTextHost,
+	formatReportPlanText,
+	type ReportPlan,
 	readReportDraft,
 	saveReportDraft,
 	updateOutbox,
@@ -454,4 +456,24 @@ test("/report previews as text with no transport call, and a read-only ceiling r
 		commands.filter((command) => command.startsWith(gh)),
 		[],
 	);
+});
+
+test("a /report preview over the ACP line cap still ends on the send line", () => {
+	const body = Array.from({ length: 400 }, (_, index) => `line ${index}`).join("\n");
+	const plan = {
+		postedAs: "posted as @octo",
+		destination: "iowarp/clio-coder issues",
+		rendered: { id: "rpt_x", title: "fix: long", body, masks: [], fields: {} },
+		maskSummary: "No secrets recognized.",
+		actions: ["file the issue"],
+		credit: false,
+		gates: ["a gate"],
+		rateWarning: null,
+	} as unknown as ReportPlan;
+	const lines = formatReportPlanText(plan, "rpt_x")
+		.split("\n")
+		.filter((line) => line.trim() !== "");
+	assert.ok(lines.length <= 200, `${lines.length} lines`);
+	assert.ok(lines.some((line) => line.includes("`/report send rpt_x`")));
+	assert.ok(lines.includes("  - a gate"));
 });
