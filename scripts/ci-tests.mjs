@@ -55,6 +55,7 @@ export const coreTests = [
 	"monitor-steer-tools",
 	"gateway-authority",
 	"mutation-atomicity",
+	"open-browser",
 	"physical-dotdot",
 	"proxy-env-bypass",
 	"read-scope",
