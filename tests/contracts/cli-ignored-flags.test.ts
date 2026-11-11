@@ -61,6 +61,12 @@ describe("global startup flags before a subcommand", () => {
 		});
 	}
 
+	it("names an unknown run option without repeating the command the caller prefixes", () => {
+		const parsed = parseRunCliArgs(["--bogus", "hello"]);
+		const message = parsed.diagnostics.map((entry) => entry.message).join(" ");
+		equal(message, "unknown option: --bogus");
+	});
+
 	it("never tells run to take a panes flag before the subcommand", () => {
 		const parsed = parseRunCliArgs(["--with-panes", "hello"]);
 		const message = parsed.diagnostics.map((entry) => entry.message).join(" ");
@@ -77,7 +83,7 @@ describe("global startup flags before a subcommand", () => {
 		for (const [args, refusal] of [
 			[["paths", "-v"], /unknown flag: -v/u],
 			[["paths", "--bogus", "--version"], /unknown flag: --bogus/u],
-			[["run", "-v"], /unknown clio-coder run option: -v/u],
+			[["run", "-v"], /clio-coder run: unknown option: -v/u],
 		] as const) {
 			const result = cli(args);
 			equal(result.status, 2, `${args.join(" ")}: ${result.stdout}`);
@@ -87,7 +93,7 @@ describe("global startup flags before a subcommand", () => {
 		// After "--" a -v is the task text: neither the version nor a refused option.
 		const task = cli(["run", "--", "-v"]);
 		doesNotMatch(task.stdout, /^Clio Coder /u);
-		doesNotMatch(task.stderr, /unknown clio-coder run option/u);
+		doesNotMatch(task.stderr, /unknown option/u);
 	});
 
 	it("still hands the boot options run honors to run", () => {
