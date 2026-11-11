@@ -265,13 +265,6 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 		text: () => "/doctor checks this install, targets and credentials; /doctor --deep adds live tool probes.",
 	},
 	{
-		id: "skills",
-		feature: "/library skills",
-		score: (turn) =>
-			harnessQuestionTopics(turn.prompt).includes("skills") ? SPECIFIC_SCORE : used(turn, "skill") > 0 ? 1.5 : 0,
-		text: () => "/library skills lists the skills ready here, and /skill <name> <task> runs one on purpose.",
-	},
-	{
 		id: "library",
 		feature: "/library",
 		score: (turn) => (LIBRARY_INSTALL.test(turn.prompt) ? SPECIFIC_SCORE : 0),

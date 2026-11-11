@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import {
@@ -170,11 +170,15 @@ describe("demo guidance tips", () => {
 		strictEqual(count(veteran), SESSION_TIP_BUDGET);
 	});
 
-	it("teaches usage, doctor, skills and the Library from questions about them", () => {
+	it("retires the skills tip so no lesson with that id is selectable", () => {
+		ok(!GUIDANCE_LESSONS.some((lesson) => lesson.id === "skills"));
+		doesNotMatch(tipOf(guidance().turn("how can I use skills in clio?")) ?? "", /\/library skills lists the skills/);
+	});
+
+	it("teaches usage, doctor and the Library from questions about them", () => {
 		for (const [prompt, pattern] of [
 			["how much have I spent today?", /^\[tip\] \/usage shows/],
 			["my clio login seems broken, how do I check it?", /\/doctor checks this install/],
-			["how can I use skills in clio?", /\/library skills lists the skills/],
 			["can you install a skill for writing changelogs", /Alt\+L opens the Library/],
 		] as const) {
 			const { turn } = guidance({ keyFor: (id) => (id === "clio-coder.library.toggle" ? "Alt+L" : null) });
