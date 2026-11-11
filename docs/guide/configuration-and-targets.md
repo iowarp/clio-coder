@@ -214,8 +214,8 @@ explains worker route selection.
 | `fleet.retry.routeCooldownMs` | `15000` | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | next dispatch |
 | `fleet.worktrees.root` | `disk` | next dispatch |
-| `fleet.limits.toolCallsPerRun` | `150` | next dispatch |
-| `fleet.limits.internalRunTimeoutMs` | `900000` | next dispatch |
+| `fleet.limits.toolCallsPerRun` | `150` | next dispatch; a project layer can only tighten it |
+| `fleet.limits.internalRunTimeoutMs` | `900000` | next dispatch; a project layer can only tighten it |
 | `fleet.history.maxRuns` | `1000` | next dispatch |
 | `fleet.history.journal` | `true` | next dispatch |
 
@@ -278,17 +278,17 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `safety.autonomy` | `default` | immediately; user layer or operator session control, and a project layer can only tighten it |
-| `safety.limits.sessionCostUsd` | `5` | immediately; a parked request re-reads it every 250 ms |
-| `safety.limits.chatToolCallsPerTurn` | `60` | next turn |
-| `safety.limits.readBytesPerCall` | `51200` | next turn |
-| `safety.limits.observationBytesPerTurn` | `196608` | next turn |
-| `safety.limits.workerResponseSeconds` | `600` | next turn |
+| `safety.limits.sessionCostUsd` | `5` | immediately; a parked request re-reads it every 250 ms; a project layer can only tighten it |
+| `safety.limits.chatToolCallsPerTurn` | `60` | next turn; a project layer can only tighten it |
+| `safety.limits.readBytesPerCall` | `51200` | next turn; a project layer can only tighten it |
+| `safety.limits.observationBytesPerTurn` | `196608` | next turn; a project layer can only tighten it |
+| `safety.limits.workerResponseSeconds` | `600` | next turn; a project layer can only tighten it |
 | `safety.limits.autonomousToolCalls` | `600` | immediately; a project layer can only tighten it |
 | `safety.limits.autonomousMinutes` | `120` | immediately; a project layer can only tighten it |
 | `safety.limits.autonomousTokens` | `5000000` | immediately; a project layer can only tighten it |
-| `safety.review.enabled` | `false` | immediately |
+| `safety.review.enabled` | `false` | immediately; a project layer can only turn review on or lower the cadence |
 | `safety.review.target` | unset | immediately |
-| `safety.review.cadenceToolCalls` | unset | immediately |
+| `safety.review.cadenceToolCalls` | unset | immediately; a project layer can only turn review on or lower the cadence |
 | `safety.sandbox` | `auto` | next turn; `auto` runs native worker bash, run_script and verify, and the main session's bash, run_script and command-running verify checks at autonomy `default`, under bubblewrap on Linux when available, or under a `sandbox-exec` seatbelt profile on macOS, whose profile is unverified; `required` refuses worker commands without a sandbox and also sandboxes yolo commands; `off` never sandboxes; a project layer can only tighten it |
 | `safety.sandboxNetwork` | `false` | next dispatch; `true` gives sandboxed worker commands network access, which workers holding `web_fetch` already get; a project layer can only set `false` |
 | `safety.scratchRoots` | `[]` | immediately; user layer only; extra directories the main session's sandboxed commands and typed `write` and `edit` calls may write at autonomy `default` without asking, where its deletes run as they do in the workspace |
@@ -402,7 +402,7 @@ A target binds an id to a registered runtime, endpoint/auth, model defaults, and
 
 The `lmstudio-native` and `ollama-native` runtime ids were removed in 0.5.6, and nothing aliases them back. A target that still names one stays unregistered, and `clio-coder doctor`, `targets use`, `run`, dispatch, `configure` and interactive startup refuse it with ``runtime '<id>' was removed in 0.5.6; set `runtime: <replacement>` on this target in settings.yaml`` ([retired-runtimes.ts](../../src/domains/providers/retired-runtimes.ts)). Update that target's `runtime` to `lmstudio` or `ollama`, respectively; `doctor --fix` does not rewrite it. `clio-coder run --api-key` exits 1 with the same message for such a target, and exits 2 when no target is named or the named target id is unknown.
 
-Keep credentials in user settings or the credential store. Project settings deliberately discard credential-bearing keys. A target that a project layer points at a non-loopback URL is never sent your stored or environment keys, on turns, side calls, target probes or System One engines; the run fails naming why, and only a `--api-key` override still applies to it. A target naming `auth.apiKeyRef` reads from the environment only `auth.apiKeyEnvVar` or its runtime's own variable. Loopback URLs are unaffected.
+Keep credentials in user settings or the credential store. Project settings deliberately discard credential-bearing keys. A target that a project layer points at a URL is never sent your stored or environment keys, on turns, side calls, target probes or System One engines; the run fails naming why, and only a `--api-key` override still applies to it. A target naming `auth.apiKeyRef` reads from the environment only `auth.apiKeyEnvVar` or its runtime's own variable. A loopback URL is no exception when the target's runtime needs a credential; only runtimes that need none, such as Ollama, may point at loopback from a project.
 
 For ALCF, the `configure` wizard asks for a gateway URL and shows a
 Sophia example because the endpoint varies by cluster or resource.
