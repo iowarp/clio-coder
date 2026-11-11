@@ -165,3 +165,36 @@ test("a __proto__ key in a settings layer never reaches Object.prototype", async
 		home.restore();
 	}
 });
+
+test("Edit settings file keeps a trusted project layer trusted and refuses an untrusted one", async () => {
+	const { editSettingsFile } = await import("../../src/interactive/settings-file-edit.js");
+	const home = await isolateClioEnv("clio-project-edit-file-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		const config = join(workspace, ".clio-coder");
+		mkdirSync(config, { recursive: true });
+		const teamFile = join(config, "settings.yaml");
+		writeFileSync(teamFile, "interface:\n  outputDetail: compact\n");
+		const notices: string[] = [];
+		const edit = (text: string): void =>
+			editSettingsFile("project", {
+				cwd: workspace,
+				suspendTerminal: (run) => run(),
+				notice: (level, line) => notices.push(`${level}: ${line}`),
+				resolveEditor: () => "editor",
+				editExternally: () => ({ ok: true, text }),
+			});
+		edit("interface:\n  outputDetail: compact\n  smoothStreaming: off");
+		match(notices.at(-1) ?? "", /^warning: Project settings are untrusted/);
+		strictEqual(readFileSync(teamFile, "utf8"), "interface:\n  outputDetail: compact\n");
+		approve(workspace);
+		edit("interface:\n  outputDetail: compact\n  smoothStreaming: off");
+		match(notices.at(-1) ?? "", /^success: Saved/);
+		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
+		const effective = readLayeredSettings(workspace).settings;
+		strictEqual(effective.interface.outputDetail, "compact");
+		strictEqual(effective.interface.smoothStreaming, "off");
+	} finally {
+		home.restore();
+	}
+});

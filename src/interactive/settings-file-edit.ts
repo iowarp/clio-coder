@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "../
 import { editTextExternally, resolveExternalEditor } from "../core/external-editor.js";
 import { clioProjectRoot } from "../core/project-root.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
+import { captureProjectSurface, recordProjectSurfaceTrust } from "../core/workspace-trust.js";
 import { diffSettings } from "../domains/config/classify.js";
 
 export type SettingsFileScope = "user" | "project";
@@ -66,6 +67,17 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 		deps.notice("info", `No editor is set (VISUAL or EDITOR). The settings file is ${file}`);
 		return;
 	}
+	// Project settings load only while their trust digest matches. An edit to an
+	// untrusted file would never apply, and an edit to a trusted one must carry
+	// the trust forward or the whole project layer drops out on the next read.
+	const trustBefore = scope === "project" ? captureProjectSurface(deps.cwd, "settings") : null;
+	if (trustBefore && trustBefore.verdict !== "trusted") {
+		deps.notice(
+			"warning",
+			`Project settings are ${trustBefore.verdict} here, so an edit would not apply. Review them with clio-coder config trust settings first.`,
+		);
+		return;
+	}
 	const original = existsSync(file) ? readFileSync(file, "utf8") : null;
 	const draft = original ?? (scope === "user" ? DEFAULT_SETTINGS_YAML : "");
 	const result = deps.suspendTerminal(() => (deps.editExternally ?? editTextExternally)(draft, editor, ".yaml"));
@@ -88,8 +100,16 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 		withSettingsLock(() => {
 			const current = existsSync(file) ? readFileSync(file, "utf8") : null;
 			if (current !== original) throw new Error("the file changed while the editor was open; edit it again");
+			if (trustBefore && captureProjectSurface(deps.cwd, "settings").contentHash !== trustBefore.contentHash) {
+				throw new Error("project settings changed while the editor was open; edit it again");
+			}
 			mkdirSync(dirname(file), { recursive: true });
 			safeResourceWrite(file, next, { encoding: "utf8", mode: SETTINGS_FILE_MODE, backup: original !== null });
+			if (trustBefore) {
+				const after = captureProjectSurface(deps.cwd, "settings");
+				if (!after.contentHash) throw new Error("project settings could not be read back after saving");
+				recordProjectSurfaceTrust(deps.cwd, "settings", after.contentHash);
+			}
 		});
 	} catch (error) {
 		deps.notice("error", `Settings file not saved: ${error instanceof Error ? error.message : String(error)}`);
