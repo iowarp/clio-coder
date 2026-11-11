@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { after, before, mock, test } from "node:test";
 import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { isCopilotRefusal } from "../../src/core/copilot-refusal.js";
+import { createHostPolicyMessage } from "../../src/core/host-policy-message.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
 import { createCapacityAdmissionController } from "../../src/domains/dispatch/admission.js";
 import { classifyFailure } from "../../src/domains/dispatch/failure-classification.js";
@@ -701,6 +702,30 @@ test("a reminder-only follow-up rides on the tool result; a steer is sent once a
 		],
 	);
 	disposeCopilotConversations("steer-session");
+});
+
+test("a posture update rides the live session as one host turn and the transcript is not re-sent", async () => {
+	disposeCopilotConversations("posture-session");
+	const start = fake().sessions.length;
+	const sendsBefore = fake().sends?.length ?? 0;
+	const context: Context = { systemPrompt: "You are Clio.", messages: [user("first")] };
+	const turn1 = await step(context, "posture-session");
+	const sessionId = fake().sessions.at(-1)?.sessionId;
+	const policy = createHostPolicyMessage("p1", "Autonomy is now yolo.", 1) as unknown as Context["messages"][number];
+	const turn2 = await step({ ...context, messages: [user("first"), turn1, policy, user("second")] }, "posture-session");
+	await step(
+		{ ...context, messages: [user("first"), turn1, policy, user("second"), turn2, user("third")] },
+		"posture-session",
+	);
+	strictEqual(fake().sessions.length, start + 1, "the posture change kept the Copilot session");
+	strictEqual(fake().sessions.at(-1)?.sessionId, sessionId);
+	deepStrictEqual(
+		fake()
+			.sends?.slice(sendsBefore)
+			.map((entry) => entry.prompt),
+		["first", '<host-policy authority="clio-coder">\nAutonomy is now yolo.\n</host-policy>\n\nsecond', "third"],
+	);
+	disposeCopilotConversations("posture-session");
 });
 
 test("usage facts keep per-field presence and billing coverage", async () => {

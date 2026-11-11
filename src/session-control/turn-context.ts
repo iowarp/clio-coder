@@ -2791,10 +2791,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// route recompiles instead. gpt-5.3-codex-spark has no row in Pi's openai-codex catalog and so no flag;
 			// measured 2026-10-30, the ChatGPT Codex backend refuses the model outright ("not supported when using
 			// Codex with a ChatGPT account"), so nothing vouches for mid-conversation developer items there.
+			// The Copilot SDK route delivers the update as a host turn on its live session (copilot/stream.ts), which
+			// keeps the session instead of re-seeding the transcript under a recompiled system message.
 			const supportsPolicyUpdates =
 				deps.prompts.renderSessionPostureUpdate !== undefined &&
-				(agentRuntime.agent.state.model?.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)
-					?.supportsMidConvoSystemMessages === true;
+				(agentRuntime.agent.state.model?.api === "copilot-sdk" ||
+					(agentRuntime.agent.state.model?.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)
+						?.supportsMidConvoSystemMessages === true);
 			const routeKey = createHash("sha256")
 				.update(
 					JSON.stringify([

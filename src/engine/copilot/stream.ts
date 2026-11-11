@@ -41,7 +41,9 @@ import type {
 	ToolResultObject,
 } from "@github/copilot-sdk";
 import { COPILOT_REFUSAL_PREFIX } from "../../core/copilot-refusal.js";
+import { isHostPolicyMessage } from "../../core/host-policy-message.js";
 import type { EngineRegisteredApiProvider } from "../api-registry.js";
+import type { AgentMessage } from "../types.js";
 import {
 	COPILOT_CLIENT_NAME,
 	copilotAccount,
@@ -155,6 +157,8 @@ class Conversation {
 	synced: string[] = [];
 	state: ConversationState = "idle";
 	pendingToolCallIds: string[] = [];
+	/** Host policy updates this session has been sent, by id; each is delivered once as a host turn. */
+	readonly policiesSent = new Set<string>();
 	busy = false;
 	disposed = false;
 	lastUsed = Date.now();
@@ -1021,7 +1025,13 @@ async function runStep(
 	signal?.addEventListener("abort", onAbort, { once: true });
 	void stream.result().finally(() => signal?.removeEventListener("abort", onAbort));
 	const key = options?.sessionId ?? "default";
-	const systemPrompt = getCurrentSystemPrompt(context.messages);
+	// A host policy update (#423) is a posture change, not system text: the SDK fixes a session's system
+	// message at creation, so folding the update into it would discard the session and re-send the whole
+	// transcript. It is delivered as one host turn instead and the session is kept.
+	const policies = context.messages.filter((message) => isHostPolicyMessage(message as AgentMessage));
+	const systemPrompt = getCurrentSystemPrompt(
+		context.messages.filter((message) => !isHostPolicyMessage(message as AgentMessage)),
+	);
 	const tools = getCurrentTools(context.messages);
 	const systemHash = hash(systemPrompt);
 	const reasoningEffort = reasoningEffortFor(model, options as SimpleStreamOptions | undefined);
@@ -1111,6 +1121,16 @@ async function runStep(
 			active.model = model.id;
 			active.reasoningEffort = reasoningEffort;
 		}
+		const policyIds: string[] = [];
+		const policyText = policies
+			.flatMap((message) => {
+				const id = (message as AgentMessage & { clio_coder_policy: { id: string } }).clio_coder_policy.id;
+				if (active.policiesSent.has(id)) return [];
+				policyIds.push(id);
+				const text = typeof message.content === "string" ? message.content : textOf(message.content);
+				return [`<host-policy authority="clio-coder">\n${text}\n</host-policy>`];
+			})
+			.join("\n\n");
 		const toolsHash = toolsSignature(tools);
 		if (reused && active.toolsHash !== toolsHash) {
 			await active.session.setTools(declareTools(() => active, tools));
@@ -1135,9 +1155,10 @@ async function runStep(
 				.filter((text) => text.length > 0)
 				.join("\n\n");
 			const steerImages = after.flatMap((message) => imagesOf(message.content));
-			if (steer.length > 0 || steerImages.length > 0) {
+			const immediate = [policyText, steer].filter((text) => text.length > 0).join("\n\n");
+			if (immediate.length > 0 || steerImages.length > 0) {
 				await active.session.send({
-					prompt: steer,
+					prompt: immediate,
 					mode: "immediate",
 					...(steerImages.length > 0 ? { attachments: blobAttachments(steerImages) } : {}),
 				});
@@ -1173,10 +1194,11 @@ async function runStep(
 						};
 					})();
 			await active.session.send({
-				prompt: seed.prompt,
+				prompt: [policyText, seed.prompt].filter((text) => text.length > 0).join("\n\n"),
 				...(seed.images.length > 0 ? { attachments: blobAttachments(seed.images) } : {}),
 			});
 		}
+		for (const id of policyIds) active.policiesSent.add(id);
 	} catch (error) {
 		// The abort already settled the step; the cancelled opening has nothing more to report.
 		if (error instanceof CopilotOpenCancelled) return;
