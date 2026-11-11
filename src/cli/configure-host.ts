@@ -25,6 +25,8 @@ export interface ConfigureWizardHost {
 	 * asks its question again. Null when the wait ends.
 	 */
 	stoppableWait?(stop: (() => void) | null): void;
+	/** The host is the desktop app, which needs no copy of a shell's environment key. */
+	readonly desktop?: boolean;
 }
 
 const UNWRAPPED_COLUMNS = 100_000;

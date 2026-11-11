@@ -542,6 +542,49 @@ export function DetectedStep({ view, busy, send }: StepProps<Of<"detected">>) {
 	);
 }
 
+/** The routes Clio found before asking anything. Picking one goes straight to its test request. */
+export function OfferedStep({ view, busy, send }: StepProps<Of<"offered">>) {
+	return (
+		<Step
+			title="Clio found a way to reach a model."
+			lede={<p>Pick one and Clio sends it one short test message before it saves anything.</p>}
+			actions={
+				view.other ? (
+					<button
+						type="button"
+						className="wizard-quiet"
+						disabled={busy}
+						onClick={() => view.other && send(selectAnswer(view.prompt, view.other))}
+					>
+						{view.other.label}
+					</button>
+				) : null
+			}
+		>
+			<ul className="wizard-options">
+				{view.routes.map((choice) => (
+					<li key={choice.id}>
+						<button
+							type="button"
+							className="wizard-card"
+							data-tile
+							{...(choice.id === view.prompt.initial ? { "data-autofocus": true } : {})}
+							disabled={busy}
+							onClick={() => send(selectAnswer(view.prompt, choice))}
+						>
+							<span className="wizard-card__text">
+								<strong>{choice.label}</strong>
+								{choice.hint ? <small>{choice.hint}</small> : null}
+							</span>
+							<Icon name="chevronRight" />
+						</button>
+					</li>
+				))}
+			</ul>
+		</Step>
+	);
+}
+
 export function LoginMethodStep({ view, busy, send }: StepProps<Of<"login-method">>) {
 	return (
 		<Step
@@ -739,8 +782,10 @@ export function ReviewStep({ view, busy, send }: StepProps<Of<"review">>) {
 			title="Review what Clio could verify."
 			lede={
 				<p>
-					These are the checks Clio ran while you set this up. None of them sends a prompt, and nothing is saved until you
-					save.
+					These are the checks Clio ran while you set this up, without sending a prompt.{" "}
+					{view.tests
+						? "Save sends the model one short test message, and saves when it answers."
+						: "Nothing is saved until you save."}
 				</p>
 			}
 			actions={
@@ -753,7 +798,7 @@ export function ReviewStep({ view, busy, send }: StepProps<Of<"review">>) {
 							disabled={busy}
 							onClick={() => view.save && send(selectAnswer(view.prompt, view.save))}
 						>
-							Save and continue
+							{view.tests ? "Test and save" : "Save and continue"}
 						</button>
 					) : null}
 					{view.details ? (
@@ -785,6 +830,54 @@ export function ReviewStep({ view, busy, send }: StepProps<Of<"review">>) {
 						<li key={note}>{note}</li>
 					))}
 				</ul>
+			) : null}
+		</Step>
+	);
+}
+
+/** The model did not answer the test request. Nothing is saved yet. */
+export function TestFailedStep({ view, reason, busy, send }: StepProps<Of<"test-failed">> & { reason: string | null }) {
+	const run = (choice: Choice | null) => choice && send(selectAnswer(view.prompt, choice));
+	const quiet = (choice: Choice | null) =>
+		choice ? (
+			<button type="button" className="wizard-quiet" disabled={busy} onClick={() => run(choice)}>
+				{choice.label}
+			</button>
+		) : null;
+	return (
+		<Step
+			title="The model did not answer the test message."
+			lede={
+				<>
+					{view.fix ? <p>{view.fix}</p> : null}
+					<p>Nothing is saved yet.</p>
+				</>
+			}
+			actions={
+				<>
+					{view.retry ? (
+						<button
+							type="button"
+							className="primary wizard-button"
+							data-autofocus
+							disabled={busy}
+							onClick={() => run(view.retry)}
+						>
+							Try again
+						</button>
+					) : null}
+					{quiet(view.change)}
+					{quiet(view.model)}
+					{quiet(view.details)}
+					{quiet(view.save)}
+					{quiet(view.cancel)}
+				</>
+			}
+		>
+			{reason ? (
+				<p className="wizard-problem" data-tone="warn" role="status">
+					{reason}
+				</p>
 			) : null}
 		</Step>
 	);

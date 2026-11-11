@@ -126,6 +126,8 @@ export type StepView =
 	| (Base & { kind: "oauth-code"; prompt: TextPrompt })
 	| (Base & { kind: "server"; prompt: TextPrompt; title: string; guidance: readonly string[] })
 	| (Base & { kind: "detected"; prompt: SelectPrompt; served: string; options: readonly Choice[] })
+	/** The routes Clio found before the first question, best first, and the way out to set up something else. */
+	| (Base & { kind: "offered"; prompt: SelectPrompt; routes: readonly Choice[]; other: Choice | null })
 	| (Base & { kind: "login-method"; prompt: SelectPrompt; provider: string; options: readonly Choice[] })
 	| (Base & {
 			kind: "model";
@@ -150,9 +152,23 @@ export type StepView =
 			facts: readonly ReviewFact[];
 			notes: readonly string[];
 			verified: boolean;
+			/** Save sends the test request before it saves. */
+			tests: boolean;
 			save: Choice | null;
 			details: Choice | null;
 			back: Choice | null;
+	  })
+	| (Base & {
+			kind: "test-failed";
+			prompt: SelectPrompt;
+			/** What to change, in the CLI's words. */
+			fix: string | null;
+			retry: Choice | null;
+			change: Choice | null;
+			model: Choice | null;
+			save: Choice | null;
+			details: Choice | null;
+			cancel: Choice | null;
 	  })
 	| (Base & {
 			kind: "details";
@@ -170,7 +186,14 @@ export type WizardView =
 	| { kind: "starting" }
 	| StepView
 	| (Base & { kind: "working"; label: string; signIn: SignIn | null })
-	| (Base & { kind: "saved"; summary: readonly string[]; warnings: readonly string[]; verified: boolean })
+	| (Base & {
+			kind: "saved";
+			summary: readonly string[];
+			warnings: readonly string[];
+			verified: boolean;
+			/** How the test request went, as `answered in 0.8 s`; null when none answered. */
+			tested: string | null;
+	  })
 	| { kind: "failed"; problem: string }
 	| { kind: "cancelled" };
 
@@ -215,6 +238,7 @@ function splitModel(label: string): { id: string; name: string | null } {
 }
 
 const VERIFIED_ENDPOINT = /reachable/iu;
+const SAVE_TESTS = "Save sends one short test message first.";
 const UNVERIFIED = /not verified|no passive check|not reachable|unverified/iu;
 
 function reviewFacts(lines: readonly string[]): { facts: ReviewFact[]; notes: string[]; verified: boolean } {
@@ -327,6 +351,32 @@ export function stepFor(prompt: Prompt): StepView {
 				provider: method[1] ?? "",
 				options: prompt.choices,
 			};
+		if (title === "Clio found a way to reach a model:") {
+			const other = byLabel(prompt, /^Set up something else$/u);
+			return {
+				kind: "offered",
+				stage: "provider",
+				scene: "focus",
+				prompt,
+				routes: prompt.choices.filter((choice) => choice !== other),
+				other,
+			};
+		}
+		if (title === "What do you have?") return { kind: "generic", stage: "provider", scene: "focus", prompt };
+		if (title === "The test request failed")
+			return {
+				kind: "test-failed",
+				stage: "test",
+				scene: "inspect",
+				prompt,
+				fix: rest(prompt)[0] ?? null,
+				retry: byLabel(prompt, /^Try again$/u),
+				change: byLabel(prompt, /^Change the key or address$/u),
+				model: byLabel(prompt, /^Choose a different model$/u),
+				save: byLabel(prompt, /^Save anyway$/u),
+				details: byLabel(prompt, /machine details$/u),
+				cancel: byLabel(prompt, /^Cancel setup$/u),
+			};
 		if (title.startsWith("That URL is serving "))
 			return {
 				kind: "detected",
@@ -362,7 +412,9 @@ export function stepFor(prompt: Prompt): StepView {
 				manual: byLabel(prompt, /^Enter an unverified model ID$/u),
 			};
 		if (title === "Review what Clio could verify") {
-			const { facts, notes, verified } = reviewFacts(rest(prompt));
+			const lines = rest(prompt);
+			const tests = lines.includes(SAVE_TESTS);
+			const { facts, notes, verified } = reviewFacts(lines.filter((line) => line !== SAVE_TESTS));
 			return {
 				kind: "review",
 				stage: "test",
@@ -371,6 +423,7 @@ export function stepFor(prompt: Prompt): StepView {
 				facts,
 				notes,
 				verified,
+				tests,
 				save: byLabel(prompt, /^Save/u),
 				details: byLabel(prompt, /machine details$/u),
 				back: byLabel(prompt, /^Back$/u),
@@ -417,11 +470,21 @@ export interface Recap {
 	readonly value: string;
 }
 
+export interface TestReading {
+	readonly state: "answered" | "failed";
+	/** `answered in 0.8 s`, or the CLI's line naming why the model did not answer. */
+	readonly text: string;
+}
+
 export interface ReadMessages {
 	/** The route the CLI took for a returning user without asking: `Chat: openai / gpt-6-luna from OPENAI_API_KEY.` */
 	readonly chat: string | null;
 	readonly signIn: SignIn | null;
 	readonly probe: ProbeReading | null;
+	/** The last test request's outcome, when one finished. */
+	readonly test: TestReading | null;
+	/** The CLI's last line says it is waiting on the test request. */
+	readonly testing: boolean;
 	readonly recap: readonly Recap[];
 	readonly saved: readonly string[];
 	readonly warnings: readonly string[];
@@ -432,6 +495,8 @@ export interface ReadMessages {
 const RECAP_LABELS = /^(Source|Provider|URL|Credential|Model|Thinking|Context|Colleague|Detected)\s{2,}(.*\S)\s*$/u;
 const SIGN_IN_URL = /^\s*Open:\s*(https?:\/\/\S+)\s*$/u;
 const CHAT_ROUTE = /^Chat: \S+ \/ .+ from .+\.$/u;
+const TESTING = /^Testing .+ \.\.\.$/u;
+const TEST_ANSWERED = /^✓\s*Testing .+ \.\.\. (answered in .+?)\.?$/u;
 
 /** A sign-in link is only offered when it is a plain http(s) URL without credentials in it. */
 export function safeUrl(text: string): string | null {
@@ -449,13 +514,23 @@ export function readMessages(messages: readonly string[]): ReadMessages {
 	let url: string | null = null;
 	let code: string | null = null;
 	let probe: ProbeReading | null = null;
+	let tested: TestReading | null = null;
 	const recap: Recap[] = [];
 	const saved: string[] = [];
 	const warnings: string[] = [];
 	const other: string[] = [];
 	for (const raw of new Set(messages)) {
 		const line = raw.trim();
-		if (line === "" || INTRO.test(line)) continue;
+		if (line === "" || INTRO.test(line) || TESTING.test(line)) continue;
+		const answered = TEST_ANSWERED.exec(line);
+		if (answered) {
+			tested = { state: "answered", text: answered[1] ?? "" };
+			continue;
+		}
+		if (/^\S.* did not answer: /u.test(line)) {
+			tested = { state: "failed", text: line };
+			continue;
+		}
 		if (CHAT_ROUTE.test(line)) {
 			chat = line;
 			continue;
@@ -484,11 +559,26 @@ export function readMessages(messages: readonly string[]): ReadMessages {
 			continue;
 		}
 		if (probe?.text === line) continue;
-		if (/Credentials are stored with mode 0600|reported no context window|did not complete|not stored/iu.test(line))
+		if (
+			/Credentials are stored with mode 0600|reported no context window|did not complete|not stored|saved without a passed test request/iu.test(
+				line,
+			)
+		)
 			warnings.push(line);
 		else other.push(line);
 	}
-	return { chat, signIn: url || code ? { url, code } : null, probe, recap, saved, warnings, other };
+	const testing = TESTING.test(messages.at(-1)?.trim() ?? "");
+	return {
+		chat,
+		signIn: url || code ? { url, code } : null,
+		probe,
+		test: tested,
+		testing,
+		recap,
+		saved,
+		warnings,
+		other,
+	};
 }
 
 const SUMMARY_LABELS: Readonly<Record<string, string>> = {
@@ -517,6 +607,7 @@ export function sentence(text: string): string {
 /** What the child is doing while no prompt is open, in the words the setup shows. */
 export function workingLabel(read: ReadMessages, after: WizardView | null = null): string {
 	if (read.signIn) return "Waiting for you to finish signing in";
+	if (read.testing) return "Sending the model a test message";
 	// The answer just sent says what the CLI is doing with it better than its messages do.
 	switch (after && "kind" in after ? after.kind : null) {
 		case "server":
@@ -571,8 +662,12 @@ export function viewFor(state: SetupState | null, previous: WizardView | null): 
 				// The CLI says nothing after it saves, so the summary is the choices made on the way.
 				summary: [...savedSummary(read.recap), ...read.saved],
 				warnings: read.warnings,
+				// A model that answered the test request is the strongest check there is; without one, the passive checks decide.
 				verified:
-					read.probe?.state === "reachable" && read.recap.some((row) => row.label === "Model" && row.value.trim() !== ""),
+					read.test === null
+						? read.probe?.state === "reachable" && read.recap.some((row) => row.label === "Model" && row.value.trim() !== "")
+						: read.test.state === "answered",
+				tested: read.test?.state === "answered" ? read.test.text : null,
 			};
 		case "cancelled":
 			return { kind: "cancelled" };

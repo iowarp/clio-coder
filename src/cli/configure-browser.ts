@@ -40,6 +40,7 @@ export async function runBrowserConfigure(
 		pending = undefined;
 	};
 	const host: ConfigureWizardHost = {
+		desktop: true,
 		signal: abort.signal,
 		onTargetSaved: () => {
 			saved = true;

@@ -424,7 +424,7 @@ A draft whose first character is `/` and that has one line opens the slash palet
 
 | Page | Content |
 | --- | --- |
-| Setup wizard (`/setup`) | Opens full window on a machine with no connection at all, and from Models for adding or repairing one. It runs `clio-coder configure --gui-host` as a child, with prompt replies on stdin. |
+| Setup wizard (`/setup`) | Opens full window on a machine with no connection at all, and from Models for adding or repairing one. It runs `clio-coder configure --gui-host` as a child, with prompt replies on stdin. A first run offers the routes Clio found; adding a connection ends on one short test message and saves when the model answers. |
 | Home (`/`) | Until a connection and a workspace both exist, two onboarding steps. Afterwards a composer that starts a task in the chosen project. |
 | All tasks (`/workspaces/:id/sessions`) | One project's open tasks and saved history, with search, a sort (`Newest activity`, `Oldest activity`, `Name A–Z`) and the filters `All work`, `Open sessions`, `Needs you` and `Saved history`. A saved row offers Rename, and a rename that fails reopens with the typed name for another try. A saved task that has ended and is not open offers Delete, which asks `Delete its saved conversation for good?` and puts focus on `Keep`. |
 | General | Appearance (system, light, dark), a link to connections, keyboard shortcuts, and version and installation details for this browser. |

@@ -188,6 +188,7 @@ export const coreTests = [
 
 export const guiTests = [
 	"report-dialog-model",
+	"setup-wizard-model",
 	"chat-composer",
 	"chat-approval",
 	"chat-interview",

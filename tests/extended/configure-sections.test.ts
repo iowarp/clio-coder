@@ -754,6 +754,51 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
+	it("offers to store an environment key for the desktop app only when the app is installed", async () => {
+		const answered: SendChatTest = async () => ({ ok: true, latencyMs: 800 });
+		const QUESTION = "Store it for the app too?";
+		const run = async (withApp: boolean, keys: string[]) => {
+			const testEnv = unconfiguredEnv();
+			if (withApp) {
+				const background = join(testEnv.env.CLIO_CODER_STATE_DIR ?? "", "gui", "background");
+				mkdirSync(background, { recursive: true });
+				writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: join(testEnv.root, "pkg") }));
+			}
+			try {
+				const result = await runWizard(
+					{ ...testEnv.env, ANTHROPIC_API_KEY: "sk-ant-env-key" },
+					[
+						{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
+						...(keys.length > 0 ? [{ waitFor: QUESTION, keys }] : []),
+					],
+					{ mode: "first", verify: answered },
+				);
+				strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+				const credentials = join(testEnv.settingsFile, "..", "credentials.yaml");
+				return {
+					screen: plainText(result.transcript()),
+					settings: readFileSync(testEnv.settingsFile, "utf8"),
+					credentials: existsSync(credentials) ? readFileSync(credentials, "utf8") : "",
+				};
+			} finally {
+				testEnv.cleanup();
+			}
+		};
+
+		const stored = await run(true, [DOWN, ENTER]);
+		ok(stored.screen.includes("The desktop app cannot see this shell's key."), stored.screen);
+		ok(stored.credentials.includes("sk-ant-env-key"), `the key is stored for the app:\n${stored.credentials}`);
+		match(stored.settings, /apiKeyEnvVar: ANTHROPIC_API_KEY/u, "the target still reads the variable first");
+
+		const declined = await run(true, [ENTER]);
+		ok(!declined.credentials.includes("sk-ant-env-key"), "No stores nothing");
+		match(declined.settings, /apiKeyEnvVar: ANTHROPIC_API_KEY/u);
+
+		const noApp = await run(false, []);
+		ok(!noApp.screen.includes(QUESTION), `no desktop app, no question:\n${noApp.screen}`);
+		ok(!noApp.credentials.includes("sk-ant-env-key"));
+	});
+
 	it("goes back from the third step without losing the first two", async () => {
 		const testEnv = unconfiguredEnv();
 		const server = await modelServer();

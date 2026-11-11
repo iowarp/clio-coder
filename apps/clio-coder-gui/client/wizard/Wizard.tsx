@@ -23,9 +23,11 @@ import {
 	LoginMethodStep,
 	ModelMissingStep,
 	ModelStep,
+	OfferedStep,
 	ProviderStep,
 	ReviewStep,
 	SignInStep,
+	TestFailedStep,
 	TextStep,
 	WelcomeStep,
 } from "./steps.js";
@@ -57,6 +59,8 @@ const CAPTIONS: Readonly<Record<StageId | "welcome" | "saved", string>> = {
 };
 
 const CAPTION_NO_MODELS = "Clio only checks the address. It never sends a prompt.";
+// Repair edits a saved connection without the test request; adding one ends on it.
+const CAPTION_TEST = "Clio sends the model one short test message before it saves.";
 
 /** A delay before the working screen replaces a step, so an answer the CLI takes a moment to accept does not flash. */
 const WORKING_DELAY_MS = 350;
@@ -323,6 +327,19 @@ export default function Wizard({
 					/>
 				);
 				break;
+			case "offered":
+				content = <OfferedStep key={view.prompt.id} view={view} {...common} />;
+				break;
+			case "test-failed":
+				content = (
+					<TestFailedStep
+						key={view.prompt.id}
+						view={view}
+						reason={read.test?.state === "failed" ? read.test.text : null}
+						{...common}
+					/>
+				);
+				break;
 			case "detected":
 				content = <DetectedStep key={view.prompt.id} view={view} {...common} />;
 				break;
@@ -419,7 +436,13 @@ export default function Wizard({
 				<aside className="wizard__stage" aria-label="Clio">
 					<Stage
 						scene={scene}
-						caption={view.kind === "model-missing" ? CAPTION_NO_MODELS : CAPTIONS[stageKey]}
+						caption={
+							view.kind === "model-missing"
+								? CAPTION_NO_MODELS
+								: stageKey === "test" && mode !== "repair"
+									? CAPTION_TEST
+									: CAPTIONS[stageKey]
+						}
 						working={workingLabel}
 					/>
 				</aside>

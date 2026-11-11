@@ -104,9 +104,11 @@ export function SavedStep({
 				{view.verified ? "You’re connected." : "Connection saved."}
 			</h1>
 			<p className="wizard-step__lede">
-				{view.verified
-					? "Clio reached the connection and has the model it will start on."
-					: "Availability is not verified. The settings are saved; check the connection again in Settings."}
+				{view.tested
+					? `The model answered a test message (${view.tested}).`
+					: view.verified
+						? "Clio reached the connection and has the model it will start on."
+						: "Availability is not verified. The settings are saved; check the connection again in Settings."}
 			</p>
 			{view.summary.length > 0 ? (
 				<ul className="wizard-checks" aria-label="What was saved">

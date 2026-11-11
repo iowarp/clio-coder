@@ -35,9 +35,16 @@ import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { isLoopbackUrl } from "../core/project-target-urls.js";
+import { clioStateDir } from "../core/xdg.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
+import { backgroundPackageRoot } from "../domains/lifecycle/install-plan.js";
 import type { Candidate } from "../domains/lifecycle/setup-status.js";
-import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
+import {
+	authStoragePath,
+	openAuthStorage,
+	resolveAuthTarget,
+	targetRequiresAuth,
+} from "../domains/providers/auth/index.js";
 import { prepareCopilotSdk } from "../domains/providers/copilot-setup.js";
 import type { ProviderSupportEntry } from "../domains/providers/index.js";
 import {
@@ -169,6 +176,8 @@ interface Answers {
 	tested?: { latencyMs: number } | "skipped" | undefined;
 	/** The review was opened from the test screen, so the review step shows it instead of testing at once. */
 	reviewing?: boolean | undefined;
+	/** The desktop app cannot read this shell's environment, so the key in `apiKeyEnv` is stored for it as well. */
+	storeKeyForApp?: boolean | undefined;
 }
 
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported" | "fix";
@@ -1612,7 +1621,7 @@ async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTe
 		if (outcome.ok) {
 			answers.tested = { latencyMs: outcome.latencyMs };
 			wizard.presenter.completedStep(`Testing ${label} ... answered in ${(outcome.latencyMs / 1000).toFixed(1)} s.`);
-			return "next";
+			return offerKeyForApp(wizard, answers);
 		}
 		const fix = chatTestFix(outcome, {
 			provider: runtime.displayName,
@@ -1645,6 +1654,38 @@ async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTe
 		}
 		return result.value;
 	}
+}
+
+/**
+ * The desktop app runs as a background service that never sees this shell's environment, so a route that
+ * reads its key from a variable would not work there. When the app is installed, the passed test asks once
+ * whether to store the key for it too. The target keeps reading the variable first.
+ */
+async function offerKeyForApp(wizard: Wizard, answers: Answers): Promise<StepOutcome> {
+	answers.storeKeyForApp = undefined;
+	const variable = answers.credential === "env" ? answers.apiKeyEnv : undefined;
+	if (wizard.host?.desktop || !variable || !process.env[variable]) return "next";
+	if (backgroundPackageRoot(clioStateDir()) === null) return "next";
+	const result = await wizard.select<boolean>({
+		heading: [
+			"",
+			chalk.bold("The desktop app cannot see this shell's key. Store it for the app too?"),
+			`Clio would store ${variable} unencrypted in ${shortenPath(authStoragePath())} (mode 0600).`,
+		],
+		choices: [
+			{ value: false, label: "No", hint: "the app asks for the key itself" },
+			{ value: true, label: "Yes, store it" },
+		],
+		railPrefix: wizard.rail,
+		backLabel: "back",
+		clearOnExit: true,
+		input: wizard.input,
+		output: wizard.output,
+	});
+	if (result.kind === "quit") return "quit";
+	if (result.kind === "back") return "back";
+	answers.storeKeyForApp = result.value;
+	return "next";
 }
 
 /** Where "Change the key or address" goes: the key screen, else the credential question, else the address. */
@@ -1986,6 +2027,27 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 				wizard.host
 					? "API key stored unencrypted (mode 0600). Any process running as you can read it. Edit the target and choose Environment variable to keep the key off disk."
 					: "API key stored unencrypted (mode 0600). Any process running as you can read it. Use --api-key-env <VAR> to keep the key off disk.",
+			);
+		}
+
+		const appKey = answers.storeKeyForApp && answers.apiKeyEnv ? process.env[answers.apiKeyEnv] : undefined;
+		if (appKey) {
+			const auth = openAuthStorage();
+			auth.setApiKey(resolveAuthTarget(descriptor, runtime).providerId, appKey);
+			if (
+				wizard.host
+					? auth.damageReason() !== null
+					: credentialWriteFailed(
+							auth,
+							`${answers.apiKeyEnv} was not stored for the desktop app; target '${targetId}' not saved`,
+						)
+			) {
+				if (wizard.host) presenter.fail("Credential not stored", auth.damageReason() ?? "unknown");
+				presenter.done("Nothing written");
+				return 1;
+			}
+			presenter.warn(
+				`${answers.apiKeyEnv} stored unencrypted (mode 0600) for the desktop app. Any process running as you can read it. ${targetId} still reads the variable first.`,
 			);
 		}
 
