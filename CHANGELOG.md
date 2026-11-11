@@ -19,6 +19,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Session transcripts, spilled tool output and `runs.json` are owner-only (0700 directories, 0600 files), and boot closes Clio Coder's existing state subdirectories that earlier versions created group- and world-readable. A group-shared home loses that access on upgrade; share a session with `clio-coder telemetry share` instead. `doctor` warns when the state or data root is open to other users, and `doctor --fix` tightens a root it can prove is Clio Coder's.
 - An older Clio Coder no longer restamps a home a newer one last used: the terminal asks before continuing (default no), `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set (`run --agent` goes on without restamping), and `doctor` names both versions and the `clio-coder` binaries on `PATH`. A home last used by 0.5.x gets its pending migrations at boot, a home that ran migrations under 0.5.5 or earlier is not mistaken for a newer one, and settings provisioned before the first launch (dotfiles, images, CI) are left as written.
 - A first launch on a home the installer scaffolded opens setup instead of saving the first route it detects, and a model server found on a local port is used only after you say yes. On Linux the question names the listener's owner and defaults to no when another user owns it.
+- A new home no longer downloads terminal panes on its first launch: Clio Coder says once that they are not installed, and `clio-coder panes install` adds them. A home that already has panes still updates them when the pinned version moves.
 - A target that names its key variable (`auth.apiKeyEnvVar`) uses that variable before the key `auth login` stored for its runtime, so two targets on one runtime no longer both send the stored key. When the variable is unset the stored key is used, and `auth status` and `doctor` say so. Targets with `auth.apiKeyRef`, targets that name no variable, and OAuth targets resolve as before.
 - `HTTPS_PROXY`, `HTTP_PROXY` and their lowercase forms now apply to model requests, discovery probes, OAuth refreshes and web fetches, and `doctor` shows the proxy in effect. `localhost`, `127.0.0.1` and `[::1]` always go direct. A `NO_PROXY` entry matches a host by exact name or as a domain suffix (`example.com`, `.example.com` and `*.example.com` all cover `api.example.com`), optionally with `:port`, and `NO_PROXY=*` turns the proxy off. CIDR ranges such as `192.168.0.0/16` and wildcards such as `192.168.*` are not honored; a CIDR range gets one stderr line naming it, and `doctor` does not list it as direct. A model server on a LAN address (LiteLLM, Ollama, llama.cpp) that went direct in 0.7.0 now goes through the proxy, with its credentials, unless `NO_PROXY` names its host or IP address exactly.
 - Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch` and the rest) run outside the shell sandbox behind the same approval as `ssh`: an ask at default, the judge at yolo. A script that calls `sbatch` itself stays contained and still fails there, and so does a workspace script named like one of these commands (`./sbatch`, `bin/ssh`). `/loop --command` and job poll commands get the environment `bash` gets (credentials scrubbed, `safety.sandboxPassEnv` honored) instead of an internal allowlist.
@@ -52,6 +53,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Concurrent `put` and `remove` calls on one blob are serialized across processes, so each record describes the bytes it stored, and a lock left by a process that died is broken. A `put` names its blob after the path that was approved, not a link target that changed afterwards. `stat` reports drift when a blob's bytes change under the same size and modification time, and `create` refuses an unknown class.
 - The built-in coder, researcher and scout workers can use `store` and `data` without extra setup, and reading a path that `store get` returned no longer asks. A weak model's `tag:blob` reference is read from the store instead of searched for in the working tree.
 - The store lives under the data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path. Its files are owner-only (0600 files, 0700 directories). `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing can recover it afterwards.
+- Writers that break the same stale store lock take turns, so only one of them holds the lock.
 
 ### Reports to the maintainers
 
@@ -91,10 +93,12 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - The Copilot route no longer counts cache-write tokens twice in input usage and totals, and Copilot's auto model, which reports a 0-token window, shows its context window as unknown instead of 0.
 - Per-session facts (Git state, the last session, the orientation time) moved out of the cached system prompt into the session's first message, and dispatched workers of one recipe get the same tool list whatever their task says, so prompt prefixes cache across sessions and workers. The system prompt no longer tells a session things that are false for it, such as `/rewind` in a headless run, and its safety section describes only the session's own situation: sandboxed, unsandboxed, or a worker with or without a shell.
 - The per-turn capability hint names only strongly matching capabilities, offers Clio Coder's own docs, library and configure capabilities only for questions about Clio Coder, and is left out when nothing fits.
+- The system prompt describes each capability once, with its example and usage note together, and lists the project's declared `verify` checks; the `verify` example uses one of them.
 - The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
 - A missing key, an unreachable model server or a missing model reads as one sentence that names the fix, the same in `doctor`, `run`, the TUI banner, a failed prompt and the desktop app.
 - First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first.
 - A lab or site can publish one setup file. `clio-coder configure --import <path-or-https-url>` shows where prompts will go, asks once and connects; first-run setup offers the same as "A setup file from my lab or team". The file may name only targets, the variable or sign-in profile each reads its key from, and the chat and fleet routes; a literal key or any other setting is refused.
+- The first launch sets up a model before it asks about the folder. The installer ends with the next step for your machine (a key or model server it found) and, while the launcher is not on `PATH`, a command that runs as printed.
 
 ### Shared folders and sessions
 
@@ -189,6 +193,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version.
 - `reset` and `uninstall` remove the data and cache directories of a `CLIO_CODER_HOME` home an earlier version created, instead of keeping them and exiting 1.
 - `clio-coder uninstall` and `reset` no longer delete a root they cannot prove is Clio Coder's own (for example `CLIO_CODER_CONFIG_DIR=~/.config`); it is kept and named, and `CLIO_CODER_HOME` set to the home directory is refused.
+- A new HPC clusters guide covers installing on a login node (old Node.js or glibc, a proxy, no internet) and connecting a model from there.
 
 ### Windows
 
@@ -226,6 +231,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - When a worker's MCP call goes to the judge, the judge sees the tool's trusted action class and description.
 - `tool.decided` journal records include the confirmation rule that raised an ask (`confirmationRuleId`, optional).
 - Materio no longer draws its "Next: /materio:identify-research" band in repositories without a non-empty `.research/`; it appears once you enter the lab bench or open a research project.
+- Extension runtimes no longer leave empty declared write-root directories (such as `.research/`) in a repository: Clio Coder removes the ones it created, if still empty, when the runtime stops.
 
 ### Release
 
@@ -260,6 +266,7 @@ Clio Coder 0.7.1 makes shared use of one folder safe, tightens the sandbox, give
 - `library list` names the installed version beside an available update, and a read-only agent's validation message names only the offending tools.
 - A long tool call no longer shows "No output from <model>" as the next model call starts, and a tool that prints nothing for minutes shows as running in the footer instead of "No output".
 - After a tool call the status no longer names the previous request's model, and a silent-wait row no longer says output arrived because of an earlier call's first byte.
+- A bash timeout says the command outlived its own limit, in human units, notes when it printed nothing, and says the shell still works; the test-run hint appears only for test commands.
 
 ### Internal
 
