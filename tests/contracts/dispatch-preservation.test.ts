@@ -495,6 +495,21 @@ test("an edit worker that changed files but reports it could not finish settles 
 	// Nothing changed is no work, not partial work; a report that opens with its result is a success.
 	strictEqual(workerPartialWorkDetail({ ...input, mutatedPathCount: 0 }), null);
 	strictEqual(workerPartialWorkDetail({ ...input, finalText: "Wired the flag. The parser cannot overflow." }), null);
+	// Partial means unfinished work: a finish it could not verify here is still a finish.
+	for (const finalText of [
+		"Unable to run the tests here; implemented the --strict flag and its parser branch.",
+		"Could not verify with the full suite (no network). Wired the flag.",
+		"I couldn't build the docs locally, but the flag is done.",
+	])
+		strictEqual(workerPartialWorkDetail({ ...input, finalText }), null, finalText);
+	match(
+		workerPartialWorkDetail({ ...input, finalText: "Unable to complete the CLI half; the parser is done." }) ?? "",
+		/partial/u,
+	);
+	match(
+		workerPartialWorkDetail({ ...input, finalText: "I couldn't implement the flag's help text." }) ?? "",
+		/partial/u,
+	);
 	strictEqual(preservesPartialResult("worker_partial_work", true), true);
 	const task = "Add the --strict flag to the CLI parser.";
 	strictEqual(

@@ -189,6 +189,15 @@ const PARTIAL_OPENING =
 	/^(?:(?:only\s+)?partial(?:ly)?\b|incomplete\b|(?:i\s+)?(?:did not|didn't|have not|haven't)\s+(?:finish|complete)|not\s+(?:all|everything|finished|complete)\b)/iu;
 
 /**
+ * With files changed, an inability counts as partial work only when what the worker could not do is the work itself.
+ * "Unable to run the tests here; implemented X" is a finish it could not verify, not an unfinished assignment.
+ */
+const UNFINISHED_INABILITY = new RegExp(
+	`${INABILITY_OPENING.source}\\s+(?:to\\s+)?(?:finish|complete|implement|fix|address|apply|do\\s+(?:all|everything|the\\s+rest|it))\\b`,
+	"iu",
+);
+
+/**
  * The worker's report (a mutation report's summary, else its final prose) and its opening.
  * Only a report that opens with its inability counts: "the parser cannot overflow" is not one.
  * A leading conventional-commit subject line ("fix(scope): ...") is the report's title, not its opening.
@@ -221,7 +230,7 @@ export function workerPartialWorkDetail(input: {
 		(input.mutatedPathCount ?? 0) > 0 || (input.mutatedPathCount === null && input.activity.mutatingSucceeded);
 	if (!changed) return null;
 	const { opening } = workerReportOpening(input.finalText);
-	if (!INABILITY_OPENING.test(opening) && !PARTIAL_OPENING.test(opening)) return null;
+	if (!UNFINISHED_INABILITY.test(opening) && !PARTIAL_OPENING.test(opening)) return null;
 	const reason = opening.split(/\r?\n/u)[0]?.trim() ?? "";
 	return `worker reported it did not finish the assignment, so its changes are a partial result${reason ? `: ${reason}` : ""}`;
 }
