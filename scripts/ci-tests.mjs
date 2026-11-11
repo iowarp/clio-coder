@@ -17,6 +17,7 @@ export const coreTests = [
 	"arcade-egg",
 	"check-lane-selection",
 	"handbook-bench",
+	"dispatch-plan-preview-newlines",
 	"reload-prompts",
 	"telemetry-share-linkability",
 	"mcp-extension-secret-mask",
