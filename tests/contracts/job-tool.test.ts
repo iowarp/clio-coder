@@ -779,6 +779,49 @@ describe("job ownership, scheduling and execution settlement", () => {
 		strictEqual(verdict.kind, "blocked");
 		strictEqual(host.list(owner).length, 0);
 	});
+	it("a turn the loop guard stopped is not an infrastructure failure, so three of them do not pause the job", async () => {
+		let occurrences = 0;
+		const chat = {
+			machineTurnAvailable: () => true,
+			async submitMachineTurn(request: import("../../src/session-control/job-turn-types.js").MachineTurnRequest) {
+				ok(request.onStarting());
+				occurrences++;
+				return {
+					status: "failed" as const,
+					turnId: request.executionId,
+					text: "",
+					reason: "the loop guard stopped it",
+					stoppedBy: "loop_guard" as const,
+				};
+			},
+		} as unknown as ChatLoop;
+		const runtime = createJobRuntime({
+			chat: () => chat,
+			isCurrent: () => true,
+			constraints: () => undefined,
+			safety: createWorkerSafety({ cwd: scratch.dir }),
+			autonomy: () => "default",
+			hostRefusal: () => null,
+			trustRefusal: () => null,
+			permissionPending: () => false,
+			runCommand: async () => {
+				throw new Error("unexpected command job");
+			},
+			notice: () => {},
+		});
+		const host = make(runtime);
+		const created = await host.create({ intervalMs: 1000, count: 5, runner: { kind: "main", prompt: "Poll" } }, owner);
+		for (let i = 0; i < 4; i++) {
+			host.tick();
+			for (let n = 0; n < 10; n++) await settle();
+			clock += 1000;
+		}
+		const job = present(host.get(created.id, owner));
+		ok(occurrences >= 3, `only ${occurrences} occurrences ran`);
+		strictEqual(job.state, "active", job.pendingReason ?? "");
+		strictEqual(job.consecutiveFailures, 0);
+	});
+
 	it("waits for an operator decision before attestation, then refuses changed or missing executables", async () => {
 		const host = make();
 		let blocked = true;

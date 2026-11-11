@@ -236,7 +236,8 @@ export function createJobRuntime(deps: JobRuntimeDeps): JobRunnerPorts {
 				result.usage && result.usage.cost.usd.unknownCount === 0
 					? result.usage.cost.usd.measured + result.usage.cost.usd.estimated
 					: null,
-			...(result.status === "failed" ? { errorClass: "infrastructure" as const } : {}),
+			// A stop by the loop guard or the tool budget is the turn's own conduct, not an outage to back off from.
+			...(result.status === "failed" && result.stoppedBy === undefined ? { errorClass: "infrastructure" as const } : {}),
 			...(result.stoppedBy === undefined ? {} : { stoppedBy: result.stoppedBy }),
 			...(result.retryAfterMs === undefined ? {} : { retryAfterMs: result.retryAfterMs }),
 		};
