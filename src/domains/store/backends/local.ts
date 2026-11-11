@@ -210,6 +210,33 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 		return target;
 	}
 
+	/** A blob cannot nest under another blob, nor take the name of a directory holding blobs. */
+	async function refuseNameConflict(tag: string, blob: string): Promise<void> {
+		const blobsDir = path.join(storeTagDir(cwd, tag), "blobs");
+		const segments = blob.split("/");
+		let current = blobsDir;
+		for (const [index, segment] of segments.entries()) {
+			current = path.join(current, segment);
+			const info = await lstatOrNull(current);
+			if (info === null) return;
+			const prefix = segments.slice(0, index + 1).join("/");
+			if (index < segments.length - 1 && !info.isDirectory()) {
+				throw new StoreRefusal(
+					"exists",
+					`Refusing blob ${blob} in tag ${tag}: it would nest under the existing blob ${prefix}.`,
+				);
+			}
+			if (index === segments.length - 1 && info.isDirectory()) {
+				const inside = (await readdir(current)).find((name) => !TEMP_SIBLING.test(name));
+				const example = inside === undefined ? "" : ` (for example ${blob}/${inside})`;
+				throw new StoreRefusal(
+					"exists",
+					`Refusing blob ${blob} in tag ${tag}: existing blobs are stored under that name${example}.`,
+				);
+			}
+		}
+	}
+
 	async function readTagFile(tag: string): Promise<TagFile> {
 		const dir = await requireTag(tag);
 		return JSON.parse(await readFile(path.join(dir, "tag.json"), "utf8")) as TagFile;
@@ -341,6 +368,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				}
 				if (!sourceInfo.isFile()) throw new StoreRefusal("not-a-file", `${source} is not a regular file.`);
 				if (signal?.aborted) throw new StoreRefusal("io", `The put of ${blob} into ${tag} was aborted.`);
+				await refuseNameConflict(tag, blob);
 				await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
 				// A link may have been planted between the check and mkdir; judge the path again.
 				await blobTarget(tag, blob);

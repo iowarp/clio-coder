@@ -147,6 +147,41 @@ test("local: a blob named *.tmp is listed; only the backend's own temp siblings 
 	}
 });
 
+test("local: a blob nested under a blob, or named like a blob directory, is refused cleanly", async () => {
+	const env = await isolateClioEnv("clio-coder-store-nest-");
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		const backend = await openStoreBackend(cwd);
+		const source = join(env.dir, "s");
+		writeFileSync(source, "s");
+		await backend.getOrCreateTag("t");
+		await backend.putBlobFromFile("t", "a", source);
+		await rejects(
+			backend.putBlobFromFile("t", "a/b", source),
+			(error: unknown) =>
+				error instanceof StoreRefusal &&
+				error.reason === "exists" &&
+				/blob a\b/u.test(error.message) &&
+				!/E(EXIST|NOTDIR|ISDIR)/u.test(error.message),
+		);
+		await backend.putBlobFromFile("t", "c/d", source);
+		await rejects(
+			backend.putBlobFromFile("t", "c", source),
+			(error: unknown) =>
+				error instanceof StoreRefusal &&
+				error.reason === "exists" &&
+				/c\/d/u.test(error.message) &&
+				!/E(EXIST|NOTDIR|ISDIR)/u.test(error.message),
+		);
+		deepStrictEqual((await backend.listBlobs("t", { offset: 0, limit: 10 })).names, ["a", "c/d"]);
+		deepStrictEqual(readdirSync(join(storeTagDir(cwd, "t"), "blobs")).sort(), ["a", "c"]);
+		deepStrictEqual(readdirSync(join(storeTagDir(cwd, "t"), "blobs", "c")), ["d"]);
+	} finally {
+		env.restore();
+	}
+});
+
 test("local: every store directory is 0700 and every file 0600 under umask 022", async () => {
 	const env = await isolateClioEnv("clio-coder-store-modes-");
 	const umask = process.umask(0o022);
