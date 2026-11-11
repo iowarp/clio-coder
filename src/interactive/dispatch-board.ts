@@ -1690,8 +1690,8 @@ function completedRunFailure(
 	row: Pick<DispatchBoardRow, "status" | "trust" | "completion" | "council" | "agentId">,
 ): CompletedRunCaveat | null {
 	if (row.status !== "completed") return null;
-	// A council synthesis composes its members' answers without tools by design, so no-tools says nothing there.
-	const synthesizes = row.council?.label === COUNCIL_SYNTHESIS_LABEL || row.agentId === COUNCIL_SYNTHESIS_AGENT;
+	// A council or poll answers in prose by design, members and synthesis alike, so no-tools says nothing there.
+	const synthesizes = row.council !== undefined || row.agentId === COUNCIL_SYNTHESIS_AGENT;
 	const { toolCalls, ...completion } = row.completion ?? {};
 	return completedRunCaveat({
 		...(row.trust !== undefined ? { trust: row.trust } : {}),

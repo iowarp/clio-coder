@@ -316,6 +316,8 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	};
 	const calls = new Map<string, { entry: unknown; cwd: string; tool: string }>();
 	const workers = new Map<string, ExitSummarySnapshot["workers"][number]>();
+	/** The run each assignment's latest attempt is, so a failover counts one worker. */
+	const assignmentRuns = new Map<string, string>();
 	const workerTools = new Map<string, ReadonlyArray<{ tool: string; count: number }>>();
 	const workerCapabilities = new Map<string, string>();
 	const noteModel = (target: string, model: string): void => {
@@ -349,6 +351,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		unattended.questions = unattended.permissions = 0;
 		calls.clear();
 		workers.clear();
+		assignmentRuns.clear();
 		workerTools.clear();
 		workerCapabilities.clear();
 	};
@@ -395,6 +398,13 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 		}),
 		deps.bus.subscribe("run.started", (run) => {
 			hasModelTurn = true;
+			// A failover's next attempt is the same worker: it replaces the attempt before it rather than counting again.
+			const assignment = (run as { assignmentId?: unknown }).assignmentId;
+			if (typeof assignment === "string") {
+				const earlier = assignmentRuns.get(assignment);
+				if (earlier !== undefined && earlier !== run.runId) workers.delete(earlier);
+				assignmentRuns.set(assignment, run.runId);
+			}
 			workers.set(run.runId, {
 				runId: run.runId,
 				agent: run.agentId,

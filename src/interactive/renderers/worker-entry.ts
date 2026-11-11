@@ -241,6 +241,14 @@ function isSynthesis(entry: WorkerEntryState): boolean {
 	return entry.council?.label === COUNCIL_SYNTHESIS_LABEL;
 }
 
+/**
+ * A council or poll answers a question in prose by design, members and synthesis alike, so a run that used no tool and
+ * no check did nothing it was asked to: neither fact marks its card.
+ */
+function answersByDesign(entry: WorkerEntryState): boolean {
+	return entry.council !== undefined;
+}
+
 /** A council synthesis that settled with some members unanswered: its own run succeeded, the council did not in full. */
 function councilShortfall(entry: WorkerEntryState): boolean {
 	if (!isSynthesis(entry) || entry.result?.outcome !== "succeeded") return false;
@@ -558,7 +566,7 @@ function actionLine(entry: WorkerEntryState, width: number, withRunId: boolean):
 				? needsInputUnit()
 				: councilShortfall(entry)
 					? theme.fg("warning", `${GLYPH.warn} partial`)
-					: outcomeUnit(entry.result, isSynthesis(entry));
+					: outcomeUnit(entry.result, answersByDesign(entry));
 	const elapsed =
 		entry.telemetry === undefined || entry.telemetry === null
 			? ""
@@ -682,7 +690,7 @@ function headerWord(entry: WorkerEntryState): string {
 	if (outcome === "timed_out") return "timed out";
 	if (outcome !== "succeeded" || settledAgainst(entry.result) !== null) return "failed";
 	if (councilShortfall(entry)) return "partial";
-	return settledRunCaveat(entry.result, isSynthesis(entry))?.kind === "no-tools" ? "no tools" : "done";
+	return settledRunCaveat(entry.result, answersByDesign(entry))?.kind === "no-tools" ? "no tools" : "done";
 }
 
 /** A settled council member's answer in one line; a running one has none yet, and its live line says what it does. */
@@ -713,7 +721,7 @@ function alignedHeader(
 					? theme.fg("error", GLYPH.error)
 					: councilShortfall(entry)
 						? theme.fg("warning", GLYPH.warn)
-						: settledMark(entry.result, isSynthesis(entry));
+						: settledMark(entry.result, answersByDesign(entry));
 	// A settled mark says its outcome in a word as well, padded so sibling cards keep one column, because a lone
 	// glyph is a colour cue NO_COLOR and a quick read both lose. A narrow row keeps the glyph alone.
 	// A running card's live line under the header says what it is doing, so only a settled header carries a word.
@@ -1045,8 +1053,13 @@ export function renderWorkerEntryLines(
 				);
 	// A council that only collected produced nothing of its own to check; each member's row is its own record.
 	const collected = isSynthesis(entry) && !isPending(entry) && parseCouncilReport(entry.text)?.synthesis.kind === "none";
+	// A council or poll answers in prose, so no recognized check is its design, not a gap to flag.
+	const unchecked =
+		answersByDesign(entry) &&
+		entry.result?.outcome === "succeeded" &&
+		entry.result.trust?.validationGrounding.state === "absent";
 	const qualityText =
-		isPending(entry) || stopping || (collected && !inspect)
+		isPending(entry) || stopping || ((collected || unchecked) && !inspect)
 			? null
 			: qualityRow(entry.result, entry.runId, inspect, reportsPassingCheck(entry));
 	const quality = qualityText === null ? [] : railLines(qualityText, "body", safeWidth);

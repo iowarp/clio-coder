@@ -3072,6 +3072,27 @@ describe("agent invocations", () => {
 		doesNotMatch(row, /\{"verdict"/u);
 	});
 
+	it("a read-only poll member that answered reads done, without a no-tools or no-check defect row", () => {
+		const member = card({
+			assignmentId: "p2",
+			agentId: "scout",
+			origin: "user",
+			council: { group: "g1", label: "p2", round: 1 },
+			text: '{"verdict":"yes","text":"97 is prime"}',
+			result: {
+				outcome: "succeeded",
+				durationMs: 4_000,
+				toolCalls: 0,
+				trust: { validationGrounding: { state: "absent", authority: { id: "none" } } } as never,
+			},
+		});
+		const plain = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("standard"), siblings: [member] })
+			.map(stripTerminalSequences)
+			.join("\n");
+		match(plain, /p2 · dynamo\/qwen ✓ done/u, plain);
+		doesNotMatch(plain, /no tools|no check ran/u, plain);
+	});
+
 	it("names a council that only collected by its size, not by a member's route", () => {
 		const report = {
 			members: [

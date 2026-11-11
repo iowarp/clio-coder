@@ -2527,6 +2527,42 @@ test("the exit summary counts a finished worker whose validation failed as Fleet
 	strictEqual(detail.match(/verifier validation failed/gu)?.length, 2, "the timeline says what each run's record says");
 });
 
+test("the exit summary counts a failed-over council member once, by its last attempt", async () => {
+	const { renderExitSummary } = await import("../../src/interactive/exit-summary.js");
+	const { createExitSummaryCollector } = await import("../../src/interactive/exit-summary-collector.js");
+	const { telemetryViewOf } = await import("../harness/telemetry-view.js");
+	const bus = createTelemetryHub();
+	const collector = createExitSummaryCollector({
+		bus,
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => telemetryViewOf("session-1", []), subscribe: () => () => {} },
+		} as never,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as never,
+		getTurns: () => 1,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	const start = (runId: string, assignmentId: string, attempt: number) =>
+		bus.emit("run.started", {
+			runId,
+			agentId: "scout",
+			targetId: "mini",
+			wireModelId: "m",
+			assignmentId,
+			attempt,
+		} as never);
+	for (const [attempt, runId] of ["broken-r0", "broken-r1", "broken-r2"].entries()) {
+		start(runId, "broken", attempt);
+		bus.emit("run.failed", { runId, agentId: "scout", outcome: "failed" } as never);
+	}
+	start("alpha-r0", "alpha", 0);
+	bus.emit("run.completed", { runId: "alpha-r0", agentId: "scout", outcome: "succeeded" } as never);
+	const card = renderExitSummary(collector.snapshot(), "standard", 120, false).join("\n");
+	match(card, /Workers: 1 failed · 1 succeeded/u, card);
+});
+
 test("a chained verify step naming no declared check seals no failed validation and leaves an earlier pass standing", async () => {
 	const { gatewayChainReceipts } = await import("../../src/tools/surface.js");
 	const chained = (unresolved: boolean) => ({
