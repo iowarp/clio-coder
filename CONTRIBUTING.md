@@ -34,6 +34,8 @@ pnpm run test
 | `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Check with TypeScript's own `tsc` as the reference, or run both and fail if their diagnostics differ. Use them when `typecheck` reports something surprising or stays silent about a type error you expect. |
 | `pnpm run lint` | Check formatting, source boundaries, local catalog pins and package hygiene. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
+| `pnpm run build` | Build `dist/` without emptying it: the previous build's chunks stay so a running Clio from this tree keeps working, and chunks no live process needs are pruned afterwards. |
+| `pnpm run build:release` | Clean build: empties `dist/` first. Use it for packaging, never in a tree another session runs from. |
 | `pnpm run test` | Compact source-based behavior checks; no build required. |
 | `pnpm run ci` | Local candidate qualification, reused for the same clean commit. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
