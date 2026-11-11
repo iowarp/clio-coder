@@ -14,8 +14,8 @@ import {
 	commandReference,
 	isRetiredCommandName,
 	lettersInOrder,
+	lineRunsBare,
 	matchCommandReference,
-	parseSlashCommand,
 	SETTINGS_AREA_IDS,
 	SUBCOMMANDS_REFUSED_DURING_TURN,
 } from "../session-control/slash-commands.js";
@@ -269,9 +269,8 @@ const bareRunCache = new Map<string, boolean>();
 function runsBare(name: string): boolean {
 	let known = bareRunCache.get(name);
 	if (known === undefined) {
-		const kind = parseSlashCommand(`/${name}`).kind;
-		// `run-usage`, `council-usage` and their kin only print the grammar.
-		known = kind !== "usage-error" && !kind.endsWith("-usage") && kind !== "unknown" && kind !== "unknown-command";
+		known =
+			commandReference({ includeHidden: true }).find((ref) => ref.name === name)?.runsBare ?? lineRunsBare(`/${name}`);
 		bareRunCache.set(name, known);
 	}
 	return known;

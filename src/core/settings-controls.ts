@@ -752,7 +752,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"chat.loopsUntilStopped": [
 		"Loops run until stopped",
-		"A /loop or job created without --count or --for keeps running until you run /loop stop or /loop cancel, or its --until condition matches. The cost ceiling and loop guard still apply.",
+		"A /loop or job created without --count or --for keeps running until you run /loop stop, or its --until condition matches. The cost ceiling and loop guard still apply.",
 	],
 	"systemOne.use": [
 		"Decision engine",

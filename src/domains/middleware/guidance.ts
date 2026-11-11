@@ -262,7 +262,7 @@ export const GUIDANCE_LESSONS: ReadonlyArray<GuidanceLesson> = [
 		id: "doctor",
 		feature: "/doctor",
 		score: (turn) => (harnessQuestionTopics(turn.prompt).includes("setup") ? SPECIFIC_SCORE : 0),
-		text: () => "/doctor checks this install, targets and credentials; /doctor deep adds live tool probes.",
+		text: () => "/doctor checks this install, targets and credentials; /doctor --deep adds live tool probes.",
 	},
 	{
 		id: "skills",

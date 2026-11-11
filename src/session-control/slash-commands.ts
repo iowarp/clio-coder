@@ -135,8 +135,8 @@ import type { WorkerEntryState } from "./worker-stream.js";
 type ShareCommandVariant = { kind: "share"; runId?: string; oldName?: true };
 type ArchiveCommandVariant =
 	| { kind: "archive-export"; path: string }
-	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
-	| { kind: "archive-usage"; subcommand?: "export" | "import"; error?: string };
+	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean };
+
 type ReportCommandVariant =
 	| { kind: "report"; report: SlashReportKind; summary?: string }
 	| { kind: "report-status" }
@@ -216,24 +216,16 @@ type SlashCommandVariant =
 	| ReportCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
-	| { kind: "run-usage" }
 	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean; readOnly?: boolean }
-	| { kind: "delegate-usage" }
 	| { kind: "btw"; question: string }
 	| { kind: "draft"; request: string; count: number }
-	| { kind: "draft-usage"; error?: string }
-	| { kind: "btw-usage" }
 	/** `/oracle <question>`: one read-only advisory run briefed on the record, never on the transcript. */
 	| { kind: "oracle"; question: string }
-	| { kind: "oracle-usage" }
 	/** `/council <task>`: one read-only council of roster members, dispatched through the dispatch tool. */
 	| { kind: "council"; task: string; options: CouncilCommandOptions; source: string }
-	| { kind: "council-usage"; reason?: string }
 	| { kind: "handoff"; goal: string }
-	| { kind: "handoff-usage" }
 	/** `/fleet run <playbook>`: compile the plan, show it for approval, dispatch on accept. */
 	| { kind: "fleet-run"; name: string; vars: Record<string, string>; resume?: string }
-	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "fleet" }
 	/** `/loop`: a bounded recurring job, or one of its control verbs. The words are parsed by loop-command.ts. */
 	| { kind: "loop"; command: LoopCommand }
@@ -260,14 +252,13 @@ type SlashCommandVariant =
 	/** Toggle zoom on a Clio-owned pane; the bare form targets the watch pane. */
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
-	| { kind: "panes-usage"; reason?: string; subcommand?: "peer"; listing?: boolean }
+	/** Bare `/panes peer`: the peers this machine can open. */
+	| { kind: "panes-peers" }
 	/** `/files`: toggle the files pane; `hide` parks it with Yazi running; `close` ends it; `pick` borrows it for one selection. */
 	| { kind: "files"; action: "toggle" | "open" | "hide" | "close" | "pick" }
-	| { kind: "files-usage"; reason: string }
 	/** `/music`: reveal or hide the music pane, or on, off, pause, next, status, station <name or url>. */
 	| { kind: "music"; action: "toggle" | "on" | "off" | "pause" | "next" | "status" }
 	| { kind: "music-station"; station: string }
-	| { kind: "music-usage"; reason: string }
 	| { kind: "thinking-set"; level: string }
 	| { kind: "thinking-picker" }
 	| { kind: "model" }
@@ -286,7 +277,12 @@ type SlashCommandVariant =
 	| { kind: "unknown"; text: string }
 	/** `text` is the whole line, so a token that turns out to name a prompt template keeps its arguments. */
 	| { kind: "unknown-command"; token: string; text: string }
-	| { kind: "usage-error"; command: string; reason: string }
+	/**
+	 * The one usage answer. `bare` marks a command typed with no arguments at all,
+	 * which is a question (info); anything else is a mistake (error). Dispatch
+	 * rejects both, so the composer keeps the line.
+	 */
+	| { kind: "usage-error"; command: string; reason?: string; subcommand?: string; bare?: true }
 	| { kind: "empty" };
 
 /** The `/usage [tab]` values, in the overlay's tab order. */
@@ -348,6 +344,9 @@ export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
 	{ name: "library reload", since: "0.8.0", to: { command: "/reload library" } },
 	{ name: "extensions reload", since: "0.8.0", to: { command: "/reload extensions" } },
 	{ name: "peer", since: "0.8.0", to: { command: "/panes peer" } },
+	{ name: "doctor deep", since: "0.8.0", to: { command: "/doctor --deep" } },
+	{ name: "loop list", since: "0.8.0", to: { command: "/loop" } },
+	{ name: "loop cancel", since: "0.8.0", to: { command: "/loop stop --now" } },
 ];
 
 /** A one-word retired name, typed bare, must reach `dispatchRetiredCommand` rather than a palette row. */
@@ -1342,8 +1341,8 @@ function formatRunVerificationBlock(runId: string, result: SlashRunVerification)
 	return `Verification for ${runId}: ${verdict}\n/view run:${runId} · press i for full details and checks.`;
 }
 
-/** The verb a command performs, in the order /help lists the groups. */
-export const SLASH_COMMAND_GROUPS = ["Work", "Inspect", "Configure", "Session"] as const;
+/** What a command is about, in the order /help lists the groups. */
+export const SLASH_COMMAND_GROUPS = ["Session", "Model and context", "Work", "Clio"] as const;
 export type SlashCommandGroup = (typeof SLASH_COMMAND_GROUPS)[number];
 
 export interface CommandAcpAdmission {
@@ -1440,24 +1439,11 @@ function fromArgsOrUsage(name: string, command: SlashCommand): (parsed: ParsedAr
 
 /** `/panes peer <peer> [brief] [--cwd <path>]`; a bare verb lists the peers this machine can open. */
 function panesPeerFromArgs(parsed: ParsedArgs): SlashCommand {
-	if (parsed.error)
-		return {
-			kind: "panes-usage",
-			subcommand: "peer",
-			...(parsed.positionals.length === 0 ? { listing: true } : {}),
-			// The one required argument is the peer, so name the choices rather than the parser's field.
-			reason:
-				parsed.positionals.length === 0
-					? `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt.`
-					: parsed.error,
-		};
+	if (parsed.positionals.length === 0) return { kind: "panes-peers" };
+	if (parsed.error) return usageError("panes", parsed.error, "peer");
 	const peer = parsed.positionals[0] ?? "";
 	if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
-		return {
-			kind: "panes-usage",
-			subcommand: "peer",
-			reason: `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}.`,
-		};
+		return usageError("panes", `${peer} is not a peer Clio can open. Name one of ${PANE_PEER_IDS.join(", ")}`, "peer");
 	}
 	const cwd = parsed.flags.get("--cwd");
 	return {
@@ -1470,6 +1456,31 @@ function panesPeerFromArgs(parsed: ParsedArgs): SlashCommand {
 
 function usageNotice(entry: BuiltinSlashCommand, subcommand?: string): string {
 	return usageLine(entry, subcommand).trim();
+}
+
+/** A usage answer for `command`, with the reason the line did not parse and the verb whose usage applies. */
+function usageError(command: string, reason?: string, subcommand?: string): SlashCommand {
+	return {
+		kind: "usage-error",
+		command,
+		...(reason !== undefined && reason.length > 0 ? { reason } : {}),
+		...(subcommand !== undefined ? { subcommand } : {}),
+	};
+}
+
+/**
+ * Prints the one usage answer and keeps the draft: a bare command is a
+ * question and gets its usage as information; anything else is a mistake and
+ * gets an error naming the reason, then the usage line.
+ */
+function answerUsage(command: Extract<SlashCommand, { kind: "usage-error" }>, ctx: SlashCommandContext): "rejected" {
+	const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
+	const usage = entry ? usageNotice(entry, command.subcommand) : `usage: /${command.command}`;
+	const reason = command.reason?.trim().replace(/\.+$/u, "") ?? "";
+	if (command.bare === true || reason.length === 0) ctx.notice("info", usage);
+	else ctx.notice("error", `${reason}. ${usage}`);
+	ctx.render?.();
+	return "rejected";
 }
 
 /**
@@ -1536,16 +1547,19 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: { reads: ["", "status"], sessionOnly: ["off"] },
 		description: "Show active conversation eggs or turn them off",
-		group: "Inspect",
+		group: "Clio",
 		hidden: true,
 		kinds: ["eggs"],
 		args: { subcommands: { status: {}, off: { positionals: [{ name: "id", required: false }] } } },
-		match(text) {
-			if (!/^\/eggs(?:\s|$)/u.test(text)) return null;
-			const match = /^\/eggs(?:\s+(status|off)(?:\s+([a-z][a-z0-9_-]*))?)?$/u.exec(text);
-			if (!match || (match[1] !== "off" && match[2]))
-				return { kind: "usage-error", command: "eggs", reason: "Use /eggs [status] or /eggs off [id]" };
-			return { kind: "eggs", action: match[1] === "off" ? "off" : "status", ...(match[2] ? { id: match[2] } : {}) };
+		fromArgs(parsed) {
+			const id = parsed.positionals[0];
+			if (
+				parsed.error ||
+				(parsed.subcommand === undefined && id !== undefined) ||
+				(id !== undefined && !/^[a-z][a-z0-9_-]*$/u.test(id))
+			)
+				return usageError("eggs", parsed.error ?? "Use /eggs [status] or /eggs off [id]");
+			return { kind: "eggs", action: parsed.subcommand === "off" ? "off" : "status", ...(id ? { id } : {}) };
 		},
 		handle(command, ctx) {
 			if (command.kind === "eggs") ctx.notice("info", ctx.eggsCommand?.(command.action, command.id) ?? "No active eggs.");
@@ -1556,7 +1570,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Reload settings, library resources and extension runtimes with one report",
-		group: "Session",
+		group: "Clio",
 		kinds: ["reload"],
 		args: { positionals: [{ name: "target", required: false, values: ["settings", "library", "extensions", "all"] }] },
 		fromArgs(parsed) {
@@ -1579,7 +1593,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Save and restart into this session and workspace",
-		group: "Session",
+		group: "Clio",
 		kinds: ["restart"],
 		args: {},
 		fromArgs: fromArgsOrUsage("restart", { kind: "restart" }),
@@ -1610,7 +1624,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 1,
 		acp: false,
 		description: "Open the help center for commands and keys",
-		group: "Inspect",
+		group: "Clio",
 		kinds: ["help"],
 		args: {
 			positionals: [{ name: "query", required: false, rest: true }],
@@ -1635,10 +1649,10 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "task", required: false, rest: true },
 			],
 		},
-		match(trimmed) {
+		fromArgs(parsed, trimmed) {
 			if (trimmed === "/skill") return { kind: "resources", tab: "skill" };
 			const command = parseSkillCommand(trimmed);
-			if (!command) return null;
+			if (!command) return usageError("skill", parsed.error);
 			// `off` is the one reserved name: an installed skill called `off`
 			// would still be reachable from the hub, and clearing the armed
 			// surface has to stay typeable without a second command.
@@ -1662,7 +1676,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: false,
 		description: "Browse skills, agents, prompts, playbooks, plugins and extensions, or review an install or removal",
-		group: "Inspect",
+		group: "Clio",
 		kinds: ["resources", "agents"],
 		// The same verbs as `clio-coder library`; each opens the review that command would apply.
 		subcommandDescriptions: {
@@ -1789,18 +1803,31 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: { reads: ["", "list"] },
 		description: "List MCP servers, or trust or untrust one by id",
-		group: "Inspect",
+		group: "Clio",
 		kinds: ["mcp"],
 		args: {
-			positionals: [
-				{ name: "action", required: false, values: ["list", "trust", "untrust"] },
-				{ name: "id", required: false },
-				{ name: "class", required: false },
-			],
+			subcommands: {
+				list: {},
+				trust: {
+					positionals: [
+						{ name: "id", required: true },
+						{ name: "class", required: false },
+					],
+				},
+				untrust: { positionals: [{ name: "id", required: true }] },
+			},
+		},
+		subcommandDescriptions: {
+			list: "List MCP servers (the bare command does the same)",
+			trust: "Trust a server, optionally for one action class",
+			untrust: "Withdraw trust from a server",
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "mcp", reason: parsed.error };
-			const [action = "list", id, actionClass] = parsed.positionals;
+			if (parsed.error) return usageError("mcp", parsed.error, parsed.subcommand);
+			if (parsed.subcommand === undefined && parsed.positionals.length > 0)
+				return usageError("mcp", `Unexpected argument: ${parsed.positionals[0]}`);
+			const action = parsed.subcommand ?? "list";
+			const [id, actionClass] = parsed.positionals;
 			return { kind: "mcp", argv: [action, ...(id ? [id] : []), ...(actionClass ? ["--action-class", actionClass] : [])] };
 		},
 		handle(command, ctx) {
@@ -1813,15 +1840,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "doctor",
 		rank: 3,
 		acp: { reads: [""] },
-		description: "Check this install; `deep` adds live tool probes and a contract dry run",
-		group: "Inspect",
+		description: "Check this install; `--deep` adds live tool probes and a contract dry run",
+		group: "Clio",
 		kinds: ["doctor"],
-		args: { positionals: [{ name: "deep", required: false, values: ["deep"] }] },
+		args: { flags: [{ name: "--deep" }] },
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "doctor", reason: parsed.error };
-			if (parsed.positionals[0] && parsed.positionals[0] !== "deep")
-				return { kind: "usage-error", command: "doctor", reason: "doctor accepts only deep" };
-			return { kind: "doctor", deep: parsed.positionals[0] === "deep" };
+			return { kind: "doctor", deep: parsed.flags.has("--deep") };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "doctor") return;
@@ -1853,7 +1878,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Review and approve a Clio Coder update, then restart when it succeeds",
-		group: "Configure",
+		group: "Clio",
 		kinds: ["upgrade"],
 		args: {},
 		fromArgs: fromArgsOrUsage("upgrade", { kind: "upgrade" }),
@@ -1870,7 +1895,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Inspect extensions, manage dev and muted ones for this session, or leave a workspace",
-		group: "Inspect",
+		group: "Clio",
 		// Harness navigation uses the shared overlay dispatcher, independently of component reload.
 		kinds: [],
 		args: {
@@ -1924,7 +1949,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		description: "Export or import a full Clio archive",
 		group: "Session",
 		hidden: true,
-		kinds: ["archive-export", "archive-import", "archive-usage"],
+		kinds: ["archive-export", "archive-import"],
 		subcommandDescriptions: { export: "Export a full Clio archive", import: "Import a full Clio archive" },
 		args: {
 			subcommands: {
@@ -1940,11 +1965,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs(parsed) {
 			const subcommand = parsed.subcommand === "export" || parsed.subcommand === "import" ? parsed.subcommand : undefined;
 			if (parsed.error) {
-				return {
-					kind: "archive-usage",
-					...(subcommand !== undefined ? { subcommand } : {}),
-					error: parsed.error,
-				};
+				return usageError("archive", parsed.error, subcommand);
 			}
 			const path = parsed.positionals[0];
 			if (subcommand === "export" && path !== undefined) return { kind: "archive-export", path };
@@ -1956,16 +1977,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					force: parsed.flags.has("--force"),
 				};
 			}
-			return { kind: "archive-usage", ...(subcommand !== undefined ? { subcommand } : {}) };
+			return usageError("archive", subcommand === undefined ? "Choose export or import" : undefined, subcommand);
 		},
 		handle(command, ctx) {
-			if (command.kind === "archive-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "archive");
-				if (!entry) return;
-				const usage = usageNotice(entry, command.subcommand);
-				ctx.notice("info", command.error ? `${command.error}\n${usage}` : usage);
-				return;
-			}
 			if (command.kind === "archive-export") {
 				if (!ctx.exportShareArchive) {
 					ctx.notice("error", "archive export is not wired");
@@ -2001,7 +2015,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: { streams: "dispatch" },
 		description: "Run a fleet agent on a task",
 		group: "Work",
-		kinds: ["run", "run-usage"],
+		kinds: ["run"],
 		args: {
 			parseFlagsBeforeRest: true,
 			flags: [
@@ -2022,7 +2036,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "run-usage" };
+			if (parsed.error) return usageError("run", parsed.error);
 			const options: RunCommandOptions = {};
 
 			const workerProfile = parsed.flags.get("--agent-profile");
@@ -2041,13 +2055,14 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 
 			const thinking = parsed.flags.get("--thinking");
 			if (typeof thinking === "string") {
-				if (!isRunThinkingLevel(thinking)) return { kind: "run-usage" };
+				if (!isRunThinkingLevel(thinking)) return usageError("run", `--thinking takes ${RUN_THINKING_LEVELS.join(", ")}`);
 				options.thinkingLevel = thinking;
 			}
 
 			const toolProfile = parsed.flags.get("--tool-profile");
 			if (typeof toolProfile === "string") {
-				if (!isToolProfileName(toolProfile)) return { kind: "run-usage" };
+				if (!isToolProfileName(toolProfile))
+					return usageError("run", `--tool-profile takes ${TOOL_PROFILE_NAMES.join(", ")}`);
 				options.toolProfile = toolProfile;
 			}
 
@@ -2064,13 +2079,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "run", agentId, task, options, source: trimmed };
 		},
 		handle(command, ctx) {
-			if (command.kind === "run-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "run");
-				if (entry) {
-					ctx.notice("info", usageNotice(entry));
-				}
-				return;
-			}
 			if (command.kind !== "run") return;
 			const { agentId, task, options } = command;
 			ctx.echoOperatorCommand?.(command.source);
@@ -2111,7 +2119,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: { streams: "dispatch" },
 		description: "Hand a task to an external ACP agent",
 		group: "Work",
-		kinds: ["delegate", "delegate-usage"],
+		kinds: ["delegate"],
 		args: {
 			parseFlagsBeforeRest: true,
 			flags: [{ name: "--share" }, { name: "--read-only" }],
@@ -2121,7 +2129,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		fromArgs(parsed, trimmed) {
-			if (parsed.error) return { kind: "delegate-usage" };
+			if (parsed.error) return usageError("delegate", parsed.error);
 			const agentId = parsed.positionals[0] ?? "";
 			const task = parsed.positionals[1] ?? "";
 			return {
@@ -2134,13 +2142,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			};
 		},
 		handle(command, ctx) {
-			if (command.kind === "delegate-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((e) => e.name === "delegate");
-				if (entry) {
-					ctx.notice("info", usageNotice(entry));
-				}
-				return;
-			}
 			if (command.kind !== "delegate") return;
 			ctx.echoOperatorCommand?.(command.source);
 			const share = command.share === true;
@@ -2178,21 +2179,16 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: false,
 		description: "Ask a side question that never enters the session transcript",
 		group: "Work",
-		kinds: ["btw", "btw-usage"],
+		kinds: ["btw"],
 		args: {
 			positionals: [{ name: "question", required: true, rest: true }],
 		},
 		fromArgs(parsed) {
 			const question = parsed.rest?.trim() ?? "";
-			if (parsed.error || question.length === 0) return { kind: "btw-usage" };
+			if (parsed.error || question.length === 0) return usageError("btw", parsed.error);
 			return { kind: "btw", question };
 		},
 		handle(command, ctx) {
-			if (command.kind === "btw-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "btw");
-				if (entry) ctx.notice("info", usageNotice(entry));
-				return;
-			}
 			if (command.kind !== "btw") return;
 			ctx.openSideQuestion?.(command.question);
 		},
@@ -2203,23 +2199,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: false,
 		description: "Draft 2-4 answers in parallel and pick the strongest",
 		group: "Work",
-		kinds: ["draft", "draft-usage"],
+		kinds: ["draft"],
 		args: {
 			positionals: [{ name: "request", required: true, rest: true }],
 		},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "draft-usage" };
+			if (parsed.error) return usageError("draft", parsed.error);
 			const read = parseDraftArgs(parsed.rest ?? "");
-			if ("error" in read) return { kind: "draft-usage", error: read.error };
+			if ("error" in read) return usageError("draft", read.error);
 			return { kind: "draft", request: read.request, count: read.count };
 		},
 		handle(command, ctx) {
-			if (command.kind === "draft-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "draft");
-				if (command.error) ctx.notice("warn", `/draft: ${command.error}`);
-				if (entry) ctx.notice("info", usageNotice(entry));
-				return;
-			}
 			if (command.kind !== "draft") return;
 			ctx.openDraft?.(command.request, command.count);
 		},
@@ -2230,21 +2220,16 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: { streams: "dispatch", injectsUserTurn: true, readOnlyRefuses: true },
 		description: "Have a read-only advisor challenge a question against settled decisions",
 		group: "Work",
-		kinds: ["oracle", "oracle-usage"],
+		kinds: ["oracle"],
 		args: {
 			positionals: [{ name: "question", required: true, rest: true }],
 		},
 		fromArgs(parsed) {
 			const question = parsed.rest?.trim() ?? "";
-			if (parsed.error || question.length === 0) return { kind: "oracle-usage" };
+			if (parsed.error || question.length === 0) return usageError("oracle", parsed.error);
 			return { kind: "oracle", question };
 		},
 		handle(command, ctx) {
-			if (command.kind === "oracle-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "oracle");
-				if (entry) ctx.notice("info", usageNotice(entry));
-				return;
-			}
 			if (command.kind !== "oracle") return;
 			const operation = (async () => {
 				await handleOracle(command.question, ctx);
@@ -2259,7 +2244,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: { streams: "dispatch", promptTurn: true },
 		description: "Ask several read-only agents the same task, then vote or synthesize",
 		group: "Work",
-		kinds: ["council", "council-usage"],
+		kinds: ["council"],
 		args: {
 			parseFlagsBeforeRest: true,
 			flags: [
@@ -2273,8 +2258,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		fromArgs(parsed, trimmed) {
 			const task = parsed.rest?.trim() ?? "";
-			if (parsed.error) return { kind: "council-usage", reason: parsed.error };
-			if (task.length === 0) return { kind: "council-usage" };
+			if (parsed.error) return usageError("council", parsed.error);
+			if (task.length === 0) return usageError("council", "Missing required argument: task");
 			const options: CouncilCommandOptions = {};
 			const roster = parsed.flags.get("--roster");
 			if (typeof roster === "string") options.roster = roster;
@@ -2283,7 +2268,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			const deadline = parsed.flags.get("--deadline");
 			if (typeof deadline === "string") {
 				const ms = parseCouncilDeadline(deadline);
-				if (ms === undefined) return { kind: "council-usage", reason: "--deadline takes seconds, Ns or Nm" };
+				if (ms === undefined) return usageError("council", "--deadline takes seconds, Ns or Nm");
 				options.memberDeadlineMs = ms;
 			}
 			const rounds = parsed.flags.get("--rounds");
@@ -2293,24 +2278,19 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				// refused after admission has already shown the operator a plan it
 				// cannot run, so the same bound is enforced where it was typed.
 				if (!Number.isInteger(parsedRounds) || parsedRounds < 1 || parsedRounds > COUNCIL_MAX_ROUNDS) {
-					return { kind: "council-usage", reason: `--rounds must be an integer 1..${COUNCIL_MAX_ROUNDS}` };
+					return usageError("council", `--rounds must be an integer 1..${COUNCIL_MAX_ROUNDS}`);
 				}
 				options.rounds = parsedRounds;
 			}
 			const synthesis = parsed.flags.get("--synthesis");
 			if (typeof synthesis === "string") {
-				if (!isCouncilSynthesisMode(synthesis)) return { kind: "council-usage" };
+				if (!isCouncilSynthesisMode(synthesis))
+					return usageError("council", `--synthesis takes ${COUNCIL_SYNTHESIS_MODES.join(", ")}`);
 				options.synthesis = synthesis;
 			}
 			return { kind: "council", task, options, source: trimmed };
 		},
 		handle(command, ctx) {
-			if (command.kind === "council-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "council");
-				const usage = entry ? usageNotice(entry) : "usage: /council <task>";
-				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
-				return;
-			}
 			if (command.kind !== "council") return;
 			// The question the round answers sits above its cards, as a /run's does.
 			ctx.echoOperatorCommand?.(command.source);
@@ -2329,7 +2309,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: {
 			injectsUserTurn: true,
 			injectsUserTurnExcept: LOOP_OBSERVE_VERBS,
-			reads: ["list", "status"],
+			reads: ["", "list", "status"],
 			// Resume restarts jobs that fire turns, so a ceiling does not admit it.
 			sessionOnly: ["stop", "cancel", "pause"],
 		},
@@ -2352,15 +2332,15 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "task", required: false, rest: true },
 			],
 			subcommands: {
-				list: {},
 				status: { positionals: [{ name: "id", required: false }] },
 				pause: { positionals: [{ name: "id", required: true }] },
 				resume: { positionals: [{ name: "id", required: true }] },
-				stop: { positionals: [{ name: "id", required: true }] },
-				cancel: { positionals: [{ name: "id", required: true }] },
+				stop: { flags: [{ name: "--now" }], positionals: [{ name: "id", required: false }] },
 			},
 		},
 		subcommandDescriptions: LOOP_SUBCOMMAND_DESCRIPTIONS,
+		// The one hand parser left: `--command program [args…]` takes the rest of the line as argv,
+		// which CommandArgsSpec cannot express, and parseLoopLine carries its own quoting and duration rules.
 		match(text) {
 			if (!/^\/loop(?:\s|$)/u.test(text)) return null;
 			const parsed = parseLoopLine(text.slice("/loop".length));
@@ -2391,7 +2371,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		aliases: [{ name: "cost" }, { name: "status" }],
 		acp: false,
 		description: "Show quota, credits, session tokens and cost, workers, and health",
-		group: "Inspect",
+		group: "Model and context",
 		kinds: ["usage"],
 		args: { positionals: [{ name: "tab", required: false, values: [...USAGE_TAB_NAMES] }] },
 		fromArgs(parsed) {
@@ -2418,7 +2398,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			sessionOnly: ["compact", "recall"],
 		},
 		description: "Show the context window, or manage session and project context",
-		group: "Inspect",
+		group: "Model and context",
 		kinds: ["context-view", "compact", "context-recover", "context-recall", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
 			compact: "Shrink the session context to free room",
@@ -2537,7 +2517,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: { subcommands: ["share"], injectsUserTurn: true },
 		description: "Show live fleet runs, share a worker result, or preview and run a playbook",
 		group: "Work",
-		kinds: ["fleet", "fleet-run", "fleet-run-usage", "share"],
+		kinds: ["fleet", "fleet-run", "share"],
 		subcommandDescriptions: {
 			run: "Preview and run a repo-owned playbook",
 			share: "Share a finished worker result with the main agent",
@@ -2562,19 +2542,19 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.subcommand !== "run") {
 				return parsed.error ? { kind: "usage-error", command: "fleet", reason: parsed.error } : { kind: "fleet" };
 			}
-			if (parsed.error) return { kind: "fleet-run-usage", reason: parsed.error };
+			if (parsed.error) return usageError("fleet", parsed.error, "run");
 			const name = parsed.positionals[0] ?? "";
-			if (name.length === 0) return { kind: "fleet-run-usage" };
+			if (name.length === 0) return usageError("fleet", "Missing required argument: playbook", "run");
 			const vars: Record<string, string> = {};
 			for (const pair of parsed.flagValues.get("--var") ?? []) {
 				const eq = pair.indexOf("=");
 				const key = eq < 0 ? "" : pair.slice(0, eq).trim();
-				if (key.length === 0) return { kind: "fleet-run-usage", reason: "--var requires key=value" };
+				if (key.length === 0) return usageError("fleet", "--var requires key=value", "run");
 				vars[key] = pair.slice(eq + 1);
 			}
 			const resume = parsed.flagValues.get("--resume")?.[0];
 			if (resume !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(resume)) {
-				return { kind: "fleet-run-usage", reason: "--resume requires a fleet run id" };
+				return usageError("fleet", "--resume requires a fleet run id", "run");
 			}
 			return { kind: "fleet-run", name, vars, ...(resume !== undefined ? { resume } : {}) };
 		},
@@ -2587,14 +2567,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind === "fleet") {
 				if (ctx.openFleetRuns) ctx.openFleetRuns();
 				else ctx.notice("error", "Fleet Runs is not wired in this session");
-				return;
-			}
-			if (command.kind === "fleet-run-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "fleet");
-				const usage = entry
-					? usageNotice(entry, "run")
-					: "usage: /fleet run <playbook> [--var key=value ...] [--resume runId]";
-				ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
 				return;
 			}
 			if (command.kind !== "fleet-run") return;
@@ -2610,7 +2582,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show settled interview decisions and operator revisions",
-		group: "Inspect",
+		group: "Work",
 		kinds: ["decisions"],
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "decisions", reason: parsed.error };
@@ -2625,7 +2597,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show this project's research campaigns and their iteration timelines",
-		group: "Inspect",
+		group: "Work",
 		kinds: ["research"],
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "research", reason: parsed.error };
@@ -2648,7 +2620,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			readOnlyRefuses: ["add", "hand", "done", "drop"],
 		},
 		description: "Show the session task board, or manage project tasks",
-		group: "Inspect",
+		group: "Work",
 		kinds: ["tasks", "tasks-add", "tasks-hand", "tasks-done", "tasks-drop"],
 		subcommandDescriptions: {
 			add: "Log a project task without notifying the agent",
@@ -2741,7 +2713,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: { subcommands: ["seed"] },
 		description: "Inspect, promote, or seed task memory",
-		group: "Inspect",
+		group: "Model and context",
 		kinds: ["memory", "memory-seed"],
 		subcommandDescriptions: { seed: "Seed the task bank from the newest handoff" },
 		args: { subcommands: { seed: {} } },
@@ -2779,7 +2751,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: false,
 		description: "Browse session artifacts and verify run records",
-		group: "Inspect",
+		group: "Work",
 		kinds: ["view", "view-verify"],
 		args: {
 			positionals: [{ name: "filter", required: false, rest: true }],
@@ -2818,8 +2790,8 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show pane status, watch a run, open a utility pane or a coding peer",
-		group: "Inspect",
-		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-usage", "peer-pane"],
+		group: "Clio",
+		kinds: ["panes", "panes-show", "panes-open", "panes-zoom", "panes-close", "panes-peers", "peer-pane"],
 		args: {
 			subcommands: {
 				peer: {
@@ -2847,13 +2819,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		fromArgs(parsed) {
 			if (parsed.subcommand === "peer") return panesPeerFromArgs(parsed);
-			if (parsed.error) return { kind: "panes-usage", reason: parsed.error };
+			if (parsed.error) return usageError("panes", parsed.error, parsed.subcommand);
 			if (parsed.subcommand === "show") {
 				return { kind: "panes-show", target: parsed.positionals[0] ?? "" };
 			}
 			if (parsed.subcommand === "open") {
 				const rest = (parsed.rest ?? "").trim();
-				if (rest.length === 0) return { kind: "panes-usage", reason: "Missing required argument: preset-or-argv" };
+				if (rest.length === 0) return usageError("panes", "Missing required argument: preset-or-argv", "open");
 				const argv = rest.split(/\s+/).filter((token) => token.length > 0);
 				const first = argv[0] ?? "";
 				// A bare preset name is a preset; anything else is operator argv,
@@ -2872,40 +2844,39 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return { kind: "panes-close", target: parsed.positionals[0] ?? "all" };
 			}
 			if (parsed.positionals.length > 0) {
-				return { kind: "panes-usage", reason: `Unexpected argument: ${parsed.positionals[0]}` };
+				return usageError("panes", `Unexpected argument: ${parsed.positionals[0]}`);
 			}
 			return { kind: "panes" };
 		},
 		handle(command, ctx) {
-			const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
-			if (command.kind === "panes-usage") {
-				const listing = command.listing ? ctx.panes?.peers?.() : undefined;
-				if (listing && ctx.panes) {
-					// The bare verb answers "which agents would open here?" with what is on this machine.
-					const status = ctx.panes.status();
-					const width = Math.max(...listing.map((row) => row.peer.length));
-					const lines = [
-						status.available
-							? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
-							: `Peers: none can open now. ${status.reason}`,
-						...listing.map(
-							(row) =>
-								`  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
-						),
-						`  ${"Open one".padEnd(width)}  /panes peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
-					];
-					// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
-					ctx.io.stdout(`${lines.join("\n")}\n`);
-					ctx.render?.();
-					return;
+			if (command.kind === "panes-peers") {
+				const listing = ctx.panes?.peers?.();
+				if (!listing || !ctx.panes) {
+					return answerUsage(
+						{
+							kind: "usage-error",
+							command: "panes",
+							subcommand: "peer",
+							reason: `Name the coding agent to open beside Clio: ${PANE_PEER_IDS.join(", ")}. A brief after it becomes its first prompt`,
+						},
+						ctx,
+					);
 				}
-				// usageNotice trims the leading newline usageLine carries, so the reason
-				// and the usage line need their own separator or they run together as
-				// `Missing required argument: run-or-agentusage: /panes show ...`.
-				if (entry) {
-					const usage = usageNotice(entry, command.subcommand);
-					ctx.notice("info", command.reason ? `${command.reason}\n${usage}` : usage);
-				}
+				// The bare verb answers "which agents would open here?" with what is on this machine.
+				const status = ctx.panes.status();
+				const width = Math.max(...listing.map((row) => row.peer.length));
+				const lines = [
+					status.available
+						? "Peers: coding agents Clio can open in a pane beside this one. Clio does not track or review their work."
+						: `Peers: none can open now. ${status.reason}`,
+					...listing.map(
+						(row) => `  ${row.peer.padEnd(width)}  ${row.found ? "installed" : `not found; install ${row.binary} to use it`}`,
+					),
+					`  ${"Open one".padEnd(width)}  /panes peer <agent> [brief]; the brief becomes its first prompt, and --cwd <path> picks its folder`,
+				];
+				// One write is one block: a write per line drew a spacer between rows wherever a row wrapped.
+				ctx.io.stdout(`${lines.join("\n")}\n`);
+				ctx.render?.();
 				return;
 			}
 			const panes = ctx.panes;
@@ -3023,29 +2994,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show or hide the files pane; picks land in the composer as @ mentions",
-		group: "Inspect",
-		kinds: ["files", "files-usage"],
-		args: { positionals: [{ name: "action", required: false }] },
+		group: "Clio",
+		kinds: ["files"],
+		args: { subcommands: { open: {}, hide: {}, close: {}, pick: {} } },
 		subcommandDescriptions: {
 			open: "Open or reveal the files pane and move the keyboard into it",
 			hide: "Hide the files pane; Yazi keeps running and keeps its directory",
 			close: "Close the files pane and end Yazi",
 			pick: "Borrow the files pane for one selection, then close it",
 		},
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "files-usage", reason: parsed.error };
-			const action = parsed.positionals[0];
-			if (action === undefined) return { kind: "files", action: "toggle" };
-			if (action === "open" || action === "hide" || action === "close" || action === "pick" || action === "toggle") {
-				return { kind: "files", action };
+		fromArgs(parsed, trimmed) {
+			const action = parsed.subcommand;
+			if (action === "open" || action === "hide" || action === "close" || action === "pick") {
+				return parsed.error ? usageError("files", parsed.error, action) : { kind: "files", action };
 			}
-			return { kind: "files-usage", reason: `Unexpected argument: ${action}` };
+			// `toggle` is what the bare command does; it stays accepted though it is not listed.
+			if (/^\/files\s+toggle$/u.test(trimmed) || !parsed.error) return { kind: "files", action: "toggle" };
+			return usageError("files", parsed.error);
 		},
 		handle(command, ctx) {
-			if (command.kind === "files-usage") {
-				ctx.notice("info", `${command.reason}\nusage: /files [open|hide|close|pick]`);
-				return;
-			}
 			if (command.kind !== "files") return;
 			const panes = ctx.panes;
 			if (!panes) {
@@ -3090,13 +3057,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 3,
 		acp: false,
 		description: "Show or hide the focus-radio music pane (cliamp in a herdr dock)",
-		group: "Inspect",
-		kinds: ["music", "music-station", "music-usage"],
+		group: "Clio",
+		kinds: ["music", "music-station"],
 		args: {
-			positionals: [
-				{ name: "action", required: false },
-				{ name: "station", required: false, rest: true },
-			],
+			subcommands: {
+				on: {},
+				off: {},
+				pause: {},
+				next: {},
+				status: {},
+				station: { positionals: [{ name: "name-or-url", required: true, rest: true }] },
+			},
 		},
 		subcommandDescriptions: {
 			on: "Play, opening or revealing the music pane first",
@@ -3106,33 +3077,25 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			status: "Say what is playing",
 			station: "Play a stream URL or a station by name",
 		},
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "music-usage", reason: parsed.error };
-			const action = parsed.positionals[0];
-			if (action === undefined) return { kind: "music", action: "toggle" };
+		fromArgs(parsed, trimmed) {
+			const action = parsed.subcommand;
+			if (action === undefined) {
+				if (/^\/music\s+toggle$/u.test(trimmed) || !parsed.error) return { kind: "music", action: "toggle" };
+				return usageError("music", parsed.error);
+			}
 			if (action === "station") {
 				const station = parsed.rest?.trim() ?? "";
 				return station.length > 0
 					? { kind: "music-station", station }
-					: { kind: "music-usage", reason: "name a station or paste a stream URL" };
+					: usageError("music", "Name a station or paste a stream URL", "station");
 			}
-			if (
-				action === "on" ||
-				action === "off" ||
-				action === "pause" ||
-				action === "next" ||
-				action === "status" ||
-				action === "toggle"
-			) {
+			if (parsed.error) return usageError("music", parsed.error, action);
+			if (action === "on" || action === "off" || action === "pause" || action === "next" || action === "status") {
 				return { kind: "music", action };
 			}
-			return { kind: "music-usage", reason: `Unexpected argument: ${action}` };
+			return usageError("music", `Unexpected argument: ${action}`);
 		},
 		handle(command, ctx) {
-			if (command.kind === "music-usage") {
-				ctx.notice("info", `${command.reason}\nusage: /music [on|off|pause|next|status|station <name or url>]`);
-				return;
-			}
 			const music = ctx.music;
 			if (!music) {
 				ctx.notice(
@@ -3158,7 +3121,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: false,
 		description: "Set the chat thinking level",
-		group: "Configure",
+		group: "Model and context",
 		kinds: ["thinking-set", "thinking-picker"],
 		args: { positionals: [{ name: "level", required: false }] },
 		fromArgs(parsed) {
@@ -3189,7 +3152,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 1,
 		acp: false,
 		description: "Pick a model, or set one by name",
-		group: "Configure",
+		group: "Model and context",
 		kinds: ["model", "model-set"],
 		args: {
 			positionals: [{ name: "pattern", required: false, rest: true }],
@@ -3249,7 +3212,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		rank: 2,
 		acp: false,
 		description: "Run setup and apply saved changes to this session",
-		group: "Configure",
+		group: "Clio",
 		kinds: ["config"],
 		args: {},
 		fromArgs: fromArgsOrUsage("config", { kind: "config" }),
@@ -3271,7 +3234,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		aliases: [{ name: "login", args: "connections" }],
 		acp: false,
 		description: "Open interactive settings",
-		group: "Configure",
+		group: "Clio",
 		kinds: ["settings"],
 		args: {
 			positionals: [
@@ -3365,7 +3328,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			readOnlyRefuses: ["send", "forget"],
 		},
 		description: "Preview, then send a bug, feature request or question to Clio Coder's maintainers",
-		group: "Session",
+		group: "Clio",
 		kinds: ["report", "report-status", "report-send", "report-forget", "report-security"],
 		subcommandDescriptions: {
 			bug: "Report a bug; the summary becomes the title",
@@ -3463,21 +3426,16 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		acp: false,
 		description: "Hand this session's working state to a fresh session for a stated goal",
 		group: "Session",
-		kinds: ["handoff", "handoff-usage"],
+		kinds: ["handoff"],
 		args: {
 			positionals: [{ name: "goal", required: true, rest: true }],
 		},
 		fromArgs(parsed) {
 			const goal = parsed.rest?.trim() ?? "";
-			if (parsed.error || goal.length === 0) return { kind: "handoff-usage" };
+			if (parsed.error || goal.length === 0) return usageError("handoff", parsed.error);
 			return { kind: "handoff", goal };
 		},
 		handle(command, ctx) {
-			if (command.kind === "handoff-usage") {
-				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "handoff");
-				if (entry) ctx.notice("info", usageNotice(entry));
-				return;
-			}
 			if (command.kind !== "handoff") return;
 			ctx.startHandoff?.(command.goal);
 		},
@@ -3849,13 +3807,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		ctx.render?.();
 		return "rejected";
 	}
-	if (command.kind === "usage-error") {
-		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
-		const usage = entry ? ` ${usageNotice(entry)}` : "";
-		ctx.notice("error", `${command.reason}.${usage}`);
-		ctx.render?.();
-		return "rejected";
-	}
+	if (command.kind === "usage-error") return answerUsage(command, ctx);
 	if (command.kind === "retired") return dispatchRetiredCommand(command, ctx);
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return "rejected";
@@ -3873,6 +3825,24 @@ export interface CommandReferenceEntry {
 	args?: CommandArgsSpec;
 	/** Stable copy shown beside first-token subcommand completions. */
 	subcommandDescriptions?: Readonly<Record<string, string>>;
+	/** The bare command does something on its own; false means it only answers with its usage. */
+	runsBare: boolean;
+}
+
+/** Whether `line` does something on its own, judged by the real parser. */
+export function lineRunsBare(line: string): boolean {
+	const kind = parseSlashCommand(line).kind;
+	return kind !== "usage-error" && kind !== "unknown" && kind !== "unknown-command";
+}
+
+const RUNS_BARE = new Map<string, boolean>();
+function commandRunsBare(name: string): boolean {
+	let known = RUNS_BARE.get(name);
+	if (known === undefined) {
+		known = lineRunsBare(`/${name}`);
+		RUNS_BARE.set(name, known);
+	}
+	return known;
 }
 
 /** `includeHidden` is for ACP, which still admits hidden commands such as `/archive` and `/eggs`. */
@@ -3893,6 +3863,7 @@ export function commandReference(options: { includeHidden?: boolean } = {}): Rea
 				...(entry.aliases?.length ? { aliases: entry.aliases } : {}),
 				...(entry.args ? { args: entry.args } : {}),
 				...(entry.subcommandDescriptions ? { subcommandDescriptions: entry.subcommandDescriptions } : {}),
+				runsBare: commandRunsBare(entry.name),
 			};
 		});
 }

@@ -40,16 +40,19 @@ async function settle(): Promise<void> {
 describe("/doctor", () => {
 	it("is registered with an optional deep mode and nothing else", () => {
 		deepStrictEqual(parseSlashCommand("/doctor"), { kind: "doctor", deep: false });
-		deepStrictEqual(parseSlashCommand("/doctor deep"), { kind: "doctor", deep: true });
-		for (const input of ["/doctor fix", "/doctor deep extra"]) {
+		deepStrictEqual(parseSlashCommand("/doctor --deep"), { kind: "doctor", deep: true });
+		// The old positional answers for one release through the retired-name table.
+		strictEqual(parseSlashCommand("/doctor deep").kind, "retired");
+		for (const input of ["/doctor fix", "/doctor --deep extra"]) {
 			strictEqual(parseSlashCommand(input).kind, "usage-error", input);
 		}
 		const reference = commandReference().find((entry) => entry.name === "doctor");
-		strictEqual(reference?.group, "Inspect");
-		match(reference?.usage ?? "", /\/doctor \[deep\]/);
-		deepStrictEqual(BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "doctor")?.args?.positionals?.[0]?.values, [
-			"deep",
-		]);
+		strictEqual(reference?.group, "Clio");
+		match(reference?.usage ?? "", /\/doctor \[--deep\]/);
+		deepStrictEqual(
+			BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "doctor")?.args?.flags?.map((flag) => flag.name),
+			["--deep"],
+		);
 	});
 
 	it("renders the report the injected runner returns, at its level", async () => {
@@ -60,7 +63,7 @@ describe("/doctor", () => {
 				return { level: "warn", text: "doctor: 2 checks, 0 error(s), 1 warning(s)\nOK   a  b\nWARN c  d" };
 			},
 		});
-		dispatchSlashCommand(parseSlashCommand("/doctor deep"), ctx);
+		dispatchSlashCommand(parseSlashCommand("/doctor --deep"), ctx);
 		await settle();
 		deepStrictEqual(calls, [{ deep: true }]);
 		strictEqual(notices.length, 2);

@@ -36,7 +36,7 @@ for (const count of [0, 1, 2]) {
 			deepStrictEqual(invoked, [{ action: "cancel", job_id: "job-0" }]);
 		} else {
 			strictEqual(invoked.length, 0);
-			match(notices.join("\n"), count === 0 ? /No active loop/u : /job id.*\/loop list/u);
+			match(notices.join("\n"), count === 0 ? /No active loop/u : /job id.*\/loop to see/u);
 		}
 	});
 }

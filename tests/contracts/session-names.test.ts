@@ -93,7 +93,7 @@ test("rename parsing accepts full names and refuses explicit empty names", () =>
 	for (const input of ['/rename ""', "/rename ''", '/rename "   "', "/rename   "]) {
 		const command = parseSlashCommand(input);
 		assert.equal(command.kind, "usage-error");
-		if (command.kind === "usage-error") assert.match(command.reason, /empty or whitespace/);
+		if (command.kind === "usage-error") assert.match(command.reason ?? "", /empty or whitespace/);
 	}
 	assert.deepEqual(parseSlashCommand("/resume my experiment"), { kind: "resume", target: "my experiment" });
 });

@@ -17,7 +17,7 @@ import type { NoticeLevel } from "./notice-source.js";
  *   /loop <every> [--count N | --for DUR | --until-stopped] [--timeout DUR] <task...>
  *   /loop <every> [--count N | --for DUR | --until-stopped] [--timeout DUR] [--until PRED]
  *         [--on-match notice|main_turn] [--follow-up TEXT] --command <program> [args...]
- *   /loop list | status [id] | pause <id> | resume <id> | stop <id> | cancel <id>
+ *   /loop | status [id] | pause <id> | resume <id> | stop <id> [--now]
  *
  * Three rules keep the grammar honest:
  *
@@ -67,12 +67,10 @@ export type LoopParseResult = { ok: true; command: LoopCommand } | { ok: false; 
 
 /** One line per spelling, in the order the usage line shows them. */
 export const LOOP_SUBCOMMAND_DESCRIPTIONS: Readonly<Record<string, string>> = {
-	list: "List this session's jobs",
 	status: "Show one job, or every job",
 	pause: "Hold a job; resume restarts its schedule",
 	resume: "Resume a paused job",
-	stop: "Stop new runs and let the current run finish",
-	cancel: "Stop new runs and abort the current run",
+	stop: "Stop new runs and let the current run finish; --now aborts it",
 };
 
 const MAX_TOKEN_BYTES = 4096;
@@ -303,7 +301,7 @@ function parseCreate(tokens: ReadonlyArray<string>): LoopParseResult {
 	}
 	if (every === null) return fail('Give the interval, for example /loop 5m "check the build"');
 	if (args.until_stopped === true && (args.count !== undefined || args.for_ms !== undefined))
-		return fail(`${UNTIL_STOPPED_FLAG} runs until /loop stop or cancel, so it takes no --count or --for`);
+		return fail(`${UNTIL_STOPPED_FLAG} runs until /loop stop, so it takes no --count or --for`);
 	args.every_ms = every;
 	if (command !== undefined) {
 		if (task !== undefined) return fail("Give either a task or --command, not both");
@@ -340,9 +338,9 @@ function parseCreate(tokens: ReadonlyArray<string>): LoopParseResult {
 
 function parseId(verb: string, tokens: ReadonlyArray<string>): { id: string } | { error: string } {
 	const id = tokens[1];
-	if (id === undefined) return { error: `/loop ${verb} needs a job id. Run /loop list to see them` };
+	if (id === undefined) return { error: `/loop ${verb} needs a job id. Run /loop to see them` };
 	if (tokens.length > 2) return { error: `/loop ${verb} takes one job id` };
-	if (!JOB_ID.test(id)) return { error: `"${id}" is not a job id. Run /loop list to see them` };
+	if (!JOB_ID.test(id)) return { error: `"${id}" is not a job id. Run /loop to see them` };
 	return { id };
 }
 
@@ -351,13 +349,20 @@ function parseId(verb: string, tokens: ReadonlyArray<string>): { id: string } | 
  * here, so an element with spaces stays one element; the slash command gets
  * the same words from {@link tokenizeLoopLine}.
  */
-export function parseLoopArgv(tokens: ReadonlyArray<string>): LoopParseResult {
-	if (tokens.length === 0) return fail("Give an interval and a task, or a control verb");
+export function parseLoopArgv(argv: ReadonlyArray<string>): LoopParseResult {
+	let tokens = argv;
+	// Bare `/loop` lists the jobs; `list` stays accepted for one release.
+	if (tokens.length === 0) return { ok: true, command: { kind: "list" } };
 	if (tokens.length > MAX_TOKENS) return fail(`Too many words (limit ${MAX_TOKENS})`);
 	if (tokens.some((token) => Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES)) {
 		return fail(`A word is longer than ${MAX_TOKEN_BYTES} bytes`);
 	}
-	const verb = tokens[0] as string;
+	let verb = tokens[0] as string;
+	// `stop <id> --now` aborts the current run; it replaces `cancel <id>`, which stays accepted for one release.
+	if (verb === "stop" && tokens.includes("--now")) {
+		verb = "cancel";
+		tokens = ["cancel", ...tokens.slice(1).filter((token) => token !== "--now")];
+	}
 	if (verb === "list") {
 		return tokens.length === 1 ? { ok: true, command: { kind: "list" } } : fail("/loop list takes no arguments");
 	}
@@ -615,7 +620,7 @@ export function loopCreatedLines(job: JobRecord, args: LoopCreateArgs, now: numb
 		);
 	}
 	lines.push(
-		`/loop status ${job.id} · /loop stop ${job.id} finishes the current run · /loop cancel ${job.id} aborts it`,
+		`/loop status ${job.id} · /loop stop ${job.id} finishes the current run · /loop stop ${job.id} --now aborts it`,
 	);
 	return lines;
 }
@@ -699,7 +704,7 @@ export async function runLoopCommand(command: LoopCommand, host: LoopHost): Prom
 			}
 			const job = jobs.status(command.id);
 			if (job === null) {
-				host.notice("error", `No loop job ${command.id} in this session. Run /loop list to see the ids`);
+				host.notice("error", `No loop job ${command.id} in this session. Run /loop to see the ids`);
 				return;
 			}
 			report(host, loopJobLevel(job, now), loopJobDetail(job, now, jobs.spend?.(job.id) ?? null));
@@ -712,8 +717,8 @@ export async function runLoopCommand(command: LoopCommand, host: LoopHost): Prom
 				host.notice(
 					"error",
 					active.length === 0
-						? "No active loop to cancel. Run /loop list to see the jobs"
-						: "/loop cancel needs a job id when several loops are active. Run /loop list to see them",
+						? "No active loop to cancel. Run /loop to see the jobs"
+						: "/loop stop --now needs a job id when several loops are active. Run /loop to see them",
 				);
 				return;
 			}

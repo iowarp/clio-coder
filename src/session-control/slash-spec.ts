@@ -610,7 +610,10 @@ export function matchFromSpec(
 	const parsed = parseArgs(entry.args ?? {}, argsLine);
 
 	if (entry.fromArgs) {
-		return entry.fromArgs(parsed, trimmed);
+		const command = entry.fromArgs(parsed, trimmed);
+		// A command typed with no arguments at all is a question, not a mistake.
+		if (command.kind === "usage-error" && argsLine.trim().length === 0) return { ...command, bare: true };
+		return command;
 	}
 
 	return null;

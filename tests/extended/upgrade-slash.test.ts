@@ -23,11 +23,11 @@ function context(overrides: Partial<SlashCommandContext> = {}): {
 }
 
 describe("/upgrade", () => {
-	it("is an argument-free Configure command", () => {
+	it("is an argument-free Clio command", () => {
 		deepStrictEqual(parseSlashCommand("/upgrade"), { kind: "upgrade" });
 		strictEqual(parseSlashCommand("/upgrade now").kind, "usage-error");
 		const reference = commandReference().find((entry) => entry.name === "upgrade");
-		strictEqual(reference?.group, "Configure");
+		strictEqual(reference?.group, "Clio");
 		strictEqual(reference?.usage, "/upgrade");
 	});
 
@@ -41,5 +41,24 @@ describe("/upgrade", () => {
 		const unwired = context();
 		strictEqual(dispatchSlashCommand(parseSlashCommand("/upgrade"), unwired.ctx), "rejected");
 		match(unwired.notices[0]?.[1] ?? "", /run clio-coder upgrade from a shell/u);
+	});
+});
+
+describe("one usage answer", () => {
+	it("rejects a bad flag as an error and a bare command as information, keeping the draft both times", () => {
+		const bad = context();
+		strictEqual(
+			dispatchSlashCommand(parseSlashCommand("/council --rounds 99 compare the two parsers"), bad.ctx),
+			"rejected",
+		);
+		strictEqual(bad.notices[0]?.[0], "error");
+		match(bad.notices[0]?.[1] ?? "", /^--rounds must be an integer 1\.\.\d+\. usage: \/council /u);
+		const bare = context();
+		strictEqual(dispatchSlashCommand(parseSlashCommand("/run"), bare.ctx), "rejected");
+		deepStrictEqual(
+			bare.notices.map(([level]) => level),
+			["info"],
+		);
+		match(bare.notices[0]?.[1] ?? "", /^usage: \/run /u);
 	});
 });

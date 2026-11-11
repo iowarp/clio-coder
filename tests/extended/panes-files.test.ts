@@ -131,7 +131,11 @@ describe("contracts/panes files surface", () => {
 		deepStrictEqual(parseSlashCommand("/files"), { kind: "files", action: "toggle" });
 		deepStrictEqual(parseSlashCommand("/files pick"), { kind: "files", action: "pick" });
 		deepStrictEqual(parseSlashCommand("/files close"), { kind: "files", action: "close" });
-		deepStrictEqual(parseSlashCommand("/files bogus"), { kind: "files-usage", reason: "Unexpected argument: bogus" });
+		deepStrictEqual(parseSlashCommand("/files bogus"), {
+			kind: "usage-error",
+			command: "files",
+			reason: "Unexpected argument: bogus",
+		});
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "files");
 		ok(entry, "the /files command must be registered");
 		ok(!/yazi/iu.test(entry.description), "the /files description must not name the engine");
