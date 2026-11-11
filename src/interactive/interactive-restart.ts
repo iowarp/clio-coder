@@ -1,4 +1,8 @@
+import { spawnSync } from "node:child_process";
+import { runningBuildId } from "../core/build-info.js";
+import { resolvePackageRoot } from "../core/package-root.js";
 import { writeRestartIntent } from "../core/restart-intent.js";
+import { missingBuildFiles } from "../core/running-build.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { OperatorExtensions } from "../domains/extensions/operator-extensions.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -14,6 +18,32 @@ export interface InteractiveRestartDeps {
 	armHandoff(): void;
 	shutdown(): Promise<void>;
 	notify(level: "info" | "warning" | "error", text: string): void;
+	/** Why the build a restart would start cannot start; null when it can. Defaults to {@link restartPreflight}. */
+	preflight?(): string | null;
+}
+
+/**
+ * Checks the build a restart hands off to before the session is saved, so a
+ * broken or half-written build is refused while this process still runs.
+ * A source run (no build id) has no build to check.
+ */
+export function restartPreflight(
+	root = resolvePackageRoot(),
+	launcher = process.argv[1],
+	built = runningBuildId !== null,
+): string | null {
+	if (!built) return null;
+	const missing = missingBuildFiles(root);
+	if (missing.length > 0) return `the build on disk is incomplete (${missing.slice(0, 3).join(", ")})`;
+	if (!launcher) return null;
+	const probe = spawnSync(process.execPath, [launcher, "--version"], {
+		timeout: 10_000,
+		stdio: ["ignore", "ignore", "pipe"],
+		encoding: "utf8",
+	});
+	if (probe.status === 0) return null;
+	const tail = (probe.stderr ?? "").trim().split("\n").slice(-1)[0] ?? "";
+	return `the new build does not start (${probe.error?.message ?? `exit ${probe.status ?? probe.signal}`}${tail ? `: ${tail}` : ""})`;
 }
 
 export function interactiveRestartBusyReason(deps: {
@@ -42,7 +72,7 @@ export function createInteractiveRestart(deps: InteractiveRestartDeps): () => vo
 			deps.notify("warning", "Restart refused: a restart is already in progress.");
 			return;
 		}
-		const reason = deps.busyReason();
+		const reason = deps.busyReason() ?? (deps.preflight ?? restartPreflight)();
 		const sessionId = deps.session?.current()?.id;
 		if (reason || !sessionId) {
 			deps.notify("warning", `Restart refused: ${reason ?? "there is no session to resume; submit a turn first"}.`);
