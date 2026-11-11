@@ -91,13 +91,24 @@ test("importing adds the target and both defaults, re-importing is a no-op, and 
 	assert.equal(await runConfigureImport(file, { yes: true, replace: true, out: capture().out }), 0);
 	assert.equal(readSettings().targets.find((target) => target.id === "lab")?.url, "https://llm.lab.example.edu");
 
-	// No terminal to answer and no --yes: refused before anything is fetched.
+	// No terminal to answer and no --yes: the file is read and previewed, then refused with nothing written.
+	updateSettings((settings) => {
+		settings.targets = settings.targets.filter((target) => target.id !== "lab");
+	});
+	const unattended = capture();
+	assert.equal(await runConfigureImport(file, { yes: false, replace: false, out: unattended.out }), 2);
+	assert.match(unattended.text(), /prompts go to https:\/\/llm\.lab\.example\.edu/);
 	assert.equal(
-		await runConfigureImport("https://setup.example.invalid/lab.yaml", {
+		readSettings().targets.some((target) => target.id === "lab"),
+		false,
+	);
+	// A missing file says so (exit 1) rather than asking for --yes.
+	assert.equal(
+		await runConfigureImport(join(home.dir, "nope.yaml"), {
 			yes: false,
 			replace: false,
 			out: capture().out,
 		}),
-		2,
+		1,
 	);
 });

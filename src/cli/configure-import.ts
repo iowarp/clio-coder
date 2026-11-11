@@ -296,10 +296,6 @@ export interface ImportOptions {
 /** `configure --import`: read, show, confirm once, apply, report. Exit 0 applied or nothing to do, 1 refused, 2 usage. */
 export async function runConfigureImport(source: string, options: ImportOptions): Promise<number> {
 	const { out } = options;
-	if (!options.yes && options.confirm === undefined) {
-		process.stderr.write("error: --import without a terminal needs --yes; review the file first, then rerun\n");
-		return 2;
-	}
 	const prepared = await prepareImport(source, options.replace);
 	if (!prepared.ok) {
 		process.stderr.write(`error: ${prepared.error}\n`);
@@ -312,6 +308,10 @@ export async function runConfigureImport(source: string, options: ImportOptions)
 		return 0;
 	}
 	out.write(`Setup file ${source} will:\n${describeImport(prepared).join("\n")}\n`);
+	if (!options.yes && options.confirm === undefined) {
+		process.stderr.write("error: --import without a terminal needs --yes; review the changes above, then rerun\n");
+		return 2;
+	}
 	if (!options.yes && !(await options.confirm?.("Apply these changes? [y/N] "))) {
 		out.write("Nothing changed.\n");
 		return 130;
