@@ -6,7 +6,11 @@ import { STORE_REPLACES_ARG, storeGrantBoundaries, storeProjectDir } from "../..
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { isDispatchIntent, normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
-import { confineGrantOnlyWriters, writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
+import {
+	confineGrantOnlyWriters,
+	overlappingWriteRootsWarning,
+	writeRootsOverlap,
+} from "../../src/domains/dispatch/parallel-writers.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
@@ -126,5 +130,24 @@ describe("store tag grants", () => {
 			const mixed = [{ ...base }, { agentId: "coder", task: "edit", cwd: root }] as unknown as DispatchRequest[];
 			strictEqual(confineGrantOnlyWriters(mixed, specs), false);
 			strictEqual(mixed[0]?.writeRoots, undefined);
+		}));
+
+	it("warns about parallel tasks whose write roots overlap and stays silent for disjoint ones", () =>
+		withWorkspace(async (root) => {
+			mkdirSync(join(root, "src", "a"), { recursive: true });
+			mkdirSync(join(root, "docs"), { recursive: true });
+			const task = (agentId: string, writeRoots: string[]) => ({ agentId, task: "edit", cwd: root, writeRoots });
+			const warning = overlappingWriteRootsWarning([
+				task("one", ["src"]),
+				task("two", ["src/a"]),
+				task("three", ["docs"]),
+			]);
+			ok(warning !== null);
+			match(warning, /task 1 \(one\) and task 2 \(two\)/u);
+			ok(warning.includes(join("workspace", "src")) && warning.includes(join("src", "a")));
+			ok(!warning.includes("three"));
+			const same = overlappingWriteRootsWarning([task("one", ["docs"]), task("two", ["docs"])]);
+			match(same ?? "", /task 1 \(one\) and task 2 \(two\)/u);
+			strictEqual(overlappingWriteRootsWarning([task("one", ["src/a"]), task("two", ["docs"])]), null);
 		}));
 });

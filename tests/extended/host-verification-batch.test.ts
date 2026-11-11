@@ -12,6 +12,7 @@ import {
 	createBatchVerificationGate,
 	hostVerificationRejection,
 	lintFormatScopeArgv,
+	lintScriptFollowUpChecks,
 	runHostVerification,
 	workspaceFingerprint,
 } from "../../src/domains/dispatch/host-verification.js";
@@ -1035,9 +1036,58 @@ describe("lint and format checks scoped to the task's changed files", () => {
 		);
 		const at = (argv: string[]) => lintFormatScopeArgv({ argv, cwd: scratch.project });
 		deepStrictEqual(at(["pnpm", "run", "lint"]), ["pnpm", "exec", "biome", "check", "."]);
-		strictEqual(at(["pnpm", "run", "all"]), null);
+		deepStrictEqual(at(["pnpm", "run", "all"]), ["pnpm", "exec", "biome", "check", "."]);
 		strictEqual(at(["pnpm", "run", "typecheck"]), null);
 		deepStrictEqual(at(["npx", "eslint", "."]), ["npx", "eslint", "."]);
+	});
+
+	it("runs a lint script's hygiene step whole-repo and compares its failure with the base", async () => {
+		const scratch = makeScratch();
+		writeFileSync(
+			join(scratch.project, "package.json"),
+			JSON.stringify({ scripts: { lint: "biome check . && node --import tsx scripts/check-hygiene.ts" } }),
+		);
+		const lint: ResolvedCheck = {
+			check: "lint",
+			argv: ["pnpm", "run", "lint"],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		};
+		const followUps = lintScriptFollowUpChecks(lint);
+		deepStrictEqual(
+			followUps.map((entry) => [entry.check, entry.argv]),
+			[
+				[
+					"lint: node --import tsx scripts/check-hygiene.ts",
+					["node", "--import", "tsx", "scripts/check-hygiene.ts"],
+				],
+			],
+		);
+		deepStrictEqual(lintScriptFollowUpChecks({ ...lint, argv: ["biome", "check", "."] }), []);
+		const hygiene = followUps[0];
+		ok(hygiene);
+		const verification: RunHostVerification = {
+			status: "rejected",
+			checks: [
+				{
+					check: hygiene.check,
+					argv: [...hygiene.argv],
+					cwd: hygiene.cwd,
+					exitCode: 1,
+					durationMs: 1,
+					memo: false,
+					outputTail: "hygiene failure",
+				},
+			],
+		};
+		await compareHostVerificationBase({
+			verification,
+			request: worktreeRequest(scratch, [lint]),
+			stateDir: scratch.stateDir,
+		});
+		const reason = verification.checks[0]?.baseComparison?.reason;
+		ok(reason !== "declared check unavailable", reason);
+		ok(reason !== "check was scoped to the task's changed files", reason);
 	});
 });
 

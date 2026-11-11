@@ -194,19 +194,48 @@ export function lintFormatScopeArgv(check: Pick<ResolvedCheck, "argv" | "cwd" | 
 	const runnerName = basename(runner ?? "");
 	if (runner === undefined || (runnerName !== "pnpm" && runnerName !== "npm") || verb !== "run") return null;
 	if (name === undefined || rest.length > 0) return null;
+	const segments = lintScriptSegments(check.cwd, name);
+	if (segments === null) return null;
+	return [runner, "exec", ...(runnerName === "npm" ? ["--"] : []), ...(segments[0] ?? [])];
+}
+
+/**
+ * A package script's `&&`-joined commands as token lists when its first command
+ * runs a known linter or formatter, else null. `biome check . && node --import
+ * tsx scripts/check-hygiene.ts` yields the Biome run and the hygiene check.
+ */
+function lintScriptSegments(cwd: string, name: string): string[][] | null {
 	let script: unknown;
 	try {
-		const manifest = JSON.parse(readFileSync(join(check.cwd, "package.json"), "utf8")) as {
+		const manifest = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
 			scripts?: Record<string, unknown>;
 		};
 		script = manifest.scripts?.[name];
 	} catch {
 		return null;
 	}
-	if (typeof script !== "string" || SCRIPT_UNSAFE_RE.test(script)) return null;
-	const tokens = script.trim().split(/\s+/u);
-	if (!LINT_FORMAT_TOOLS.has(tokens[0] ?? "")) return null;
-	return [runner, "exec", ...(runnerName === "npm" ? ["--"] : []), ...tokens];
+	if (typeof script !== "string") return null;
+	const parts = script.split("&&").map((part) => part.trim());
+	if (parts.some((part) => part === "" || SCRIPT_UNSAFE_RE.test(part))) return null;
+	const segments = parts.map((part) => part.split(/\s+/u));
+	if (!LINT_FORMAT_TOOLS.has(segments[0]?.[0] ?? "")) return null;
+	return segments;
+}
+
+/**
+ * The whole-repo commands a package lint script runs after its linter, such
+ * as the repository hygiene check, as checks of their own. Scoping narrows the
+ * linter to the task's files; these still run on the whole task worktree and
+ * are compared with the base like any whole-repo check.
+ */
+export function lintScriptFollowUpChecks(check: ResolvedCheck): ResolvedCheck[] {
+	if (check.kind !== undefined && check.kind !== "command") return [];
+	const [runner, verb, name, ...rest] = check.argv;
+	const runnerName = basename(runner ?? "");
+	if ((runnerName !== "pnpm" && runnerName !== "npm") || verb !== "run" || name === undefined || rest.length > 0)
+		return [];
+	const segments = lintScriptSegments(check.cwd, name);
+	return (segments ?? []).slice(1).map((argv) => ({ ...check, check: `${check.check}: ${argv.join(" ")}`, argv }));
 }
 
 /** Absolute paths of the files a task worktree changed against its base, or null when Git cannot say. */
@@ -266,7 +295,10 @@ function taskChecks(request: Pick<DispatchRequest, "resolvedVerification" | "tas
 	const worktree = request.taskWorktree;
 	if (worktree === undefined || !checks.some((check) => lintFormatScopeArgv(check) !== null)) return [...checks];
 	const changed = taskChangedPaths(worktree);
-	return checks.map((check) => scopeCheckToTask(check, changed));
+	return checks.flatMap((check) => {
+		const scoped = scopeCheckToTask(check, changed);
+		return scoped === check ? [check] : [scoped, ...lintScriptFollowUpChecks(check)];
+	});
 }
 
 /** Lockfiles whose agreement lets the base replay borrow the task's installed dependencies. */
@@ -473,7 +505,9 @@ export async function compareHostVerificationBase(input: {
 		check.baseComparison = { status: "not_compared", reason: "no isolated task base available" };
 	if (worktree === undefined) return;
 	const candidates = failures.flatMap((check) => {
-		const declared = input.request.resolvedVerification?.find((entry) => entry.check === check.check);
+		const declared = (input.request.resolvedVerification ?? [])
+			.flatMap((entry) => [entry, ...lintScriptFollowUpChecks(entry)])
+			.find((entry) => entry.check === check.check);
 		const reason =
 			declared === undefined
 				? "declared check unavailable"

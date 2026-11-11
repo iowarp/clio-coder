@@ -27,6 +27,33 @@ export function writeRootsOverlap(left: ReadonlyArray<string>, right: ReadonlyAr
 	return left.some((a) => right.some((b) => contains(a, b) || contains(b, a)));
 }
 
+/**
+ * A warning naming every pair of tasks in one parallel call whose declared
+ * write roots overlap (equal, or one inside the other), or null when none do.
+ * Admission still starts them; each task worktree merges back on its own, so
+ * overlapping roots can collide at merge time.
+ */
+export function overlappingWriteRootsWarning(
+	requests: ReadonlyArray<Pick<DispatchRequest, "agentId" | "cwd" | "writeRoots" | "intent">>,
+	positions?: ReadonlyArray<number>,
+): string | null {
+	const roots = requests.map((request) => canonicalWriteRoots(request).filter((root) => !isStorePath(root)));
+	const label = (index: number) => `task ${positions?.[index] ?? index + 1} (${requests[index]?.agentId})`;
+	const lines: string[] = [];
+	for (let i = 0; i < requests.length; i++)
+		for (let j = i + 1; j < requests.length; j++) {
+			const left = roots[i] ?? [];
+			const right = roots[j] ?? [];
+			const shared = left.flatMap((a) =>
+				right.filter((b) => writeRootsOverlap([a], [b])).map((b) => (a === b ? a : `${a} ~ ${b}`)),
+			);
+			if (shared.length > 0) lines.push(`${label(i)} and ${label(j)}: ${shared.join(", ")}`);
+		}
+	if (lines.length === 0) return null;
+	const list = lines.map((line) => `- ${line}`).join("\n");
+	return `warning: parallel tasks declare overlapping intent.write_roots; their changes may conflict:\n${list}`;
+}
+
 function isWriter(request: DispatchRequest, classes: ReadonlyMap<string, AgentSpec["capabilityClass"]>): boolean {
 	return request.worktree !== true && request.readOnly !== true && classes.get(request.agentId) !== "read-only";
 }
