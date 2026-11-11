@@ -112,9 +112,10 @@ export function workerSandboxApplies(): boolean {
 /**
  * System daemon sockets that are root-equivalent for their group, reachable
  * under `safety.sandboxUnixSockets: owned` because another user owns them:
- * Docker, rootful Podman, containerd, LXD (snap and package), libvirt and
- * Incus. A runtime directory is masked where the daemon keeps several sockets
- * there (libvirt's modular daemons, containerd's ttrpc socket).
+ * Docker, rootful Podman, containerd, LXD (snap and package), libvirt, Incus,
+ * CRI-O, k3s's containerd and BuildKit. A runtime directory is masked where the
+ * daemon keeps several sockets there (libvirt's modular daemons, containerd's
+ * ttrpc socket).
  */
 const DAEMON_SOCKET_PATHS = [
 	"run/docker.sock",
