@@ -55,6 +55,8 @@ export interface StoreToolDeps {
 	 * only, and its records name it as a worker of that dispatch run.
 	 */
 	grant?: { tags: ReadonlyArray<string>; dispatchRunId?: string };
+	/** Test seam; production opens the selected backend. */
+	openBackend?: (cwd: string) => Promise<StoreBackend>;
 }
 
 const WRITE_OPS: ReadonlySet<StoreOp> = new Set(["create", "put", "note", "remove"]);
@@ -312,6 +314,13 @@ async function runOp(
 		let replaced = false;
 		const stored = await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
 			replaced = (await backend.statBlob(tag, blob)) !== null;
+			// Admission sees only the local layout, so it judges a replace on another backend as a plain write.
+			// Such a replace goes through remove, which is admitted as destructive, instead.
+			if (replaced && backend.kind !== "local")
+				throw new StoreToolError(
+					`store: ${tag}:${blob} already exists on the ${backend.kind} backend, which keeps no versions; ` +
+						`remove ${tag}:${blob} first, then put again.`,
+				);
 			const written = await backend.putBlobFromFile(tag, blob, source.abs, signal);
 			try {
 				const { path: storedPath } = await backend.getBlobAsPath(tag, blob, signal);
@@ -440,7 +449,7 @@ export function createStoreTool(deps: StoreToolDeps): ToolSpec {
 			commitObservationReservation(reservation);
 			try {
 				const cwd = getCwd();
-				const result = await runOp(op, args, cwd, await openStoreBackend(cwd), options, deps.grant);
+				const result = await runOp(op, args, cwd, await (deps.openBackend ?? openStoreBackend)(cwd), options, deps.grant);
 				return finalizeObservation({
 					tool: STORE_TOOL_NAME,
 					unit: result.unit,

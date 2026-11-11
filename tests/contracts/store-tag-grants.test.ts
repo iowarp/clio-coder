@@ -7,6 +7,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { isDispatchIntent, normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { confineGrantOnlyWriters, writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { openStoreBackend } from "../../src/domains/store/index.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -75,6 +76,22 @@ describe("store tag grants", () => {
 			[["fleet"], ["fleet"]],
 		);
 	});
+
+	it("refuses a put over an existing blob on a backend admission cannot stat", () =>
+		withWorkspace(async (root) => {
+			const local = await openStoreBackend(root);
+			const openBackend = async () => ({ ...local, kind: "clio-core" as const });
+			const main = createStoreTool({ getCwd: () => root, writable: true, openBackend });
+			await main.run({ op: "create", tag: "results" });
+			const first = await main.run({ op: "put", tag: "results", path: "out/summary.csv" });
+			strictEqual(first.kind, "ok", JSON.stringify(first));
+			const worker = createStoreTool({ getCwd: () => root, writable: false, grant: { tags: ["results"] }, openBackend });
+			for (const tool of [main, worker]) {
+				const replaced = await tool.run({ op: "put", tag: "results", path: "out/summary.csv" });
+				strictEqual(replaced.kind, "error");
+				match(String((replaced as { message?: unknown }).message), /already exists on the clio-core backend/);
+			}
+		}));
 
 	it("parallel writers granted the same tag do not overlap", () =>
 		withWorkspace(async (root) => {
