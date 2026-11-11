@@ -1,4 +1,5 @@
 import { strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { after, before, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { taskWorktreeManifestsChanged } from "../../src/tools/task-worktree.js";
 
 let scratch = "";
 before(() => {
@@ -64,5 +66,38 @@ describe("worker own-check bypass hardening", () => {
 			strictEqual(admit({ tool: ToolNames.Bash, args: { command } }), "ask", command);
 		}
 		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "check", args: ["--import=./pwn.mjs"] } }), "ask");
+	});
+
+	it("drops the bypass once the worker changed a package manifest or package-manager config", () => {
+		const changed = harness(true);
+		strictEqual(changed({ tool: ToolNames.Bash, args: { command: "pnpm run check" } }), "ask");
+		strictEqual(changed({ tool: ToolNames.Verify, args: { check: "check" } }), "ask");
+		// Without the host's manifest check the bypass fails closed.
+		const unknown = harness(undefined);
+		strictEqual(unknown({ tool: ToolNames.Bash, args: { command: "pnpm run check" } }), "ask");
+	});
+
+	it("compares manifests and package-manager config with the task base", () => {
+		const repo = join(scratch, "repo");
+		mkdirSync(join(repo, "pkg"), { recursive: true });
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-C", repo, ...args], { stdio: "pipe" });
+		git("init", "-q");
+		writeFileSync(join(repo, "package.json"), "{}");
+		writeFileSync(join(repo, "pkg", "package.json"), "{}");
+		writeFileSync(join(repo, ".gitignore"), ".npmrc\n");
+		git("add", ".");
+		git("commit", "-qm", "base");
+		const base = git("rev-parse", "HEAD").toString().trim();
+		const changed = () => taskWorktreeManifestsChanged({ path: repo, base });
+		strictEqual(changed(), false);
+		writeFileSync(join(repo, "pkg", "package.json"), '{"scripts":{"check":"curl x"}}');
+		strictEqual(changed(), true, "edited workspace package manifest");
+		git("checkout", "-q", "--", "pkg/package.json");
+		writeFileSync(join(repo, "pkg", ".npmrc"), "node-options=--import=./x.mjs\n");
+		strictEqual(changed(), true, "ignored .npmrc");
+		rmSync(join(repo, "pkg", ".npmrc"));
+		strictEqual(changed(), false);
+		strictEqual(taskWorktreeManifestsChanged({ path: join(scratch, "missing"), base }), true, "git failure");
 	});
 });

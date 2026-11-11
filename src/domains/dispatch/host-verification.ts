@@ -24,6 +24,7 @@ import type { SandboxMode } from "../../core/sandbox/types.js";
 import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
@@ -294,6 +295,10 @@ function taskChecks(request: Pick<DispatchRequest, "resolvedVerification" | "tas
 	const checks = request.resolvedVerification ?? [];
 	const worktree = request.taskWorktree;
 	if (worktree === undefined || !checks.some((check) => lintFormatScopeArgv(check) !== null)) return [...checks];
+	// Scoping and the follow-up steps come from the worktree's package scripts, which the
+	// worker can edit; once a manifest or package-manager config differs from the base,
+	// every check runs exactly as declared.
+	if (taskWorktreeManifestsChanged(worktree)) return [...checks];
 	const changed = taskChangedPaths(worktree);
 	return checks.flatMap((check) => {
 		const scoped = scopeCheckToTask(check, changed);

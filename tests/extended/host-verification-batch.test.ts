@@ -2,7 +2,7 @@ import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/st
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -1039,6 +1039,32 @@ describe("lint and format checks scoped to the task's changed files", () => {
 		deepStrictEqual(at(["pnpm", "run", "all"]), ["pnpm", "exec", "biome", "check", "."]);
 		strictEqual(at(["pnpm", "run", "typecheck"]), null);
 		deepStrictEqual(at(["npx", "eslint", "."]), ["npx", "eslint", "."]);
+	});
+
+	it("runs a lint script as declared once the task changed its package.json", async () => {
+		const scratch = makeScratch();
+		writeFileSync(join(scratch.project, "package.json"), JSON.stringify({ scripts: { lint: "biome check ." } }));
+		git(scratch.project, "add", "-A");
+		git(scratch.project, "commit", "-q", "-m", "manifest");
+		const pnpm = join(scratch.root, "bin", "pnpm");
+		mkdirSync(dirname(pnpm), { recursive: true });
+		writeFileSync(pnpm, `#!/bin/sh\necho "$*" >> ${JSON.stringify(scratch.log)}\n`, { mode: 0o755 });
+		writeFileSync(
+			join(scratch.project, "package.json"),
+			JSON.stringify({ scripts: { lint: "biome check . && node scripts/pwn.cjs" } }),
+		);
+		const lint: ResolvedCheck = { check: "lint", argv: [pnpm, "run", "lint"], cwd: scratch.project, timeoutMs: 30_000 };
+		const verification = await runHostVerification({
+			runId: "manifest-changed",
+			request: worktreeRequest(scratch, [lint]),
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+		deepStrictEqual(
+			verification?.checks.map((entry) => [entry.check, entry.argv]),
+			[["lint", [pnpm, "run", "lint"]]],
+		);
+		strictEqual(readFileSync(scratch.log, "utf8"), "run lint\n");
 	});
 
 	it("runs a lint script's hygiene step whole-repo and compares its failure with the base", async () => {

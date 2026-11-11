@@ -7,7 +7,7 @@ import { readTaskWorktreeGitLayout, taskWorktreeGitWritablePaths } from "../core
 import type { AdmissionGitContext } from "../domains/safety/admission.js";
 import { classifyGitArgv, literalGitPathError } from "../domains/safety/git-policy.js";
 import type { WorkerGitAllowance } from "../domains/safety/worker-permit.js";
-import { attestTaskWorktreeCwd, type TaskWorktree } from "./task-worktree.js";
+import { attestTaskWorktreeCwd, type TaskWorktree, taskWorktreeManifestsChanged } from "./task-worktree.js";
 
 /**
  * The fixed Git surface of the typed git tool (Phase C). Every typed op runs
@@ -186,6 +186,7 @@ export function createWorkerGitContext(input: {
 			? {
 					taskWorktree: {
 						attest: (cwd: string) => attestTaskWorktreeCwd(worktree, cwd),
+						manifestsChanged: () => taskWorktreeManifestsChanged(worktree),
 						...(layout !== null
 							? { typedGitWritablePaths: Object.freeze(taskWorktreeGitWritablePaths(layout, worktree.branch)) }
 							: {}),

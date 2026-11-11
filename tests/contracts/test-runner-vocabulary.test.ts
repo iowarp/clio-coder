@@ -339,6 +339,7 @@ describe("test runner vocabulary (#377)", () => {
 			taskWorktree: {
 				attest: (cwd: string) =>
 					cwd === root || cwd.startsWith(`${root}/`) ? { ok: true as const } : { ok: false as const, detail: "outside" },
+				manifestsChanged: () => false,
 			},
 		};
 		const admit = (call: { tool: string; args: Record<string, unknown> }, withGit = true) =>

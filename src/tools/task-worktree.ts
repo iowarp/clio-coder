@@ -150,6 +150,29 @@ function gitBytes(root: string, args: string[], options: GitOptions = {}): Buffe
 	});
 }
 
+const MANIFEST_PATHSPECS = [
+	":(glob)**/package.json",
+	":(glob)**/.npmrc",
+	":(glob)**/pnpm-workspace.yaml",
+	":(exclude,glob)**/node_modules/**",
+];
+
+/**
+ * Whether the task worktree's package manifests or package-manager config
+ * differ from its base: committed, staged, unstaged, untracked or ignored.
+ * Any Git failure counts as changed.
+ */
+export function taskWorktreeManifestsChanged(worktree: Pick<TaskWorktree, "path" | "base">): boolean {
+	try {
+		const tracked = gitBytes(worktree.path, ["diff", "--name-only", worktree.base, "--", ...MANIFEST_PATHSPECS]);
+		if (tracked.length > 0) return true;
+		const added = gitBytes(worktree.path, ["ls-files", "--others", "--", ...MANIFEST_PATHSPECS]);
+		return added.length > 0;
+	} catch {
+		return true;
+	}
+}
+
 function git(root: string, args: string[], options: GitOptions = {}): string {
 	return gitBytes(root, args, options).toString("utf8").trim();
 }

@@ -199,6 +199,12 @@ export interface AdmissionGitContext {
 		typedGitWritablePaths?: ReadonlyArray<string>;
 		/** Re-checks ownership, the common Git directory and HEAD on the task branch for a command run in `cwd`. */
 		attest(cwd: string): TaskWorktreeAttestation;
+		/**
+		 * Whether a package manifest or package-manager config (`package.json`,
+		 * `.npmrc`, `pnpm-workspace.yaml`, at any depth) differs from the task
+		 * base. Absent counts as changed.
+		 */
+		manifestsChanged?(): boolean;
 	};
 }
 
@@ -324,7 +330,7 @@ const WORKER_CHECK_ARG = /^[\w=./:][\w=./:-]*$/u;
  * A dispatched worker's focused check inside the task worktree it owns is its
  * own authority: it runs the project's declared check under the worker's
  * sandbox, so nobody has to answer an ask for it. Arbitrary commands, a cwd
- * outside the attested worktree and `unsandboxed` keep their asks.
+ * outside the attested worktree, `unsandboxed` and a changed manifest keep their asks.
  */
 function workerOwnTaskCheck(effect: ClassifierCall, decision: SafetyDecision, input: AdmissionInput): boolean {
 	if (decision.classification.actionClass !== "execute") return false;
@@ -347,7 +353,10 @@ function workerOwnTaskCheck(effect: ClassifierCall, decision: SafetyDecision, in
 	} else return false;
 	const base = input.cwd ?? input.git.cwd;
 	const cwd = typeof args.cwd === "string" && args.cwd.length > 0 ? resolve(base, args.cwd) : base;
-	return worktree.attest(cwd).ok;
+	if (!worktree.attest(cwd).ok) return false;
+	// The worker authors the scripts the check runs once it edits a manifest or
+	// the package-manager config, so the bypass holds only while they match the base.
+	return worktree.manifestsChanged !== undefined && !worktree.manifestsChanged();
 }
 
 function readOnlyRun(input: AdmissionInput): boolean {
