@@ -37,3 +37,16 @@ export function listJump(data: string, index: number, count: number): number | n
 	if (matchesKey(data, "pageDown")) return Math.min(last, index + LIST_PAGE_ROWS);
 	return null;
 }
+
+/**
+ * E-13 paging for a scroll body: PgUp and PgDn move a page, Home goes to the top and End to `max` when the
+ * body knows it. Returns the new offset, or null for any other key.
+ */
+export function scrollJump(data: string, scroll: number, max?: number): number | null {
+	const cap = (value: number): number => Math.max(0, max === undefined ? value : Math.min(max, value));
+	if (matchesKey(data, "home")) return 0;
+	if (max !== undefined && matchesKey(data, "end")) return cap(max);
+	if (matchesKey(data, "pageUp")) return cap(scroll - LIST_PAGE_ROWS);
+	if (matchesKey(data, "pageDown")) return cap(scroll + LIST_PAGE_ROWS);
+	return null;
+}

@@ -24,6 +24,7 @@ import { DRAFT_LABELS, type DraftLabel, hasDeadDraftToolCallMarkup } from "../..
 import { buildResponsiveHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { codeInk } from "../renderers/code-ink.js";
 import { clioTheme, formatWaitClock, GLYPH, markdownTheme, rule } from "../theme/index.js";
+import { scrollJump } from "./confirm-once.js";
 
 export const DRAFT_OVERLAY_TITLE = "Drafts";
 
@@ -256,6 +257,12 @@ export function openDraftOverlay(tui: TUI, options: OpenDraftOverlayOptions): Dr
 			}
 			if (matchesKey(data, "right") || matchesKey(data, "tab")) {
 				select((state.selected + 1) % state.candidates.length);
+				return;
+			}
+			const jump = scrollJump(data, state.scroll);
+			if (jump !== null) {
+				state.scroll = jump;
+				tui.requestRender();
 				return;
 			}
 			if (matchesKey(data, "up")) {

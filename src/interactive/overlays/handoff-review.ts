@@ -45,6 +45,7 @@ import {
 	spinnerFrame,
 } from "../theme/index.js";
 import { skinEpoch } from "../theme/tokens.js";
+import { scrollJump } from "./confirm-once.js";
 
 export const HANDOFF_REVIEW_OVERLAY_TITLE = "Handoff review";
 const HANDOFF_PREPARING_OVERLAY_TITLE = "Handoff · preparing";
@@ -277,6 +278,11 @@ export function openHandoffReviewOverlay(
 			if (settled || isKeyRelease(data)) return;
 			if (preparing) {
 				if (matchesKey(data, "escape")) cancel();
+				return;
+			}
+			const jump = scrollJump(data, scroll, maxScroll);
+			if (jump !== null) {
+				scrollBy(jump - scroll);
 				return;
 			}
 			if (matchesKey(data, "up")) {

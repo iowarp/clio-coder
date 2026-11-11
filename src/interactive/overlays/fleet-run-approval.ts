@@ -33,6 +33,7 @@ import {
 	tableColumnsFit,
 	tableRows,
 } from "../theme/index.js";
+import { scrollJump } from "./confirm-once.js";
 
 export const FLEET_RUN_APPROVAL_OVERLAY_TITLE = "Fleet run approval";
 
@@ -328,6 +329,11 @@ export function openFleetRunApprovalOverlay(tui: TUI, options: OpenFleetRunAppro
 		// left the overlay unanswerable. Everything unmatched is swallowed.
 		onInput: (data: string): void => {
 			if (settled || isKeyRelease(data)) return;
+			const jump = scrollJump(data, scroll);
+			if (jump !== null) {
+				scrollBy(jump - scroll);
+				return;
+			}
 			if (matchesKey(data, "up")) {
 				scrollBy(-1);
 				return;

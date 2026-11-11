@@ -3,6 +3,7 @@ import { it } from "node:test";
 import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
 import { buildTurnPreview } from "../../src/domains/session/tree/preview.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { listJump, scrollJump } from "../../src/interactive/overlays/confirm-once.js";
 import { TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
 
 it("previews operator words instead of injected scaffolding and identifies tool-only assistant turns", () => {
@@ -168,4 +169,17 @@ it("j and k move the selection like Down and Up (E-13)", () => {
 	f.view.handleInput("\r");
 	strictEqual(f.switched.length, 2);
 	strictEqual(f.switched[0] !== f.switched[1], true, "j and k selected different turns");
+});
+
+it("list and scroll paging stop at their ends; End needs a known bottom (E-13)", () => {
+	strictEqual(listJump("\x1b[6~", 0, 25), 10);
+	strictEqual(listJump("\x1b[6~", 20, 25), 24);
+	strictEqual(listJump("\x1b[5~", 3, 25), 0);
+	strictEqual(listJump("\x1b[F", 3, 25), 24);
+	strictEqual(listJump("x", 3, 25), null);
+	strictEqual(scrollJump("\x1b[6~", 0), 10);
+	strictEqual(scrollJump("\x1b[6~", 0, 4), 4);
+	strictEqual(scrollJump("\x1b[H", 7), 0);
+	strictEqual(scrollJump("\x1b[F", 7, 30), 30);
+	strictEqual(scrollJump("\x1b[F", 7), null, "a body with no known bottom leaves End alone");
 });
