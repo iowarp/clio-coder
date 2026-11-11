@@ -156,3 +156,13 @@ test("every settings field name is still a key some settings schema reads", () =
 	);
 	deepStrictEqual(stale, []);
 });
+
+test("a zero-byte settings file loads as defaults instead of failing every command", async (t) => {
+	const home = await isolateClioEnv("clio-empty-settings-");
+	t.after(() => home.restore());
+	const path = join(home.dir, "config", "settings.yaml");
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(path, "");
+	const result = validateSettingsFile();
+	deepStrictEqual(result.issues, []);
+});

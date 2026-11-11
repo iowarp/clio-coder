@@ -2787,7 +2787,8 @@ export function validateSettingsFile(): SettingsValidationResult {
 			retired: [],
 		};
 	}
-	return validateSettings(parsed);
+	// An empty file parses as null; it holds no settings, so it reads as an empty map.
+	return validateSettings(parsed ?? {});
 }
 
 export function readSettings(): ClioSettings {
