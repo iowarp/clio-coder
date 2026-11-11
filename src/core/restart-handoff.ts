@@ -1,17 +1,41 @@
 import { spawn } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { relaunchScript } from "./relaunch-script.js";
 import { restartIntentPath } from "./restart-intent.js";
 import { markRestartHandoff } from "./restart-status.js";
 import type { getTerminationCoordinator } from "./termination.js";
 
 /** Keep the shell's foreground job alive while the restarted child owns the terminal. */
+/**
+ * What to print when the restarted child exited non-zero within `windowMs`
+ * without consuming the restart intent: the command that resumes the
+ * session by hand. Null when the child started properly or exited cleanly.
+ */
+export function restartFallbackAdvice(
+	stateDir: string,
+	code: number,
+	elapsedMs: number,
+	windowMs = 15_000,
+): string | null {
+	if (code === 0 || elapsedMs >= windowMs) return null;
+	let sessionId: unknown;
+	try {
+		sessionId = JSON.parse(readFileSync(restartIntentPath(stateDir), "utf8")).sessionId;
+	} catch {
+		return null;
+	}
+	rmSync(restartIntentPath(stateDir), { force: true });
+	const resume = typeof sessionId === "string" ? `, then /resume ${sessionId}` : "";
+	return `Restart failed: the new build exited with code ${code} before it resumed the session. Run clio-coder${resume}.\n`;
+}
+
 export function armRestartHandoff(stateDir: string, termination: ReturnType<typeof getTerminationCoordinator>): void {
 	termination.setExitHandoff(async () => {
 		try {
 			return await new Promise<number>((resolve, reject) => {
 				const [script, ...args] = process.argv.slice(1);
 				const argv = script === undefined ? [] : [relaunchScript(script), ...args];
+				const started = Date.now();
 				const child = spawn(process.execPath, [...process.execArgv, ...argv], {
 					cwd: process.cwd(),
 					env: process.env,
@@ -41,7 +65,12 @@ export function armRestartHandoff(stateDir: string, termination: ReturnType<type
 				});
 				child.once("exit", (code, signal) => {
 					cleanup();
-					resolve(code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : signal === "SIGHUP" ? 129 : 1));
+					const status = code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : signal === "SIGHUP" ? 129 : 1);
+					const advice = existsSync(restartIntentPath(stateDir))
+						? restartFallbackAdvice(stateDir, status, Date.now() - started)
+						: null;
+					if (advice) process.stderr.write(advice);
+					resolve(status);
 				});
 			});
 		} catch (error) {
