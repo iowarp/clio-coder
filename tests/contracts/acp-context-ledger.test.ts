@@ -247,7 +247,13 @@ test("a long turn streams usage_update per model response with the meter rising 
 	assert.equal(promptUsage.quantities.output.display, "100");
 	const session = last?._meta["clio-coder/usage"]?.session as {
 		totals: { usd: { display: string }; tokens: { display: string } };
+		context: { cache: { share?: { display: string }; lastTurnShare?: { display: string } } | null };
 	};
+	// The cache block carries the cached share `telemetry cache` reports: the session's, then its last turn's.
+	assert.deepEqual(
+		[session.context.cache?.share?.display, session.context.cache?.lastTurnShare?.display],
+		["31.6%", "33.3%"],
+	);
 	assert.equal(session.totals.usd.display, "~$2.50 +?");
 	assert.ok(session.totals.tokens.display.includes("910"));
 	assert.deepEqual(frames[0]?.cost, { amount: 1.25, currency: "USD" });

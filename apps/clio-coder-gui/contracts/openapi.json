@@ -17921,7 +17921,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9631a581"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_44a75724"
 								}
 							}
 						},
@@ -18958,7 +18958,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9631a581"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_44a75724"
 								}
 							}
 						},
@@ -19053,7 +19053,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9631a581"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_44a75724"
 								}
 							}
 						},
@@ -19103,7 +19103,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_9631a581"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_44a75724"
 									}
 								}
 							}
@@ -19594,7 +19594,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9631a581"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_44a75724"
 								}
 							}
 						},
@@ -23846,7 +23846,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_fe875928"
+										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_ebafa9bd"
 									}
 								},
 								"additionalProperties": false
@@ -26617,10 +26617,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_eggs_fe875928": {
+			"Object_autonomy_budget_eggs_ebafa9bd": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_149fa755"
+					"$ref": "#/components/schemas/Shape_d338c1ca"
 				},
 				"additionalProperties": false
 			},
@@ -27144,11 +27144,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cacheRead_cacheWrite_input_4e54b4b4": {
+			"Object_cacheRead_cacheWrite_input_5999c8d5": {
 				"type": "object",
 				"required": ["cacheRead", "cacheWrite", "input"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_341d5247"
+					"$ref": "#/components/schemas/Shape_f7ce5f04"
 				},
 				"additionalProperties": false
 			},
@@ -27215,6 +27215,14 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_cache_free_groups_2ef4f63b": {
+				"type": "object",
+				"required": ["used", "window", "free", "reserve", "share", "groups", "cache"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_aeffd685"
+				},
+				"additionalProperties": false
+			},
 			"Object_cache_free_groups_608bad03": {
 				"type": "object",
 				"required": [
@@ -27232,14 +27240,6 @@
 				],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_6b840e60"
-				},
-				"additionalProperties": false
-			},
-			"Object_cache_free_groups_bb32a742": {
-				"type": "object",
-				"required": ["used", "window", "free", "reserve", "share", "groups", "cache"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_66c97be4"
 				},
 				"additionalProperties": false
 			},
@@ -27807,7 +27807,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_9631a581": {
+			"Object_config_contextWork_fleet_44a75724": {
 				"type": "object",
 				"required": [
 					"id",
@@ -27824,7 +27824,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_a1f58d03"
+					"$ref": "#/components/schemas/Shape_959ea69e"
 				},
 				"additionalProperties": false
 			},
@@ -27988,11 +27988,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_context_session_turn_eab80754": {
+			"Object_context_session_turn_f4f94159": {
 				"type": "object",
 				"required": ["turn", "session"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_d38a0589"
+					"$ref": "#/components/schemas/Shape_d0adfe36"
 				},
 				"additionalProperties": false
 			},
@@ -30962,7 +30962,7 @@
 					"transport"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_490df8cb"
+					"$ref": "#/components/schemas/Shape_fe91c4f2"
 				},
 				"additionalProperties": false
 			},
@@ -31181,35 +31181,6 @@
 			"Shape_12e39c26": {
 				"ignored": {
 					"$ref": "#/components/schemas/Array_7d31aeb6"
-				}
-			},
-			"Shape_149fa755": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_source_ac199f39"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_session_turn_eab80754"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_1686abeb": {
@@ -31538,17 +31509,6 @@
 					]
 				}
 			},
-			"Shape_341d5247": {
-				"cacheRead": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"cacheWrite": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"input": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
 			"Shape_35544bbe": {
 				"outcome": {
 					"type": "string",
@@ -31725,65 +31685,6 @@
 				},
 				"display": {
 					"type": "string"
-				}
-			},
-			"Shape_490df8cb": {
-				"v": {
-					"type": "number",
-					"const": 1
-				},
-				"foldVersion": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"generatedAt": {
-					"type": "string",
-					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-				},
-				"kind": {
-					"type": "string",
-					"const": "session"
-				},
-				"sessionId": {
-					"type": "string",
-					"minLength": 1,
-					"maxLength": 512
-				},
-				"modes": {
-					"type": "array",
-					"items": {
-						"enum": ["standard", "research"]
-					}
-				},
-				"journal": {
-					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_48ebcd87"
-				},
-				"lifetime": {
-					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_a4ab1107"
-				},
-				"lineage": {
-					"$ref": "#/components/schemas/Object_parent_totals_unreadableAncestors_d17b9b7d"
-				},
-				"own": {
-					"$ref": "#/components/schemas/Object_cost_counts_tokens_e3199db1"
-				},
-				"byRole": {
-					"$ref": "#/components/schemas/Array_20f77070"
-				},
-				"runs": {
-					"$ref": "#/components/schemas/Object_apiCalls_count_tokens_fb76b1f8"
-				},
-				"totals": {
-					"$ref": "#/components/schemas/Object_tokens_usd_a1fd0d93"
-				},
-				"context": {
-					"$ref": "#/components/schemas/Object_cache_free_groups_bb32a742"
-				},
-				"overhead": {
-					"$ref": "#/components/schemas/Object_bookkeepingRounds_harness_model_451499c1"
-				},
-				"transport": {
-					"$ref": "#/components/schemas/Union_10c2f0fd"
 				}
 			},
 			"Shape_4cbcf9e3": {
@@ -32729,29 +32630,6 @@
 					"$ref": "#/components/schemas/Union_6ab8d6d6"
 				}
 			},
-			"Shape_66c97be4": {
-				"used": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"window": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"free": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"reserve": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"share": {
-					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				},
-				"groups": {
-					"$ref": "#/components/schemas/Array_466f937c"
-				},
-				"cache": {
-					"$ref": "#/components/schemas/Union_95722fee"
-				}
-			},
 			"Shape_6b840e60": {
 				"used": {
 					"type": "string",
@@ -33116,6 +32994,66 @@
 					"$ref": "#/components/schemas/Object_calls_tokens_usd_0c039ba0"
 				}
 			},
+			"Shape_959ea69e": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_cc43feb8"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_ebafa9bd"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_99feab09": {
 				"version": {
 					"type": "number",
@@ -33185,66 +33123,6 @@
 			"Shape_9d730e9c": {
 				"quantities": {
 					"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_calls_ad75ee35"
-				}
-			},
-			"Shape_a1f58d03": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_cc43feb8"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_fe875928"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_a7a7e801": {
@@ -33322,6 +33200,29 @@
 				},
 				"unresolved": {
 					"$ref": "#/components/schemas/Object_display_fact_1897f681"
+				}
+			},
+			"Shape_aeffd685": {
+				"used": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"window": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"free": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"reserve": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"share": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"groups": {
+					"$ref": "#/components/schemas/Array_466f937c"
+				},
+				"cache": {
+					"$ref": "#/components/schemas/Union_b6006dcb"
 				}
 			},
 			"Shape_af1563ae": {
@@ -34045,6 +33946,17 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
+			"Shape_d0adfe36": {
+				"context": {
+					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_fb814a10"
+				},
+				"turn": {
+					"$ref": "#/components/schemas/Union_c2e91107"
+				},
+				"session": {
+					"$ref": "#/components/schemas/Union_021b2167"
+				}
+			},
 			"Shape_d2ae50e5": {
 				"resource": {
 					"type": "string",
@@ -34058,15 +33970,33 @@
 					"$ref": "#/components/schemas/Object_at_fact_id_cdcc8a27"
 				}
 			},
-			"Shape_d38a0589": {
-				"context": {
-					"$ref": "#/components/schemas/Object_compactionAuto_compactionThreshold_contextWindow_fb814a10"
+			"Shape_d338c1ca": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_source_ac199f39"
 				},
-				"turn": {
-					"$ref": "#/components/schemas/Union_c2e91107"
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
 				},
-				"session": {
-					"$ref": "#/components/schemas/Union_eb6a2f5a"
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_session_turn_f4f94159"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_d3a517a5": {
@@ -34438,6 +34368,23 @@
 					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
 				}
 			},
+			"Shape_f7ce5f04": {
+				"cacheRead": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"cacheWrite": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"input": {
+					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
+				},
+				"share": {
+					"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
+				},
+				"lastTurnShare": {
+					"$ref": "#/components/schemas/Object_display_fact_c2d511a1"
+				}
+			},
 			"Shape_fd2af4a0": {
 				"verdict": {
 					"$ref": "#/components/schemas/Union_7c27c829"
@@ -34503,6 +34450,65 @@
 				},
 				"verification": {
 					"$ref": "#/components/schemas/Object_axes_reason_runId_3824a2a2"
+				}
+			},
+			"Shape_fe91c4f2": {
+				"v": {
+					"type": "number",
+					"const": 1
+				},
+				"foldVersion": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"generatedAt": {
+					"type": "string",
+					"pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+				},
+				"kind": {
+					"type": "string",
+					"const": "session"
+				},
+				"sessionId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 512
+				},
+				"modes": {
+					"type": "array",
+					"items": {
+						"enum": ["standard", "research"]
+					}
+				},
+				"journal": {
+					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_48ebcd87"
+				},
+				"lifetime": {
+					"$ref": "#/components/schemas/Object_closed_firstRecordAt_lastRecordAt_a4ab1107"
+				},
+				"lineage": {
+					"$ref": "#/components/schemas/Object_parent_totals_unreadableAncestors_d17b9b7d"
+				},
+				"own": {
+					"$ref": "#/components/schemas/Object_cost_counts_tokens_e3199db1"
+				},
+				"byRole": {
+					"$ref": "#/components/schemas/Array_20f77070"
+				},
+				"runs": {
+					"$ref": "#/components/schemas/Object_apiCalls_count_tokens_fb76b1f8"
+				},
+				"totals": {
+					"$ref": "#/components/schemas/Object_tokens_usd_a1fd0d93"
+				},
+				"context": {
+					"$ref": "#/components/schemas/Object_cache_free_groups_2ef4f63b"
+				},
+				"overhead": {
+					"$ref": "#/components/schemas/Object_bookkeepingRounds_harness_model_451499c1"
+				},
+				"transport": {
+					"$ref": "#/components/schemas/Union_10c2f0fd"
 				}
 			},
 			"TelemetryUpdateV1": {
@@ -35407,6 +35413,16 @@
 					{
 						"type": "string",
 						"const": "json"
+					}
+				]
+			},
+			"Union_021b2167": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/SessionTelemetryV1"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -36669,16 +36685,6 @@
 					}
 				]
 			},
-			"Union_95722fee": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_input_4e54b4b4"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_963e21ff": {
 				"anyOf": [
 					{
@@ -37110,6 +37116,16 @@
 					{
 						"type": "string",
 						"const": "recalled"
+					}
+				]
+			},
+			"Union_b6006dcb": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cacheRead_cacheWrite_input_5999c8d5"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -37547,16 +37563,6 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_after_before_48a65c2b"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
-			"Union_eb6a2f5a": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/SessionTelemetryV1"
 					},
 					{
 						"type": "null"

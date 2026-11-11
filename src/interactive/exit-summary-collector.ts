@@ -155,6 +155,11 @@ export type ExitSpend =
 			models: ReadonlyArray<{ key: string; calls: string; cost: string; breakdown: string }>;
 			/** The session's verified outcomes and its tokens and cost per outcome, as /usage words them. */
 			verified: VerifiedOutcomeWords;
+			/**
+			 * The read model's cached share of the prompt tokens sent, for the session and its last turn, as
+			 * `telemetry cache` words them; null when no call reported its cache read.
+			 */
+			cache: { share: string; lastTurn: string | null } | null;
 	  };
 
 /**
@@ -239,7 +244,17 @@ export function exitSpend(
 			breakdown: tokenBreakdown(view, group.key),
 		})),
 		verified: verifiedOutcomeWords(view, sessionVerifiedOutcomes(view, entries)),
+		cache: cacheShareWords(view),
 	};
+}
+
+const shareWords = (share: { fact: { kind: string }; display: string } | undefined): string | null =>
+	share && (share.fact.kind === "measured" || share.fact.kind === "estimated") ? share.display : null;
+
+function cacheShareWords(view: TelemetryView): { share: string; lastTurn: string | null } | null {
+	const report = view.cache();
+	const share = shareWords(report.share);
+	return share === null ? null : { share, lastTurn: shareWords(report.lastTurnShare) };
 }
 
 /**

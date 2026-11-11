@@ -329,6 +329,12 @@ export function renderExitSummary(
 		add("Session tokens", spend.kind === "ready" ? factsOf(spend.breakdown) : [SPEND_NOT_AVAILABLE]);
 		add("Session cost", [spend.kind === "ready" ? spend.cost : SPEND_NOT_AVAILABLE]);
 		add("Verified", verifiedFacts(spend));
+		if (style === "report" && spend.kind === "ready" && spend.cache !== null) {
+			add("Cache", [
+				`${spend.cache.share} of prompt tokens read from cache`,
+				...(spend.cache.lastTurn !== null ? [`last turn ${spend.cache.lastTurn}`] : []),
+			]);
+		}
 		if (snapshot.compactions > 0) add("Compactions", [count(snapshot.compactions)]);
 		if (unattended !== null) add("Unattended", unattended);
 		if (gitHooks !== null) add("Git hooks", gitHooks);

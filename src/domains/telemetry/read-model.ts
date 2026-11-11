@@ -1858,6 +1858,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 						cacheRead: quantity(view, own(id, "cacheRead", { attemptId: latest.started.attemptId })),
 						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
 						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
+						...cacheShares(analysis.attempts),
 					}
 				: null,
 			used: quantity(view, { scope: "context", owner: id, metric: "contextUsed" }),
@@ -2260,8 +2261,6 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			verdicts[floorCalls.has(attempt) ? "hot" : attempt.settled.cache.verdict] += 1;
 	const breaks = analysis.attempts.filter((attempt) => isBreak(attempt) && !floorCalls.has(attempt));
 	const causes = [...new Set(breaks.flatMap(coldKeys))].sort();
-	const lastTurn = [...analysis.attempts].reverse().find((attempt) => invoked(attempt) && attempt.ctx?.turnId)
-		?.ctx?.turnId;
 	const floorRows = [...floors].flatMap(([route, granularity]) => {
 		const calls = [...floorCalls.keys()].filter((attempt) => routeOf(attempt) === route);
 		if (calls.length === 0) return [];
@@ -2303,10 +2302,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			rePrefilled: quantity(view, own(id, "rePrefilled", { group: { by: "cold", key: cause } })),
 			breakUsd: quantity(view, own(id, "breakUsd", { group: { by: "cold", key: cause } })),
 		})),
-		share: cacheShare(analysis.attempts),
-		lastTurnShare: cacheShare(
-			lastTurn === undefined ? [] : analysis.attempts.filter((attempt) => attempt.ctx?.turnId === lastTurn),
-		),
+		...cacheShares(analysis.attempts),
 		engineFloor: floorRows,
 	};
 }
@@ -2343,6 +2339,17 @@ function cacheShare(attempts: readonly Attempt[]): { fact: Fact<number>; display
 	const fact: Fact<number> =
 		total > 0 ? { kind: "measured", value: (100 * read) / total, source: "local-count" } : unobserved;
 	return { fact, display: renderFact(fact, "percent") };
+}
+
+/** The session's cached share and its last turn's, read by `telemetry cache`, the exit summary and ACP alike. */
+function cacheShares(attempts: readonly Attempt[]) {
+	const lastTurn = [...attempts].reverse().find((attempt) => invoked(attempt) && attempt.ctx?.turnId)?.ctx?.turnId;
+	return {
+		share: cacheShare(attempts),
+		lastTurnShare: cacheShare(
+			lastTurn === undefined ? [] : attempts.filter((attempt) => attempt.ctx?.turnId === lastTurn),
+		),
+	};
 }
 
 const routeOf = (attempt: Attempt) => modelKey(attempt.settled?.target ?? attempt.started.target);

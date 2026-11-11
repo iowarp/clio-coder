@@ -319,6 +319,8 @@ const roleRow = Type.Object(
 );
 const totals = Type.Object({ tokens: QuantitySchema, usd: QuantitySchema }, closed);
 
+/** A cached share of prompt tokens, as a percent fact and its display. */
+const CacheShareSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
 export const SessionTelemetrySchema = Type.Object(
 	{
 		...header,
@@ -371,8 +373,21 @@ export const SessionTelemetrySchema = Type.Object(
 				reserve: QuantitySchema,
 				share: QuantitySchema,
 				groups: Type.Array(Type.Object({ key: text, tokens: QuantitySchema, share: QuantitySchema }, closed)),
+				/**
+				 * The latest call's cache read, write and input, then the cached share of the session's prompt tokens and its
+				 * last turn's, as `telemetry cache` reports them.
+				 */
 				cache: Type.Union([
-					Type.Object({ cacheRead: QuantitySchema, cacheWrite: QuantitySchema, input: QuantitySchema }, closed),
+					Type.Object(
+						{
+							cacheRead: QuantitySchema,
+							cacheWrite: QuantitySchema,
+							input: QuantitySchema,
+							share: Type.Optional(CacheShareSchema),
+							lastTurnShare: Type.Optional(CacheShareSchema),
+						},
+						closed,
+					),
 					Type.Null(),
 				]),
 			},
@@ -577,7 +592,6 @@ export const CostReportSchema = Type.Object(
 export type CostReportV1 = Static<typeof CostReportSchema>;
 
 /** Cached share of a prompt in percent: cache read / (cache read + cache write + uncached input). */
-const CacheShareSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
 const cacheBreak = Type.Object(
 	{
 		callId: CallIdSchema,

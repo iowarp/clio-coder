@@ -78,6 +78,32 @@ test("the session summary counts what Clio answered while the operator was away 
 	collector.dispose();
 });
 
+test("the session report states the cached share of the prompt, for the session and its last turn", () => {
+	const view = telemetryViewOf("session-1", [
+		...telemetryCall("session-1", { turnId: "t1", usage: { input: 1000, output: 10 } }),
+		...telemetryCall("session-1", { turnId: "t2", usage: { input: 100, output: 10, cacheRead: 900 } }),
+	]);
+	const collector = createExitSummaryCollector({
+		bus: createTelemetryHub(),
+		telemetry: {
+			subscribe: () => () => {},
+			read: { live: () => view, subscribe: () => () => {} },
+		} as unknown as TelemetryContract,
+		dispatch: {},
+		session: { current: () => ({ id: "session-1", hasModelTurn: true }) } as unknown as Pick<SessionContract, "current">,
+		getTurns: () => 2,
+		getToolCounts: () => new Map(),
+		getModel: () => null,
+	});
+	const base = collector.snapshot();
+	ok(base);
+	const snapshot = { ...base, spend: exitSpend(view, "1970-01-01T00:00:00.000Z") };
+	const card = (style: "standard" | "report") => renderExitSummary(snapshot, style, 120, false).join("\n");
+	match(card("report"), /^Cache: 45\.0% of prompt tokens read from cache · last turn 90\.0%$/mu);
+	strictEqual(card("standard").includes("read from cache"), false);
+	collector.dispose();
+});
+
 test("the exit card divides the session's spend over its distinct verified outcomes, and never by zero", () => {
 	const passed = (kind: string, check: string, sha256: string, validation = "passed") => ({
 		kind: "message",
