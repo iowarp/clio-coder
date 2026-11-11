@@ -139,6 +139,23 @@ describe("release decisions", () => {
 		strictEqual(nextStep(facts({ pushed: false, ci: null, local: { wanted: false }, moved: foreign }), {}).step, "push");
 	});
 
+	it("cancels the old candidate's open release run before starting over", async () => {
+		const { startOverCancels } = await import(planModule);
+		const receipt = { releaseRun: { id: 7 }, ciRun: { id: 6 } };
+		deepStrictEqual(
+			startOverCancels(receipt, () => "waiting").map(({ id, argv }) => [id, argv.slice(0, 3)]),
+			[[7, ["run", "cancel", "7"]]],
+		);
+		deepStrictEqual(
+			startOverCancels(receipt, () => "completed"),
+			[],
+		);
+		deepStrictEqual(
+			startOverCancels({ releaseRun: null }, () => "waiting"),
+			[],
+		);
+	});
+
 	it("publishes only the ci.yml run's artifact, never the local candidate", async () => {
 		const { ciCandidateDirectory, publishArgs } = await import(planModule);
 		const ciRun = { id: 42 };

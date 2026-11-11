@@ -134,6 +134,17 @@ export const postFailures = (results) =>
 export const previousTag = (git, tag, commit) =>
 	git("describe", "--tags", "--abbrev=0", "--match", "v*", "--exclude", tag, `${commit}^`);
 
+/**
+ * Runs a receipt owns that are still open when the candidate moved and the receipt is dropped. An
+ * old release.yml run left waiting for approval holds the public-release concurrency group and
+ * blocks the new candidate's run, so starting over cancels it first.
+ */
+export const startOverCancels = (receipt, statusOf) =>
+	[receipt?.releaseRun?.id]
+		.filter(Boolean)
+		.filter((id) => statusOf(id) !== "completed")
+		.map((id) => ({ id, argv: ["run", "cancel", String(id), "--repo", "iowarp/clio-coder"] }));
+
 /** npm refuses a second publish of an existing version with this message; same bytes mean accepted. */
 export const alreadyPublished = (stderr) =>
 	/cannot publish over the previously published versions/u.test(String(stderr));

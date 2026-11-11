@@ -40,6 +40,7 @@ import {
 	QUALIFICATION_JOBS,
 	rerunStarted,
 	runState,
+	startOverCancels,
 	tmpdirProblem,
 	toolingOnly,
 	versionBranch,
@@ -736,6 +737,18 @@ export async function main(argv = process.argv.slice(2)) {
 		let receipt = loadReceipt(state, pkg.version);
 		if (receipt && receipt.commit !== head && !receipt.npm?.accepted) {
 			console.log(`The candidate moved from ${receipt.commit.slice(0, 12)} to ${head.slice(0, 12)}; starting over.`);
+			for (const { id, argv } of startOverCancels(receipt, (id) => getRun(id).record.status)) {
+				if (statusOnly) {
+					console.log(`  release.yml run ${id} of the old candidate is still open; cancel it: gh ${argv.join(" ")}`);
+					continue;
+				}
+				try {
+					run("gh", argv, { stdio: "pipe" });
+					console.log(`  cancelled release.yml run ${id} of the old candidate`);
+				} catch {
+					throw new Error(`Cancel release.yml run ${id} of the old candidate first: gh ${argv.join(" ")}`);
+				}
+			}
 			receipt = null;
 		}
 		receipt ??= newReceipt({
