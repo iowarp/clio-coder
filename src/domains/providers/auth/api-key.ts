@@ -1,5 +1,6 @@
 import { type ResolveConfigValueOptions, resolveDynamicConfigValue } from "../../../core/resolve-config-value.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../../engine/env-api-keys.js";
+import { isPluginProviderId } from "../plugin-provider-ids.js";
 
 export interface EnvironmentApiKeyResolution {
 	apiKey: string | undefined;
@@ -33,6 +34,8 @@ export function resolveEnvironmentApiKey(providerId: string, explicitEnvVar?: st
 			return { apiKey: fromExplicit, source: explicitEnvVar };
 		}
 	}
+	// A runtime plugin gets only the variable it declares, never a well-known provider's key.
+	if (isPluginProviderId(providerId)) return { apiKey: undefined, source: explicitEnvVar ?? null };
 	for (const envVar of findEngineEnvKeys(providerId) ?? []) {
 		const fromKnownEnv = process.env[envVar]?.trim();
 		if (fromKnownEnv && fromKnownEnv.length > 0) {

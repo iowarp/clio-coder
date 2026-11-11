@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { clioConfigDir } from "../../core/xdg.js";
+import { markPluginProviderIds, unmarkPluginProviderIds } from "./plugin-provider-ids.js";
 import { retiredRuntimeReplacement } from "./retired-runtimes.js";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
@@ -41,6 +42,14 @@ function runtimePluginSpecifier(specifier: string): string {
 export function createRuntimeRegistry(): RuntimeRegistry {
 	const byId = new Map<string, RuntimeDescriptor>();
 	const canonical = new Set<string>();
+	const pluginIds = new Set<string>();
+
+	const registerPlugin = (desc: RuntimeDescriptor): void => {
+		register(desc);
+		const ids = [desc.id, ...(desc.aliases ?? []), ...(desc.oauthProviderId ? [desc.oauthProviderId] : [])];
+		for (const id of ids) pluginIds.add(id);
+		markPluginProviderIds(ids);
+	};
 
 	const register = (desc: RuntimeDescriptor): void => {
 		const ids = [desc.id, ...(desc.aliases ?? [])];
@@ -60,6 +69,8 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 	const clear = (): void => {
 		byId.clear();
 		canonical.clear();
+		unmarkPluginProviderIds(pluginIds);
+		pluginIds.clear();
 	};
 
 	const loadFromDir = async (dir: string, beforeImport?: () => Promise<void>): Promise<ReadonlyArray<string>> => {
@@ -78,7 +89,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 			const desc = await importDescriptor(full, pathToFileURL(full).href, beforeImport);
 			if (desc === null) continue;
 			try {
-				register(desc);
+				registerPlugin(desc);
 				loaded.push(desc.id);
 			} catch (err) {
 				writeDiagnostic(`[providers] runtime plugin ${full} rejected: ${describeError(err)}\n`);
@@ -115,7 +126,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 				continue;
 			}
 			try {
-				register(validation.descriptor);
+				registerPlugin(validation.descriptor);
 				loaded.push(validation.descriptor.id);
 			} catch (err) {
 				writeDiagnostic(`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`);
