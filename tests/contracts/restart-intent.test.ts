@@ -13,6 +13,7 @@ import {
 	writeRestartIntent,
 } from "../../src/core/restart-intent.js";
 import { firePendingModelRestart, nextModelRestartChain, setRestartHost } from "../../src/core/restart-request.js";
+import { describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { createInteractiveRestart, restartPreflight } from "../../src/interactive/interactive-restart.js";
 import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { createRestartSessionTool, restartSessionWorkspaceRefusal } from "../../src/tools/restart-session.js";
@@ -140,4 +141,10 @@ test("restart_session: a card at default, refused at yolo and outside the runnin
 		setRestartHost(null);
 		home.cleanup();
 	}
+});
+
+test("the restart_session card shows the continuation the operator approves", () => {
+	const target = describeCallTarget("restart_session", { continuation: "check the footer", reason: "rebuilt" });
+	assert.match(target, /check the footer/);
+	assert.match(target, /reason=.*rebuilt/);
 });

@@ -232,6 +232,8 @@ const CALL_ACTION_OBJECT_FIELDS = ["path", "file_path", "command", "pattern", "q
  */
 const CALL_TARGET_FIELDS: Readonly<Record<string, ReadonlyArray<string>>> = {
 	read: ["path", "offset", "limit", "tail"],
+	// The operator approves the continuation the restarted session will receive, so the card shows it.
+	restart_session: ["continuation", "reason"],
 	grep: ["pattern", "path", "mode", "glob", "ignore_case", "literal", "context", "limit", "include_ignored"],
 	find: ["pattern", "path", "order", "limit", "include_ignored"],
 	ls: ["path", "limit"],
