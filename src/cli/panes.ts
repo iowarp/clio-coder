@@ -8,8 +8,9 @@ clio-coder panes theme
 install  Install the pane host Clio runs its panes in (herdr, Apache-2.0). This
          is an alias for \`clio-coder tools install herdr\`; the toolchain
          command is where every pinned external program is managed. The
-         installer provisions it and Clio installs it on launch when it is
-         missing, so this is only needed to repair or pre-fetch it. With
+         installer provisions it, and Clio installs a new pin on launch after
+         an upgrade. Run this when the installer could not fetch it or after
+         \`npm install -g\`; a launch without it says so once. With
          --if-missing nothing is downloaded when Clio's own pinned copy is
          already installed. A herdr of your own on PATH is never used to host
          Clio's panes and is never touched.

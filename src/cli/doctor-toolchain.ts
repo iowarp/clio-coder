@@ -133,7 +133,7 @@ export function paneHostFinding(status: ToolStatus, name = "external tool herdr"
 		ok: true,
 		name,
 		level: "warn",
-		detail: `pane host ${status.version} is not installed; the next \`clio-coder\` installs it, or run \`clio-coder panes install\``,
+		detail: `pane host ${status.version} is not installed; run \`clio-coder panes install\``,
 	};
 }
 

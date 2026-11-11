@@ -8,10 +8,12 @@
  *
  * The pane host is part of Clio, not an option of it. It always runs Clio's
  * own vendored herdr pin, never a herdr on PATH, so the operator's own herdr,
- * its config and its sessions are left exactly as they are. When the pin is
- * missing (an install that skipped it, a wiped data directory, an upgrade that
- * moved the pin) it is installed here with one line of status, and when that
- * fails Clio says so in one line and carries on in the plain terminal.
+ * its config and its sessions are left exactly as they are. A home that never
+ * had the pane host (an install that skipped it, a fresh `npm install -g`)
+ * starts in the plain terminal with one notice and no download, so a first
+ * launch never waits on the network. When an upgrade moved the pin of a host
+ * that was installed, the new pin is installed here with one line of status,
+ * and when that fails Clio says so in one line and carries on.
  *
  * Inside the operator's own herdr, Clio opens its own host nested in that pane
  * with a prefix that does not collide with the outer one. Inside Clio's own
@@ -20,7 +22,7 @@
  * it never opens a host either.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import { relaunchScript } from "../core/relaunch-script.js";
@@ -80,14 +82,43 @@ function recentInstallFailure(stamp: string, version: string, now: number): bool
 	}
 }
 
+/** The notice for a home without the pane host is shown once per pin; the same stamp quiets a failed install. */
+function toldAbout(stamp: string, version: string): boolean {
+	try {
+		const record = JSON.parse(readFileSync(stamp, "utf8")) as { version?: unknown };
+		return record.version === version;
+	} catch {
+		return false;
+	}
+}
+
+function writeStamp(stamp: string, version: string): void {
+	try {
+		mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
+		writeFileSync(stamp, `${JSON.stringify({ version, at: Date.now() })}\n`, { mode: 0o600 });
+	} catch {
+		// Without the stamp the next launch says it again.
+	}
+}
+
+/** Whether any herdr pin was ever installed here, so a missing one is an upgrade's new pin rather than none at all. */
+function hadPaneHost(versionDir: string): boolean {
+	try {
+		return readdirSync(dirname(versionDir)).length > 0;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Clio's own pinned herdr, installed on the spot when it is missing. On a
- * platform with no pinned herdr build, panes are silently unavailable. A failed
- * install warns once and is not retried at launch for a day, or until the pin
- * moves; the installers, `tools install herdr` and doctor always try.
+ * Clio's own pinned herdr. On a platform with no pinned herdr build, panes are
+ * silently unavailable. A home that never had it gets one notice and no
+ * download. A pin an upgrade moved is installed on the spot; a failed install
+ * warns once and is not retried at launch for a day, or until the pin moves.
+ * The installers, `panes install` and doctor always try.
  */
 async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } | null> {
-	const { currentToolPlatform, findPinnedTool, installTool, resolveVendoredBinary } = await import(
+	const { currentToolPlatform, findPinnedTool, installTool, resolveVendoredBinary, toolVersionDir } = await import(
 		"../domains/toolchain/index.js"
 	);
 	const present = resolveVendoredBinary("herdr");
@@ -97,6 +128,15 @@ async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } 
 	if (entry === null || platform === null || entry.downloads[platform] === undefined) return null;
 	const { clioStateDir } = await import("../core/xdg.js");
 	const stamp = installFailureStamp(clioStateDir());
+	if (!hadPaneHost(toolVersionDir(entry.id, entry.version))) {
+		if (!toldAbout(stamp, entry.version)) {
+			process.stderr.write(
+				"Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.\n",
+			);
+			writeStamp(stamp, entry.version);
+		}
+		return null;
+	}
 	if (recentInstallFailure(stamp, entry.version, Date.now())) return null;
 	process.stderr.write("Clio Coder: setting up terminal panes (one time)...\n");
 	const installed = await installTool("herdr", { timeoutMs: LAUNCH_INSTALL_TIMEOUT_MS });
@@ -106,12 +146,7 @@ async function vendoredHerdr(): Promise<{ binaryPath: string; version: string } 
 		process.stderr.write(
 			`Clio Coder: terminal panes unavailable (${why}). Continuing in this terminal; run \`clio-coder panes install\` to retry.\n`,
 		);
-		try {
-			mkdirSync(dirname(stamp), { recursive: true, mode: 0o700 });
-			writeFileSync(stamp, `${JSON.stringify({ version: entry.version, at: Date.now() })}\n`, { mode: 0o600 });
-		} catch {
-			// Without the stamp the next launch simply tries again.
-		}
+		writeStamp(stamp, entry.version);
 	} else {
 		rmSync(stamp, { force: true });
 	}

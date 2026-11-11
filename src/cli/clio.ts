@@ -1,4 +1,5 @@
 import { formatBootTrace } from "../core/boot-trace.js";
+import { validateSettingsFile } from "../core/config.js";
 import { allowCopilotKeychain } from "../core/copilot-keychain.js";
 import { writeDiagnostic } from "../core/diagnostics.js";
 import { detectNewerHome, initializeClioHome, type NewerHome, recordHomeDowngrade } from "../core/init.js";
@@ -31,6 +32,12 @@ function describeNewerHome(newer: NewerHome): string {
 			? ` with migrations this build does not know (${newer.unknownMigrations.join(", ")})`
 			: "";
 	return `This home was last used by Clio Coder ${newer.version}${unknown}; you are running ${readClioVersion()} (${process.argv[1] ?? process.execPath}). Run the newer one, or continue at your own risk.`;
+}
+
+/** Whether the user settings name a chat target, read without creating or migrating the home. */
+function chatRouteChosen(): boolean {
+	const { settings, issues } = validateSettingsFile();
+	return issues.length > 0 || Boolean(settings.chat.target);
 }
 
 export interface ClioCommandDependencies {
@@ -80,11 +87,15 @@ export async function runClioCommand(
 		if (!accepted) return 2;
 		recordHomeDowngrade();
 	}
-	if (!options.headless && !options.acp) {
+	// A home with no chat route chosen sets up a model first: a new user's first `clio-coder` is usually typed in
+	// their home folder, and the folder question would otherwise end the launch before setup.
+	const deferWorkspaceCheck = terminalLeaseEligible(options) && !chatRouteChosen();
+	if (!options.headless && !options.acp && !deferWorkspaceCheck) {
 		const { confirmStartupWorkspace } = await import("./workspace-check.js");
 		if (!(await confirmStartupWorkspace())) return 1;
 	}
 	let startupSettings: import("../core/config.js").ClioSettings | undefined;
+	let setupRan = false;
 	if (terminalLeaseEligible(options)) {
 		const existingHome = homeIsReturning();
 		initializeClioHome();
@@ -140,6 +151,7 @@ export async function runClioCommand(
 			const { runConfigureCommand } = await import("./configure.js");
 			const configured = await runConfigureCommand([], process.stdin, process.stdout, true);
 			if (configured !== 0) return configured;
+			setupRan = true;
 			const configuredLayers = readStrictLayeredSettings(process.cwd());
 			const configuredWarning = formatSettingsLayerWarning(configuredLayers);
 			if (configuredWarning !== null && configuredWarning !== projectWarning) writeDiagnostic(configuredWarning);
@@ -149,6 +161,14 @@ export async function runClioCommand(
 				process.stderr.write(`${describeVerdict(configuredVerdict)} Configuration did not complete; startup cancelled.\n`);
 				return 2;
 			}
+		}
+	}
+	if (deferWorkspaceCheck) {
+		const { confirmStartupWorkspace } = await import("./workspace-check.js");
+		if (!(await confirmStartupWorkspace(process.cwd(), { afterSetup: setupRan }))) {
+			if (!setupRan) return 1;
+			process.stdout.write(wrapToTerminal("Your model is set up. cd into a project folder and run clio-coder there."));
+			return 0;
 		}
 	}
 	if (startupSettings) {

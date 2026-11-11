@@ -389,7 +389,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			const paneHost = fixedReport.findings.find((entry) => entry.name === "external tool herdr");
 			match(
 				paneHost?.detail ?? "",
-				/^pane host \S+ is not installed; the next `clio-coder` installs it|Clio's pinned copy|no pinned pane host/u,
+				/^pane host \S+ is not installed; run `clio-coder panes install`|Clio's pinned copy|no pinned pane host/u,
 			);
 			for (const finding of fixedReport.findings.filter((entry) =>
 				/panes|yazi|external tool (herdr|yazi)/u.test(entry.name),

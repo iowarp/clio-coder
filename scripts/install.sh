@@ -547,9 +547,9 @@ report_path() {
 		fi
 		return 0
 	fi
-	warn "$bin_dir is not on PATH. Add it for this shell, and to $rc to keep it:"
-	printf '  %s\n' "$(path_line)" >&2
-	warn "or rerun the installer with --modify-path to append that line for you"
+	# Last lines of the install, so the command a user copies from the bottom is one that runs as printed.
+	warn "$bin_dir is not on your PATH. Until it is, run: $launcher"
+	printf '  To add it: %s   (and to %s to keep it, or rerun with --modify-path)\n' "$(path_line)" "$rc" >&2
 }
 
 warn_about_shadowing_clio() {
@@ -560,8 +560,11 @@ warn_about_shadowing_clio() {
 	warn "check it with: $found --version; remove it or put $bin_dir earlier on PATH, then run: hash -r"
 }
 
+# The installed binary computes the next step for this home: found keys and servers, or the route in use.
 print_next_steps() {
-	printf 'Run: clio-coder\n'
+	if ! { version_ge "${installed_version%%-*}" "0.7.1" && "$node_bin" "$entry" setup --next </dev/null 2>/dev/null; }; then
+		printf 'Run: clio-coder\n'
+	fi
 	printf 'Desktop app: clio-coder gui\n'
 }
 
@@ -605,14 +608,14 @@ offer_gui() {
 
 # The pane host is what bare `clio-coder` opens: the session beside terminal panes, hosted by
 # Clio Coder's own pinned herdr in its data directory. A herdr of the operator's own on PATH is
-# never used for that and never touched. A failure here never fails the install: Clio installs
-# the pane host itself on first launch, and runs in the plain terminal until it can.
+# never used for that and never touched. A failure here never fails the install: Clio runs in the
+# plain terminal, says so once, and never downloads on first launch; `clio-coder panes install` retries.
 provision_workspace() {
 	# Same command as install.ps1, so both installers provision the pane host identically.
 	if "$node_bin" "$entry" tools install herdr --json </dev/null >"$work/workspace.out" 2>"$work/workspace.err"; then
 		ok "pane host ready: $("$node_bin" -e 'try { process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).message || "herdr")); } catch { process.stdout.write("herdr"); }' "$work/workspace.out")"
 	else
-		warn "the pane host (herdr) was not installed; Clio Coder retries on first launch, or run: clio-coder panes install"
+		warn "the pane host (herdr) was not installed; Clio Coder runs in the plain terminal until you run: clio-coder panes install"
 	fi
 }
 
@@ -1016,9 +1019,9 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	fi
 	if version_ge "${installed_version%%-*}" "0.6.2"; then provision_workspace; fi
 	offer_gui
-	report_path
 	warn_about_shadowing_clio
 	print_next_steps
+	report_path
 }
 
 main "$@"

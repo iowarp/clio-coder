@@ -33,6 +33,7 @@ export const coreTests = [
 	"setup-status",
 	"key-prefix",
 	"configure-import",
+	"setup-next",
 	"contained-secrets",
 	"true-yolo",
 	"contained-yolo",

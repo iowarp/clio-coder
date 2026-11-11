@@ -36,8 +36,14 @@ export function workspaceConcern(cwd: string, home: string): WorkspaceConcern {
 		: null;
 }
 
-/** Runs before project configuration, hooks, or the interactive shell load. */
-export async function confirmStartupWorkspace(cwd = process.cwd()): Promise<boolean> {
+/**
+ * Runs before project configuration, hooks, or the interactive shell load. Right after a first-run setup the
+ * user typed `clio-coder` where they were, usually home, so the question leads to a project instead of an exit.
+ */
+export async function confirmStartupWorkspace(
+	cwd = process.cwd(),
+	options: { afterSetup?: boolean } = {},
+): Promise<boolean> {
 	const canonical = realpathSync(cwd);
 	const concern = workspaceConcern(canonical, realpathSync(homedir()));
 	if (concern === null) return true;
@@ -51,7 +57,9 @@ export async function confirmStartupWorkspace(cwd = process.cwd()): Promise<bool
 			? "This is your home folder. It includes personal files and application settings."
 			: "This is a system or shared folder. Changes here can affect more than one project.",
 		"Clio can read files and, depending on permissions, edit files and run commands.",
-		"Open a project folder instead if you did not intend this scope.",
+		options.afterSetup
+			? "Clio works in a project folder: cd into one and run clio-coder there."
+			: "Open a project folder instead if you did not intend this scope.",
 		"",
 	];
 	if (!canSelect()) {
@@ -62,10 +70,15 @@ export async function confirmStartupWorkspace(cwd = process.cwd()): Promise<bool
 	}
 	const result = await promptSelect({
 		heading,
-		choices: [
-			{ value: false, label: "No, exit" },
-			{ value: true, label: "Yes, open this folder" },
-		],
+		choices: options.afterSetup
+			? [
+					{ value: false, label: "Exit, then cd into a project and run clio-coder" },
+					{ value: true, label: "Open this folder anyway" },
+				]
+			: [
+					{ value: false, label: "No, exit" },
+					{ value: true, label: "Yes, open this folder" },
+				],
 		initialIndex: 0,
 		backLabel: "cancel",
 		clearOnExit: true,

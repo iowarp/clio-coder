@@ -873,7 +873,7 @@ describe("doctor's panes binary row", () => {
 
 		const missing = await row();
 		equal(missing?.level, "warn");
-		match(missing?.detail ?? "", /is not installed; the next `clio-coder` installs it/);
+		match(missing?.detail ?? "", /is not installed; run `clio-coder panes install`/);
 		equal(missing?.detail.includes(bin), false);
 
 		const vendored = join(scratch, "data", "tools", "herdr", pin.version, "herdr");

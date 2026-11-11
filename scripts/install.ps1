@@ -373,7 +373,7 @@ function Install-ClioCoder {
 
 		# Clio hosts its terminal panes in a private copy of herdr, pinned by sha256 and fetched from
 		# herdr's releases or CLIO_CODER_TOOLCHAIN_MIRROR. It is part of the install, but never fails it:
-		# Clio fetches it again on its next launch and runs in the plain terminal until it has it.
+		# Clio runs in the plain terminal, says so once, and never downloads on first launch.
 		$panes = $null
 		$savedPreference = $ErrorActionPreference
 		$ErrorActionPreference = "Continue"
@@ -382,7 +382,7 @@ function Install-ClioCoder {
 			Ok "terminal panes ready (powered by herdr $($panes.version), Apache-2.0)"
 		} else {
 			$why = if ($panes -and $panes.message) { $panes.message } else { "the pane host could not be installed" }
-			Warn "terminal panes are not set up yet: $why. Clio Coder retries on its next launch; or run: clio-coder tools install herdr"
+			Warn "terminal panes are not set up yet: $why. Clio Coder runs in the plain terminal until you run: clio-coder panes install"
 		}
 
 		# Read and write the raw registry value: [Environment]::SetEnvironmentVariable
@@ -415,9 +415,18 @@ function Install-ClioCoder {
 		if (-not $modifyPath -and -not (Path-Contains $env:Path $binDir)) {
 			Say "PATH changes disabled; use the launcher commands below."
 		}
-		Write-Host "Run: $run"
+		# The installed binary computes the next step for this home: found keys and servers, or the route in use.
+		$next = $null
+		if ([version](($pkg.version -split '-')[0]) -ge [version]"0.7.1") {
+			$savedPreference = $ErrorActionPreference
+			$ErrorActionPreference = "Continue"
+			try { $next = & $node $entry setup --next 2>$null; if ($LASTEXITCODE -ne 0) { $next = $null } } catch { $next = $null } finally { $ErrorActionPreference = $savedPreference }
+		}
+		if ($next) { $next | ForEach-Object { Write-Host $_ } } else { Write-Host "Run: $run" }
 		# Native Windows has no background service yet; `clio-coder gui` starts a private server and prints its link.
 		Write-Host "Desktop app: $run gui"
+		# Last, so the command a user copies from the bottom is one that runs as printed.
+		if (-not (Path-Contains $env:Path $binDir)) { Write-Host "$binDir is not on this terminal's PATH. Until it is, run: $run" }
 	} finally {
 		# Stopping this script (Ctrl+C, a quitting session) leaves the npm child
 		# and its descendants running and writing into staging; end the whole

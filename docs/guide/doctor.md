@@ -128,7 +128,7 @@ Doctor reports one `external tool <id>` row for each pinned external program:
 `croc` (relay file transfer between machines) and `cliamp` (the terminal music
 player behind `/music`). The `herdr` row describes only Clio's own pinned copy, because
 Clio never hosts on a `herdr` from `PATH`: ``pane host <pin> (Clio's pinned copy) at <path>``
-is `OK`, ``pane host <pin> is not installed; the next `clio-coder` installs it, or run `clio-coder panes install` ``
+is `OK`, ``pane host <pin> is not installed; run `clio-coder panes install` ``
 is a `WARN`, and `no pinned pane host for this platform; Clio runs without panes` is `INFO`.
 For every other tool the detail says
 where the tool resolves, with a `PATH` copy winning when it meets the pin's minimum version:

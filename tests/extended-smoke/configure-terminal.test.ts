@@ -28,8 +28,9 @@ function terminal(
 	args: string[] = [],
 	env: NodeJS.ProcessEnv = {},
 	rows = 24,
+	command: string[] = ["configure"],
 ) {
-	const child = spawn(process.execPath, [CLI, "configure", ...args], {
+	const child = spawn(process.execPath, [CLI, ...command, ...args], {
 		cwd: home.dir,
 		env: { ...process.env, ...home.env, HOME: home.dir, TERM: "xterm-256color", PATH: "", ...env },
 		cols: 100,
@@ -565,6 +566,27 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.finish(130);
 			strictEqual(existsSync(join(home.dir, "config/settings.yaml")), false);
 			strictEqual(existsSync(join(home.dir, "config/credentials.yaml")), false);
+		} finally {
+			tty.close();
+			home.cleanup();
+		}
+	});
+
+	it("a first launch in the home folder sets up a model before the folder question", async () => {
+		const home = makeScratchHome("clio-coder-first-launch-tty-");
+		const registry = getRuntimeRegistry();
+		registerBuiltinRuntimes(registry);
+		const noKeys = Object.fromEntries(
+			registry.list().flatMap((runtime) => (runtime.credentialsEnvVar ? [[runtime.credentialsEnvVar, ""]] : [])),
+		);
+		// cwd and HOME are the same folder, which the workspace check treats as the home folder.
+		const tty = terminal(home, [], noKeys, 24, []);
+		try {
+			await tty.expect("Clio needs a model");
+			await tty.expect("What do you have?");
+			strictEqual(tty.screen().includes("This is your home folder"), false, tty.screen());
+			tty.send(BACK);
+			await tty.finish(130);
 		} finally {
 			tty.close();
 			home.cleanup();

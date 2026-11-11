@@ -409,6 +409,8 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["panes", async (subArgs) => (await import("./panes.js")).runPanesCommand(subArgs)],
 	["doctor", async (subArgs) => (await import("./doctor.js")).runDoctorCommand(subArgs)],
 	["paths", async (subArgs) => (await import("./paths.js")).runPathsCommand(subArgs)],
+	// Hidden: the installers' closing message.
+	["setup", async (subArgs) => (await import("./setup-next.js")).runSetupCommand(subArgs)],
 	["reset", async (subArgs) => (await import("./reset.js")).runResetCommand(subArgs)],
 	["uninstall", async (subArgs) => (await import("./uninstall.js")).runUninstallCommand(subArgs)],
 	["upgrade", async (subArgs) => (await import("./upgrade.js")).runUpgradeCommand(subArgs)],
