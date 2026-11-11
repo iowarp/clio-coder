@@ -475,7 +475,7 @@ Workers compile their system prompt as the third tier, after the attended and he
 1. `identity.clio-coder-worker`
 2. `operating.contract` and `operating.worker`, rendered as one operating contract section
 3. `operating.steering`, only when live steering is available
-4. `safety.default`, or `safety.yolo-worker` when the permit inherited the operator's yolo, rendered with the worker's permit
+4. `safety.yolo-worker` when the permit inherited the operator's yolo, else `safety.worker` for a worker holding `bash`, `run_script` or `verify` and `safety.worker-no-shell` for one holding none, rendered with the worker's permit
 5. `dispatch.read-only`, only for a read-only dispatch
 6. The persona, which is the recipe body or a caller `persona` override, followed by the block for any bound skills
 
