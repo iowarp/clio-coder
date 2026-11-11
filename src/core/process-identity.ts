@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { hostname } from "node:os";
 
 /**
@@ -89,4 +89,110 @@ export function processIdentityAlive(identity: {
 	if (identity.birthToken === null) return true;
 	const current = processBirthToken(identity.pid);
 	return current === null || current === identity.birthToken;
+}
+
+function readPidNamespace(pid: number | "self"): string | null {
+	try {
+		return readlinkSync(`/proc/${pid}/ns/pid`);
+	} catch {
+		return null;
+	}
+}
+
+function readBootId(): string | null {
+	try {
+		return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * This process's pid namespace (`pid:[<inode>]`) and the kernel's boot id, or null where /proc does not expose them.
+ * A namespace inode is only meaningful within one boot, so the two travel together. Compare against our own
+ * namespace, never a fixed "initial" one: WSL2 and Clio's own bwrap run every process in a non-initial namespace.
+ */
+export const PID_NAMESPACE = readPidNamespace("self");
+export const BOOT_ID = readBootId();
+
+/** The owner fields a durable record carries so another process can adjudicate it. */
+export interface OwnerIdentity {
+	host: string;
+	pid: number;
+	birthToken: string | null;
+	pidNs: string | null;
+	bootId: string | null;
+}
+
+export function ownerIdentity(): OwnerIdentity {
+	return { host: hostname(), pid: process.pid, birthToken: processBirthToken(), pidNs: PID_NAMESPACE, bootId: BOOT_ID };
+}
+
+/** A recorded owner as a reader sees it; `host` null and absent `pidNs`/`bootId` are records from before those fields. */
+export interface RecordedOwner {
+	host: string | null;
+	pid: number;
+	birthToken: string | null;
+	pidNs?: string | null;
+	bootId?: string | null;
+}
+
+export type OwnerState = "alive" | "gone" | "unknown";
+
+/**
+ * Find the process a record names in another pid namespace: a process here whose pid namespace is the recorded one
+ * and whose innermost NSpid is the recorded pid. `visible` says whether any process of that namespace was seen, which
+ * is what lets a missing pid prove the owner gone; a parent or sibling namespace is never visible.
+ */
+function findInNamespace(pidNs: string, pid: number): { visible: boolean; hostPid: number | null } {
+	let entries: string[];
+	try {
+		entries = readdirSync("/proc");
+	} catch {
+		return { visible: false, hostPid: null };
+	}
+	let visible = false;
+	for (const entry of entries) {
+		if (!/^\d+$/.test(entry)) continue;
+		if (readPidNamespace(Number(entry)) !== pidNs) continue;
+		visible = true;
+		try {
+			const nspid = /^NSpid:\s+(.+)$/m
+				.exec(readFileSync(`/proc/${entry}/status`, "utf8"))?.[1]
+				?.trim()
+				.split(/\s+/);
+			if (nspid !== undefined && Number(nspid[nspid.length - 1]) === pid) return { visible, hostPid: Number(entry) };
+		} catch {
+			// Exited between the readdir and the read.
+		}
+	}
+	return { visible, hostPid: null };
+}
+
+/**
+ * Whether a recorded owner still runs: `alive`, `gone`, or `unknown` when it cannot be probed from here. Another host
+ * is unknown. On this host a record from another boot is gone. A record from our own pid namespace, or one written
+ * before the namespace was recorded, takes the pid and birth-token probe. A record from another namespace (an
+ * Apptainer `--pid`/`--containall` container, or the host seen from inside one) is never judged by a local pid: its
+ * pid is looked up inside that namespace when the namespace is visible here, and is unknown otherwise.
+ */
+export function ownerState(owner: RecordedOwner): OwnerState {
+	if (owner.host !== null && owner.host !== hostname()) return "unknown";
+	if (owner.bootId && BOOT_ID !== null && owner.bootId !== BOOT_ID) return "gone";
+	let pid = owner.pid;
+	if (owner.pidNs && PID_NAMESPACE !== null && owner.pidNs !== PID_NAMESPACE) {
+		const found = findInNamespace(owner.pidNs, owner.pid);
+		if (found.hostPid === null) return found.visible ? "gone" : "unknown";
+		pid = found.hostPid;
+	}
+	if (!processAlive(pid)) return "gone";
+	if (owner.birthToken === null) return "alive";
+	const current = processBirthToken(pid);
+	return current === null || current === owner.birthToken ? "alive" : "gone";
+}
+
+/** Whether a recorded owner is this very process: same host, pid and (when both are known) pid namespace. */
+export function ownerIsThisProcess(owner: RecordedOwner): boolean {
+	if (owner.pid !== process.pid || (owner.host !== null && owner.host !== hostname())) return false;
+	return !owner.pidNs || PID_NAMESPACE === null || owner.pidNs === PID_NAMESPACE;
 }

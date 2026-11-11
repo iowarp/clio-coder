@@ -1,11 +1,14 @@
 import { ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import fs, { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
+import { pathToFileURL } from "node:url";
 import { processBirthToken } from "../../src/core/process-identity.js";
-import { withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
+import { tryWithStateFileLockSync, withStateFileLock, withStateFileLockSync } from "../../src/core/state-file-lock.js";
 
 // One implementation now backs settings.yaml, the dispatch admission state
 // file, credentials.yaml and residency mutations, so its policy is worth
@@ -220,5 +223,118 @@ describe("contracts/state-file-lock", () => {
 		await rejects(waiting, /operator cancelled lock wait/);
 		strictEqual(ran, false, "an aborted waiter never enters the protected mutation");
 		ok(existsSync(lockPath), "cancelling a waiter does not release the live holder's lock");
+	});
+});
+
+// An Apptainer `--pid` or `--containall` instance keeps the host's hostname and boot but runs in its own pid
+// namespace. `unshare --user --pid --fork --mount-proc` reproduces that without privilege where user namespaces are
+// allowed; elsewhere these tests skip.
+const NAMESPACES =
+	process.platform === "linux" &&
+	spawnSync("unshare", ["-Urpf", "--mount-proc", "true"], { stdio: "ignore", timeout: 10_000 }).status === 0;
+
+describe("contracts/state-file-lock across pid namespaces", {
+	skip: !NAMESPACES && "no unprivileged pid namespaces",
+}, () => {
+	let dir = "";
+	let target = "";
+	let lockPath = "";
+	let script = "";
+	const children: ChildProcess[] = [];
+
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "clio-coder-file-lock-ns-"));
+		target = join(dir, "state.json");
+		lockPath = `${target}.lock`;
+		script = join(dir, "lock-peer.mts");
+		const lockModule = pathToFileURL(join(process.cwd(), "src/core/state-file-lock.ts")).href;
+		writeFileSync(
+			script,
+			`import { tryWithStateFileLockSync, withStateFileLock } from ${JSON.stringify(lockModule)};
+const [mode, target] = process.argv.slice(2);
+if (mode === "hold") {
+	await withStateFileLock(target, async () => {
+		process.stdout.write("held\\n");
+		await new Promise((resolve) => process.stdin.on("end", resolve).resume());
+	});
+} else if (mode === "abandon") {
+	await withStateFileLock(target, () => {
+		process.stdout.write("held\\n");
+		process.exit(0);
+	});
+} else {
+	process.stdout.write(tryWithStateFileLockSync(target, () => true).held ? "taken\\n" : "busy\\n");
+}
+`,
+		);
+	});
+
+	afterEach(() => {
+		for (const child of children.splice(0)) child.kill("SIGKILL");
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	function inNamespace(command: string): ChildProcess {
+		const child = spawn("unshare", ["-Urpf", "--mount-proc", "sh", "-c", command], {
+			cwd: process.cwd(),
+			stdio: ["pipe", "pipe", "inherit"],
+		});
+		children.push(child);
+		return child;
+	}
+	const peer = (mode: string) =>
+		`${JSON.stringify(process.execPath)} --import tsx ${JSON.stringify(script)} ${mode} ${JSON.stringify(target)}`;
+
+	function firstLine(child: ChildProcess): Promise<string> {
+		return new Promise((resolve, reject) => {
+			let out = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				out += chunk.toString();
+				if (out.includes("\n")) resolve(out.split("\n")[0] as string);
+			});
+			child.on("exit", (code) => reject(new Error(`peer exited ${code} before answering: ${out}`)));
+		});
+	}
+
+	const takeHere = () => tryWithStateFileLockSync(target, () => true).held;
+
+	it("a holder in another pid namespace is not judged by the pid it recorded", async () => {
+		// The holder is pid 1 in its namespace; here pid 1 is a different, live process.
+		const holder = inNamespace(`exec ${peer("hold")}`);
+		strictEqual(await firstLine(holder), "held");
+		strictEqual(takeHere(), false, "a live holder in a container keeps its lock");
+		const record = JSON.parse(readFileSync(lockPath, "utf8")) as { pid: number; pidNs?: string; bootId?: string };
+		strictEqual(record.pid, 1);
+		ok(record.pidNs && record.bootId, "the record carries its pid namespace and boot");
+		holder.stdin?.end();
+		await once(holder, "exit");
+		strictEqual(existsSync(lockPath), false, "the holder released its own lock");
+	});
+
+	it("a waiter in another pid namespace does not reclaim a host holder it cannot see", async () => {
+		await withStateFileLock(target, async () => {
+			const waiter = inNamespace(`exec ${peer("try")}`);
+			strictEqual(await firstLine(waiter), "busy");
+		});
+	});
+
+	it("reclaims a holder that died inside a namespace that is still running", async () => {
+		// sh stays as pid 1, so the namespace remains visible after the holder (pid 2) exits without releasing.
+		const box = inNamespace(`${peer("abandon")}; echo gone; exec sleep 60`);
+		strictEqual(await firstLine(box), "held");
+		await new Promise<void>((resolve) => box.stdout?.on("data", (chunk: Buffer) => chunk.includes("gone") && resolve()));
+		ok(existsSync(lockPath));
+		strictEqual(takeHere(), true);
+	});
+
+	it("an exited namespace's lock falls to the stale-lock age, not to a local pid", async () => {
+		const holder = inNamespace(`exec ${peer("abandon")}`);
+		strictEqual(await firstLine(holder), "held");
+		await once(holder, "exit");
+		// pid 1 is alive here, so a local pid check would keep this lock forever; a fresh lock waits out its age.
+		strictEqual(takeHere(), false);
+		const past = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, past, past);
+		strictEqual(takeHere(), true);
 	});
 });

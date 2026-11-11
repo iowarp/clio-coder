@@ -14,7 +14,7 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
-import { processAlive, processBirthToken } from "./process-identity.js";
+import { ownerIdentity, ownerIsThisProcess, ownerState } from "./process-identity.js";
 
 /**
  * The one cross-process advisory file lock. Every durable lock in the tree runs
@@ -23,9 +23,11 @@ import { processAlive, processBirthToken } from "./process-identity.js";
  * instead of four that disagreed by a factor of 26.
  *
  * The lock is keyed by target path (`<target>.lock`) and records the owner's
- * host, pid and birth token. A holder is presumed gone only when its pid is
- * gone on this host; a record from another host is never adjudicated here. The
- * age of the lockfile decides only for a record whose owner cannot be read, so
+ * host, pid, birth token, pid namespace and boot id. A holder is presumed gone
+ * only when its pid is gone on this host; a record from another host is never
+ * adjudicated here, and one from another pid namespace (an Apptainer container,
+ * or the host seen from inside one) is never judged by a local pid. The age of
+ * the lockfile decides only for a record whose owner cannot be read or probed, so
  * staleness is a backstop rather than a cap on how long a critical section may
  * legitimately take: the settings lock used to steal itself back from a healthy
  * writer after five seconds. Async holders additionally refresh the lockfile mtime while
@@ -74,6 +76,8 @@ interface LockOwner {
 	host: string | null;
 	pid: number;
 	birthToken: string | null;
+	pidNs: string | null;
+	bootId: string | null;
 	note?: string;
 }
 
@@ -92,7 +96,7 @@ function lockHolder(lockPath: string): StateFileLockHolder | null {
 	return {
 		pid: owner.pid,
 		host: foreign ? owner.host : null,
-		self: !foreign && owner.pid === process.pid,
+		self: ownerIsThisProcess(owner),
 		note: owner.note ?? null,
 	};
 }
@@ -101,26 +105,19 @@ function readLockOwner(lockPath: string): LockOwner | null {
 	try {
 		const raw = readFileSync(lockPath, "utf8").trim();
 		const record = raw.startsWith("{") ? (JSON.parse(raw) as Record<string, unknown>) : { pid: Number.parseInt(raw, 10) };
-		const { host, pid, birthToken, note } = record;
+		const { host, pid, birthToken, pidNs, bootId, note } = record;
 		if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
 		return {
 			host: typeof host === "string" ? host : null,
 			pid,
 			birthToken: typeof birthToken === "string" ? birthToken : null,
+			pidNs: typeof pidNs === "string" ? pidNs : null,
+			bootId: typeof bootId === "string" ? bootId : null,
 			...(typeof note === "string" ? { note } : {}),
 		};
 	} catch {
 		return null;
 	}
-}
-
-/** Mirrors compete-worktrees' ownerIsAlive: foreign hosts are never adjudicated, a null token cannot rule out pid reuse. */
-function ownerIsAlive(owner: LockOwner): boolean {
-	if (owner.host !== null && owner.host !== hostname()) return true;
-	if (!processAlive(owner.pid)) return false;
-	if (owner.birthToken === null) return true;
-	const current = processBirthToken(owner.pid);
-	return current === null || current === owner.birthToken;
 }
 
 function lockfileAgeMs(lockPath: string): number | null {
@@ -138,7 +135,7 @@ function createLock(lockPath: string, note?: string): boolean {
 		try {
 			writeSync(
 				fd,
-				`${JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken(), at: new Date().toISOString(), ...(note !== undefined ? { note } : {}) })}\n`,
+				`${JSON.stringify({ ...ownerIdentity(), at: new Date().toISOString(), ...(note !== undefined ? { note } : {}) })}\n`,
 			);
 		} catch (err) {
 			// A failed write (ENOSPC, EDQUOT) would leave an ownerless empty lock that blocks every waiter until it ages out.
@@ -160,9 +157,14 @@ function lockIsAbandoned(lockPath: string, foreignExpiresMs?: number): boolean {
 		const ageMs = lockfileAgeMs(lockPath);
 		return ageMs !== null && ageMs > foreignExpiresMs;
 	}
-	if (owner !== null) return !ownerIsAlive(owner);
+	const state = owner === null ? "unknown" : ownerState(owner);
+	if (state !== "unknown") return state === "gone";
+	// Another host without an opted-in lease is never adjudicated.
+	if (owner !== null && owner.host !== null && owner.host !== hostname()) return false;
+	// An unreadable record, or this host's record from a pid namespace not visible here (a container that has exited,
+	// or the host seen from inside one): the age backstop, which an async holder's refresh keeps from firing.
 	const ageMs = lockfileAgeMs(lockPath);
-	return ageMs !== null && ageMs > STALE_LOCK_MS;
+	return ageMs !== null && ageMs > (owner === null ? STALE_LOCK_MS : (foreignExpiresMs ?? STALE_LOCK_MS));
 }
 
 /** Whether a lock's recorded owner is provably gone, the same test a stale takeover uses. */
@@ -237,7 +239,7 @@ function release(lockPath: string): void {
 	// Only unlink a lock we still own. If ours was reclaimed as abandoned and a
 	// sibling now holds a fresh one, deleting here would open their section.
 	const owner = readLockOwner(lockPath);
-	if (owner?.pid !== process.pid || (owner.host !== null && owner.host !== hostname())) return;
+	if (owner === null || !ownerIsThisProcess(owner)) return;
 	try {
 		unlinkSync(lockPath);
 	} catch {
