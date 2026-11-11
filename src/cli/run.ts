@@ -813,9 +813,16 @@ async function runDispatch(
 				}
 			});
 		}
-		const onSignal = (): void => dispatch.abort(handle.runId);
+		// Every terminating signal aborts the worker and lets the run settle, so the result frame is always written;
+		// the process then exits 128 plus the signal number, as a main-agent run does.
+		let signalExit: number | null = null;
+		const onSignal = (signal: NodeJS.Signals): void => {
+			signalExit ??= signal === "SIGHUP" ? 129 : signal === "SIGINT" ? 130 : 143;
+			dispatch.abort(handle.runId);
+		};
 		process.on("SIGINT", onSignal);
 		process.on("SIGTERM", onSignal);
+		process.on("SIGHUP", onSignal);
 		// Any coordinated shutdown (--timeout expiry, EPIPE on stdout) aborts the
 		// worker and lets it settle so the run is recorded as "canceled" before exit.
 		// The budget covers the worker's own abort bound.
@@ -884,11 +891,12 @@ async function runDispatch(
 
 		process.off("SIGINT", onSignal);
 		process.off("SIGTERM", onSignal);
+		process.off("SIGHUP", onSignal);
 
 		await dispatch.drain();
 		await workerHooks.drain();
 		await workerHooks.dispose();
-		return await stopDomains(mapExitCode(receipt));
+		return await stopDomains(signalExit ?? mapExitCode(receipt));
 	} catch (err) {
 		unsubscribeScopeNotices();
 		if (cleanupSteer) {
