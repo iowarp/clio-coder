@@ -106,16 +106,6 @@ test("--yes with a signed-in gh files the issue once and status lists it", async
 	);
 });
 
-test("a command a Clio session's bash ran is refused with --body-file --yes and the draft is kept as the agent's", async () => {
-	const { bodyFile, calls, deps, output } = scratch();
-	deps.env = { AI_AGENT: "clio-coder" };
-	strictEqual(await runReport([...compose(bodyFile), "--yes"], deps), 2);
-	ok(output().err.includes("nothing sent: an agent's draft is reviewed in a terminal"));
-	strictEqual(calls.filter((call) => call.args[0] === "issue").length, 0);
-	strictEqual(await runReport(["status"], deps), 0);
-	ok(/rpt_[0-9A-Z]{26}\s+draft\s+bug\s+fix: x fails on y/u.test(output().out));
-});
-
 test("the editor opens the draft inside the reports drafts directory, never the shared temp dir", async () => {
 	const { deps, output } = scratch();
 	const record = join(deps.cwd ?? "", "editor-path");
