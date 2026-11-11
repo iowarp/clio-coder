@@ -12,6 +12,7 @@ import {
 	COUNCIL_JUDGE_PROMPT,
 	COUNCIL_MAX_MEMBERS,
 	COUNCIL_MIN_MEMBERS,
+	councilBallotContract,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -925,7 +926,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							...(council.synthesis === "vote"
 								? {
 										task: renderCouncilVoteMemberTask(base.task),
-										resultContractOverride: { kind: "council-ballot" as const },
+										resultContractOverride: councilBallotContract(base.task),
 									}
 								: {}),
 							target: member.target,

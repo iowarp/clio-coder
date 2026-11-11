@@ -1363,6 +1363,13 @@ tally, so members that reach the same conclusion land on the same key. The
 reasoning belongs in `text`, which is what the council report shows as the
 member's answer.
 
+When the task lists its answers, as `/poll --options a|b|c` does, the ballot
+names only them: the directive asks for one of the listed options verbatim, the
+example shape reads `{"verdict":"<one of: a|b|c>",...}`, and the
+`council-ballot` postcondition accepts only a listed option, matched without
+regard to case. A member that copies an example token such as `yes` gets a
+repair round that quotes the options, rather than casting a spoiled vote.
+
 A member that seals no conforming ballot fails its own run and is reported as a
 failed member rather than dropping silently out of the count. A vote whose top
 tally does not exceed half of the members that answered reports `no_majority`, and a vote in

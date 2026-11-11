@@ -30,8 +30,13 @@ export type ResultContract =
 	 * can be voted with. No recipe may declare it: `parseResultContract` rejects
 	 * the kind, and a Scout subtask may not request it, because it is a
 	 * topology's ballot rather than an agent's work product.
+	 *
+	 * `options` is set when the question listed its answers (as `/poll
+	 * --options` does): the verdict must then be one of them, matched without
+	 * regard to case, so a member that copies an example token instead gets a
+	 * repair round that names the options rather than a spoiled vote.
 	 */
-	| { kind: "council-ballot" }
+	| { kind: "council-ballot"; options?: string[] }
 	| { kind: "debugger-report" }
 	| { kind: "research-report" }
 	| { kind: "world-knowledge-report" }
@@ -480,6 +485,27 @@ export const COUNCIL_BALLOT_VERDICT_MAX_BYTES = 64;
  */
 export const COUNCIL_BALLOT_SHAPE = '{"verdict":"yes","text":"the answer and the evidence behind it"}';
 
+/**
+ * The ballot shape for a question that listed its answers. The verdict is a
+ * placeholder naming them, so no example token sits where a member may copy it.
+ */
+export function councilBallotShape(options?: ReadonlyArray<string>): string {
+	if (options === undefined || options.length === 0) return COUNCIL_BALLOT_SHAPE;
+	const placeholder = `<one of: ${options.join("|")}>`;
+	return COUNCIL_BALLOT_SHAPE.replace('"verdict":"yes"', `"verdict":${JSON.stringify(placeholder)}`);
+}
+
+/** Whether a listed answer can be cast as a verdict at all: one non-empty line within the verdict bound. */
+export function isCouncilBallotOption(option: string): boolean {
+	const trimmed = option.trim();
+	return (
+		trimmed.length > 0 &&
+		trimmed === option &&
+		!trimmed.includes("\n") &&
+		Buffer.byteLength(trimmed, "utf8") <= COUNCIL_BALLOT_VERDICT_MAX_BYTES
+	);
+}
+
 interface CouncilBallot {
 	/** The comparable token the tally counts. */
 	verdict: string;
@@ -519,6 +545,17 @@ function validateCouncilBallot(contract: ResultContract, output: string | null):
 			"unmeasured",
 			`Council ballot verdict must be a single line of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} UTF-8 bytes`,
 		);
+	}
+	const options = contract.kind === "council-ballot" ? contract.options : undefined;
+	if (options !== undefined && options.length > 0) {
+		const verdict = ballot.verdict.toLowerCase();
+		if (!options.some((option) => option.toLowerCase() === verdict)) {
+			return failure(
+				contract,
+				"unmeasured",
+				`Council ballot verdict ${JSON.stringify(ballot.verdict)} is not one of the listed options: ${options.join(" | ")}`,
+			);
+		}
 	}
 	// Unmeasured, like every other contract whose shape carries no correctness
 	// claim: casting a well-formed ballot says nothing about whether the member
@@ -2042,7 +2079,9 @@ export function resultContractShape(contract: ResultContract): string {
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
 		case "council-ballot":
-			return COUNCIL_BALLOT_SHAPE;
+			return contract.options !== undefined && contract.options.length > 0
+				? `${councilBallotShape(contract.options)}; verdict legal values are ${contract.options.join(" | ")}`
+				: COUNCIL_BALLOT_SHAPE;
 		case "debugger-report":
 			return 'one of {"diagnosis":"...","reproduction":"reproduced","evidence":["..."]}, {"diagnosis":"...","reproduction":"not-reproduced","evidence":["..."]}, or {"diagnosis":"...","reproduction":"unknown","evidence":["..."]}; reproduction legal values are reproduced | not-reproduced | unknown';
 		case "research-report":
@@ -2255,6 +2294,20 @@ function parseContract(
 			throw new Error(`agent recipe: ${sourcePath}: artifact-report path must be workspace-relative`);
 		}
 		return { kind: "artifact-report", path: record.path };
+	}
+	if (record.kind === "council-ballot" && kinds.includes("council-ballot") && record.options !== undefined) {
+		const options = record.options;
+		if (
+			!only("kind", "options") ||
+			!Array.isArray(options) ||
+			options.length === 0 ||
+			!options.every((option): option is string => typeof option === "string" && isCouncilBallotOption(option))
+		) {
+			throw new Error(
+				`agent recipe: ${sourcePath}: council-ballot options must be a non-empty list of single-line verdicts of at most ${COUNCIL_BALLOT_VERDICT_MAX_BYTES} UTF-8 bytes`,
+			);
+		}
+		return { kind: "council-ballot", options: [...options] };
 	}
 	if (record.kind === "mutation-report") {
 		if (!only("kind", "maxSummaryBytes")) {

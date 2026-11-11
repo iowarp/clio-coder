@@ -50,6 +50,7 @@ import {
 	COUNCIL_JUDGE_PROMPT,
 	competePresentationOrder,
 	competeStanceFor,
+	councilBallotContract,
 	JUDGE_GATE_PROMPT,
 	REVIEWER_GATE_PROMPT,
 	renderCouncilVoteMemberTask,
@@ -2243,7 +2244,7 @@ async function runCouncil(
 					...(council.synthesis === "vote"
 						? {
 								task: voteTask,
-								resultContractOverride: { kind: "council-ballot" as const },
+								resultContractOverride: councilBallotContract(base.task),
 							}
 						: {}),
 					target: member.target,

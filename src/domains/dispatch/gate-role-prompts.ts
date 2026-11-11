@@ -1,7 +1,13 @@
 /** Bounded role prompts shared by dispatch topology construction and ACP admission. */
 
 import { createHash } from "node:crypto";
-import { COUNCIL_BALLOT_SHAPE, COUNCIL_BALLOT_VERDICT_MAX_BYTES } from "../agents/result-contract.js";
+import {
+	COUNCIL_BALLOT_SHAPE,
+	COUNCIL_BALLOT_VERDICT_MAX_BYTES,
+	councilBallotShape,
+	isCouncilBallotOption,
+	type ResultContract,
+} from "../agents/result-contract.js";
 
 /**
  * Roster bounds for a council. Two is the point of the topology: one seated
@@ -68,20 +74,44 @@ export const COUNCIL_VOTE_MEMBER_DIRECTIVE = [
 ].join("\n");
 
 /**
+ * The answers a vote task lists, as `/poll --options` writes them, or undefined
+ * when it lists none or one of them could not be cast as a verdict.
+ */
+export function councilVoteOptions(task: string): string[] | undefined {
+	const listed = /^Choose exactly one of these options: (.+)\. Your verdict is that option, verbatim\.$/mu.exec(task);
+	if (listed === null) return undefined;
+	const options = (listed[1] ?? "").split(", ");
+	return options.length > 0 && options.every(isCouncilBallotOption) ? options : undefined;
+}
+
+/**
+ * The ballot a vote member seals. A task that lists its options binds the
+ * verdict to them, so a copied example token fails into a repair round that
+ * names the options instead of spoiling the tally.
+ */
+export function councilBallotContract(task: string): Extract<ResultContract, { kind: "council-ballot" }> {
+	const options = councilVoteOptions(task);
+	return options === undefined ? { kind: "council-ballot" } : { kind: "council-ballot", options };
+}
+
+/**
  * The task a council member is given under `synthesis: "vote"`. Plan admission
  * composes it here once, then the runner reuses the task pinned by that plan so
  * the approval artifact shows the exact ask the member receives.
  */
 export function renderCouncilVoteMemberTask(originalTask: string): string {
-	// A task that lists its options (as /poll writes them) gets a neutral verdict placeholder, so the shape's
-	// example "yes" is not copied as a ballot. Every other council keeps the directive byte for byte.
-	const listed = /^Choose exactly one of these options: (.+)\. Your verdict is that option, verbatim\.$/mu.exec(
-		originalTask,
-	);
-	if (listed === null) return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE].join("\n\n");
-	const placeholder = `<one of: ${(listed[1] ?? "").split(", ").join("|")}>`;
-	const shape = COUNCIL_BALLOT_SHAPE.replace('"verdict":"yes"', `"verdict":${JSON.stringify(placeholder)}`);
-	return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE.replace(COUNCIL_BALLOT_SHAPE, shape)].join("\n\n");
+	// A task that lists its options (as /poll writes them) names only them: the shape's verdict is a placeholder and
+	// the prose cites no example token, so neither "yes" nor "keep" is there to copy. Every other council keeps the
+	// directive byte for byte.
+	const options = councilVoteOptions(originalTask);
+	if (options === undefined) return [originalTask, COUNCIL_VOTE_MEMBER_DIRECTIVE].join("\n\n");
+	const directive = [
+		"This council round is a vote. Do the work the task asks for, then cast one ballot on it.",
+		`The verdict is exactly one of the options listed above, verbatim: ${options.join(" | ")}. Anything longer is reasoning: put that in text, along with the evidence behind it.`,
+		"Your recipe's own result shape does not apply to this run. The council reads the ballot and nothing else.",
+		`End with a JSON object only: ${councilBallotShape(options)}`,
+	].join("\n");
+	return [originalTask, directive].join("\n\n");
 }
 
 /**

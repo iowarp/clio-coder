@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { Type } from "typebox";
@@ -196,6 +196,40 @@ test("a vote task that lists options gets a neutral verdict placeholder; others 
 	);
 	match(polled, /\{"verdict":"<one of: a\|b\|c>","text":/);
 	ok(!polled.includes('"verdict":"yes"'));
+	// The prose names the options too, so no example token is left to copy.
+	doesNotMatch(polled, /"yes"|"keep"/u);
+	match(polled, /exactly one of the options listed above, verbatim: a \| b \| c/u);
+});
+
+test("a poll ballot that copies an example token fails into a repair round that names the options", async () => {
+	const { councilBallotContract } = await import("../../src/domains/dispatch/gate-role-prompts.js");
+	const { parseWorkerResultContract, resultContractShape, validateResultContract } = await import(
+		"../../src/domains/agents/result-contract.js"
+	);
+	const { renderPollQuestion } = await import("../../src/session-control/poll.js");
+	const contract = councilBallotContract(
+		renderPollQuestion({ participants: 3, question: "Indent?", options: ["tabs", "spaces"] }),
+	);
+	deepStrictEqual(contract, { kind: "council-ballot", options: ["tabs", "spaces"] });
+	deepStrictEqual(councilBallotContract("plain"), { kind: "council-ballot" });
+	// The contract crosses to the worker on its spec and must read back whole.
+	deepStrictEqual(parseWorkerResultContract(JSON.parse(JSON.stringify(contract)), "spec"), contract);
+	const validate = (output: string) =>
+		validateResultContract({
+			contract,
+			output,
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => null },
+		});
+	const copied = validate('{"verdict":"yes","text":"spaces read better"}');
+	strictEqual(copied.conformance, "fail");
+	match(copied.reason ?? "", /"yes" is not one of the listed options: tabs \| spaces/u);
+	strictEqual(validate('{"verdict":"Spaces","text":"spaces read better"}').conformance, "pass");
+	const repair = resultContractShape(contract);
+	match(repair, /"verdict":"<one of: tabs\|spaces>"/u);
+	match(repair, /verdict legal values are tabs \| spaces/u);
+	ok(!repair.includes('"verdict":"yes"'), repair);
 });
 
 test("a council with one answer and one failed member reports partial, not failed", async () => {
