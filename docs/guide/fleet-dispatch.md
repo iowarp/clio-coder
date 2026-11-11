@@ -768,14 +768,31 @@ branch, and the detail names the `clio-coder fleet land` command that applies it
 A merge-mode run whose host verification rejected the tree fails with
 `host_verification_rejected` and keeps its branch with the work committed. The detail
 names the `clio-coder fleet land` command that applies it. That detail, the run's evidence line for the
-check, and the merge card all say whether Clio Coder ran the failing check on the task base. Only
-a quick command check is replayed, once, inside a bubblewrap sandbox over a throwaway
-archive of the base: one that took under two seconds, with a timeout capped at five seconds.
+check, and the merge card all say whether Clio Coder ran the failing check on the task base.
+A failing whole-repo command check is replayed once, inside a bubblewrap sandbox over a
+throwaway archive of the base commit, under the check's own declared timeout; the result is
+cached per base commit, so tasks cut from one base pay for the replay once. How long the check
+took on the task does not matter. When every failing check also fails on the base, the
+failures predate the task: host verification is recorded as `not_implicated` with reason
+`failures_present_on_base` and the run is not rejected. Only a failure the base does not have
+rejects the run.
 When the task worktree has `node_modules` and its `package.json` and lockfiles match the base,
 the replay links them in; otherwise the note says base dependencies were not provisioned.
-Judged checks and commands that name the worker checkout are not replayed. The note says the
-check also fails on the base, passes there, or was not compared and why. A failure on the
-base does not establish that the worker caused it.
+Judged checks, commands that name the worker checkout, and lint or format checks scoped to the
+task's files are not replayed. The note says the
+check also fails on the base, passes there, or was not compared and why.
+
+A task with a task worktree runs its lint and format checks on the files it changed, not the
+whole repository. A declared command check counts as lint or format when it runs biome, eslint,
+prettier, ruff, black or stylelint, directly or through `npx`, `bunx` or `pnpm|npm|yarn exec`,
+or when it is exactly `pnpm run <script>` or `npm run <script>` and that package.json script is
+one such command with no shell operators, quotes or globs (`biome check .` qualifies,
+`biome check . && tsc` does not). The declared id is not consulted. The changed files are the
+task worktree's diff against its base plus untracked files, deleted files excluded, limited to
+the check's directory: bare `.` arguments are dropped, each file is appended as `./<path>`,
+and biome also gets `--no-errors-on-unmatched`. A task that changed no such file passes the
+check without running it. Typecheck, tests and every other check run whole-repo as declared,
+and the whole-repo lint runs when the work lands.
 
 #### Merge task branch card
 

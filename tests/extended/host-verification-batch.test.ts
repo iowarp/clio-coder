@@ -11,6 +11,7 @@ import {
 	compareHostVerificationBase,
 	createBatchVerificationGate,
 	hostVerificationRejection,
+	lintFormatScopeArgv,
 	runHostVerification,
 	workspaceFingerprint,
 } from "../../src/domains/dispatch/host-verification.js";
@@ -815,12 +816,16 @@ for (const baseFails of [true, false]) {
 			verification?.checks[0]?.baseComparison?.status,
 			contained ? (baseFails ? "failed" : "passed") : "not_compared",
 		);
-		match(
-			hostVerificationRejection(verification)?.detail ?? "",
-			contained ? (baseFails ? /also fails on base/ : /passes on base/) : /base was not compared/,
-		);
-		strictEqual(verification?.status, "rejected");
-		match(hostVerificationRejection(verification)?.detail ?? "", /host ran this check/);
+		if (contained && baseFails) {
+			// The failure predates the task, so it is not the task's rejection.
+			strictEqual(verification?.status, "not_implicated");
+			strictEqual(verification?.reason, "failures_present_on_base");
+			strictEqual(hostVerificationRejection(verification), null);
+		} else {
+			match(hostVerificationRejection(verification)?.detail ?? "", contained ? /passes on base/ : /base was not compared/);
+			strictEqual(verification?.status, "rejected");
+			match(hostVerificationRejection(verification)?.detail ?? "", /host ran this check/);
+		}
 		strictEqual(
 			execFileSync("git", ["-C", scratch.project, "worktree", "list", "--porcelain"], { encoding: "utf8" }).split(
 				"worktree ",
@@ -875,17 +880,17 @@ it("links the task's node_modules into the base when the manifests match, and le
 	strictEqual(readFileSync(join(scratch.project, "node_modules", "dep", "index.js"), "utf8"), "module.exports = 0;\n");
 });
 
-it("states that an expensive failed host check was not compared", async () => {
+it("compares a slow failed whole-repo check against the base and does not reject a failure the base has", async () => {
 	const scratch = makeScratch();
 	const declared = check({ scratch, message: "failure", exitCode: 1 });
 	const verification = await runHostVerification({
-		runId: "uncompared",
+		runId: "slow-compared",
 		request: { resolvedVerification: [declared] },
 		workerSuccessful: true,
 		stateDir: scratch.stateDir,
 	});
 	ok(verification?.checks[0]);
-	verification.checks[0].durationMs = 2_001;
+	verification.checks[0].durationMs = 60_000;
 	await compareHostVerificationBase({
 		verification,
 		request: {
@@ -893,7 +898,7 @@ it("states that an expensive failed host check was not compared", async () => {
 			taskWorktree: {
 				root: scratch.project,
 				path: scratch.project,
-				runId: "uncompared",
+				runId: "slow-compared",
 				branch: "main",
 				base: "HEAD",
 				ownerToken: "fixture",
@@ -901,9 +906,87 @@ it("states that an expensive failed host check was not compared", async () => {
 		},
 		stateDir: scratch.stateDir,
 	});
-	strictEqual(verification.checks[0].baseComparison?.status, "not_compared");
-	match(hostVerificationRejection(verification)?.detail ?? "", /base was not compared/);
+	const contained = sandboxAvailability().available && sandboxAvailability().backend === "bwrap";
+	if (contained) {
+		strictEqual(verification.checks[0].baseComparison?.status, "failed");
+		strictEqual(verification.status, "not_implicated");
+		strictEqual(hostVerificationRejection(verification), null);
+	} else {
+		strictEqual(verification.checks[0].baseComparison?.reason, "isolated base comparison sandbox unavailable");
+		strictEqual(verification.status, "rejected");
+	}
+	// The base replay cannot append to the run log outside its sandbox.
 	strictEqual(runCount(scratch), 1);
+});
+
+describe("lint and format checks scoped to the task's changed files", () => {
+	function fakeLinter(scratch: Scratch): { argv: string[]; log: string } {
+		const bin = join(scratch.root, "bin");
+		mkdirSync(bin, { recursive: true });
+		const log = join(scratch.root, "biome-args.log");
+		const tool = join(bin, "biome");
+		writeFileSync(tool, `#!/bin/sh\necho "$*" >> ${JSON.stringify(log)}\nexit 0\n`, { mode: 0o755 });
+		return { argv: [tool, "check", "."], log };
+	}
+	function worktreeRequest(scratch: Scratch, checks: ResolvedCheck[]) {
+		return {
+			resolvedVerification: checks,
+			taskWorktree: {
+				root: scratch.project,
+				path: scratch.project,
+				runId: "scoped",
+				branch: "main",
+				base: "HEAD",
+				ownerToken: "fixture",
+			},
+		};
+	}
+
+	it("passes the changed files to a biome check and leaves other checks whole-repo", async () => {
+		const scratch = makeScratch();
+		const linter = fakeLinter(scratch);
+		writeFileSync(join(scratch.project, "src", "a.ts"), "export const a = 9;\n");
+		writeFileSync(join(scratch.project, "src", "new.ts"), "export const n = 1;\n");
+		const lint: ResolvedCheck = { check: "lint", argv: linter.argv, cwd: scratch.project, timeoutMs: 30_000 };
+		const whole = check({ scratch, id: "typecheck", message: "ok", exitCode: 0 });
+		const verification = await runHostVerification({
+			runId: "scoped",
+			request: worktreeRequest(scratch, [lint, whole]),
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+		strictEqual(verification?.status, "verified");
+		strictEqual(readFileSync(linter.log, "utf8"), "check --no-errors-on-unmatched ./src/a.ts ./src/new.ts\n");
+		deepStrictEqual(verification?.checks[1]?.argv.slice(1), whole.argv.slice(1));
+		strictEqual(runCount(scratch), 1);
+	});
+
+	it("passes a scoped check without running it when the task changed no file under it", async () => {
+		const scratch = makeScratch();
+		const linter = fakeLinter(scratch);
+		const lint: ResolvedCheck = { check: "lint", argv: linter.argv, cwd: scratch.project, timeoutMs: 30_000 };
+		const verification = await runHostVerification({
+			runId: "scoped-empty",
+			request: worktreeRequest(scratch, [lint]),
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+		});
+		strictEqual(verification?.status, "verified");
+		strictEqual(existsSync(linter.log), false);
+	});
+
+	it("recognizes a package script that is a single linter command", () => {
+		const scratch = makeScratch();
+		writeFileSync(
+			join(scratch.project, "package.json"),
+			JSON.stringify({ scripts: { lint: "biome check .", all: "biome check . && tsc" } }),
+		);
+		const at = (argv: string[]) => lintFormatScopeArgv({ argv, cwd: scratch.project });
+		deepStrictEqual(at(["pnpm", "run", "lint"]), ["pnpm", "exec", "biome", "check", "."]);
+		strictEqual(at(["pnpm", "run", "all"]), null);
+		strictEqual(at(["pnpm", "run", "typecheck"]), null);
+		deepStrictEqual(at(["npx", "eslint", "."]), ["npx", "eslint", "."]);
+	});
 });
 
 it("contains base-check writes and removes concurrent timed-out base checkouts", async () => {

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { PATH_BOUNDARY_MAX_ENTRIES, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
@@ -134,7 +134,124 @@ function memoKey(command: PlaybookCommand, judgment: string, fingerprint: string
 	return sha256(JSON.stringify({ fingerprint, judgment, env: values }));
 }
 
-/** Compare only quick command checks, on an isolated base checkout, once (flywheel p9/C1). */
+/**
+ * Per-task scoping of lint and format checks.
+ *
+ * A declared command check is a lint or format check when its command runs a
+ * known file-taking linter or formatter (biome, eslint, prettier, ruff, black,
+ * stylelint) directly, through `npx`/`bunx`, or through `pnpm|npm|yarn exec`;
+ * or when it is exactly `pnpm run <script>` or `npm run <script>` and the
+ * package.json script is a single such command with no shell operators,
+ * quoting or globs (`biome check .`, not `biome check . && tsc`). The declared
+ * id is not used: a name says nothing about how the command takes paths.
+ *
+ * For a task with a task worktree, such a check runs on the files the task
+ * changed relative to its base commit (`git diff <base>` plus untracked files),
+ * limited to those under the check's cwd: bare `.` path arguments are dropped
+ * and each changed file is appended as `./<path>` (biome also gets
+ * `--no-errors-on-unmatched`). A task that changed no such file passes the check
+ * without running it. Every other check, typecheck included, runs whole-repo as
+ * declared; the whole-repo lint runs again when the work lands.
+ */
+const LINT_FORMAT_TOOLS = new Set(["biome", "eslint", "prettier", "ruff", "black", "stylelint"]);
+const SCRIPT_UNSAFE_RE = /[&|;<>`$()'"\\\n*?{}]/u;
+const SCOPED_PATHS_MAX = 1_000;
+/** Scoped checks whose task changed no file under them; they pass without running. */
+const nothingChanged = new WeakSet<ResolvedCheck>();
+
+/** Index of the linter or formatter in `argv`, or -1. */
+function lintFormatToolIndex(argv: ReadonlyArray<string>): number {
+	const head = basename(argv[0] ?? "");
+	let index = 0;
+	if (head === "npx" || head === "bunx") index = 1;
+	else if ((head === "pnpm" || head === "npm" || head === "yarn") && argv[1] === "exec") index = 2;
+	while (index > 0 && argv[index]?.startsWith("-") === true) index += 1;
+	const tool = argv[index];
+	return tool !== undefined && LINT_FORMAT_TOOLS.has(basename(tool)) ? index : -1;
+}
+
+/** The command a lint or format check runs when it can take paths, or null when it is not one. */
+export function lintFormatScopeArgv(check: Pick<ResolvedCheck, "argv" | "cwd" | "kind">): string[] | null {
+	if (check.kind !== undefined && check.kind !== "command") return null;
+	if (lintFormatToolIndex(check.argv) >= 0) return [...check.argv];
+	const [runner, verb, name, ...rest] = check.argv;
+	const runnerName = basename(runner ?? "");
+	if (runner === undefined || (runnerName !== "pnpm" && runnerName !== "npm") || verb !== "run") return null;
+	if (name === undefined || rest.length > 0) return null;
+	let script: unknown;
+	try {
+		const manifest = JSON.parse(readFileSync(join(check.cwd, "package.json"), "utf8")) as {
+			scripts?: Record<string, unknown>;
+		};
+		script = manifest.scripts?.[name];
+	} catch {
+		return null;
+	}
+	if (typeof script !== "string" || SCRIPT_UNSAFE_RE.test(script)) return null;
+	const tokens = script.trim().split(/\s+/u);
+	if (!LINT_FORMAT_TOOLS.has(tokens[0] ?? "")) return null;
+	return [runner, "exec", ...(runnerName === "npm" ? ["--"] : []), ...tokens];
+}
+
+/** Absolute paths of the files a task worktree changed against its base, or null when Git cannot say. */
+function taskChangedPaths(worktree: { path: string; base: string }): string[] | null {
+	const git = (args: string[]) =>
+		execFileSync("git", internalGitArgv(["-C", worktree.path, ...args]), {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: 30_000,
+			maxBuffer: 16 * 1024 * 1024,
+		});
+	try {
+		const names = [
+			...git(["diff", "--name-only", "--no-renames", "-z", worktree.base, "--"]).split("\0"),
+			...git(["ls-files", "--others", "--exclude-standard", "-z"]).split("\0"),
+		];
+		const paths = new Set<string>();
+		for (const name of names) {
+			if (name === "") continue;
+			const path = resolve(worktree.path, name);
+			// A deleted file has nothing left to lint.
+			if (statSync(path, { throwIfNoEntry: false })?.isFile() === true) paths.add(path);
+		}
+		return [...paths].sort();
+	} catch {
+		return null;
+	}
+}
+
+/** The check to run for this task: a lint or format check narrowed to `changed`, else the check as declared. */
+export function scopeCheckToTask(check: ResolvedCheck, changed: ReadonlyArray<string> | null): ResolvedCheck {
+	if (changed === null) return check;
+	const argv = lintFormatScopeArgv(check);
+	if (argv === null) return check;
+	const inside = changed.flatMap((path) => {
+		const rel = relative(check.cwd, path);
+		return rel === "" || rel === ".." || rel.startsWith("../") || isAbsolute(rel) ? [] : [`./${rel}`];
+	});
+	if (inside.length > SCOPED_PATHS_MAX) return check;
+	if (inside.length === 0) {
+		const scoped = { ...check, argv: [...check.argv] };
+		nothingChanged.add(scoped);
+		return scoped;
+	}
+	const toolIndex = lintFormatToolIndex(argv);
+	const scopedArgv = argv.filter((arg, index) => index <= toolIndex || (arg !== "." && arg !== "./"));
+	if (basename(argv[toolIndex] ?? "") === "biome" && !scopedArgv.includes("--no-errors-on-unmatched"))
+		scopedArgv.push("--no-errors-on-unmatched");
+	return { ...check, argv: [...scopedArgv, ...inside] };
+}
+
+/** A request's declared checks as this task runs them; see {@link scopeCheckToTask}. */
+function taskChecks(request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">): ResolvedCheck[] {
+	const checks = request.resolvedVerification ?? [];
+	const worktree = request.taskWorktree;
+	if (worktree === undefined || !checks.some((check) => lintFormatScopeArgv(check) !== null)) return [...checks];
+	const changed = taskChangedPaths(worktree);
+	return checks.map((check) => scopeCheckToTask(check, changed));
+}
+
+/** Lockfiles whose agreement lets the base replay borrow the task's installed dependencies. */
 const DEPENDENCY_MANIFESTS = [
 	"package.json",
 	"package-lock.json",
@@ -176,6 +293,41 @@ async function manifestsMatch(
 	return true;
 }
 
+/**
+ * Base replays of whole-repo checks, one per base commit, check command and
+ * cwd, so a wave of tasks cut from one base pays for each failing check's base
+ * run once. Bounded so a long session does not grow it without limit.
+ */
+interface BaseReplay {
+	exitCode: number | null;
+	incomplete: boolean;
+}
+const BASE_REPLAY_CACHE_MAX = 64;
+const baseReplayCache = new Map<string, Promise<BaseReplay>>();
+
+function resolvedBaseSha(root: string, base: string): string | null {
+	try {
+		return execFileSync("git", internalGitArgv(["-C", root, "rev-parse", "--verify", "-q", `${base}^{commit}`]), {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: 30_000,
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Compare each failing whole-repo check against the task's base commit.
+ *
+ * The check runs once on an isolated archive of the base, cached per base sha,
+ * under the check's own declared timeout. When every failing check also fails
+ * on the base, the failures predate the task: the verification is sealed
+ * `not_implicated` with reason `failures_present_on_base` and the run is not
+ * rejected. A lint or format check scoped to the task's changed files (see
+ * {@link scopeCheckToTask}) judges only the task's own files and is never
+ * excused by the base.
+ */
 export async function compareHostVerificationBase(input: {
 	verification: RunHostVerification | undefined;
 	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
@@ -195,8 +347,8 @@ export async function compareHostVerificationBase(input: {
 				? "declared check unavailable"
 				: declared.kind !== undefined && declared.kind !== "command"
 					? "judged check cannot be replayed as a command"
-					: check.durationMs > 2_000
-						? "check exceeded the cheap comparison budget"
+					: lintFormatScopeArgv(declared) !== null
+						? "check was scoped to the task's changed files"
 						: declared.argv.some((arg) => arg.includes(worktree.path))
 							? "command refers to the worker checkout"
 							: null;
@@ -244,7 +396,12 @@ export async function compareHostVerificationBase(input: {
 			};
 			continue;
 		}
-		try {
+		const baseSha = resolvedBaseSha(worktree.path, worktree.base);
+		const cacheKey =
+			baseSha === null
+				? null
+				: sha256(JSON.stringify({ baseSha, argv: declared.argv, relativeCwd, linkModules, timeout: declared.timeoutMs }));
+		const replay = async (): Promise<BaseReplay> => {
 			// The archive lives only in bubblewrap's private tmpfs. Even SIGKILL
 			// cannot leave a checkout or shared Git registration behind (flywheel p9/C1).
 			const basePath = `/tmp/verification-base-${randomUUID()}`;
@@ -300,18 +457,43 @@ export async function compareHostVerificationBase(input: {
 				killGraceMs: 0,
 				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
 			});
-			const incomplete =
-				outcome.timedOut ||
-				outcome.signal !== null ||
-				outcome.outputCapped ||
-				outcome.failure !== null ||
-				outcome.exitCode === null ||
-				outcome.exitCode === 125;
+			return {
+				exitCode: outcome.exitCode,
+				incomplete:
+					outcome.timedOut ||
+					outcome.signal !== null ||
+					outcome.outputCapped ||
+					outcome.failure !== null ||
+					outcome.exitCode === null ||
+					outcome.exitCode === 125,
+			};
+		};
+		try {
+			let pending = cacheKey === null ? undefined : baseReplayCache.get(cacheKey);
+			if (pending === undefined) {
+				pending = replay();
+				if (cacheKey !== null) {
+					baseReplayCache.set(cacheKey, pending);
+					while (baseReplayCache.size > BASE_REPLAY_CACHE_MAX) {
+						const oldest = baseReplayCache.keys().next().value;
+						if (oldest === undefined) break;
+						baseReplayCache.delete(oldest);
+					}
+					// Only a completed replay is a fact about the base; a timeout or setup failure is retried next time.
+					pending.then(
+						(result) => {
+							if (result.incomplete) baseReplayCache.delete(cacheKey);
+						},
+						() => baseReplayCache.delete(cacheKey),
+					);
+				}
+			}
+			const { exitCode, incomplete } = await pending;
 			check.baseComparison = {
-				status: incomplete ? "not_compared" : outcome.exitCode === 0 ? "passed" : "failed",
+				status: incomplete ? "not_compared" : exitCode === 0 ? "passed" : "failed",
 				base: worktree.base,
-				...(outcome.exitCode !== null ? { exitCode: outcome.exitCode } : {}),
-				...(incomplete ? { reason: "base check could not complete within the isolated comparison budget" } : {}),
+				...(exitCode !== null ? { exitCode } : {}),
+				...(incomplete ? { reason: "base check could not complete in the isolated comparison" } : {}),
 			};
 		} catch {
 			// Comparison is explanatory evidence; setup failure retains the host rejection.
@@ -321,6 +503,12 @@ export async function compareHostVerificationBase(input: {
 				reason: "isolated base comparison could not run",
 			};
 		}
+	}
+	const verification = input.verification;
+	if (verification?.status === "rejected" && failures.every((check) => check.baseComparison?.status === "failed")) {
+		// Every failure is already present on the base: the task did not cause it.
+		verification.status = "not_implicated";
+		verification.reason = "failures_present_on_base";
 	}
 }
 
@@ -483,6 +671,20 @@ async function runResolvedCheck(input: {
 		const check = await runSealedReproduce(resolvedCheck, input.shellSandbox);
 		return { check, outputExcerpt: check.outputTail };
 	}
+	if (nothingChanged.has(resolvedCheck)) {
+		return {
+			check: {
+				check: resolvedCheck.check,
+				argv: [...resolvedCheck.argv],
+				cwd: resolvedCheck.cwd,
+				exitCode: 0,
+				durationMs: 0,
+				memo: false,
+				outputTail: "host verification: the task changed no file under this lint or format check; nothing to check",
+			},
+			outputExcerpt: "",
+		};
+	}
 	const command: PlaybookCommand = {
 		id: resolvedCheck.check,
 		argv: [...resolvedCheck.argv],
@@ -587,7 +789,7 @@ export function hostVerificationSandbox(
 
 export async function runHostVerification(input: {
 	runId: string;
-	request: Pick<DispatchRequest, "resolvedVerification">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "taskWorktree">;
 	workerSuccessful: boolean;
 	stateDir?: string;
 	env?: NodeJS.ProcessEnv;
@@ -601,7 +803,7 @@ export async function runHostVerification(input: {
 	const stateDir = input.stateDir ?? clioStateDir();
 	const env = input.env ?? process.env;
 	const results: RunHostVerificationCheck[] = [];
-	for (const [index, resolvedCheck] of checks.entries()) {
+	for (const [index, resolvedCheck] of taskChecks(input.request).entries()) {
 		const outcome = await runResolvedCheck({
 			runId: input.runId,
 			index,
@@ -633,6 +835,7 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 	return sha256(
 		JSON.stringify({
 			check: resolvedCheck.check,
+			...(nothingChanged.has(resolvedCheck) ? { nothingChanged: true } : {}),
 			argv: [...resolvedCheck.argv],
 			cwd: resolve(resolvedCheck.cwd),
 			timeoutMs: resolvedCheck.timeoutMs,
@@ -668,7 +871,7 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 
 export interface BatchVerificationParticipant {
 	runId: string;
-	request: Pick<DispatchRequest, "resolvedVerification" | "intent" | "cwd">;
+	request: Pick<DispatchRequest, "resolvedVerification" | "intent" | "cwd" | "taskWorktree">;
 	workerSuccessful: boolean;
 	shellSandbox?: MainSandboxPolicy;
 	onDiagnostic?: (error: unknown) => void;
@@ -846,13 +1049,14 @@ export function createBatchVerificationGate(
 		const contributors = members.filter(
 			(member) => member.workerSuccessful && (member.request.resolvedVerification?.length ?? 0) > 0,
 		);
+		const memberChecks = new Map(contributors.map((member) => [member, taskChecks(member.request)]));
 		const distinct = new Map<
 			string,
 			{ resolvedCheck: ResolvedCheck; owner: BatchVerificationParticipant; index: number }
 		>();
 		const checkKeys = new Map<ResolvedCheck, string>();
 		for (const member of contributors) {
-			for (const resolvedCheck of member.request.resolvedVerification ?? []) {
+			for (const resolvedCheck of memberChecks.get(member) ?? []) {
 				const key = checkDedupeKey(resolvedCheck);
 				checkKeys.set(resolvedCheck, key);
 				if (!distinct.has(key)) distinct.set(key, { resolvedCheck, owner: member, index: distinct.size });
@@ -880,7 +1084,7 @@ export function createBatchVerificationGate(
 		for (const [key, entry] of ran) {
 			if (entry.check.exitCode === 0) continue;
 			const declarers = contributors.filter((member) =>
-				(member.request.resolvedVerification ?? []).some((candidate) => checkKeys.get(candidate) === key),
+				(memberChecks.get(member) ?? []).some((candidate) => checkKeys.get(candidate) === key),
 			);
 			const implicated = implicatedPaths(entry.outputExcerpt, entry.check.cwd);
 			const verdict = attributeFailure({ implicated, declarers, wave: members });
@@ -909,7 +1113,7 @@ export function createBatchVerificationGate(
 			const own: RunHostVerificationCheck[] = [];
 			let rejected = false;
 			let unimplicated = false;
-			for (const resolvedCheck of member.request.resolvedVerification ?? []) {
+			for (const resolvedCheck of memberChecks.get(member) ?? []) {
 				const key = checkKeys.get(resolvedCheck);
 				if (key === undefined) throw new Error("host verification: declared check has no batch identity");
 				const shared = ran.get(key);
