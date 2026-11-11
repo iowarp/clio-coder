@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, rmdirSync } from "node:fs";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
@@ -101,9 +101,10 @@ function assertDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, wo
  * workspace, and refuses any component that is not a plain directory: a root
  * never exists through a link, and a link cannot be swapped in underneath it.
  */
-export function prepareDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, workspace: string): void {
+export function prepareDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarationV2, workspace: string): string[] {
 	assertDeclaredWriteRoots(declaration, workspace);
 	const home = canonicalizeExistingPath(workspace);
+	const created: string[] = [];
 	for (const entry of declaration.permissions.fs.write) {
 		if (entry === "store") continue;
 		let current = home;
@@ -112,12 +113,29 @@ export function prepareDeclaredWriteRoots(declaration: ExtensionRuntimeDeclarati
 			current = path.join(current, segment);
 			try {
 				mkdirSync(current);
+				created.push(current);
 			} catch (error) {
 				// An existing component is checked below; any other failure leaves the root unusable.
 				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 			}
 			if (!lstatSync(current).isDirectory())
 				throw new Error(`declared write root ${entry} passes through ${current}, which is not a plain directory`);
+		}
+	}
+	return created;
+}
+
+/**
+ * Remove the directories `prepareDeclaredWriteRoots` created, deepest first, when
+ * they are still empty, so a runtime leaves no empty roots behind in the
+ * workspace. A non-recursive rmdir never removes content or a pre-existing root.
+ */
+export function releaseDeclaredWriteRoots(created: ReadonlyArray<string>): void {
+	for (const directory of [...created].reverse()) {
+		try {
+			rmdirSync(directory);
+		} catch {
+			/* Not empty, already gone, or replaced: leave it. */
 		}
 	}
 }

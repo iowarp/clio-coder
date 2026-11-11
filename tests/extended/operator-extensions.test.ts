@@ -1019,6 +1019,36 @@ test("a net:false runtime cannot reach loopback, reports its backend, and gets e
 	});
 });
 
+test("a stopped runtime removes the empty write roots it created and keeps pre-existing or filled ones", async (t) => {
+	const script = [
+		'import { writeFileSync } from "node:fs";',
+		"export default api => {",
+		'  api.handle("probe", async () => { writeFileSync("filled/kept.txt", "x"); return { text: "ok" }; });',
+		"};",
+	].join("\n");
+	const f = await fixture(t, script, {
+		api: 2,
+		commands: [{ name: "probe", description: "Fill one root", timeoutMs: 10_000 }],
+		ui: [],
+		permissions: { fs: { read: [], write: [".research/notes", "filled", "existing"] }, exec: false, net: false },
+	});
+	mkdirSync(path.join(f.cwd, "existing"));
+	const runtime = new OperatorExtensions({
+		context: () => ({ workspace: f.cwd, sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: (root) => listInstalledExtensions(root, { all: true }),
+		stateDir: () => path.join(f.env.dir, "state"),
+	});
+	t.after(() => runtime.dispose());
+	equal((await runtime.reload("startup")).status, "committed");
+	equal((await runtime.invoke(extensionInvocation("lab_status.v1", "probe"), "")).text, "ok");
+	ok(existsSync(path.join(f.cwd, ".research", "notes")), "roots exist while the runtime runs");
+	await runtime.dispose();
+	equal(existsSync(path.join(f.cwd, ".research")), false, "host-created empty roots and parents are removed");
+	ok(existsSync(path.join(f.cwd, "filled", "kept.txt")), "a root with content survives");
+	ok(existsSync(path.join(f.cwd, "existing")), "a pre-existing root survives");
+});
+
 test("a runtime in a read-only session writes its store but none of its workspace roots, and creates none", async (t) => {
 	const script = [
 		'import { writeFileSync } from "node:fs";',

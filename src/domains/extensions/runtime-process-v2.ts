@@ -37,6 +37,7 @@ import {
 	planExtensionLaunch,
 	prepareDeclaredWriteRoots,
 	readOnlyRuntimeDeclaration,
+	releaseDeclaredWriteRoots,
 } from "./runtime-sandbox.js";
 import { extensionPlainText, RUNTIME_LIMITS } from "./runtime-schema.js";
 import { RUNTIME_V2_LIMITS } from "./runtime-schema-v2.js";
@@ -162,6 +163,7 @@ export class ExtensionRuntimeProcessV2 {
 	private stopPromise: Promise<void> | undefined;
 	private exited: Promise<void>;
 	private diagnosticBytes = 0;
+	private createdRoots: string[] = [];
 	private messageWindow = Date.now();
 	private messages = 0;
 
@@ -179,7 +181,7 @@ export class ExtensionRuntimeProcessV2 {
 			if (options.readOnly === true) confined = readOnlyRuntimeDeclaration(this.declaration);
 			// A declared write root may not reach Clio's own installed resources, state, trust or policy,
 			// and exists as a plain directory before launch so the sandbox binds exactly it.
-			prepareDeclaredWriteRoots(confined, options.snapshot.workspace);
+			this.createdRoots = prepareDeclaredWriteRoots(confined, options.snapshot.workspace);
 			cpSync(extension.provenance.canonicalRoot, copy, { recursive: true, dereference: false, verbatimSymlinks: true });
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
@@ -204,6 +206,7 @@ export class ExtensionRuntimeProcessV2 {
 			mkdirSync(options.storeDir, { recursive: true });
 		} catch (error) {
 			rmSync(temporary, { recursive: true, force: true });
+			releaseDeclaredWriteRoots(this.createdRoots);
 			throw error;
 		}
 		this.staged = new Promise((resolve, reject) => {
@@ -280,6 +283,8 @@ export class ExtensionRuntimeProcessV2 {
 		return this.pending.size > 0;
 	}
 	private cleanCopy(): void {
+		releaseDeclaredWriteRoots(this.createdRoots);
+		this.createdRoots = [];
 		try {
 			rmSync(this.copyRoot, { recursive: true, force: true });
 		} catch (error) {
