@@ -8,7 +8,11 @@ import {
 	type UnixSocketMode,
 	WORKER_SANDBOX_SPEC_VERSION,
 } from "../../core/sandbox/types.js";
-import { composeWorkerSandboxInvocation } from "../../core/sandbox/worker-process.js";
+import {
+	composeWorkerSandboxInvocation,
+	settingsFileMasks,
+	workerSandboxMasks,
+} from "../../core/sandbox/worker-process.js";
 import { workspaceTrustDirectory } from "../../core/workspace-trust.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import type { ExtensionRuntimeDeclarationV2 } from "./manifest-v2.js";
@@ -193,6 +197,8 @@ export function planExtensionLaunch(input: {
 			{ argv },
 			workspace,
 			availability,
+			// An extension never reads Clio's settings, which can hold target auth headers, so they are masked always.
+			[...workerSandboxMasks(), ...settingsFileMasks()],
 		);
 	} catch (error) {
 		return {

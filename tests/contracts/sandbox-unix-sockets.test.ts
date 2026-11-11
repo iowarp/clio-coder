@@ -197,6 +197,33 @@ test("the extension runtime launch blocks unix sockets by default and honors the
 	assert.doesNotMatch(profile("allow"), /unix-socket/u);
 });
 
+test("the extension runtime launch masks Clio's settings.yaml and the copies beside it", async (t) => {
+	const home = await isolateClioEnv("clio-extension-settings-mask-");
+	t.after(() => home.restore());
+	const roots = {
+		workspace: join(home.dir, "workspace"),
+		packageCopy: join(home.dir, "runtime", "package"),
+		storeDir: join(home.dir, "store"),
+		bootstrap: join(home.dir, "bootstrap", "runtime-child-v2.mjs"),
+	};
+	for (const directory of [roots.workspace, roots.packageCopy, roots.storeDir, join(home.dir, "bootstrap")])
+		mkdirSync(directory, { recursive: true });
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	const settingsFiles = ["settings.yaml", "settings.yaml.bak"].map((name) => join(home.dir, "config", name));
+	for (const file of settingsFiles) writeFileSync(file, "targets:\n  - auth: { headers: { x-api-key: secret } }\n");
+	const launch = planExtensionLaunch({
+		declaration: {
+			permissions: { fs: { read: [], write: [] }, exec: false, net: false },
+		} as unknown as ExtensionRuntimeDeclarationV2,
+		roots,
+		argv: [process.execPath, roots.bootstrap],
+		availability: { available: true, backend: "seatbelt", executable: "/usr/bin/sandbox-exec", reason: null },
+	});
+	assert.equal(launch.report.backend, "seatbelt", launch.report.reason);
+	const args = launch.args.join("\n");
+	for (const file of settingsFiles) assert.ok(args.includes(realpathSync(file)), `${file} is not masked`);
+});
+
 test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies live and reaches the worker spec", async (t) => {
 	const home = await isolateClioEnv("clio-unix-socket-settings-");
 	t.after(() => home.restore());
