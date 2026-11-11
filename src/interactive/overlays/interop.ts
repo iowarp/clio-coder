@@ -727,6 +727,13 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				ctx.notice("info", `Adoption kind: ${settings.filter ?? "all"}.`);
 			},
 		},
+		// E-13: Esc leaves a pending plan for the agent list before it closes; b stays as a second way.
+		onBack: {
+			active: () => pending !== undefined,
+			back: () => {
+				if (pending) reset(`inventory:${pending.host}`);
+			},
+		},
 		hints,
 		actions: {
 			i: preview,
