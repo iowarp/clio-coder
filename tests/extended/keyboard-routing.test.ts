@@ -820,6 +820,15 @@ it("Ctrl+C is Esc in Fleet Runs: it folds an open run detail before it closes th
 	f.terminal.input("\x03");
 	assert.equal(f.state(), "closed");
 });
+it("Tab opens and folds a fleet run detail like Enter (E-13)", () => {
+	const f = fixture();
+	f.open("dispatch-board");
+	f.terminal.input("\t");
+	assert.equal(f.active.detail, true);
+	f.terminal.input("\t");
+	assert.equal(f.active.detail, false);
+	assert.equal(f.state(), "dispatch-board");
+});
 it("m steers a fleet run; the old s and d answer with their new key and do nothing", () => {
 	const f = fixture();
 	f.open("dispatch-board");

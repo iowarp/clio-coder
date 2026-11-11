@@ -31,7 +31,7 @@ import {
 	sectionRule,
 	selectionRow,
 } from "../theme/index.js";
-import { confirmOnceRail } from "./confirm-once.js";
+import { confirmOnceRail, listJump } from "./confirm-once.js";
 
 export const QUEUE_NAVIGATOR_OVERLAY_WIDTH = 88;
 
@@ -318,7 +318,10 @@ class QueueNavigatorBody implements Component, RowBudgetedBody, RailAwareBody {
 			this.deps.requestRender();
 			return;
 		}
-		if (matchesKey(data, "up") || matchesKey(data, "k")) {
+		const jump = listJump(data, this.selected, entries.length);
+		if (jump !== null) {
+			this.selected = jump;
+		} else if (matchesKey(data, "up") || matchesKey(data, "k")) {
 			this.selected = Math.max(0, this.selected - 1);
 		} else if (matchesKey(data, "down") || matchesKey(data, "j")) {
 			this.selected = Math.min(entries.length - 1, this.selected + 1);

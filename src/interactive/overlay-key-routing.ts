@@ -288,7 +288,8 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 	// Enter opens the detail in place everywhere. The watch pane is a separate,
 	// named choice on `w`, because opening it splits the terminal and an operator
 	// who pressed Enter to read a row did not ask for the layout to change (LA06).
-	if (matchesKey(data, "enter")) {
+	// E-13: Tab is Enter's twin for the detail; Fleet Runs has no tabs to change.
+	if (matchesKey(data, "enter") || matchesKey(data, "tab")) {
 		deps.toggleSelectedDispatchDetail();
 		return true;
 	}
