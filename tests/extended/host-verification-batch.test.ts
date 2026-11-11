@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -87,7 +87,8 @@ function makeScratch(): Scratch {
  */
 function check(input: { scratch: Scratch; id?: string; message: string; exitCode: number }): ResolvedCheck {
 	const script = [
-		`require("node:fs").appendFileSync(${JSON.stringify(input.scratch.log)}, "ran\\n");`,
+		// A base replay cannot write the log; it must print the same failure the task run does.
+		`try { require("node:fs").appendFileSync(${JSON.stringify(input.scratch.log)}, "ran\\n"); } catch {}`,
 		`console.error(${JSON.stringify(input.message)});`,
 		`process.exit(${input.exitCode});`,
 	].join(" ");
@@ -917,6 +918,53 @@ it("compares a slow failed whole-repo check against the base and does not reject
 	}
 	// The base replay cannot append to the run log outside its sandbox.
 	strictEqual(runCount(scratch), 1);
+});
+
+it("replays a slow base check in full and still rejects a failure the base does not have", {
+	skip: !(sandboxAvailability().available && sandboxAvailability().backend === "bwrap"),
+}, async () => {
+	const scratch = makeScratch();
+	writeFileSync(join(scratch.project, "src", "a.ts"), "export const a = 9;\n");
+	const declared: ResolvedCheck = {
+		check: "test",
+		cwd: scratch.project,
+		timeoutMs: 30_000,
+		argv: [
+			process.execPath,
+			"-e",
+			[
+				"const task = require('node:fs').readFileSync('src/a.ts', 'utf8').includes('9');",
+				"console.log('error: src/b.ts is broken');",
+				"if (task) console.log('error: src/a.ts is broken');",
+				"setTimeout(() => process.exit(1), task ? 0 : 5_500);",
+			].join(" "),
+		],
+	};
+	const request = {
+		resolvedVerification: [declared],
+		taskWorktree: {
+			root: scratch.project,
+			path: scratch.project,
+			runId: "new-failure",
+			branch: "main",
+			base: "HEAD",
+			ownerToken: "fixture",
+		},
+	};
+	const verification = await runHostVerification({
+		runId: "new-failure",
+		request,
+		workerSuccessful: true,
+		stateDir: scratch.stateDir,
+	});
+	ok(verification?.checks[0]);
+	await compareHostVerificationBase({ verification, request, stateDir: scratch.stateDir });
+	strictEqual(verification.checks[0].baseComparison?.status, "failed");
+	match(verification.checks[0].baseComparison?.reason ?? "", /src\/a\.ts is broken/);
+	strictEqual(verification.status, "rejected");
+	match(hostVerificationRejection(verification)?.detail ?? "", /src\/a\.ts is broken/);
+	// The base's result is kept per base commit for the next task cut from it.
+	strictEqual(readdirSync(join(scratch.stateDir, "dispatch-verification-base")).length, 1);
 });
 
 describe("lint and format checks scoped to the task's changed files", () => {

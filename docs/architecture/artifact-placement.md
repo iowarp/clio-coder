@@ -106,6 +106,7 @@ problem.
 | `gate-decisions/<id>.json` | Review and compete gate decisions; undecided ones sit in `gate-decisions/pending/` |
 | `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step output logs, write-boundary records and run recordings |
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
+| `dispatch-verification-base/<key>.json` | Host verification's base replays of failing whole-repo checks, one per base commit and check (newest 64) |
 | `settings-changes.jsonl` | One line per settings change `configure_clio` saved after operator approval: time, session, path and the changed `path: old → new` lines; never a secret ([configure-clio.ts](../../src/tools/configure-clio.ts)) |
 | `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |

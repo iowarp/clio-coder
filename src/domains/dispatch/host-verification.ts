@@ -1,6 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	realpathSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ClioSettings } from "../../core/config.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -18,6 +28,7 @@ import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { PLAYBOOK_COMMAND_BASE_ENV, type PlaybookCommand } from "../agents/playbook-commands.js";
+import { redactCommandOutputSecrets } from "../evidence/redact.js";
 import { effectiveScratchRoots } from "../safety/scratch-roots.js";
 import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
@@ -294,16 +305,123 @@ async function manifestsMatch(
 }
 
 /**
- * Base replays of whole-repo checks, one per base commit, check command and
- * cwd, so a wave of tasks cut from one base pays for each failing check's base
- * run once. Bounded so a long session does not grow it without limit.
+ * Base replays of whole-repo checks, one per base commit, check command, cwd
+ * and environment, so every task cut from one base pays for each failing
+ * check's base run once. In flight they are shared in memory; once complete
+ * they are kept under the state root, so another session on the machine reuses
+ * them too. Both are bounded.
  */
 interface BaseReplay {
 	exitCode: number | null;
 	incomplete: boolean;
+	/** The base run's output as {@link outputLines}. */
+	lines: string[];
 }
+const BASE_REPLAY_VERSION = 1;
 const BASE_REPLAY_CACHE_MAX = 64;
+const BASE_REPLAY_LINES_MAX = 20_000;
 const baseReplayCache = new Map<string, Promise<BaseReplay>>();
+
+function baseReplayPath(stateDir: string, key: string): string {
+	return join(stateDir, "dispatch-verification-base", `${key}.json`);
+}
+
+function readBaseReplay(stateDir: string, key: string): BaseReplay | undefined {
+	try {
+		const parsed = JSON.parse(readFileSync(baseReplayPath(stateDir, key), "utf8")) as {
+			version?: unknown;
+			exitCode?: unknown;
+			lines?: unknown;
+		};
+		if (
+			parsed.version !== BASE_REPLAY_VERSION ||
+			typeof parsed.exitCode !== "number" ||
+			!Array.isArray(parsed.lines) ||
+			!parsed.lines.every((line) => typeof line === "string")
+		)
+			return undefined;
+		return { exitCode: parsed.exitCode, incomplete: false, lines: parsed.lines as string[] };
+	} catch {
+		// A missing or damaged entry is a miss; the base runs again.
+		return undefined;
+	}
+}
+
+function storeBaseReplay(stateDir: string, key: string, replay: BaseReplay): void {
+	const target = baseReplayPath(stateDir, key);
+	const dir = dirname(target);
+	mkdirSync(dir, { recursive: true });
+	const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+	writeFileSync(
+		temporary,
+		JSON.stringify({ version: BASE_REPLAY_VERSION, exitCode: replay.exitCode, lines: replay.lines }),
+		"utf8",
+	);
+	renameSync(temporary, target);
+	const stale = readdirSync(dir)
+		.filter((name) => name.endsWith(".json"))
+		.map((name) => ({ name, mtimeMs: statSync(join(dir, name), { throwIfNoEntry: false })?.mtimeMs ?? 0 }))
+		.sort((left, right) => right.mtimeMs - left.mtimeMs)
+		.slice(BASE_REPLAY_CACHE_MAX);
+	for (const entry of stale) rmSync(join(dir, entry.name), { force: true });
+}
+
+const ANSI_ESCAPE_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, "gu");
+const PASSING_LINE_RE = /^(?:✔|✓|√|ok\b|PASS\b)/u;
+
+/**
+ * A check's output as lines comparable across two checkouts: escape codes
+ * stripped, each checkout root replaced, every digit run (line and column
+ * numbers, counts, durations) replaced, whitespace collapsed, and blank or
+ * passing-test lines dropped.
+ */
+function outputLines(output: string, roots: ReadonlyArray<string>): string[] {
+	const ordered = [...new Set(roots)].sort((left, right) => right.length - left.length);
+	const lines = new Set<string>();
+	for (const raw of redactCommandOutputSecrets(output).split(/\r?\n/u)) {
+		let line = raw.replace(ANSI_ESCAPE_RE, "");
+		for (const root of ordered) line = line.split(root).join("<root>");
+		line = line.replace(/\d+/gu, "N").replace(/\s+/gu, " ").trim();
+		if (line !== "" && !PASSING_LINE_RE.test(line)) lines.add(line);
+	}
+	return [...lines];
+}
+
+/** What the failing check printed on the task: its full artifact log when there is one, else the receipt tail. */
+function taskCheckOutput(check: RunHostVerificationCheck): string {
+	if (check.artifactPath !== undefined) {
+		try {
+			const log = readFileSync(check.artifactPath, "utf8");
+			// The code-step log is a header, a blank line, then the captured output.
+			const body = log.indexOf("\n\n");
+			if (body >= 0) return log.slice(body + 2);
+		} catch {
+			// Fall back to the tail sealed on the receipt.
+		}
+	}
+	// A full tail starts mid-line; that partial line is not output the base could match.
+	return Buffer.byteLength(check.outputTail, "utf8") >= OUTPUT_TAIL_BYTES - 4
+		? check.outputTail.slice(check.outputTail.indexOf("\n") + 1)
+		: check.outputTail;
+}
+
+function taskRoots(path: string): string[] {
+	try {
+		return [path, realpathSync(path)];
+	} catch {
+		return [path];
+	}
+}
+
+/** A failure line short enough for a receipt reason. */
+function boundedLine(line: string): string {
+	return line.length > 160 ? `${line.slice(0, 157)}...` : line;
+}
+
+/** A failing check the base fails the same way: it predates the task and does not reject it. */
+function failsTheSameOnBase(check: RunHostVerificationCheck): boolean {
+	return check.baseComparison?.status === "failed" && check.baseComparison.reason === undefined;
+}
 
 function resolvedBaseSha(root: string, base: string): string | null {
 	try {
@@ -320,13 +438,16 @@ function resolvedBaseSha(root: string, base: string): string | null {
 /**
  * Compare each failing whole-repo check against the task's base commit.
  *
- * The check runs once on an isolated archive of the base, cached per base sha,
- * under the check's own declared timeout. When every failing check also fails
- * on the base, the failures predate the task: the verification is sealed
- * `not_implicated` with reason `failures_present_on_base` and the run is not
- * rejected. A lint or format check scoped to the task's changed files (see
- * {@link scopeCheckToTask}) judges only the task's own files and is never
- * excused by the base.
+ * The check runs once on an isolated archive of the base, cached per base sha
+ * (see {@link BaseReplay}), under the check's own declared timeout however long
+ * it took on the task. A failing check fails the same way on the base when the
+ * base run fails too and the task's output, compared line by line through
+ * {@link outputLines}, adds nothing the base's lacks. When every failing check
+ * fails the same way on the base, the failures predate the task: the
+ * verification is sealed `not_implicated` with reason `failures_present_on_base`
+ * and the run is not rejected. A lint or format check scoped to the task's
+ * changed files (see {@link scopeCheckToTask}) judges only the task's own files
+ * and is never excused by the base.
  */
 export async function compareHostVerificationBase(input: {
 	verification: RunHostVerification | undefined;
@@ -347,7 +468,8 @@ export async function compareHostVerificationBase(input: {
 				? "declared check unavailable"
 				: declared.kind !== undefined && declared.kind !== "command"
 					? "judged check cannot be replayed as a command"
-					: lintFormatScopeArgv(declared) !== null
+					: lintFormatScopeArgv(declared) !== null &&
+							(check.argv.length !== declared.argv.length || check.argv.some((arg, index) => arg !== declared.argv[index]))
 						? "check was scoped to the task's changed files"
 						: declared.argv.some((arg) => arg.includes(worktree.path))
 							? "command refers to the worker checkout"
@@ -398,11 +520,26 @@ export async function compareHostVerificationBase(input: {
 			};
 			continue;
 		}
+		const env = Object.fromEntries(
+			PLAYBOOK_COMMAND_BASE_ENV.flatMap((name) => {
+				const value = (input.env ?? process.env)[name];
+				return value === undefined ? [] : [[name, value]];
+			}),
+		);
 		const baseSha = resolvedBaseSha(worktree.path, worktree.base);
 		const cacheKey =
 			baseSha === null
 				? null
-				: sha256(JSON.stringify({ baseSha, argv: declared.argv, relativeCwd, linkModules, timeout: declared.timeoutMs }));
+				: sha256(
+						JSON.stringify({
+							baseSha,
+							argv: declared.argv,
+							relativeCwd,
+							linkModules,
+							timeout: declared.timeoutMs,
+							env,
+						}),
+					);
 		const replay = async (): Promise<BaseReplay> => {
 			// The archive lives only in bubblewrap's private tmpfs. Even SIGKILL
 			// cannot leave a checkout or shared Git registration behind (flywheel p9/C1).
@@ -445,17 +582,11 @@ export async function compareHostVerificationBase(input: {
 				backend,
 				executable,
 			);
-			const env = Object.fromEntries(
-				PLAYBOOK_COMMAND_BASE_ENV.flatMap((name) => {
-					const value = (input.env ?? process.env)[name];
-					return value === undefined ? [] : [[name, value]];
-				}),
-			);
 			const outcome = await runCommandVector(invocation.file, invocation.args, {
 				cwd: worktree.path,
 				workspaceRoot: worktree.path,
 				env,
-				timeoutMs: Math.min(declared.timeoutMs, 5_000),
+				timeoutMs: declared.timeoutMs,
 				killGraceMs: 0,
 				maxOutputBytes: CODE_STEP_CAPTURE_MAX_BYTES,
 			});
@@ -468,12 +599,27 @@ export async function compareHostVerificationBase(input: {
 					outcome.failure !== null ||
 					outcome.exitCode === null ||
 					outcome.exitCode === 125,
+				lines: outputLines(`${outcome.stdout}\n${outcome.stderr}`, [basePath]).slice(0, BASE_REPLAY_LINES_MAX),
 			};
+		};
+		const stateDir = input.stateDir ?? clioStateDir();
+		const cachedReplay = async (key: string): Promise<BaseReplay> => {
+			const stored = readBaseReplay(stateDir, key);
+			if (stored !== undefined) return stored;
+			const result = await replay();
+			if (!result.incomplete) {
+				try {
+					storeBaseReplay(stateDir, key, result);
+				} catch {
+					// The cache saves a rerun; failing to write it changes no verdict.
+				}
+			}
+			return result;
 		};
 		try {
 			let pending = cacheKey === null ? undefined : baseReplayCache.get(cacheKey);
 			if (pending === undefined) {
-				pending = replay();
+				pending = cacheKey === null ? replay() : cachedReplay(cacheKey);
 				if (cacheKey !== null) {
 					baseReplayCache.set(cacheKey, pending);
 					while (baseReplayCache.size > BASE_REPLAY_CACHE_MAX) {
@@ -490,12 +636,25 @@ export async function compareHostVerificationBase(input: {
 					);
 				}
 			}
-			const { exitCode, incomplete } = await pending;
+			const { exitCode, incomplete, lines } = await pending;
+			// A failure the base has too excuses the task only when the task's output
+			// adds nothing to the base's: a new error in an already red check rejects.
+			const known = new Set(lines);
+			const added =
+				incomplete || exitCode === 0
+					? []
+					: outputLines(taskCheckOutput(check), taskRoots(worktree.path)).filter((line) => !known.has(line));
 			check.baseComparison = {
 				status: incomplete ? "not_compared" : exitCode === 0 ? "passed" : "failed",
 				base: worktree.base,
 				...(exitCode !== null ? { exitCode } : {}),
-				...(incomplete ? { reason: "base check could not complete in the isolated comparison" } : {}),
+				...(incomplete
+					? { reason: "base check could not complete in the isolated comparison" }
+					: added.length > 0
+						? {
+								reason: `the task's output has ${added.length} line${added.length === 1 ? "" : "s"} the base's does not, first: ${JSON.stringify(boundedLine(added[0] ?? ""))}`,
+							}
+						: {}),
 			};
 		} catch {
 			// Comparison is explanatory evidence; setup failure retains the host rejection.
@@ -507,7 +666,7 @@ export async function compareHostVerificationBase(input: {
 		}
 	}
 	const verification = input.verification;
-	if (verification?.status === "rejected" && failures.every((check) => check.baseComparison?.status === "failed")) {
+	if (verification?.status === "rejected" && failures.every(failsTheSameOnBase)) {
 		// Every failure is already present on the base: the task did not cause it.
 		verification.status = "not_implicated";
 		verification.reason = "failures_present_on_base";
@@ -518,7 +677,10 @@ export function hostVerificationRejection(
 	verification: RunHostVerification | undefined,
 ): { outcomeCode: "host_verification_rejected"; detail: string } | null {
 	if (verification?.status !== "rejected") return null;
-	const failedCheck = verification.checks.find((check) => check.exitCode !== 0);
+	// Name a failure the run is rejected for, not one its base already has.
+	const failedCheck =
+		verification.checks.find((check) => check.exitCode !== 0 && !failsTheSameOnBase(check)) ??
+		verification.checks.find((check) => check.exitCode !== 0);
 	return {
 		outcomeCode: "host_verification_rejected",
 		detail:

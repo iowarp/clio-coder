@@ -770,12 +770,17 @@ A merge-mode run whose host verification rejected the tree fails with
 names the `clio-coder fleet land` command that applies it. That detail, the run's evidence line for the
 check, and the merge card all say whether Clio Coder ran the failing check on the task base.
 A failing whole-repo command check is replayed once, inside a bubblewrap sandbox over a
-throwaway archive of the base commit, under the check's own declared timeout; the result is
-cached per base commit, so tasks cut from one base pay for the replay once. How long the check
-took on the task does not matter. When every failing check also fails on the base, the
-failures predate the task: host verification is recorded as `not_implicated` with reason
-`failures_present_on_base` and the run is not rejected. Only a failure the base does not have
-rejects the run.
+throwaway archive of the base commit, under the check's own declared timeout. The result is
+kept per base commit under the state root (`dispatch-verification-base/`, the newest 64), so
+tasks cut from one base, in this session or another on the machine, pay for the replay once.
+How long the check took on the task does not matter. A failing check fails the same way on the
+base when the base run fails too and the task's output adds no line the base's output lacks;
+lines are compared with the checkout path, digits (line numbers, counts, durations), escape
+codes and passing-test lines set aside. A new error in a check the base already fails is a
+failure the base does not have: the note quotes the first such line and the run is rejected.
+When every failing check fails the same way on the base, the failures predate the task: host
+verification is recorded as `not_implicated` with reason `failures_present_on_base` and the
+run is not rejected.
 When the task worktree has `node_modules` and its `package.json` and lockfiles match the base,
 the replay links them in; otherwise the note says base dependencies were not provisioned.
 Judged checks, commands that name the worker checkout, and lint or format checks scoped to the
@@ -791,8 +796,9 @@ one such command with no shell operators, quotes or globs (`biome check .` quali
 task worktree's diff against its base plus untracked files, deleted files excluded, limited to
 the check's directory: bare `.` arguments are dropped, each file is appended as `./<path>`,
 and biome also gets `--no-errors-on-unmatched`. A task that changed no such file passes the
-check without running it. Typecheck, tests and every other check run whole-repo as declared,
-and the whole-repo lint runs when the work lands.
+check without running it. Typecheck, tests and every other check run whole-repo as declared.
+Clio Coder does not rerun the whole-repo lint when a task branch merges; leave that to the
+project's own gate before the work lands (`pnpm run check`, CI).
 
 #### Merge task branch card
 
