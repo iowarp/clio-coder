@@ -10,6 +10,7 @@
 
 import type { ClioSettings } from "../core/config.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
+import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { writeCrashRecord } from "../domains/report/crash.js";
 import { effectiveYoloConfinement } from "../domains/safety/autonomy.js";
@@ -399,9 +400,13 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	const onProcessFault = (error: unknown): void => {
 		// Never throws: a crash the next session can offer to report, written before shutdown.
 		writeCrashRecord(error, "tui");
+		// A lazy chunk a rebuild deleted under this session gets the reinstall advice, not a stack.
+		const advice = incompleteInstallationAdvice(error);
 		lease.writeDiagnostic(
 			"stderr",
-			`Clio Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+			advice
+				? `Clio Coder: ${advice}\n`
+				: `Clio Coder: unexpected error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
 		);
 		void termination.shutdown(1);
 	};

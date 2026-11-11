@@ -148,3 +148,25 @@ test("the restart_session card shows the continuation the operator approves", ()
 	assert.match(target, /check the footer/);
 	assert.match(target, /reason=.*rebuilt/);
 });
+
+test("a replaced build is told once, then pinned as a short footer line", async () => {
+	const { createStaleBuildNotice } = await import("../../src/interactive/stale-build.js");
+	const seen: Array<{ key: string; ttlMs?: number }> = [];
+	let stale = false;
+	const check = createStaleBuildNotice(
+		(notice) => seen.push(notice),
+		() => ({ stale }),
+	);
+	check();
+	assert.equal(seen.length, 0, "a current build shows nothing");
+	stale = true;
+	check();
+	check();
+	assert.deepEqual(
+		seen.map((notice) => [notice.key, notice.ttlMs]),
+		[
+			["build:stale", undefined],
+			["build:stale:pin", 0],
+		],
+	);
+});
