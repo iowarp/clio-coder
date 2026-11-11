@@ -106,6 +106,11 @@ export interface DispatchBoardOverlayKeyDeps {
 	 * which is the whole behavior when panes are off or the run is terminal.
 	 */
 	watchSelectedDispatch: () => boolean;
+	/**
+	 * `/` closes the board and hands the key to the composer, so a typed command
+	 * runs instead of its Enter opening a row behind a stale steer notice.
+	 */
+	startSlashCommand?: (data: string) => void;
 }
 
 interface CloseOverlayKeyDeps {
@@ -288,6 +293,11 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 	}
 	if (matchesKey(data, "w")) {
 		deps.watchSelectedDispatch();
+		return true;
+	}
+	if (deps.startSlashCommand !== undefined && (data === "/" || decodePrintableKey(data) === "/")) {
+		deps.closeOverlay();
+		deps.startSlashCommand(data);
 		return true;
 	}
 	return false;

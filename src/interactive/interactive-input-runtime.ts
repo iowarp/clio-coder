@@ -587,6 +587,10 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 						if (handled) deps.requestRender();
 						return handled;
 					},
+					startSlashCommand: (data) => {
+						deps.editor.handleInput?.(data);
+						deps.requestRender();
+					},
 					steerSelectedDispatch: deps.steerSelectedDispatch,
 					cancelSelectedDispatch: deps.cancelSelectedDispatch,
 					confirmCancelSelectedDispatch: () => {

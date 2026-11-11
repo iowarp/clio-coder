@@ -844,6 +844,15 @@ it("m steers a fleet run; the old s and d answer with their new key and do nothi
 	f.terminal.input("m");
 	assert.equal(f.counts.steer, 1);
 });
+it("/ in Fleet Runs closes the board and starts a slash command in the composer", () => {
+	const f = fixture();
+	f.open("dispatch-board");
+	f.terminal.input("/");
+	assert.equal(f.state(), "closed", "a typed command must not land in the board, where Enter only opens a row");
+	for (const ch of "library") f.terminal.input(ch);
+	assert.equal(f.editor.getText(), "/library");
+	assert.equal(f.active.detail, false);
+});
 it("x asks once before it cancels a fleet run; another key keeps the run", () => {
 	const f = fixture();
 	f.open("dispatch-board");
