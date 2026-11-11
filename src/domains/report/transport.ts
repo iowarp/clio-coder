@@ -387,7 +387,28 @@ async function findFiled(
 			options,
 		);
 		if (result.exitCode !== 0) return undefined;
-		const match = DISCUSSION_URL.exec(result.stdout);
+		let match = DISCUSSION_URL.exec(result.stdout);
+		if (match === null) {
+			// More than thirty newer discussions push it out of that window; by then the search index has caught up.
+			const searched = await run(
+				gh,
+				[
+					"api",
+					"graphql",
+					"--hostname",
+					"github.com",
+					"-f",
+					`q=repo:${REPORT_REPOSITORY} "${id}" in:body`,
+					"-f",
+					"query=query($q: String!) { search(query: $q, type: DISCUSSION, first: 1) { nodes { ... on Discussion { url number } } } }",
+					"--jq",
+					".data.search.nodes[0].url // empty",
+				],
+				options,
+			);
+			if (searched.exitCode !== 0) return undefined;
+			match = DISCUSSION_URL.exec(searched.stdout);
+		}
 		return match === null ? null : { url: match[0], number: Number(match[1]) };
 	}
 	// The reporter's own newest issues, not the search index: search lags filing by up to minutes.

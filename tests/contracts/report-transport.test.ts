@@ -113,6 +113,29 @@ test("a discussion whose create timed out is adopted from the newest discussions
 	ok(!retry.calls.some((args) => args.some((arg) => arg.includes("createDiscussion"))));
 });
 
+test("a timed-out discussion older than the newest thirty is still adopted through search", async () => {
+	const stateDir = mkdtempSync(join(tmpdir(), "report-transport-"));
+	const report = rendered("Thirty other discussions were opened before the retry.");
+	const killed = runner((args) =>
+		args.some((arg) => arg.includes("discussionCategories"))
+			? { exitCode: 0, stdout: "R_1\tC_1\n" }
+			: { exitCode: null, timedOut: true },
+	);
+	await sendReport(report, routeFor("question"), gh, { kind: "create" }, { stateDir, run: killed.run });
+	const url = "https://github.com/iowarp/clio-coder/discussions/77";
+	const retry = runner((args) => {
+		if (args.some((arg) => arg.includes("discussionCategories"))) return { exitCode: 0, stdout: "R_1\tC_1\n" };
+		if (args.some((arg) => arg.includes("createDiscussion")))
+			return { exitCode: 0, stdout: `${url.replace("77", "78")}\n` };
+		// By now the search index has it, but it has fallen out of the newest thirty.
+		if (args.some((arg) => arg.includes("search("))) return { exitCode: 0, stdout: `${url}\n` };
+		return { exitCode: 0, stdout: "" };
+	});
+	const second = await sendReport(report, routeFor("question"), gh, { kind: "create" }, { stateDir, run: retry.run });
+	deepStrictEqual(second, { status: "sent", url, number: 77, adopted: true });
+	ok(!retry.calls.some((args) => args.some((arg) => arg.includes("createDiscussion"))));
+});
+
 test("the prefilled link stays under its budget and keeps the title and the start of the problem", () => {
 	const paragraph = "The loop stopped after a tool call and printed nothing at all, again and again. ";
 	const report = rendered(Array.from({ length: 40 }, () => paragraph.repeat(4)).join("\n\n"));
