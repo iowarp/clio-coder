@@ -90,8 +90,15 @@ export async function runClioCommand(
 	// when stdin is a real TTY. Piped or /dev/null stdin (used by verify.ts,
 	// CI runners, and non-interactive scripts) should fall through to the
 	// bannered non-interactive boot so those scripts do not hang on the TUI.
-	// Explicit CLIO_CODER_INTERACTIVE=1 still forces interactive mode.
-	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && process.stdin.isTTY) {
+	// Explicit CLIO_CODER_INTERACTIVE=1 still forces interactive mode. A piped
+	// stdout (`clio-coder | tee log`) has no terminal to draw on either.
+	if (
+		!options.headless &&
+		!options.acp &&
+		process.env.CLIO_CODER_INTERACTIVE === undefined &&
+		process.stdin.isTTY &&
+		process.stdout.isTTY
+	) {
 		process.env.CLIO_CODER_INTERACTIVE = "1";
 	}
 	// A task piped to bare `clio-coder` would be discarded by the bannered boot; point at `run` instead.
