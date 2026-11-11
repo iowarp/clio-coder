@@ -316,9 +316,11 @@ export function resolveAuthTarget(target: TargetDescriptor, runtime: RuntimeAuth
 		runtimeAuth: runtime.auth,
 		...(runtime.auth === "api-key" && !target.auth?.oauthProfile ? { requiredCredentialType: "api_key" as const } : {}),
 	};
-	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+	// An OAuth runtime refuses an API key, so a target's key variable would outrank its login and break it.
+	const targetKeyEnvVar = runtime.auth === "oauth" ? undefined : target.auth?.apiKeyEnvVar;
+	const explicitEnvVar = targetKeyEnvVar ?? runtime.credentialsEnvVar;
 	if (explicitEnvVar) authTarget.explicitEnvVar = explicitEnvVar;
-	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : target.auth?.apiKeyEnvVar?.trim();
+	const targetEnvVar = target.auth?.apiKeyRef?.trim() ? undefined : targetKeyEnvVar?.trim();
 	if (targetEnvVar) authTarget.targetEnvVar = targetEnvVar;
 	const projectUrl = projectChosenTargetUrl(target, targetRequiresAuth(target, runtime));
 	if (projectUrl) {

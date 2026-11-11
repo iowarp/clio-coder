@@ -58,7 +58,7 @@ export function bootAuthStatus(target: TargetDescriptor, runtime: RuntimeAuthMet
 		target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || runtime.oauthProviderId || runtime.id;
 	if (!required) return { providerId, required: false, available: true };
 	if (projectChosenTargetUrl(target, true)) return { providerId, required: true, available: false };
-	const explicitEnvVar = target.auth?.apiKeyEnvVar ?? runtime.credentialsEnvVar;
+	const explicitEnvVar = (runtime.auth === "oauth" ? undefined : target.auth?.apiKeyEnvVar) ?? runtime.credentialsEnvVar;
 	return {
 		providerId,
 		required: true,
