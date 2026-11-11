@@ -321,6 +321,14 @@ const totals = Type.Object({ tokens: QuantitySchema, usd: QuantitySchema }, clos
 
 /** A cached share of prompt tokens, as a percent fact and its display. */
 const CacheShareSchema = Type.Object({ fact: factSchema(nonNegative), display: Type.String() }, closed);
+/**
+ * Cache breaks a resumed session's replayed transcript caused (cause `replay_mismatch`): how many, the tokens they
+ * prefilled again, and the first entry where the latest replay departed from what was sent before.
+ */
+const ReplayMismatchSchema = Type.Object(
+	{ breaks: count, rePrefilled: QuantitySchema, firstDivergentSection: FactTextSchema },
+	closed,
+);
 export const SessionTelemetrySchema = Type.Object(
 	{
 		...header,
@@ -385,6 +393,7 @@ export const SessionTelemetrySchema = Type.Object(
 							input: QuantitySchema,
 							share: Type.Optional(CacheShareSchema),
 							lastTurnShare: Type.Optional(CacheShareSchema),
+							replayMismatch: Type.Optional(ReplayMismatchSchema),
 						},
 						closed,
 					),
@@ -629,6 +638,7 @@ export const CacheReportSchema = Type.Object(
 		/** Cached share over the session's calls that reported their cache read, and over its last turn's. */
 		share: Type.Optional(CacheShareSchema),
 		lastTurnShare: Type.Optional(CacheShareSchema),
+		replayMismatch: Type.Optional(ReplayMismatchSchema),
 		/**
 		 * Routes whose engine resumes a prefix only at fixed block boundaries, learned from the session's own cached
 		 * counts. Their calls that fell short by under two blocks count as `hot` (reason engine-floor), not breaks.

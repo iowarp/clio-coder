@@ -333,6 +333,7 @@ export function renderExitSummary(
 			add("Cache", [
 				`${spend.cache.share} of prompt tokens read from cache`,
 				...(spend.cache.lastTurn !== null ? [`last turn ${spend.cache.lastTurn}`] : []),
+				...(spend.cache.replay !== null ? [spend.cache.replay] : []),
 			]);
 		}
 		if (snapshot.compactions > 0) add("Compactions", [count(snapshot.compactions)]);

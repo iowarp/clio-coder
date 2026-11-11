@@ -158,9 +158,10 @@ export type ExitSpend =
 			verified: VerifiedOutcomeWords;
 			/**
 			 * The read model's cached share of the prompt tokens sent, for the session and its last turn, as
-			 * `telemetry cache` words them; null when no call reported its cache read.
+			 * `telemetry cache` words them, and where a resumed transcript's replay broke the cache; null when no call
+			 * reported its cache read.
 			 */
-			cache: { share: string; lastTurn: string | null } | null;
+			cache: CacheWords | null;
 	  };
 
 /**
@@ -252,10 +253,30 @@ export function exitSpend(
 const shareWords = (share: { fact: { kind: string }; display: string } | undefined): string | null =>
 	share && (share.fact.kind === "measured" || share.fact.kind === "estimated") ? share.display : null;
 
-function cacheShareWords(view: TelemetryView): { share: string; lastTurn: string | null } | null {
+interface CacheWords {
+	share: string;
+	lastTurn: string | null;
+	/** `resumed transcript differed at <section>`, with the breaks and tokens prefilled again; null without one. */
+	replay: string | null;
+}
+
+function cacheShareWords(view: TelemetryView): CacheWords | null {
 	const report = view.cache();
 	const share = shareWords(report.share);
-	return share === null ? null : { share, lastTurn: shareWords(report.lastTurnShare) };
+	if (share === null) return null;
+	return { share, lastTurn: shareWords(report.lastTurnShare), replay: replayWords(report.replayMismatch) };
+}
+
+function replayWords(replay: ReturnType<TelemetryView["cache"]>["replayMismatch"]): string | null {
+	if (replay === undefined) return null;
+	const fact = replay.rePrefilled.fact;
+	const known =
+		"kind" in fact
+			? fact.kind === "measured" || fact.kind === "estimated"
+			: fact.unknownCount === 0 && fact.absentCount === 0;
+	const facts = [`${replay.breaks} ${replay.breaks === 1 ? "break" : "breaks"}`];
+	if (known) facts.push(`${replay.rePrefilled.display} re-prefilled`);
+	return `resumed transcript differed at ${replay.firstDivergentSection.display} (${facts.join(", ")})`;
 }
 
 /**

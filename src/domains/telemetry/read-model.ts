@@ -1911,6 +1911,7 @@ export function sessionTelemetry(source: SessionSource, options: ReadOptions = {
 						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
 						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
 						...cacheShares(analysis.attempts),
+						...replayMismatch(view, id, analysis.attempts.filter(isBreak)),
 					}
 				: null,
 			used: quantity(view, { scope: "context", owner: id, metric: "contextUsed" }),
@@ -2355,6 +2356,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			breakUsd: quantity(view, own(id, "breakUsd", { group: { by: "cold", key: cause } })),
 		})),
 		...cacheShares(analysis.attempts),
+		...replayMismatch(view, id, breaks),
 		engineFloor: floorRows,
 	};
 }
@@ -2401,6 +2403,20 @@ function cacheShares(attempts: readonly Attempt[]) {
 		lastTurnShare: cacheShare(
 			lastTurn === undefined ? [] : attempts.filter((attempt) => attempt.ctx?.turnId === lastTurn),
 		),
+	};
+}
+
+/** The cache breaks among `breaks` a resumed transcript caused, read by `telemetry cache`, the exit summary and ACP. */
+function replayMismatch(view: View, id: string, breaks: readonly Attempt[]) {
+	const replays = breaks.filter((attempt) => coldKeys(attempt).includes("replay_mismatch"));
+	const latest = replays.at(-1);
+	if (latest === undefined) return {};
+	return {
+		replayMismatch: {
+			breaks: replays.length,
+			rePrefilled: quantity(view, own(id, "rePrefilled", { group: { by: "cold", key: "replay_mismatch" } })),
+			firstDivergentSection: textFact(divergence(latest)),
+		},
 	};
 }
 

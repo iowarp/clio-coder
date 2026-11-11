@@ -946,25 +946,23 @@ test("a resumed request that departs from the last journaled one mid-transcript 
 			cache: { verdict: "cold", rePrefilledTokens: { kind: "unknown", reason: "not-observed" }, structure },
 		});
 	const head = { system: d("a"), tools: d("b") };
-	const report = (resumed: string[]) =>
-		cacheReport(
-			{
-				...source,
-				sessionId: "cache-replay",
-				journal: {
-					...source.journal,
-					records: [
-						// One process: the first request lists its transcript, the next only what it appended.
-						...call({ ...head, entries: [`user:${d("1")}`] }),
-						...call({ ...head, base: 1, entries: [`assistant:${d("2")}`, `toolResult:${d("3")}`] }),
-						// The next process lists the whole transcript again.
-						...call({ ...head, entries: resumed }),
-					],
-				},
-			},
-			now,
-		);
-	const replayed = report([`user:${d("1")}`, `assistant:${d("9")}`, `toolResult:${d("3")}`, `user:${d("4")}`]);
+	const sourceOf = (resumed: string[]): SessionSource => ({
+		...source,
+		sessionId: "cache-replay",
+		journal: {
+			...source.journal,
+			records: [
+				// One process: the first request lists its transcript, the next only what it appended.
+				...call({ ...head, entries: [`user:${d("1")}`] }),
+				...call({ ...head, base: 1, entries: [`assistant:${d("2")}`, `toolResult:${d("3")}`] }),
+				// The next process lists the whole transcript again.
+				...call({ ...head, entries: resumed }),
+			],
+		},
+	});
+	const report = (resumed: string[]) => cacheReport(sourceOf(resumed), now);
+	const mismatched = [`user:${d("1")}`, `assistant:${d("9")}`, `toolResult:${d("3")}`, `user:${d("4")}`];
+	const replayed = report(mismatched);
 	deepStrictEqual(
 		replayed.byCause.map((row) => [row.cause, row.breaks]),
 		[
@@ -973,10 +971,17 @@ test("a resumed request that departs from the last journaled one mid-transcript 
 		],
 	);
 	strictEqual(replayed.breaks.at(-1)?.firstDivergentSection.display, "message[1]:assistant");
+	// The report, and the session DTO ACP's usage update carries, name the replay's breaks and where it departed.
+	const fromDto = sessionTelemetry(sourceOf(mismatched)).context.cache?.replayMismatch;
+	for (const replay of [replayed.replayMismatch, fromDto])
+		deepStrictEqual([replay?.breaks, replay?.firstDivergentSection.display], [1, "message[1]:assistant"]);
 	// A resume that only extends the journaled transcript replayed it exactly.
-	const extended = report([`user:${d("1")}`, `assistant:${d("2")}`, `toolResult:${d("3")}`, `user:${d("4")}`]);
+	const exact = [`user:${d("1")}`, `assistant:${d("2")}`, `toolResult:${d("3")}`, `user:${d("4")}`];
+	const extended = report(exact);
 	deepStrictEqual(
 		extended.byCause.map((row) => [row.cause, row.breaks]),
 		[["unattributed", 3]],
 	);
+	strictEqual(extended.replayMismatch, undefined);
+	strictEqual(sessionTelemetry(sourceOf(exact)).context.cache?.replayMismatch, undefined);
 });
