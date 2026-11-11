@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
 import { readWorkerTelemetryFrame } from "../../src/core/telemetry/forwarder.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { selectWorkerContext } from "../../src/domains/context/worker/select.js";
 import { captureWorkerContext } from "../../src/domains/context/worker/snapshot.js";
 import { isDeterministicOutcomeCode } from "../../src/domains/dispatch/backoff.js";
@@ -14,6 +15,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { resolvedDispatchPlanFromArgs } from "../../src/tools/dispatch-plan.js";
+import { CODE_NAV_TASK_STEERING } from "../../src/tools/profiles.js";
 import { parseWorkerSpec, WORKER_SPEC_VERSION_SKEW } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -135,6 +137,18 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			ok(!request.includes("LATER_PARENT_TURN"));
 			ok(!request.includes("PARENT_ONLY_SYSTEM_POLICY"));
 			equal(result.messages[0]?.role, "user", "worker output starts after the prompt/tool baseline and inherited history");
+			if (mode === "isolated") {
+				// Tools never vary with the task wording; a task naming no source path is steered in its task message.
+				const allowedTools = [...input.allowedTools, ToolNames.CodeNav, ToolNames.Grep];
+				for (const task of ["Report the version field of package.json.", "Report the exported functions of src/math.js."])
+					equal((await startWorkerRun({ ...input, allowedTools, task }, () => {}).promise).exitCode, 0);
+				const [plain, navigation] = fixture.requests.slice(-2);
+				ok(plain && navigation);
+				match(JSON.stringify(plain.tools), /code_nav/);
+				deepStrictEqual(plain.tools, navigation.tools);
+				equal(JSON.stringify(plain).split(CODE_NAV_TASK_STEERING).length - 1, 1);
+				ok(!JSON.stringify(navigation).includes(CODE_NAV_TASK_STEERING));
+			}
 			if (mode === "fork")
 				ok(
 					!JSON.stringify(events).includes("PARENT_CONSTRAINT_42"),

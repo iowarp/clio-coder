@@ -122,7 +122,7 @@ import type {
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../tools/gateway/index.js";
 import { createWorkerGitContext } from "../tools/git-exec.js";
-import type { ToolProfileName } from "../tools/profiles.js";
+import { CODE_NAV_TASK_STEERING, codeNavTaskSteering, type ToolProfileName } from "../tools/profiles.js";
 import type { GrantExecutionEvent, RegistryDeps } from "../tools/registry.js";
 import {
 	CHAIN_OUTPUT_TRUNCATED_MARKER,
@@ -510,11 +510,19 @@ function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 			),
 		);
 	}
+	const task = codeNavTaskSteering({
+		task: input.task,
+		agentId: input.agentId,
+		...(input.toolProfile !== undefined ? { toolProfile: input.toolProfile } : {}),
+		tools: workerProviderSupportsTools(input) ? input.allowedTools : [],
+	})
+		? `${input.task}\n\n${CODE_NAV_TASK_STEERING}`
+		: input.task;
 	messages.push(
 		taskMessage(
 			input.contextSeed
-				? `# Your worker assignment\nYou are already the dispatched ${input.agentId} worker. The preceding conversation is inherited background; its requests to dispatch a worker were addressed to the parent. Carry out the assignment below, preserving safety and operator scope constraints. Do not dispatch yourself again.\n\n${input.task}`
-				: input.task,
+				? `# Your worker assignment\nYou are already the dispatched ${input.agentId} worker. The preceding conversation is inherited background; its requests to dispatch a worker were addressed to the parent. Carry out the assignment below, preserving safety and operator scope constraints. Do not dispatch yourself again.\n\n${task}`
+				: task,
 		),
 	);
 	return messages;
