@@ -535,6 +535,26 @@ test("a listed prompt budget below the context window is the window Clio compact
 	}
 });
 
+test("the default tier's billed prompt budget bounds the window when the limits describe long context", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "long-context",
+		capabilities: {
+			supports: { vision: false, reasoningEffort: true },
+			limits: { max_context_window_tokens: 1_000_000, max_prompt_tokens: 1_000_000, max_output_tokens: 128_000 },
+		},
+		billing: { tokenPrices: { maxPromptTokens: 200_000, longContext: { maxPromptTokens: 1_000_000 } } },
+	});
+	try {
+		const rows = await listCopilotSdkModels();
+		strictEqual(rows.find((row) => row.id === "long-context")?.contextWindow, 200_000);
+	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
 test("a request over Copilot's prompt budget is a context overflow, so recovery compacts and retries", async () => {
 	const failed = await step({ messages: [user("over budget")] }, "budget-session");
 	strictEqual(failed.stopReason, "error");

@@ -305,14 +305,20 @@ export function listCopilotModels(): Promise<CopilotModelRow[]> {
 	return held(() => listHeld());
 }
 
-/** The prompt budget Copilot enforces sits under the context window; compaction must trip below it. */
-function promptWindow(
-	limits: { max_context_window_tokens?: number; max_prompt_tokens?: number } | undefined,
-): number | undefined {
-	const window = limits?.max_context_window_tokens;
-	const prompt = limits?.max_prompt_tokens;
-	if (prompt === undefined) return window;
-	return window === undefined ? prompt : Math.min(window, prompt);
+/**
+ * The prompt budget Copilot enforces sits under the context window; compaction must trip below it. A session
+ * runs on the default tier, whose budget is `billing.tokenPrices.maxPromptTokens`; `capabilities.limits` can
+ * describe the long-context tier instead (live 2026-11-10: Claude Opus 5.5 limits 1M, default tier 200K, the
+ * budget the runtime refused at).
+ */
+function promptWindow(model: ModelInfo): number | undefined {
+	const limits = model.capabilities?.limits;
+	const budgets = [
+		limits?.max_context_window_tokens,
+		limits?.max_prompt_tokens,
+		model.billing?.tokenPrices?.maxPromptTokens,
+	].filter((tokens): tokens is number => tokens !== undefined);
+	return budgets.length === 0 ? undefined : Math.min(...budgets);
 }
 
 async function listHeld(): Promise<CopilotModelRow[]> {
@@ -325,7 +331,7 @@ async function listHeld(): Promise<CopilotModelRow[]> {
 			(model): CopilotModelRow => ({
 				id: model.id,
 				label: model.name || model.id,
-				contextWindow: promptWindow(model.capabilities?.limits),
+				contextWindow: promptWindow(model),
 				maxOutputTokens: model.capabilities?.limits?.max_output_tokens,
 				vision: model.capabilities?.supports?.vision === true,
 				reasoning: model.capabilities?.supports?.reasoningEffort === true,
