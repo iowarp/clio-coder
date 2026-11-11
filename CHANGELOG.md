@@ -182,6 +182,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - First launch no longer adopts a local server's embedding model as the chat model.
 - `clio-coder auth logout <runtime>` names the targets that hold their own stored key and how to drop one, instead of saying nothing is stored.
 - Bare `clio-coder auth logout` lists a target's stored key under the target id and removes exactly the credential you pick, also when a target is named after its runtime: the runtime's own key is listed and accepted as `runtime:<id>`, and a key several targets share is listed once.
+- Removing a target (`clio-coder targets remove` or Settings) drops the credential only it used: its own stored key and the desktop app's copy of its key variable when no other target names that variable. A runtime key or a key another target still uses is kept, and the removal line says which.
 - `clio-coder run --model` with a pattern that matches no model exits 2 with a `clio-coder run:` usage message, like other bad `run` input, instead of 1.
 - In setup, the warning about a refused credential clears once you enter a new one, and the first-run offer calls a Copilot login "signed in" instead of "stored key".
 - The setup review lists automatic local workers only for a target on this machine.
@@ -343,7 +344,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder uninstall --inactive` removes an installer root left behind after moving to another install method, and refuses while a session, receipt or graphical service still starts from it. `doctor` names such a root with its size and `paths` marks it as not running from here.
 - `doctor`, `paths` and `upgrade` say what an install follows or is pinned to, and how to release a pin.
 - Uninstall stops Clio Coder's private pane hosts, removes the exact PATH block `install.sh` added (kept while other programs share its directory), runs `npm uninstall` for an npm install (`--keep-package` keeps it), and closes with what was removed and what was kept, and why.
-- Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version. `clio-coder upgrade` restarts an idle background app once instead of two or three times.
+- Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version. `clio-coder upgrade` restarts an idle background app once instead of two or three times. After a native-installer `upgrade --rollback` to an older version, the restored version opens the home the newer one used instead of exiting 2 in headless runs and ACP, and the rollback names the newer migrations it accepts.
 - `reset` and `uninstall` remove the data and cache directories of a `CLIO_CODER_HOME` home an earlier version created, instead of keeping them and exiting 1.
 - `clio-coder uninstall` and `reset` no longer delete a root they cannot prove is Clio Coder's own (for example `CLIO_CODER_CONFIG_DIR=~/.config`); it is kept and named, and `CLIO_CODER_HOME` set to the home directory is refused.
 - A new HPC clusters guide covers installing on a login node (old Node.js or glibc, a proxy, no internet) and connecting a model from there.
