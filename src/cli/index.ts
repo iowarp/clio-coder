@@ -2,8 +2,15 @@
 // The process table is the only place an integrator can identify a running Clio
 // Coder without sniffing script paths, and the bin name never reaches it because
 // the entry is a node script. Set it before anything can fail so `--version` and
-// a crashed boot are both legible to `ps`, `pgrep -f`, and htop.
+// a crashed boot are both legible to `ps`, `pgrep -f`, and htop. The title
+// carries the version and build commit (`clio-coder 0.8.0-dev@67b3247`), so an
+// orchestrator can verify which build a pane runs from outside the process.
 process.title = "clio-coder";
+try {
+	process.title = clioProcessTitle();
+} catch {
+	// An unreadable package.json fails the boot below with its own message.
+}
 
 /**
  * A reader that closes early (`clio-coder agents | head -1`) ends the command with SIGPIPE status instead of
@@ -22,6 +29,7 @@ function installHumanStdoutHandler(command: string): void {
 }
 
 import { markClioAgentProcess } from "../core/agent-environment.js";
+import { clioProcessTitle } from "../core/build-info.js";
 
 // Pi and other agent-aware developer tools use this generic marker to
 // attribute subprocess activity without knowing Clio-specific variables.

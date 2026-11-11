@@ -360,6 +360,24 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		}
 	});
 
+	it("names its version and build commit in the process title", { skip: process.platform !== "linux" }, async () => {
+		const scratch = home();
+		const child = spawn(process.execPath, [CLI, "acp"], { cwd: ROOT, env: scratch.env, stdio: ["pipe", "pipe", "pipe"] });
+		try {
+			const commit = existsSync(join(ROOT, ".git")) ? "@[0-9a-f]{7,}(?:-dirty)?" : "";
+			const expected = new RegExp(`^clio-coder ${VERSION.replaceAll(".", "\\.")}${commit}$`);
+			let title = "";
+			for (let attempt = 0; attempt < 100 && !expected.test(title); attempt += 1) {
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				title = readFileSync(`/proc/${child.pid}/cmdline`, "utf8").split("\0")[0] ?? "";
+			}
+			match(title, expected);
+		} finally {
+			child.kill("SIGKILL");
+			scratch.cleanup();
+		}
+	});
+
 	it("keeps doctor/configure outcomes and both configure cancellation codes", async () => {
 		const scratch = home();
 		const firstRun = home("clio-coder-first-run-cancel-");

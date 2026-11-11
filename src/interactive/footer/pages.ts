@@ -9,6 +9,7 @@
  * Runs board and a quota meter here reads like one in `/usage`.
  */
 
+import { clioBuildLabel } from "../../core/build-info.js";
 import { outputStyleLabel } from "../../core/defaults.js";
 import { renderUsdLimit } from "../../core/telemetry/render.js";
 import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
@@ -799,7 +800,10 @@ export function dashboardPageViewport(
 	// A glance, not a standing view: the transcript keeps two thirds of the terminal, and the workers list scrolls.
 	const budget = Math.max(6, Math.min(8, Math.floor(terminalRows / 3)));
 	// The rule keeps the brand from reading as part of the title.
-	const tabText = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} ${theme.style("selectedOption", "Dashboard", { bold: true })}`;
+	const title = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} ${theme.style("selectedOption", "Dashboard", { bold: true })}`;
+	// The build this process runs, as its process title names it, yields to the route when the row is narrow.
+	const withBuild = `${title}  ${theme.fg("annotation", clioBuildLabel())}`;
+	const tabText = innerWidth - visibleWidth(withBuild) - 4 >= 20 ? withBuild : title;
 	// The route sits flush right, the way a title row carries its meta, so the
 	// tabs and the identity read as one row with two ends rather than a sentence.
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;

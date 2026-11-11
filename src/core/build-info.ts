@@ -43,6 +43,22 @@ function describeVersion(version: string, build: BuildProvenance | null = readBu
 	return `${version} (unreleased${commit})`;
 }
 
+/**
+ * `0.8.0-dev@67b3247` (`-dirty` when the tree was), or the plain version when the
+ * bundle records no commit: short enough for a process title and a footer.
+ */
+export function clioBuildLabel(
+	version = readClioVersion(),
+	build: BuildProvenance | null = readBuildProvenance(),
+): string {
+	return build === null ? version : `${version}@${build.commit}${build.dirty ? "-dirty" : ""}`;
+}
+
+/** What `ps -o args=` and `/proc/<pid>/cmdline` show for a running Clio, so a build can be verified from outside. */
+export function clioProcessTitle(): string {
+	return `clio-coder ${clioBuildLabel()}`;
+}
+
 /** The version for display: banner, `--version`, doctor and the ACP handshake. */
 export function readClioVersionLabel(): string {
 	return describeVersion(readClioVersion());
