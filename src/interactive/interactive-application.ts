@@ -5,7 +5,7 @@ import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
-import { consumeRestartContinuation } from "../core/restart-intent.js";
+import { consumeRestartContinuation, restartContinuationMessage } from "../core/restart-intent.js";
 import { firePendingModelRestart, nextModelRestartChain, setRestartHost } from "../core/restart-request.js";
 import { isRestartHandoff } from "../core/restart-status.js";
 import type { SettingsOrigin } from "../core/settings-layers.js";
@@ -1603,7 +1603,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const restartContinuation = restartSessionId ? consumeRestartContinuation(deps.stateDir, restartSessionId) : undefined;
 	if (restartContinuation)
 		setImmediate(() =>
-			editorSubmit.submitEditorText(`Restarted on build ${runningBuildId ?? "source"}. ${restartContinuation}`),
+			editorSubmit.submitEditorText(restartContinuationMessage(restartContinuation, runningBuildId ?? null)),
 		);
 
 	const interactiveTickers = createInteractiveTickers({
