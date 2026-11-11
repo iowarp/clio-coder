@@ -117,7 +117,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `/run <id>` also starts a configured external (ACP) agent. A fleet agent of the same name wins; `acp:<id>` forces the external one, and flags an external agent cannot take (`--model`, `--target`, `--worktree` and the like) are refused in one error before the draft is cleared.
 - `/settings` has seven areas named for what they hold (Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, Advanced). Old area names still open them, typing always filters and `*` pins a row.
 - Alt+U opens a one-page dashboard and closes it on the next press; the machine readings moved to the Health tab of `/usage`.
-- Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, and PgUp, PgDn, Home and End move through `/tree`.
+- Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, PgUp, PgDn, Home and End move through `/tree`, Decisions and Research, `j` and `k` move the selection in Tree, Tasks, Decisions and Research, and Tab opens a decision's detail. A filter given with `/view <text>` clears on the first Esc, like `/help <text>` and `/resume <text>`.
 - List overlays share one set of action letters, and a destructive key asks once before it acts: `x` removes, cancels, declines or supersedes the selected row in Tasks, the steering queue, Memory, Fleet Runs, Decisions, the Library and Interop; `r` refreshes the Library and `R` restarts all extensions; `o` orders `/tree`; `m` steers a fleet run and `Enter` opens its detail; `s` switches Interop scope; `Tab` opens a Library review's paths. In this release an old letter only says which key it moved to, and Esc in Interop first leaves a pending plan.
 - `/config` opens Settings on Connections in place, also during a turn, instead of suspending the terminal UI; `clio-coder configure` is unchanged.
 - `/reload prompts` (and bare `/reload`) re-reads prompt fragments, agent recipes, the project handbook and project rules in a running session and says which fragments changed, or that agent recipes failed to reload. The safety rule pack still needs a restart.
@@ -212,7 +212,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Under `safety.sandbox: required`, outward git with `GIT_CONFIG_SYSTEM=` or a `-c core.sshCommand=`-style program override stays in the sandbox.
 - On macOS, the sandbox's temp-directory write grant no longer overrides read-only paths.
 - ACP: renaming a session requires authentication.
-- Opening a repository with its own Clio Coder configuration shows one card that sums it up (connections, rule counts, hook commands) with Review, Trust all and Open without it, instead of one notice per file.
+- Opening a repository with its own Clio Coder configuration shows one card that sums it up (connections, rule counts, hook commands) with Review, Trust all and Open without it, instead of one notice per file. Open without it prints one notice, Review also shows the hook scripts a hooks approval pins (and the changed-hooks notice names them), and `q` or Ctrl+C on the card quits without opening a session, as its legend says; Esc still opens without the configuration.
 - The grep presence check on secret files is exempt only for the bare `^NAME=` pattern, so a pattern can no longer guess a value.
 - Protected-file rails follow a literal `cd` in a shell command and recognize `dd of=`, `install` and `cp`/`mv -t` destinations. A path argument with more segments than any real path is refused at once instead of stalling the safety check.
 - A peer pane's sender id keeps only pane id characters, so it cannot inject control text into the transcript.
@@ -314,7 +314,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Worker diagnostics can no longer be mistaken for control frames.
 - The wiki generation lock records host and process identity, so another node's run is respected and a reused pid no longer blocks generation; a codewiki lock left by a gone process on another host is reclaimed after a minute.
 - A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer.
-- `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason.
+- `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer.
 
 ### Extensions and MCP
 
@@ -380,6 +380,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A call journal whose first line is damaged is set aside and journaling continues, instead of failing as an unsupported header.
 - A poll job's deadline wake is announced once; cancelling or closing afterwards no longer records a second continuation.
 - `/doctor` no longer reads as reporting a missing pane host twice: the `panes binary` warning points at the `external tool herdr` row.
+- A command stopped by Clio's built-in path protection no longer says the project's safety policy blocked it; only an entry the project wrote is named as the project's policy.
 
 ### Internal
 
