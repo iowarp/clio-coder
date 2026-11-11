@@ -34,7 +34,7 @@ The skill precedence, lowest to highest, is:
 | 50 | project | clio | `.clio-coder/skills` |
 | 60 | cli | path | `--skill <path>` explicit paths |
 
-Inside Clio Coder's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to take conventions from the code and neighboring tests and not to load either, and both skills stay discoverable.
+Inside Clio Coder's own repository, attended sessions are told to load `clio-coder-dev` before the first edit and `clio-coder-test` when choosing validation ([extension.ts](../../src/domains/prompts/extension.ts)). Headless runs are told to load `clio-coder-dev` before the first edit and `clio-coder-test` before choosing checks, and the built-in `coder` recipe gets both skills there.
 
 Clio Coder-native roots intentionally outrank shared compatibility roots at the same scope, so `.clio-coder/skills` overrides a project `.codex/skills` skill of the same name, and `<configDir>/skills` overrides `~/.agents/skills`. Project roots may not leave the workspace and user roots may not leave the home directory through a symlink; an escaping skill is skipped with the warning `skill path resolves to <path>, outside <anchor>; a skill root may not leave its scope through a symlink`. A project root is contained strictly: a project skill root that is itself a symlink does not move the boundary to its target, because a repository can offer only what it contains. A user or XDG root the operator placed outside its scope, such as a config directory on another volume, anchors to its own real path instead.
 
