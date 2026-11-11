@@ -139,7 +139,8 @@ describe("worker handbook selection", () => {
 			workingPaths: [],
 			maxChars: 420,
 		});
-		ok(!starved.text.includes("Relative imports"));
+		ok(starved.text.length <= 420);
+		ok(/Rules not selected[^\n]*invariants/i.test(starved.text), "a skipped invariant is signposted");
 	});
 
 	it("keeps packing the worker's own sections after invariants that overflow the budget", () => {
