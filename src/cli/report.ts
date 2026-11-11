@@ -59,6 +59,7 @@ import {
 	updateShareReceipt,
 	uploadShare,
 } from "../domains/report/index.js";
+import { writeSealedReportBundle } from "../domains/report/transport.js";
 import {
 	attachBundle,
 	type BundleRequest,
@@ -539,7 +540,9 @@ async function confirmAndSend(
 	const shareId = options.share === true && source !== null ? newShareId() : null;
 	let sharing = shareId !== null && planTransport.kind === "gh";
 	if (shareId !== null && !sharing && !options.json)
-		io.err("not shared: --share needs an authenticated gh; the bundle stays on this machine.\n");
+		io.err(
+			"not shared: --share needs an authenticated gh; sending seals the bundle to the maintainers as a .box file you can attach by hand.\n",
+		);
 	const consent: ReportSharePointer["consent"] = source?.scopes.includes("dataset") === true ? "debug,dataset" : "debug";
 	let preview = sharing ? { share: { bundle: `gist:<created on send>#${shareId}`, consent } } : {};
 	let plan = planReport(draft, { identity, transport: planTransport, stateDir: io.stateDir, reviewed, ...preview });
@@ -640,6 +643,22 @@ async function confirmAndSend(
 		sharing && shareId !== null && transport.kind === "gh" && source !== null
 			? shareHook(io, transport.path, shareId, consent, source)
 			: null;
+	if (shareId !== null && share === null && source !== null) {
+		// No gh to upload it: the same sealed envelope goes to a file only the maintainers can open.
+		const box = writeSealedReportBundle(io.stateDir, {
+			reportId: draft.id,
+			shareId,
+			clio: source.clio,
+			consent: source.scopes,
+			digest: reportBundleDigest(source.bytes),
+			archiveFormat: REPORT_BUNDLE_FORMAT,
+			archive: source.bytes,
+			...(io.deps.now !== undefined ? { now: io.deps.now() } : {}),
+		});
+		(options.json ? io.err : io.out)(
+			`Sealed the bundle for the maintainers at ${box}; only they can open it. Attach it to the issue by hand.\n`,
+		);
+	}
 	const outcome = await runReportSend(draft, plan.rendered, {
 		...(share !== null ? { share } : {}),
 		stateDir: io.stateDir,

@@ -441,7 +441,15 @@ clio-coder telemetry share forget <shareId>
   report block names it as `bundle: gist:<id>#<shareId>`; a telemetry share
   opens a discussion in "Telemetry shares" on iowarp/clio-coder that names only
   the gist. The gist is created only at send, and deleted again if posting
-  fails.
+  fails. If the gist cannot be uploaded, the report is still posted without
+  a `bundle:` pointer and the output says why the bundle was not shared.
+- **Without gh.** `report ... --share` without a signed-in gh seals the
+  bundle the same way and writes the envelope next to the report's bundle as
+  `reports/bundles/<id>.box` in the state directory; the output names its
+  path so you can attach it to the issue by hand. Only the maintainers can
+  open it.
+- **Titles.** A bug report's title is prefixed `fix:` by design, so the
+  issue reads as the fix it asks for.
 - **Who reads it.** Only the maintainers. They keep counts derived from it,
   never its contents or who sent it, in their private metrics repository to
   rank what to fix next. `consent: debug` lets them read it to fix Clio Coder;

@@ -426,20 +426,18 @@ export async function runReportSend(
 	const route = routeFor(final.kind);
 	const commenting = choice === "comment" && verdict.kind === "comment";
 	// A comment's block is not scanned for shares, so a gist uploaded for it would sit where no maintainer finds it.
-	const notShared =
+	let notShared =
 		deps.share !== undefined && commenting
 			? "The bundle was not shared: a comment on an existing issue cannot carry it. Share it with a new report, or send telemetry with clio-coder telemetry share --send."
 			: undefined;
 	let shared: { shareId: string; gistId: string } | undefined;
 	if (deps.share !== undefined && deps.transport.kind === "gh" && !commenting) {
 		const uploaded = await deps.share.upload();
-		if ("failed" in uploaded) {
-			saveReportDraft(deps.stateDir, final);
-			const path = writeReportMarkdown(deps.stateDir, final.id, rendered.body);
-			const reason = `the encrypted bundle was not uploaded, so nothing was posted: ${uploaded.failed}`;
-			return { kind: "sent", result: { status: "failed", reason, path }, draft: final, rendered, verdict };
-		}
-		shared = { shareId: deps.share.shareId, gistId: uploaded.gistId };
+		// A failed upload costs only the bundle: the report still goes, without a pointer, and says what was not shared.
+		if ("failed" in uploaded) notShared = `The bundle was not shared: ${uploaded.failed}`;
+		else shared = { shareId: deps.share.shareId, gistId: uploaded.gistId };
+	}
+	if (shared !== undefined && deps.share !== undefined) {
 		// Recorded before anything is posted, so forget and the retention sweep can find the gist whatever happens next.
 		updateShareReceipt(deps.stateDir, shared.shareId, {
 			kind: "report-bundle",
@@ -454,8 +452,9 @@ export async function runReportSend(
 		shared !== undefined && deps.share !== undefined
 			? { bundle: sharePointer(shared.gistId, shared.shareId), consent: deps.share.consent }
 			: undefined;
+	// A share's preview carries a placeholder pointer, so a share that was not uploaded re-renders without one.
 	const finalRendered =
-		final === draft && pointer === undefined
+		final === draft && pointer === undefined && deps.share === undefined
 			? rendered
 			: renderReport(final, deps.identity, deps.reviewed ?? true, pointer);
 	saveReportDraft(deps.stateDir, final);

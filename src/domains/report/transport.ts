@@ -1,14 +1,53 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { canOpenBrowser, openBrowser } from "../../core/open-browser.js";
 import { resolveToolBinary } from "../toolchain/index.js";
 import type { RenderedReport } from "./body.js";
+import { reportBundlePath } from "./bundle.js";
 import { issueCanaryFinding, issueCanaryGate } from "./canary.js";
 import { type ReportCommandRunner, runReportCommand } from "./command.js";
 import { type OutboxEntry, outboxEntry, updateOutbox } from "./outbox.js";
 import type { LocalIdentity } from "./scrub.js";
+import { SHARE_PLAIN_FORMAT, sealShare } from "./share/seal.js";
 import { writeReportMarkdown } from "./store.js";
 import { REPORT_REPOSITORY, type ReportKind } from "./vocabulary.js";
 
 export type ReportTransport = { kind: "gh"; login: string; path: string } | { kind: "browser" } | { kind: "file" };
+
+/** What {@link writeSealedReportBundle} seals: the report bundle's bytes and what its envelope records. */
+export interface SealedBundleSource {
+	reportId: string;
+	shareId: string;
+	clio: string;
+	consent: ReadonlyArray<"debug" | "dataset">;
+	digest: unknown;
+	archiveFormat: string;
+	archive: Buffer;
+	now?: Date;
+}
+
+/**
+ * Without gh nothing uploads a share, so the bundle is sealed to the maintainers as it would be for a gist and written
+ * next to the report's bundle as `<id>.box`, for the reporter to attach by hand. Returns the file's path.
+ */
+export function writeSealedReportBundle(stateDir: string, source: SealedBundleSource): string {
+	const envelope = sealShare({
+		format: SHARE_PLAIN_FORMAT,
+		v: 1,
+		kind: "report-bundle",
+		shareId: source.shareId,
+		day: (source.now ?? new Date()).toISOString().slice(0, 10),
+		clio: source.clio,
+		consent: [...source.consent],
+		digest: source.digest,
+		archiveFormat: source.archiveFormat,
+		archive: source.archive.toString("base64"),
+	});
+	const path = reportBundlePath(stateDir, source.reportId).replace(/\.tar\.gz$/u, ".box");
+	mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+	writeFileSync(path, `${JSON.stringify(envelope)}\n`, { mode: 0o600 });
+	return path;
+}
 
 /**
  * Where a report may go. This table is the only source of a destination: no caller text names a repository, and

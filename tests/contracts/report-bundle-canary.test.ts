@@ -864,9 +864,10 @@ test("report --share uploads the bundle sealed as a secret gist, names it in the
 		gistFails = true;
 		out = "";
 		err = "";
-		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes"), 1);
-		ok(err.includes("nothing was posted") && err.includes("gh auth refresh -s gist"), err);
-		strictEqual(posted, "");
+		strictEqual(await report("--bundle", "mechanics", "--consent", "debug", "--share", "--yes"), 0);
+		ok(out.includes("The bundle was not shared:") && out.includes("gh auth refresh -s gist"), out);
+		ok(posted !== "" && !posted.includes("bundle: gist:"), posted);
+		posted = "";
 
 		gistFails = false;
 		out = "";
