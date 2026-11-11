@@ -312,6 +312,45 @@ function limitWords(ms: number): string {
 	return `${seconds}s`;
 }
 
+/** `60 min (3600000 ms)`: the timeout in human units with the raw value the model passed as timeout_ms. */
+function timeoutWords(ms: number): string {
+	if (ms < 1000) return `${ms} ms`;
+	const seconds = ms / 1000;
+	const human =
+		seconds >= 3600 && seconds % 3600 === 0
+			? `${seconds / 3600} h`
+			: seconds >= 60 && seconds % 60 === 0
+				? `${seconds / 60} min`
+				: `${Math.round(seconds * 10) / 10} s`;
+	return `${human} (${ms} ms)`;
+}
+
+const TEST_RUN_COMMAND =
+	/\b(?:pytest|vitest|jest|node\s+(?:[^|;&]*\s)?--test\b|(?:pnpm|npm|yarn)\s+(?:run\s+|-s\s+)*test(?::[\w-]+)?\b|go\s+test|cargo\s+test|ctest)\b/u;
+
+/**
+ * A timeout is the command outliving its own limit, not the tool going away: a model that read the old test-run wording
+ * after a lock wait concluded bash had stopped answering. The test-run hint stays for commands that look like test runs.
+ */
+function bashTimeoutStatus(
+	command: string,
+	timeoutMs: number,
+	printedNothing: boolean,
+	lastActiveTest: string | null,
+): string {
+	let status = `bash: this command ran past its own ${timeoutWords(timeoutMs)} timeout and was stopped.`;
+	if (printedNothing)
+		status += " It printed nothing before it was stopped (its output went elsewhere, or it was waiting).";
+	status += " The bash tool still works; the next call runs normally.";
+	if (lastActiveTest !== null || TEST_RUN_COMMAND.test(command)) {
+		status +=
+			" Validation did not finish." +
+			(lastActiveTest === null ? "" : ` Last active pytest test: ${lastActiveTest}.`) +
+			" Narrow the test selection or enable verbose test names before another bounded run.";
+	}
+	return status;
+}
+
 /** An abort is the run ending under the command, never its own timeout, and the model has to be able to tell which (#445). */
 function bashAbortStatus(elapsedMs: number, timeoutMs: number, cause: string | null): string {
 	const span = `after ${Math.round(elapsedMs / 1000)}s of its ${limitWords(timeoutMs)} time limit`;
@@ -433,10 +472,7 @@ export const bashTool: ToolSpec = {
 			}
 			if (timedOut) {
 				const lastActiveTest = lastActivePytestTest(args.command, rawOutput);
-				const status =
-					`bash: command timed out after ${timeout}ms; validation did not finish.` +
-					(lastActiveTest === null ? "" : ` Last active pytest test: ${lastActiveTest}.`) +
-					" Narrow the test selection or enable verbose test names before another bounded run.";
+				const status = bashTimeoutStatus(args.command, timeout, output.length === 0, lastActiveTest);
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,

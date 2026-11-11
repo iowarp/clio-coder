@@ -22,10 +22,22 @@ it("reports the last announced pytest test when a bounded run times out", async 
 	const result = await bashTool.run({ command, timeout_ms: 250 });
 	strictEqual(result.kind, "error");
 	if (result.kind !== "error") return;
-	match(result.message, /timed out after 250ms; validation did not finish/u);
+	match(result.message, /ran past its own 250 ms timeout and was stopped/u);
+	match(result.message, /Validation did not finish/u);
 	match(result.message, /Last active pytest test: tests\/test_commands\.py::TestProcessCommand::test_process_json/u);
 	match(result.message, /Narrow the test selection/u);
 	strictEqual(result.details?.lastActiveTest, "tests/test_commands.py::TestProcessCommand::test_process_json");
+	strictEqual(result.details?.timedOut, true);
+});
+
+it("says a non-test timeout stopped only that command and leaves the shell usable", async () => {
+	const result = await bashTool.run({ command: "sleep 5 > /dev/null", timeout_ms: 1500 });
+	strictEqual(result.kind, "error");
+	if (result.kind !== "error") return;
+	match(result.message, /ran past its own 1\.5 s \(1500 ms\) timeout and was stopped/u);
+	match(result.message, /printed nothing/u);
+	match(result.message, /bash tool still works/u);
+	ok(!/Validation did not finish|Narrow the test selection/u.test(result.message));
 	strictEqual(result.details?.timedOut, true);
 });
 

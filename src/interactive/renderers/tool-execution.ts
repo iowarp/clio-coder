@@ -300,7 +300,7 @@ function optionalCompactMs(durationMs: number | undefined): string | null {
  * diagnosis as the body line.
  */
 const COMMAND_STATUS_LINE =
-	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
+	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: this command ran past its own .+ (?<newTimeout>timeout) and was stopped\..*|bash: command (?<aborted>aborted)(?: after \d+s of its \S+ time limit\. The host ended the run(?:: (?<cause>.+)| and recorded no cause\.))?)$/u;
 
 interface CommandStatus {
 	/** Index of the status line in the result text's lines. */
@@ -328,7 +328,7 @@ function commandStatusLine(result: unknown): CommandStatus | null {
 		return {
 			index,
 			exit,
-			timedOut: match.groups.timeout !== undefined,
+			timedOut: match.groups.timeout !== undefined || match.groups.newTimeout !== undefined,
 			aborted: match.groups.aborted !== undefined,
 			// `command exited with code 3` after `(exit 3)` restates the row's own fact, so it is no diagnosis.
 			message: message !== null && message.trim().toLowerCase() === `command exited with code ${exit}` ? null : message,
