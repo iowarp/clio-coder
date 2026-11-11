@@ -13,6 +13,8 @@ export interface AgentContextEstimateInput {
 	pendingUserText?: string;
 	pendingUserImages?: ReadonlyArray<unknown>;
 	tools?: ReadonlyArray<unknown>;
+	/** `estimateAgentMessageTokens` of each message, aligned with `messages`, when the caller already holds them. */
+	messageTokens?: ReadonlyArray<number>;
 }
 
 export interface ContextUsageSnapshot {
@@ -246,14 +248,15 @@ export function estimateAgentMessageTokens(message: MessageTokenEstimateInput): 
 	return ceilChars(messageChars(message)) + MESSAGE_OVERHEAD_TOKENS;
 }
 
+function estimatedMessageTokens(input: AgentContextEstimateInput, message: AgentMessage, index: number): number {
+	if (message.role === "system" && !isHostPolicyMessage(message)) return 0;
+	return input.messageTokens?.[index] ?? estimateAgentMessageTokens(message);
+}
+
 export function estimateAgentContextBreakdown(input: AgentContextEstimateInput): ContextUsageBreakdown {
 	return {
 		systemPromptTokens: input.systemPrompt ? ceilChars(input.systemPrompt.length) : 0,
-		messageTokens: input.messages.reduce(
-			(sum, message) =>
-				sum + (message.role === "system" && !isHostPolicyMessage(message) ? 0 : estimateAgentMessageTokens(message)),
-			0,
-		),
+		messageTokens: input.messages.reduce((sum, message, index) => sum + estimatedMessageTokens(input, message, index), 0),
 		pendingUserTokens:
 			input.pendingUserText !== undefined
 				? estimateAgentMessageTokens({
@@ -272,13 +275,11 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 
 	const usage = latestUsableAssistantUsage(input.messages);
 	if (!usage) return projection;
-	const trailingTokens = input.messages
-		.slice(usage.index + 1)
-		.reduce(
-			(sum, message) =>
-				sum + (message.role === "system" && !isHostPolicyMessage(message) ? 0 : estimateAgentMessageTokens(message)),
-			0,
-		);
+	let trailingTokens = 0;
+	for (let index = usage.index + 1; index < input.messages.length; index += 1) {
+		const message = input.messages[index];
+		if (message !== undefined) trailingTokens += estimatedMessageTokens(input, message, index);
+	}
 	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 	return Math.max(projection, anchored);
 }

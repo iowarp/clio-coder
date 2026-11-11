@@ -33,7 +33,7 @@ import { prepareInPrefixSummary } from "../engine/in-prefix-summary.js";
 import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
-import { createMessageListDigests } from "./message-list-digest.js";
+import { createMessageListFold } from "./message-list-digest.js";
 import {
 	effectivePosture,
 	POSTURE_GENERATION,
@@ -586,6 +586,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * a working-set projection subtracts the tokens it removed rather than
 	 * throwing the attestation away.
 	 */
+	const historyFold = createMessageListFold();
+	/** The next request's history, folded: only messages appended since the last publication are serialized. */
+	const observeHistory = (agentRuntime: AgentRuntime): MessageListDigests =>
+		historyFold.observe(
+			agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+		);
+	let promptDigest: { prompt: string | null; digest: string } | null = null;
 	let reconciledAnchor: {
 		tokens: number;
 		anchoredMessages: ReadonlyArray<AgentMessage>;
@@ -1062,9 +1069,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const reconciledHistoryTokens = (agentRuntime: AgentRuntime, history?: MessageListDigests): number | null => {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
-		const messages =
-			history?.messages ??
-			agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message));
+		const observed = history ?? observeHistory(agentRuntime);
+		const messages = observed.messages;
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
 		// still looks like the attested one. The digest covers the attested prefix
@@ -1080,18 +1086,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			anchor.wireModelId !== agentRuntime.wireModelId ||
 			anchor.anchoredMessages.length > messages.length ||
 			anchor.anchoredMessages.some((message, index) => message !== messages[index]) ||
-			(history?.digest(anchor.anchoredMessages.length) ??
-				messageListDigest(messages.slice(0, anchor.anchoredMessages.length))) !== anchor.contentDigest
+			observed.digest(anchor.anchoredMessages.length) !== anchor.contentDigest
 		) {
 			reconciledAnchor = null;
 			return null;
 		}
 		let tail = 0;
-		for (let i = anchor.anchoredMessages.length; i < messages.length; i += 1) {
-			const message = messages[i];
-			if (message === undefined) continue;
-			tail += estimateAgentMessageTokens(message);
-		}
+		for (let i = anchor.anchoredMessages.length; i < messages.length; i += 1) tail += observed.messageTokens[i] ?? 0;
 		return anchor.tokens + tail;
 	};
 
@@ -1122,14 +1123,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		history?: MessageListDigests,
 	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
+		const observed = replayMessages === undefined ? (history ?? observeHistory(agentRuntime)) : undefined;
 		const estimateInput = {
 			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
 			messages:
-				replayMessages === undefined && history
-					? history.messages
-					: (replayMessages ?? agentRuntime.agent.state.messages).filter(
-							(message) => message.role !== "system" || isHostPolicyMessage(message),
-						),
+				observed?.messages ??
+				(replayMessages ?? []).filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
+			...(observed ? { messageTokens: observed.messageTokens } : {}),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
@@ -1138,7 +1138,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const pendingPolicyTokens =
 			policyText === null ? 0 : estimateAgentMessageTokens({ role: "system", content: policyText });
 		breakdown.pendingUserTokens += pendingPolicyTokens;
-		const historyTokens = replayMessages === undefined ? reconciledHistoryTokens(agentRuntime, history) : null;
+		const historyTokens = observed ? reconciledHistoryTokens(agentRuntime, observed) : null;
 		const anchor = reconciledAnchor;
 		// Provider usage already includes the old system prompt and schemas.
 		// Price only positive growth, separately: shrinking one must not hide
@@ -1167,6 +1167,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+	/** The system prompt rarely changes between publications; hash it again only when it does. */
+	const systemPromptDigest = (prompt: string | null): string => {
+		if (promptDigest?.prompt !== prompt) promptDigest = { prompt, digest: sha256Json(prompt) };
+		return promptDigest.digest;
+	};
 
 	/**
 	 * Identity of the exact material the next request would carry, plus the
@@ -1220,10 +1225,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			toolSignature,
 			// Same serialization the anchor validates its attested prefix with, so
 			// the two cannot disagree about whether the conversation changed.
-			history?.digest() ??
-				messageListDigest(
-					agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-				),
+			(history ?? observeHistory(agentRuntime)).digest(),
 			pendingUserText ?? null,
 			pendingUserText === undefined ? null : pendingUserImages,
 			eligibility,
@@ -1331,15 +1333,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const liveBudgetInput = (pendingUserText?: string, capturedHistory?: MessageListDigests): LiveBudgetInput => {
 		const settings = deps.getSettings();
 		const agentRuntime = state.runtime;
-		const history = agentRuntime
-			? (capturedHistory ??
-				createMessageListDigests(
-					agentRuntime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-				))
-			: undefined;
+		const history = agentRuntime ? (capturedHistory ?? observeHistory(agentRuntime)) : undefined;
 		const snapshot = currentContextSnapshot;
 		const promptFingerprint = agentRuntime
-			? sha256Json(engineInitialSystemPrompt(agentRuntime.agent) ?? null)
+			? systemPromptDigest(engineInitialSystemPrompt(agentRuntime.agent) ?? null)
 			: (snapshot?.promptHash ?? null);
 		const toolSignature = agentRuntime
 			? toolSignatureFromState(agentRuntime.agent.state.tools)
@@ -2701,11 +2698,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// outside `input`, so the attested prompt is the three summed.
 			const promptTokens = (usage.input || 0) + (usage.cacheRead || 0) + (usage.cacheWrite || 0);
 			const runtime = state.runtime;
-			const history = runtime
-				? createMessageListDigests(
-						runtime.agent.state.messages.filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-					)
-				: undefined;
+			const history = runtime ? observeHistory(runtime) : undefined;
 			if (promptTokens > 0 && runtime) {
 				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
 				const anchoredMessages = [...(history?.messages ?? [])];

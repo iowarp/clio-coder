@@ -1,4 +1,5 @@
-import { ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -510,6 +511,56 @@ describe("live budget adapter", () => {
 		ok((after.headroomTokens ?? 0) < 0, "the view reports the overflow it now measures");
 		strictEqual(after.phase, "recover");
 		strictEqual(after.admission.result, "unsafe");
+	});
+
+	it("serializes only the messages appended since the last publication, and publishes the same digest", async () => {
+		const { createMessageListFold } = await import("../../src/session-control/message-list-digest.js");
+		const f = reconciledFixture();
+		for (let i = 0; i < 200; i += 1)
+			f.runtime.agent.state.messages.push(assistant(`step ${i}`), toolResult(`${i}`.repeat(2000)));
+		f.context.refreshLiveBudget();
+		const historyBytes = JSON.stringify(f.runtime.agent.state.messages).length;
+		f.runtime.agent.state.messages.push(toolResult("one more result"));
+		const stringify = JSON.stringify;
+		let serialized = 0;
+		JSON.stringify = ((...args: Parameters<typeof stringify>) => {
+			const out = stringify(...args);
+			serialized += out?.length ?? 0;
+			return out;
+		}) as typeof stringify;
+		let view: ReturnType<typeof f.context.refreshLiveBudget>;
+		try {
+			view = f.context.refreshLiveBudget();
+		} finally {
+			JSON.stringify = stringify;
+		}
+		ok(serialized < historyBytes / 4, `a publication serialized ${serialized} bytes of a ${historyBytes}-byte history`);
+		strictEqual(view.inputSource, "anchored-plus-estimated-tail", "an append keeps the attested prefix");
+		strictEqual(view.estimatedInputTokens, f.context.liveContextEstimate(f.runtime).estimatedTokens);
+
+		// The folded digest is the whole-list hash, through appends, prefixes, in-place edits and truncation.
+		const whole = (list: ReadonlyArray<AgentMessage>): string =>
+			createHash("sha256").update(JSON.stringify(list)).digest("hex");
+		const fold = createMessageListFold();
+		const list: AgentMessage[] = [assistant("a"), toolResult("b")];
+		const check = (label: string): void => {
+			const observed = fold.observe(list);
+			strictEqual(observed.digest(), whole(list), label);
+			strictEqual(observed.digest(1), whole(list.slice(0, 1)), `${label}, prefix`);
+			strictEqual(observed.digest(0), whole([]), `${label}, empty`);
+			deepStrictEqual(observed.messageTokens, list.map(estimateAgentMessageTokens), `${label}, tokens`);
+		};
+		check("initial");
+		list.push(assistant("c"), toolResult("d"));
+		check("appended");
+		(list[1] as { content: { type: string; text: string }[] }).content[0] = { type: "text", text: "B" };
+		check("edited in place at the same length");
+		((list[2] as { content: { type: string; text: string }[] }).content[0] as { text: string }).text = "C";
+		check("a string replaced in place");
+		list.splice(1, 2, toolResult("e"));
+		check("replaced and truncated");
+		list.length = 0;
+		check("emptied");
 	});
 
 	it("drops the anchor when the target or the message projection changes", () => {
