@@ -106,11 +106,15 @@ export async function main(args = process.argv.slice(2)) {
 	}
 	const values = serverOptions(args);
 	const open = values.open === "always" || (values.open === "auto" && autoOpenBrowser());
+	// True when the launcher focused the window it owns instead of opening the link.
 	const openLink = (href: string, reuse = false) =>
-		openApp(href, process.env, undefined, reuse).catch(() => {
-			console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
-			return "failed" as const;
-		});
+		openApp(href, process.env, undefined, reuse).then(
+			(result) => result === "focused",
+			() => {
+				console.error("[clio-coder:gui] Could not open the browser. Open the printed URL manually.");
+				return false;
+			},
+		);
 	// A person at a terminal gets guidance; a pipe, a script or a test gets only the link on stdout.
 	const hint = (line: string) => {
 		if (process.stderr.isTTY) console.error(`[clio-coder:gui] ${line}`);

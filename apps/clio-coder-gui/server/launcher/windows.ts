@@ -321,19 +321,25 @@ export async function installWindowsLauncher(directory: string, launch: LaunchPa
 /**
  * The managed profile hosts the installed PWA; the shortcut still starts and verifies its local server.
  * `live` says the app has a window that can hear it, so the open window on this address is focused, not replaced.
+ * Says whether the window was focused or the link opened, or false when there is no managed app to open.
  */
-export async function openManagedWindowsApp(url: string, directory: string, live = false): Promise<boolean> {
+export async function openManagedWindowsApp(
+	url: string,
+	directory: string,
+	live = false,
+): Promise<false | "focused" | "opened"> {
 	if (!isWsl()) return false;
 	const manifest = await readManifest(directory);
 	if (!manifest?.appDirectory || !manifest.appId) return false;
 	if ((await inspect(manifest.files)).changed)
 		throw new Error("Windows launcher files were changed; run clio-coder doctor --fix.");
-	await runWindowsPowerShell("$ErrorActionPreference='Stop'; & $env:CLIO_WIN_APP_SCRIPT", {
+	const output = await runWindowsPowerShell("$ErrorActionPreference='Stop'; & $env:CLIO_WIN_APP_SCRIPT", {
 		CLIO_WIN_APP_SCRIPT: `${manifest.appDirectory}\\app.ps1`,
 		CLIO_WIN_URL: url,
 		CLIO_WIN_LIVE: live ? "1" : "0",
 	});
-	return true;
+	// A script written by an older version says nothing, so its launch counts as opened.
+	return output.trim().endsWith("focused") ? "focused" : "opened";
 }
 
 /** Removes only what this installation recorded, and only while the recorded bytes are still there. */

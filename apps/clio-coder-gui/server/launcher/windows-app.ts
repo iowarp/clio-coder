@@ -203,7 +203,7 @@ $sameMode=(Test-Path -LiteralPath $modeFile) -and [IO.File]::ReadAllText($modeFi
 $address=$url.GetLeftPart([UriPartial]::Authority)
 $connected=@($existing | Where-Object { -not [ClioIdentity]::Title($_).Contains('${DISCONNECTED_TITLE}') })
 if($env:CLIO_WIN_LIVE -eq '1' -and $sameMode -and $connected.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $address) {
- [ClioIdentity]::Focus($connected[0]); return
+ [ClioIdentity]::Focus($connected[0]); [Console]::Write('focused'); return
 }
 if($existing.Count -gt 0) {
  # A changed port or credential cannot reconnect the old window. Close only this owned profile's windows.

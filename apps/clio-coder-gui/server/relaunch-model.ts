@@ -10,8 +10,11 @@ export interface RelaunchSteps {
 	ask(path?: string): Promise<WindowAnswer>;
 	/** Raises an app window on this desktop; false when no tool could. */
 	focus(): Promise<boolean>;
-	/** Opens the fresh launch link; `reuse` says a launcher that owns its window may focus it instead. */
-	open(reuse: boolean): Promise<unknown>;
+	/**
+	 * Opens the fresh launch link; `reuse` says a launcher that owns its window may focus it instead. True when it
+	 * did, so the link, and the page it names, did not open.
+	 */
+	open(reuse: boolean): Promise<boolean>;
 }
 
 export async function relaunchWindow(
@@ -19,11 +22,12 @@ export async function relaunchWindow(
 	steps: RelaunchSteps,
 ): Promise<"focused" | "page-not-shown" | "opened"> {
 	const live = await steps.ask().catch((): WindowAnswer => "unknown");
-	if (live !== "no-window" && (await steps.focus())) {
+	const showPage = async () => {
 		if (path === "/") return "focused";
 		return (await steps.ask(path).catch((): WindowAnswer => "unknown")) === "shown" ? "focused" : "page-not-shown";
-	}
-	// Reusing a window cannot show it a named page, so such a launch opens the link that names it.
-	await steps.open(live === "shown" && path === "/");
-	return "opened";
+	};
+	if (live !== "no-window" && (await steps.focus())) return showPage();
+	// The WSL launcher owns its window and focuses it while the app says one is live; a named page then goes to it
+	// as above. An opener that cannot reuse a window opens the link, which names the page itself.
+	return (await steps.open(live === "shown")) ? showPage() : "opened";
 }

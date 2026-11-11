@@ -314,10 +314,11 @@ export async function openApp(
 	env: NodeJS.ProcessEnv = process.env,
 	directory = join(resolveClioDirs().state, "gui/background"),
 	reuse = false,
-): Promise<"opened"> {
+): Promise<"focused" | "opened"> {
 	if (isWsl(env)) {
 		const { openManagedWindowsApp } = await import("./launcher/windows.js");
-		if (await openManagedWindowsApp(url, directory, reuse)) return "opened";
+		const managed = await openManagedWindowsApp(url, directory, reuse);
+		if (managed) return managed;
 	}
 	const app = windowsAppCommand(url, env);
 	if (!app) {

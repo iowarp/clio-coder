@@ -81,7 +81,13 @@ test("a window that lost its credential is titled so no launch raises it in plac
 });
 
 test("a relaunch focuses only a window the app says is live, and otherwise opens the fresh link", async () => {
-	const run = async (path: string, live: WindowAnswer | Error, focused: boolean, page: WindowAnswer = "shown") => {
+	const run = async (
+		path: string,
+		live: WindowAnswer | Error,
+		focused: boolean,
+		page: WindowAnswer = "shown",
+		reused = false,
+	) => {
 		const calls: string[] = [];
 		const outcome = await relaunchWindow(path, {
 			ask: async (named) => {
@@ -95,6 +101,7 @@ test("a relaunch focuses only a window the app says is live, and otherwise opens
 			},
 			open: async (reuse) => {
 				calls.push(`open ${reuse}`);
+				return reuse && reused;
 			},
 		});
 		return { outcome, calls };
@@ -107,11 +114,25 @@ test("a relaunch focuses only a window the app says is live, and otherwise opens
 		outcome: "focused",
 		calls: ["ask -", "focus", "ask /sessions"],
 	});
-	// No tool raised it (WSL leaves that to its Windows launcher): reuse the live window only for a bare launch.
+	// No tool raised it and the opener cannot reuse a window (a Linux tab): the link, which names the page, opens.
 	assert.deepEqual(await run("/", "shown", false), { outcome: "opened", calls: ["ask -", "focus", "open true"] });
 	assert.deepEqual(await run("/sessions", "shown", false), {
 		outcome: "opened",
-		calls: ["ask -", "focus", "open false"],
+		calls: ["ask -", "focus", "open true"],
+	});
+	// The WSL launcher owns its window and focused the live one: a named page goes to it as after a tool's focus,
+	// instead of the launcher closing a live window to open the link.
+	assert.deepEqual(await run("/", "shown", false, "shown", true), {
+		outcome: "focused",
+		calls: ["ask -", "focus", "open true"],
+	});
+	assert.deepEqual(await run("/sessions", "shown", false, "shown", true), {
+		outcome: "focused",
+		calls: ["ask -", "focus", "open true", "ask /sessions"],
+	});
+	assert.deepEqual(await run("/sessions", "shown", false, "unknown", true), {
+		outcome: "page-not-shown",
+		calls: ["ask -", "focus", "open true", "ask /sessions"],
 	});
 	// An older app that cannot answer keeps today's behaviour: focus, then name the page.
 	assert.deepEqual(await run("/", new Error("refused"), true), { outcome: "focused", calls: ["ask -", "focus"] });

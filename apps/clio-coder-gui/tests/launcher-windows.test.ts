@@ -139,11 +139,14 @@ test("managed Windows app uses its owned profile and shell identity and uninstal
 				},
 			),
 		) as number[];
-	assert.equal(await openManagedWindowsApp(link(), directory, false), true);
+	assert.equal(await openManagedWindowsApp(link(), directory, false), "opened");
 	const first = await handles();
 	assert.equal(first.length, 1);
 	// Two simultaneous relaunches while the app reports the window live must serialize and focus that window.
-	await Promise.all([0, 1].map(() => openManagedWindowsApp(link(), directory, true)));
+	assert.deepEqual(await Promise.all([0, 1].map(() => openManagedWindowsApp(link(), directory, true))), [
+		"focused",
+		"focused",
+	]);
 	assert.deepEqual(await handles(), first, "a live window must be focused, not replaced");
 	// A window the app does not know (its server restarted) cannot reconnect, so it is replaced.
 	await openManagedWindowsApp(link(), directory, false);
