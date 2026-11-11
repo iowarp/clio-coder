@@ -250,7 +250,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"compaction.threshold":
 		"Choose how full the model's context may get. A higher percentage keeps more history but leaves less room for the next answer.",
 	"context.compaction.maxTokens":
-		"Whole number of at least 1 · default: 200000 tokens. A lower ceiling limits input cost by triggering cleanup sooner, even when the model has a larger context window.",
+		"Whole number of at least 1 · default: 400000 tokens. A lower ceiling limits input cost by triggering cleanup sooner, even when the model has a larger context window.",
 	"context.workingSet.enabled":
 		"Old tool output is set aside without changing chat history. When off, Clio waits until it needs to summarize the conversation.",
 	"context.workingSet.policy":

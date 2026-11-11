@@ -435,11 +435,11 @@ it("economic reduction leaves real-window admission and overflow intact", () => 
 		reduce: budget.threshold,
 		target: DEFAULT_POLICY.target * budget.fractionScale,
 	};
-	strictEqual(evaluatePressure(factsAtRatio(0.199, 1_000_000), policy).admission.result, "admit");
-	const crossing = factsAtRatio(0.2, 1_000_000);
+	strictEqual(evaluatePressure(factsAtRatio(0.399, 1_000_000), policy).admission.result, "admit");
+	const crossing = factsAtRatio(0.4, 1_000_000);
 	strictEqual(evaluatePressure(crossing, policy).admission.result, "reduce-first");
 	const noCut = evaluatePressure({ ...crossing, reduction: "no-useful-cut" }, policy);
 	strictEqual(noCut.admission.result, "admit");
-	strictEqual(noCut.headroomTokens, 800_000);
-	strictEqual(evaluatePressure({ ...crossing, outputReserveTokens: 800_001 }, policy).admission.result, "unsafe");
+	strictEqual(noCut.headroomTokens, 600_000);
+	strictEqual(evaluatePressure({ ...crossing, outputReserveTokens: 600_001 }, policy).admission.result, "unsafe");
 });

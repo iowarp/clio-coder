@@ -20,7 +20,7 @@ The assistant must call `self_compact` alone. A batch containing it and another 
 
 ## When the context window fills up
 
-As the context window fills up, Clio Coder reduces older context to make room for the next request. Automatic compaction normally triggers at 80% of the effective window, or earlier at the `context.compaction.maxTokens` ceiling (default 200,000 tokens): working-set eviction runs first, then summarization if needed. Open `/context` to inspect the request budget, or use `/compact <what to keep>` for a directed summary. The automatic controls and failure pause are described below.
+As the context window fills up, Clio Coder reduces older context to make room for the next request. Automatic compaction normally triggers at 80% of the effective window, or earlier at the `context.compaction.maxTokens` ceiling (default 400,000 tokens): working-set eviction runs first, then summarization if needed. Open `/context` to inspect the request budget, or use `/compact <what to keep>` for a directed summary. The automatic controls and failure pause are described below.
 
 ## Automatic compaction and its failure pause
 

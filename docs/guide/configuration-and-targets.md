@@ -235,7 +235,7 @@ explains worker route selection.
 | `context.workingSet.rearmFraction` | `0.1` | next turn |
 | `context.compaction.auto` | `true` | next turn |
 | `context.compaction.threshold` | `0.8` | next turn |
-| `context.compaction.maxTokens` | `200000` | immediately |
+| `context.compaction.maxTokens` | `400000` | immediately |
 | `context.compaction.provider` | `off` | immediately |
 | `context.compaction.model` | unset | next turn |
 | `context.compaction.systemPrompt` | unset | next turn |

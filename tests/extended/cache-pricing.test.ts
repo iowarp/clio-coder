@@ -108,6 +108,9 @@ test("economic compaction honors catalog tiers, flat-row fallbacks, and smaller 
 			ok(0.6 * budget.budgetWindow < expected, "eviction target stays below the trigger");
 		}
 	}
+	const wide = compactionBudget(1_000_000, 0.8);
+	strictEqual(wide.ceilingTokens, 400_000);
+	strictEqual(wide.threshold * 1_000_000, 400_000);
 	const small = compactionBudget(32_000, 0.8);
 	strictEqual(small.threshold, 0.8);
 	strictEqual(small.budgetWindow, 32_000);

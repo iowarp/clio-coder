@@ -842,7 +842,7 @@ export const DEFAULT_SETTINGS = {
 		compaction: {
 			auto: true,
 			threshold: 0.8,
-			maxTokens: 200_000,
+			maxTokens: 400_000,
 			provider: "off",
 		} as DurableCompactionSettings,
 		memory: {
@@ -1064,7 +1064,7 @@ context:
   compaction:
     auto: true
     threshold: 0.8
-    maxTokens: 200000
+    maxTokens: 400000
     provider: off
   memory:
     enabled: true

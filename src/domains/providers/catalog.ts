@@ -125,7 +125,7 @@ export function calculatePricingCostUsd(
 export function compactionBudget(
 	contextWindow: number,
 	threshold: number,
-	maxTokens = 200_000,
+	maxTokens = 400_000,
 	model?: Pick<Model<Api>, "id" | "cost"> | null,
 ): { ceilingTokens: number; threshold: number; fractionScale: number; budgetWindow: number; triggerWindow: number } {
 	const boundaries = (model?.cost?.tiers ?? [])
