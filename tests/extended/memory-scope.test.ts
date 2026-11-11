@@ -121,6 +121,37 @@ describe("memory scope boundary", () => {
 		deepStrictEqual(selected.map(({ id }) => id).sort(), ["docs", "main"]);
 	});
 
+	it("does not walk this repository's refs for another repository's record", () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-memory-other-")));
+		roots.push(root);
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim();
+		git("init", "-q", "-b", "main");
+		git("commit", "-q", "--allow-empty", "-m", "main root");
+		primeMemoryRepositoryFingerprint(root);
+		const active = canonicalMemoryRepositoryIdentity(root);
+		ok(active?.fingerprint !== undefined);
+		const select = (records: MemoryRecord[]) =>
+			selectMemoryForPrompt(records, { scopes: ["repo"], tokenBudget: 10_000, activeRepository: active }).map(
+				({ id }) => id,
+			);
+		const elsewhere = record("elsewhere", "repo", {
+			kind: "canonical-path",
+			key: join(tmpdir(), "another-repository"),
+			fingerprint: "c".repeat(40),
+		});
+		deepStrictEqual(select([elsewhere]), []);
+		// The walk runs once per repository, so a root made after a walk would not count: this one does, so none ran.
+		git("checkout", "-q", "--orphan", "docs");
+		git("commit", "-q", "--allow-empty", "-m", "docs root");
+		const docs = record("docs", "repo", { kind: "canonical-path", key: root, fingerprint: git("rev-parse", "HEAD") });
+		deepStrictEqual(select([elsewhere, docs]), ["docs"]);
+	});
+
 	it("creates a redacted, review-required promotion with source provenance", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-memory-scope-"));
 		roots.push(root);

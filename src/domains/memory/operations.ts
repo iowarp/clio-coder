@@ -285,6 +285,9 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 	// record without it never enters any repository prompt.
 	if (record.repository === undefined) return false;
 	if (record.repository.kind !== activeRepository.kind) return false;
+	const key = record.repository.key;
+	// Another repository's record is refused before the fingerprint check, which may walk every ref of this one.
+	if (key !== activeRepository.key && !key.startsWith(`${activeRepository.key}${sep}`)) return false;
 	if (
 		record.repository.fingerprint !== undefined &&
 		activeRepository.fingerprint !== undefined &&
@@ -293,14 +296,10 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 	) {
 		return false;
 	}
-	if (record.repository.key === activeRepository.key) return true;
+	if (key === activeRepository.key) return true;
 	// Records learned in a subdirectory session before identities resolved to the repository root still apply when
 	// that directory resolves to this repository now: never below a directory outside Git, never inside a nested one.
-	const key = record.repository.key;
-	return (
-		key.startsWith(`${activeRepository.key}${sep}`) &&
-		canonicalMemoryRepositoryIdentity(key)?.key === activeRepository.key
-	);
+	return canonicalMemoryRepositoryIdentity(key)?.key === activeRepository.key;
 }
 
 function runtimeApplies(record: MemoryRecord, activeRuntime: MemoryRuntimeIdentity | null): boolean {
