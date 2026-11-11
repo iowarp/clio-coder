@@ -34,6 +34,7 @@ import {
 import type { ThinkingLevel } from "../core/defaults.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
+import { isLoopbackUrl } from "../core/project-target-urls.js";
 import { ensureClaudeAgentSdk } from "../domains/lifecycle/claude-sdk-install.js";
 import type { Candidate } from "../domains/lifecycle/setup-status.js";
 import { authStoragePath, openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
@@ -1490,7 +1491,8 @@ const REVIEW_STEP: Step = {
 					...verificationSummary(answers),
 					wizard.sendTest ? "Save sends one short test message first." : "No generation or quality/tool tests.",
 					"GPU/VRAM and model fit not checked.",
-					`Automatic local workers: ${capacity.limit}`,
+					// Local worker capacity only matters when this machine runs the models.
+					...(answers.url !== undefined && isLoopbackUrl(answers.url) ? [`Automatic local workers: ${capacity.limit}`] : []),
 					answers.mode === "first" ? "Save sets the chat and fleet model." : "Existing routes stay in place.",
 				],
 				choices: [

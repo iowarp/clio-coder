@@ -583,6 +583,40 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
+	it("lists automatic local workers in the review only for a target on this machine", async () => {
+		const hosted = unconfiguredEnv();
+		try {
+			const result = await runWizard(hosted.env, [
+				{ waitFor: "What do you have?", keys: [ENTER] },
+				{ waitFor: "Paste your API key", keys: [..."sk-ant-api03-clio-test-key".split(""), ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			const screen = plainText(result.transcript());
+			ok(screen.includes("Review what Clio could verify"), screen);
+			ok(!screen.includes("Automatic local workers"), `a remote target must not list local workers:\n${screen}`);
+		} finally {
+			hosted.cleanup();
+		}
+
+		const local = unconfiguredEnv();
+		const server = await modelServer();
+		try {
+			const result = await runWizard(local.env, [
+				{ waitFor: "What do you have?", keys: [DOWN, DOWN, ENTER] },
+				{ waitFor: "What is the server's address?", keys: [...server.url.split(""), ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
+				{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+			]);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			const screen = plainText(result.transcript());
+			ok(screen.includes("Automatic local workers:"), `a loopback server lists local workers:\n${screen}`);
+		} finally {
+			await server.close();
+			local.cleanup();
+		}
+	});
+
 	it("sends one test request before Save: a refused key saves nothing, a good key or Save anyway saves", async () => {
 		const checks = (root: string) =>
 			(readdirSync(root, { recursive: true }) as string[]).filter((file) => file.includes("provider-target-checks/"));
