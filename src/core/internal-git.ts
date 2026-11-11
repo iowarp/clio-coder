@@ -220,10 +220,10 @@ export interface InternalGitPolicy {
 	read?(operation: InternalGitOperation): ReadonlyArray<string> | null;
 }
 
-/** Thrown by {@link internalGitArgv} when the policy refuses a read; a call site handles it as a failed git. */
+/** Thrown by {@link internalGitArgv} when the policy refuses a read or cannot decide; a call site handles it as a failed git. */
 export class InternalGitRefusedError extends Error {
-	constructor(operation: InternalGitOperation) {
-		super(`${operation.operation} refused: executable git config changed in ${operation.repository}`);
+	constructor(operation: InternalGitOperation, why = `executable git config changed in ${operation.repository}`) {
+		super(`${operation.operation} refused: ${why}`);
 		this.name = "InternalGitRefusedError";
 	}
 }
@@ -251,8 +251,8 @@ function readOverrides(operation: InternalGitOperation): ReadonlyArray<string> {
 	try {
 		words = installedPolicy.read(operation);
 	} catch {
-		// A read keeps the base options and patch flags when the policy cannot decide.
-		return [];
+		// Without the policy's overrides the repository's filters and config programs would run: refuse instead.
+		throw new InternalGitRefusedError(operation, `the internal git policy could not decide for ${operation.repository}`);
 	}
 	if (words === null) throw new InternalGitRefusedError(operation);
 	return words;
@@ -276,7 +276,7 @@ function policyOverrides(operation: InternalGitOperation): ReadonlyArray<string>
  * hook-running subcommand, or its read overrides before any other. `cwd` is
  * where the process starts (the call's own `cwd` option), for resolving which
  * repository git runs in. Throws {@link InternalGitRefusedError} when the
- * policy refuses a read.
+ * policy refuses a read or throws deciding one.
  */
 export function internalGitArgv(args: ReadonlyArray<string>, cwd?: string): string[] {
 	const at = subcommandIndex(args);

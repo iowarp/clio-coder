@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
 	appendFileSync,
@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { installInternalGitPolicy, internalGitArgv } from "../../src/core/internal-git.js";
+import { InternalGitRefusedError, installInternalGitPolicy, internalGitArgv } from "../../src/core/internal-git.js";
 import { createGitHooksFingerprinter } from "../../src/core/sandbox/git-hooks-fingerprint.js";
 import { git as researchGit } from "../../src/domains/research/git.js";
 import { createGitHookDriftGuard } from "../../src/domains/safety/hook-drift.js";
@@ -250,6 +250,33 @@ test("a repository filter whose key no -c can name refuses Clio's read at every 
 		ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
 		rmSync(scratch, { recursive: true, force: true });
 	}
+});
+
+test("a policy that throws on a read refuses Clio's config-running read and hooks-off checkout instead of running them as configured", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	installInternalGitPolicy({
+		harden: () => [],
+		read: () => {
+			throw new Error("policy failed");
+		},
+	});
+	for (const args of [
+		["-C", "/repo", "status", "--porcelain"],
+		["-C", "/repo", "-c", "core.hooksPath=/dev/null", "worktree", "add", "/tmp/w"],
+	]) {
+		throws(() => internalGitArgv(args), InternalGitRefusedError, args.join(" "));
+	}
+	match(
+		(() => {
+			try {
+				internalGitArgv(["-C", "/repo", "status"]);
+				return "";
+			} catch (error) {
+				return (error as Error).message;
+			}
+		})(),
+		/policy could not decide/u,
+	);
 });
 
 test("a repository config git cannot list within its bounds refuses Clio's read and runs its worktree add with hooks off", (t) => {
