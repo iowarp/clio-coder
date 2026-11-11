@@ -2012,8 +2012,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let machineProjectionRequired = false;
 	let machineHostDisposed = false;
 
-	/** What a settled turn stopped on, when nobody asked for it and yolo has continuations left (#445). */
-	const yoloContinuationDue = (): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
+	/**
+	 * What a settled turn stopped on, when nobody asked for it and yolo has continuations left (#445).
+	 * A guard interrupt (the hard tool-call ceiling or an identical-call loop stop) counts against the cap:
+	 * the turn did not converge after the soft budget asked it to re-plan.
+	 */
+	const yoloContinuationDue = (
+		guardInterrupted = false,
+	): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
 		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
@@ -2021,11 +2027,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		// A failure stop outranks a budget crossing in the same turn, so a failing turn cannot escape the cap on one.
 		const stop =
 			failed ??
-			(state.synthesisToolLock
-				? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
-				: state.toolBudgetLock
-					? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
-					: null);
+			(guardInterrupted
+				? { cause: "loop_guard" as const, reason: "the loop guard stopped it" }
+				: state.synthesisToolLock
+					? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
+					: state.toolBudgetLock
+						? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
+						: null);
 		if (stop === null) return null;
 		return continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP
 			? null
@@ -3725,6 +3733,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// Safety net for thrown paths where agent_end never delivered;
 					// no-op when the agent_end flush already ran.
 					context.flushReconciledSnapshot();
+					// The guard, not a person and not a newer submit, aborted this owner.
+					const guardStopped =
+						owner !== null &&
+						owner === guardStoppedOwner &&
+						submitOwner === owner &&
+						!disposed &&
+						options.isAdmissionCurrent?.() !== false;
 					// Runs on every exit path (normal settle, catch-arm returns) so
 					// a steer the engine never drained still reaches the model.
 					if (options.machineTurn !== undefined) {
@@ -3738,16 +3753,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const guardStop =
 							stop !== null
 								? undefined
-								: state.synthesisToolLock
+								: guardStopped || state.synthesisToolLock
 									? "loop_guard"
 									: state.toolBudgetLock
 										? "tool_budget"
 										: undefined;
 						options.machineTurn.onSettled({
 							status:
-								!admissionCurrent() || canceled || interviewDismissed
+								(!admissionCurrent() && !guardStopped) || canceled || interviewDismissed
 									? "canceled"
-									: failure || stop || !finalMessage
+									: failure || stop || guardStopped || !finalMessage
 										? "failed"
 										: "succeeded",
 							turnId: userTurnId,
@@ -3759,15 +3774,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 					}
 					state.activeUserTurnId = null;
-					const guardStopped =
-						owner !== null &&
-						owner === guardStoppedOwner &&
-						submitOwner === owner &&
-						!disposed &&
-						options.isAdmissionCurrent?.() !== false;
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
-							? yoloContinuationDue()
+							? yoloContinuationDue(guardStopped)
 							: null;
 					if (
 						!disposed &&

@@ -16,7 +16,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const RATE_LIMITED = "429 rate_limit_error: This request would exceed your rate limit";
 
 /** What one model call does: cross the budget, lock the tools, both, finish, or throw. */
-type Step = "budget" | "hard" | "esc-then-hard" | "lockout" | "both" | "done" | { throws: string };
+type Step = "budget" | "hard" | "loop-stop" | "esc-then-hard" | "lockout" | "both" | "done" | { throws: string };
 
 interface Harness {
 	loop: ReturnType<typeof createChatLoop>;
@@ -113,6 +113,16 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 								at: Date.now(),
 							});
 						}
+						if (current === "loop-stop") {
+							context.bus.emit("safety.loop_blocked", {
+								tool: "bash",
+								repeatCount: 5,
+								blocksThisTurn: 1,
+								disposition: "stop",
+								interrupted: true,
+								at: Date.now(),
+							} as never);
+						}
 						if (current === "lockout" || current === "both") {
 							context.bus.emit("safety.loop_blocked", { disposition: "lockout" } as never);
 						}
@@ -181,15 +191,26 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 		}
 	});
 
-	it("continues a turn the hard tool-call ceiling stopped (#450)", async () => {
-		const run = await harness(["hard", "done"]);
-		try {
-			await run.loop.submit("poll CI and the cluster until both are done");
-			await run.loop.whenSettled();
-			strictEqual(run.prompts.length, 2);
-			deepStrictEqual(pairs(run.continued), [["tool_budget", 0]]);
-		} finally {
-			await run.close();
+	it("continues a turn the guard interrupted, counted against the cap, until the cap stops it", async () => {
+		for (const step of ["hard", "loop-stop"] as const) {
+			const run = await harness([step, step, step, step, "done"]);
+			try {
+				await run.loop.submit("poll CI and the cluster until both are done");
+				await run.loop.whenSettled();
+				strictEqual(run.prompts.length, 1 + TURN_CONTINUATION_CAP, step);
+				deepStrictEqual(
+					pairs(run.continued),
+					[
+						["loop_guard", 1],
+						["loop_guard", 2],
+						["loop_guard", 3],
+					],
+					step,
+				);
+				ok((run.prompts[1] ?? "").includes("The previous turn stopped: the loop guard stopped it"), step);
+			} finally {
+				await run.close();
+			}
 		}
 	});
 
@@ -288,6 +309,8 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			["budget", "tool_budget"],
 			["lockout", "loop_guard"],
 			["both", "loop_guard"],
+			["hard", "loop_guard"],
+			["loop-stop", "loop_guard"],
 			["done", undefined],
 		] as const) {
 			const run = await harness([step]);
@@ -304,6 +327,7 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 				});
 				await run.loop.whenSettled();
 				strictEqual(result?.stoppedBy, expected, step);
+				if (step === "hard" || step === "loop-stop") strictEqual(result?.status, "failed", step);
 				strictEqual(run.prompts.length, 1);
 				deepStrictEqual(run.continued, []);
 			} finally {

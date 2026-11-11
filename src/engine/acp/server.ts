@@ -672,6 +672,8 @@ interface ActivePrompt {
 	permissionExpired: boolean;
 	/** The ACP presentation ceiling won before a 129th tool call reached the wire. */
 	toolCallLimitReached: boolean;
+	/** The loop guard stopped a run of this prompt: an engine abort after it is the guard's, not the client's. */
+	guardStopped?: boolean;
 	errored: boolean;
 	errorMessage?: string;
 	/** Machine-readable reason from the first admission notice of this turn. */
@@ -1490,7 +1492,8 @@ function applyStopReason(active: ActivePrompt, message: unknown): void {
 		return;
 	}
 	active.errored = false;
-	active.stopReason = mapped;
+	// ACP has no stop reason for a harness limit other than max_turn_requests; cancelled is the client's.
+	active.stopReason = mapped === "cancelled" && active.guardStopped === true ? "max_turn_requests" : mapped;
 }
 
 function outputText(value: unknown): string {
@@ -4463,6 +4466,10 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				const frame = budgetBlockFrame(payload);
 				if (frame === null) return;
 				sendUpdate(options.transport, sessionId, active, frame.update, { ...ORCHESTRATOR_UPDATE_META, ...frame.meta });
+			}),
+			bus.subscribe("turn.aborted", (payload) => {
+				const active = activePromptState;
+				if (active !== null && !active.cancelled && payload.source === "loop_guard") active.guardStopped = true;
 			}),
 			bus.subscribe("safety.loop_blocked", (payload: LoopBlockedPayload) => {
 				// Loop blocks describe the turn that is running, so unlike a dispatch

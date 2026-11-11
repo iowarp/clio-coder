@@ -342,6 +342,37 @@ test("ACP close cancels and waits for an active prompt", async () => {
 	}
 });
 
+test("ACP reports a turn the loop guard stopped as max_turn_requests, not cancelled", async () => {
+	const bus = createTelemetryHub();
+	const peer = fixture(
+		[],
+		(emit) => {
+			emit({ type: "agent_start", turnId: "turn-1" });
+			bus.emit("turn.aborted", { source: "loop_guard", at: Date.now(), reason: "tool-call ceiling: 75 calls" });
+			emit({
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "partial" }], stopReason: "aborted" },
+			});
+			emit({ type: "agent_end", turnId: "turn-1", messages: [] });
+		},
+		undefined,
+		false,
+		undefined,
+		bus,
+	);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
+		const result = (await peer.call("session/prompt", {
+			sessionId: opened.sessionId,
+			prompt: [{ type: "text", text: "poll CI" }],
+		})) as { stopReason: string };
+		strictEqual(result.stopReason, "max_turn_requests");
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP load streams the complete active history beyond the former 64 turn limit", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const entries: SessionEntry[] = [];

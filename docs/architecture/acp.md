@@ -297,6 +297,7 @@ Transcript notices from the engine arrive as `agent_message_chunk` frames marked
 | Refusal | `refusal` |
 | Output length | `max_tokens` |
 | More than 128 tool starts in one prompt | `max_turn_requests` |
+| The loop guard stopped the turn (tool-call ceiling or identical-call loop) and nothing continued it | `max_turn_requests` |
 | Provider or engine failure | no stop reason; the request fails `turn_failed` |
 | Permission ceiling won | no stop reason; the request fails `permission_expired` |
 
