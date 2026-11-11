@@ -86,8 +86,7 @@ export function projectReceiptFindings(
 		const output = record?.result?.state === "resolved" ? record.result.value.output : null;
 		const result = output?.structured;
 		if (
-			!settled ||
-			settled.outcome !== "succeeded" ||
+			settled?.outcome !== "succeeded" ||
 			settled.exitCode !== 0 ||
 			output?.state !== "final" ||
 			output.truncated ||

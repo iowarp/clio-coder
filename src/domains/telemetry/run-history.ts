@@ -18,7 +18,7 @@ import { readRunRecord } from "./run-record.js";
 /** Bound identity records before their domain readers open them; telemetry stays in its own run scopes (#434). */
 function containedRecord(root: string, ...parts: string[]): boolean {
 	const info = statStatePathSync(root, join(root, ...parts));
-	return info !== null && info.isFile() && info.size <= 8 * 1024 * 1024;
+	return info?.isFile() === true && info.size <= 8 * 1024 * 1024;
 }
 
 /** Identity and orchestration history for run surfaces; terminal facts always come from the run DTO (#434). */

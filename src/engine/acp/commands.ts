@@ -288,8 +288,7 @@ export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
 			...(rule.streams !== undefined ? { streams: rule.streams } : {}),
 			...(rule.injectsUserTurn === true ? { injectsUserTurn: true as const } : {}),
 			...(rule.promptTurn === true ? { promptTurn: true as const } : {}),
-			...(rule.promptTurnSubcommands !== undefined &&
-			rule.promptTurnSubcommands.some((name) => rule.subcommands?.includes(name) ?? true)
+			...(rule.promptTurnSubcommands?.some((name) => rule.subcommands?.includes(name) ?? true)
 				? {
 						promptTurnSubcommands: rule.promptTurnSubcommands.filter((name) => rule.subcommands?.includes(name) ?? true),
 					}

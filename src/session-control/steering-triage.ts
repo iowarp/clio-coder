@@ -93,8 +93,8 @@ export const TRIAGE_RESPONSE_SCHEMA: Record<string, unknown> = {
 export const TRIAGE_SYSTEM_PROMPT = [
 	"You triage messages an operator typed while a coding assistant was working on a task.",
 	"For each queued message decide how it relates to the task in progress and how soon it should reach the assistant.",
-	"Relations: " + RELATION_KEYS.map((key) => `${key} = ${STEER_RELATIONS[key]}`).join("; ") + ".",
-	"Urgencies: " + URGENCY_KEYS.map((key) => `${key} = ${STEER_URGENCIES[key]}`).join("; ") + ".",
+	`Relations: ${RELATION_KEYS.map((key) => `${key} = ${STEER_RELATIONS[key]}`).join("; ")}.`,
+	`Urgencies: ${URGENCY_KEYS.map((key) => `${key} = ${STEER_URGENCIES[key]}`).join("; ")}.`,
 	'Answer with JSON only, in the shape {"verdicts": [{"id", "relation", "urgency", "confidence"}]}, one verdict per message id, confidence between 0 and 1.',
 	"Prefer nextSlot when unsure. Use stop only for an explicit instruction to stop, wait, hold or undo.",
 ].join("\n");

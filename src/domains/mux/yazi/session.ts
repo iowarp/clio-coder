@@ -138,8 +138,7 @@ export function sweepStaleTransportFiles(sessionsDir: string, now: number = Date
 			if (now - statSync(ownerPath).mtimeMs <= YAZI_STALE_TRANSPORT_MS) continue;
 			const owner = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown> | null;
 			if (
-				!owner ||
-				owner.version !== 1 ||
+				owner?.version !== 1 ||
 				typeof owner.host !== "string" ||
 				typeof owner.pid !== "number" ||
 				!Number.isSafeInteger(owner.pid) ||
