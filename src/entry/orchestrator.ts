@@ -4388,8 +4388,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				await termination.shutdown(130);
 				return { exitCode: 130, bootTimeMs: timer.snapshot().totalMs };
 			}
-			// A template's allowed-tools and delegated-tools narrow the run's own
-			// --allow-tools and --delegate-tools scope, never widen it.
+			// A template's allowed-tools and delegated-tools narrow the run's --allow-tools and --delegate-tools, never widen.
 			const template = promptExpansion?.expanded ? promptExpansion.template : undefined;
 			const constraints = narrowTurnConstraints(
 				options.headless.constraints,
@@ -4437,6 +4436,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: {}),
 				...(dispatch ? { dispatch } : {}),
 				autonomyHalt: () => lastAutonomyHalt,
+				readEntries: activePathEntries,
 				autonomy: () => autonomyWindow.report(true),
 				scopeNotices: (listener) => bus.subscribe("run.scope_notice_raised", listener),
 				...(telemetry

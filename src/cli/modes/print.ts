@@ -77,6 +77,7 @@ import {
 	projectDispatchedRunOutcome,
 	settleDispatchedRuns,
 } from "./headless-dispatched-runs.js";
+import { formatHeadlessObservedLine, observeHeadlessRun } from "./headless-observed.js";
 import { createHeadlessJsonProjector } from "./json-stream.js";
 import { writeFrame } from "./jsonl.js";
 import type { RunJsonMainFrame, RunJsonMainSessionFrame, RunJsonSegmentUsage } from "./run-json-schema.js";
@@ -136,6 +137,8 @@ export interface HeadlessMainAgentOptions {
 	deadline?: HeadlessRunDeadline;
 	/** `clio-coder run --verify`: acceptance checks the run itself runs once the turn settled. */
 	verify?: HeadlessVerifyOptions;
+	/** The session's active path, so the run can say which checks it saw stand (`observed:` on stderr, `turn_end.observed`). */
+	readEntries?: () => ReadonlyArray<unknown>;
 	/**
 	 * The dispatch ledger. When present, the run waits for the workers it
 	 * dispatched before sealing and fails when one did not deliver (D3, D6b).
@@ -1176,6 +1179,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			chat.steer(line);
 		});
 	}
+	let entriesBefore = 0;
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
@@ -1192,6 +1196,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 		// Sampling flags ride the scoped run-overrides transport for the turn;
 		// see core/run-overrides.ts.
+		entriesBefore = options.readEntries?.().length ?? 0;
 		await withRunOverrides(
 			options.sampling && Object.keys(options.sampling).length > 0 ? { sampling: { ...options.sampling } } : {},
 			async () => {
@@ -1233,6 +1238,17 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		for (const check of verify) process.stderr.write(`${formatHeadlessVerifyResult(check)}\n`);
 	}
 
+	const observed =
+		options.readEntries !== undefined
+			? observeHeadlessRun({
+					entries: options.readEntries(),
+					start: entriesBefore,
+					workspaceRoot: process.cwd(),
+					toolCalls: countToolStats(runStats.toolStats),
+					refused: toolTotals(runStats.toolStats).blocked,
+					writes: runStats.mutatingSucceeded,
+				})
+			: null;
 	const endedAt = new Date().toISOString();
 	// Every exit of the answer. A reply the token limit stopped can end inside a URL, which a terminating tool's result cannot (#446).
 	const settledAnswer = (answer: string): string =>
@@ -1393,6 +1409,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			...(runStats.toolRounds.length > 0 ? { toolRounds: runStats.toolRounds } : {}),
 			...(autonomy !== null ? { autonomy } : {}),
 			...(verify !== null ? { verify } : {}),
+			...(observed !== null && observed.toolCalls > 0 ? { observed } : {}),
 		});
 	}
 
@@ -1405,6 +1422,9 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	if (stdoutMessage !== null) {
 		writeRawStdout(`${stdoutMessage}\n`);
 	}
+	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
+	const observedLine = observed !== null && mode === "text" ? formatHeadlessObservedLine(observed) : null;
+	if (observedLine !== null) process.stderr.write(`${observedLine}\n`);
 	if (mode === "json") writeJsonHeader(true, true);
 	writeRunEnd(terminal);
 	await frameChain;

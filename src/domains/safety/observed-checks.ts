@@ -107,6 +107,15 @@ export function standingChecks(
 ): ReadonlyArray<ObservedCheck> {
 	const start = workWindowStart(entries, boardId, taskId);
 	if (start === -1) return [];
+	return standingChecksFrom(entries, start, workspaceRoot);
+}
+
+/** The same fold over any stretch of the session path, from `start` on: a headless run folds its own turn. */
+export function standingChecksFrom(
+	entries: ReadonlyArray<unknown>,
+	start: number,
+	workspaceRoot: string,
+): ReadonlyArray<ObservedCheck> {
 	const root = path.resolve(workspaceRoot);
 	const calls = new Map<string, TrackedCall>();
 	const standing = new Map<string, ObservedCheck>();

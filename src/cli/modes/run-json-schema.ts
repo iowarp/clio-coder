@@ -238,6 +238,8 @@ export interface RunJsonTerminalTurnEndFrame {
 	autonomy?: AutonomyReport;
 	/** `run --verify`: each check as the run ran it after the turn, in flag order. */
 	verify?: RunJsonVerifyResult[];
+	/** What the harness saw the run do (tool calls, refusals, writes, standing checks); absent when no tool ran. */
+	observed?: { toolCalls: number; refused: number; writes: number; checks: Array<{ name: string; passed: boolean }> };
 }
 
 /**
