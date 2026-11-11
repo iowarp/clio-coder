@@ -75,7 +75,10 @@ test("filter persists across preview, back, refresh, and terminal widths", async
 		await settle();
 		match(plain(view, width), /> report/u);
 	}
-	// The filter came with the open and was never edited, so Esc closes rather than clears it.
+	// E-13: the filter that came with /view <text> is a layer; the first Esc clears it, the second closes.
+	view.handleInput("\x1b");
+	strictEqual(closed(), false);
+	doesNotMatch(plain(view), /> report/u);
 	view.handleInput("\x1b");
 	strictEqual(closed(), true);
 });
