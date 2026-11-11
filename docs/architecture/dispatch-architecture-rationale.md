@@ -22,7 +22,7 @@ decision actually used for the attempt.
 
 ## Imports and dependency direction
 
-Clio Coder's public cross-domain surface goes through the owning domain's `index.ts` barrel. The [boundary checker](../../tests/boundaries/check-boundaries.ts), run by
+Clio Coder's public cross-domain surface goes through the owning domain's `index.ts` barrel. The [boundary checker](https://github.com/iowarp/clio-coder/blob/main/tests/boundaries/check-boundaries.ts), run by
 `pnpm run lint`, forbids cross-domain `extension.ts` imports, including types.
 It permits other subpath imports in most domains; the pure `turn-control` domain
 may reach another domain only through its `index.ts`. The checker's permission

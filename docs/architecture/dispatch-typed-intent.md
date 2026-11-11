@@ -220,7 +220,7 @@ filesystem, no clock, no environment, and no package layout. The supported
 version set is a compiled-in constant, not a lookup. A source checkout, a global
 npm install, and a bundled `dist/` therefore classify identical input
 identically, which is what makes the version policy verifiable rather than
-environmental. [dispatch-admission.test.ts](../../tests/contracts/dispatch-admission.test.ts) covers the current
+environmental. [dispatch-admission.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/dispatch-admission.test.ts) covers the current
 normalization and compatibility boundary.
 
 The one input that is legitimately environmental is the *verification catalog*:

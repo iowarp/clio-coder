@@ -304,8 +304,8 @@ both sides report one; a mismatch names `clio-coder fleet nodes install <id> --y
 after 10 idle minutes. A broken channel reconnects with backoff up to five times, and when the sixth
 consecutive connection fails the attachment stays failed until the node is opened
 again. Stopping the app stops every channel
-([machine-attach.ts](../../apps/clio-coder-gui/server/services/machine-attach.ts),
-[ssh-model.ts](../../apps/clio-coder-gui/server/ssh-model.ts)).
+([machine-attach.ts](https://github.com/iowarp/clio-coder/blob/main/apps/clio-coder-gui/server/services/machine-attach.ts),
+[ssh-model.ts](https://github.com/iowarp/clio-coder/blob/main/apps/clio-coder-gui/server/ssh-model.ts)).
 
 ### Exact client installation
 

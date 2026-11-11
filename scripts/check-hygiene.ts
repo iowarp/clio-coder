@@ -31,6 +31,7 @@ import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { renderRowConditions, type SessionFacts } from "../src/domains/prompts/preconditions.js";
 import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
+import { isPackagedPath } from "./package-files.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
 
 const root = resolvePackageRoot(import.meta.url);
@@ -46,6 +47,7 @@ function readRoot(relPath: string): string {
 
 function checkDocumentationLinks(): void {
 	const files = [...collectFiles([join(root, "docs")], [".md"]), join(root, "README.md"), join(root, "CONTRIBUTING.md")];
+	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
 	const anchors = new Map<string, Set<string>>();
 	const linesWithoutFences = (file: string): string[] => {
 		let fence = "";
@@ -74,6 +76,8 @@ function checkDocumentationLinks(): void {
 	};
 	for (const file of files) {
 		const display = relative(root, file);
+		// A packaged doc's relative link must resolve inside the installed package too.
+		const packagedDoc = display.startsWith("docs/") && isPackagedPath(display, packageFiles);
 		for (const [index, line] of linesWithoutFences(file).entries()) {
 			const markdownTargets = [...line.matchAll(/\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/gu)].map(
 				(match) => match[1] ?? match[2] ?? "",
@@ -86,6 +90,11 @@ function checkDocumentationLinks(): void {
 				const resolved = pathname ? resolve(dirname(file), decodeURIComponent(pathname)) : file;
 				if (!existsSync(resolved) || !statSync(resolved).isFile()) {
 					fail("documentation-links", `${display}:${index + 1}: missing link target ${target}`);
+				} else if (packagedDoc && !isPackagedPath(relative(root, resolved), packageFiles)) {
+					fail(
+						"documentation-links",
+						`${display}:${index + 1}: ${target} is not in package.json files; link https://github.com/iowarp/clio-coder/blob/main/<path> instead`,
+					);
 				} else if (fragment && resolved.endsWith(".md") && !getAnchors(resolved).has(decodeURIComponent(fragment))) {
 					fail("documentation-links", `${display}:${index + 1}: missing heading anchor ${target}`);
 				}

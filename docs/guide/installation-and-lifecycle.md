@@ -491,7 +491,7 @@ hash -r
 clio-coder --version
 ```
 
-[install-local.sh](../../scripts/install-local.sh) is idempotent and auditable. Its flags are `--skip-deps`, `--no-build`, `--dry-run`, `--force` (`-f`) and `--help` (`-h`); an unknown option exits 1. It:
+[install-local.sh](https://github.com/iowarp/clio-coder/blob/main/scripts/install-local.sh) is idempotent and auditable. Its flags are `--skip-deps`, `--no-build`, `--dry-run`, `--force` (`-f`) and `--help` (`-h`); an unknown option exits 1. It:
 
 - verifies `node` satisfies `package.json` `engines.node`;
 - runs `pnpm install --frozen-lockfile` to sync dependencies with the workspace lockfile unless `--skip-deps` is passed;

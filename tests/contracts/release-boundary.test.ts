@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { isPackagedPath } from "../../scripts/package-files.js";
 import { shippedAdvisoryFindings } from "../../scripts/release-audit.mjs";
 import { readmeInstallVersion, releaseVersionErrors } from "../../scripts/release-version-policy.mjs";
 
@@ -106,5 +108,32 @@ describe("release version boundary", () => {
 			}),
 			[],
 		);
+	});
+});
+
+describe("packaged docs link boundary", () => {
+	const files = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { files: string[] })
+		.files;
+	it("ships docs Markdown but not the repo-only files packaged docs used to link", () => {
+		for (const shipped of [
+			"docs/guide/gui.md",
+			"docs/architecture/pi-boundary.md",
+			"src/core/config.ts",
+			"dist/cli/index.js",
+		]) {
+			assert.equal(isPackagedPath(shipped, files), true, shipped);
+		}
+		for (const repoOnly of [
+			"tests/boundaries/check-boundaries.ts",
+			"scripts/check-hygiene.ts",
+			"scripts/install-local.sh",
+			"patches/README.md",
+			"apps/clio-coder-gui/server/ssh-model.ts",
+			"docs/pi-surface.json",
+			"docs/wiki/Home.md",
+			"dist/cli/index.js.map",
+		]) {
+			assert.equal(isPackagedPath(repoOnly, files), false, repoOnly);
+		}
 	});
 });
