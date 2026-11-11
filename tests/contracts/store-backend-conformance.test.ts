@@ -38,12 +38,31 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			strictEqual(readFileSync(path, "utf8"), "first version, longer");
 			writeFileSync(source, "second");
 			await backend.putBlobFromFile("sim/run7", "out/data.bin", source);
-			strictEqual(readFileSync(path, "utf8"), "second");
+			const again = await backend.getBlobAsPath("sim/run7", "out/data.bin");
+			strictEqual(readFileSync(again.path, "utf8"), "second");
 			strictEqual(readFileSync(source, "utf8"), "second");
 			const facts = await backend.facts();
 			// Only the local backend has no tiers; clio-core lists its runtime's targets.
 			strictEqual(facts.tiers === false, backend.kind === "local");
 			strictEqual(facts.blobVersions, false);
+		}));
+
+	test(`${name}: get hands back a path whose writes cannot change the stored blob`, () =>
+		withBackend(async (backend, scratch) => {
+			await backend.getOrCreateTag("t");
+			const source = join(scratch, "source.bin");
+			writeFileSync(source, "stored");
+			await backend.putBlobFromFile("t", "b", source);
+			const got = await backend.getBlobAsPath("t", "b");
+			strictEqual(got.copied, true);
+			strictEqual(lstatSync(got.path).mode & 0o222, 0);
+			try {
+				writeFileSync(got.path, "tampered");
+			} catch {
+				// A read-only copy refuses the write outright.
+			}
+			const fresh = await backend.getBlobAsPath("t", "b");
+			strictEqual(readFileSync(fresh.path, "utf8"), "stored");
 		}));
 
 	test(`${name}: an aborted put leaves no change and no temp file`, () =>

@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream, type Dirent } from "node:fs";
 import {
+	chmod,
+	copyFile,
 	link,
 	lstat,
 	mkdir,
@@ -20,16 +22,18 @@ import { pipeline } from "node:stream/promises";
 import { fsyncDirectoryAsync, safeResourceWriteAsync } from "../../../core/safe-resource-write.js";
 import {
 	decodeTagSegment,
+	encodeTagSegment,
 	isRecordsTag,
 	storeBlobPath,
 	storeProjectDir,
+	storeProjectKey,
 	storeProjectRoot,
 	storeRoot,
 	storeTagDir,
 	validateBlobName,
 	validateTagName,
 } from "../../../core/store-paths.js";
-import { clioDataDir } from "../../../core/xdg.js";
+import { clioCachePath, clioDataDir } from "../../../core/xdg.js";
 import { withFileMutationQueue } from "../../../tools/file-mutation-queue.js";
 import type { StoreBackend } from "../backend.js";
 import { withStoreLock } from "../lock.js";
@@ -398,7 +402,28 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				const info = await lstatOrNull(target);
 				if (info === null) throw new StoreRefusal("not-found", `Tag ${tag} has no blob named ${blob}.`);
 				if (!info.isFile()) throw new StoreRefusal("not-a-file", `Blob ${blob} in tag ${tag} is not a regular file.`);
-				return { path: target, copied: false };
+				// The stored file backs the records, so `get` hands out a read-only copy under the store cache
+				// (one of storeReadRoots) like the clio-core backend; a write to it cannot change the blob.
+				const tagCache = path.join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd)), encodeTagSegment(tag));
+				const copy = path.join(tagCache, blob);
+				try {
+					await mkdir(path.dirname(copy), { recursive: true, mode: 0o700 });
+				} catch {
+					// A stale entry blocks the blob's parents ("d" cached as a file, "d/e" wanted); the cache is disposable.
+					await rm(tagCache, { recursive: true, force: true });
+					await mkdir(path.dirname(copy), { recursive: true, mode: 0o700 });
+				}
+				const temp = tempSibling(copy);
+				try {
+					await copyFile(target, temp);
+					await chmod(temp, 0o400);
+					await rm(copy, { recursive: true, force: true });
+					await rename(temp, copy);
+				} catch (error) {
+					await rm(temp, { force: true });
+					throw error;
+				}
+				return { path: copy, copied: true };
 			}),
 
 		putRecordIfAbsent: (tag, blob, data) =>

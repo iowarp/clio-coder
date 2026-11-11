@@ -183,6 +183,21 @@ export function storeReadRoots(cwd: string): string[] {
 	return [storeProjectDir(cwd), storeCacheDir(cwd), ...(mounted !== null ? [mounted] : [])];
 }
 
+/**
+ * Every path a store write touches, from tool arguments alone: the primary
+ * target `storeWriteTarget` names first, then the blob's records tag (put,
+ * remove and note append a record there), the project's `project.json`
+ * (written when a tag or records tag is first created) and the store lock
+ * directory. Empty for read ops and malformed calls.
+ */
+export function storeWriteSet(cwd: string, args: Record<string, unknown> | undefined): string[] {
+	const primary = storeWriteTarget(cwd, args);
+	if (primary === null) return [];
+	const projectDir = storeProjectDir(cwd);
+	const records = storeTagDir(cwd, recordsTag(String(args?.tag)));
+	return [...new Set([primary, records, join(projectDir, "project.json"), join(projectDir, "locks")])];
+}
+
 /** Where a store write lands, from tool arguments alone; null for read ops and malformed calls. */
 export function storeWriteTarget(cwd: string, args: Record<string, unknown> | undefined): string | null {
 	if (args === undefined) return null;

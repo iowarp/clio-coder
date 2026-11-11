@@ -16,7 +16,7 @@ import {
 import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
 import { isSkippedSecretScanDirectory, SECRET_SCAN_LIMITS } from "../../core/sandbox/secret-files.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
-import { storeWriteTarget } from "../../core/store-paths.js";
+import { storeWriteSet } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
@@ -616,17 +616,19 @@ export const WRITE_ROOT_REFUSED_TOOLS: ReadonlySet<string> = new Set<string>([
 // own loop, so it is not covered by the lexical write-root containment below.
 const WRITE_ROOT_TOOLS = new Set<string>([ToolNames.Write, ToolNames.Edit, ToolNames.Artifact]);
 
+/** A call this session may not make writes nothing; the tool refuses it with how to get a grant. */
+function storeWriteTargets(call: ClassifierCall, cwd: string): string[] {
+	return call.args?.[STORE_UNGRANTED_ARG] === true ? [] : storeWriteSet(cwd, call.args);
+}
+
 /**
- * A store write lands where `storeWriteTarget` predicts, never at its `path`
+ * A store write lands where `storeWriteSet` predicts, never at its `path`
  * argument (the source), so the store is judged by that target here. It stays
  * out of WRITE_ROOT_TOOLS, which also drives the git-control check over the
  * call's path arguments.
  */
 function writeRootTargetPath(call: ClassifierCall, cwd: string = process.cwd()): string | null {
-	if (call.tool === ToolNames.Store) {
-		// A call this session may not make writes nothing; the tool refuses it with how to get a grant.
-		return call.args?.[STORE_UNGRANTED_ARG] === true ? null : storeWriteTarget(cwd, call.args);
-	}
+	if (call.tool === ToolNames.Store) return storeWriteTargets(call, cwd)[0] ?? null;
 	if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
 	const target = pathArg(call.args);
 	if (target !== null) return target;
@@ -689,10 +691,21 @@ function writeRootViolation(
  */
 function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, call: ClassifierCall): string | null {
 	if (roots.length === 0) return null;
-	const target = writeRootTargetPath(call, writeRootCwd);
-	if (target === null) return null;
+	// A store write touches its records, project.json and locks besides its target, so each is judged.
+	const targets =
+		call.tool === ToolNames.Store ? storeWriteTargets(call, writeRootCwd) : [writeRootTargetPath(call, writeRootCwd)];
 	const memo = createPathWalkMemo();
-	return writeRootViolation(roots, target, canonicalizeRawPath(expandPath(target), writeRootCwd, memo), memo);
+	for (const target of targets) {
+		if (target === null) continue;
+		const violation = writeRootViolation(
+			roots,
+			target,
+			canonicalizeRawPath(expandPath(target), writeRootCwd, memo),
+			memo,
+		);
+		if (violation !== null) return violation;
+	}
+	return null;
 }
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {

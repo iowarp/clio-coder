@@ -82,6 +82,12 @@ describe("store safety admission", () => {
 		match(text, /no grant for tag 'sim'.*tags: \["sim"\]/u);
 	});
 
+	it("refuses a store write whose records or project files fall outside the write roots", () => {
+		const engine = createSafetyPolicyEngine({ cwd, writeRoots: [`${dirname(storeBlobPath(cwd, "sim", "a.txt"))}/`] });
+		const put = engine.evaluate({ tool: ToolNames.Store, args: { op: "put", tag: "sim", path: "a.txt" } });
+		strictEqual(put.reasonCode, "write-root");
+	});
+
 	it("admits a cd into this project's store directory and not another project's", () => {
 		const own = storeProjectDir(cwd);
 		const other = storeProjectDir(scratch.dir);

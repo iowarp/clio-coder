@@ -15,6 +15,7 @@ import {
 	storeReadRoots,
 	storeRoot,
 	storeTagDir,
+	storeWriteSet,
 	storeWriteTarget,
 	validateBlobName,
 	validateTagName,
@@ -62,6 +63,17 @@ test("a linked worktree and its main checkout share one store project key", () =
 
 	strictEqual(storeProjectKey(storeProjectRoot(join(worktree, "src"))), storeProjectKey(storeProjectRoot(main)));
 	strictEqual(storeProjectDir(worktree), storeProjectDir(main));
+});
+
+test("storeWriteSet names the records, project.json and locks a write touches besides its target", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "clio-coder-store-set-"));
+	const tag = "sim/run7";
+	const project = storeProjectDir(cwd);
+	const set = storeWriteSet(cwd, { op: "put", tag, blob: "a.h5", path: "x.h5" });
+	strictEqual(set[0], storeBlobPath(cwd, tag, "a.h5"));
+	for (const expected of [storeTagDir(cwd, recordsTag(tag)), join(project, "project.json"), join(project, "locks")])
+		strictEqual(set.includes(expected), true, expected);
+	strictEqual(storeWriteSet(cwd, { op: "get", tag, blob: "a.h5" }).length, 0);
 });
 
 test("storeWriteTarget predicts each write op's path and is null for reads and malformed calls", () => {
