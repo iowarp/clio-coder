@@ -10,7 +10,7 @@ import {
 import { loadUserHooks, type UserHookDeclarationBatch } from "../domains/middleware/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { loadProjectSafetyPolicy } from "../domains/safety/project-policy.js";
-import { canSelect, promptSelect } from "./select.js";
+import { canSelect, promptSelect, type SelectResult } from "./select.js";
 
 const CARD_SURFACES: ReadonlyArray<ProjectTrustSurface> = ["settings", "safety", "hooks", "extensions", "plugins"];
 
@@ -142,7 +142,15 @@ export function trustProjectCard(model: ProjectTrustCardModel): void {
 	}
 }
 
-export type ProjectTrustCardOutcome = "trusted" | "skipped" | "none";
+export type ProjectTrustCardOutcome = "trusted" | "skipped" | "quit" | "none";
+
+type CardChoice = "review" | "trust" | "skip";
+
+/** `q` and Ctrl+C quit as the card's legend says; Esc keeps opening without the configuration. */
+export function projectTrustCardChoice(result: SelectResult<CardChoice>): CardChoice | "quit" {
+	if (result.kind === "selected") return result.value;
+	return result.kind === "quit" ? "quit" : "skip";
+}
 
 /** One card before the session starts; Review is the default action. */
 export async function runProjectTrustCard(cwd: string = process.cwd()): Promise<ProjectTrustCardOutcome> {
@@ -150,7 +158,7 @@ export async function runProjectTrustCard(cwd: string = process.cwd()): Promise<
 	if (model === null || !canSelect()) return "none";
 	let reviewed = false;
 	while (true) {
-		const result = await promptSelect<"review" | "trust" | "skip">({
+		const result = await promptSelect<CardChoice>({
 			heading: renderProjectTrustCard(model),
 			choices: [
 				{ value: "review", label: reviewed ? "Review again" : "Review" },
@@ -160,7 +168,8 @@ export async function runProjectTrustCard(cwd: string = process.cwd()): Promise<
 			initialIndex: reviewed ? 1 : 0,
 			clearOnExit: true,
 		});
-		const choice = result.kind === "selected" ? result.value : "skip";
+		const choice = projectTrustCardChoice(result);
+		if (choice === "quit") return "quit";
 		if (choice === "skip") return "skipped";
 		if (choice === "trust") {
 			try {

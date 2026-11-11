@@ -227,6 +227,8 @@ export async function runClioCommand(
 		// It runs after the workspace relaunch so only the process that hosts the session asks.
 		const { runProjectTrustCard } = await import("./project-trust-card.js");
 		const outcome = await runProjectTrustCard(process.cwd());
+		// Quitting the card opens no session, like declining the workspace check.
+		if (outcome === "quit") return 1;
 		if (outcome === "trusted") {
 			trustCardNotices = [];
 			startupSettings = readStrictLayeredSettings(process.cwd()).settings;

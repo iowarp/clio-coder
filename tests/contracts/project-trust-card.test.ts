@@ -2,7 +2,12 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildProjectTrustCard, renderProjectTrustCard, trustProjectCard } from "../../src/cli/project-trust-card.js";
+import {
+	buildProjectTrustCard,
+	projectTrustCardChoice,
+	renderProjectTrustCard,
+	trustProjectCard,
+} from "../../src/cli/project-trust-card.js";
 import {
 	captureProjectSurface,
 	recordProjectSurfaceTrust,
@@ -90,4 +95,10 @@ test("S-76: the launch card runs after the workspace relaunch, so a hosted child
 	const card = source.indexOf("runProjectTrustCard(process.cwd())");
 	ok(relaunch > 0 && card > 0);
 	ok(card > relaunch, "the trust card must follow the workspace relaunch decision");
+});
+
+test("trust card: q and Ctrl+C quit as the legend says; Esc still opens without the configuration", () => {
+	strictEqual(projectTrustCardChoice({ kind: "quit" }), "quit");
+	strictEqual(projectTrustCardChoice({ kind: "back" }), "skip");
+	strictEqual(projectTrustCardChoice({ kind: "selected", value: "trust" }), "trust");
 });
