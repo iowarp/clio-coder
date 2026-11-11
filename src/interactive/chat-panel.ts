@@ -52,7 +52,7 @@ import { routeFirstOutput } from "./footer/silence-note.js";
 import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js";
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
-import { codeInk } from "./renderers/code-ink.js";
+import { type CodeInkCarry, codeInk, codeInkLexer } from "./renderers/code-ink.js";
 import { holdInlineMath } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
 import { settledMarkdownHead } from "./renderers/markdown-blocks.js";
@@ -124,8 +124,9 @@ import { type TurnSpend, turnHoldsCalls, turnSpend } from "./turn-spend.js";
 // source line starts, so a piece Pi cut off is never mistaken for a new line.
 const CODE_SPACE = "\u2800";
 const CODE_LINE = "\uFDD1";
+const inkLang = (lang: string | undefined): string | undefined => lang?.trim().split(/\s+/u, 1)[0];
 const BASE_MARKDOWN_THEME = markdownTheme(clioTheme(), (code, lang) =>
-	codeInk(lang?.trim().split(/\s+/u, 1)[0], code.split("\n")).map((line) => line.replaceAll(" ", CODE_SPACE)),
+	codeInk(inkLang(lang), code.split("\n")).map((line) => line.replaceAll(" ", CODE_SPACE)),
 );
 const CHAT_MARKDOWN_THEME = {
 	...BASE_MARKDOWN_THEME,
@@ -329,8 +330,45 @@ type SettledBlocks = {
 	layout?: { width: number; bareFences: boolean; epoch: number; rows: string[]; through: number };
 	/** The open tail's Markdown component and the source it last rendered. */
 	tail?: { view: Markdown; source: string; epoch: number; bareFences: boolean };
-	/** The rows last returned and how many of them were head rows at which layout, which later rows still lead with. */
-	returned?: { layout: NonNullable<SettledBlocks["layout"]>; rows: string[]; headRows: number };
+	/** The open tail as one top-level fence still open, found at the head length `at`; null when the tail is not one. */
+	fence?: { at: number; open: OpenFence | null };
+	/**
+	 * The rows last returned and how many of them were head rows at which layout, which later rows still lead with;
+	 * `fenceRows` more lead with them while the open fence keeps its layout.
+	 */
+	returned?: {
+		layout: NonNullable<SettledBlocks["layout"]>;
+		fence: OpenFence["layout"];
+		rows: string[];
+		headRows: number;
+		fenceRows: number;
+	};
+};
+/**
+ * A streaming tail that is one fenced code block still open at the top level. Every code line is drawn on its own
+ * and inked from the lexer state the lines above leave, so its complete lines render once per layout and a delta
+ * renders only the line still open, as the whole fence would draw them.
+ */
+type OpenFence = {
+	/** The opening line, without its line end; the code starts after it. */
+	opener: string;
+	/** The fence's marker, as long as it opened: a closing line needs at least as many. */
+	marker: string;
+	/** Where the first line not yet searched for a closing fence starts in the tail. */
+	scanned: number;
+	/** Code ink's lexer for the fence's language; null when it inks none. */
+	lexer: ReturnType<typeof codeInkLexer>;
+	/** The complete lines' rows at one layout, how far into the tail they reach, and the lexer state there. */
+	layout?: {
+		width: number;
+		bareFences: boolean;
+		epoch: number;
+		/** How many rows the opening line draws: `rows` opens with them, and every piece drawn after drops them. */
+		header: number;
+		rows: string[];
+		through: number;
+		carry: CodeInkCarry | undefined;
+	};
 };
 type ToolSegment = {
 	kind: "tool";
@@ -1304,7 +1342,9 @@ function renderSettledSplit(
 	let region = secrets.textFrom(from);
 	// A cut needs a line completed since the last search. A reference definition, which always holds `]:`, is
 	// looked for on every frame it may be in the tail, since it changes how links in the head resolve.
-	if (region.indexOf("\n", Math.max(0, settled.searched - from)) >= 0 || region.includes("]:")) {
+	// An open fence holds no cut, and searching it would lex the whole fence again on every line.
+	const fence = openFence(settled, region);
+	if (fence === null && (region.indexOf("\n", Math.max(0, settled.searched - from)) >= 0 || region.includes("]:"))) {
 		settled.searched = from + region.length;
 		const limit = secrets.settledLength - from;
 		const head = limit > 0 ? settledMarkdownHead(region, CODE_SPACE, limit) : { length: 0, spacing: false };
@@ -1346,20 +1386,144 @@ function renderSettledSplit(
 		layout.through = cut;
 		runStart = -1;
 	}
-	let tail = settled.tail;
-	if (tail === undefined || tail.epoch !== epoch || tail.bareFences !== bareFences) {
-		tail = { view: chatMarkdown(region, bareFences), source: region, epoch, bareFences };
-		settled.tail = tail;
-	} else if (tail.source !== region) {
-		tail.view.setText(region);
-		tail.source = region;
+	const fenceRows = fence === null ? null : openFenceRows(fence, region, width, bareFences, epoch, memo);
+	let rows: string[];
+	if (fenceRows !== null && fence?.layout !== undefined) {
+		rows = layout.rows.concat(fence.layout.rows, fenceRows);
+	} else {
+		let tail = settled.tail;
+		if (tail === undefined || tail.epoch !== epoch || tail.bareFences !== bareFences) {
+			tail = { view: chatMarkdown(region, bareFences), source: region, epoch, bareFences };
+			settled.tail = tail;
+		} else if (tail.source !== region) {
+			tail.view.setText(region);
+			tail.source = region;
+		}
+		rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
 	}
-	const rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
-	// A layout's head rows only grow, so every head row the last frame returned still leads in place.
+	// A layout's head rows only grow, and so do an open fence's settled rows, so every such row the last frame
+	// returned still leads in place.
+	const fenceLayout = fenceRows === null ? undefined : fence?.layout;
 	const returned = settled.returned;
-	if (returned?.layout === layout) keepRows(rows, returned.rows, returned.headRows);
-	settled.returned = { layout, rows, headRows: layout.rows.length };
+	if (returned?.layout === layout) {
+		const held = returned.fence !== undefined && returned.fence === fenceLayout ? returned.fenceRows : 0;
+		keepRows(rows, returned.rows, returned.headRows + held);
+	}
+	settled.returned = {
+		layout,
+		fence: fenceLayout,
+		rows,
+		headRows: layout.rows.length,
+		fenceRows: fenceLayout?.rows.length ?? 0,
+	};
 	return rows;
+}
+
+/** A fence's opening line at the very start of a tail: a marker, then at most a plain language word. */
+const FENCE_OPENER = /^(`{3,}|~{3,})([ \t]*[\w+#.-]*[ \t]*)\n/u;
+
+/**
+ * The tail as one fenced code block still open at the top level, or null. A tail starts at a top-level block
+ * boundary, so a marker opening its first line opens a top-level fence. Each line is searched for a closing fence
+ * once, as it completes.
+ */
+function openFence(settled: SettledBlocks, region: string): OpenFence | null {
+	let found = settled.fence;
+	if (found?.at !== settled.length) {
+		const opener = FENCE_OPENER.exec(region);
+		// Until its first line completes, the tail may still open with anything.
+		if (opener === null && region.indexOf("\n") < 0) return null;
+		const lang = opener === null ? undefined : inkLang(opener[2]);
+		// A Mermaid fence becomes a diagram drawn from its whole source.
+		const open =
+			opener === null || lang?.toLowerCase() === "mermaid"
+				? null
+				: {
+						opener: opener[0].slice(0, -1),
+						marker: opener[1] ?? "```",
+						scanned: opener[0].length,
+						lexer: codeInkLexer(lang),
+					};
+		found = { at: settled.length, open };
+		settled.fence = found;
+	}
+	const open = found.open;
+	if (open === null) return null;
+	for (let end = region.indexOf("\n", open.scanned); end >= 0; end = region.indexOf("\n", open.scanned)) {
+		const line = region.slice(open.scanned, end);
+		open.scanned = end + 1;
+		if (closesFence(line, open.marker)) {
+			found.open = null;
+			return null;
+		}
+	}
+	return open;
+}
+
+function closesFence(line: string, marker: string): boolean {
+	const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
+	return close !== undefined && close[0] === marker[0] && close.length >= marker.length;
+}
+
+/** A fence's code drawn from `carry`: the lexer state the lines above it leave. */
+function fenceMarkdown(text: string, bareFences: boolean, open: OpenFence, carry: CodeInkCarry | undefined): Markdown {
+	const theme = bareFences ? EXPORT_MARKDOWN_THEME : CHAT_MARKDOWN_THEME;
+	const lexer = open.lexer;
+	if (lexer === null || carry === undefined) return new Markdown(text, 0, 0, theme, undefined, CHAT_MARKDOWN_OPTIONS);
+	const highlightCode = (code: string): string[] =>
+		lexer.ink(code.split("\n"), carry).map((line) => line.replaceAll(" ", CODE_SPACE));
+	return new Markdown(text, 0, 0, { ...theme, highlightCode }, undefined, CHAT_MARKDOWN_OPTIONS);
+}
+
+/**
+ * The rows of an open fence's line still open, after its complete lines are rendered into `open.layout`. Null when
+ * this frame must render the whole tail: a width too narrow to count the opening line's rows, or a last line that
+ * may close the fence or that Pi trims as a partial closing fence.
+ */
+function openFenceRows(
+	open: OpenFence,
+	region: string,
+	width: number,
+	bareFences: boolean,
+	epoch: number,
+	memo: RowMemo | undefined,
+): string[] | null {
+	if (width < 8) return null;
+	const lineStart = region.lastIndexOf("\n") + 1;
+	if (/^ {0,3}[`~]/u.test(region.slice(lineStart))) return null;
+	let layout = open.layout;
+	if (layout?.width !== width || layout.bareFences !== bareFences || layout.epoch !== epoch) {
+		// The opening line and one short code line draw the opening line's rows and one more.
+		const rows = markdownRows(chatMarkdown(`${open.opener}\nx`, bareFences), width, bareFences);
+		const header = rows.length - 1;
+		const start = open.opener.length + 1;
+		layout = { width, bareFences, epoch, header, rows: rows.slice(0, header), through: start, carry: open.lexer?.start };
+		open.layout = layout;
+	}
+	// Lines settle through the last complete line that is not blank, since Pi drops a fence's trailing line end.
+	let settleTo = lineStart;
+	while (settleTo - 1 > layout.through && region.charCodeAt(settleTo - 2) === 10) settleTo -= 1;
+	if (settleTo - 1 > layout.through) {
+		const code = region.slice(layout.through, settleTo - 1);
+		const md = fenceMarkdown(`${open.opener}\n${code}`, bareFences, open, layout.carry);
+		const rows = markdownRows(md, width, bareFences);
+		for (let index = layout.header; index < rows.length; index += 1) layout.rows.push(rows[index] ?? "");
+		const lexer = open.lexer;
+		if (lexer !== null && layout.carry !== undefined) {
+			let carry = layout.carry;
+			for (const line of code.split("\n")) carry = lexer.advance(line, carry);
+			layout.carry = carry;
+		}
+		layout.through = settleTo;
+	}
+	const rest = region.slice(layout.through);
+	if (rest.length === 0) return [];
+	return markdownRows(
+		fenceMarkdown(`${open.opener}\n${rest}`, bareFences, open, layout.carry),
+		width,
+		bareFences,
+		memo,
+	).slice(layout.header);
 }
 
 /**

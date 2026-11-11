@@ -29,6 +29,7 @@ export const coreTests = [
 	"handbook-bench",
 	"dispatch-plan-preview-newlines",
 	"interactive-ticker-idle",
+	"streamed-code-fence",
 	"reload-prompts",
 	"telemetry-share-linkability",
 	"mcp-extension-secret-mask",
