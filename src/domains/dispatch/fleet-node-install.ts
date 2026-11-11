@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, win32 } from "node:path";
 import { updateSettings } from "../../core/config.js";
 import type { FleetNodeSettings } from "../../core/defaults.js";
 import { readClioVersion, resolvePackageRoot } from "../../core/package-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
+import { packageManagerLaunch } from "../../core/self-update.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { clioCacheDir } from "../../core/xdg.js";
 import { fleetNode } from "./fleet-nodes.js";
@@ -24,6 +25,27 @@ export interface FleetNodeInstallPlan {
 	cleanup(): void;
 }
 
+/**
+ * The npm pack launch. On Windows npm is a `.cmd` shim run through cmd.exe,
+ * whose allow-list refuses paths with spaces, so npm runs in the destination
+ * directory (its default pack destination) and names the package root by a
+ * relative spec rather than passing the destination path.
+ */
+export function fleetPackLaunch(
+	root: string,
+	directory: string,
+	platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[]; cwd: string } {
+	if (platform !== "win32")
+		return {
+			file: "npm",
+			args: ["pack", "--ignore-scripts", "--json", "--pack-destination", directory],
+			cwd: root,
+		};
+	const spec = win32.relative(directory, root) || ".";
+	return { ...packageManagerLaunch("npm", ["pack", spec, "--ignore-scripts", "--json"], platform), cwd: directory };
+}
+
 /** Pack the package this client actually runs; never substitute a registry release. */
 export async function prepareFleetNodeInstall(id: string): Promise<FleetNodeInstallPlan> {
 	const node = fleetNode(id);
@@ -32,16 +54,13 @@ export async function prepareFleetNodeInstall(id: string): Promise<FleetNodeInst
 		throw new Error("client build is missing; build this checkout before installing nodes");
 	const directory = mkdtempSync(join(clioCacheDir(), "fleet-install-"));
 	try {
-		const packed = await runCommandVector(
-			"npm",
-			["pack", "--ignore-scripts", "--json", "--pack-destination", directory],
-			{
-				cwd: root,
-				workspaceRoot: root,
-				timeoutMs: 120_000,
-				env: { TMPDIR: directory, npm_config_cache: join(directory, "npm-cache") },
-			},
-		);
+		const launch = fleetPackLaunch(root, directory);
+		const packed = await runCommandVector(launch.file, launch.args, {
+			cwd: launch.cwd,
+			workspaceRoot: root,
+			timeoutMs: 120_000,
+			env: { TMPDIR: directory, npm_config_cache: join(directory, "npm-cache") },
+		});
 		if (packed.exitCode !== 0) throw new Error(`could not pack client: ${packed.stderr.trim()}`);
 		const entries = JSON.parse(packed.stdout) as Array<{ filename: string }>;
 		const filename = entries[0]?.filename;

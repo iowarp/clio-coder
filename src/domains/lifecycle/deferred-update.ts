@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import * as path from "node:path";
 import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { processBirthToken } from "../../core/process-identity.js";
+import { packageManagerLaunch } from "../../core/self-update.js";
 import type { Installation } from "./install-method.js";
 
 const PACKAGE_NAME = "@iowarp/clio-coder";
@@ -128,6 +129,22 @@ function onPath(name: string): string | null {
  * Windows, root, sudo, a prefix this user cannot write, homebrew, winget,
  * native installs and every unknown layout.
  */
+/**
+ * The pnpm global-add launch. An npm-installed pnpm is a JS file run under this
+ * node; a bare pnpm on Windows is a `.cmd` shim, which goes through
+ * packageManagerLaunch so cmd.exe runs it with a vetted argument list.
+ */
+export function pnpmAddLaunch(
+	pnpm: string,
+	spec: string,
+	platform: NodeJS.Platform = process.platform,
+): { file: string; args: string[] } {
+	const args = ["add", "-g", spec];
+	if (/\.(c|m)?js$/u.test(pnpm)) return { file: process.execPath, args: [pnpm, ...args] };
+	if (platform === "win32") return packageManagerLaunch("pnpm", args, platform);
+	return { file: pnpm, args };
+}
+
 export function deferredUpdateTarget(installation: Installation, version: string): DeferredTarget | null {
 	if (process.platform === "win32" || process.env.SUDO_USER) return null;
 	if (!["npm", "pnpm", "bun"].includes(installation.kind) || installation.installer) return null;
@@ -215,19 +232,19 @@ export function deferredUpdateTarget(installation: Installation, version: string
 		if (!pnpm) return null;
 		// An npm-installed pnpm is a JS file whose shebang finds node on PATH;
 		// run it under this session's node instead. A standalone pnpm is a binary.
-		const script = /\.(c|m)?js$/u.test(pnpm);
+		const launch = pnpmAddLaunch(pnpm, spec);
 		const layout = parts[global + 1];
 		target = {
 			manager: "pnpm",
 			root,
 			bin,
 			hold,
-			command: script ? process.execPath : pnpm,
+			command: launch.file,
 			// A plain global add resolves the global dir and bin from PNPM_HOME
 			// and the operator's own pnpm config, exactly as the install was made;
 			// --global-dir alone would derive <dir>/../bin instead. pnpm refuses
 			// unless that bin is on PATH, so the child gets it first.
-			args: [...(script ? [pnpm] : []), "add", "-g", spec],
+			args: launch.args,
 			env: { PNPM_HOME: bin, PATH: `${bin}:${process.env.PATH ?? ""}` },
 			// The root is the per-version store copy; the global layout's link is stable.
 			versionFile:
