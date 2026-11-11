@@ -131,6 +131,12 @@ const DAEMON_SOCKET_PATHS = [
 	"var/lib/incus/unix.socket.user",
 	"run/incus",
 	"var/run/incus",
+	"run/crio",
+	"var/run/crio",
+	"run/k3s/containerd",
+	"var/run/k3s/containerd",
+	"run/buildkit",
+	"var/run/buildkit",
 ];
 
 /**

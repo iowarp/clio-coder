@@ -18,7 +18,15 @@ describe("worker sandbox masks root-equivalent daemon sockets", () => {
 			"var/lib/incus/unix.socket",
 			"var/lib/incus/unix.socket.user",
 		];
-		const dirs = ["run/podman", "run/containerd", "run/libvirt", "run/incus"];
+		const dirs = [
+			"run/podman",
+			"run/containerd",
+			"run/libvirt",
+			"run/incus",
+			"run/crio",
+			"run/k3s/containerd",
+			"run/buildkit",
+		];
 		for (const file of files) {
 			mkdirSync(dirname(join(root, file)), { recursive: true });
 			writeFileSync(join(root, file), "");
