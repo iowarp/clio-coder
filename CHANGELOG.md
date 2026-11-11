@@ -2,7 +2,7 @@
 
 Notable changes to Clio Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## 0.8.0 - 2026-11-10
+## Unreleased
 
 Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tools, and predictable to automate: shared folders, the sandbox, headless `run`, setup and installs all behave more strictly. It also adds a per-project store and reports you review before they go. Several exit codes, defaults and permissions change, so read the Upgrade notes before upgrading.
 

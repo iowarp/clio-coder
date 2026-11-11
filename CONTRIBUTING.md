@@ -109,7 +109,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Branches and Releases
 
-Development happens on the version branch, currently `v071`. Keep local
+Development happens on the version branch, currently `v080`. Keep local
 and remote version branches synchronized with ordinary pushes. `main` moves
 only by fast-forward when a stable release completes. Published tags and npm
 versions are immutable. The completed stable release deletes its version branch;
@@ -153,7 +153,7 @@ and its expected wall time, and performs the next step until it needs the
 owner, finishes or fails. Interrupting is safe; the next run resumes from the
 real state. One release command runs per clone at a time: a lock and a receipt
 live in `$(git rev-parse --git-common-dir)/clio-release/`, and every remote
-write asks for a typed phrase such as `push v071` or `publish 0.8.0`.
+write asks for a typed phrase such as `push v080` or `publish 0.8.0`.
 Qualification and packing refuse `/tmp` and long `TMPDIR` paths; export a short
 private one such as `TMPDIR=$HOME/.cache/cr`.
 
@@ -238,7 +238,7 @@ version. Do not claim it is verified by `npm publish --dry-run`.
 On GitHub, the `release` environment needs the owner as required reviewer.
 Leave Prevent self-review unchecked if the owner also dispatches releases.
 Keep the Tag rule `v*` and add a **Branch** deployment rule
-`v[0-9][0-9][0-9]` so publication from a version branch such as `v071` can reach the approval gate.
+`v[0-9][0-9][0-9]` so publication from a version branch such as `v080` can reach the approval gate.
 An agent authenticated with the owner's admin credentials could technically
 approve or bypass the gate. A strict owner-only boundary requires separate
 agent credentials and disabling administrator bypass.
