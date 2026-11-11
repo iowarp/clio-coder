@@ -209,6 +209,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 								: theme.fg("counter", /^[≥~]*\$/u.test(spend.cost) ? spend.cost : `cost ${spend.cost}`),
 						]),
 			tools === null ? null : labelled("tools", theme.fg("counter", toolChip(clean(tools), width))),
+			ceilingChip(state),
 		],
 		width,
 	);
@@ -253,7 +254,6 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		...tasks,
 		...notices,
 		contextLine(state, width),
-		spendLine(state, width),
 		sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) }),
 	];
 	if (rows.length === 0) {
@@ -370,26 +370,19 @@ function sessionSpendChips(telemetry: FooterTelemetry): string[] {
 	];
 }
 
-/** The dashboard's one spend line: the session's tokens and cost against the ceiling. `/usage` has the rest. */
-function spendLine(state: FooterDashboardRenderState, width: number): string {
+/** The session cost ceiling beside the spend on the dashboard's session row; `/usage` has the rest. */
+function ceilingChip(state: FooterDashboardRenderState): string {
 	const theme = clioTheme();
-	return chipRow(
-		theme,
-		[
-			...sessionSpendChips(state.telemetry),
-			labelled(
-				"ceiling",
-				theme.fg(
-					"counter",
-					state.costCeilingUsd === undefined
-						? "unknown"
-						: state.costCeilingUsd === 0
-							? "none"
-							: `${renderUsdLimit(state.costCeilingUsd)} tracked pricing only`,
-				),
-			),
-		],
-		width,
+	return labelled(
+		"ceiling",
+		theme.fg(
+			"counter",
+			state.costCeilingUsd === undefined
+				? "unknown"
+				: state.costCeilingUsd === 0
+					? "none"
+					: `${renderUsdLimit(state.costCeilingUsd)} tracked pricing only`,
+		),
 	);
 }
 

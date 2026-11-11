@@ -427,7 +427,7 @@ test("worker cards and Status distinguish shared account limits from recorded se
 	}));
 	const activity = plain(scrolled(snapshot, 160, 120));
 	match(activity, /Account.*Shared claude-code.*91% used/);
-	match(activity, /session 0 tokens · nothing charged yet/);
+	match(activity, /tools 19 available · ceiling unknown/);
 });
 
 test("compact quota stays beside the selected model while workspace and rotating hints remain visible", () => {
