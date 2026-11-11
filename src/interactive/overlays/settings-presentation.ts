@@ -530,7 +530,7 @@ function sectionFacts(theme: ClioTheme, counts: InspectorContext["counts"]): Arr
 /** What the row is, said once: its default, where its value came from, what the value means, and how it is reached. */
 function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCenterItem): Array<string | null> {
 	const facts: Array<string | null> = [];
-	if (item.id.startsWith("maintenance.")) facts.push(chip(theme, `run in a terminal: ${item.currentValue}`, "muted"));
+	if (item.id.startsWith("maintenance.")) facts.push(chip(theme, `Enter ${item.currentValue}`, "muted"));
 	else if (item.id === "targets.add-cta") facts.push(chip(theme, "Enter opens the guided setup", "muted"));
 	else if (item.readOnly) facts.push(chip(theme, `read-only here · ${item.affordance}`, "muted"));
 	else if (item.presentationKind === "status" || item.presentationKind === "action")
@@ -676,7 +676,7 @@ function scopeNote(item: SettingsCenterItem, context: InspectorContext): string 
 			: context.rowKeysLive
 				? " · p pins"
 				: "";
-	if (item.id.startsWith("maintenance.")) return `Run in a terminal: ${item.currentValue}`;
+	if (item.id.startsWith("maintenance.")) return `Enter ${item.currentValue}`;
 	if (item.id === "targets.add-cta")
 		return "Opens the guided setup for a new connection; its last step saves it to your global settings";
 	if (item.submenu && (item.presentationKind === "status" || item.presentationKind === "action"))

@@ -99,7 +99,7 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 	const live = diff ? diff.hotReload.length + diff.nextTurn.length : 0;
 	const restart = diff?.restartRequired ?? [];
 	const parts = [`Saved ${file}`];
-	if (diff) parts.push(`${live} change${live === 1 ? "" : "s"} apply now`);
+	if (diff) parts.push(`${live === 1 ? "1 change applies" : `${live} changes apply`} now`);
 	if (restart.length > 0) parts.push(`restart to apply: ${restart.join(", ")}`);
 	deps.notice("success", parts.join(". "));
 }
