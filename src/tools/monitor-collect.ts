@@ -301,6 +301,9 @@ export async function collectRuns(
 	const collectedRows: CollectedRunRow[] = rows.map((row) => ({ ...row, evidence: durableRunEvidence(row.run) }));
 	const lines = [
 		`collect complete for ${scope}: total=${rows.length} failed=${failed.length}${missing.length > 0 ? ` missing=${missing.length}` : ""}`,
+		// Every run is named up front: per-run detail below can be long, and a
+		// bounded consumer (the turn-control collected block) cuts from the end.
+		`runs: ${rows.map((row) => `${row.runId}=${row.run === null ? "missing" : (row.run.outcome ?? row.run.status)}`).join(" ")}`,
 		...collectedRows.flatMap((row) => collectRunLine(row)),
 		...(board !== null ? ["", board] : []),
 		...(batchId.length > 0 && !collected
