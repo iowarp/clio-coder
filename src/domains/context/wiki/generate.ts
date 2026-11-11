@@ -12,7 +12,9 @@ import {
 	statSync,
 	writeSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { processBirthToken, processIdentityAlive } from "../../../core/process-identity.js";
 import { ensureProjectIgnore } from "../../../core/project-root.js";
 import type { ContextActivityPayload } from "../../../core/telemetry/live-events.js";
 import type { DecisionLedgerEntry } from "../../session/entries.js";
@@ -186,27 +188,37 @@ function clioDir(cwd: string): string {
 	return join(cwd, ".clio-coder");
 }
 
-/**
- * ESRCH means the pid is gone; EPERM means it exists but is owned by another
- * user (still alive). Any other error (including an out-of-range pid) is treated
- * as not alive so a corrupt lock never wedges generation forever.
- */
-function isProcessAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err) {
-		return (err as NodeJS.ErrnoException).code === "EPERM";
-	}
+interface WikiLockOwner {
+	host: string;
+	pid: number;
+	birthToken: string | null;
 }
 
-function readLockPid(lockPath: string): number | null {
+/** Reads the holder; a bare pid from an older build reads as this host with no birth token. */
+function readLockOwner(lockPath: string): WikiLockOwner | null {
 	try {
-		const parsed = Number.parseInt(readFileSync(lockPath, "utf8").trim(), 10);
-		return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+		const raw = readFileSync(lockPath, "utf8").trim();
+		const record = raw.startsWith("{") ? (JSON.parse(raw) as Record<string, unknown>) : { pid: Number.parseInt(raw, 10) };
+		const { host, pid, birthToken } = record;
+		if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return null;
+		return {
+			host: typeof host === "string" ? host : hostname(),
+			pid,
+			birthToken: typeof birthToken === "string" ? birthToken : null,
+		};
 	} catch {
 		return null;
 	}
+}
+
+/** A holder on another host cannot be probed, so it stays live; a reused local pid fails the birth token. */
+function ownerAlive(owner: WikiLockOwner): boolean {
+	return processIdentityAlive(owner) ?? true;
+}
+
+function describeOwner(owner: WikiLockOwner | null): string {
+	if (owner === null) return "pid unknown";
+	return owner.host === hostname() ? `pid ${owner.pid}` : `pid ${owner.pid} on host ${owner.host}`;
 }
 
 type WikiLock = { ok: true; release: () => void } | { ok: false; problem: string };
@@ -231,7 +243,7 @@ function acquireWikiLock(cwd: string): WikiLock {
 	const create = (): void => {
 		const fd = openSync(lockPath, "wx");
 		try {
-			writeSync(fd, String(process.pid));
+			writeSync(fd, JSON.stringify({ host: hostname(), pid: process.pid, birthToken: processBirthToken() }));
 		} finally {
 			closeSync(fd);
 		}
@@ -242,11 +254,11 @@ function acquireWikiLock(cwd: string): WikiLock {
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
 	}
-	const holder = readLockPid(lockPath);
-	if (holder !== null && isProcessAlive(holder)) {
+	const holder = readLockOwner(lockPath);
+	if (holder !== null && ownerAlive(holder)) {
 		return {
 			ok: false,
-			problem: `wiki generation is already running (lock held by pid ${holder} at ${lockPath})`,
+			problem: `wiki generation is already running (lock held by ${describeOwner(holder)} at ${lockPath})`,
 		};
 	}
 	// Stale lock from a crashed run: reclaim it.
@@ -256,10 +268,9 @@ function acquireWikiLock(cwd: string): WikiLock {
 		return { ok: true, release };
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-		const racer = readLockPid(lockPath);
 		return {
 			ok: false,
-			problem: `wiki generation is already running (lock held by pid ${racer ?? "unknown"} at ${lockPath})`,
+			problem: `wiki generation is already running (lock held by ${describeOwner(readLockOwner(lockPath))} at ${lockPath})`,
 		};
 	}
 }

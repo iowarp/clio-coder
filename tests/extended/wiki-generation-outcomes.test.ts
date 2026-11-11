@@ -12,6 +12,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -541,6 +542,18 @@ describe("wiki generation outcomes", () => {
 			for (const source of invalid) assert.equal(writerTask.includes(`- ${source}\n`), false, source);
 		});
 	}
+	it("keeps a wiki lock held on another host and reclaims a local one whose pid was reused", async () => {
+		const lockPath = join(cwd, ".clio-coder", "wiki.lock");
+		mkdirSync(dirname(lockPath), { recursive: true });
+		writeFileSync(lockPath, JSON.stringify({ host: "other-node.invalid", pid: 999_999_999, birthToken: "1" }));
+		const foreign = await run(generator(() => {}));
+		assert.equal(foreign.status, "failed");
+		assert.match(foreign.problems?.join("\n") ?? "", /pid 999999999 on host other-node\.invalid/);
+		writeFileSync(lockPath, JSON.stringify({ host: hostname(), pid: process.pid, birthToken: "reused" }));
+		const reclaimed = await run(generator(() => {}));
+		assert.doesNotMatch(reclaimed.problems?.join("\n") ?? "", /already running/);
+	});
+
 	it("publishes draft labels and counts from the same statuses as metadata after link repair and dropped pages", async () => {
 		const result = await runWikiGenerate({
 			cwd,
