@@ -1,6 +1,7 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { unattendedWindowMs } from "../domains/safety/unattended.js";
 import { sessionApprovalTask } from "../session-control/approval-request-facts.js";
+import { dispatchSlashCommand } from "../session-control/slash-commands.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import type { OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
@@ -515,6 +516,10 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),
 		...(openModelScopeOverlayFactory ? { openModelScopeOverlay: openModelScopeOverlayFactory } : {}),
 		...(openSettingsOverlayFactory ? { openSettingsOverlay: openSettingsOverlayFactory } : {}),
+		checkSetup: () => {
+			dispatchSlashCommand({ kind: "doctor", deep: false }, deps.getSlashContext());
+		},
+		...(deps.suspendTerminal ? { suspendTerminal: deps.suspendTerminal } : {}),
 	});
 
 	const overlayResourceOpeners = createOverlayResourceOpeners({

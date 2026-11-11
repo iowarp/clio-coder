@@ -57,7 +57,6 @@ test("every existing settings control has exactly one home and canonical persist
 		["guardrails.internalDispatchTimeoutMs", "advanced"],
 		["panes.journal", "fleet"],
 		["terminal.smoothStreaming", "chat"],
-		["keybindings", "advanced"],
 		["attribution.gitCommits", "workspace"],
 		["skills.trustProjectCompatRoots", "integrations"],
 		["workers.onPermission", "safety"],
@@ -66,7 +65,6 @@ test("every existing settings control has exactly one home and canonical persist
 		["compaction.model", "context"],
 		["background.target", "context"],
 		["defaults.maxTokens", "models"],
-		["modelSelector.favorites", "models"],
 	] as const)
 		strictEqual(byId.get(id)?.section, home, id);
 });

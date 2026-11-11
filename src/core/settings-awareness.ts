@@ -93,7 +93,9 @@ export function settingsAwareness(
 				? { value: getAtPath(settings, control.path) ?? null }
 				: { valueOmitted: "Free-form or structured value; inspect through the user settings UI." }),
 			...(control.choices ? { choices: control.choices } : {}),
-			tui: `/settings ${settingsAreaForPath(control.path)}`,
+			tui: control.menu
+				? `/settings ${settingsAreaForPath(control.path)}`
+				: "no /settings row; Edit settings file in /settings advanced",
 			cli: `clio-coder configure --section ${settingsSectionForPath(control.path)}`,
 		};
 	});

@@ -6,16 +6,11 @@ import { parse } from "yaml";
 import { saveControl } from "../../src/cli/configure-controls.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { getAtPath, setAtPath } from "../../src/core/session-routing.js";
+import { getAtPath } from "../../src/core/session-routing.js";
 import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
 import { renderYamlPreservingLayout } from "../../src/core/yaml-preserve.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import {
-	buildSettingItems,
-	buildSettingsSections,
-	createSettingsChangePlan,
-	SettingsCenter,
-} from "../../src/interactive/overlays/settings.js";
+import { buildSettingItems, buildSettingsSections, SettingsCenter } from "../../src/interactive/overlays/settings.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 function fixture() {
@@ -29,11 +24,12 @@ function fixture() {
 	return settings;
 }
 
-test("every shared control has a TUI home and accepts its shipped value", () => {
+test("a control has a TUI row exactly when it is on the menu, and accepts its shipped value", () => {
 	const rows = buildSettingItems(DEFAULT_SETTINGS);
 	for (const control of SETTING_CONTROLS) {
-		assert.ok(
+		assert.equal(
 			rows.some((row) => row.configPath === control.path),
+			control.menu === true,
 			control.path,
 		);
 		assert.notEqual(control.label, control.path, control.path);
@@ -138,28 +134,6 @@ test("numeric editors accept custom values, retain invalid drafts, and recover w
 	center.handleInput("12345");
 	center.handleInput("\r");
 	assert.equal(reviewed, "12345");
-});
-
-test("TUI saves JSON maps with dotted user keys as whole collections", () => {
-	const settings = fixture();
-	const row = buildSettingItems(settings).find((item) => item.id === "keybindings");
-	assert.ok(row);
-	const value = { "clio-coder.notifications.dismiss": "alt+n" };
-	const plan = createSettingsChangePlan(settings, row, JSON.stringify(value));
-	assert.ok(plan);
-	assert.deepEqual(
-		plan.leaves.map((leaf) => leaf.path),
-		["interface.keybindings"],
-	);
-	const saved = structuredClone(settings);
-	for (const leaf of plan.leaves) setAtPath(saved, leaf.path, structuredClone(leaf.after));
-	assert.deepEqual(saved.interface.keybindings, value);
-	const clear = createSettingsChangePlan(saved, row, "{}");
-	assert.ok(clear);
-	assert.deepEqual(
-		clear.leaves.map((leaf) => leaf.path),
-		["interface.keybindings"],
-	);
 });
 
 test("saved edits keep the operator's comments, quoting and untouched lines", async (t) => {

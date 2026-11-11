@@ -60,6 +60,9 @@ export interface OverlayModelSelectorsDeps {
 	openModelOverlay?: typeof openModelOverlay;
 	openModelScopeOverlay?: typeof openModelScopeOverlay;
 	openSettingsOverlay?: typeof openSettingsOverlay;
+	/** Settings' "Check setup" row: runs the doctor after settings closes. */
+	checkSetup?: () => void;
+	suspendTerminal?: <T>(run: () => T) => T;
 }
 
 export interface OverlayModelSelectors {
@@ -296,6 +299,16 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					}
 				: {}),
 			notice: deps.notify,
+			...(deps.checkSetup
+				? {
+						checkSetup: () => {
+							settingsOverlayRefresh = null;
+							deps.closeOverlay();
+							deps.checkSetup?.();
+						},
+					}
+				: {}),
+			...(deps.suspendTerminal ? { suspendTerminal: deps.suspendTerminal } : {}),
 			onClose: () => {
 				settingsOverlayRefresh = null;
 				deps.closeOverlay();

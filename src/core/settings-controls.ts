@@ -469,7 +469,66 @@ export interface SettingControl {
 	kind: "boolean" | "number" | "string" | "list" | "json";
 	optional: boolean;
 	readOnly: boolean;
+	/** Has a `/settings` row (hand-written or generated). A leaf without it lives only in the file. */
+	menu?: true;
 }
+
+/**
+ * Leaves that earn a generated `/settings` row. Every other leaf without a
+ * hand-written row stays valid in settings.yaml, `config inspect` and
+ * `configure`, and is reached through "Edit settings file".
+ */
+const MENU_ROWS = new Set([
+	"fleet.defaultNode",
+	"fleet.default.node",
+	"turnControl.workflows",
+	"chat.cacheKeepalive",
+	"chat.loopsUntilStopped",
+	"chat.steering.triage.enabled",
+	"fleet.worktrees.root",
+	"context.memory.observations.enabled",
+	"context.semantic.enabled",
+	"context.semantic.target",
+	"context.semantic.model",
+	"context.semantic.background",
+	"safety.limits.workerResponseSeconds",
+	"safety.limits.autonomousToolCalls",
+	"safety.limits.autonomousMinutes",
+	"safety.limits.autonomousTokens",
+	"safety.sandbox",
+	"safety.sandboxNetwork",
+	"safety.scratchRoots",
+	"safety.snapshots",
+	"safety.unattendedAfterSeconds",
+	"safety.yoloConfinement",
+	"safety.judge.enabled",
+	"safety.judge.target",
+	"safety.judge.model",
+	"interface.exitSummary",
+	"interface.demo",
+	"interface.autoUpdate",
+	"integrations.music.enabled",
+	"telemetry.mode",
+	"report.offers",
+	"prompts.profile",
+	"systemOne.use",
+]);
+
+/** Hand-written rows that left the menu; their leaves stay valid in the file. */
+export const OFF_MENU_HAND_ROWS: ReadonlySet<string> = new Set([
+	"interface.keybindings",
+	"fleet.adaptiveRouting.agentRoles",
+	"context.memory.trajectorySteps",
+	"context.memory.maxOutputTokens",
+	"context.memory.timeoutMs",
+	"context.workingSet.policy",
+	"context.workingSet.protectLastSteps",
+	"context.workingSet.minEvictableTokens",
+	"context.workingSet.rearmFraction",
+	"fleet.retry.routeCooldownMs",
+	"chat.modelPicker.favorites",
+	"integrations.library.confirmedRemote",
+]);
 
 const CHOICES: Record<string, readonly string[]> = {
 	"integrations.git.commitAuthor": ["auto", "human"],
@@ -806,6 +865,7 @@ export const SETTING_CONTROLS: readonly SettingControl[] = (() => {
 				kind,
 				optional: raw === null || OPTIONAL_STRINGS.has(path) || OPTIONAL_NUMBERS.has(path),
 				readOnly: path === "integrations.library.confirmedRemote",
+				...(MENU_ROWS.has(path) || (id !== undefined && !OFF_MENU_HAND_ROWS.has(path)) ? { menu: true as const } : {}),
 			};
 		});
 })();

@@ -3,6 +3,7 @@ import {
 	applyControlValue,
 	controlInstructions,
 	formatControlValue,
+	OFF_MENU_HAND_ROWS,
 	orderAreaEntries,
 	SETTING_CONTROLS,
 	SETTINGS_DESCRIPTIONS_BY_ID,
@@ -14,6 +15,7 @@ import {
 	settingsV2PathForRow,
 } from "../../core/settings-controls.js";
 import { settingsChangeKind } from "../../domains/config/classify.js";
+import { editSettingsFile } from "../settings-file-edit.js";
 import { openTargetWizard } from "../target-wizard.js";
 
 export { SETTINGS_LABELS_BY_ID } from "../../core/settings-controls.js";
@@ -1239,23 +1241,24 @@ function maintenanceRows(): SettingsCenterItem[] {
 		{
 			id: "maintenance.diagnostics" as const,
 			label: "Check setup",
-			currentValue: "clio-coder configure --section advanced",
-			description: "Inspect version and directories, run doctor, or read settings.yaml from the configure wizard.",
+			currentValue: "runs /doctor",
+			description: "Close settings and run the doctor: version, directories, connections and settings problems.",
 		},
 		{
 			id: "maintenance.editor" as const,
-			label: "Edit all settings",
-			currentValue: "clio-coder configure --edit",
-			description: "Open the complete settings.yaml in your editor, validate the draft, and review before saving.",
+			label: "Edit settings file",
+			currentValue: "opens $EDITOR",
+			description:
+				"Open your settings file or this project's in your editor. Every setting is there, including ones with no row here. The draft is checked before it is saved.",
 		},
 	].map((row) => ({
 		...row,
 		configPath: row.id,
 		valueSegments: [],
 		section: "advanced",
-		affordance: "run in a terminal",
-		scope: "restart",
-		readOnly: true,
+		affordance: "Enter to run",
+		scope: "live",
+		readOnly: false,
 		presentationKind: "status",
 	}));
 }
@@ -1745,12 +1748,11 @@ export function buildSettingItems(
 			}
 		}
 	}
+	const listed = items.filter((item) => !OFF_MENU_HAND_ROWS.has(item.configPath));
 	const paths = new Set(items.map((item) => item.configPath));
 	return [
-		...items,
-		...SETTING_CONTROLS.filter(
-			(control) => !paths.has(control.path) || control.path === "integrations.externalAgents.entries",
-		).map((control) => {
+		...listed,
+		...SETTING_CONTROLS.filter((control) => control.menu === true && !paths.has(control.path)).map((control) => {
 			const item = commonControlItem(control, live);
 			const value = getAtPath(settings, control.path);
 			item.currentValue = formatControlValue(value);
@@ -1767,8 +1769,16 @@ export function buildSettingItems(
 	].map((item) => {
 		const note = settingInactiveNote(item.configPath, settings);
 		if (note) item.description += ` ${note}`;
+		if (item.configPath === "safety.autonomy") item.description += ` ${yoloAcceptanceNote(settings)}`;
 		return item;
 	});
+}
+
+/** The acceptance records left the menu; the autonomy row still says what they hold and where. */
+function yoloAcceptanceNote(settings: Readonly<ClioSettings>): string {
+	const yolo = settings.safety.yoloAccepted ? "accepted" : "not yet accepted";
+	const unconfined = settings.safety.yoloUnconfinedAccepted ? "accepted" : "not accepted";
+	return `Yolo is ${yolo}; unconfined yolo is ${unconfined} (safety.yoloAccepted and safety.yoloUnconfinedAccepted in settings.yaml).`;
 }
 
 function fleetProfileRows(
@@ -2624,7 +2634,7 @@ function impactFor(propagation: SettingsChangePlan["propagation"]): string {
 	return "takes effect now";
 }
 
-export function createSettingsChangePlan(
+function createSettingsChangePlan(
 	settings: Readonly<ClioSettings>,
 	item: Pick<SettingsCenterItem, "id" | "label" | "currentValue" | "scope">,
 	selectedValue: string,
@@ -2751,6 +2761,10 @@ export interface SettingsCenterOptions {
 	onApply: (plan: SettingsChangePlan, scope: "session" | "project" | "global") => void;
 	onCancel: () => void;
 	onAddTarget?: () => void;
+	/** "Edit settings file": open the chosen settings file in the operator's editor. */
+	onEditSettingsFile?: (file: "user" | "project") => void;
+	/** "Check setup": close settings and run the doctor. */
+	onCheckSetup?: () => void;
 	requestRender?: () => void;
 	/** Pins and recent changes to build the Recent & Pinned view from; absent means none yet. */
 	shortcuts?: SettingsShortcuts;
@@ -3337,6 +3351,27 @@ export class SettingsCenter implements Component {
 			this.options.onAddTarget?.();
 			return;
 		}
+		if (item.id === "maintenance.diagnostics") {
+			this.options.onCheckSetup?.();
+			return;
+		}
+		if (item.id === "maintenance.editor") {
+			const list = new ChoiceList([
+				{ value: "user", label: "Your settings file", description: "Applies to every session." },
+				{ value: "project", label: "This project's settings file", description: ".clio-coder/settings.yaml" },
+			]);
+			list.onSelect = (choice) => {
+				this.submenuComponent = null;
+				this.options.onEditSettingsFile?.(choice.value === "project" ? "project" : "user");
+				this.options.requestRender?.();
+			};
+			list.onCancel = () => {
+				this.submenuComponent = null;
+				this.options.requestRender?.();
+			};
+			this.submenuComponent = new SubmenuWrapper(item.label, list, [{ key: "Enter", verb: "open" }], "Which file?");
+			return;
+		}
 		if (item.submenu) {
 			this.openValueEditor(item, item.editValue ?? item.currentValue);
 			return;
@@ -3651,7 +3686,8 @@ export class SettingsCenter implements Component {
 	private emptyFilterLines(width: number, height: number): string[] {
 		return fitRows(
 			emptyState(clioTheme(), `No settings match “${this.effectiveFilterQuery()}”`, width, {
-				remedy: "/ edits the filter · an empty Enter clears it",
+				remedy:
+					"/ edits the filter · an empty Enter clears it. Not every setting has a row. Edit settings file lists them all.",
 			}),
 			width,
 			height,
@@ -3965,6 +4001,10 @@ export interface OpenSettingsOverlayDeps {
 	 * the origin column and the inspector's "from" fact empty.
 	 */
 	settingOrigin?: (path: string) => SettingValueOrigin;
+	/** "Check setup": the host closes settings and runs the doctor. */
+	checkSetup?: () => void;
+	/** Hands the terminal to an external editor; defaults to stopping and restarting this TUI. */
+	suspendTerminal?: <T>(run: () => T) => T;
 }
 
 function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
@@ -4054,6 +4094,25 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 			refreshRows();
 		},
 		onAddTarget: () => launchWizard(),
+		onEditSettingsFile: (file) => {
+			editSettingsFile(file, {
+				cwd: process.cwd(),
+				suspendTerminal:
+					deps.suspendTerminal ??
+					(<T>(run: () => T): T => {
+						try {
+							tui.stop();
+							return run();
+						} finally {
+							tui.start();
+							tui.requestRender(true);
+						}
+					}),
+				notice: (level, text) => deps.notice?.(level, text, "settings:file"),
+			});
+			refreshRows();
+		},
+		...(deps.checkSetup ? { onCheckSetup: deps.checkSetup } : {}),
 		onCancel: () => deps.onClose(),
 		requestRender: () => tui.requestRender(),
 	});

@@ -30,7 +30,11 @@ test("settings awareness reports effective limits and UI links without serializi
 	assert.match(all.note, /not remaining budgets/);
 	assert.match(all.posture, /unknown provider prices/);
 	assert.ok(
-		all.rows.every((row) => row.tui.startsWith("/settings ") && row.cli.startsWith("clio-coder configure --section ")),
+		all.rows.every(
+			(row) =>
+				(row.tui.startsWith("/settings ") || row.tui.includes("Edit settings file")) &&
+				row.cli.startsWith("clio-coder configure --section "),
+		),
 	);
 	assert.deepEqual(settings, before);
 	const page = settingsAwareness(settings, "safety", 0, 2);
