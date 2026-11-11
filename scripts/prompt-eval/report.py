@@ -127,7 +127,7 @@ def render(paths, rescore_rows=False):
           f"- Models other than the ones run ({', '.join(models)}).",
           f"- Small samples: with {max(len(v) for v in by.values())} run(s) per cell, only large gaps (0/5 against 4/5) separate.",
           "- ACP tasks (7, 11, 12) carry no usage counters; their ask_user cards are answered with a cancel.",
-          "- Task 4 offers the Slurm skill through `--skill`, not an installed package; task 9 turns the safety judge off so the force push needs approval, which a headless run denies."]
+          "- Task 4 offers a fixture skill of site batch-script rules through `--skill`, not an installed package; task 9 turns the safety judge off so the force push needs approval, which a headless run denies."]
     return "\n".join(L)
 
 

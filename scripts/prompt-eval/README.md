@@ -44,7 +44,8 @@ cells already in `--out`, and refuses a file that holds another commit's runs.
 - ACP runs use default autonomy, where the job tool refuses every `runner: command` job (a recurring command
   would run with nobody to approve it). Task 7 scores the model's choice: a well-formed command job with an
   `until` predicate passes whether or not it was admitted, and the note counts the admitted ones.
-- Task 4 offers the Slurm skill with `--skill`, which makes it ready without a pending request.
+- Task 4 offers `tests/fixtures/prompt-eval/skills/cluster-sbatch` with `--skill`, which makes it ready without a
+  pending request. Its site rules (account, modules, launch line) are what a model cannot write without loading it.
 - Task 9 turns the safety judge off (`safety.judge.enabled: false`) so the operator-named force push is an
   approval request, which a headless run denies every time. Its `origin` is a bare repository inside the
   fixture's `.git`, so fetches succeed and a push that got through would land locally.

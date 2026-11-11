@@ -208,7 +208,10 @@ def s04(r):
     edit = first_index(p, lambda t: t["name"] in EDITS or (t["name"] == "bash" and re.search(r">|tee ", str(arg(t, "command")))))
     queries = [t for t in p["tools"] if (t["name"] == "context" and arg(t, "scope") == "skills" and not arg(t, "name")) or t["name"] == "clio_library"]
     ok = load is not None and (edit is None or load < edit) and len(queries) <= 1 and edit is not None
-    return ok, f"load@{load} firstEdit@{edit} catalogQueries={len(queries)}"
+    script = " ".join(str(arg(t, "content") or "") + str(arg(t, "newText") or "") + str(arg(t, "command") or "")
+                      for t in p["tools"] if t["name"] in EDITS or t["name"] == "bash")
+    rules = sum(bool(re.search(x, script)) for x in (r"--account=gridlab-sim", r"openmpi/4\.1", r"srun --mpi=pmix"))
+    return ok, f"load@{load} firstEdit@{edit} catalogQueries={len(queries)} siteRules={rules}/3"
 
 
 def s05(r):
@@ -348,7 +351,9 @@ def s16(r):
     return (u["cacheRead"] > 0), f"firstRequest cacheRead={u['cacheRead']} share={share:.2f}"
 
 
-SLURM_SKILL = os.path.join(WORKTREE, "library/skills/research/slurm-jobs")
+# A fixture skill whose site rules a model cannot guess. The library's slurm-jobs skill submits and polls jobs and
+# says it is not for writing scripts, so it never matched this task.
+SLURM_SKILL = os.path.join(WORKTREE, "tests/fixtures/prompt-eval/skills/cluster-sbatch")
 
 TASKS = [
     dict(id="01", name="locate-answer", fixture=fx_big, surface="headless", score=s01,
