@@ -231,6 +231,16 @@ export function decisionChips(decision: PermissionDecisionFacts | undefined): re
 	];
 }
 
+/** Why this call, of all calls, stopped for the operator; empty when the engine sent no rule. */
+function askedBecause(decision: PermissionDecisionFacts): string {
+	const axis = decision.axis;
+	if (axis === undefined) return "";
+	if (axis.kind === "safety-net") return axis.ruleId.length > 0 ? `safety net: ${axis.ruleId.replace(/-/gu, " ")}` : "";
+	if (axis.kind === "autonomy" && axis.level.length > 0)
+		return `${axis.level} autonomy asks before a call that ${labelled(ACTION_CLASS_LABELS, decision.actionClass)}`;
+	return "";
+}
+
 export interface DecisionRow {
 	readonly term: string;
 	readonly value: string;
@@ -263,6 +273,19 @@ export function decisionRows(decision: PermissionDecisionFacts | undefined): rea
 			? decision.reversibilityCopy
 			: labelled(REVERSIBILITY_LABELS, decision.reversibility),
 	);
+	push("Asked because", askedBecause(decision));
+	const mutation = decision.mutation;
+	if (mutation !== undefined) {
+		const shape =
+			mutation.kind === "write"
+				? `write ${mutation.bytes} B`
+				: `edit ${mutation.replacements} replacement${mutation.replacements === 1 ? "" : "s"} · ${mutation.bytes} B`;
+		push("Mutation", `${shape} · sha256 ${mutation.digest}`);
+	}
+	const task = decision.task;
+	if (task !== undefined && task.text.length > 0) {
+		push("Task", `"${task.text}" · you${task.via !== undefined && task.via.length > 0 ? ` · via ${task.via}` : ""}`);
+	}
 	push("Requested by", decision.requestedByCopy);
 	push("Target", decision.target ?? "");
 	return rows;

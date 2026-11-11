@@ -214,6 +214,45 @@ test("the sentences the agent wrote from the whole command sit under the generic
 	);
 });
 
+test("the card names the rule that asked, the parked write's digest and the recorded task", () => {
+	const rows = decisionRows({
+		...DECISION,
+		axis: { kind: "safety-net", ruleId: "outward-write" },
+		exposure: "local",
+		mutation: { kind: "write", bytes: 482, replacements: 1, digest: "3f9a1c22ee04b7d1" },
+		task: { text: "fix the parser", via: "acp" },
+	});
+	assert.deepEqual(
+		rows.map((row) => [row.term, row.value]),
+		[
+			["Authorization", DECISION.authorizationCopy],
+			["Consequence", DECISION.consequenceCopy],
+			["Reversibility", "reversible only in part"],
+			["Asked because", "safety net: outward write"],
+			["Mutation", "write 482 B · sha256 3f9a1c22ee04b7d1"],
+			["Task", '"fix the parser" · you · via acp'],
+			["Requested by", DECISION.requestedByCopy],
+		],
+	);
+	const autonomy = decisionRows({
+		...DECISION,
+		axis: { kind: "autonomy", level: "default" },
+		mutation: { kind: "edit", bytes: 12, replacements: 2, digest: "00ff00ff00ff00ff" },
+		task: { text: "go" },
+	});
+	assert.equal(
+		autonomy.find((row) => row.term === "Asked because")?.value,
+		"default autonomy asks before a call that writes content",
+	);
+	assert.equal(autonomy.find((row) => row.term === "Mutation")?.value, "edit 2 replacements · 12 B · sha256 00ff00ff00ff00ff");
+	assert.equal(autonomy.find((row) => row.term === "Task")?.value, '"go" · you');
+	// An answer axis and a record from an older engine add no row.
+	for (const record of [{ ...DECISION, axis: { kind: "answer" } as const }, DECISION]) {
+		const terms = decisionRows(record).map((row) => row.term);
+		assert.deepEqual(terms, ["Authorization", "Consequence", "Reversibility", "Requested by"]);
+	}
+});
+
 test("an engine that announced no decision facts still yields a usable card", () => {
 	assert.deepEqual(decisionChips(undefined), []);
 	assert.deepEqual(decisionRows(undefined), []);

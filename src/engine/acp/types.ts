@@ -2431,6 +2431,31 @@ export const AcpPermissionDecisionFactsSchema = Type.Object(
 		target: Type.Optional(Type.String({ maxLength: 512 })),
 		/** What a bash command would do, one sentence per step, written by the agent from the full command. */
 		consequenceLines: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 9 })),
+		/** Which rule held the call: a safety-net rail, the autonomy level, or an answer the operator owes. */
+		axis: Type.Optional(
+			Type.Union([
+				Type.Object({ kind: Type.Literal("safety-net"), ruleId: Type.String({ maxLength: 128 }) }, closed),
+				Type.Object({ kind: Type.Literal("autonomy"), level: Type.String({ maxLength: 128 }) }, closed),
+				Type.Object({ kind: Type.Literal("answer") }, closed),
+			]),
+		),
+		exposure: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("outward")])),
+		/** Size and truncated SHA-256 of a parked write or edit, binding the decision to the exact call. */
+		mutation: Type.Optional(
+			Type.Object(
+				{
+					kind: Type.Union([Type.Literal("write"), Type.Literal("edit")]),
+					bytes: Type.Integer({ minimum: 0 }),
+					replacements: Type.Integer({ minimum: 0 }),
+					digest: Type.String({ pattern: "^[0-9a-f]{1,64}$" }),
+				},
+				closed,
+			),
+		),
+		/** The operator's own last message, read from the session ledger. */
+		task: Type.Optional(
+			Type.Object({ text: Type.String({ maxLength: 512 }), via: Type.Optional(Type.String({ maxLength: 64 })) }, closed),
+		),
 	},
 	closed,
 );
