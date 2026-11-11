@@ -55,11 +55,47 @@ export class StoreRefusal extends Error {
 /** Longest blob-name pattern a listing accepts; patterns come from the model and the CLI. */
 export const STORE_PATTERN_MAX_LENGTH = 256;
 
+/** The quantifier starting at `i`, if any: `*`, `+`, `?` or an open-ended `{n,}` / `{n,m}`. */
+function quantifierAt(pattern: string, i: number): boolean {
+	const ch = pattern[i];
+	if (ch === "*" || ch === "+" || ch === "?") return true;
+	return ch === "{" && /^\{\d+,\d*\}/.test(pattern.slice(i));
+}
+
 /**
- * A quantified group whose body is itself quantified, such as `(a+)+` or `(.*x)*`: the
- * shape that backtracks exponentially on a near-miss name.
+ * True when a quantified group contains a quantifier at any depth, such as `(a+)+`, `((a+))+` or
+ * `(a(b+))*`: the shape that backtracks exponentially on a near-miss name. Escapes and character
+ * classes are skipped, so `[(]a+` is not a group.
  */
-const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[*+]|\{\d+,?\d*\})(?:[^()\\]|\\.)*\)(?:[*+]|\{\d+,?\d*\})/;
+function hasNestedQuantifier(pattern: string): boolean {
+	const open: boolean[] = [];
+	let inClass = false;
+	for (let i = 0; i < pattern.length; i++) {
+		const ch = pattern[i];
+		if (ch === "\\") {
+			i++;
+			continue;
+		}
+		if (inClass) {
+			if (ch === "]") inClass = false;
+			continue;
+		}
+		if (ch === "[") {
+			inClass = true;
+		} else if (ch === "(") {
+			open.push(false);
+			if (pattern[i + 1] === "?") i++;
+		} else if (ch === ")") {
+			const inner = open.pop() ?? false;
+			const quantified = quantifierAt(pattern, i + 1);
+			if (inner && quantified) return true;
+			if ((inner || quantified) && open.length > 0) open[open.length - 1] = true;
+		} else if (quantifierAt(pattern, i) && open.length > 0) {
+			open[open.length - 1] = true;
+		}
+	}
+	return false;
+}
 const BACKREFERENCE = /\\(?:[1-9]|k<)/;
 
 /**
@@ -73,7 +109,7 @@ export function compileBlobPattern(pattern: string): RegExp {
 	if (BACKREFERENCE.test(pattern)) {
 		throw new StoreRefusal("invalid-name", "Invalid blob pattern: backreferences are not allowed");
 	}
-	if (NESTED_QUANTIFIER.test(pattern)) {
+	if (hasNestedQuantifier(pattern)) {
 		throw new StoreRefusal("invalid-name", "Invalid blob pattern: a quantified group may not contain another quantifier");
 	}
 	try {

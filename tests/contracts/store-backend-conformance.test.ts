@@ -111,8 +111,9 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 				hasMore: false,
 			});
 			deepStrictEqual((await backend.listBlobs("t", { pattern: "txt", offset: 0, limit: 10 })).names, []);
+			deepStrictEqual((await backend.listBlobs("t", { pattern: "[(]a+", offset: 0, limit: 10 })).names, []);
 			await rejects(backend.listBlobs("t", { pattern: "(", offset: 0, limit: 1 }), refusedWith("invalid-name"));
-			for (const pattern of ["(a+)+", "(.*x)*", "(a)\\1", "a".repeat(257)]) {
+			for (const pattern of ["(a+)+", "(.*x)*", "((a+))+", "((?:a+)x)*", "(a(b+))+", "(a)\\1", "a".repeat(257)]) {
 				await rejects(backend.listBlobs("t", { pattern, offset: 0, limit: 1 }), refusedWith("invalid-name"));
 			}
 		}));
