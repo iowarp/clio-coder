@@ -47,4 +47,16 @@ describe("safety gate findings", () => {
 			strictEqual(kind({ tool: ToolNames.Read, args: { path: secret } }), "block", secret);
 		}
 	});
+
+	it("the exit-code presence exemption covers only the bare ^NAME= pattern", () => {
+		const bash = (command: string) => kind({ tool: ToolNames.Bash, args: { command } });
+		strictEqual(bash("grep -sq '^API_KEY=' .env"), "allow");
+		for (const oracle of [
+			"grep -q '^API_KEY=sk-a' .env",
+			"grep -q '^API_KEY=s[a-k]' .env",
+			'grep -sq "^API_KEY=.*x" .env',
+		]) {
+			strictEqual(bash(oracle), "block", oracle);
+		}
+	});
 });

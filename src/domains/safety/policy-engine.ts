@@ -1886,7 +1886,9 @@ function isSafePresenceCheck(command: string): boolean {
 	const match = SAFE_PRESENCE_RE.exec(command);
 	if (!match || match[1] === undefined) return false;
 	const pattern = stripQuotes(match[1]);
-	return /^\^[A-Za-z_][A-Za-z0-9_]*=/.test(pattern);
+	// The pattern must end at `=`: anything after it tests the value, and a
+	// sequence of such checks reads the secret one character at a time.
+	return /^\^[A-Za-z_][A-Za-z0-9_]*=$/.test(pattern);
 }
 
 function stripQuotes(token: string): string {
