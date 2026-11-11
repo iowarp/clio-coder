@@ -93,6 +93,7 @@ problem.
 | --- | --- |
 | `memory/records.json` | Reviewed long-term memory; see [evidence-and-memory.md](evidence-and-memory.md) |
 | `evidence/session-<sessionId>/` | Session evidence bundles |
+| `store/projects/<key>/` | The project store behind the `store` tool, keyed by the first 16 hex of the SHA-256 of the main checkout's real path: `tags/<tag>/` with each tag's `blobs/` and records, and `locks/`, the cross-process lock files (`<sha256 prefix>.lock`, created exclusively) that hold one blob or tag record across a write; a lock whose owner died on this host, or older than ten minutes, is taken over ([lock.ts](../../src/domains/store/lock.ts)) |
 | `tools/<id>/<version>/<binary>` | Pinned external programs installed by `clio-coder tools install`, such as `cliamp`. The version is part of the path, so a pin bump installs beside the old copy. |
 
 ### State root: machine-produced state
