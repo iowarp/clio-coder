@@ -939,7 +939,7 @@ test("a worker permit that inherited yolo compiles the yolo worker safety fragme
 	match(yolo.systemPrompt, /inherited the operator's yolo/u);
 	strictEqual(yolo.systemPrompt.includes("other commands require approval"), false);
 	strictEqual(
-		compileWith().fragmentManifest.some((fragment) => fragment.id === "safety.default"),
+		compileWith().fragmentManifest.some((fragment) => fragment.id === "safety.worker-no-shell"),
 		true,
 	);
 });

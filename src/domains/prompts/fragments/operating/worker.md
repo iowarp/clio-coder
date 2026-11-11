@@ -18,5 +18,5 @@ separately from checks the host will run.
 
 There is no scratch directory: `write` and `edit` reach only your writable
 roots, and a sandboxed command's private `/tmp` is discarded when it exits.
-Pass commands to `bash` directly instead of staging helper scripts, and create
+{bash} Pass commands to `bash` directly instead of staging helper scripts, and create
 a workspace file only when the task asks for it.

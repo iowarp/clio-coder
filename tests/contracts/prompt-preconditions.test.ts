@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { compile, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
+import { compile, compileWorker, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
 import { type FragmentTable, type LoadedFragment, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { guidanceForDocs } from "../../src/domains/prompts/runtime-guidance.js";
 
@@ -125,5 +125,59 @@ describe("fragment preconditions in the compiled prompt", () => {
 		const memory = guidanceForDocs("remember this").find((entry) => entry.id === "operating.memory-guidance");
 		ok(memory?.text.includes("tool. `memory_recall` only reads:"), memory?.text);
 		ok(!memory?.text.includes("{memory_recall}"), memory?.text);
+	});
+});
+
+describe("safety text matches the session (S-81)", () => {
+	const table = loadFragments();
+	const session = (sandbox: boolean, headless = false): string =>
+		compile(table, {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.default",
+			sessionInputs: {
+				coordinatorCapabilities: [ToolNames.Bash, ToolNames.Read, ToolNames.Dispatch],
+				providerSupportsTools: true,
+				toolNames: [ToolNames.Bash, ToolNames.Read, ToolNames.Dispatch],
+				sandbox,
+				...(headless ? { headless: true } : {}),
+			},
+		}).systemPrompt;
+
+	it("a sandboxed session reads no recognized-command list", () => {
+		const prompt = session(true);
+		ok(prompt.includes("inside an OS sandbox"), prompt);
+		ok(!/recognized commands run|rev-parse|`sed -n/u.test(prompt), prompt);
+	});
+
+	it("an unsandboxed session reads nothing the sandbox would hide", () => {
+		const prompt = session(false);
+		ok(prompt.includes("This session has no OS sandbox"), prompt);
+		ok(!/are hidden|SSH agent|unsandboxed: true/u.test(prompt), prompt);
+		ok(!session(false, true).includes("/rewind"));
+	});
+
+	it("a worker without a shell reads no command rules", () => {
+		const tools = [
+			ToolNames.CodeNav,
+			ToolNames.Context,
+			ToolNames.Find,
+			ToolNames.Gateway,
+			ToolNames.Grep,
+			ToolNames.Ls,
+			ToolNames.Read,
+		];
+		const prompt = compileWorker(table, {
+			persona: { id: "persona.scout", relPath: "scout.md", body: "Scout persona.", contentHash: "p", dynamic: false },
+			providerSupportsTools: true,
+			toolNames: tools,
+			toolPromptHints: [],
+			hasCanonicalContext: true,
+			hasBoundSkills: false,
+			readOnly: true,
+			onPermission: "deny",
+		}).systemPrompt;
+		ok(prompt.includes("You run no commands"), prompt);
+		ok(!/\bbash\b|unsandboxed|\/rewind|main session/iu.test(prompt), prompt);
 	});
 });

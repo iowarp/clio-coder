@@ -297,30 +297,36 @@ export const SESSION_APPROVAL_SEMANTICS =
 export const HEADLESS_SESSION_APPROVAL_SEMANTICS =
 	"No operator is attached to this headless run, so approval-required calls are denied instead of pausing; use recognized commands and typed checks, and report what could not run.";
 
+/**
+ * The posture id `safety.default` names no fragment of its own: it resolves
+ * to the body true for the session's shell, sandboxed or not (S-81).
+ */
+const SAFETY_DEFAULT_ID = "safety.default";
+
+function defaultSafetyId(sandbox: boolean): string {
+	return sandbox ? "safety.default-sandboxed" : "safety.default-unsandboxed";
+}
+
 /** The safety fragment for a level: yolo has one body per confinement under the one `safety.yolo` posture. */
 function safetyFragmentFor(
 	table: FragmentTable,
 	level: string,
 	confinement: YoloConfinement | undefined,
+	sandbox: boolean,
 ): LoadedFragment {
-	return level === "yolo" && confinement === "unconfined"
-		? lookupFragment(table, "safety.yolo-unconfined", "safety")
-		: lookupFragment(table, `safety.${level}`, "safety");
+	if (level === "yolo" && confinement === "unconfined") return lookupFragment(table, "safety.yolo-unconfined", "safety");
+	if (level === "default") return lookupFragment(table, defaultSafetyId(sandbox), "safety");
+	return lookupFragment(table, `safety.${level}`, "safety");
 }
 
 /**
- * Safety text true for the session that reads it. A headless run has no
- * /rewind and no ask_user, so those clauses leave the body; an attended yolo
+ * Safety text true for the session that reads it. Row conditions already
+ * dropped what a headless run lacks (/rewind, ask_user); an attended yolo
  * session with ask_user attached has an operator who may answer, so the
  * "nobody will answer" sentences become what holds there (S-89).
  */
 function sessionSafetyBody(body: string, headless: boolean, askUserAttached: boolean): string {
-	if (headless) {
-		return body
-			.replace(/,\s+and the operator can undo them with \/rewind;/u, ";")
-			.replace(/an ask_user gate marked exposure=outward,\s+/u, "");
-	}
-	if (!askUserAttached) return body;
+	if (headless || !askUserAttached) return body;
 	return body
 		.replace(/ and is away by contract: nothing waits for them\./u, ": nothing waits for their approval.")
 		.replace(/ and is away by contract\./u, ".")
@@ -349,7 +355,9 @@ function renderSafetySection(
 /** A host policy transition replaces every posture-dependent clause together (#423). */
 export function renderSessionPostureUpdate(table: FragmentTable, level: string, inputs: SessionPromptInputs): string {
 	if (!isAutonomyLevel(level)) throw new Error("Invalid session posture");
-	const safety = safetyFragmentFor(table, level, inputs.yoloConfinement);
+	const facts = sessionFacts(inputs, level);
+	const picked = safetyFragmentFor(table, level, inputs.yoloConfinement, facts.sandbox);
+	const safety = { ...picked, body: renderRowConditions(picked.body, facts) };
 	const contract = renderToolContractBlock(inputs, level);
 	const hasEnding = contract.includes("## Ending a turn");
 	return [
@@ -797,6 +805,9 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 	].join("\n");
 }
 
+/** The worker tools that run commands; a worker with none reads no command rules. */
+const WORKER_COMMAND_TOOLS: ReadonlySet<string> = new Set(["bash", "run_script", "verify"]);
+
 function canonicalWorkerTools(inputs: WorkerPromptInputs): string[] {
 	return [...new Set(inputs.toolNames.map((name) => name.trim()).filter((name) => name.length > 0))].sort();
 }
@@ -1049,17 +1060,26 @@ export const PROMPT_SECTION_LAYER: Readonly<Record<string, PromptSectionLayer>> 
  * states the volatility rule that fixes it.
  */
 export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSessionPrompt {
-	const posture = lookupFragment(table, inputs.safety, "safety");
-	const autonomyLevel = posture.id.startsWith("safety.") ? posture.id.slice("safety.".length) : posture.id;
+	const posture = inputs.safety === SAFETY_DEFAULT_ID ? undefined : lookupFragment(table, inputs.safety, "safety");
+	const autonomyLevel =
+		posture === undefined
+			? "default"
+			: posture.id.startsWith("safety.")
+				? posture.id.slice("safety.".length)
+				: posture.id;
 	const session = inputs.sessionInputs;
 	const picker = new FragmentPicker(table, sessionFacts(session, autonomyLevel));
 	const identity = picker.require(inputs.identity, "identity");
 	const operatingContract = picker.require(inputs.operatingContract, "operating contract");
-	const safety = picker.render(
-		autonomyLevel === "yolo" && session.yoloConfinement === "unconfined"
-			? safetyFragmentFor(table, autonomyLevel, session.yoloConfinement)
-			: posture,
-	);
+	const safety =
+		posture === undefined
+			? (picker.pick(defaultSafetyId(session.sandbox === true)) ??
+				picker.require(defaultSafetyId(session.sandbox === true), "safety"))
+			: picker.render(
+					autonomyLevel === "yolo" && session.yoloConfinement === "unconfined"
+						? safetyFragmentFor(table, autonomyLevel, session.yoloConfinement, session.sandbox === true)
+						: posture,
+				);
 
 	const parts: string[] = [];
 	const sections: PromptSection[] = [];
@@ -1315,11 +1335,14 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	const decisions = picker.pick("operating.decisions");
 	// A worker is steered through @<agent>; the same guidance on several messages at one slot applies.
 	const steering = inputs.liveSteering === false ? undefined : picker.pick("operating.steering");
-	// A worker that inherited the operator's yolo reads what it may do under it (#407).
+	// A worker that inherited the operator's yolo reads what it may do under it (#407);
+	// otherwise only a worker that runs commands reads what its commands may do (S-81).
 	const safety =
 		inputs.permit?.allowance.executeAutonomy === "yolo"
 			? picker.require("safety.yolo-worker", "safety")
-			: picker.require("safety.default", "safety");
+			: canonicalWorkerTools(inputs).some((tool) => WORKER_COMMAND_TOOLS.has(tool))
+				? picker.require("safety.worker", "safety")
+				: picker.require("safety.worker-no-shell", "safety");
 	const readOnly = inputs.readOnly === true ? picker.require("dispatch.read-only", "read-only restriction") : undefined;
 
 	const parts: string[] = [];
