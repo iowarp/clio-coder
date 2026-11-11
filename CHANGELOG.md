@@ -272,7 +272,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Windows opened by `clio-coder gui` or reopened with a remembered credential no longer land on "Open your launch link", and the Reconnect field accepts the `#ticket=` link `clio-coder gui` prints.
 - The approval card shows why a call stopped (the safety-net rule or the autonomy level), the size and sha256 digest of a parked write or edit, and the recorded task, matching the terminal card.
 - The machine proxy refuses credential routes however the path is encoded, and a malformed percent-encoded path returns 400 instead of 500.
-- When the open desktop window belongs to a server that restarted, `clio-coder gui` opens a fresh window instead of focusing the dead one.
+- When the open desktop window belongs to a server that restarted, `clio-coder gui` opens a fresh window instead of focusing the dead one. That dead window retitles itself so a later relaunch never raises it; on WSL a relaunch that names a page shows it in the live window instead of replacing the window, and the launcher scripts update themselves on launch after an upgrade.
 
 ### Context and compaction
 
@@ -321,7 +321,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Resuming a long session reads its ledger one fewer time.
 - Very large tool results render faster: only the shown prefix is sanitized.
 - A long live turn no longer re-lays out its finished text and tools on every streamed update: the settled head of the turn renders once per width and style.
+- A streamed answer with headings, code fences or rules but no blank lines settles at those boundaries, so a long answer no longer re-lexes its whole text on every update; the fleet and board tickers sleep while nothing is live.
 - On the openai-codex route the main prompt's pinned layer goes out as its own instructions block and the rest of the system prompt as the first input item, so a change below the pinned layer (a handbook edit, a new turn context) no longer re-bills the whole prompt: measured on a changed tail with the real tool set, the cached share went from 0% to 73%. Workers and other routes keep their request shape.
+- Clio Coder draws its first frame before it recovers restart worktrees and abandoned runs, and dispatch waits until that recovery has finished: with one or two leased workers left from a previous session, startup to loaded domains went from about 1.0 s and 1.9 s to about 0.27 s and 0.21 s.
 
 ### Telemetry
 
@@ -341,7 +343,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder uninstall --inactive` removes an installer root left behind after moving to another install method, and refuses while a session, receipt or graphical service still starts from it. `doctor` names such a root with its size and `paths` marks it as not running from here.
 - `doctor`, `paths` and `upgrade` say what an install follows or is pinned to, and how to release a pin.
 - Uninstall stops Clio Coder's private pane hosts, removes the exact PATH block `install.sh` added (kept while other programs share its directory), runs `npm uninstall` for an npm install (`--keep-package` keeps it), and closes with what was removed and what was kept, and why.
-- Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version.
+- Post-install moves the graphical background service to the active installation, and package-manager `upgrade --rollback` names the exact previous version. `clio-coder upgrade` restarts an idle background app once instead of two or three times.
 - `reset` and `uninstall` remove the data and cache directories of a `CLIO_CODER_HOME` home an earlier version created, instead of keeping them and exiting 1.
 - `clio-coder uninstall` and `reset` no longer delete a root they cannot prove is Clio Coder's own (for example `CLIO_CODER_CONFIG_DIR=~/.config`); it is kept and named, and `CLIO_CODER_HOME` set to the home directory is refused.
 - A new HPC clusters guide covers installing on a login node (old Node.js or glibc, a proxy, no internet) and connecting a model from there.
