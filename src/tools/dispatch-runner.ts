@@ -2182,7 +2182,11 @@ async function runCouncil(
 				consumeGateSensitiveDispatchEvents(deps, handle.runId, request.agentId, handle.events),
 				handle.finalPromise,
 			]);
-			return completeRun(deps, receipt, summary, undefined, request);
+			const completed = completeRun(deps, receipt, summary, undefined, request);
+			// A deadline that fires while a finished member winds down did not cut it off.
+			if (request.council !== undefined && !isPipelineStepFailure(completed.receipt))
+				timedOut.delete(request.council.label);
+			return completed;
 		} finally {
 			if (timer !== undefined) clearTimeout(timer);
 			signal?.removeEventListener("abort", abort);

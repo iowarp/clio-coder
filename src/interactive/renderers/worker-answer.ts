@@ -255,7 +255,10 @@ export function councilSynthesisLines(report: CouncilReport): string[] {
 
 /** What a council that only collected says in place of an answer of its own. */
 export function councilCollectedWords(report: CouncilReport): string {
-	return `${report.members.length} answers, no synthesis asked for`;
+	const answered = report.members.filter((member) => member.failed === undefined).length;
+	const timedOut = report.partial?.timedOut ?? [];
+	const partial = timedOut.length > 0 ? `partial, ${timedOut.join(", ")} past the deadline; ` : "";
+	return `${partial}${answered} ${answered === 1 ? "answer" : "answers"}, no synthesis asked for`;
 }
 
 /** A council's sealed report in words: the synthesis, then each member's gist under its label. */
