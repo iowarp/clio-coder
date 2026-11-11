@@ -1635,12 +1635,12 @@ describe("production compaction controls", () => {
 			role: i % 2 === 0 ? "user" : "assistant",
 			payload: { text: `exchange ${i} `.repeat(400) },
 		}));
-		const port = (cost: number, reply: "text" | "tool") => {
+		const port = (cost: number, reply: "text" | "tool", tailTokens = 1000) => {
 			const tails: string[] = [];
 			const live: LivePrefixSummary = {
 				model: { id: model.id, provider: model.provider },
 				inputCost: () => cost,
-				inputTokens: () => 1000,
+				inputTokens: () => tailTokens,
 				stream: (tail) => {
 					tails.push(tail);
 					const events = createAssistantMessageEventStream();
@@ -1708,6 +1708,14 @@ describe("production compaction controls", () => {
 		strictEqual(offered.tails.length, 0);
 		strictEqual(used, 1);
 		strictEqual(portableCalls, 3);
+
+		// A tail that leaves room for 1024 output tokens but not the real summary reservation
+		// is refused, so the budgeted portable request runs instead.
+		const sized = { ...model, contextWindow: 131072, maxTokens: 16384, reasoning: false };
+		const crowded = port(1, "text", 131072 - 2000);
+		await run(crowded.livePrefix, { model: sized });
+		strictEqual(crowded.tails.length, 0);
+		strictEqual(portableCalls, 4);
 	});
 });
 

@@ -1509,7 +1509,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		);
 		const cost = port.inputCost(tail);
 		const window = input.model.contextWindow;
-		const fits = !(window > 0) || port.inputTokens(tail) + Math.min(maxTokens ?? 1024, 1024) <= window;
+		const fits = !(window > 0) || port.inputTokens(tail) + (maxTokens ?? summaryRoom) <= window;
 		if (observationTracing())
 			traceObservation("compaction-route", {
 				portable,
