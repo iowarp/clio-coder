@@ -71,7 +71,9 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 	// untrusted file would never apply, and an edit to a trusted one must carry
 	// the trust forward or the whole project layer drops out on the next read.
 	const trustBefore = scope === "project" ? captureProjectSurface(deps.cwd, "settings") : null;
-	if (trustBefore && trustBefore.verdict !== "trusted") {
+	// A project with neither settings file has nothing to review; the re-pin after the save trusts what the operator wrote.
+	const bothAbsent = trustBefore?.files.every((file) => file.text === null && file.error === undefined) === true;
+	if (trustBefore && trustBefore.verdict !== "trusted" && !bothAbsent) {
 		deps.notice(
 			"warning",
 			`Project settings are ${trustBefore.verdict} here, so an edit would not apply. Review them with clio-coder config trust settings first.`,

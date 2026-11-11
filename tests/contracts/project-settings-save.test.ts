@@ -221,3 +221,24 @@ test("a trusted project layer cannot turn the census on or choose its endpoint",
 	}
 });
 
+test("Edit settings file creates the project settings file when the project has none", async () => {
+	const { editSettingsFile } = await import("../../src/interactive/settings-file-edit.js");
+	const home = await isolateClioEnv("clio-project-edit-new-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(workspace, { recursive: true });
+		const notices: string[] = [];
+		editSettingsFile("project", {
+			cwd: workspace,
+			suspendTerminal: (run) => run(),
+			notice: (level, line) => notices.push(`${level}: ${line}`),
+			resolveEditor: () => "editor",
+			editExternally: () => ({ ok: true, text: "interface:\n  smoothStreaming: off" }),
+		});
+		match(notices.at(-1) ?? "", /^success: Saved/);
+		strictEqual(captureProjectSurface(workspace, "settings").verdict, "trusted");
+		strictEqual(readLayeredSettings(workspace).settings.interface.smoothStreaming, "off");
+	} finally {
+		home.restore();
+	}
+});
