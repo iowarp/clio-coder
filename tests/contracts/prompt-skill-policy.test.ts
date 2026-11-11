@@ -18,6 +18,8 @@ import { compile, compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
+import { createLocalStoreBackend } from "../../src/domains/store/backends/local.js";
+import { workspaceCapabilitySignals } from "../../src/domains/store/workspace-signal.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { mainPromptCacheIdentity } from "../../src/session-control/prompt-cache-identity.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
@@ -250,4 +252,50 @@ it("names a gateway capability only for a strong match, and Clio's own only for 
 	}
 	assert.match(note("How do I add a second target to Clio?"), /\[Capabilities\] Likely useful: [^.]*\bclio_docs\b/u);
 	assert.match(note("Summarize the columns of data/run.parquet"), /\[Capabilities\] Likely useful: data\b/u);
+});
+
+it("names store and data on a data question once the project store holds a tag, and keeps the floor for the rest", async (t) => {
+	const env = await isolateClioEnv("clio-coder-capability-store-");
+	t.after(() => env.restore());
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: env.dir }) });
+	registerAllTools(registry, { mcpCapabilities: false });
+	const candidates = registry.listGateway().map((spec) => ({ id: spec.name, description: spec.description }));
+	const gate = createCapabilityGate();
+	const note = (task: string): string => {
+		const reminder = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 0,
+			rankCapabilities: (text) =>
+				gate.rank({
+					kind: "capabilities",
+					task: text,
+					limit: 3,
+					candidates,
+					signalled: workspaceCapabilitySignals(env.dir),
+				}),
+		});
+		const effects = reminder.evaluate({ hook: "turn_start", text: task, metadata: { conversationMessages: 0 } });
+		return effects.map((effect) => ("message" in effect ? effect.message : "")).join("\n");
+	};
+	const named = (task: string): string[] =>
+		/\[Capabilities\] Likely useful: ([^.]*)\./u.exec(note(task))?.[1]?.split(", ") ?? [];
+	const question = "What variables are in the simulation output?";
+	const unrelated = "Read README.md and tell me what the test command is.";
+	assert.deepEqual(workspaceCapabilitySignals(env.dir), []);
+	assert.ok(!named(question).includes("store") && !named(question).includes("data"), "no tag, no store signal");
+	assert.doesNotMatch(note(question), /store holds/u);
+
+	await createLocalStoreBackend(env.dir).getOrCreateTag("sim");
+	assert.deepEqual(workspaceCapabilitySignals(env.dir), [ToolNames.Store, ToolNames.Data]);
+	assert.deepEqual(
+		named(question)
+			.filter((id) => id === "store" || id === "data")
+			.sort(),
+		["data", "store"],
+	);
+	assert.match(note(question), /This project's store holds tagged data; store op=tags lists it\./u);
+	assert.deepEqual(
+		named(unrelated).filter((id) => id !== "store" && id !== "data"),
+		[],
+		"the tag names store and data, not anything below the floor",
+	);
 });

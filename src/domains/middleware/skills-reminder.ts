@@ -1,4 +1,5 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
+import { ToolNames } from "../../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import { type CapabilityMatch, capabilityWorthNaming } from "./capability-gate.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
@@ -82,11 +83,14 @@ function rankedSkillsReminder(
 						: `Suggest \`${SKILL_SUGGESTION_ANCHOR}\` with the chosen name, then continue without waiting; only the operator loads a skill.`,
 				];
 	const names = capabilities.slice(0, 3).map((match) => match.id);
+	const store = capabilities.slice(0, 3).some((match) => match.workspaceSignal && match.id === ToolNames.Store)
+		? " This project's store holds tagged data; store op=tags lists it."
+		: "";
 	return [
 		...skills,
 		...(names.length > 0
 			? [
-					`[Capabilities] Likely useful: ${names.join(", ")}. Use gateway(op="call", capability="<name>", args={...}) when needed; admission still applies.`,
+					`[Capabilities] Likely useful: ${names.join(", ")}.${store} Use gateway(op="call", capability="<name>", args={...}) when needed; admission still applies.`,
 				]
 			: []),
 	].join("\n");

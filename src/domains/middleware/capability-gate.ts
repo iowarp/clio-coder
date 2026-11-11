@@ -12,12 +12,16 @@ export interface CapabilityRequest {
 	readonly workspace?: string;
 	readonly candidates: ReadonlyArray<CapabilityCandidate>;
 	readonly limit?: number;
+	/** Candidate ids the workspace itself points at; they are kept and named whatever the task's words. */
+	readonly signalled?: ReadonlyArray<string>;
 }
 
 export interface CapabilityMatch extends CapabilityCandidate {
 	readonly score: number;
 	/** Task score as a fraction of the best any candidate could reach for this query, 0..1. */
 	readonly coverage?: number;
+	/** Kept because the workspace points at it, not for the task's words. */
+	readonly workspaceSignal?: true;
 }
 
 export interface CapabilityGate {
@@ -37,6 +41,7 @@ const CLIO_SCOPE = /\b(?:clio(?:[\s-]coder)?|settings?|targets?|fleet|skills?|pl
  * fleet, skills or playbooks; a workspace question never routes to them.
  */
 export function capabilityWorthNaming(match: CapabilityMatch, task: string): boolean {
+	if (match.workspaceSignal && !CLIO_SCOPED_CAPABILITIES.has(match.id)) return true;
 	if ((match.coverage ?? 0) < REMINDER_MIN_COVERAGE) return false;
 	return !CLIO_SCOPED_CAPABILITIES.has(match.id) || CLIO_SCOPE.test(task);
 }
@@ -110,11 +115,23 @@ export function createCapabilityGate(): CapabilityGate {
 			const lexical = rankCapabilitiesLexically(request, history.get(request.kind));
 			const limit = Math.max(0, Math.min(10, request.limit ?? 5));
 			const best = lexical[0]?.score ?? 0;
-			return lexical
+			const ranked = lexical
 				.filter((hit) => hit.score >= best * 0.22)
 				.map((hit) => ({ ...hit, score: hit.score / Math.max(1, best) }))
-				.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-				.slice(0, limit);
+				.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+			const signalled = new Set(request.signalled ?? []);
+			if (signalled.size === 0) return ranked.slice(0, limit);
+			// A signalled candidate keeps its own rank when the task reached it and holds a place within the limit when not.
+			const kept = request.candidates
+				.filter((candidate) => signalled.has(candidate.id))
+				.slice(0, limit)
+				.map((candidate): CapabilityMatch => {
+					const hit = ranked.find((match) => match.id === candidate.id);
+					return { ...(hit ?? { ...candidate, score: 0, coverage: 0 }), workspaceSignal: true };
+				});
+			return [...ranked.filter((hit) => !signalled.has(hit.id)).slice(0, limit - kept.length), ...kept].sort(
+				(a, b) => b.score - a.score || a.id.localeCompare(b.id),
+			);
 		},
 	};
 }

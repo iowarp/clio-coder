@@ -282,6 +282,7 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { latestUserImages } from "../domains/session/vision-images.js";
 import { probeWorkspaceAsync } from "../domains/session/workspace/index.js";
 import { archiveCommandHost, ShareDomainModule } from "../domains/share/index.js";
+import { workspaceCapabilitySignals } from "../domains/store/workspace-signal.js";
 import type { SystemOneInstance } from "../domains/system-one/index.js";
 import { createSystemOne, parseRouteList } from "../domains/system-one/index.js";
 import { createTelemetryDomain, READ_MODEL_FOLD } from "../domains/telemetry/index.js";
@@ -1752,6 +1753,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					.listGateway()
 					.filter((spec) => surface.has(spec.name) && surfaceSpecPlacement(spec, surface) === "gateway")
 					.map((spec) => ({ id: spec.name, description: spec.description })),
+				signalled: workspaceCapabilitySignals(process.cwd()),
 			});
 		};
 		const rankReminderSkills = (task: string): ReadonlyArray<CapabilityMatch> => {
