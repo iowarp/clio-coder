@@ -11,6 +11,7 @@ reaches stdout; logs go to stderr.
 import argparse
 import base64
 import errno
+import hashlib
 import json
 import os
 import re
@@ -483,6 +484,7 @@ class Core:
         # truncated blob behind (M-40 F18). The rename replaces the old blob in one step.
         parent, leaf = path.rsplit("/", 1)
         temp = f"{parent}/.{leaf}{PUT_TEMP_SUFFIX}{os.urandom(6).hex()}"
+        digest = hashlib.sha256()
         with source:
             self.make_parents(fs, path)
             fd = fs.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
@@ -494,6 +496,7 @@ class Core:
                         chunk = source.read(STEP_BYTES)
                         if not chunk:
                             break
+                        digest.update(chunk)
                         written = 0
                         while written < len(chunk):
                             count = fs.pwrite(fd, chunk[written:] if written else chunk, offset + written)
@@ -512,6 +515,11 @@ class Core:
                     except OSError:
                         if done:
                             raise
+                # This put's own stat, on its private temp name: once renamed, the blob's name may already
+                # hold a concurrent put's bytes.
+                stat = self.blob_stat(fs, temp)
+                if stat is None:
+                    raise Refusal("io", f"{temp} is missing right after it was written.")
                 fs.rename(temp, path)
             except BaseException:
                 try:
@@ -519,10 +527,7 @@ class Core:
                 except OSError:
                     pass  # Best effort: listings hide the temp name either way.
                 raise
-        stat = self.blob_stat(fs, path)
-        if stat is None:
-            raise Refusal("io", f"{path} is missing right after its put.")
-        return stat
+        return {"bytes": offset, "modifiedMs": stat["modifiedMs"], "version": None, "sha256": digest.hexdigest()}
 
     def get_blob_as_path(self, args, progress):
         fs = self.need_fs()

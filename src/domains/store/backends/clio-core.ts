@@ -16,7 +16,7 @@ import {
 import { clioCachePath } from "../../../core/xdg.js";
 import type { StoreBackend } from "../backend.js";
 import type { CoreHost } from "../core-host/supervisor.js";
-import { type StoreBackendFacts, type StoreBlobStat, StoreRefusal } from "../types.js";
+import { type StoreBackendFacts, type StoreBlobPut, type StoreBlobStat, StoreRefusal } from "../types.js";
 
 /** The top of the CTE chain (filesystem 560 over cache 563); the default client binds the bottom, 512.0. */
 export const CLIO_CORE_CHAIN_TOP_POOL = "563.0";
@@ -31,6 +31,7 @@ const RECORD_NAME = /^(.+)#\d{8}$/u;
 const PUT_TEMP = /(?:^|\/)\.[^/]+#put-[0-9a-f]{12}$/u;
 /** `materialize`'s download directory beside the cached copies. */
 const GET_TEMP = /^\.get-\d+-[0-9a-f]{12}$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
 export interface ClioCoreStoreOptions {
 	/** Pool the host must address; `startCoreHost` was launched with it. Defaults to the chain top. */
@@ -285,7 +286,7 @@ export async function createClioCoreStoreBackend(
 		getTagXattrs: (tag) => guarded(async () => (await host.call("getTagXattrs", { tag: physical(tag) })).xattrs),
 
 		putBlobFromFile: (tag, blob, source, signal) =>
-			guarded(async () => {
+			guarded(async (): Promise<StoreBlobPut> => {
 				const tagName = physical(tag);
 				checkBlob(tag, blob);
 				writable();
@@ -307,8 +308,16 @@ export async function createClioCoreStoreBackend(
 					{ tag: tagName, blob, source: path.resolve(source) },
 					{ bytes: info.size, ...(signal !== undefined ? { signal } : {}) },
 				);
+				if (typeof put.sha256 !== "string" || !SHA256_HEX.test(put.sha256))
+					throw new StoreRefusal("io", `The clio-core host stored ${tag}:${blob} without reporting its sha256.`);
 				if (options.mount === undefined) await refreshCached(tag, blob, signal);
-				return put;
+				return {
+					bytes: put.bytes,
+					modifiedMs: put.modifiedMs,
+					version: put.version,
+					sha256: put.sha256,
+					key: `/${tagName}/${blob}`,
+				};
 			}),
 
 		getBlobAsPath: (tag, blob, signal) =>

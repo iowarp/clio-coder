@@ -5,6 +5,7 @@ export { type ClioCoreStoreOptions, createClioCoreStoreBackend } from "./backend
 export type {
 	StoreBackendFacts,
 	StoreBackendKind,
+	StoreBlobPut,
 	StoreBlobStat,
 	StoreRefusalReason,
 	StoreTagClass,

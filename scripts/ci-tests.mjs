@@ -145,6 +145,7 @@ export const coreTests = [
 	"report-dataset",
 	"typecheck-corpus",
 	"anthropic-thread-idle",
+	"store-put-identity",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

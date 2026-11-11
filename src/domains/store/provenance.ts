@@ -8,6 +8,7 @@ import path from "node:path";
 import {
 	type HashObservation,
 	isRunId,
+	RUN_FILE_HASH_MAX_BYTES,
 	type RunManifest,
 	readRunManifest,
 	runRecordsDir,
@@ -22,7 +23,7 @@ import {
 	type StoreRecordBody,
 	type StoreRecordUse,
 } from "./records.js";
-import { type StoreBlobStat, StoreRefusal } from "./types.js";
+import { type StoreBlobPut, type StoreBlobStat, StoreRefusal } from "./types.js";
 
 const PRODUCING_RUN_SCAN_LIMIT = 100;
 
@@ -87,6 +88,15 @@ async function usedFrom(
 	return used;
 }
 
+/**
+ * The hash a put record holds: the sha256 the put computed over the bytes it
+ * streamed. Above the run-record hash ceiling it is omitted, as for any other
+ * observed file, so `store verify` does not hash such blobs unless asked.
+ */
+export function putHashObservation(stored: StoreBlobPut): HashObservation {
+	return stored.bytes > RUN_FILE_HASH_MAX_BYTES ? { sha256: null, hashOmitted: "too-large" } : { sha256: stored.sha256 };
+}
+
 export interface PutRecordInput {
 	backend: StoreBackend;
 	cwd: string;
@@ -94,9 +104,9 @@ export interface PutRecordInput {
 	blob: string;
 	/** The workspace file the blob was put from. */
 	sourceAbs: string;
-	/** The stored blob after the put. */
+	/** The put's own stat of the bytes it stored, never a later read of the blob's name. */
 	stat: StoreBlobStat;
-	/** Hash of the source, which holds the same bytes as the blob. */
+	/** Hash of the bytes the put stored (putHashObservation). */
 	hash: HashObservation;
 	receipt: NonNullable<StoreRecord["receipt"]>;
 	actor: "main" | "worker";

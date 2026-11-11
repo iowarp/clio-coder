@@ -1,4 +1,4 @@
-import type { StoreBackendFacts, StoreBlobStat, StoreRefusalReason } from "../types.js";
+import type { StoreBackendFacts, StoreBlobPut, StoreBlobStat, StoreRefusalReason } from "../types.js";
 
 /**
  * The core host protocol: the parent and a child process that holds the
@@ -27,7 +27,8 @@ export interface CoreHostOps {
 	delTag: { args: { tag: string }; result: Record<string, never> };
 	setTagXattr: { args: { tag: string; key: string; value: string }; result: Record<string, never> };
 	getTagXattrs: { args: { tag: string }; result: { xattrs: Record<string, string> } };
-	putBlobFromFile: { args: { tag: string; blob: string; source: string }; result: StoreBlobStat };
+	/** The size and sha256 of the bytes the host streamed, and the stat of its temp copy before the rename. */
+	putBlobFromFile: { args: { tag: string; blob: string; source: string }; result: Omit<StoreBlobPut, "key"> };
 	getBlobAsPath: { args: { tag: string; blob: string; destDir: string }; result: { path: string; copied: boolean } };
 	putRecordIfAbsent: { args: { tag: string; blob: string; data: string }; result: { outcome: "written" | "exists" } };
 	getRecord: { args: { tag: string; blob: string }; result: { data: string | null } };

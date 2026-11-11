@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream, type Dirent } from "node:fs";
 import {
 	chmod,
@@ -37,7 +37,7 @@ import { clioCachePath, clioDataDir } from "../../../core/xdg.js";
 import { withFileMutationQueue } from "../../../tools/file-mutation-queue.js";
 import type { StoreBackend } from "../backend.js";
 import { withStoreLock } from "../lock.js";
-import { type StoreBackendFacts, type StoreBlobStat, StoreRefusal } from "../types.js";
+import { type StoreBackendFacts, type StoreBlobPut, StoreRefusal } from "../types.js";
 
 const XATTR_KEY_MAX_BYTES = 255;
 const XATTR_VALUE_MAX_BYTES = 64 * 1024;
@@ -360,7 +360,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 		getTagXattrs: (tag) => guarded(async () => ({ ...(await readTagFile(tag)).xattrs })),
 
 		putBlobFromFile: (tag, blob, source, signal) =>
-			guarded(async (): Promise<StoreBlobStat> => {
+			guarded(async (): Promise<StoreBlobPut> => {
 				await requireTag(tag);
 				const target = await blobTarget(tag, blob);
 				let sourceInfo: Awaited<ReturnType<typeof stat>>;
@@ -377,14 +377,26 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				// A link may have been planted between the check and mkdir; judge the path again.
 				await blobTarget(tag, blob);
 				const temp = tempSibling(target);
+				const hash = createHash("sha256");
+				let bytes = 0;
+				let modifiedMs: number;
 				try {
 					await pipeline(
 						createReadStream(source),
+						async function* (chunks: AsyncIterable<Buffer>) {
+							for await (const chunk of chunks) {
+								hash.update(chunk);
+								bytes += chunk.byteLength;
+								yield chunk;
+							}
+						},
 						createWriteStream(temp, { flags: "wx", mode: 0o600 }),
 						...(signal !== undefined ? [{ signal }] : []),
 					);
 					await fsyncFile(temp);
 					if (signal?.aborted) throw new StoreRefusal("io", `The put of ${blob} into ${tag} was aborted.`);
+					// Stat this put's own temp: once renamed, the name may already hold a concurrent put's bytes.
+					modifiedMs = (await lstat(temp)).mtimeMs;
 					await rename(temp, target);
 				} catch (error) {
 					await rm(temp, { force: true });
@@ -392,8 +404,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 					throw error;
 				}
 				await fsyncDirectoryAsync(path.dirname(target));
-				const info = await lstat(target);
-				return { bytes: info.size, modifiedMs: info.mtimeMs, version: null };
+				return { bytes, modifiedMs, version: null, sha256: hash.digest("hex"), key: target };
 			}),
 
 		getBlobAsPath: (tag, blob) =>

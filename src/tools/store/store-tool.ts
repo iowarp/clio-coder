@@ -11,7 +11,7 @@ import {
 	type StoreTagClass,
 	withStoreLock,
 } from "../../domains/store/index.js";
-import { buildPutRecord } from "../../domains/store/provenance.js";
+import { buildPutRecord, putHashObservation } from "../../domains/store/provenance.js";
 import {
 	appendRecord,
 	currentState,
@@ -173,15 +173,23 @@ async function backendSummary(backend: StoreBackend): Promise<{ kind: string; ti
 	};
 }
 
-/** The `stat` shape: what Clio recorded and whether the bytes still match it. No path: `get` produces one. */
+/**
+ * The `stat` shape: what Clio recorded and whether the bytes still match it. No path: `get` produces one.
+ * A put passes the record it just wrote and the backend summary it took first, so nothing is read after it.
+ */
 async function statShape(
 	backend: StoreBackend,
 	tag: string,
 	blob: string,
 	stat: StoreBlobStat | null,
-	options: { verifyHash?: boolean; signal?: AbortSignal | undefined } = {},
+	options: {
+		verifyHash?: boolean;
+		signal?: AbortSignal | undefined;
+		state?: ReturnType<typeof currentState>;
+		backend?: Awaited<ReturnType<typeof backendSummary>>;
+	} = {},
 ) {
-	const state = currentState((await readBlobHistory(backend, tag, blob)).records);
+	const state = options.state ?? currentState((await readBlobHistory(backend, tag, blob)).records);
 	const put = state.put;
 	let drift = driftOf(put, stat);
 	// Size and mtime can match bytes that changed (an mtime restored by touch -r or a copy tool),
@@ -212,7 +220,7 @@ async function statShape(
 		})),
 		receipt: put?.receipt ?? null,
 		...(state.removed ? { removed: true } : {}),
-		backend: await backendSummary(backend),
+		backend: options.backend ?? (await backendSummary(backend)),
 	};
 }
 
@@ -343,8 +351,9 @@ async function runOp(
 		const blob = checkBlob(typeof args.blob === "string" && args.blob.length > 0 ? args.blob : source.name);
 		await requireTag(backend, tag);
 		const derived = await derivedRefs(backend, stringList(args.derived_from));
+		const summary = await backendSummary(backend);
 		let replaced = false;
-		const stored = await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
+		const { stored, record } = await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
 			replaced = (await backend.statBlob(tag, blob)) !== null;
 			// Admission stats another backend's blob beforehand (storeAdmissionFacts); a replace it did not
 			// see, such as a blob created since, goes through remove, which is admitted as destructive.
@@ -354,24 +363,23 @@ async function runOp(
 						`remove ${tag}:${blob} first, then put again.`,
 				);
 			const written = await backend.putBlobFromFile(tag, blob, source.abs, signal);
+			// The record names what this put streamed; the blob is never re-read, as a concurrent writer may own it.
 			try {
-				const { path: storedPath } = await backend.getBlobAsPath(tag, blob, signal);
-				const hash = await observeFileHash(storedPath, written.bytes, signal);
-				const record = await buildPutRecord({
+				const body = await buildPutRecord({
 					backend,
 					cwd,
 					tag,
 					blob,
 					sourceAbs: source.abs,
 					stat: written,
-					hash,
-					receipt: { backend: backend.kind, key: storedPath, version: written.version },
+					hash: putHashObservation(written),
+					receipt: { backend: backend.kind, key: written.key, version: written.version },
 					actor,
 					ids,
 					...(typeof args.note === "string" ? { note: args.note } : {}),
 					derivedFrom: derived,
 				});
-				await appendRecord(backend, record);
+				return { stored: written, record: await appendRecord(backend, body) };
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
 				throw new StoreToolError(
@@ -380,11 +388,13 @@ async function runOp(
 						`put the same file again to record it, or remove ${tag}:${blob} to drop it.`,
 				);
 			}
-			return written;
 		});
 		return {
 			payload: {
-				...(await statShape(backend, tag, blob, stored)),
+				...(await statShape(backend, tag, blob, stored, {
+					state: { put: record, notes: [], removed: false },
+					backend: summary,
+				})),
 				replaced,
 				source: { path: source.rel, bytes: source.bytes },
 			},

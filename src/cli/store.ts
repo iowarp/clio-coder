@@ -1,7 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { copyFile, readdir, readFile, rename, stat } from "node:fs/promises";
 import path from "node:path";
-import { hashFile, observeFileHash } from "../core/run-records.js";
+import { hashFile } from "../core/run-records.js";
 import { safeResourceWriteAsync } from "../core/safe-resource-write.js";
 import {
 	isRecordsTag,
@@ -16,11 +16,12 @@ import {
 import {
 	openStoreBackend,
 	type StoreBackend,
+	type StoreBackendFacts,
 	type StoreBlobStat,
 	StoreRefusal,
 	withStoreLock,
 } from "../domains/store/index.js";
-import { buildPutRecord } from "../domains/store/provenance.js";
+import { buildPutRecord, putHashObservation } from "../domains/store/provenance.js";
 import {
 	appendRecord,
 	currentState,
@@ -185,15 +186,27 @@ async function storeStat(cwd: string, tag: string, blob: string) {
 	const backend = await openStoreBackend(cwd);
 	const info = await backend.statBlob(tag, blob);
 	const state = currentState((await readBlobHistory(backend, tag, blob)).records);
-	const put = state.put;
-	if (info === null && put === null) {
+	if (info === null && state.put === null) {
 		const removed = state.removed ? "; it was removed and its records remain" : "";
 		throw new StoreRefusal("not-found", `${tag}:${blob} is not in the store${removed}.`);
 	}
 	const facts = await backend.facts();
 	return {
-		ref: `${tag}:${blob}`,
 		path: info === null ? null : (await backend.getBlobAsPath(tag, blob)).path,
+		...statPayload(facts, tag, blob, info, state),
+	};
+}
+
+function statPayload(
+	facts: StoreBackendFacts,
+	tag: string,
+	blob: string,
+	info: StoreBlobStat | null,
+	state: ReturnType<typeof currentState>,
+) {
+	const put = state.put;
+	return {
+		ref: `${tag}:${blob}`,
 		bytes: info?.bytes ?? null,
 		modified: info === null ? null : new Date(info.modifiedMs).toISOString(),
 		drift: driftOf(put, info),
@@ -305,42 +318,58 @@ export async function storePut(
 	cwd: string,
 	tag: string,
 	file: string,
-	options: { blob?: string; note?: string; signal?: AbortSignal } = {},
+	options: {
+		blob?: string;
+		note?: string;
+		signal?: AbortSignal;
+		/** Test seam; production opens the selected backend. */
+		openBackend?: (cwd: string) => Promise<StoreBackend>;
+	} = {},
 ) {
 	const sourceAbs = path.resolve(cwd, file);
 	const blob = options.blob ?? path.basename(sourceAbs);
 	const problem = validateBlobName(blob);
 	if (problem !== null) throw new UsageError(problem);
-	const backend = await openStoreBackend(cwd);
+	const backend = await (options.openBackend ?? openStoreBackend)(cwd);
 	const { created } = await backend.getOrCreateTag(tag);
 	if (created) {
 		await backend.setTagXattr(tag, "clio.description", "");
 		await backend.setTagXattr(tag, "clio.class", "input");
 		await backend.setTagXattr(tag, "clio.createdAt", new Date().toISOString());
 	}
-	const replaced = (await backend.statBlob(tag, blob)) !== null;
-	const stored: StoreBlobStat = await backend.putBlobFromFile(tag, blob, sourceAbs, options.signal);
-	const { path: blobPath } = await backend.getBlobAsPath(tag, blob, options.signal);
-	const hash = await observeFileHash(blobPath, stored.bytes, options.signal);
-	const body = await buildPutRecord({
-		backend,
-		cwd,
-		tag,
-		blob,
-		sourceAbs,
-		stat: stored,
-		hash,
-		receipt: { backend: backend.kind, key: blobPath, version: stored.version },
-		actor: "main",
-		...(options.note !== undefined ? { note: options.note } : {}),
+	const facts = await backend.facts();
+	// The store tool's put and rm take the same lock, so a put and its record are never split by another writer.
+	return withStoreLock(cwd, `blob\0${tag}\0${blob}`, async () => {
+		const replaced = (await backend.statBlob(tag, blob)) !== null;
+		const stored = await backend.putBlobFromFile(tag, blob, sourceAbs, options.signal);
+		// From here the bytes are in the store: any failure before the record lands reports them as unrecorded,
+		// and nothing after it re-reads the blob, so a put whose record was written succeeds.
+		let record: StoreRecord;
+		try {
+			const body = await buildPutRecord({
+				backend,
+				cwd,
+				tag,
+				blob,
+				sourceAbs,
+				stat: stored,
+				hash: putHashObservation(stored),
+				receipt: { backend: backend.kind, key: stored.key, version: stored.version },
+				actor: "main",
+				...(options.note !== undefined ? { note: options.note } : {}),
+			});
+			record = await appendRecord(backend, body);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			throw new StoreRefusal("io", `${tag}:${blob} is stored but unrecorded (stat shows drift unrecorded): ${reason}`);
+		}
+		return {
+			...statPayload(facts, tag, blob, stored, { put: record, notes: [], removed: false }),
+			createdTag: created,
+			replaced,
+			source: { path: sourceAbs },
+		};
 	});
-	try {
-		await appendRecord(backend, body);
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
-		throw new StoreRefusal("io", `${tag}:${blob} is stored but unrecorded (stat shows drift unrecorded): ${reason}`);
-	}
-	return { ...(await storeStat(cwd, tag, blob)), createdTag: created, replaced, source: { path: sourceAbs } };
 }
 
 async function storeGet(cwd: string, tag: string, blob: string, to?: string) {

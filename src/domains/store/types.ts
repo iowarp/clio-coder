@@ -20,6 +20,17 @@ export interface StoreBlobStat {
 	version: number | null;
 }
 
+/**
+ * What one put stored, observed by the put itself: the size and sha256 of the
+ * bytes it streamed and the stat of its own copy before it took the blob's
+ * name, so a concurrent writer's bytes never stand in for this put's.
+ */
+export interface StoreBlobPut extends StoreBlobStat {
+	sha256: string;
+	/** The backend's own name for the blob: the absolute path on the local backend. */
+	key: string;
+}
+
 export type StoreRefusalReason =
 	| "invalid-name"
 	| "not-found"

@@ -1,4 +1,4 @@
-import type { StoreBackendFacts, StoreBackendKind, StoreBlobStat } from "./types.js";
+import type { StoreBackendFacts, StoreBackendKind, StoreBlobPut, StoreBlobStat } from "./types.js";
 
 /**
  * The store's backend contract, shaped on the clio-core CTE client so a
@@ -18,7 +18,8 @@ export interface StoreBackend {
 	setTagXattr(tag: string, key: string, value: string): Promise<void>;
 	getTagXattrs(tag: string): Promise<Record<string, string>>;
 	// Whole-object data path. CTE: TruncateBlob then PutBlob at offsets; GetBlob at offsets.
-	putBlobFromFile(tag: string, blob: string, source: string, signal?: AbortSignal): Promise<StoreBlobStat>;
+	/** Never re-reads the blob's name to describe the put: a concurrent put may own it by then. */
+	putBlobFromFile(tag: string, blob: string, source: string, signal?: AbortSignal): Promise<StoreBlobPut>;
 	/** A readable local path. `copied` is true when the backend had to materialize bytes to produce it. */
 	getBlobAsPath(tag: string, blob: string, signal?: AbortSignal): Promise<{ path: string; copied: boolean }>;
 	// Small records. CTE: PutBlobIfAbsent, GetBlob.
