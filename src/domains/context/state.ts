@@ -150,6 +150,9 @@ const ADOPTION_PROVIDERS = new Set<AdoptionProvider>([
 	"cursor",
 	"copilot",
 	"opencode",
+	"windsurf",
+	"cline",
+	"aider",
 ]);
 const ADOPTION_KINDS = new Set<AdoptionSourceKind>(["instructions", "settings", "command", "agent", "skill", "rule"]);
 

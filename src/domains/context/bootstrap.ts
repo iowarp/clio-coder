@@ -410,7 +410,9 @@ function projectTypeLabel(projectType: ProjectType): string {
 /** Only project-wide instructions may become unconditional handbook rules. */
 function handbookInstructionFiles(input: BootstrapGenerateInput): SiblingContextFile[] {
 	const projectPaths = new Set(
-		INTEROP_AGENT_KINDS.flatMap((kind) => kind.instructionFiles.map((file) => resolve(input.cwd, file))),
+		INTEROP_AGENT_KINDS.flatMap((kind) =>
+			[...kind.instructionFiles, ...(kind.rootInstructionFiles ?? [])].map((file) => resolve(input.cwd, file)),
+		),
 	);
 	const allowed = new Set(
 		input.adoption.sources

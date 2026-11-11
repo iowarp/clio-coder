@@ -8,7 +8,17 @@ import { instructionUnits } from "./instruction-units.js";
 import type { TreeFact } from "./tree-facts.js";
 import { contradictingFact, factClaims, treeFacts } from "./tree-facts.js";
 
-export type AdoptionProvider = "claude-code" | "agents" | "codex" | "gemini" | "cursor" | "copilot" | "opencode";
+export type AdoptionProvider =
+	| "claude-code"
+	| "agents"
+	| "codex"
+	| "gemini"
+	| "cursor"
+	| "copilot"
+	| "opencode"
+	| "windsurf"
+	| "cline"
+	| "aider";
 export type AdoptionScope = "project" | "global";
 export type AdoptionSourceKind = "instructions" | "settings" | "command" | "agent" | "skill" | "rule";
 
@@ -126,6 +136,9 @@ const PROVIDER_LABELS: Record<AdoptionProvider, string> = {
 	cursor: "Cursor",
 	copilot: "GitHub Copilot",
 	opencode: "OpenCode",
+	windsurf: "Windsurf",
+	cline: "Cline",
+	aider: "Aider",
 };
 
 const KIND_LABELS: Record<AdoptionSourceKind, string> = {
@@ -325,7 +338,9 @@ function discoverCandidateSpecs(
 	// directory scope instead of silently becoming repository-global prose.
 	for (const kind of INTEROP_AGENT_KINDS) {
 		if (kind.adoptionProvider === undefined) continue;
-		for (const file of kind.instructionFiles) addProject(file, kind.adoptionProvider, "instructions");
+		for (const file of [...kind.instructionFiles, ...(kind.rootInstructionFiles ?? [])]) {
+			addProject(file, kind.adoptionProvider, "instructions");
+		}
 	}
 	// Nested constitutions are part of the claimed provenance set. Let the
 	// walker's typed limit/incomplete failures propagate instead of silently
@@ -366,7 +381,14 @@ function discoverCandidateSpecs(
 		(filePath) => markdownLike(filePath) || jsonLike(filePath),
 	);
 
-	addProjectDir(join(".cursor", "rules"), "cursor", "rule", 0, markdownLike);
+	for (const kind of INTEROP_AGENT_KINDS) {
+		if (kind.adoptionProvider === undefined) continue;
+		for (const dir of kind.ruleDirs ?? []) {
+			addProjectDir(dir.path, kind.adoptionProvider, "rule", dir.depth, (filePath) =>
+				dir.suffixes.some((suffix) => filePath.toLowerCase().endsWith(suffix)),
+			);
+		}
+	}
 
 	if (includeGlobal) add(join(home, ".codex", "AGENTS.md"), "global", "codex", "instructions");
 

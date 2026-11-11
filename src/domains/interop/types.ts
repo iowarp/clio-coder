@@ -11,6 +11,9 @@ export type InteropAgentId =
 	| "cursor"
 	| "antigravity"
 	| "pi"
+	| "windsurf"
+	| "cline"
+	| "aider"
 	| "agents";
 
 /** How a peer is launched over ACP stdio, for the kinds that speak it. */
@@ -21,6 +24,13 @@ export interface InteropAcpRecipe {
 	npmPackage?: string;
 	/** Executable that package installs, looked up on PATH before falling back to npx. */
 	npmPackageBin?: string;
+}
+
+/** A directory of rule files: the file-name endings it holds and how many subdirectory levels are read. */
+export interface InteropRuleDir {
+	path: string;
+	suffixes: ReadonlyArray<string>;
+	depth: number;
 }
 
 /**
@@ -47,6 +57,10 @@ export interface InteropAgentKind {
 	projectPromptRoot?: string;
 	/** Project-relative instruction files the context domain mines for rules. */
 	instructionFiles: ReadonlyArray<string>;
+	/** Instruction files the agent reads only at the repository root; a subdirectory copy is not mined. */
+	rootInstructionFiles?: ReadonlyArray<string>;
+	/** Project-relative directories of rule files the context domain mines. */
+	ruleDirs?: ReadonlyArray<InteropRuleDir>;
 	acp?: InteropAcpRecipe;
 	/** Clio-managed worker runtime for this peer's headless CLI, when implemented. */
 	headlessRuntimeId?: string;

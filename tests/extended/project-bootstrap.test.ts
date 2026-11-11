@@ -112,6 +112,37 @@ describe("project bootstrap boundary", () => {
 		}
 	});
 
+	it("scans Cursor, Copilot, Windsurf, Cline and Aider instruction sources", () => {
+		const root = scratch();
+		const home = scratch();
+		const write = (relPath: string): void => {
+			mkdirSync(join(root, relPath, ".."), { recursive: true });
+			writeFileSync(join(root, relPath), "- Always run the focused test first.\n");
+		};
+		for (const relPath of [
+			".cursorrules",
+			".github/instructions/api.instructions.md",
+			".github/instructions/notes.md",
+			".windsurfrules",
+			".windsurf/rules/style.md",
+			".clinerules/testing.md",
+			"CONVENTIONS.md",
+			"nested/.cursorrules",
+			"nested/CONVENTIONS.md",
+		]) {
+			write(relPath);
+		}
+		const adoption = scanAgentConfigs({ cwd: root, homeDir: home });
+		deepStrictEqual(adoption.sources.map((source) => `${source.provider}:${source.kind}:${source.displayPath}`).sort(), [
+			"aider:instructions:CONVENTIONS.md",
+			"cline:rule:.clinerules/testing.md",
+			"copilot:rule:.github/instructions/api.instructions.md",
+			"cursor:instructions:.cursorrules",
+			"windsurf:instructions:.windsurfrules",
+			"windsurf:rule:.windsurf/rules/style.md",
+		]);
+	});
+
 	it("builds a deterministic, parseable handbook artifact from bounded project evidence", async () => {
 		const root = scratch();
 		packageFile(root);
