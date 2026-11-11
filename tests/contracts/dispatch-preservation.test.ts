@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
 import { acquireCheckoutWriterLease } from "../../src/domains/dispatch/checkout-writer-lease.js";
+import { workerNoWorkDetail } from "../../src/domains/dispatch/tool-stats.js";
 import {
 	claimCompeteGroup,
 	cleanupCompeteGroup,
@@ -27,6 +28,24 @@ import {
 import { createDispatchAdmissionController } from "../../src/tools/dispatch-admission.js";
 import { DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT } from "../../src/tools/dispatch-plan.js";
 import type { DispatchToolDeps } from "../../src/tools/dispatch-types.js";
+
+test("a no-change report that names its block under a commit subject line settles as no work", () => {
+	const input = {
+		activity: { calls: 8, succeeded: 7, failed: 1, blocked: 0, mutatingSucceeded: true },
+		limitationRecorded: false,
+		mutatedPathCount: 0,
+		finalText: JSON.stringify({
+			mutatedPaths: [],
+			validations: [],
+			summary:
+				"fix(compaction): reserve the real summary output\nBLOCKED: the trigger lives outside my write roots.\nchangelog: none.",
+		}),
+	};
+	match(workerNoWorkDetail(input) ?? "", /changed nothing.*BLOCKED: the trigger lives outside/s);
+	strictEqual(workerNoWorkDetail({ ...input, mutatedPathCount: 1 }), null);
+	const subjectOnly = JSON.stringify({ mutatedPaths: [], summary: "fix(x): done\nThe parser cannot overflow." });
+	strictEqual(workerNoWorkDetail({ ...input, finalText: subjectOnly }), null);
+});
 
 function git(root: string, ...args: string[]) {
 	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();

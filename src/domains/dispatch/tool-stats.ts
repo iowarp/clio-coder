@@ -212,10 +212,10 @@ export function workerNoWorkDetail(input: {
 		// Plain final prose is also a valid worker report.
 	}
 	// Only a report that opens with its inability counts: "the parser cannot overflow" in a no-change report is not one.
+	// A leading conventional-commit subject line ("fix(scope): ...") is the report's title, not its opening.
+	const opening = report.trimStart().replace(/^[a-z]+(?:\([^)\n]*\))?!?:[^\n]*\n\s*/u, "");
 	const reportedInability =
-		/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu.test(
-			report.trimStart(),
-		);
+		/^(?:i\s+)?(?:cannot|can't|could not|couldn't|was unable to|am unable to|unable to|blocked\b)/iu.test(opening);
 	const unchanged = input.mutatedPathCount === 0;
 	// The operator must see that the run did nothing because they denied the call
 	// (flywheel p7/A5); the worker's own text may not open with an inability.
