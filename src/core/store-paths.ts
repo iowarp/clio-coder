@@ -7,7 +7,7 @@
  * with `/` because clio-core splits such a name into a hierarchy.
  *
  * Every function here is pure apart from `realpath` and reading `.git` and
- * `commondir`: the safety layer predicts where a store call writes from its
+ * `commondir` (and `backend.json` for a clio-core mount): the safety layer predicts where a store call writes from its
  * arguments alone, the way it predicts the `artifact` default path
  * (`src/core/artifact-paths.ts`).
  */
@@ -153,11 +153,28 @@ function storeCacheDir(cwd: string): string {
 }
 
 /**
+ * This project's directory in the clio-core mount that `<storeRoot>/backend.json`
+ * names, or null: with a mount, `store get` hands back paths in it instead of copies.
+ */
+function storeMountProjectDir(cwd: string): string | null {
+	try {
+		const record = JSON.parse(readFileSync(join(storeRoot(), "backend.json"), "utf8")) as Record<string, unknown>;
+		if (record.v !== 1 || record.backend !== "clio-core" || typeof record.mount !== "string" || record.mount === "")
+			return null;
+		return join(resolve(record.mount), STORE_NATIVE_PREFIX, storeProjectKey(storeProjectRoot(cwd)));
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Trees outside the workspace the model may read: this project's store
- * directory and the clio-core cache whose copies `store get` hands back.
+ * directory, the clio-core cache whose copies `store get` hands back, and
+ * this project's directory in a selected clio-core mount.
  */
 export function storeReadRoots(cwd: string): string[] {
-	return [storeProjectDir(cwd), storeCacheDir(cwd)];
+	const mounted = storeMountProjectDir(cwd);
+	return [storeProjectDir(cwd), storeCacheDir(cwd), ...(mounted !== null ? [mounted] : [])];
 }
 
 /** Where a store write lands, from tool arguments alone; null for read ops and malformed calls. */

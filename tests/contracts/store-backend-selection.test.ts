@@ -4,7 +4,7 @@ import net from "node:net";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storeFindings } from "../../src/cli/doctor-store.js";
-import { storeRoot } from "../../src/core/store-paths.js";
+import { storeProjectKey, storeProjectRoot, storeReadRoots, storeRoot } from "../../src/core/store-paths.js";
 import { openStoreBackend, storeBackendIsLocal } from "../../src/domains/store/index.js";
 import { readStoreBackendSelection } from "../../src/domains/store/selection.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
@@ -42,6 +42,15 @@ describe("store backend selection", () => {
 			strictEqual(await storeBackendIsLocal(), true);
 			writeRecord(JSON.stringify({ v: 1, backend: "clio-core" }));
 			strictEqual(await storeBackendIsLocal(), false);
+		}));
+
+	it("a clio-core mount's project directory is a store read root, since get hands back paths in it", () =>
+		withHome(async (dir, root) => {
+			const mount = join(dir, "mnt");
+			const inMount = join(mount, "agentspace", storeProjectKey(storeProjectRoot(root)));
+			ok(!storeReadRoots(root).includes(inMount));
+			writeRecord(JSON.stringify({ v: 1, backend: "clio-core", mount }));
+			ok(storeReadRoots(root).includes(inMount), JSON.stringify(storeReadRoots(root)));
 		}));
 
 	it("doctor reports the local default quietly when clio-core is absent", () =>
