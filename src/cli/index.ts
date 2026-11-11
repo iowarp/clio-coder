@@ -85,6 +85,7 @@ Usage:
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
   clio-coder uninstall            remove Clio Coder: its state, settings and launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
+  clio-coder gui                  open the alpha graphical application; 'gui background restart' after an upgrade
   clio-coder agents               list discovered agent recipes
   clio-coder agents validate      report every unresolved reference in the repo's recipes, skills and fleet bindings
   clio-coder playbook list|new|validate|graph|commands  list, author, validate, and graph playbooks
