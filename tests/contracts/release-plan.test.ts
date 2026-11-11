@@ -10,6 +10,7 @@ import { parse } from "yaml";
 const planModule = "../../scripts/release/plan.mjs";
 const receiptModule = "../../scripts/release/receipt.mjs";
 const nextModule = "../../scripts/release/next.mjs";
+const publishModule = "../../scripts/release-publish.mjs";
 const candidateModule = "../../scripts/release-candidate.mjs";
 const commit = "a".repeat(40);
 
@@ -175,7 +176,7 @@ describe("release decisions", () => {
 	});
 
 	it("finishes only a version npm serves from an ancestor of the branch head, never publishing", async () => {
-		const { finishGate } = await import("../../scripts/release-publish.mjs");
+		const { finishGate } = await import(publishModule);
 		const scratch = mkdtempSync(join(tmpdir(), "clio-finish-"));
 		try {
 			const tarball = join(scratch, "iowarp-clio-coder-0.7.1.tgz");
