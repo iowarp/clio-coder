@@ -180,6 +180,28 @@ it("queue recovery prefixes both queue kinds exactly once and keeps literal bang
 	f.controller.restoreQueuedFollowUpsToEditor();
 	assert.equal(f.editor.getText(), "prior steer\n\nprior follow-up\n\n!draft");
 });
+it("a mistyped command names the closest one, runs nothing and keeps the draft", () => {
+	const f = fixture();
+	f.idle();
+	const notices: string[] = [];
+	const context = {
+		notice: (_level: string, text: string) => notices.push(text),
+		render: noop,
+	} as unknown as SlashCommandContext;
+	f.deps.dispatchCommand = (text) => dispatchSlashCommand(parseSlashCommand(text), context);
+	for (const [typed, notice] of [
+		["/stauts", "/stauts is not a command. Closest: /status (runs /usage). /help lists them all."],
+		["/sttings", "/sttings is not a command. Closest: /settings. /help lists them all."],
+		["/zzzz", "/zzzz is not a command. Type /help for the list."],
+	] as const) {
+		notices.length = 0;
+		f.editor.setText(typed);
+		f.controller.submitEditorText(typed);
+		assert.deepEqual(notices, [notice], typed);
+		assert.equal(f.editor.getText(), typed, typed);
+	}
+	assert.deepEqual(f.accepted, []);
+});
 it("a removed command name is an unknown command like any other", () => {
 	const notices: string[] = [];
 	const context = {

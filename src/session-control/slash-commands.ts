@@ -3886,7 +3886,7 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 			refusal
 				? refusal.message
 				: closest
-					? `\`/${command.token}\` is not a command. Closest: \`/${closest.typed}\`${closest.runs ? ` (runs \`/${closest.runs}\`)` : ""}. \`/help\` lists them all.`
+					? `/${command.token} is not a command. Closest: /${closest.typed}${closest.runs ? ` (runs /${closest.runs})` : ""}. /help lists them all.`
 					: `/${command.token} is not a command. Type /help for the list.`,
 		);
 		ctx.render?.();

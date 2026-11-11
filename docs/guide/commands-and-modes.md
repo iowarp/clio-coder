@@ -593,7 +593,7 @@ show equal percentages are never merged.
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
 | `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
 | `/tasks` | Inspect session tasks and the durable project task inbox. ↑/↓ select a row, Tab and Shift+Tab jump between sections, and a board taller than the dock scrolls to keep the selection in view, pages with PgUp/PgDn, and shows its position. `a` adds an operator task; `h`, `d` and `x` hand, finish or drop the selected one. Acceptance checks travel with handed tasks; receipts show whether they passed. |
-| Unknown slash command | Rejected before model submission. Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
+| Unknown slash command | Rejected before model submission; nothing runs and the draft stays in the composer to correct. A near miss names the closest command, by the palette's own matching or within two typed letters of a name or alias: `/stauts is not a command. Closest: /status (runs /usage). /help lists them all.` Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
 
 The command spellings and arguments are the [slash-command registry](../../src/session-control/slash-commands.ts); this table calls out only session workflows that need explanation.
 
