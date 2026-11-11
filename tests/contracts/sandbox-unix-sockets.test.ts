@@ -116,6 +116,19 @@ test("the unix-socket seccomp program refuses AF_UNIX sockets under x86_64, x32,
 	}
 });
 
+test("the seatbelt temp-directory write grant keeps read-only paths protected", () => {
+	const profile = buildSeatbeltInvocation({
+		command: { argv: ["/usr/bin/true"] },
+		cwd: "/private/tmp/w",
+		writableRoots: ["/private/tmp/w"],
+		readOnlyPaths: ["/private/tmp/w/.git"],
+		maskedPaths: [],
+		network: false,
+	}).args[1] as string;
+	const temp = profile.split("\n").find((line) => line.includes('(subpath "/private/tmp")'));
+	assert.match(temp ?? "", /require-not \(require-any \(subpath \(param "READ_ONLY_PATH_0"\)\)\)/u);
+});
+
 test("the seatbelt profile denies unix-socket connects and binds when blocking, keeping DNS only with network", () => {
 	const profile = (spec: { network: boolean; denyUnixSockets?: boolean }): string =>
 		buildSeatbeltInvocation({

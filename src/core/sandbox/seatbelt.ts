@@ -80,10 +80,16 @@ function buildSeatbeltProfile(spec: SandboxInvocationSpec): { profile: string; p
 	const lines = [...SEATBELT_BASE_POLICY];
 	// Temporary directories: macOS resolves /tmp to /private/tmp and gives each
 	// user a per-session TMPDIR under /private/var/folders.
-	lines.push('(allow file-write* (subpath "/private/tmp") (subpath "/private/var/folders"))');
+	// A read-only path under them (a workspace's `.git` in a temp checkout) stays protected, as under the roots below.
+	const protectedPaths = paramRule("READ_ONLY_PATH", readOnly);
+	const temp = '(subpath "/private/tmp") (subpath "/private/var/folders")';
+	lines.push(
+		readOnly > 0
+			? `(allow file-write* (require-all (require-any ${temp}) (require-not (require-any ${protectedPaths}))))`
+			: `(allow file-write* ${temp})`,
+	);
 	if (writable > 0) {
 		const roots = paramRule("WRITABLE_ROOT", writable);
-		const protectedPaths = paramRule("READ_ONLY_PATH", readOnly);
 		lines.push(
 			readOnly > 0
 				? `(allow file-write* (require-all (require-any ${roots}) (require-not (require-any ${protectedPaths}))))`
