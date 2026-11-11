@@ -29,7 +29,7 @@ A dispatched worker reads the store but does not write it, unless its dispatch g
 
 The store uses the **local** backend unless you choose otherwise: blobs are plain files under the Clio data directory. Nothing needs to be installed, and `clio-coder doctor` reports `store backend: local (no selection; the default)`.
 
-The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOWarp clio-core runtime (the `iowarp-core` Python package). It needs clio-core built from its integration branch at PLACEHOLDER-CORE8-SHA or later; no released `iowarp-core` wheel carries the bindings it uses yet. Choose it when the store must live in clio-core's tiers, be shared through its FUSE mount, or sit beside other clio-core data:
+The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOWarp clio-core runtime (the `iowarp-core` Python package). It needs clio-core built from its integration branch at commit 6c54cdbf or later (it reports iowarp-core 2.4.0); no released `iowarp-core` wheel carries the bindings it uses yet. Choose it when the store must live in clio-core's tiers, be shared through its FUSE mount, or sit beside other clio-core data:
 
 ```sh
 clio-coder store backend clio-core --python /path/to/venv/bin/python3 --config /path/to/clio.yaml --pool 570.0
@@ -40,7 +40,7 @@ The command probes the interpreter, the daemon and its version, the host and a d
 ### clio-core notes
 
 - After each record put the store syncs the tag, so a record survives a runtime crash. An older `iowarp-core` without `AsyncSyncTag` skips the sync, and records written within about 10 seconds of a crash can then be lost. Reading a lost one afterwards fails with a message that the record was lost at a clio-core restart, instead of returning damaged data.
-- A clio-core space reserved over `agentspace/<project key>/` charges both the records and the data blobs.
+- A clio-core space reserved over `agentspace/<project key>/` charges both the records and the data blobs (agentspace operator 1e54daa or later).
 - A put over an existing blob asks first, as a replace does on the local backend; clio-core keeps no blob versions.
 - With a `--mount`, `store get` returns the path inside the mount, and the model may read it.
 - Through the FUSE mount, `close()` publishes a file's size asynchronously. A writer that hands a file to a reader outside the mount calls `fsync` before closing it (or the runtime runs with `CLIO_FUSE_ASYNC_FLUSH=0`).
