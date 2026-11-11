@@ -438,8 +438,8 @@ Names retired in 0.8.0 answer for this release only, with a notice, and are remo
 | Command | Usage | Purpose |
 | --- | --- | --- |
 | `/quit` | `/quit` | Exit Clio Coder. Alias: `/exit`. |
-| `/reload` | `/reload [settings\|library\|extensions\|all]` | Re-read resources and report what applied and what needs a restart. Defaults to `all`. |
-| `/restart` | `/restart` | Save and restart into this session and workspace. |
+| `/reload` | `/reload [settings\|library\|extensions\|prompts\|all]` | Re-read resources and report what applied and what needs a restart. Defaults to `all`. `prompts` re-reads prompt fragments, agent recipes, the project handbook and project rules and names the fragments that changed; the safety rule pack still needs a restart. |
+| `/restart` | `/restart [text]` | Save and restart into this session and workspace. It first checks that the build on disk can start and refuses, keeping the session, when it cannot. Text after the command becomes the restarted session's first turn. |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill <name> [task]` or `/skill off` | Invoke a skill or clear its active tool surface; bare `/skill` opens the Library on Skills. |
 | `/loop` | `/loop <every> <task> [flags]`, `/loop`, or `/loop status\|pause\|resume\|stop [id]` with `stop <id> --now` | Create or control a bounded recurring job. Bare `/loop` lists this session's jobs; `stop` lets the current run finish and `stop --now` aborts it. `/loop list` and `/loop cancel <id>` still work in this release and say the new spelling. Use [job tool usage](tool-usage.md#bounded-main-runner-jobs) for the runner and limits. |

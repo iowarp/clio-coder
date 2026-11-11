@@ -324,7 +324,12 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
   count, `clio-coder report show <id>` prints one, `send <id>` reviews and sends
   a saved draft, and `forget <id>` deletes a draft that was never posted. A
   posted report cannot be withdrawn from Clio Coder; edit or close it on GitHub.
-  `forget` on it deletes only its local bundle.
+  `forget` on it deletes only its local bundle. When the report shared an
+  encrypted bundle, `clio-coder report forget <id>` first deletes that secret
+  gist and then, for a report filed as an issue, shows a one-line comment
+  asking the maintainers to delete their copy of the bundle. It posts the
+  comment only after you confirm in a terminal; if posting fails, the local
+  forget still finishes and the command exits 1.
 - **Replies and fixes.** The send step can tick a check of the filed issue for
   a maintainer's reply (`r` in the TUI, `--reply-check` in a shell). It runs at
   most once a day through your `gh`, for open reports sent in the last 90 days,
