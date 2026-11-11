@@ -11,6 +11,7 @@ import {
 	storeVerify,
 	storeWhere,
 } from "../../src/cli/store.js";
+import { storeBlobPath } from "../../src/core/store-paths.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -39,11 +40,12 @@ describe("clio-coder store", () => {
 				await storePut(root, "sim", name);
 			}
 			const backend = await openStoreBackend(root);
-			const b = (await backend.getBlobAsPath("sim", "b.dat")).path;
+			// `get` hands out a read-only copy, so edit the stored file itself.
+			const b = storeBlobPath(root, "sim", "b.dat");
 			// Same size, new bytes and mtime: edited behind Clio.
 			writeFileSync(b, "B.DAT BYTES\n");
 			utimesSync(b, new Date(), new Date(Date.now() + 5000));
-			rmSync((await backend.getBlobAsPath("sim", "c.dat")).path);
+			rmSync(storeBlobPath(root, "sim", "c.dat"));
 			writeFileSync(join(root, "d.dat"), "dropped\n");
 			await backend.putBlobFromFile("sim", "d.dat", join(root, "d.dat"));
 

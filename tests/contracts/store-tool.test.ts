@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { storeProjectDir, storeWriteTarget } from "../../src/core/store-paths.js";
+import { storeBlobPath, storeProjectDir, storeWriteTarget } from "../../src/core/store-paths.js";
 import { withStoreLock } from "../../src/domains/store/index.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { prepareStoreAdmissionArguments, prepareStoreArguments } from "../../src/tools/store/surface.js";
@@ -108,7 +108,8 @@ describe("store tool", () => {
 			const tool = createStoreTool({ getCwd: () => root, writable: true });
 			body(await tool.run({ op: "create", tag: "results" }));
 			body(await tool.run({ op: "put", tag: "results", path: "out/summary.csv" }));
-			const live = String(body(await tool.run({ op: "get", ref: "results:summary.csv" })).path);
+			// `get` hands out a read-only copy, so edit the stored file itself.
+			const live = storeBlobPath(root, "results", "summary.csv");
 			// touch -r copies the full-precision mtime, as a copy tool that preserves timestamps would.
 			const stamp = join(root, "stamp");
 			execFileSync("touch", ["-r", live, stamp]);
