@@ -584,6 +584,13 @@ it("honors resume selection overrides and refreshes help while it remains open",
 	assert.match(composerText(f.editor, 120), /Alt\+P/);
 	assert.doesNotMatch(composerText(f.editor, 120), /Alt\+L/);
 });
+it("Help is a pick list: after an arrow, a typed j goes to the filter, not the selection (E-13)", () => {
+	const f = fixture();
+	f.mount("help", () => openHelpOverlay(f.tui, f.keys, f.close));
+	f.terminal.input("\x1b[B");
+	f.terminal.input("j");
+	assert.match(composerText(f.editor, 120), /> j/);
+});
 it("blocks repeated app actions even when a custom key collides with draft deletion", () => {
 	const f = fixture({ "clio-coder.library.toggle": "ctrl+d" });
 	f.editor.setText("draft");

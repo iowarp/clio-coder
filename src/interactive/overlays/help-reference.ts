@@ -372,6 +372,7 @@ export function openHelpOverlay(
 		filterable: true,
 		filterPlaceholder: "type to find a command, key or topic",
 		exactMatchesOnly: true,
+		typingRefocusesFilter: true,
 		...(initialFilter ? { initialFilter } : {}),
 		hints: (selected) => (selected && picks.has(selected.id) && onPick ? [{ key: "Enter", verb: "use" }] : []),
 		onSelect: (item) => {

@@ -186,6 +186,11 @@ export interface ListOverlayOptions {
 	 */
 	exactMatchesOnly?: boolean;
 	/**
+	 * E-13 pick list: a printable key typed while the selection has focus goes back to the filter instead of
+	 * acting as `j`/`k` movement. Help sets it; lists with letter actions leave it off.
+	 */
+	typingRefocusesFilter?: boolean;
+	/**
 	 * Extra hint entries beyond movement/filter/Esc (builder appends Esc). A
 	 * function is asked per frame and is handed the selected row, so a footer can
 	 * advertise the keys that row actually offers rather than a fixed set.
@@ -1545,6 +1550,15 @@ export class ListOverlayView implements Component {
 			}
 			this.onChange();
 		} else {
+			if (this.options.typingRefocusesFilter && this.options.filterable && /^[\p{L}\p{N}\p{P}\p{S} ]$/u.test(data)) {
+				this.isFilterFocused = true;
+				this.inputEpoch += 1;
+				this.input.handleInput(data);
+				this.filterText = this.input.getValue();
+				this.selectIndex(0);
+				this.onChange();
+				return;
+			}
 			if (matchesKey(data, "up") || data === "k") {
 				if (filteredItems.length > 0) {
 					this.selectIndex(this.selectedIndex === 0 ? filteredItems.length - 1 : this.selectedIndex - 1);
