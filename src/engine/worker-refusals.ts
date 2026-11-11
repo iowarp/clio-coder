@@ -1,4 +1,5 @@
 import { isAbsolute, sep } from "node:path";
+import { redactCommandOutputSecrets } from "../domains/evidence/redact.js";
 import type { ClassifierCall } from "../domains/safety/action-classifier.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -42,7 +43,7 @@ export function outsideWorkspaceHint(args: unknown, cwd: string): string {
  */
 export function describeWorkerRefusal(call: ClassifierCall, decision: SafetyDecision): WorkerRefusal {
 	const raw = decision.policy?.command ?? describeCallTarget(call.tool, call.args);
-	const scrubbed = redactSecretString(raw.trim());
+	const scrubbed = redactCommandOutputSecrets(redactSecretString(raw.trim()));
 	const command =
 		scrubbed.length <= REFUSED_COMMAND_MAX_CHARS ? scrubbed : `${scrubbed.slice(0, REFUSED_COMMAND_MAX_CHARS)}…`;
 	const rule =

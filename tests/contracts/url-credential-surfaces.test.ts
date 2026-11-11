@@ -27,6 +27,7 @@ import { projectAsideAnswer, projectDraftOutcome } from "../../src/engine/acp/as
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
+import { describeWorkerRefusal } from "../../src/engine/worker-refusals.js";
 import { formatDraftOverlayBody } from "../../src/interactive/overlays/draft.js";
 import { SideQuestionOverlayBody } from "../../src/interactive/overlays/side-question.js";
 import { renderNoticeRow } from "../../src/interactive/renderers/notice.js";
@@ -1399,4 +1400,32 @@ test("an aborted side question stopped short, so an opaque name stays hidden whi
 	const streaming = new SideQuestionOverlayBody("q", () => 0);
 	streaming.set({ kind: "streaming", text: opaque });
 	ok(PLAIN(streaming.render(200)).includes("abcdef0123"));
+});
+
+test("both redactors and worker refusals hide command, header and token credential shapes", () => {
+	const cases = [
+		"curl -u alice:Hunter2pass https://x",
+		"curl -H 'Cookie: session=abc123def456ghi' https://x",
+		"sshpass -p Hunter2pass ssh host",
+		"docker login -u bob -p Hunter2pass reg",
+		`echo npm_${"a".repeat(36)}`,
+		`echo hf_${"a".repeat(34)}`,
+		`echo sk_live_${"a".repeat(24)}`,
+		"echo ASIAABCDEFGHIJKLMNOP",
+		"curl https://acct.blob.core.windows.net/c/b?sv=2020&sig=abcdEFGH1234xyz",
+	];
+	const secrets = ["Hunter2pass", "abc123def456ghi", "a".repeat(20), "ASIAABCDEFGHIJKLMNOP", "abcdEFGH1234xyz"];
+	for (const text of cases) {
+		// Display redaction leaves value shapes to evidence redaction; it hides the command, header and URL shapes.
+		const display = /^curl|sshpass|docker/u.test(text) ? [redactSecretString(text)] : [];
+		const shown = [
+			...display,
+			redactSecretsText(text, createRedactionTally()),
+			describeWorkerRefusal({ tool: "bash", args: { command: "x" } }, {
+				kind: "block",
+				policy: { command: text },
+			} as never).command,
+		];
+		for (const out of shown) for (const secret of secrets) ok(!out.includes(secret), `${out} leaks ${secret}`);
+	}
 });

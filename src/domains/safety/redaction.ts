@@ -11,6 +11,8 @@
  * keep the original argument values; nothing here changes what a tool runs.
  */
 
+import { CREDENTIAL_LEAD_SHAPES, replaceCredentialShapes } from "../../core/secret-shapes.js";
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -69,7 +71,7 @@ const GIT_TOKEN_NAME_RE = new RegExp(`^${GIT_TOKEN_PREFIX}`, "iu");
 // while `db_password`, `password_confirmation`, `token[]` and `pageToken` lose theirs. A glued qualifier counts only when it is a
 // known one. `auth` alone can be qualified into a setting, as `no_auth=1` is, so it stands only by itself (#446).
 const SECRET_URL_PARAM_NAME_RE =
-	/(?:^|_)(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)_?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|(?:db|ssl)pass(?:word)?)(?:_|$)|^o?auth$/u;
+	/(?:^|_)(?:authorization|credential|pass(?:word|wd|phrase)?|pwd|secret|token|(?:access|api|auth|private|secret)_?key|(?:access|auth|oauth|refresh|id|session)token|clientsecret|sig|(?:db|ssl)pass(?:word)?)(?:_|$)|^o?auth$/u;
 const URL_PARAM_WORD_BREAK_RE = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/gu;
 const URL_PARAM_WORD_SEPARATOR_RE = /[-_.[\]\d]+/u;
 // A delimiter opens a name, `//` or its JSON-escaped form opens a URL, and whitespace or a `"` closes one. `;` divides
@@ -131,7 +133,8 @@ const AUTHORIZATION_VALUE_RE =
 function redactTokenShapes(value: string): string {
 	let out = value.replace(AUTHORIZATION_VALUE_RE, (_match, lead: string) => `${lead}[redacted]`);
 	for (const shape of TOKEN_SHAPE_RES) out = out.replace(shape, "[redacted]");
-	return out;
+	// Value shapes stay with evidence redaction, whose markers name the kind; the command and header shapes are shared here.
+	return replaceCredentialShapes(out, CREDENTIAL_LEAD_SHAPES, () => "[redacted]");
 }
 
 // `auth` stops short of `author` and `authority`, so prose such as "operator-authority ask" keeps its next word.

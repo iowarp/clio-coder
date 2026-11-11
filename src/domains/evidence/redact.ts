@@ -7,6 +7,7 @@
  * every pattern here has to stay linear in its input.
  */
 
+import { CREDENTIAL_SHAPES } from "../../core/secret-shapes.js";
 import {
 	secretUrlParamValues,
 	URL_USERINFO_PATTERNS,
@@ -25,6 +26,7 @@ export function createRedactionTally(): RedactionTally {
 interface SecretPattern {
 	kind: string;
 	re: RegExp;
+	keepsHead?: true;
 }
 
 /**
@@ -72,6 +74,8 @@ const SECRET_PATTERNS: ReadonlyArray<SecretPattern> = [
 		// requires it to read as random, so a 40-character name or path stays.
 		re: /(?<![A-Za-z0-9/+=])(?=[A-Za-z0-9/+]*[A-Z])(?=[A-Za-z0-9/+]*[a-z])(?=[A-Za-z0-9/+]*\d)[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g,
 	},
+	// The shapes display redaction and the sandbox env scrub share; the first entries above repeat some of them.
+	...CREDENTIAL_SHAPES,
 	{
 		kind: "jwt",
 		// Group 1 is the run ahead of the token and stays in the text. The first `eyJ` of a run is the only start that can
@@ -202,6 +206,7 @@ const COMMAND_OUTPUT_SECRET_KINDS: ReadonlySet<string> = new Set([
 	"telegram-bot-token",
 	"jwt",
 	"authorization",
+	...CREDENTIAL_SHAPES.map((shape) => shape.kind),
 ]);
 const COMMAND_OUTPUT_SECRET_PATTERNS = SECRET_PATTERNS.filter((pattern) =>
 	COMMAND_OUTPUT_SECRET_KINDS.has(pattern.kind),
@@ -237,6 +242,10 @@ export function redactCommandOutputSecrets(text: string, tally?: RedactionTally)
 	return parts.join("");
 }
 
+const HEAD_KEEPING_KINDS: ReadonlySet<string> = new Set(
+	CREDENTIAL_SHAPES.filter((shape) => shape.keepsHead).map((shape) => shape.kind),
+);
+
 /** The replacement for one {@link SECRET_PATTERNS} match: the head a pattern keeps, then its marker. */
 function replaceSecretMatch(kind: string, match: unknown[], tally?: RedactionTally): string {
 	if (kind === "url-userinfo") {
@@ -245,7 +254,7 @@ function replaceSecretMatch(kind: string, match: unknown[], tally?: RedactionTal
 		return `${String(match[1])}[redacted:url-userinfo]`;
 	}
 	if (tally) tally.count += 1;
-	if (kind === "assignment" || kind === "authorization" || kind === "jwt") {
+	if (kind === "assignment" || kind === "authorization" || kind === "jwt" || HEAD_KEEPING_KINDS.has(kind)) {
 		// Keep the key and separator, or the run ahead of the token; replace only the value.
 		return `${String(match[1])}[redacted:${kind}]`;
 	}
@@ -342,7 +351,8 @@ export function redactSecretSegments(segments: string[], tally: RedactionTally):
 			if (!secretShapeHolds(pattern.kind, match[0])) continue;
 			const userinfo = pattern.kind === "url-userinfo";
 			if (userinfo && !urlUserinfoHoldsSecret(match[2] ?? "")) continue;
-			const keepsHead = userinfo || pattern.kind === "assignment" || pattern.kind === "jwt";
+			const keepsHead =
+				userinfo || pattern.kind === "assignment" || pattern.kind === "jwt" || HEAD_KEEPING_KINDS.has(pattern.kind);
 			const start = match.index + (keepsHead ? (match[1]?.length ?? 0) : 0);
 			ranges.push({ start, end: match.index + match[0].length, kind: pattern.kind });
 			tally.count += 1;
