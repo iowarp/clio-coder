@@ -517,7 +517,7 @@ of four inputs:
 | --- | --- |
 | cpu | usable CPUs from `os.availableParallelism()`, which honors affinity masks such as a Slurm cpuset |
 | memory | (available memory minus a 2 GiB reserve) divided by 1 GiB per worker |
-| cgroup | the same formula over the headroom inside a cgroup memory limit, when one is set |
+| cgroup | the same formula over the headroom inside a cgroup memory limit, when one is set: `memory.max` minus the working set (`memory.current` minus `inactive_file` from `memory.stat`), so page cache the kernel can reclaim does not count; without `memory.stat` it is Node's `process.availableMemory()` |
 | cap | 8 |
 
 The 1 GiB per-worker estimate covers workers that run compilers, type checkers
@@ -528,6 +528,11 @@ seconds. Each sample records the host facts and active local worker count togeth
 The sampler adds back the estimated memory of those workers, avoiding a capacity
 reduction caused solely by Clio Coder's own workers while still observing changes in
 host pressure. Calls inside the sampling interval reuse that same paired sample.
+
+When a plan asks for more local workers than `auto` allows, the refusal names the
+binding input and how to pin it, for example `reservation denied: node 'local'
+capacity exceeded (3/1): memory-bound at 1 from cgroup headroom; set
+fleet.concurrency to pin it`. A numeric setting or the cap adds no such note.
 
 When a host input binds the limit, the `/settings` fleet row for `local` shows
 it after the busy count (`ready · 1/2 busy · memory-bound at 2`), and the

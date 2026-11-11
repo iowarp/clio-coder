@@ -256,7 +256,7 @@ import {
 	sessionCeilingReached,
 } from "../scheduling/budget.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
-import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
+import { describeLocalCapacityRefusal, resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import { ceilChars } from "../session/context-accounting.js";
 import { telemetryBundlePath, telemetryJournalPath, telemetryRunDirectory } from "../telemetry/index.js";
 import type { TelemetrySessionLease, TelemetrySessionOrigin } from "../telemetry/session-journals.js";
@@ -4213,8 +4213,14 @@ export function createDispatchBundle(
 	): ReservationCapacitySnapshot {
 		// Read budget after the capacity lock wait too; concurrent callbacks may spend.
 		const preflight = scheduling.preflight();
-		const nodes: Record<string, { active: number; limit: number }> = {
-			local: { active: usage.nodes.local ?? 0, limit: configuredLocalCapacity(settings) },
+		const localCapacity = scheduling.localCapacity?.();
+		const localNote = localCapacity === undefined ? null : describeLocalCapacityRefusal(localCapacity);
+		const nodes: Record<string, { active: number; limit: number; note?: string }> = {
+			local: {
+				active: usage.nodes.local ?? 0,
+				limit: localCapacity?.limit ?? configuredGlobalCapacity(settings),
+				...(localNote === null ? {} : { note: localNote }),
+			},
 		};
 		for (const node of settings?.fleet?.nodes ?? [])
 			nodes[node.id] = { active: usage.nodes[node.id] ?? 0, limit: node.maxWorkers };

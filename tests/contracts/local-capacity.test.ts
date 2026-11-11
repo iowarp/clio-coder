@@ -1,4 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -9,6 +12,7 @@ import {
 	AUTO_MAX_WORKERS,
 	createLocalCapacitySampler,
 	type HostCapacityFacts,
+	observeHostCapacityFacts,
 	resolveGlobalConcurrency,
 	resolveLocalConcurrency,
 	WORKER_MEMORY_ESTIMATE_BYTES,
@@ -123,6 +127,37 @@ describe("fleet.concurrency auto resolution", () => {
 	});
 });
 
+describe("cgroup headroom", () => {
+	// The M-34 container: a 7 GiB limit, 4.0 GB charged of which 3.6 GB is page cache, and a probe that saw 3.26 GiB.
+	function probe(files: Record<string, string>) {
+		const dir = mkdtempSync(join(tmpdir(), "cgroup-"));
+		for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+		const facts = observeHostCapacityFacts({
+			cpus: () => 4,
+			freeMemory: () => 40 * GiB,
+			totalMemory: () => 64 * GiB,
+			constrainedMemory: () => 7 * GiB,
+			availableMemory: () => 3.26 * GiB,
+			cgroupDir: () => dir,
+		});
+		rmSync(dir, { recursive: true, force: true });
+		return facts;
+	}
+	const counters = { "memory.max": `${7 * GiB}\n`, "memory.current": "4000000000\n" };
+
+	it("counts the working set, not reclaimable page cache, so a container that read large files keeps its workers", () => {
+		const facts = probe({ ...counters, "memory.stat": "anon 190000000\nfile 3600000000\ninactive_file 3400000000\n" });
+		strictEqual(facts.cgroupAvailableBytes, 7 * GiB - 600_000_000);
+		deepStrictEqual(resolveLocalConcurrency("auto", facts), { limit: 4, bound: "cpu" });
+	});
+
+	it("falls back to the process probe when memory.stat is missing", () => {
+		const facts = probe(counters);
+		strictEqual(facts.cgroupAvailableBytes, 3.26 * GiB);
+		deepStrictEqual(resolveLocalConcurrency("auto", facts), { limit: 1, bound: "cgroup" });
+	});
+});
+
 describe("fleet.concurrency auto placement surfaces", () => {
 	function schedulingFor(settings: typeof DEFAULT_SETTINGS) {
 		const config = { get: () => settings } as unknown as ConfigContract;
@@ -225,7 +260,7 @@ describe("dispatch capacity under auto", () => {
 							{ memberId: "b", wave: 0, resolution: on("local", "local") },
 						],
 					}),
-				/node 'local' capacity exceeded \(2\/1\)/u,
+				/node 'local' capacity exceeded \(2\/1\): memory-bound at 1 from host available memory; set fleet\.concurrency to pin it/u,
 			);
 			const remote = reservations.prepare({
 				topology: "parallel",

@@ -4,7 +4,8 @@
  * A numeric setting is the exact worker limit for both the global pool and the
  * local node. `auto` sizes only the local node from host facts: usable CPUs,
  * available memory, and a cgroup memory limit when one is set, so a job inside
- * a batch allocation is not sized from the whole machine. The global pool under
+ * a batch allocation is not sized from the whole machine. Cgroup headroom counts
+ * the working set, not reclaimable page cache. The global pool under
  * `auto` resolves to the upper cap, because SSH nodes carry their own
  * `maxWorkers` and a small orchestrator host must not shrink remote work.
  *
@@ -13,7 +14,9 @@
  * at most once per interval.
  */
 
+import { readFileSync } from "node:fs";
 import { availableParallelism, freemem, totalmem } from "node:os";
+import { join } from "node:path";
 
 /** Which input decided the worker limit. */
 export type LocalCapacityBound = "configured" | "cpu" | "memory" | "cgroup" | "cap";
@@ -28,7 +31,9 @@ export interface HostCapacityFacts {
 	cpus: number;
 	/** Host memory available to new processes (Linux MemAvailable). */
 	availableMemoryBytes: number;
-	/** Memory still available inside the cgroup limit; null when no limit is set. */
+	/**
+	 * Memory still available inside the cgroup limit, not counting reclaimable page cache; null when no limit is set.
+	 */
 	cgroupAvailableBytes: number | null;
 }
 
@@ -96,6 +101,23 @@ export function describeLocalCapacity(capacity: LocalCapacity): string | null {
 	return `${capacity.bound}-bound at ${capacity.limit}`;
 }
 
+const REFUSAL_SOURCES: Partial<Record<LocalCapacityBound, string>> = {
+	cpu: "cpu-bound at {n} from usable CPUs",
+	memory: "memory-bound at {n} from host available memory",
+	cgroup: "memory-bound at {n} from cgroup headroom",
+};
+
+/**
+ * The limit that binds an `auto` local node, for a capacity refusal, so the model
+ * dispatches fewer at once instead of retrying the same fan-out; null when the
+ * limit is the configured number or the cap.
+ */
+export function describeLocalCapacityRefusal(capacity: LocalCapacity): string | null {
+	const source = REFUSAL_SOURCES[capacity.bound];
+	if (source === undefined) return null;
+	return `${source.replace("{n}", String(capacity.limit))}; set fleet.concurrency to pin it`;
+}
+
 function gibibytes(bytes: number): string {
 	return (Math.max(0, bytes) / 1024 ** 3).toFixed(1);
 }
@@ -120,18 +142,72 @@ export function describeHostCapacity(facts: HostCapacityFacts, capacity: LocalCa
 	return `${facts.cpus} usable CPUs, ${gibibytes(facts.availableMemoryBytes)} GiB available memory${cgroup}; ${capacity.limit} local workers (${bound}). GPU/VRAM and model fit are not checked.`;
 }
 
+/** The host reads behind `observeHostCapacityFacts`; tests replace them. */
+export interface HostCapacityProbe {
+	cpus?: () => number;
+	freeMemory?: () => number;
+	totalMemory?: () => number;
+	constrainedMemory?: () => number;
+	availableMemory?: () => number;
+	/** This process's cgroup v2 directory, or null when it cannot be read. */
+	cgroupDir?: () => string | null;
+}
+
+function ownCgroupDir(): string | null {
+	try {
+		const line = readFileSync("/proc/self/cgroup", "utf8")
+			.split("\n")
+			.find((entry) => entry.startsWith("0::"));
+		return line === undefined ? null : join("/sys/fs/cgroup", line.slice(3).trim());
+	} catch {
+		return null;
+	}
+}
+
+function readCgroupFile(dir: string, name: string): string | null {
+	try {
+		return readFileSync(join(dir, name), "utf8");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Headroom inside a cgroup v2 limit counting only the working set:
+ * memory.max - (memory.current - inactive_file). memory.current includes page
+ * cache the kernel reclaims on demand, so a container that has read large files
+ * would otherwise look full and size one worker. Null when memory.stat or the
+ * counters cannot be read; `limitBytes` stands in for a memory.max of `max`,
+ * where the binding limit sits on an ancestor cgroup.
+ */
+function cgroupWorkingSetHeadroom(dir: string, limitBytes: number): number | null {
+	const stat = readCgroupFile(dir, "memory.stat");
+	const current = Number(readCgroupFile(dir, "memory.current")?.trim());
+	const inactive = stat?.match(/^inactive_file (\d+)$/mu)?.[1];
+	if (inactive === undefined || !Number.isFinite(current)) return null;
+	const max = Number(readCgroupFile(dir, "memory.max")?.trim());
+	const limit = Number.isFinite(max) && max > 0 ? max : limitBytes;
+	return Math.max(0, limit - Math.max(0, current - Number(inactive)));
+}
+
 /** Read this process's host facts. Tests inject facts instead of calling this. */
-export function observeHostCapacityFacts(): HostCapacityFacts {
-	const available = freemem();
+export function observeHostCapacityFacts(probe: HostCapacityProbe = {}): HostCapacityFacts {
+	const total = (probe.totalMemory ?? totalmem)();
 	// constrainedMemory() reports an unbounded sentinel (or 0) when no cgroup
 	// limit applies; only a limit below physical memory constrains anything.
-	// availableMemory() is then the headroom left inside that limit.
-	const constrained = process.constrainedMemory();
-	const limited = Number.isFinite(constrained) && constrained > 0 && constrained < totalmem();
+	const constrained = (probe.constrainedMemory ?? (() => process.constrainedMemory()))();
+	const limited = Number.isFinite(constrained) && constrained > 0 && constrained < total;
+	let cgroupAvailableBytes: number | null = null;
+	if (limited) {
+		const dir = (probe.cgroupDir ?? ownCgroupDir)();
+		cgroupAvailableBytes =
+			(dir === null ? null : cgroupWorkingSetHeadroom(dir, constrained)) ??
+			(probe.availableMemory ?? (() => process.availableMemory()))();
+	}
 	return {
-		cpus: availableParallelism(),
-		availableMemoryBytes: available,
-		cgroupAvailableBytes: limited ? process.availableMemory() : null,
+		cpus: (probe.cpus ?? availableParallelism)(),
+		availableMemoryBytes: (probe.freeMemory ?? freemem)(),
+		cgroupAvailableBytes,
 	};
 }
 

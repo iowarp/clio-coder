@@ -89,7 +89,8 @@ export interface DispatchReservationRecord {
 
 export interface ReservationCapacitySnapshot {
 	global: { active: number; limit: number };
-	nodes: Readonly<Record<string, { active: number; limit: number }>>;
+	/** `note` names what binds an automatically sized node limit, carried into its capacity refusal. */
+	nodes: Readonly<Record<string, { active: number; limit: number; note?: string }>>;
 	endpoints: Readonly<Record<string, { active: number; limit: number; leases?: number; foregroundStreams?: number }>>;
 	budget: { currentUsd: number; ceilingUsd: number };
 }
@@ -102,6 +103,10 @@ export interface ReservationAllocation {
 }
 
 export type ReservationPlanResult = { ok: true; allocation: ReservationAllocation } | { ok: false; reason: string };
+
+function nodeNote(node: { note?: string }): string {
+	return node.note === undefined ? "" : `: ${node.note}`;
+}
 
 function endpointCapacityDenial(input: {
 	endpointKey: string;
@@ -256,7 +261,7 @@ function allocateReservation(
 		const heldSlots = held.reduce((sum, allocation) => sum + (allocation.nodeSlots[nodeId] ?? 0), 0);
 		const used = node.active + heldSlots;
 		if (used + slots > node.limit) {
-			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})` };
+			return { ok: false, reason: `node '${nodeId}' capacity exceeded (${used + slots}/${node.limit})${nodeNote(node)}` };
 		}
 	}
 	for (const [endpointKey, slots] of Object.entries(requested.endpointSlots)) {
@@ -454,7 +459,7 @@ export function rebindDispatchReservationMember(input: {
 				const used = node.active + otherHeld + siblingSlots;
 				if (used + 1 > node.limit) {
 					throw new Error(
-						`dispatch: reservation rebind denied: node '${input.nodeId}' capacity exceeded (${used + 1}/${node.limit})`,
+						`dispatch: reservation rebind denied: node '${input.nodeId}' capacity exceeded (${used + 1}/${node.limit})${nodeNote(node)}`,
 					);
 				}
 			}
