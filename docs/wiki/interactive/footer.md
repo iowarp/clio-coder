@@ -1,6 +1,6 @@
 ---
 title: "Interactive footer: compact line, expanded pages and notices"
-summary: "The live region under the interactive prompt: the compact status line, the three expanded pages (Activity, Context, Status), the notification center, the spend and context readers, and the local machine sampler. Read this when changing what the footer shows or when it refreshes."
+summary: "The live region under the interactive prompt: the compact status line, the one expanded dashboard page, the notification center, the spend and context readers, and the local machine sampler. Read this when changing what the footer shows or when it refreshes."
 sources:
   - "src/interactive/footer/dashboard.ts"
   - "src/interactive/footer/pages.ts"
@@ -14,7 +14,6 @@ symbols:
   - "buildFooterDashboard"
   - "FooterDashboardDeps"
   - "FooterDashboardPanel"
-  - "DASHBOARD_PAGES"
   - "renderCompactDashboard"
   - "dashboardPageViewport"
   - "createNotificationCenter"
@@ -27,8 +26,8 @@ tests:
   - "tests/contracts/footer-machine-sampling.test.ts"
   - "tests/contracts/footer-responsive-pages.test.ts"
 invariants:
-  - "The expanded footer cycles Activity, Context, Status on each toggle; toggling from Status returns to the compact footer. Leaving Status is the only path that stops the machine sampler."
-  - "The local machine sampler is started only while the Status page is visible; the compact footer and the Activity and Context pages do not start it, per the machine sampling contract test."
+  - "The footer has two modes: compact and one expanded dashboard page. `toggleExpanded` flips between them (Alt+U); there is no page cycle."
+  - "The local machine sampler no longer runs in the footer; `/usage` starts it only while its Health tab is shown, per the machine sampling contract test."
   - "Every rendered footer row is no wider than the requested width, and rows carry only SGR escape sequences, per the machine sampling and responsive pages tests."
   - "A notice added with a key replaces an existing notice that has the same key; info and success notices expire after 12 seconds unless a ttlMs is supplied, and warnings and errors persist until dismissed."
   - "topNotification chooses the highest-severity live notice, then the most recent one, so an unresolved error is not hidden by a newer info notice."
@@ -48,7 +47,7 @@ The footer is the live region drawn below the interactive prompt. A reader needs
 
 The file-level rendering is split across modules:
 
-- `src/interactive/footer/pages.ts` holds the `DASHBOARD_PAGES` constant (`Activity`, `Context`, `Status`), `renderCompactDashboard`, `dashboardPageViewport`, and `renderDashboardPage`. The Activity page lists live and recent dispatch workers through the shared board renderers. The Context page reads the context budget. The Status page shows the session totals and the machine metrics.
+- `src/interactive/footer/pages.ts` holds `renderCompactDashboard`, `dashboardPageViewport`, `renderDashboardPage` and `machineBlock`. The expanded page lists live and recent dispatch workers through the shared board renderers, reads the context budget, and shows the session totals with the cost `ceiling` chip; the machine block is drawn by `/usage` Health.
 - `src/interactive/footer/widgets.ts` defines the facts interfaces (`WorkspaceFacts`, `SessionFacts`, `ContextEngineFacts`, `AgentWorkFacts`, `ToolTallySnapshot`) and the width-fitting helpers such as `fitDashboardLine` and `formatToolTally`.
 - `src/interactive/footer/notifications.ts` holds the notice center, the severity and expiry rules, and a desktop notification path (`createInteractiveDesktopNotifications`).
 - `src/interactive/footer/spend.ts` converts a telemetry view into the `FooterTelemetry` value.
@@ -64,11 +63,11 @@ The panel reads its data only through the optional getters on `FooterDashboardDe
 
 ## Paging and the sampler lifecycle
 
-`toggleExpanded` in `src/interactive/footer/dashboard.ts` works in three steps. From compact, it calls `setExpanded(true)`, which sets the page to `Activity`. From `Status`, it calls `setExpanded(false)`. From any other page, it advances the index in `DASHBOARD_PAGES` and wraps to `Activity` at the end. After each page change it calls `machine.setActive(page === "Status")`. `setExpanded` also calls `machine.setActive(false)`.
+`toggleExpanded` in `src/interactive/footer/dashboard.ts` calls `setExpanded(mode === "compact")`: from compact it opens the one expanded page, and from that page it returns to compact. `setExpanded` resets the scroll offset and refreshes.
 
-`createLocalMachineSampler` in `src/interactive/footer/system-metrics.ts` starts a two-second interval only when `setActive(true)` is called. `setActive(false)` clears the interval and clears the snapshot. The sampler reads `/proc/net/dev`, `/proc/diskstats`, `/sys/block`, and `/sys/class/drm` on Linux, and it reads `os` values on every platform. It does not run subprocesses.
+`createLocalMachineSampler` in `src/interactive/footer/system-metrics.ts` starts a two-second interval only when `setActive(true)` is called. `setActive(false)` clears the interval and clears the snapshot. Its one caller is `src/interactive/usage-overlay.ts`, which activates it only on the Health tab. The sampler reads `/proc/net/dev`, `/proc/diskstats`, `/sys/block`, and `/sys/class/drm` on Linux, and it reads `os` values on every platform. It does not run subprocesses.
 
-The test `tests/contracts/footer-machine-sampling.test.ts` replaces `setInterval` and `clearInterval` with counters. For each width in 60, 80, 120, and 200, it asserts that the compact footer and the Activity and Context pages do not add an interval. It asserts that entering Status adds exactly one interval, that a refresh on Status reuses that interval, and that leaving Status clears it. The same test asserts that every rendered row fits the width and contains only SGR sequences (`ESC [ ... m`).
+The test `tests/contracts/footer-machine-sampling.test.ts` replaces `setInterval` and `clearInterval` with counters and checks that the footer adds no interval and that every rendered row fits the width and contains only SGR sequences (`ESC [ ... m`).
 
 ## Width and layout
 
@@ -102,7 +101,7 @@ The `tests/contracts/footer-notice-priority.test.ts` file exists in the reposito
 
 ## Things to watch when editing
 
-- The sampler is the only footer component with timers that the footer owns directly. Any change to page order or to the Status toggle must keep `machine.setActive` in step with the page, or the interval will leak or stay off.
+- The footer owns no timers for the machine sampler; `/usage` does. Any change to the Health tab must keep `machine.setActive` in step with the tab, or the interval will leak or stay off.
 - `renderCompactDashboard` and `dashboardPageViewport` depend on the width the footer receives. A new row must be checked at the narrow widths in `tests/contracts/footer-responsive-pages.test.ts`, because a row that is wider than the terminal breaks the layout.
 - Notice replacement is keyed. Two callers that use the same `key` overwrite each other's notice.
 - `FooterDashboardRenderState` is assembled in `state(width)` inside `buildFooterDashboard`. A new fact needs a getter on `FooterDashboardDeps` and a field on the state. Missing getters must still produce a valid render.

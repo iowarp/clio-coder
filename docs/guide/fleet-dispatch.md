@@ -530,8 +530,7 @@ reduction caused solely by Clio Coder's own workers while still observing change
 host pressure. Calls inside the sampling interval reuse that same paired sample.
 
 When a host input binds the limit, the `/settings` fleet row for `local` shows
-it after the busy count (`ready · 1/2 busy · memory-bound at 2`), and the
-dashboard status page shows it as `Worker cap  2 · memory`. The footer chip shows
+it after the busy count (`ready · 1/2 busy · memory-bound at 2`). The footer chip shows
 only the live worker count. `clio-coder configure` shows what `auto` resolves to on
 the current host, and `clio-coder doctor` reports it as the local worker capacity.
 
