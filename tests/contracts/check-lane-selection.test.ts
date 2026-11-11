@@ -1,6 +1,6 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { directImports, selectLaneTests } from "../../scripts/check-lane.mjs";
+import { directImports, formatOpenapi, selectLaneTests } from "../../scripts/check-lane.mjs";
 
 test("check:lane selects changed tests and direct importers, and flags an added test no gate lists", () => {
 	const importsOf = new Map([
@@ -36,4 +36,10 @@ test("check:lane selects changed tests and direct importers, and flags an added 
 		],
 		unlisted: ["tests/contracts/new-thing.test.ts"],
 	});
+});
+
+test("check:lane formats a regenerated openapi contract the way the GUI package's openapi script does", () => {
+	const formatted = formatOpenapi(`${JSON.stringify({ required: ["a", "b"] }, null, "\t")}\n`);
+	strictEqual(formatted.status, 0, formatted.stderr);
+	strictEqual(formatted.stdout, '{\n\t"required": ["a", "b"]\n}\n');
 });

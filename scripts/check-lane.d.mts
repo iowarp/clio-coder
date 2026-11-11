@@ -6,3 +6,4 @@ export declare function selectLaneTests(input: {
 	importsOf: Map<string, string[]>;
 	lists: { coreTests: string[]; guiTests: string[]; packageTests: string[] };
 }): { affected: string[]; unlisted: string[] };
+export declare function formatOpenapi(text: string): { status: number | null; stdout: string; stderr: string };

@@ -70,6 +70,17 @@ export function selectLaneTests({ changed, added, importsOf, lists }) {
 	return { affected: [...affected].sort(), unlisted };
 }
 
+/** Biome-format generated openapi JSON with the GUI package's own config, the one `pnpm run openapi` uses. */
+export function formatOpenapi(text) {
+	// The root biome config excludes apps/clio-coder-gui, so formatting from the root returns the input unchanged.
+	return spawnSync("pnpm", ["exec", "biome", "format", "--stdin-file-path=contracts/openapi.json"], {
+		cwd: join(root, "apps/clio-coder-gui"),
+		input: text,
+		encoding: "utf8",
+		maxBuffer: 64 * 1024 * 1024,
+	});
+}
+
 function git(args) {
 	const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
 	if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.trim()}`);
@@ -186,15 +197,7 @@ async function main() {
 			],
 			{ cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 		);
-		const formatted =
-			generated.status === 0
-				? spawnSync("pnpm", ["exec", "biome", "format", "--stdin-file-path=apps/clio-coder-gui/contracts/openapi.json"], {
-						cwd: root,
-						input: generated.stdout,
-						encoding: "utf8",
-						maxBuffer: 64 * 1024 * 1024,
-					})
-				: generated;
+		const formatted = generated.status === 0 ? formatOpenapi(generated.stdout) : generated;
 		const current = readFileSync(join(root, "apps/clio-coder-gui/contracts/openapi.json"), "utf8");
 		if (formatted.status !== 0) fail("openapi", `(could not regenerate: ${formatted.stderr.trim().split("\n")[0]})`);
 		else if (formatted.stdout !== current)
