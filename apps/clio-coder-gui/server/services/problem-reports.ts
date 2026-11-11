@@ -64,10 +64,7 @@ export class ProblemReportsService {
 			| typeof ProblemReportRows
 			| typeof ProblemReportBundle
 			| typeof ProblemReportOffer,
-	>(
-		schema: S,
-		raw: unknown,
-	) {
+	>(schema: S, raw: unknown) {
 		const value = Value.Clean(schema, structuredClone(raw));
 		if (!Value.Check(schema, value))
 			throw new AppProblem("unavailable", "The report host returned an invalid projection.");

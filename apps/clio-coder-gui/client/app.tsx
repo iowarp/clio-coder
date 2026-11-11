@@ -163,6 +163,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			title: taskTitle(value),
 			state: value.state,
 			runningTurnId: value.turns.at(-1)?.status === "running" ? (value.turns.at(-1)?.id ?? null) : null,
+			failedTurnId: value.turns.at(-1)?.status === "failed" ? (value.turns.at(-1)?.id ?? null) : null,
 		}),
 		enabled: false,
 	});
@@ -404,8 +405,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const collapsed = sidebarCollapsed && !phone;
 	// The report domain decides whether a failure may be offered (its rules, its ledger and `report.offers`); the
 	// app asks once per failed turn and shows the answer as an ordinary inline notice that never takes focus.
-	const lastTurn = snapshot?.turns.at(-1);
-	const failedTurnId = lastTurn?.status === "failed" ? lastTurn.id : null;
+	const failedTurnId = snapshot?.failedTurnId ?? null;
 	const offer = useQuery({
 		queryKey: ["report-offer", activeWorkspaceId ?? "", sessionId ?? "", failedTurnId ?? ""],
 		queryFn: () =>
@@ -424,10 +424,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		<div className="app-update-notice" role="status">
 			<p>
 				{shownOffer.text}{" "}
-				<button
-					type="button"
-					onClick={() => setReportRequest(sessionId !== null ? { sessionId } : {})}
-				>
+				<button type="button" onClick={() => setReportRequest(sessionId !== null ? { sessionId } : {})}>
 					{shownOffer.link}
 				</button>{" "}
 				<button

@@ -252,8 +252,7 @@ export function ReportDialog({
 						) : state.step === "attach" ? (
 							<div className="report-dialog__pane" role="tabpanel">
 								<p>
-									A diagnostic bundle is attached only if you choose it on the Send step. Review what it would
-									carry here first.
+									A diagnostic bundle is attached only if you choose it on the Send step. Review what it would carry here first.
 								</p>
 								<label className="report-dialog__tick">
 									<input

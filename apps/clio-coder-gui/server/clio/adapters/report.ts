@@ -90,10 +90,7 @@ async function bundle(cwd: string, draftId: string, request: ProblemReportBundle
 		});
 	} catch (error) {
 		shownBundles.delete(draftId);
-		throw new AppProblem(
-			"validation",
-			`No bundle was built: ${error instanceof Error ? error.message : String(error)}`,
-		);
+		throw new AppProblem("validation", `No bundle was built: ${error instanceof Error ? error.message : String(error)}`);
 	}
 	shownBundles.set(draftId, built);
 	const { summary } = built;
