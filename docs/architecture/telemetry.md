@@ -176,8 +176,9 @@ The read model folds the same verdict into a run's DTO (`seal`), which `/view ve
 `clio-coder telemetry share` ([share.ts](../../src/domains/telemetry/share.ts)) packs sealed scopes into one `tar.gz` for a maintainer. Without `--send` nothing is uploaded.
 
 ```text
-clio-coder telemetry share [--session <id>]... [--run <id>]... [--repo <path>] [--since <iso>] [--until <iso>]
-                           [--profile content-free|structural|research] [--out <file>] [--dry-run]
+clio-coder telemetry share [--session <id>]... [--run <id>]... [--process <id>]... [--repo <path>]
+                           [--since <iso>] [--until <iso>] [--live]
+                           [--profile content-free|report|structural|research] [--out <file>] [--dry-run]
                            [--send --consent debug|dataset [--yes]]
 clio-coder telemetry share list | forget <shareId>
 clio-coder telemetry import <archive>
@@ -185,11 +186,12 @@ clio-coder telemetry import <archive>
 
 `--send` ([telemetry-share.ts](../../src/cli/telemetry-share.ts)) packs the same archive in memory and hands it to the report domain's share modules ([seal.ts](../../src/domains/report/share/seal.ts), [gist.ts](../../src/domains/report/share/gist.ts)): a content-free digest (event and tool outcome counts by closed names, scope counts, OS, install kind, profile) is computed from the archive's records, the plaintext `{format: "clio-coder.share.plain", v: 1, kind, shareId, day, clio, consent, digest, archiveFormat, archive}` is sealed to the maintainers' X25519 key (an ephemeral X25519 key, HKDF-SHA256 over both public keys, AES-256-GCM with the key id and share id as associated data), and the envelope is uploaded as a secret gist through the sender's `gh`. A public discussion in "Telemetry shares" then carries a fenced `clio-coder-share` block (`v`, `share: gist:<id>#<shareId>`, `kind`, `version`, `consent`, `profile`) that the maintainers' intake discovers. The category is looked up before anything is uploaded, and a failed post deletes the gist. Receipts are written under `reports/shares.json`, never under the telemetry root, and drive `list`, `forget` and the 180-day deletion, which every `report` and `telemetry share` run performs (never startup). The `report` profile is refused with `--send`: a report archive goes with its report through `report --share`. See [Share with the maintainers](../guide/troubleshooting.md#share-with-the-maintainers).
 
-A selection names sessions, runs, a repository's sessions or a seal-time range; a session brings the runs it references, and a scope that is live or fails verification is skipped and named. In a terminal with no scope flags, `share` asks which scopes and which profile. The profiles are declared once in `SHARE_PROFILES`:
+A selection names sessions, runs, a repository's sessions or a seal-time range; a session brings the runs it references, and a scope that is live or fails verification is skipped and named. `--live` shares a named scope that is still live as a snapshot of what is on disk, without sealing or touching it. A process scope (boot, health, domain loads, exit) is reachable by `--process`, and the running process's own only with `--live`. In a terminal with no scope flags, `share` asks which scopes and which profile. The profiles are declared once in `SHARE_PROFILES`:
 
 | Profile | Keeps |
 | --- | --- |
 | `content-free` (default) | Accountability and operational records with content-free or structural payloads; no objects. |
+| `report` | Structural, with target ids anonymized too, for an archive linked from a public issue. The archive gets an install id and anonymization key of its own, so no anonymous id links it to another share, and the preview lists every name left readable. |
 | `structural` | Adds the objects that hold structure, such as prompt and tool-schema manifests. |
 | `research` | Adds research records, content records and content objects, for scopes captured under consent. |
 
