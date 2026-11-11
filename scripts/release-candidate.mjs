@@ -19,6 +19,7 @@ import { runTests } from "./ci-tests.mjs";
 import { tmpdirProblem } from "./release/plan.mjs";
 import { acquireLock } from "./release/receipt.mjs";
 import { releaseVersionErrors } from "./release-version-policy.mjs";
+import { creditsSection } from "./report-credits.mjs";
 
 export const root = fileURLToPath(new URL("..", import.meta.url));
 export const installers = ["install.sh", "install.ps1", "install.cmd", "native-install.cjs"];
@@ -100,7 +101,8 @@ function prepareWebsite(directory, commit, version) {
 	}
 }
 
-export async function prepare(directory) {
+/** `credits` is the JSON `scripts/report-credits.mjs` printed for this release; without it the notes are unchanged. */
+export async function prepare(directory, credits) {
 	const commit = source();
 	const pkg = json(join(root, "package.json"));
 	const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
@@ -148,7 +150,7 @@ export async function prepare(directory) {
 	const notes = section?.slice(section.indexOf("\n") + 1).trim();
 	writeFileSync(
 		join(directory, "release-notes.md"),
-		`${notes || "Development qualification; release notes are not final."}\n`,
+		`${notes || "Development qualification; release notes are not final."}\n${creditsSection(credits ? JSON.parse(readFileSync(credits, "utf8")) : null)}`,
 	);
 	prepareWebsite(directory, commit, pkg.version);
 	if (source() !== commit) throw new Error("Source changed during candidate preparation.");
@@ -374,13 +376,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 				node22: { type: "string" },
 				node24: { type: "string" },
 				state: { type: "string" },
+				credits: { type: "string" },
 			},
 			allowPositionals: true,
 		});
 		const commit = values.sha ?? git("rev-parse", "HEAD");
 		const directory = resolve(values.directory ?? join(releaseState(), `c-${commit.slice(0, 12)}`));
 		const mode = positionals[0];
-		if (mode === "prepare") await prepare(directory);
+		if (mode === "prepare") await prepare(directory, values.credits);
 		else if (mode === "test") {
 			if (values.results !== undefined && !/^test-results(?:-\d+)?\.json$/u.test(values.results))
 				throw new Error("--results names test-results.json or test-results-<node major>.json.");
