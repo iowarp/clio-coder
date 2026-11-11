@@ -379,7 +379,7 @@ export function ReportDialog({
 											update({ credit: event.target.checked });
 										}}
 									/>
-									Credit me in the release notes (credit: yes)
+									{controls.creditLabel}
 								</label>
 								<label className="report-dialog__tick">
 									<input

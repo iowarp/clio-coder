@@ -122,3 +122,11 @@ test("report this on a failed run: drafts from the run's session with a title na
 	});
 	assert.equal(failedRunReport({ runId: "r1", agentId: "scout", state: "done" }, "s1"), null);
 });
+
+test("report dialog: the credit label states the current choice", () => {
+	assert.match(reportControls(INITIAL_REPORT_STATE).creditLabel, /\(credit: no\)$/);
+	const ready = reportReducer(INITIAL_REPORT_STATE, { type: "planned", view: view([]) });
+	assert.match(reportControls(ready).creditLabel, /\(credit: no\)$/);
+	const credited = reportReducer(ready, { type: "credit", value: true });
+	assert.match(reportControls(credited).creditLabel, /\(credit: yes\)$/);
+});

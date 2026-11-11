@@ -136,6 +136,12 @@ export interface ReportControls {
 	readonly sendBlocked: string | null;
 	readonly actions: readonly string[];
 	readonly gates: readonly string[];
+	/** The credit checkbox label, naming what the current choice sends. */
+	readonly creditLabel: string;
+}
+
+function creditLabel(state: ReportDialogState): string {
+	return `Credit me in the release notes (credit: ${state.choices.credit ? "yes" : "no"})`;
 }
 
 export function reportControls(state: ReportDialogState): ReportControls {
@@ -147,6 +153,7 @@ export function reportControls(state: ReportDialogState): ReportControls {
 			sendBlocked: "Preparing",
 			actions: [],
 			gates: [],
+			creditLabel: creditLabel(state),
 		};
 	const sent = state.outcome?.status === "sent";
 	const blocked = sent
@@ -170,6 +177,7 @@ export function reportControls(state: ReportDialogState): ReportControls {
 		sendBlocked: blocked,
 		actions: view.plan.actions.map((action, index) => `${index + 1}. ${action}`),
 		gates: view.plan.gates,
+		creditLabel: creditLabel(state),
 	};
 }
 
