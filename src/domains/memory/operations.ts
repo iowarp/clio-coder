@@ -146,6 +146,24 @@ export function canonicalMemoryRepositoryIdentity(repositoryPath: string): Memor
 
 /** Root commits read once per session per repository key; `null` means none could be read. */
 const repositoryFingerprints = new Map<string, string | null>();
+/**
+ * Every root commit any ref of the repository reaches, read with the fingerprint. A record learned on another branch
+ * whose history starts elsewhere (an orphan branch, or a history merged in later) still belongs to this repository.
+ */
+const repositoryRootCommits = new Map<string, ReadonlySet<string>>();
+
+function rootCommits(cwd: string, revisions: ReadonlyArray<string>): string[] {
+	const out = execFileSync("git", ["rev-list", "--max-parents=0", ...revisions], {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+		timeout: 5000,
+	});
+	return out
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => /^[0-9a-f]{40,64}$/u.test(line));
+}
 
 /**
  * Read the repository's root commit once, at session start and off the prompt-build path, so identities built
@@ -158,17 +176,13 @@ export function primeMemoryRepositoryFingerprint(cwd: string): void {
 	let fingerprint: string | null = null;
 	try {
 		if (existsSync(join(identity.key, ".git")) && !existsSync(join(identity.key, ".git", "shallow"))) {
-			const out = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], {
-				cwd: identity.key,
-				encoding: "utf8",
-				stdio: ["ignore", "pipe", "ignore"],
-				timeout: 5000,
-			});
-			const first = out.split("\n")[0]?.trim() ?? "";
-			if (/^[0-9a-f]{40,64}$/u.test(first)) fingerprint = first;
+			fingerprint = rootCommits(identity.key, ["HEAD"])[0] ?? null;
+			if (fingerprint !== null)
+				repositoryRootCommits.set(identity.key, new Set([fingerprint, ...rootCommits(identity.key, ["--all"])]));
 		}
 	} catch {
-		// No git, no commits, or a broken repository: path-only matching.
+		// No git, no commits, or a broken repository: path-only matching. The HEAD fingerprint stands when only the
+		// walk over every ref failed.
 	}
 	repositoryFingerprints.set(identity.key, fingerprint);
 }
@@ -262,15 +276,19 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 	if (
 		record.repository.fingerprint !== undefined &&
 		activeRepository.fingerprint !== undefined &&
-		record.repository.fingerprint !== activeRepository.fingerprint
+		record.repository.fingerprint !== activeRepository.fingerprint &&
+		!repositoryRootCommits.get(activeRepository.key)?.has(record.repository.fingerprint)
 	) {
 		return false;
 	}
 	if (record.repository.key === activeRepository.key) return true;
-	// Records learned in a subdirectory session before identities resolved to the
-	// repository root still apply, unless that subdirectory is a repository itself.
+	// Records learned in a subdirectory session before identities resolved to the repository root still apply when
+	// that directory resolves to this repository now: never below a directory outside Git, never inside a nested one.
 	const key = record.repository.key;
-	return key.startsWith(`${activeRepository.key}${sep}`) && !existsSync(join(key, ".git"));
+	return (
+		key.startsWith(`${activeRepository.key}${sep}`) &&
+		canonicalMemoryRepositoryIdentity(key)?.key === activeRepository.key
+	);
 }
 
 function runtimeApplies(record: MemoryRecord, activeRuntime: MemoryRuntimeIdentity | null): boolean {

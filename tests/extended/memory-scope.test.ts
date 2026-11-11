@@ -1,9 +1,13 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { canonicalMemoryRepositoryIdentity } from "../../src/domains/memory/operations.js";
+import {
+	canonicalMemoryRepositoryIdentity,
+	primeMemoryRepositoryFingerprint,
+} from "../../src/domains/memory/operations.js";
 import { memoryRecordFromPromotion } from "../../src/domains/memory/promotion.js";
 import { selectMemoryForPrompt } from "../../src/domains/memory/prompt-section.js";
 import { TaskMemoryBank } from "../../src/domains/memory/task-bank.js";
@@ -53,6 +57,64 @@ describe("memory scope boundary", () => {
 				({ id }) => id,
 			),
 			["global"],
+		);
+	});
+
+	it("applies a subdirectory's record only when that directory resolves to the active repository", () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-memory-subdir-")));
+		roots.push(root);
+		const repo = join(root, "repo");
+		mkdirSync(join(repo, ".git"), { recursive: true });
+		mkdirSync(join(repo, "notebooks"), { recursive: true });
+		mkdirSync(join(repo, "vendor", "lib", ".git"), { recursive: true });
+		mkdirSync(join(repo, "vendor", "lib", "src"), { recursive: true });
+		const plain = join(root, "plain");
+		mkdirSync(join(plain, "scratch"), { recursive: true });
+		const keyed = (id: string, key: string) => record(id, "repo", { kind: "canonical-path", key });
+		const selected = (active: string) =>
+			selectMemoryForPrompt(
+				[
+					keyed("repo-sub", join(repo, "notebooks")),
+					keyed("nested-sub", join(repo, "vendor", "lib", "src")),
+					keyed("plain-sub", join(plain, "scratch")),
+				],
+				{ scopes: ["repo"], tokenBudget: 10_000, activeRepository: canonicalMemoryRepositoryIdentity(active) },
+			)
+				.map(({ id }) => id)
+				.sort();
+		deepStrictEqual(selected(repo), ["repo-sub"], "a nested repository's subdirectory stays its own");
+		const plainIdentity = canonicalMemoryRepositoryIdentity(plain);
+		if (plainIdentity?.key !== plain) return; // The temp root sits inside a repository on this host.
+		deepStrictEqual(selected(plain), [], "a directory outside Git does not collect its subdirectories' records");
+	});
+
+	it("keeps a repository's records across a branch whose history starts at another root commit", () => {
+		const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-memory-orphan-")));
+		roots.push(root);
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], {
+				cwd: root,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim();
+		git("init", "-q", "-b", "main");
+		git("commit", "-q", "--allow-empty", "-m", "main root");
+		const mainRoot = git("rev-parse", "HEAD");
+		git("checkout", "-q", "--orphan", "pages");
+		git("commit", "-q", "--allow-empty", "-m", "pages root");
+		primeMemoryRepositoryFingerprint(root);
+		const active = canonicalMemoryRepositoryIdentity(root);
+		ok(active?.fingerprint !== undefined && active.fingerprint !== mainRoot);
+		const keyed = (id: string, fingerprint: string) =>
+			record(id, "repo", { kind: "canonical-path", key: root, fingerprint });
+		const selected = selectMemoryForPrompt([keyed("main", mainRoot), keyed("other", "c".repeat(40))], {
+			scopes: ["repo"],
+			tokenBudget: 10_000,
+			activeRepository: active,
+		});
+		deepStrictEqual(
+			selected.map(({ id }) => id),
+			["main"],
 		);
 	});
 
