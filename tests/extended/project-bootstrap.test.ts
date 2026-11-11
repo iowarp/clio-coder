@@ -143,6 +143,29 @@ describe("project bootstrap boundary", () => {
 		]);
 	});
 
+	it("states no invariant or convention a sibling file only names", async () => {
+		const root = scratch();
+		packageFile(root);
+		writeFileSync(
+			join(root, "AGENTS.md"),
+			"Engine boundary, Worker isolation and Domain independence matter here.\nNo em-dash. Local imports end in `.js`. Commit subjects follow conventional commit style.\n",
+		);
+		const adoption = scanAgentConfigs({ cwd: root, homeDir: scratch() });
+		const output = await heuristicBootstrapOutput({
+			cwd: root,
+			projectType: "typescript",
+			siblingFiles: adoption.sources.map((source) => ({
+				source: source.scope,
+				path: source.path,
+				content: source.content,
+			})),
+			adoption,
+			codewiki: { version: 5, language: "typescript", files: [], symbols: [], edges: [] },
+		});
+		deepStrictEqual(output.invariants, []);
+		deepStrictEqual(output.conventions, ["Tests use `node:test`."]);
+	});
+
 	it("builds a deterministic, parseable handbook artifact from bounded project evidence", async () => {
 		const root = scratch();
 		packageFile(root);

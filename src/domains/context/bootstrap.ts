@@ -551,25 +551,12 @@ function inferConventions(cwd: string, files: ReadonlyArray<SiblingContextFile>,
 	// is not stated. The stack alone decides nothing: a repository that imports
 	// `./money.ts` under allowImportingTsExtensions is told to break its own
 	// build by a rule inferred from the presence of a tsconfig.
-	const declaredJs = /Local imports end in `?\.js`?/i.test(context);
-	const importExtension = declaredJs ? ".js" : localImportExtension(codewiki);
+	const importExtension = localImportExtension(codewiki);
 	if (importExtension !== null) {
 		pushUnique(conventions, `Local imports end in \`${importExtension}\`.`);
 	}
 	if (/node:test/i.test(context) || /node --import tsx --test|node --test/.test(packageText)) {
 		pushUnique(conventions, "Tests use `node:test`.");
-	}
-	if (/No em-dash|em-dash/i.test(context)) {
-		pushUnique(
-			conventions,
-			"No em-dash clause separators in code, comments, commits, or responses. Write full sentences.",
-		);
-	}
-	if (/Commit subjects|conventional commit|Imperative, lowercase|lowercase-typed subjects/i.test(context)) {
-		pushUnique(
-			conventions,
-			"Commit subjects are imperative, lowercase, conventional, at most 72 characters, and end without a period.",
-		);
 	}
 	// An uncited sibling bullet is kept only when no tree fact contradicts it; a cited one is adopted
 	// only through the verified authored-rule pass, which checks its citations against the tree.
@@ -578,27 +565,6 @@ function inferConventions(cwd: string, files: ReadonlyArray<SiblingContextFile>,
 		if (!/`[^`\n]+`/.test(bullet) && !contradictingFact(bullet, facts)) pushUnique(conventions, bullet);
 	}
 	return conventions.slice(0, 6);
-}
-
-function inferInvariants(files: ReadonlyArray<SiblingContextFile>): string[] {
-	const context = allContextText(files);
-	const invariants: string[] = [];
-	if (/Engine boundary/i.test(context)) {
-		pushUnique(invariants, "Engine boundary. Only `src/engine/**` may value-import `@earendil-works/pi-*`.");
-	}
-	if (/Worker isolation/i.test(context)) {
-		pushUnique(
-			invariants,
-			"Worker isolation. `src/worker/**` never imports `src/domains/**` except `src/domains/providers`.",
-		);
-	}
-	if (/Domain independence/i.test(context)) {
-		pushUnique(
-			invariants,
-			"Domain independence. `src/domains/<x>/**` never imports `src/domains/<y>/extension.ts` for `y != x`.",
-		);
-	}
-	return invariants.slice(0, 3);
 }
 
 function indexedSourceFileCount(codewiki: Codewiki): number {
@@ -2132,7 +2098,6 @@ function stabilizeGeneratedOutput(
 			if (groundModelOutput) onModelSectionRetained?.();
 		}
 	}
-	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
 	// A checker rule that constrains imports between path sets is a hard
 	// invariant: it leads, in the checker's own declaration, and a model rule
 	// that only restates one gives way to it.
@@ -2376,13 +2341,6 @@ function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] 
 	// tokens and does not shorten the path to the right file. The session prompt
 	// already routes navigation through `code_nav`.
 	const sections: ClioMdSection[] = [];
-	const invariants = inferInvariants(handbookInstructionFiles(input));
-	if (invariants.length > 0) {
-		sections.push({
-			title: "Architecture boundaries",
-			body: invariants.map((item) => `- ${item}`).join("\n"),
-		});
-	}
 	if (input.adoption.sources.length > 0) {
 		const sourceNames = input.adoption.sources
 			.map((source) => `\`${source.displayPath}\``)
@@ -2412,7 +2370,7 @@ function heuristicBootstrapOutputSync(input: BootstrapGenerateInput): BootstrapS
 		projectName: projectName(input.cwd, tomlFiles),
 		identity: resolveDefaultIdentity(input.cwd, input.projectType, handbookInstructionFiles(input), tomlFiles).text,
 		conventions: inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki),
-		invariants: inferInvariants(handbookInstructionFiles(input)),
+		invariants: [],
 		sections: inferHeuristicSections(input),
 	});
 }
