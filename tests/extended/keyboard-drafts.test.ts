@@ -278,3 +278,18 @@ it("Enter on a slash row that leaves the typed line unchanged submits it", async
 	assert.equal(editor.getText(), "/model claude-sonnet-5.5");
 	assert.deepEqual(submitted, ["/model claude-sonnet-5.5"]);
 });
+
+it("every /delegate form that fails to parse names /run first", () => {
+	const notices: string[] = [];
+	const context = {
+		keyboardActions: { menuLabel: () => "" },
+		notice: (_level: string, text: string) => notices.push(text),
+		render: noop,
+	} as unknown as SlashCommandContext;
+	for (const line of ["/delegate", "/delegate --bogus"]) {
+		notices.length = 0;
+		dispatchSlashCommand(parseSlashCommand(line), context);
+		assert.equal(notices[0], "/delegate is now /run; ran it.", line);
+		assert.match(notices.at(-1) ?? "", /usage: \/run/u, line);
+	}
+});

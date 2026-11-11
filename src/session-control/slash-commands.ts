@@ -362,6 +362,9 @@ export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
 	{ name: "loop cancel", since: "0.8.0", to: { command: "/loop stop --now" } },
 ];
 
+/** `/delegate` stays a live command for ACP clients; only its unparsable forms take this redirect. */
+const DELEGATE_RETIRED: RetiredCommand = { name: "delegate", since: "0.8.0", to: { command: "/run" } };
+
 /** A one-word retired name, typed bare, must reach `dispatchRetiredCommand` rather than a palette row. */
 export function isRetiredCommandName(name: string): boolean {
 	return RETIRED_COMMANDS.some((entry) => entry.name === name);
@@ -2277,7 +2280,11 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 		},
 		fromArgs(parsed, trimmed) {
-			if (parsed.error) return usageError("delegate", parsed.error);
+			// A form that does not parse goes to /run, whose usage is the one to learn.
+			if (parsed.error) {
+				const rest = trimmed.replace(/^\/delegate/u, "").trim();
+				return { kind: "retired", name: "delegate", rest, entry: DELEGATE_RETIRED };
+			}
 			return {
 				kind: "delegate",
 				agentId: parsed.positionals[0] ?? "",
