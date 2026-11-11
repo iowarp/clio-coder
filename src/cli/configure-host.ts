@@ -1,5 +1,6 @@
 import { PassThrough, Writable } from "node:stream";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
+import type { SendChatTest } from "./chat-test.js";
 import { runOnboardingWizard } from "./configure-onboarding.js";
 import type { SelectOptions, SelectResult, TextPromptOptions, TextResult } from "./select.js";
 
@@ -28,7 +29,13 @@ export interface ConfigureWizardHost {
 
 const UNWRAPPED_COLUMNS = 100_000;
 
-export type HostedTargetOptions = { mode: "first" | "add" } | { mode: "edit"; target: TargetDescriptor };
+export type HostedTargetOptions =
+	| {
+			mode: "first" | "add";
+			/** The test request before saving: on unless false; a function replaces it in tests. */
+			verify?: boolean | SendChatTest;
+	  }
+	| { mode: "edit"; target: TargetDescriptor };
 
 /** Loaded on target setup so the instant shell never evaluates wizard code. */
 export async function runHostedTargetWizard(host: ConfigureWizardHost, options: HostedTargetOptions): Promise<number> {
@@ -47,7 +54,11 @@ export async function runHostedTargetWizard(host: ConfigureWizardHost, options: 
 	Object.defineProperty(output, "columns", { value: UNWRAPPED_COLUMNS });
 	const input = new PassThrough();
 	try {
-		return await runOnboardingWizard({ in: input, out: output }, options, host);
+		return await runOnboardingWizard(
+			{ in: input, out: output },
+			options.mode === "edit" ? options : { verify: true, ...options },
+			host,
+		);
 	} finally {
 		input.destroy();
 		output.destroy();

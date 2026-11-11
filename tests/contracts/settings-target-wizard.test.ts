@@ -15,6 +15,7 @@ import { dockTop } from "../../src/interactive/dock.js";
 import { buildSettingItems, openSettingsOverlay } from "../../src/interactive/overlays/settings.js";
 import { TargetWizardSurface } from "../../src/interactive/target-wizard.js";
 import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
+import { closeServer, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("/config opens Settings on Connections while /settings retains its areas", () => {
@@ -66,6 +67,7 @@ function fixtures(): void {
 
 class ScriptedWizard extends TargetWizardSurface {
 	seen: string[] = [];
+	reports: string[] = [];
 	private inspected = false;
 	constructor(
 		private readonly runtime: string,
@@ -118,6 +120,10 @@ class ScriptedWizard extends TargetWizardSurface {
 		this.handleInput("\r");
 		return pending;
 	}
+	override report(line: string): void {
+		this.reports.push(stripTerminalSequences(line));
+		super.report(line);
+	}
 	override async text(options: TextPromptOptions): Promise<TextResult> {
 		const pending = super.text(options);
 		this.check();
@@ -139,7 +145,11 @@ test("the dock hosts shared target add and URL/runtime/model editing through Sav
 		fixtures();
 		initializeClioHome();
 		const add = new ScriptedWizard("wizard-one", "localhost:9911", "model-a", true, true);
-		strictEqual(await add.start({ mode: "add" }), 0, add.render(200).map(stripTerminalSequences).join("\n"));
+		strictEqual(
+			await add.start({ mode: "add", verify: false }),
+			0,
+			add.render(200).map(stripTerminalSequences).join("\n"),
+		);
 		const target = readSettings().targets.find((entry) => entry.id === "wizard-one");
 		ok(
 			target,
@@ -181,7 +191,7 @@ test("cancelling target setup leaves settings unchanged (#385)", async () => {
 		initializeClioHome();
 		const before = readSettings();
 		const wizard = new ScriptedWizard("wizard-one", "localhost:9911", "model-a", false);
-		strictEqual(await wizard.start({ mode: "add" }), 0);
+		strictEqual(await wizard.start({ mode: "add", verify: false }), 0);
 		deepStrictEqual(readSettings(), before);
 	} finally {
 		env.restore();
@@ -249,6 +259,24 @@ test("Settings mounts Add and Edit as docked prompts and tears them down with it
 		strictEqual(dockTop(tui), null);
 	}
 	await new Promise<void>((resolve) => setImmediate(resolve));
+});
+
+test("Add in the dock sends one test request and saves on its answer, without the review", async () => {
+	const env = await isolateClioEnv("clio-coder-target-test-");
+	const server = await startOpenAICompatFixture("OK", { models: [{ id: "model-a", object: "model" }] });
+	try {
+		fixtures();
+		initializeClioHome();
+		const add = new ScriptedWizard("wizard-one", server.url, "model-a");
+		strictEqual(await add.start({ mode: "add" }), 0, add.reports.join("\n"));
+		strictEqual(server.requests.length, 1, add.reports.join("\n"));
+		match(add.reports.join("\n"), /Testing wizard-one \/ model-a \.\.\. answered in/u);
+		ok(!add.seen.some((heading) => heading.includes("Review what Clio could verify")));
+		ok(readSettings().targets.some((target) => target.id === "wizard-one"));
+	} finally {
+		await closeServer(server.server);
+		env.restore();
+	}
 });
 
 test("closing setup during a probe cannot save a late target (#385)", async () => {

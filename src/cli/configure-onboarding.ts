@@ -1598,6 +1598,7 @@ async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTe
 	const label = `${answers.targetId} / ${model}`;
 	for (;;) {
 		wizard.presenter.note(`Testing ${label} ...`);
+		wizard.host?.waiting?.(`Testing ${label}…`);
 		const target = draftDescriptor(answers, runtime, true);
 		const apiKey =
 			answers.apiKeyLiteral ??

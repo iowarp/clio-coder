@@ -1293,6 +1293,8 @@ interface SectionIo {
 	/** Confirm one change on the transcript, in the presenter's voice. */
 	ok: (text: string) => void;
 	warn: (text: string) => void;
+	/** Target setup sends its test request before saving; off with `--no-verify`. */
+	verify: boolean;
 }
 
 interface SectionAction {
@@ -1443,7 +1445,10 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 				hint: "register a provider endpoint",
 				run: async (io) => {
 					if (canRunOnboarding(io.streams)) {
-						await runTargetWizard(io, { mode: readSettings().targets.length === 0 ? "first" : "add" });
+						await runTargetWizard(io, {
+							mode: readSettings().targets.length === 0 ? "first" : "add",
+							verify: io.verify,
+						});
 						return;
 					}
 					const runtime = await pickRuntimeViaCategory(io.rl);
@@ -2036,6 +2041,7 @@ async function runSection(
 	streams: ConfigureStreams,
 	spec: SectionSpec,
 	backLabel: string,
+	verify = true,
 ): Promise<"back" | "quit"> {
 	let selected = 0;
 	let notice: { text: string; warning: boolean } | undefined;
@@ -2057,6 +2063,7 @@ async function runSection(
 			warn: (text) => {
 				notice = { text: text.trim(), warning: true };
 			},
+			verify,
 		};
 		presenter.blank();
 		const choice = await pickEntry(rl, streams, spec.actions, backLabel, presenter.isPlain(), selected);
@@ -2079,6 +2086,7 @@ async function runConfigSectionsMenu(
 	rl: ConfigurePrompts,
 	streams: ConfigureStreams,
 	backLabel: "back" | "quit" = "quit",
+	verify = true,
 ): Promise<"back" | "quit"> {
 	let selected = 0;
 	for (;;) {
@@ -2100,7 +2108,7 @@ async function runConfigSectionsMenu(
 		selected = choice.index;
 		const spec = SECTIONS[selected];
 		if (spec === undefined) continue;
-		if ((await runSection(rl, streams, spec, "back")) === "quit") return "quit";
+		if ((await runSection(rl, streams, spec, "back", verify)) === "quit") return "quit";
 	}
 }
 
@@ -2144,10 +2152,10 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 			if (result === "connected") return 0;
 			if (result === "quit") return exitCode();
 		} else if (selected === 2) {
-			if ((await runConfigSectionsMenu(rl, streams, "back")) === "quit") return exitCode();
+			if ((await runConfigSectionsMenu(rl, streams, "back", verify)) === "quit") return exitCode();
 		} else {
 			const section = findSection("diagnostics");
-			if (section && (await runSection(rl, streams, section, "back")) === "quit") return exitCode();
+			if (section && (await runSection(rl, streams, section, "back", verify)) === "quit") return exitCode();
 		}
 	}
 }
@@ -2192,7 +2200,7 @@ async function runInteractive(
 		return (await runQuickConnect(rl)) === "connected" ? 0 : 130;
 	}
 	if (defaults.settings) {
-		await runConfigSectionsMenu(rl, streams);
+		await runConfigSectionsMenu(rl, streams, "quit", defaults.verify !== false);
 		return 0;
 	}
 	if (preselectedRuntime) {
@@ -2219,7 +2227,7 @@ async function runInteractive(
 			renderSection(spec, streams.out).done("Done");
 			return 0;
 		}
-		await runSection(rl, streams, spec, "quit");
+		await runSection(rl, streams, spec, "quit", defaults.verify !== false);
 		return 0;
 	}
 	// A first run that the bare `clio-coder` start sent here has one thing to do. The launcher would put
@@ -2235,7 +2243,7 @@ async function runInteractive(
 		return await runTargetSetupInteractive(rl, runtime, defaults);
 	}
 
-	await runConfigSectionsMenu(rl, streams);
+	await runConfigSectionsMenu(rl, streams, "quit", defaults.verify !== false);
 	return 0;
 }
 
