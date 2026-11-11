@@ -232,7 +232,6 @@ export interface InteractiveSlashRuntimeDeps {
 	openModel: () => void;
 	/** Apply a resolved `/model <pattern>` swap for this session the way Enter in the picker does, notice included. */
 	applyModelSession?: (ref: PendingModelScope) => void;
-	openConfigure?: () => void;
 	openSettings: (area?: SettingsAreaId, group?: "model-picker") => void;
 	openFleetRuns?: () => void;
 	openResume: (target?: string) => void;
@@ -768,7 +767,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			deps.requestRender();
 			return "applied";
 		},
-		...(deps.openConfigure ? { openConfigure: deps.openConfigure } : {}),
 		openSettings: deps.openSettings,
 		renameSession: (name) => {
 			const session = deps.session;

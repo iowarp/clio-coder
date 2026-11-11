@@ -182,7 +182,6 @@ type SlashCommandVariant =
 	| { kind: "mcp"; argv: string[] }
 	| { kind: "doctor"; deep: boolean }
 	| { kind: "upgrade" }
-	| { kind: "config" }
 	| { kind: "quit" }
 	| { kind: "reload"; target: ReloadTarget }
 	| { kind: "restart" }
@@ -795,7 +794,7 @@ async function handleDelegate(
  * path, never a fabricated tool result.
  */
 /** Commands that refuse rather than queue while a turn streams; the composer's list says so before Enter does. */
-export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["config", "council", "oracle"]);
+export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["council", "oracle"]);
 /** The same, for a command that only refuses by subcommand, as `<command> <subcommand>`. */
 export const SUBCOMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["fleet run"]);
 
@@ -1350,7 +1349,6 @@ export interface SessionCommandContext {
 	 * host applied it and already said what landed, so no second notice is due.
 	 */
 	applyModelRef?: (ref: ResolvedModelRef) => "applied" | "reported";
-	openConfigure?: () => void;
 	openSettings?: (area?: SettingsAreaId, group?: "model-picker") => void;
 	openFleetRuns?: () => void;
 	/** Resume `target` (an id, unique id prefix or exact name) directly, or open the picker. */
@@ -3284,30 +3282,12 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "config",
-		rank: 2,
-		acp: false,
-		description: "Run setup and apply saved changes to this session",
-		group: "Clio",
-		kinds: ["config"],
-		args: {},
-		fromArgs: fromArgsOrUsage("config", { kind: "config" }),
-		handle(_command, ctx) {
-			if (ctx.isTurnInFlight?.()) {
-				ctx.notice("warn", "A turn is running. Press Esc first, then run /config.");
-				return;
-			}
-			if (!ctx.openConfigure) {
-				ctx.notice("warn", "/config needs an interactive terminal.");
-				return;
-			}
-			ctx.openConfigure();
-		},
-	},
-	{
 		name: "settings",
 		rank: 1,
-		aliases: [{ name: "login", args: "connections" }],
+		aliases: [
+			{ name: "login", args: "connections" },
+			{ name: "config", args: "connections" },
+		],
 		acp: false,
 		description: "Open interactive settings",
 		group: "Clio",

@@ -1386,8 +1386,8 @@ export function idleReadinessPresentation(
 			{ text: room >= 40 ? `cannot reach ${facts.targetId}` : "server down", keep: 9 },
 			{ ...MODEL_SWITCHES, keep: 8 },
 			fix?.sentence !== undefined && facts.missing?.kind === "unreachable"
-				? { text: fix.sentence, short: `clio-coder configure --id ${facts.targetId}`, keep: 2 }
-				: { text: `clio-coder configure --id ${facts.targetId}`, keep: 2 },
+				? { text: fix.sentence, short: "/config", keep: 2 }
+				: { text: "/config", keep: 2 },
 		]);
 		return { glyph: GLYPH.error, token: "error", live: false, label, ...shown() };
 	}

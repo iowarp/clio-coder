@@ -9,7 +9,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Connect a model | [First-run flow](#first-run-flow), or `clio-coder configure --quick` when you already know the endpoint |
 | Understand how an existing home picks a chat route | [Chat route detection](#chat-route-detection) |
 | Apply a lab or site setup file | [Setup files](#setup-files): `clio-coder configure --import <path-or-https-url>` |
-| Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` → **Guided setup** adds a connection |
+| Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` opens Connections, where **Add a target** adds one |
 | Inspect or probe targets | `clio-coder targets` |
 | Check a model list | `clio-coder models --target <id>` |
 | Make a target report cost | [Pricing and cost provenance](#pricing-and-cost-provenance) |
@@ -125,7 +125,7 @@ Other settings apply at the boundary shown in the inventory. The routing classif
 
 ## Settings Center
 
-Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` is separate: it runs the configure flow inside the TUI and applies the saved routing to the running session, while `/settings` stays the settings center (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, then seven areas: **Models**, **Chat and display**, **Workers**, **Context and memory**, **Safety and limits**, **Workspace**, and **Advanced**. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
+Open `/settings` in the TUI, `clio-coder configure --settings`, or Settings in the GUI. The TUI command `/config` opens `/settings connections` (see [commands and modes](commands-and-modes.md)). The TUI starts with **Recent & Pinned**, then seven areas: **Models**, **Chat and display**, **Workers**, **Context and memory**, **Safety and limits**, **Workspace**, and **Advanced**. Configure and GUI use the eight sections listed above. A connection is the provider/app/server entry stored as a `target`; the CLI's `targets` commands and the YAML keys keep that technical name.
 
 Use **Models → Connections → Add a target** to reopen Guided setup inside the TUI. It runs the same setup flow as configure, including model inventories, passive checks, and review before Save. **Models → Chat model** selects the connection and model that answer you. **Workers → Default worker** selects the connection, model, and thinking level for delegated work; profiles and agent routes stay in Workers. **Safety and limits** opens with **Autonomy**, then **Safety judge**, worker approvals, **Sandbox**, review and spending/tool limits.
 

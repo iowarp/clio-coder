@@ -53,7 +53,6 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "systemOneControl"
 	| "interop"
 	| "telemetry"
-	| "onConfigure"
 	| "onContextClear"
 	| "onForkSession"
 	| "onNewSession"
@@ -205,7 +204,6 @@ export interface OverlayLifecycleController {
 	openModelOverlayState(): void;
 	/** `/model <pattern>` lands here: applied for this session, as Enter in the picker does. */
 	applyModelSessionState(ref: PendingModelScope): void;
-	openConfigureState(): void;
 	openSettingsOverlayState(section?: SettingsSectionId, rowId?: SettingsCenterRowId): void;
 	openResumeOverlayState(target?: string): void;
 	openTreeOverlayState(): void;
@@ -739,20 +737,6 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		forgetReportState: (id) => withReportHost((host) => host.forget(id)),
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,
 		applyModelSessionState: overlayModelSelectors.applyModelSessionState,
-		openConfigureState: () => {
-			if (!deps.app.onConfigure || !deps.suspendTerminalAsync) {
-				notify("warning", "/config needs an interactive terminal.");
-				return;
-			}
-			void deps.suspendTerminalAsync(deps.app.onConfigure).then(
-				(message) => {
-					appendNotice("info", message, busNoticeSink);
-					footer.refresh();
-					tui.requestRender();
-				},
-				(error: unknown) => notify("error", `Setup failed: ${error instanceof Error ? error.message : String(error)}`),
-			);
-		},
 		openSettingsOverlayState: overlayModelSelectors.openSettingsOverlayState,
 		openResumeOverlayState,
 		openTreeOverlayState,

@@ -15,8 +15,8 @@ import { TargetWizardSurface } from "../../src/interactive/target-wizard.js";
 import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-test("/config runs setup while /settings retains its areas", () => {
-	deepStrictEqual(parseSlashCommand("/config"), { kind: "config" });
+test("/config opens Settings on Connections while /settings retains its areas", () => {
+	deepStrictEqual(parseSlashCommand("/config"), { kind: "settings", area: "models" });
 	strictEqual(parseSlashCommand("/config targets").kind, "usage-error");
 	for (const area of ["", "targets", "chat", "interface"]) {
 		strictEqual(parseSlashCommand(`/settings ${area}`.trim()).kind, "settings");

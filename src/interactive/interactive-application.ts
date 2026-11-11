@@ -282,8 +282,6 @@ export interface InteractiveDeps {
 	 * first-available entry.
 	 */
 	getSettings?: () => Readonly<ClioSettings>;
-	/** Run setup while the terminal is suspended; return the session result. */
-	onConfigure?: () => Promise<string>;
 	/** Live fleet node snapshots for the /fleet nodes view and node-pin editor. */
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
 	/** Live dispatch breaker state per route for the Settings → Targets rows. */
@@ -1467,7 +1465,6 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		...(loopJobs ? { jobs: loopJobs.jobs } : {}),
 		openModel: () => openModelOverlayState(),
 		applyModelSession: (ref) => applyModelSessionState(ref),
-		openConfigure: () => overlayLifecycle.openConfigureState(),
 		openSettings: (area, group) => {
 			if (!area) return openSettingsOverlayState();
 			// The quick-switch list lives under Models & Inference; `/settings chat model-picker` predates that area.
