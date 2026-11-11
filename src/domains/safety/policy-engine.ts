@@ -849,7 +849,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// additions and exemptions stay gated on validity inside the loader.
 		const pathBlock = evaluateProjectPathPolicy(pathPolicy, deletes, call, callCwd, walkMemo);
 		if (pathBlock !== null) {
-			return { reasonCode: pathBlock.reasonCode, reasons: [pathBlock.reason], policySource: "project-policy" };
+			// Only an entry the project authored is the project's policy; the rest is Clio's built-in protection.
+			const authored = evaluateProjectPathPolicy(operatorPolicy(), operatorPolicy(), call, callCwd, walkMemo) !== null;
+			return {
+				reasonCode: pathBlock.reasonCode,
+				reasons: [pathBlock.reason],
+				policySource: authored ? "project-policy" : "damage-control:base",
+			};
 		}
 		// A shell target after a literal cd is also judged from the directory
 		// that cd leaves the shell in, so `cd .clio-coder && echo x > safety.yaml`

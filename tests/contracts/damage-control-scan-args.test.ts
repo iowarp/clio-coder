@@ -1,4 +1,7 @@
 import { strictEqual } from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -148,4 +151,19 @@ test("rm is refused by target at every autonomy level and never by flags", () =>
 	}
 	const blocked = decide({ command: "rm ~/notes.txt" }, "yolo");
 	strictEqual(blocked.reasonCode, "damage-control:delete-outside-workspace");
+});
+
+test("a built-in zero-access block is not attributed to a project policy that does not exist", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-builtin-path-"));
+	try {
+		const bare = createSafetyPolicyEngine({ cwd: root });
+		for (const posture of ["default", "yolo"] as const) {
+			const decision = bare.evaluate({ tool: ToolNames.Bash, args: { command: "cp .env.example .env.local" } }, posture);
+			strictEqual(decision.kind, "block");
+			strictEqual(decision.reasonCode, "path-policy:zeroAccessPaths");
+			strictEqual(decision.policySource, "damage-control:base");
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
