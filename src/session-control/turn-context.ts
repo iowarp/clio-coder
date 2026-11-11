@@ -122,6 +122,7 @@ import {
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
+import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
 import { createTokenEstimator } from "../domains/session/compaction/tokens.js";
 import {
 	type CaptureContextSnapshotInput,
@@ -1679,12 +1680,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		);
 		const compactionThreshold = economic.threshold;
 		const compactionWindow = economic.triggerWindow;
+		// The summary's output shares the window with the context it reads, so every
+		// trigger check here counts it; the re-checks after a free stage use the same
+		// reserve so a stage that stops short of it does not re-arm on the next turn.
+		const summaryReserve = summaryOutputReserve(agentRuntime.agent.state.model);
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
 			pressureEstimate &&
 			!requiredFit &&
-			!shouldCompact(pressureEstimate.tokens, compactionThreshold, compactionWindow).shouldCompact
+			!shouldCompact(pressureEstimate.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
 		)
 			return false;
 		// Paused or inside the rearm band, the paid summary waits; the free pre-summary stages below still run.
@@ -1820,7 +1825,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		if (pressureEstimate) {
 			const estimate = pressureEstimate;
-			const verdict = shouldCompact(estimate.tokens, compactionThreshold, compactionWindow);
+			const verdict = shouldCompact(estimate.tokens, compactionThreshold, compactionWindow, summaryReserve);
 
 			// One-release compatibility escape hatch. This is the destructive
 			// pre-stage that working-set eviction replaces; keep it byte-for-byte
@@ -1895,7 +1900,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						if (
 							requiredFit
 								? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-								: !shouldCompact(after.tokens, compactionThreshold, compactionWindow).shouldCompact
+								: !shouldCompact(after.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
 						)
 							return true;
 					}
@@ -2020,7 +2025,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							if (
 								requiredFit
 									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
-									: !shouldCompact(after.tokens, compactionThreshold, compactionWindow).shouldCompact
+									: !shouldCompact(after.tokens, compactionThreshold, compactionWindow, summaryReserve).shouldCompact
 							)
 								return true;
 						} catch (error) {
@@ -3276,7 +3281,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				agentRuntime.agent.state.model,
 			);
 			const knownWindow = before.contextWindow > 0;
-			const verdict = shouldCompact(before.tokens, economic.threshold, economic.triggerWindow);
+			const verdict = shouldCompact(
+				before.tokens,
+				economic.threshold,
+				economic.triggerWindow,
+				summaryOutputReserve(agentRuntime.agent.state.model),
+			);
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.
 			const messagesBefore = agentRuntime.agent.state.messages;

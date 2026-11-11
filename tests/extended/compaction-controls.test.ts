@@ -1038,6 +1038,22 @@ describe("production compaction controls", () => {
 		strictEqual(f.calls.length, 2, "/compact always calls the summarizer");
 	});
 
+	it("triggers the automatic summary when its output reservation crosses the threshold", async () => {
+		const f = fixture(true);
+		f.settings.context.workingSet.enabled = false;
+		let attempts = 0;
+		const { runtime, context } = automaticContext(f, (...args) => {
+			attempts++;
+			return f.run(...args);
+		});
+		// The summary reserves the route's 8192-token output limit, a quarter of the
+		// 32768-token window, so context below that quarter only reaches the
+		// threshold once the reservation is counted.
+		f.settings.context.compaction.threshold = 0.25;
+		await context.runAutoCompact(runtime, false);
+		strictEqual(attempts, 1);
+	});
+
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
 		const f = fixture();
 		let attempts = 0;

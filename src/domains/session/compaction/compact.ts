@@ -67,7 +67,8 @@ import {
 	recordPriorFileOperations,
 	stripEchoedExactFacts,
 } from "./exact-facts.js";
-import { noteSummaryUsage, summaryReasoningShare } from "./reasoning-share.js";
+import { noteSummaryUsage } from "./reasoning-share.js";
+import { summaryOutputBudget } from "./summary-output.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
 /** Validate the history checkpoint, never the intentionally different split-turn prompt. */
@@ -1367,28 +1368,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	if (!Number.isFinite(reserveTokens) || reserveTokens <= 0) {
 		throw new Error("compaction requires a positive finite reserve token budget");
 	}
-	// A route that reports no output limit gets no explicit cap and the server
-	// decides; refusing it would leave a reactive overflow compaction with no way out.
-	// The summary text keeps the reserve's room in the next context. A route that
-	// reasons spends output on reasoning first, so the cap adds the reasoning share
-	// observed on that route, up to the model's output limit; a reasoning route with
-	// nothing observed yet gets its whole limit. A fixed cap let reasoning consume it
-	// and the summary was never saved (pi upstream #9512).
-	const outputLimit =
-		Number.isFinite(input.model.maxTokens) && input.model.maxTokens >= 1 ? Math.floor(input.model.maxTokens) : undefined;
-	const summaryRoom = Math.max(1024, Math.floor(reserveTokens * 0.8));
-	const reasoningShare = summaryReasoningShare(input.model);
-	const maxTokens =
-		outputLimit === undefined
-			? undefined
-			: Math.min(
-					outputLimit,
-					reasoningShare === undefined
-						? input.model.reasoning
-							? outputLimit
-							: summaryRoom
-						: Math.ceil(summaryRoom / (1 - reasoningShare)),
-				);
+	// A fixed cap let reasoning consume it and the summary was never saved (pi
+	// upstream #9512); summaryOutputBudget sizes it per route.
+	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens);
 	let memoryOffer: MemoryCompactionOffer | null = null;
 	// Recorded only once the request is actually sent, so a request skipped as a
 	// repeat leaves no offer-used event behind.
