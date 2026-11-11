@@ -160,3 +160,27 @@ test("a running member's progress counts the output it has streamed", () => {
 	fold.observe({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "y".repeat(30) } }, 2000);
 	strictEqual(fold.snapshot().streamedOutputTokens, 10);
 });
+
+test("/poll seats n independent vote members cycling over --models and tallies the distribution", async () => {
+	const { buildPollDispatchArgs, formatPollTally } = await import("../../src/session-control/poll.js");
+	const built = buildPollDispatchArgs(
+		{
+			participants: 3,
+			question: "Tabs or spaces?",
+			options: ["tabs", "spaces"],
+			models: ["copilot/gpt-6-luna", "litellm/mini/q"],
+		},
+		{ target: "chat" },
+	);
+	ok(built.ok);
+	deepStrictEqual(built.args.members, [
+		{ label: "p1", target: "copilot", model: "gpt-6-luna" },
+		{ label: "p2", target: "litellm", model: "mini/q" },
+		{ label: "p3", target: "copilot", model: "gpt-6-luna" },
+	]);
+	strictEqual(built.args.synthesis, "vote");
+	strictEqual(built.args.rounds, undefined);
+	match(String(built.args.task), /exactly one of these options: tabs, spaces/);
+	strictEqual(buildPollDispatchArgs({ participants: 6, question: "q" }, { target: "chat" }).ok, false);
+	match(formatPollTally({ tabs: 2, spaces: 1 }, 3), /^poll: 3 of 3 voted; majority: tabs\n {2}tabs {4}## 2 \(67%\)/);
+});

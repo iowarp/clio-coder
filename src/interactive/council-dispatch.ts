@@ -31,5 +31,22 @@ export async function dispatchCouncilThroughRegistry(
 	);
 	if (verdict.kind === "blocked") return { status: "blocked", reason: verdict.reason };
 	if (verdict.kind === "not_visible") return { status: "error", message: verdict.reason };
-	return verdict.result.kind === "error" ? { status: "error", message: verdict.result.message } : { status: "ok" };
+	const tally = voteTally(verdict.result.details);
+	const extra = tally !== undefined ? { tally } : {};
+	return verdict.result.kind === "error"
+		? { status: "error", message: verdict.result.message, ...extra }
+		: { status: "ok", ...extra };
+}
+
+/** The vote tally a council result carries in `details.council.synthesis`, when it ran a vote. */
+function voteTally(details: Readonly<Record<string, unknown>> | undefined): Record<string, number> | undefined {
+	const council = details?.council;
+	if (council === null || typeof council !== "object") return undefined;
+	const synthesis = (council as { synthesis?: unknown }).synthesis;
+	if (synthesis === null || typeof synthesis !== "object") return undefined;
+	const tally = (synthesis as { tally?: unknown }).tally;
+	if (tally === null || typeof tally !== "object" || Array.isArray(tally)) return undefined;
+	const out: Record<string, number> = {};
+	for (const [verdict, count] of Object.entries(tally)) if (typeof count === "number") out[verdict] = count;
+	return out;
 }

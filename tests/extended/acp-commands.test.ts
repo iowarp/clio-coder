@@ -65,12 +65,12 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all seventeen allowlisted commands", async () => {
+test("the catalog projects all eighteen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
-	assert.equal(ACP_COMMAND_RULES.length, 17);
-	assert.equal(catalog.commands.length, 17);
-	assert.equal(ACP_COMMANDS_CAPABILITY.count, 17);
+	assert.equal(ACP_COMMAND_RULES.length, 18);
+	assert.equal(catalog.commands.length, 18);
+	assert.equal(ACP_COMMANDS_CAPABILITY.count, 18);
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
 		[
@@ -84,6 +84,7 @@ test("the catalog projects all seventeen allowlisted commands", async () => {
 			"delegate",
 			"oracle",
 			"council",
+			"poll",
 			"loop",
 			"context",
 			"fleet",
@@ -158,7 +159,7 @@ test("streams and injectsUserTurn mark exactly the commands that earn them", asy
 	const catalog = acpCommandCatalog();
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.streams === "dispatch").map((command) => command.name),
-		["run", "delegate", "oracle", "council"],
+		["run", "delegate", "oracle", "council", "poll"],
 	);
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.injectsUserTurn === true).map((command) => command.name),
@@ -343,7 +344,7 @@ test("the announced capability names the two methods a client calls", async () =
 			version: 1,
 			list: "_clio-coder/commands/list",
 			invoke: "_clio-coder/commands/invoke",
-			count: 17,
+			count: 18,
 		},
 	);
 });

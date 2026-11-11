@@ -88,6 +88,8 @@ import {
 import type { NoticeLevel } from "./notice-source.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
+import type { PollCommandOptions } from "./poll.js";
+import { buildPollDispatchArgs, formatPollTally } from "./poll.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
 import type { ReloadTarget } from "./reload-report.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
@@ -232,6 +234,8 @@ type SlashCommandVariant =
 	| { kind: "oracle"; question: string }
 	/** `/council <task>`: one read-only council of roster members, dispatched through the dispatch tool. */
 	| { kind: "council"; task: string; options: CouncilCommandOptions; source: string }
+	/** `/poll <n> <question>`: n independent participants vote; a one-round vote council with explicit members. */
+	| { kind: "poll"; options: PollCommandOptions; source: string }
 	| { kind: "handoff"; goal: string }
 	/** `/fleet run <playbook>`: compile the plan, show it for approval, dispatch on accept. */
 	| { kind: "fleet-run"; name: string; vars: Record<string, string>; resume?: string }
@@ -414,9 +418,9 @@ export type SetThinkingLevelResult =
  * only a refusal or a failure is worth a notice.
  */
 export type CouncilDispatchOutcome =
-	| { status: "ok" }
+	| { status: "ok"; tally?: Record<string, number> }
 	| { status: "blocked"; reason: string }
-	| { status: "error"; message: string };
+	| { status: "error"; message: string; tally?: Record<string, number> };
 
 export type TaskMemorySeedCommandResult =
 	| { status: "seeded"; seeded: number; skipped: number; source: string; flowRuleIds?: ReadonlyArray<string> }
@@ -794,7 +798,7 @@ async function handleDelegate(
  * path, never a fabricated tool result.
  */
 /** Commands that refuse rather than queue while a turn streams; the composer's list says so before Enter does. */
-export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["council", "oracle"]);
+export const COMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["council", "oracle", "poll"]);
 /** The same, for a command that only refuses by subcommand, as `<command> <subcommand>`. */
 export const SUBCOMMANDS_REFUSED_DURING_TURN: ReadonlySet<string> = new Set(["fleet run"]);
 
@@ -1010,6 +1014,38 @@ async function handleCouncil(task: string, options: CouncilCommandOptions, ctx: 
 		else if (outcome.status === "error") ctx.notice("error", `/council failed: ${councilFailureWords(outcome.message)}`);
 	} catch (err) {
 		ctx.notice("error", `/council failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
+	}
+}
+
+async function handlePoll(options: PollCommandOptions, ctx: SlashCommandContext): Promise<void> {
+	if (ctx.isTurnInFlight?.() === true) {
+		ctx.notice("warn", "a turn is in flight; /poll is refused rather than queued");
+		return;
+	}
+	if (!ctx.runCouncilDispatch) {
+		ctx.notice("error", "/poll is not wired in this session");
+		return;
+	}
+	const chatTarget = ctx.getChatTarget?.() ?? undefined;
+	const chatModel = ctx.getChatModel?.() ?? undefined;
+	const built = buildPollDispatchArgs(options, {
+		...(chatTarget !== undefined && chatTarget !== null ? { target: chatTarget } : {}),
+		...(chatModel !== undefined && chatModel !== null ? { model: chatModel } : {}),
+	});
+	if (!built.ok) {
+		ctx.notice("error", `/poll: ${built.reason}`);
+		return;
+	}
+	try {
+		const outcome = await ctx.runCouncilDispatch(built.args, ctx.standingTurnConstraints?.());
+		if (outcome.status === "blocked") {
+			ctx.notice("warn", councilRefusalWords(outcome.reason).replace("/council", "/poll"));
+			return;
+		}
+		if (outcome.tally !== undefined) ctx.notice("info", formatPollTally(outcome.tally, options.participants));
+		if (outcome.status === "error") ctx.notice("warn", `/poll: ${councilFailureWords(outcome.message)}`);
+	} catch (err) {
+		ctx.notice("error", `/poll failed: ${councilFailureWords(err instanceof Error ? err.message : String(err))}`);
 	}
 }
 
@@ -2381,6 +2417,58 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			ctx.echoOperatorCommand?.(command.source);
 			const operation = (async () => {
 				await handleCouncil(command.task, command.options, ctx);
+				ctx.render?.();
+			})();
+			ctx.holdReplyFor?.(operation);
+		},
+	},
+	{
+		name: "poll",
+		rank: 3,
+		acp: { streams: "dispatch", promptTurn: true },
+		description: "Poll n independent agents on a question and show the vote distribution",
+		group: "Work",
+		kinds: ["poll"],
+		args: {
+			parseFlagsBeforeRest: true,
+			flags: [
+				{ name: "--options", takesValue: true, valueName: "a|b|c" },
+				{ name: "--models", takesValue: true, valueName: "target[/model],..." },
+				{ name: "--rationale", takesValue: false },
+				{ name: "--deadline", takesValue: true, valueName: "N|Ns|Nm" },
+			],
+			positionals: [{ name: "n question", required: true, rest: true }],
+		},
+		fromArgs(parsed, trimmed) {
+			if (parsed.error) return usageError("poll", parsed.error);
+			const match = /^(\d+)\s+([\s\S]+)$/u.exec(parsed.rest?.trim() ?? "");
+			if (match === null) return usageError("poll", "Missing required arguments: n question");
+			const options: PollCommandOptions = { participants: Number(match[1]), question: (match[2] ?? "").trim() };
+			const choices = parsed.flags.get("--options");
+			if (typeof choices === "string") {
+				const list = choices
+					.split("|")
+					.map((choice) => choice.trim())
+					.filter((choice) => choice.length > 0);
+				if (list.length < 2) return usageError("poll", "--options takes two or more choices, a|b|c");
+				options.options = list;
+			}
+			const models = parsed.flags.get("--models");
+			if (typeof models === "string") options.models = models.split(",").filter((entry) => entry.trim().length > 0);
+			if (parsed.flags.get("--rationale") === true) options.rationale = true;
+			const deadline = parsed.flags.get("--deadline");
+			if (typeof deadline === "string") {
+				const ms = parseCouncilDeadline(deadline);
+				if (ms === undefined) return usageError("poll", "--deadline takes seconds, Ns or Nm");
+				options.memberDeadlineMs = ms;
+			}
+			return { kind: "poll", options, source: trimmed };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "poll") return;
+			ctx.echoOperatorCommand?.(command.source);
+			const operation = (async () => {
+				await handlePoll(command.options, ctx);
 				ctx.render?.();
 			})();
 			ctx.holdReplyFor?.(operation);

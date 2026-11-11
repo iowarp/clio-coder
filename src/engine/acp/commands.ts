@@ -152,6 +152,7 @@ const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> 
 	archive: ["exportShareArchive", "importShareArchive"],
 	oracle: ["oracleBriefing", "submitOperatorNote"],
 	council: ["runCouncilDispatch", "getWorkerRosters"],
+	poll: ["runCouncilDispatch"],
 	skill: ["submitTurn", "parsePendingSkillRequests", "clearSkillSurface"],
 	tasks: ["userTasks", "submitTurn"],
 	memory: ["seedTaskMemory"],
