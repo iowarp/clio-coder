@@ -164,7 +164,7 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 					name: "panes binary",
 					detail: `${PANE_HOST_TOOL_ID} is not in the pinned tool registry`,
 				}
-			: paneHostFinding(toolStatus(entry), "panes binary"),
+			: samePaneHostRow(paneHostFinding(toolStatus(entry), "panes binary")),
 	);
 
 	findings.push(layoutRow);
@@ -189,4 +189,11 @@ export async function panesFindings(env: NodeJS.ProcessEnv = process.env): Promi
 	});
 	findings.push(journalWritabilityFinding());
 	return findings;
+}
+
+/** The toolchain section reports the same missing pin; a warning points at that row rather than reading as a second problem. */
+function samePaneHostRow(finding: DoctorFinding): DoctorFinding {
+	return finding.level === "warn"
+		? { ...finding, detail: `${finding.detail} (same as \`external tool herdr\`)` }
+		: finding;
 }

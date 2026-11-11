@@ -875,6 +875,8 @@ describe("doctor's panes binary row", () => {
 		equal(missing?.level, "warn");
 		match(missing?.detail ?? "", /is not installed; run `clio-coder panes install`/);
 		equal(missing?.detail.includes(bin), false);
+		// doctor's toolchain section already reports the missing pin; this row points at it instead of counting twice.
+		match(missing?.detail ?? "", /same as `external tool herdr`/);
 
 		const vendored = join(scratch, "data", "tools", "herdr", pin.version, "herdr");
 		mkdirSync(join(vendored, ".."), { recursive: true });
