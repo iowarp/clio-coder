@@ -181,16 +181,27 @@ function identityUnits(entry: WorkerEntryState, withRunId = true): string[] {
 				: `${targetId}/${wireModelId}`
 			: (targetId ?? wireModelId);
 	// A council member reads by its roster label in its roster color, the name
-	// the operator configured, rather than by its agent id.
+	// the operator configured, rather than by its agent id. The synthesis card is the council's own row, so it goes by
+	// the council's size, and a council that only collected ran no model of its own, so it names no route.
+	const report = isSynthesis(entry) && !isPending(entry) ? parseCouncilReport(entry.text) : null;
 	const who =
 		entry.council !== undefined
-			? councilLabelText(theme, isSynthesis(entry) ? "council" : entry.council.label, entry.council.color)
+			? councilLabelText(
+					theme,
+					isSynthesis(entry)
+						? report !== null && report.members.length > 0
+							? `council of ${report.members.length}`
+							: "council"
+						: entry.council.label,
+					entry.council.color,
+				)
 			: theme.fg("workerIdentity", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
+	const showRoute = kind !== "acp" && route !== undefined && report?.synthesis.kind !== "none";
 	return [
 		who,
 		...(entry.planStep !== undefined ? [theme.fg("info", sanitizeCallTargetText(entry.planStep))] : []),
 		...(entry.helper ? [meta("internal")] : []),
-		...(kind !== "acp" && route !== undefined ? [meta(route)] : []),
+		...(showRoute && route !== undefined ? [meta(route)] : []),
 		...(withRunId ? [meta(`run ${entry.runId}`)] : []),
 		// A failover keeps the card; the header says which attempt it shows.
 		...(entry.attempts.length > 1 ? [meta(`attempt ${entry.attempts.length}`)] : []),
