@@ -1,9 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it, mock } from "node:test";
 import { modelBootstrapGenerate } from "../../src/cli/bootstrap-generate.js";
-import { runInitCommand } from "../../src/cli/init.js";
+import { type InitCommandIo, runInitCommand } from "../../src/cli/init.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { fitGeneratedHandbook } from "../../src/domains/context/handbook-budget.js";
@@ -1177,6 +1178,21 @@ interface LedgerEntryShape {
 	kept: boolean;
 }
 
+/** An io for runInitCommand that keeps what the command wrote in `out` and `err`. */
+function captureIo(): InitCommandIo & { out: string; err: string } {
+	const io = {
+		out: "",
+		err: "",
+		stdout: (text: string): void => {
+			io.out += text;
+		},
+		stderr: (text: string): void => {
+			io.err += text;
+		},
+	};
+	return io;
+}
+
 function readHandbookLedger(): LedgerEntryShape[] {
 	return JSON.parse(readFileSync(join(cwd, ".clio-coder", "state", "handbook-ledger.json"), "utf8")).entries;
 }
@@ -1253,15 +1269,10 @@ it("context init --verify flags a missing path and a wrong rule id, and --apply 
 	);
 	const previous = process.cwd();
 	process.chdir(cwd);
-	let stdout = "";
-	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
-		// The test runner's own reporter writes bytes; the command writes strings.
-		if (typeof chunk === "string") stdout += chunk;
-		return true;
-	});
+	const io = captureIo();
 	try {
-		strictEqual(await runInitCommand(["--verify", "--json"]), 1);
-		const report = JSON.parse(stdout) as { rules: { verdict: string; line: number }[]; usage?: unknown };
+		strictEqual(await runInitCommand(["--verify", "--json"], io), 1);
+		const report = JSON.parse(io.out) as { rules: { verdict: string; line: number }[]; usage?: unknown };
 		deepStrictEqual(
 			report.rules.filter((rule) => rule.verdict === "stale").map((rule) => rule.line),
 			[6, 7],
@@ -1269,18 +1280,117 @@ it("context init --verify flags a missing path and a wrong rule id, and --apply 
 		strictEqual("usage" in report, false);
 		const ledger = JSON.parse(readFileSync(join(cwd, ".clio-coder", "state", "handbook-ledger.json"), "utf8"));
 		ok(typeof ledger.verifiedCommit === "string", JSON.stringify(ledger));
-		stdout = "";
-		strictEqual(await runInitCommand(["--verify", "--apply"]), 1);
+		io.out = "";
+		strictEqual(await runInitCommand(["--verify", "--apply", "--json"], io), 1);
+		const proposed = JSON.parse(io.out) as { proposals: { id: string; diff: string }[] };
+		ok(proposed.proposals[0]?.diff.includes("-- Never edit `src/legacy/old.ts` by hand."), io.out);
+		strictEqual(await runInitCommand(["--accept", proposed.proposals[0]?.id ?? ""], io), 0, io.err);
 		const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 		strictEqual(handbook.includes("src/legacy"), false, handbook);
 		ok(handbook.includes("suite directory (rule1)."), handbook);
-		ok(stdout.includes("-- Never edit `src/legacy/old.ts` by hand."), stdout);
-		stdout = "";
-		strictEqual(await runInitCommand(["--verify"]), 0, stdout);
+		io.out = "";
+		strictEqual(await runInitCommand(["--verify"], io), 0, io.out);
 	} finally {
-		write.mock.restore();
 		process.chdir(previous);
 	}
+});
+
+it("context init --verify --apply proposes removing a flagged list rule whole and leaves the handbook alone", async () => {
+	const handbook = [
+		"# harbor",
+		"",
+		"## Rules",
+		"",
+		"Never import these removed modules:",
+		"- `src/old/a.ts`",
+		"- `src/old/b.ts`",
+		"```sh",
+		"node src/old/a.ts",
+		"```",
+		"- Exported names from `src/widgets/render.ts` stay stable.",
+		"",
+	].join("\n");
+	writeFileSync(join(cwd, "CLIO-CODER.md"), handbook);
+	const previous = process.cwd();
+	process.chdir(cwd);
+	const io = captureIo();
+	try {
+		strictEqual(await runInitCommand(["--verify", "--apply", "--json"], io), 1);
+		strictEqual(readFileSync(join(cwd, "CLIO-CODER.md"), "utf8"), handbook);
+		const { proposals } = JSON.parse(io.out) as { proposals: { id: string; proposalPath: string }[] };
+		strictEqual(proposals.length, 1, io.out);
+		const lines = handbook.split("\n");
+		strictEqual(
+			readFileSync(proposals[0]?.proposalPath ?? "", "utf8"),
+			[...lines.slice(0, 4), ...lines.slice(7)].join("\n"),
+		);
+		strictEqual(await runInitCommand(["--accept", proposals[0]?.id ?? ""], io), 0, io.err);
+		ok(readFileSync(join(cwd, "CLIO-CODER.md"), "utf8").includes("```sh\nnode src/old/a.ts\n```"));
+	} finally {
+		process.chdir(previous);
+	}
+});
+
+it("context init --verify grounds on the tree from any directory, never on a stale index or an instruction file", async () => {
+	await runBootstrap({ cwd, io: { stdout: () => {}, stderr: () => {} } });
+	execFileSync("git", ["init", "-q"], { cwd });
+	writeFileSync(join(cwd, "src", "widgets", "paint.ts"), "export const paint = 1;\n");
+	writeFileSync(join(cwd, "AGENTS.md"), "Set `HARBOR_MODE` to strict before a release.\n");
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		[
+			"# harbor",
+			"",
+			"## Rules",
+			"",
+			"- Exported names from `src/widgets/render.ts` stay stable.",
+			"- Paint helpers live in `src/widgets/paint.ts`.",
+			"- Set `HARBOR_MODE` before a release.",
+			`- ${"Keep every widget small and readable. ".repeat(20).trim()}`,
+			"- Do not use npm; use pnpm for installs.",
+			"",
+		].join("\n"),
+	);
+	writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+	rmSync(join(cwd, "src", "widgets", "render.ts"));
+	const previous = process.cwd();
+	process.chdir(join(cwd, "src"));
+	const io = captureIo();
+	try {
+		strictEqual(await runInitCommand(["--verify", "--json"], io), 1);
+	} finally {
+		process.chdir(previous);
+	}
+	const { rules } = JSON.parse(io.out) as { rules: { verdict: string; line: number }[] };
+	deepStrictEqual(
+		rules.map((rule) => [rule.line, rule.verdict]),
+		[
+			[5, "stale"],
+			[6, "verified"],
+			[7, "stale"],
+			[8, "unverifiable"],
+			[9, "unverifiable"],
+		],
+	);
+});
+
+it("context init --adopt leaves out an imported rule whose citation the tree no longer holds", async () => {
+	writeFileSync(
+		join(cwd, "CLAUDE.md"),
+		[
+			"# Rules",
+			"",
+			"- Always run `npm run test:unit` before pushing.",
+			"- Never edit `src/legacy/old.ts` by hand.",
+			"- Never edit `src/widgets/render.ts` without updating `src/index.ts`.",
+			"",
+		].join("\n"),
+	);
+	await runBootstrap({ cwd, adopt: true, io: { stdout: () => {}, stderr: () => {} } });
+	const imported = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8").split("## Imported agent context")[1] ?? "";
+	ok(imported.includes("without updating `src/index.ts`."), imported);
+	strictEqual(imported.includes("test:unit"), false, imported);
+	strictEqual(imported.includes("src/legacy"), false, imported);
 });
 
 it("does not let a rule stated only in a sibling handbook ground a model line", async () => {
@@ -1346,18 +1456,13 @@ it("reports the rejected sibling rules with their source line and reason, in the
 	rmSync(join(cwd, "CLIO-CODER.md"));
 	const previous = process.cwd();
 	process.chdir(cwd);
-	let stdout = "";
-	const write = mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
-		if (typeof chunk === "string") stdout += chunk;
-		return true;
-	});
+	const io = captureIo();
 	try {
-		strictEqual(await runInitCommand(["--heuristic", "--json"]), 0);
+		strictEqual(await runInitCommand(["--heuristic", "--json"], io), 0);
 	} finally {
-		write.mock.restore();
 		process.chdir(previous);
 	}
-	const report = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}") as {
+	const report = JSON.parse(io.out.trim().split("\n").at(-1) ?? "{}") as {
 		absorb?: { rules: { status: string; file: string; line: number; reason: string }[]; handbooks: string[] };
 	};
 	deepStrictEqual(

@@ -10,7 +10,8 @@ export function handbookLedgerPath(cwd: string): string {
 interface LedgerFileShape {
 	commit?: unknown;
 	verifiedCommit?: unknown;
-	entries?: unknown;
+	/** The rules `--verify` judged; `entries` holds what `context init` judged while adopting. */
+	verification?: unknown;
 }
 
 /** What the ledger says about the effective handbook: the commit it was verified at and the rules needing attention. */
@@ -28,7 +29,7 @@ export function readHandbookFreshness(cwd: string): HandbookFreshness {
 	}
 	const verifiedCommit = typeof parsed.verifiedCommit === "string" ? parsed.verifiedCommit : null;
 	if (verifiedCommit === null) return { verifiedCommit, attention: 0 };
-	const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+	const entries = Array.isArray(parsed.verification) ? parsed.verification : [];
 	const attention = entries.filter((entry: unknown) => {
 		const verdict = (entry as { verdict?: unknown } | null)?.verdict;
 		return verdict === "stale" || verdict === "contradicted";

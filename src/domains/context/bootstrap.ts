@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, parse, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, posix, relative, resolve } from "node:path";
 import { isReleaseOnlyWorkflow, readCiFileRuns } from "../../core/ci-commands.js";
 import type { ContextOperationFact } from "../../core/context-operation.js";
 import { internalGitArgv } from "../../core/internal-git.js";
@@ -139,7 +139,8 @@ export interface HandbookLedgerEntry {
 	id: string;
 	text: string;
 	origin: "adopted" | "handbook";
-	source: { file: string; line: number };
+	/** Where the rule is stated, 1-based; `endLine` is its last line when `--verify` judged it. */
+	source: { file: string; line: number; endLine?: number };
 	citations: string[];
 	verdict: "verified" | "stale" | "unverifiable" | "contradicted";
 	reason: string;
@@ -2644,63 +2645,154 @@ function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
 }
 
 /**
+ * Why a rule's citations fail against the tree, or null when it cites nothing
+ * or every concrete file it names exists and its text survives grounding.
+ */
+function staleCitationReason(line: string, corpus: ModelGroundingCorpus): string | null {
+	const citations = [...line.matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? "").filter(Boolean);
+	if (citations.length === 0) return null;
+	const missing = citations.filter((token) => !groundedToken(token, corpus));
+	const missingFile = missing.some((token) => CONCRETE_FILE_RE.test(citedPath(token)));
+	if (!missingFile && groundedModelBody(line, corpus).length > 0) return null;
+	return missing.length > 0
+		? `does not resolve in this tree: ${missing.join(", ")}`
+		: "its citations do not pass the citation rule";
+}
+
+/** At most this many adopted rules enter "Imported agent context", as before verification raised the scan caps. */
+const MAX_RENDERED_IMPORTED_RULES = 20;
+
+/**
+ * The adopted rules `--adopt` writes under "Imported agent context": a rule
+ * whose citations no longer resolve in the tree is left out, like a sibling
+ * rule `context init` judges stale.
+ */
+function verifiedImportedRules(
+	input: Pick<BootstrapGenerateInput, "cwd" | "projectType" | "siblingFiles" | "adoption" | "codewiki">,
+): AdoptionScanResult["importedRules"] {
+	if (input.adoption.importedRules.length === 0) return [];
+	const corpus = createModelGroundingCorpus(input);
+	return input.adoption.importedRules
+		.filter((rule) => staleCitationReason(rule.text, corpus) === null)
+		.slice(0, MAX_RENDERED_IMPORTED_RULES);
+}
+
+interface LedgerFile {
+	version: 1;
+	commit: string | null;
+	entries: HandbookLedgerEntry[];
+	verifiedCommit?: string;
+	verifiedAt?: string;
+	verification?: HandbookLedgerEntry[];
+}
+
+function readLedgerFile(cwd: string): Partial<LedgerFile> {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(handbookLedgerPath(cwd), "utf8"));
+		return parsed !== null && typeof parsed === "object" ? (parsed as Partial<LedgerFile>) : {};
+	} catch {
+		return {};
+	}
+}
+
+function writeLedgerFile(cwd: string, ledger: LedgerFile): void {
+	safeResourceWrite(handbookLedgerPath(cwd), `${JSON.stringify(ledger, null, 2)}\n`);
+}
+
+/**
  * Every adopted unit `context init` judged, with its verdict, so an operator can
- * see why a sibling handbook rule did or did not reach CLIO-CODER.md.
+ * see why a sibling handbook rule did or did not reach CLIO-CODER.md. The last
+ * `--verify` record is kept.
  */
 function writeHandbookLedger(cwd: string, entries: ReadonlyArray<HandbookLedgerEntry>): void {
 	const commit = gitOutput(cwd, ["rev-parse", "HEAD"])?.trim() || null;
-	mkdirSync(dirname(handbookLedgerPath(cwd)), { recursive: true });
-	writeFileSync(
-		handbookLedgerPath(cwd),
-		`${JSON.stringify({ version: 1, commit, entries: entries.map((entry) => ({ ...entry, commit })) }, null, 2)}\n`,
-		"utf8",
-	);
+	const { verifiedCommit, verifiedAt, verification } = readLedgerFile(cwd);
+	writeLedgerFile(cwd, {
+		version: 1,
+		commit,
+		entries: entries.map((entry) => ({ ...entry, commit })),
+		...(typeof verifiedCommit === "string" ? { verifiedCommit } : {}),
+		...(typeof verifiedAt === "string" ? { verifiedAt } : {}),
+		...(Array.isArray(verification) ? { verification } : {}),
+	});
 }
 
 /** The effective handbook's rules re-checked against the current tree by `context init --verify`. */
 export interface HandbookVerification {
-	/** Repository-relative paths of the handbook files that were checked. */
+	/** The directory the handbook paths, citations and ledger are resolved from: the repository root. */
+	root: string;
+	/** Root-relative paths of the handbook files that were checked. */
 	files: string[];
 	commit: string | null;
 	entries: HandbookLedgerEntry[];
+}
+
+/** The enclosing repository root, as the handbook walk finds it; outside a repository, `cwd` itself. */
+function handbookRoot(cwd: string): string {
+	let directory = resolve(cwd);
+	while (!existsSync(join(directory, ".git"))) {
+		const parent = dirname(directory);
+		if (parent === directory) return resolve(cwd);
+		directory = parent;
+	}
+	return directory;
+}
+
+/** The index, less every file the tree no longer holds, so a deleted file never grounds a citation. */
+function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<string>): Codewiki {
+	const present = new Set(repositoryFiles);
+	const files = codewiki.files.filter((file) => present.has(file.path));
+	if (files.length === codewiki.files.length) return codewiki;
+	const ids = new Set(files.map((file) => file.id));
+	return { ...codewiki, files, symbols: codewiki.symbols.filter((symbol) => ids.has(symbol.fileId)) };
 }
 
 /**
  * Re-ground every rule of the effective handbook without a model: its
  * backticked citations against the tree, its tree-fact claims against the
  * tree-fact table, and its checker ids against the enforcement inventory.
- * Records the verdicts and the commit in the handbook ledger.
+ * Paths resolve from the repository root whatever directory it runs in, and
+ * no instruction file (handbook, AGENTS.md, CLAUDE.md and the like) counts as
+ * evidence. Records the verdicts and the commit in the handbook ledger.
  */
 export async function verifyHandbook(cwd: string): Promise<HandbookVerification> {
 	const loaded = loadProjectClioMd(cwd);
+	const root = handbookRoot(cwd);
 	const handbooks = loaded.files.map((file) => ({
-		file: relative(cwd, file.path).split("\\").join("/"),
+		file: relative(root, file.path).split("\\").join("/"),
 		path: file.path,
 		content: file.source,
 	}));
-	const repositoryFiles = (await enumerateWorkspaceFilesAsync(cwd)).filter(
+	const repositoryFiles = (await enumerateWorkspaceFilesAsync(root)).filter(
 		(path) => !GENERATION_EXCLUDED_FILES.has(path),
 	);
-	const projectType = detectProjectType(cwd);
-	const codewiki = readCodewiki(cwd) ?? (await buildCodewikiCandidate(cwd, projectType)).codewiki;
-	const enforcement = collectEnforcementInventory(cwd, repositoryFiles);
+	const projectType = detectProjectType(root);
+	const indexed = readCodewiki(root);
+	const codewiki = indexed
+		? codewikiOnTree(indexed, repositoryFiles)
+		: (await buildCodewikiCandidate(root, projectType)).codewiki;
+	const enforcement = collectEnforcementInventory(root, repositoryFiles);
+	const adoption = scanAgentConfigs({ cwd: root, includeGlobal: false });
 	const input: BootstrapGenerateInput = {
-		cwd,
+		cwd: root,
 		projectType,
-		// The handbook under review is the claim, never its own evidence.
-		siblingFiles: handbooks.map((handbook) => ({ source: "handbook", path: handbook.path, content: handbook.content })),
-		adoption: scanAgentConfigs({ cwd, includeGlobal: false }),
+		// The handbook under review is the claim, never its own evidence, and neither is any other instruction file.
+		siblingFiles: [
+			...handbooks.map((handbook) => ({ source: "handbook", path: handbook.path, content: handbook.content })),
+			...loadBootstrapSiblingFiles(adoption),
+		],
+		adoption,
 		codewiki,
 		enforcement,
 		repositoryFiles,
 	};
 	const corpus = createModelGroundingCorpus(input);
-	const facts = treeFacts(cwd, enforcement.ciCommands ?? []);
+	const facts = treeFacts(root, enforcement.ciCommands ?? []);
 	const checkerRules = checkerRuleList(input);
 	const codes = new Set(checkerRules.map((rule) => rule.code));
 	const entries: HandbookLedgerEntry[] = [];
 	for (const handbook of handbooks) {
-		for (const unit of instructionUnits(handbook.content, 600, handbook.file)) {
+		for (const unit of instructionUnits(handbook.content, 600, handbook.file, 1, true)) {
 			const line = unit.text.trim();
 			if (line.length === 0) continue;
 			const citations = [...line.matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? "").filter(Boolean);
@@ -2714,7 +2806,7 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 					id: createHash("sha256").update(`${unit.file}:${unit.line}:${line}`).digest("hex").slice(0, 12),
 					text: line,
 					origin: "handbook",
-					source: { file: unit.file, line: unit.line },
+					source: { file: unit.file, line: unit.line, endLine: unit.endLine },
 					citations,
 					verdict,
 					reason,
@@ -2722,16 +2814,19 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 					...(ruleIds.length > 0 ? { ruleIds } : {}),
 				});
 			};
+			// Too long to judge as one rule, or an introduction whose list it could not take in: still listed.
+			if (unit.unjudged === "oversized") {
+				entry("unverifiable", "longer than 600 characters; split it into rules the tree can check");
+				continue;
+			}
+			if (unit.unjudged === "intro") {
+				entry("unverifiable", "an introduction with no list under it");
+				continue;
+			}
 			// A rule is stale when nothing it cites survives grounding, or when a concrete file it names is gone.
-			const missing = citations.filter((token) => !groundedToken(token, corpus));
-			const missingFile = missing.some((token) => CONCRETE_FILE_RE.test(citedPath(token)));
-			if (citations.length > 0 && (missingFile || groundedModelBody(line, corpus).length === 0)) {
-				entry(
-					"stale",
-					missing.length > 0
-						? `does not resolve in this tree: ${missing.join(", ")}`
-						: "its citations do not pass the citation rule",
-				);
+			const stale = staleCitationReason(line, corpus);
+			if (stale !== null) {
+				entry("stale", stale);
 				continue;
 			}
 			if (codes.size > 0 && ids.length > 0) {
@@ -2757,51 +2852,53 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 			else entry("unverifiable", "cites nothing the tree can check");
 		}
 	}
-	const commit = gitOutput(cwd, ["rev-parse", "HEAD"])?.trim() || null;
-	const ledger = {
+	const commit = gitOutput(root, ["rev-parse", "HEAD"])?.trim() || null;
+	const previous = readLedgerFile(root);
+	writeLedgerFile(root, {
 		version: 1,
-		commit,
+		commit: typeof previous.commit === "string" ? previous.commit : null,
+		entries: Array.isArray(previous.entries) ? previous.entries : [],
 		verifiedCommit: commit ?? "uncommitted",
 		verifiedAt: new Date().toISOString(),
-		entries: entries.map((entry) => ({ ...entry, commit })),
-	};
-	mkdirSync(dirname(handbookLedgerPath(cwd)), { recursive: true });
-	writeFileSync(handbookLedgerPath(cwd), `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
-	return { files: handbooks.map((handbook) => handbook.file), commit, entries };
+		verification: entries.map((entry) => ({ ...entry, commit })),
+	});
+	return { root, files: handbooks.map((handbook) => handbook.file), commit, entries };
 }
 
-/** How many physical lines the unit starting at 0-based `start` spans: a list item with its continuation, or a paragraph. */
-function unitLineSpan(lines: ReadonlyArray<string>, start: number): number {
-	let end = start + 1;
-	while (end < lines.length) {
-		const next = lines[end] ?? "";
-		if (next.trim().length === 0 || /^\s*(?:[-*+]|\d+[.)])\s/.test(next) || /^\s*#/.test(next)) break;
-		end += 1;
-	}
-	return end - start;
+/** One handbook file `--verify --apply` proposes to change, as a proposal `--accept` writes. */
+export interface HandbookVerificationProposal {
+	file: string;
+	proposalPath: string;
+	id: string;
+	diff: string;
 }
 
 /**
- * The edit `--verify --apply` makes and shows: each stale or contradicted rule
- * is removed, except one whose only fault is a renumbered checker id, which is
- * rewritten to the id the checker declares now. Returns one unified diff per file.
+ * The edit `--verify --apply` proposes: each stale or contradicted rule is
+ * removed over its whole extent (an intro with its list, a list item with its
+ * continuation lines, never into a fence or table), except one whose only fault
+ * is a renumbered checker id, which is rewritten to the id the checker declares
+ * now. The handbook is not touched: each changed file gets a proposal in
+ * `.clio-coder/proposals` that `context init --accept <id>` writes.
  */
-export function applyHandbookVerification(
-	cwd: string,
+export function proposeHandbookVerification(
 	verification: HandbookVerification,
-): Array<{ file: string; diff: string }> {
-	const results: Array<{ file: string; diff: string }> = [];
+	now = new Date(),
+): HandbookVerificationProposal[] {
+	const { root } = verification;
+	const results: HandbookVerificationProposal[] = [];
 	for (const file of verification.files) {
 		const flagged = verification.entries
 			.filter((entry) => entry.source.file === file && (entry.verdict === "stale" || entry.verdict === "contradicted"))
 			.sort((a, b) => b.source.line - a.source.line);
 		if (flagged.length === 0) continue;
-		const path = join(cwd, file);
-		const lines = readFileSync(path, "utf8").split("\n");
+		const path = join(root, file);
+		const source = readFileSync(path, "utf8");
+		const lines = source.split("\n");
 		const hunks: string[] = [];
 		for (const entry of flagged) {
 			const start = entry.source.line - 1;
-			const count = unitLineSpan(lines, start);
+			const count = (entry.source.endLine ?? entry.source.line) - start;
 			const before = lines.slice(start, start + count);
 			const changes = entry.ruleIds ?? [];
 			const after =
@@ -2819,8 +2916,13 @@ export function applyHandbookVerification(
 				].join("\n"),
 			);
 		}
-		writeFileSync(path, lines.join("\n"), "utf8");
-		results.push({ file, diff: [`--- a/${file}`, `+++ b/${file}`, ...hunks].join("\n") });
+		const proposalPath = writeProposalFile(root, now, lines.join("\n"), path, source, { origin: "verify" });
+		results.push({
+			file,
+			proposalPath,
+			id: proposalId(proposalPath),
+			diff: [`--- a/${file}`, `+++ b/${file}`, ...hunks].join("\n"),
+		});
 	}
 	return results;
 }
@@ -2848,27 +2950,57 @@ function writeClioMdProposal(
 	existingSource: string | null,
 	absorb: AbsorbReport | undefined,
 ): string {
-	const dir = join(cwd, ".clio-coder", "proposals");
+	return writeProposalFile(cwd, now, serializeBootstrapOutput(output), join(cwd, "CLIO-CODER.md"), existingSource, {
+		generation: durableGenerationTelemetry(generation),
+		...(absorb ? { absorb } : {}),
+	});
+}
+
+/**
+ * Writes `content` as a proposal for `handbookPath` with its sidecar: the hash
+ * of the handbook it was drafted against and of the proposal itself, which
+ * `--accept` checks before it writes.
+ */
+function writeProposalFile(
+	cwd: string,
+	now: Date,
+	content: string,
+	handbookPath: string,
+	existingSource: string | null,
+	extra: Record<string, unknown>,
+): string {
+	const dir = proposalsDir(cwd);
 	ensureProjectIgnore(cwd);
 	mkdirSync(dir, { recursive: true });
 	const proposalPath = join(dir, `CLIO-CODER-${timestampForPath(now)}-${randomUUID()}.md`);
-	const serialized = serializeBootstrapOutput(output);
-	writeFileSync(proposalPath, serialized, { encoding: "utf8", flag: "wx" });
+	writeFileSync(proposalPath, content, { encoding: "utf8", flag: "wx" });
 	// Proposal provenance belongs to the candidate, never to the untouched handbook.
 	writeFileSync(
 		`${proposalPath}.json`,
 		`${JSON.stringify({
 			version: 1,
 			createdAt: now.toISOString(),
-			handbookPath: join(cwd, "CLIO-CODER.md"),
+			handbookPath,
 			sourceHash: existingSource === null ? null : createHash("sha256").update(existingSource).digest("hex"),
-			proposalHash: createHash("sha256").update(serialized).digest("hex"),
-			generation: durableGenerationTelemetry(generation),
-			...(absorb ? { absorb } : {}),
+			proposalHash: createHash("sha256").update(content).digest("hex"),
+			...extra,
 		})}\n`,
 		{ encoding: "utf8", flag: "wx" },
 	);
 	return proposalPath;
+}
+
+/** Handbook names a proposal may target; any other sidecar target is refused. */
+const PROPOSAL_TARGETS: ReadonlySet<string> = new Set(["CLIO-CODER.md", "CLIO-CODER.override.md", "CLIO-DEV.md"]);
+
+/** The handbook a proposal's sidecar names, when it is a handbook inside the project; CLIO-CODER.md otherwise. */
+function proposalTarget(cwd: string, named: unknown): string | null {
+	if (named === undefined) return join(cwd, "CLIO-CODER.md");
+	if (typeof named !== "string") return null;
+	const target = resolve(named);
+	const inside = relative(resolve(cwd), target);
+	if (inside.startsWith("..") || isAbsolute(inside) || !PROPOSAL_TARGETS.has(basename(target))) return null;
+	return target;
 }
 
 function proposalsDir(cwd: string): string {
@@ -2921,7 +3053,7 @@ export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposa
 	const resolved = resolveProposal(cwd, ref);
 	if ("error" in resolved) return { ok: false, reason: resolved.error };
 	const proposalPath = resolved.path;
-	let sidecar: { sourceHash?: unknown; proposalHash?: unknown };
+	let sidecar: { sourceHash?: unknown; proposalHash?: unknown; handbookPath?: unknown };
 	let bytes: Buffer;
 	try {
 		sidecar = JSON.parse(readFileSync(`${proposalPath}.json`, "utf8")) as typeof sidecar;
@@ -2932,15 +3064,22 @@ export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposa
 	const sha = (data: string | Buffer): string => createHash("sha256").update(data).digest("hex");
 	if (sidecar.proposalHash !== sha(bytes))
 		return { ok: false, proposalPath, reason: "the proposal was edited after it was written" };
-	const current = readExistingClioMdText(cwd);
+	const handbookPath = proposalTarget(cwd, sidecar.handbookPath);
+	if (handbookPath === null)
+		return { ok: false, proposalPath, reason: "the proposal names a target that is not a handbook in this project" };
+	let current: string | null = null;
+	try {
+		current = readFileSync(handbookPath, "utf8");
+	} catch {
+		// A handbook that does not exist yet hashes to null.
+	}
 	const currentHash = current === null ? null : sha(current);
 	if (sidecar.sourceHash !== currentHash)
 		return {
 			ok: false,
 			proposalPath,
-			reason: "CLIO-CODER.md changed since the proposal was written; run context init --propose again",
+			reason: `${relative(cwd, handbookPath)} changed since the proposal was written; draft it again`,
 		};
-	const handbookPath = join(cwd, "CLIO-CODER.md");
 	safeResourceWrite(handbookPath, bytes);
 	return { ok: true, proposalPath, handbookPath };
 }
@@ -3398,7 +3537,8 @@ async function runBootstrapWork(
 		});
 	}
 	if (input.adopt === true) {
-		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
+		const imported = verifiedImportedRules({ cwd, projectType, siblingFiles, adoption, codewiki });
+		output = replaceImportedAgentContext(output, renderImportedAgentContext({ ...adoption, importedRules: imported }));
 	}
 	if (shouldGenerate && generation.mode !== "existing") {
 		output = markWorkerScopes(

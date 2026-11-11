@@ -2,22 +2,44 @@
 // Both adoption and authored policy need the same complete Markdown units.
 // Each unit carries the file and 1-based line it starts on, so an adopted rule can cite where it was stated.
 // `firstLine` is the source line `content` starts on when a caller stripped a prefix such as frontmatter.
-export function instructionUnits(
-	content: string,
-	maxChars: number,
-	file = "",
-	firstLine = 1,
-): Array<{
+// `endLine` is the unit's last source line; a unit never spans a blank line, heading, table row, comment or fence.
+// With `keepUnjudged`, a unit longer than `maxChars` and an intro whose list could not join it are returned
+// with `unjudged` set instead of being left out, so a caller can still give them a verdict.
+export interface InstructionUnit {
 	text: string;
 	heading: string;
 	listItem: boolean;
 	file: string;
 	line: number;
-}> {
-	const units: Array<{ text: string; heading: string; listItem: boolean; adjacent: boolean; line: number }> = [];
+	endLine: number;
+	unjudged?: "oversized" | "intro";
+}
+
+export function instructionUnits(
+	content: string,
+	maxChars: number,
+	file = "",
+	firstLine = 1,
+	keepUnjudged = false,
+): InstructionUnit[] {
+	const units: Array<{
+		text: string;
+		heading: string;
+		listItem: boolean;
+		adjacent: boolean;
+		line: number;
+		endLine: number;
+	}> = [];
 	let heading = "";
 	let fence: { marker: string; length: number } | null = null;
-	let pending: { lines: string[]; heading: string; listItem: boolean; adjacent: boolean; line: number } | null = null;
+	let pending: {
+		lines: string[];
+		heading: string;
+		listItem: boolean;
+		adjacent: boolean;
+		line: number;
+		endLine: number;
+	} | null = null;
 	let adjacent = false;
 	const flush = (): void => {
 		if (pending === null) return;
@@ -27,6 +49,7 @@ export function instructionUnits(
 			listItem: pending.listItem,
 			adjacent: pending.adjacent,
 			line: pending.line,
+			endLine: pending.endLine,
 		});
 		pending = null;
 		adjacent = true;
@@ -60,11 +83,19 @@ export function instructionUnits(
 		const item = /^(?:[-*+]\s+|\d+[.)]\s+)(.*)$/.exec(line)?.[1];
 		if (item !== undefined) flush();
 		if (pending === null)
-			pending = { lines: [], heading, listItem: item !== undefined, adjacent, line: firstLine + lineIndex };
+			pending = {
+				lines: [],
+				heading,
+				listItem: item !== undefined,
+				adjacent,
+				line: firstLine + lineIndex,
+				endLine: firstLine + lineIndex,
+			};
 		pending.lines.push(item ?? line);
+		pending.endLine = firstLine + lineIndex;
 	}
 	flush();
-	const result: Array<{ text: string; heading: string; listItem: boolean; file: string; line: number }> = [];
+	const result: InstructionUnit[] = [];
 	for (let index = 0; index < units.length; index++) {
 		const unit = units[index];
 		if (unit === undefined) continue;
@@ -77,18 +108,30 @@ export function instructionUnits(
 				.slice(index + 1, end)
 				.map((item) => item.text)
 				.join("; ")}`;
+			const endLine = units[end - 1]?.endLine ?? unit.endLine;
 			if (combined.length <= maxChars) {
-				result.push({ text: combined, heading: unit.heading, listItem: unit.listItem, file, line: unit.line });
+				result.push({ text: combined, heading: unit.heading, listItem: unit.listItem, file, line: unit.line, endLine });
+				index = end - 1;
+			} else if (keepUnjudged) {
+				// An oversized intro plus list is one rule; its items must not be judged, or removed, without it.
+				const { heading, listItem, line } = unit;
+				result.push({ text: combined, heading, listItem, file, line, endLine, unjudged: "oversized" });
 				index = end - 1;
 			}
 			// An oversized intro plus list would recreate the observed incomplete prohibition; drop the intro.
 			continue;
 		}
+		const { heading, listItem, line, endLine } = unit;
 		// An intro without its list states no complete rule, even when bold markup follows the colon.
-		if (intro) continue;
+		if (intro) {
+			if (keepUnjudged) result.push({ text: unit.text, heading, listItem, file, line, endLine, unjudged: "intro" });
+			continue;
+		}
+		if (unit.text.length === 0) continue;
 		// Never truncate a unit into fragments such as "— these are host-only.".
-		if (unit.text.length > 0 && unit.text.length <= maxChars)
-			result.push({ text: unit.text, heading: unit.heading, listItem: unit.listItem, file, line: unit.line });
+		if (unit.text.length <= maxChars) result.push({ text: unit.text, heading, listItem, file, line, endLine });
+		else if (keepUnjudged)
+			result.push({ text: unit.text, heading, listItem, file, line, endLine, unjudged: "oversized" });
 	}
 	return result;
 }

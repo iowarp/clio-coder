@@ -9,7 +9,6 @@ export {
 export {
 	type AcceptProposalResult,
 	acceptHandbookProposal,
-	applyHandbookVerification,
 	type BootstrapFallbackMode,
 	type BootstrapFallbackResult,
 	type BootstrapGenerate,
@@ -22,6 +21,7 @@ export {
 	type BootstrapStructuredOutput,
 	fallbackBootstrapOutput,
 	type HandbookVerification,
+	proposeHandbookVerification,
 	type RunBootstrapInput,
 	type RunBootstrapResult,
 	runBootstrap,

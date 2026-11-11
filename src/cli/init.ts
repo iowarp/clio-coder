@@ -1,7 +1,7 @@
 import { formatContextOperationResult } from "../core/context-operation.js";
 import {
 	acceptHandbookProposal,
-	applyHandbookVerification,
+	proposeHandbookVerification,
 	runBootstrap,
 	verifyHandbook,
 } from "../domains/context/index.js";
@@ -47,26 +47,42 @@ Options:
   --verify         re-check every rule of the effective handbook against the current tree without a model;
                    lists rules as verified, stale, contradicted or unverifiable with file:line, records the
                    verdicts in the handbook ledger, and exits 1 when any rule is stale or contradicted.
-                   With --apply, removes the flagged rules (correcting renumbered rule ids) and prints the diff
-  --accept [<id>]  write a reviewed .clio-coder/proposals draft (newest when no path or id is given) to
-                   CLIO-CODER.md byte for byte; refuses when the handbook changed since the draft was written
+                   With --apply, writes a proposal without the flagged rules (correcting renumbered rule ids)
+                   and prints its diff; the handbook changes only when --accept writes it
+  --accept [<id>]  write a reviewed .clio-coder/proposals draft (newest when no path or id is given) to the
+                   handbook it was drafted for, byte for byte; refuses when that handbook changed since
 `;
+
+/** Where the command writes; tests pass their own instead of replacing process.stdout. */
+export interface InitCommandIo {
+	stdout(text: string): void;
+	stderr(text: string): void;
+}
+
+const PROCESS_IO: InitCommandIo = {
+	stdout: (text) => {
+		process.stdout.write(text);
+	},
+	stderr: (text) => {
+		process.stderr.write(text);
+	},
+};
 
 const VERDICT_ORDER = ["verified", "stale", "contradicted", "unverifiable"] as const;
 
-async function runVerifyCommand(args: ReadonlyArray<string>): Promise<number> {
+async function runVerifyCommand(args: ReadonlyArray<string>, io: InitCommandIo): Promise<number> {
 	const extra = args.filter((arg) => arg !== "--verify" && arg !== "--json" && arg !== "--apply");
 	if (extra.length > 0) {
-		process.stderr.write(`clio-coder context init: --verify takes only --apply and --json, not ${extra.join(" ")}\n`);
+		io.stderr(`clio-coder context init: --verify takes only --apply and --json, not ${extra.join(" ")}\n`);
 		return 2;
 	}
 	const json = args.includes("--json");
 	const cwd = process.cwd();
 	const verification = await verifyHandbook(cwd);
 	const flagged = verification.entries.filter((entry) => entry.verdict === "stale" || entry.verdict === "contradicted");
-	const applied = args.includes("--apply") && flagged.length > 0 ? applyHandbookVerification(cwd, verification) : [];
+	const proposals = args.includes("--apply") && flagged.length > 0 ? proposeHandbookVerification(verification) : [];
 	if (json) {
-		process.stdout.write(
+		io.stdout(
 			`${JSON.stringify({
 				version: 1,
 				files: verification.files,
@@ -80,11 +96,11 @@ async function runVerifyCommand(args: ReadonlyArray<string>): Promise<number> {
 					reason: entry.reason,
 					...(entry.ruleIds ? { ruleIds: entry.ruleIds } : {}),
 				})),
-				applied,
+				proposals: proposals.map(({ file, id, proposalPath, diff }) => ({ file, id, proposalPath, diff })),
 			})}\n`,
 		);
 	} else if (verification.files.length === 0) {
-		process.stdout.write("No project handbook to verify.\n");
+		io.stdout("No project handbook to verify.\n");
 	} else {
 		const lines = [`Verified ${verification.files.join(", ")} at ${verification.commit?.slice(0, 12) ?? "uncommitted"}`];
 		for (const verdict of VERDICT_ORDER) {
@@ -97,31 +113,35 @@ async function runVerifyCommand(args: ReadonlyArray<string>): Promise<number> {
 				lines.push(`  ${entry.source.file}:${entry.source.line}  ${text}${reason}`);
 			}
 		}
-		for (const result of applied) lines.push("", result.diff);
-		if (flagged.length > 0 && applied.length === 0)
+		for (const proposal of proposals) lines.push("", proposal.diff);
+		const from = verification.root === cwd ? "" : ` from ${verification.root}`;
+		for (const proposal of proposals)
 			lines.push(
 				"",
-				`${flagged.length} rule${flagged.length === 1 ? "" : "s"} need attention; rerun with --apply to remove or correct them.`,
+				`Proposed ${proposal.file} without the flagged rules; review the diff, then run \`clio-coder context init --accept ${proposal.id}\`${from}.`,
 			);
-		process.stdout.write(`${lines.join("\n")}\n`);
+		if (flagged.length > 0 && proposals.length === 0)
+			lines.push(
+				"",
+				`${flagged.length} rule${flagged.length === 1 ? "" : "s"} need attention; rerun with --apply to propose removing or correcting them.`,
+			);
+		io.stdout(`${lines.join("\n")}\n`);
 	}
 	return flagged.length > 0 ? 1 : 0;
 }
 
-function runAcceptCommand(args: ReadonlyArray<string>): number {
+function runAcceptCommand(args: ReadonlyArray<string>, io: InitCommandIo): number {
 	const json = args.includes("--json");
 	const rest = args.filter((arg) => arg !== "--accept" && arg !== "--json");
 	if (rest.length > 1 || rest.some((arg) => arg.startsWith("-"))) {
-		process.stderr.write(
-			`clio-coder context init: --accept takes one proposal path or id and --json, not ${rest.join(" ")}\n`,
-		);
+		io.stderr(`clio-coder context init: --accept takes one proposal path or id and --json, not ${rest.join(" ")}\n`);
 		return 2;
 	}
 	const result = acceptHandbookProposal(process.cwd(), rest[0]);
-	if (json) process.stdout.write(`${JSON.stringify({ version: 1, ...result })}\n`);
-	else if (result.ok) process.stdout.write(`Wrote ${result.handbookPath} from ${result.proposalPath}\n`);
+	if (json) io.stdout(`${JSON.stringify({ version: 1, ...result })}\n`);
+	else if (result.ok) io.stdout(`Wrote ${result.handbookPath} from ${result.proposalPath}\n`);
 	else
-		process.stderr.write(
+		io.stderr(
 			`clio-coder context init --accept refused${result.proposalPath ? ` ${result.proposalPath}` : ""}: ${result.reason}\n`,
 		);
 	return result.ok ? 0 : 1;
@@ -194,23 +214,23 @@ interface InitPhaseTiming {
 	completedMs?: number;
 }
 
-export async function runInitCommand(args: string[]): Promise<number> {
+export async function runInitCommand(args: string[], io: InitCommandIo = PROCESS_IO): Promise<number> {
 	if (hasFlag(args, "--help") || hasFlag(args, "-h")) {
-		process.stdout.write(HELP);
+		io.stdout(HELP);
 		return 0;
 	}
-	if (hasFlag(args, "--verify")) return runVerifyCommand(args);
-	if (hasFlag(args, "--accept")) return runAcceptCommand(args);
+	if (hasFlag(args, "--verify")) return runVerifyCommand(args, io);
+	if (hasFlag(args, "--accept")) return runAcceptCommand(args, io);
 	const parsed = parseContextInitArgs(args);
 	if (parsed.error) {
-		process.stderr.write(`clio-coder context init: ${parsed.error}\n`);
-		process.stderr.write(HELP);
+		io.stderr(`clio-coder context init: ${parsed.error}\n`);
+		io.stderr(HELP);
 		return 2;
 	}
 	const validationError = validateInitOptions(parsed.options);
 	if (validationError) {
-		process.stderr.write(`${validationError}\n`);
-		process.stderr.write(HELP);
+		io.stderr(`${validationError}\n`);
+		io.stderr(HELP);
 		return 2;
 	}
 	const bootstrapOptions = bootstrapInputFromInitOptions(parsed.options);
@@ -227,11 +247,11 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			cwd: process.cwd(),
 			io: {
 				stdout: (s) => {
-					if (!parsed.json) process.stdout.write(s);
+					if (!parsed.json) io.stdout(s);
 				},
 				stderr: (s) => {
 					warnings.push(s);
-					process.stderr.write(s);
+					io.stderr(s);
 				},
 			},
 			onProgress: (event) => {
@@ -255,7 +275,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 									}
 								: {}),
 							onFallback: (err, mode) =>
-								process.stderr.write(
+								io.stderr(
 									`clio-coder context init: model exploration unavailable, using ${mode === "existing" ? "existing CLIO-CODER.md" : "heuristic"} (${err.message})\n`,
 								),
 						}),
@@ -268,9 +288,9 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			"Context init finished",
 			{ facts: bootstrapOperationFacts(result), warnings: warnings.slice(0, 8) },
 		);
-		if (!parsed.json) process.stdout.write(`${formatContextOperationResult(conclusion)}\n`);
+		if (!parsed.json) io.stdout(`${formatContextOperationResult(conclusion)}\n`);
 		if (parsed.json) {
-			process.stdout.write(
+			io.stdout(
 				`${JSON.stringify({
 					version: 1,
 					operation: conclusion,
@@ -308,13 +328,13 @@ export async function runInitCommand(args: string[]): Promise<number> {
 		if (useModel && generation.mode === "heuristic" && (written || result.summary.action === "proposed")) {
 			const reason = (generation.fallbackReason ?? "the model draft was unusable").split("\n")[0]?.slice(0, 300) ?? "";
 			const file = written ? result.clioMdPath : "the CLIO-CODER.md proposal";
-			process.stderr.write(
+			io.stderr(
 				`clio-coder context init: warning: ${file} is a heuristic draft, not a model draft (${reason}).\n` +
 					"  review it before committing, or rerun `clio-coder context init --rewrite` once the bootstrap target answers.\n",
 			);
 		}
 		if (parsed.options.rewriteClioMd === true && result.telemetry.generation.mode === "existing") {
-			process.stderr.write(
+			io.stderr(
 				"clio-coder context init: --rewrite did not rewrite CLIO-CODER.md; the model draft failed and the existing file was preserved.\n" +
 					"  rerun `clio-coder context init --rewrite` once the bootstrap target answers, or `clio-coder context init --rewrite --heuristic` to replace it with the deterministic draft.\n",
 			);
@@ -326,7 +346,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
 			err instanceof Error && err.name === "AbortError" ? "cancelled" : "failed",
 			err instanceof Error ? err.message : String(err),
 		);
-		process.stderr.write(`clio-coder context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
+		io.stderr(`clio-coder context init failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		return 1;
 	} finally {
 		progress.stop();

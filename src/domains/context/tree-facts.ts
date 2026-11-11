@@ -117,15 +117,34 @@ export function treeFacts(cwd: string, ciCommands: ReadonlyArray<string> = []): 
 
 const VERB = String.raw`\b(?:always\s+|must\s+|should\s+|prefer\s+|use\s+|run\s+)*(?:use|prefer|run|format with|formatted with)\s+`;
 
+const NEGATION_RE =
+	/\b(?:not|never|no longer|avoid|instead of|rather than)\b|\b(?:don|doesn|isn|aren|shouldn|mustn)['’]?t\b/;
+
+/**
+ * The first of `values` a rule asserts in a clause that does not negate it: "Do
+ * not use npm; use pnpm" asserts pnpm, and "Never use yarn" asserts nothing.
+ */
+function assertedValue(normalized: string, values: string): string | undefined {
+	for (const match of normalized.matchAll(new RegExp(`${VERB}(${values})\\b`, "g"))) {
+		const clause =
+			normalized
+				.slice(0, match.index)
+				.split(/[;,:.!?]\s/)
+				.at(-1) ?? "";
+		if (!NEGATION_RE.test(clause)) return match[1];
+	}
+	return undefined;
+}
+
 /** The tree-fact values a rule asserts, for the keys the table can check. */
 export function factClaims(text: string): Array<{ key: TreeFactKey; value: string }> {
 	const normalized = text.toLowerCase().replace(/`/g, "");
 	const claims: Array<{ key: TreeFactKey; value: string }> = [];
-	const manager = new RegExp(`${VERB}(pnpm|npm|yarn|bun)\\b`).exec(normalized)?.[1];
+	const manager = assertedValue(normalized, "pnpm|npm|yarn|bun");
 	if (manager) claims.push({ key: "package-manager", value: manager });
-	const runner = new RegExp(`${VERB}(node:test|vitest|jest|mocha|pytest|cargo test|go test)\\b`).exec(normalized)?.[1];
+	const runner = assertedValue(normalized, "node:test|vitest|jest|mocha|pytest|cargo test|go test");
 	if (runner) claims.push({ key: "test-runner", value: runner });
-	const formatter = new RegExp(`${VERB}(prettier|biome)\\b`).exec(normalized)?.[1];
+	const formatter = assertedValue(normalized, "prettier|biome");
 	if (formatter) claims.push({ key: "formatter", value: formatter });
 	if (/\bstrict(?:\s+mode)?\s+(?:is\s+)?(?:off|disabled)\b|\bstrict"?\s*:\s*false\b|\bnot\s+strict\b/.test(normalized))
 		claims.push({ key: "ts-strict", value: "false" });
