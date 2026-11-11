@@ -553,6 +553,16 @@ import {
 } from "./worker-spawn.js";
 import { workerMergedNotice } from "./workspace-mutation.js";
 import type { WriteBoundaryAttribution, WriteBoundaryAttributionDowngrade } from "./write-boundary.js";
+import {
+	createWriteRootPark,
+	evaluateWriteRootGrant,
+	resolveWriteRootRequest,
+	WRITE_ROOTS_GRANT_TOOL,
+	type WriteRootContinuation,
+	writeRootOutcomeMessage,
+	writeRootRequestDetail,
+	writeRootRequestFromEntries,
+} from "./write-root-requests.js";
 
 /**
  * What a running worker has spent, as its own call telemetry folds it. Absent until the first frame reaches the
@@ -4042,6 +4052,8 @@ export function createDispatchBundle(
 	const grantBroker = createGrantBroker({
 		now,
 		deliver: (record, decision, reason, cause) => {
+			const parked = writeRootPark.deliver(record, decision, reason);
+			if (parked !== null) return parked;
 			const run = active.get(record.runId);
 			if (run?.resolvePermission === undefined) return false;
 			return run.resolvePermission(
@@ -4494,6 +4506,26 @@ export function createDispatchBundle(
 		settleCanceled: () => void;
 	}
 	const retryQueue = new Map<string, RetryQueueEntry>();
+	const writeRootPark = createWriteRootPark<ActiveRun, RunResult>({
+		broker: grantBroker,
+		now,
+		deadlineMs: () =>
+			getEffectiveSettings()?.fleet.limits.internalRunTimeoutMs ?? DEFAULT_SETTINGS.fleet.limits.internalRunTimeoutMs,
+		isLive: (run) => !draining && retryChainIsLive(run),
+		hold: (run, settled) => trackMemberWork(run.runId, settled),
+		settle: (run, receipt, status, detail) =>
+			settleAssignmentDurably(asAssignmentId(run.lineage.rootRunId), receipt, status, detail),
+		continueAttempt: (run, reason, continuation) =>
+			executeRetry(
+				run,
+				run.lineage.attempt + 1,
+				reason,
+				{ retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-write-roots-widened" },
+				null,
+				reason,
+				continuation,
+			),
+	});
 	/** Delay before the first retry of a member's worker run; each further attempt doubles it. */
 	const RETRY_BACKOFF_BASE_MS = 500;
 	/** Ceiling the doubled retry delay never exceeds. */
@@ -4859,6 +4891,7 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
+		if (writeRootPark.park(run, receipt)) return;
 		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass, contextOverflow, retryReason);
 		if (retry.scheduled) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
@@ -4897,6 +4930,7 @@ export function createDispatchBundle(
 		decision: RetryDecision = decideRetry("internal", memberRetryAttempt(run), assignmentPolicyFor(run.req).maxRetries),
 		overflowRoute: DispatchFailoverCandidate | null = null,
 		moveReason = reason,
+		continuation: WriteRootContinuation = {},
 	): Promise<void> {
 		if (draining || !retryChainIsLive(run)) return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
@@ -4907,6 +4941,7 @@ export function createDispatchBundle(
 				: run.req.reroutes;
 		const retryReq: DispatchRequest = {
 			...run.req,
+			...continuation,
 			...(rerouteHops !== undefined ? { reroutes: rerouteHops } : {}),
 			// A retry that moves the target names one, which would otherwise read
 			// as an operator pin and freeze every later retry in the chain.
@@ -8985,6 +9020,26 @@ export function createDispatchBundle(
 					finalDetail = [finalDetail, `deterministic worker failure: ${outcomeCode}`].filter(Boolean).join("; ");
 					failureMessage = finalDetail;
 				}
+				// A write worker that stopped to ask for wider write roots changed
+				// nothing; whether the assignment continues is the request's decision.
+				if (
+					finalOutcome === "succeeded" &&
+					outcomeCode === null &&
+					lifecycle.capabilityClass === "workspace-edit" &&
+					!lifecycle.readOnly &&
+					finishContract?.assessment.mutatedPaths.length === 0
+				) {
+					const asked = writeRootRequestFromEntries(finishContractEntries);
+					if (asked !== null) {
+						const resolution = resolveWriteRootRequest(req, asked);
+						const routable = resolution.ok && req.mainGrantRoute?.kind === "yield" && typeof req.ownerSessionId === "string";
+						if (resolution.ok && routable) writeRootPark.stage(envelope.id, resolution.request);
+						finalOutcome = "failed";
+						outcomeCode = "worker_no_work";
+						finalDetail = writeRootRequestDetail(asked, resolution, routable);
+						failureMessage = finalDetail;
+					}
+				}
 				// The finish contract reads a turn whose writes were all refused as
 				// "no mutation" and passes it. For an edit worker that is the whole
 				// assignment failing, and rerunning under the same policy is refused
@@ -9690,7 +9745,10 @@ export function createDispatchBundle(
 					try {
 						// A canceled run that never produced work leaves nothing to keep.
 						if (
-							!((finalOutcome === "canceled" || outcomeCode === "worker_no_work") && discardIdleTaskWorktree(req.taskWorktree))
+							!(
+								(finalOutcome === "canceled" || (outcomeCode === "worker_no_work" && !writeRootPark.isStaged(envelope.id))) &&
+								discardIdleTaskWorktree(req.taskWorktree)
+							)
 						) {
 							settleTaskWorktree(req.taskWorktree, accounted);
 						}
@@ -11048,6 +11106,7 @@ export function createDispatchBundle(
 	 * receipt becomes the terminal evidence and the assignment settles `canceled`.
 	 */
 	function settleQueuedAssignmentsForShutdown(): void {
+		writeRootPark.revoke(() => true, "the owning session is shutting down");
 		for (const [finishedRunId, entry] of retryQueue) {
 			clearTimeout(entry.timer);
 			entry.settleCanceled();
@@ -11276,6 +11335,13 @@ export function createDispatchBundle(
 	async function decideGrantAsMain(
 		input: Parameters<NonNullable<DispatchContract["grants"]>["decideAsMain"]>[0],
 	): Promise<MainGrantOutcome> {
+		const outcome = await decideGrantRecordAsMain(input);
+		return grantBroker.get(input.requestId)?.tool === WRITE_ROOTS_GRANT_TOOL ? writeRootOutcomeMessage(outcome) : outcome;
+	}
+
+	async function decideGrantRecordAsMain(
+		input: Parameters<NonNullable<DispatchContract["grants"]>["decideAsMain"]>[0],
+	): Promise<MainGrantOutcome> {
 		const record = grantBroker.get(input.requestId);
 		if (record === null) return { ok: false, message: `unknown permission request '${input.requestId}'` };
 		const base = { sessionId: input.sessionId, runId: input.runId };
@@ -11325,13 +11391,16 @@ export function createDispatchBundle(
 		if (input.runId !== record.runId && input.runId !== record.rootRunId) {
 			return failed(`permission request '${input.requestId}' belongs to run ${record.runId}, not '${input.runId}'`);
 		}
-		const verdict = evaluateMainGrant({
-			record,
-			autonomy: input.autonomy,
-			attended: grantAttended(),
-			safety,
-			...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
-		});
+		const verdict =
+			record.tool === WRITE_ROOTS_GRANT_TOOL
+				? evaluateWriteRootGrant({ autonomy: input.autonomy, attended: grantAttended() })
+				: evaluateMainGrant({
+						record,
+						autonomy: input.autonomy,
+						attended: grantAttended(),
+						safety,
+						...(input.turnConstraints !== undefined ? { turnConstraints: input.turnConstraints } : {}),
+					});
 		if (verdict.kind === "grant") {
 			const result = grantBroker.decide(input.requestId, {
 				...base,
@@ -11540,6 +11609,10 @@ export function createDispatchBundle(
 				assignments.cancel(assignment.id);
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel`);
 			}
+			writeRootPark.revoke(
+				(parked) => (controlRootsByAttempt.get(parked.runId) ?? parked.lineage.rootRunId) === rootRunId,
+				"the run was cancelled",
+			);
 			for (const [finishedRunId, retry] of retryQueue) {
 				if ((controlRootsByAttempt.get(finishedRunId) ?? retry.rootRunId) !== rootRunId) continue;
 				clearTimeout(retry.timer);
