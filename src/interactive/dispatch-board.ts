@@ -42,6 +42,7 @@ import {
 	type RowBudgetedBody,
 	windowRows,
 } from "./overlay-frame.js";
+import { confirmOnceRail } from "./overlays/confirm-once.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import {
@@ -2239,6 +2240,10 @@ export interface DispatchBoardView extends Component, RowBudgetedBody, GrowableB
 	toggleDetail(): void;
 	scrollDetail(direction: -1 | 1): void;
 	detailExpanded(): boolean;
+	/** Whether a first `x` asked about the selected run; a second `x` on it cancels. */
+	cancelArmed(): boolean;
+	/** Arm the selected run for cancel, or disarm. */
+	armCancel(on: boolean): void;
 	/** Whether `w` can open the watch pane on the selected run. */
 	canWatch(): boolean;
 	/** Say which rows `w` takes to the watch pane; only a session with a pane host has any. */
@@ -2250,10 +2255,13 @@ export interface DispatchBoardView extends Component, RowBudgetedBody, GrowableB
  * key row read this one list, so a key the rail has no room for is named in the body rather than lost (cards r1).
  */
 export function dispatchBoardHintEntries(
-	board: Pick<DispatchBoardView, "selectedRow" | "detailExpanded" | "canWatch">,
+	board: Pick<DispatchBoardView, "selectedRow" | "detailExpanded" | "canWatch"> &
+		Partial<Pick<DispatchBoardView, "cancelArmed">>,
 ): HintEntry[] {
 	const row = board.selectedRow();
 	if (row === null) return [];
+	if (board.cancelArmed?.() === true && isDispatchBoardRowCancellable(row))
+		return confirmOnceRail("x", "cancel", row.agentId);
 	const entries: HintEntry[] = [{ key: "↑↓", verb: "select" }];
 	const steerable = isDispatchBoardRowSteerable(row);
 	if (board.detailExpanded()) entries.push({ key: "PgUp/PgDn", verb: "detail", critical: true });
@@ -2317,6 +2325,7 @@ export function createDispatchBoardView(
 	telemetry: () => TelemetrySnapshot | undefined,
 	getOutputStyle: () => OutputStyle = () => "standard",
 ): DispatchBoardView {
+	let armedCancelRunId: string | null = null;
 	let selectedRunId: string | null = null;
 	// Detail is a property of the operator's attention, not of a run, so it
 	// follows the cursor rather than pinning to the row it was opened on.
@@ -2428,6 +2437,16 @@ export function createDispatchBoardView(
 				);
 		},
 		detailExpanded,
+		cancelArmed(): boolean {
+			const row = normalizeSelection(rows());
+			return row !== null && armedCancelRunId === row.runId;
+		},
+		armCancel(on: boolean): void {
+			const next = on ? (normalizeSelection(rows())?.runId ?? null) : null;
+			if (next === armedCancelRunId) return;
+			armedCancelRunId = next;
+			memo = null;
+		},
 		wantsGrowth(): boolean {
 			return detailExpanded();
 		},

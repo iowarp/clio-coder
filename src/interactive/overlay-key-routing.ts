@@ -90,6 +90,10 @@ export interface DispatchBoardOverlayKeyDeps {
 	selectNextDispatch: () => void;
 	steerSelectedDispatch: () => void;
 	cancelSelectedDispatch: () => void;
+	/** First `x` asks: false arms the selected run and holds the key; true means it was armed, so cancel. */
+	confirmCancelSelectedDispatch?: () => boolean;
+	/** Any key other than `x` keeps the run. */
+	disarmCancelSelectedDispatch?: () => void;
 	/** Open or close the selected run's worker-progress detail. */
 	toggleSelectedDispatchDetail: () => void;
 	/** Whether the selected run's detail is open, so Esc folds it before it closes the board. */
@@ -245,6 +249,7 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 
 /** Pure overlay key router for the dispatch board. */
 function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKeyDeps): boolean {
+	if (!isKeyRelease(data) && !matchesKey(data, "x")) deps.disarmCancelSelectedDispatch?.();
 	if (isEscapeKey(data)) {
 		if (deps.isSelectedDispatchDetailOpen?.() === true) deps.toggleSelectedDispatchDetail();
 		else deps.closeOverlay();
@@ -268,6 +273,7 @@ function routeDispatchBoardOverlayKey(data: string, deps: DispatchBoardOverlayKe
 		return true;
 	}
 	if (matchesKey(data, "x")) {
+		if (deps.confirmCancelSelectedDispatch?.() === false) return true;
 		deps.cancelSelectedDispatch();
 		return true;
 	}

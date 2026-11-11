@@ -2203,6 +2203,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			scrollDetail: (direction) => dispatchBoard.scrollDetail(direction),
 			// Without this the Esc router read every detail as closed, so the rail's `[Esc] hide` closed the whole board.
 			detailExpanded: () => dispatchBoard.detailExpanded(),
+			cancelArmed: () => dispatchBoard.cancelArmed(),
+			armCancel: (on) => dispatchBoard.armCancel(on),
 		},
 		watchSelectedDispatch,
 		steerSelectedDispatch,

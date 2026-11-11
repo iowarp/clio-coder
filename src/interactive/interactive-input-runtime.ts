@@ -136,6 +136,8 @@ export interface InteractiveInputRuntimeDeps {
 		toggleDetail(): void;
 		detailExpanded?(): boolean;
 		scrollDetail?(direction: -1 | 1): void;
+		cancelArmed?(): boolean;
+		armCancel?(on: boolean): void;
 	};
 	/** Enter in the workers view; false falls through to the detail toggle. */
 	watchSelectedDispatch: () => boolean;
@@ -587,6 +589,15 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					},
 					steerSelectedDispatch: deps.steerSelectedDispatch,
 					cancelSelectedDispatch: deps.cancelSelectedDispatch,
+					confirmCancelSelectedDispatch: () => {
+						const board = deps.dispatchBoard;
+						if (board.armCancel === undefined || board.cancelArmed === undefined) return true;
+						const armed = board.cancelArmed();
+						board.armCancel(!armed);
+						if (!armed) deps.requestRender();
+						return armed;
+					},
+					disarmCancelSelectedDispatch: () => deps.dispatchBoard.armCancel?.(false),
 					cancelAskUser: () => deps.overlay.cancelAskUser(),
 				},
 				(input, id) => deps.keybindings.matches(input, id),

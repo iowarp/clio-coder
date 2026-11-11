@@ -90,11 +90,22 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 		inspecting: false,
 		terms: false,
 		detail: false,
+		armed: false,
 	};
 	const editor = new ClioEditor(tui, { getModelLabel: () => "fixture", getThinkingLabel: () => "off" });
 	let state: OverlayState = "closed";
 	let handle: ReturnType<typeof tui.showOverlay> | null = null;
-	const counts = { library: 0, cancel: 0, submit: 0, status: 0, allow: 0, stop: 0, dismiss: 0, shutdown: 0 };
+	const counts = {
+		library: 0,
+		cancel: 0,
+		submit: 0,
+		status: 0,
+		allow: 0,
+		stop: 0,
+		dismiss: 0,
+		shutdown: 0,
+		runCancel: 0,
+	};
 	editor.onSubmit = () => {
 		counts.submit++;
 	};
@@ -187,10 +198,16 @@ function fixture(overrides: Record<string, string | string[]> = {}, scrollFooter
 				active.detail = !active.detail;
 			},
 			detailExpanded: () => active.detail,
+			cancelArmed: () => active.armed,
+			armCancel: (on: boolean) => {
+				active.armed = on;
+			},
 		},
 		watchSelectedDispatch: () => false,
 		steerSelectedDispatch: noop,
-		cancelSelectedDispatch: noop,
+		cancelSelectedDispatch: () => {
+			counts.runCancel++;
+		},
 		cancelActiveEditorBash: () => false,
 		isStreaming: () => active.streaming,
 		hasQueuedMessages: () => active.queued,
@@ -794,6 +811,18 @@ it("Ctrl+C is Esc in Fleet Runs: it folds an open run detail before it closes th
 	assert.equal(f.state(), "dispatch-board", "the first Ctrl+C folds the detail");
 	f.terminal.input("\x03");
 	assert.equal(f.state(), "closed");
+});
+it("x asks once before it cancels a fleet run; another key keeps the run", () => {
+	const f = fixture();
+	f.open("dispatch-board");
+	f.terminal.input("x");
+	assert.equal(f.counts.runCancel, 0, "the first x only asks");
+	assert.equal(f.active.armed, true);
+	f.terminal.input("j");
+	assert.equal(f.active.armed, false, "another key keeps the run");
+	f.terminal.input("x");
+	f.terminal.input("x");
+	assert.equal(f.counts.runCancel, 1);
 });
 it("closes a real extension panel and cycles Interop kinds with encoded c only in browse", () => {
 	const f = fixture();
