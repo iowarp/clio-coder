@@ -192,6 +192,11 @@ export class ClientRegistry {
 	/**
 	 * Clients other than `except` holding an event stream open: a window that can hear a launch. A window
 	 * of a server that restarted holds none, since its credential died with that server.
+	 *
+	 * The count does not say which window is live or where it is: a background browser tab and another
+	 * machine's window that reaches this app through a fleet proxy count too. The launcher therefore raises
+	 * only a window whose title says it is connected (`DISCONNECTED_TITLE` marks one that is not); when no
+	 * such window is on this desktop, it opens the fresh link.
 	 */
 	liveWindows(except: ClientRecord) {
 		let count = 0;

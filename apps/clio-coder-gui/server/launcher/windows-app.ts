@@ -1,3 +1,5 @@
+import { DISCONNECTED_TITLE } from "../../contracts/runtime.js";
+
 /** Windows shell identity shared by the Start Menu entry and the hosted Chromium window. */
 export const windowsIdentitySource = `using System;
 using System.Runtime.InteropServices;
@@ -31,6 +33,12 @@ public static class ClioIdentity {
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
+    public static string Title(long handle) {
+        var text=new StringBuilder(512);
+        GetWindowText(new IntPtr(handle),text,text.Capacity);
+        return text.ToString();
+    }
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)] static extern IntPtr CommandLineToArgvW(string command,out int count);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
     public static bool UsesProfile(string command,string profile) {
@@ -190,10 +198,12 @@ $link=Join-Path $PSScriptRoot 'last-link'
 $modeFile=Join-Path $PSScriptRoot 'last-window-mode'
 $sameMode=(Test-Path -LiteralPath $modeFile) -and [IO.File]::ReadAllText($modeFile) -eq $mode
 # Each link carries a fresh single-use ticket, so the window is matched by its address alone. Only the app
-# knows whether that window still holds a connection; one left by a restarted server cannot reconnect.
+# knows whether a window still holds a connection; one left by a restarted server cannot reconnect and titles
+# itself as not connected, so the app's live answer may come from another client and never focuses that one.
 $address=$url.GetLeftPart([UriPartial]::Authority)
-if($env:CLIO_WIN_LIVE -eq '1' -and $sameMode -and $existing.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $address) {
- [ClioIdentity]::Focus($existing[0]); return
+$connected=@($existing | Where-Object { -not [ClioIdentity]::Title($_).Contains('${DISCONNECTED_TITLE}') })
+if($env:CLIO_WIN_LIVE -eq '1' -and $sameMode -and $connected.Count -gt 0 -and (Test-Path -LiteralPath $link) -and [IO.File]::ReadAllText($link) -eq $address) {
+ [ClioIdentity]::Focus($connected[0]); return
 }
 if($existing.Count -gt 0) {
  # A changed port or credential cannot reconnect the old window. Close only this owned profile's windows.

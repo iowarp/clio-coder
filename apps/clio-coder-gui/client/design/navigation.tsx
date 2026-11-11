@@ -58,7 +58,7 @@ export const SIDEBAR_ID = "desktop-navigation";
  * `announcer.ts`, so a waiting approval is visible on a backgrounded tab without two effects
  * fighting over the same string.
  */
-export function RouteFocus() {
+export function RouteFocus({ connected }: { connected: boolean }) {
 	const location = useLocation(),
 		previous = useRef(location.pathname);
 	const { approvalPending, pageTitle } = useLiveState();
@@ -72,7 +72,7 @@ export function RouteFocus() {
 	}, [location.pathname]);
 	useEffect(() => {
 		const section = navigation.find((item) => location.pathname.startsWith(item.path));
-		document.title = composeTitle(pageTitle ?? section?.label, approvalPending);
-	}, [location.pathname, approvalPending, pageTitle]);
+		document.title = composeTitle(pageTitle ?? section?.label, approvalPending, connected);
+	}, [location.pathname, approvalPending, pageTitle, connected]);
 	return null;
 }

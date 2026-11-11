@@ -6,8 +6,14 @@ export const API_VERSION = 1;
 
 export const APP_VERSION = "0.0.0";
 
-/** Every window title ends with this. The launcher finds an open app window by it, so a title never drops it. */
+/** Every connected window's title ends with this. The launcher finds an open app window by it, so a title never drops it. */
 export const APP_TITLE = "Clio Coder";
+
+/**
+ * The title of a window with no working credential, such as one left on screen when its server restarted. It does
+ * not end with `APP_TITLE`, so a launch never raises that window in place of a live one or of a fresh link.
+ */
+export const DISCONNECTED_TITLE = `${APP_TITLE} (not connected)`;
 
 /**
  * The engine bounds steer text at 16 KiB and a queue at 64 entries; these are

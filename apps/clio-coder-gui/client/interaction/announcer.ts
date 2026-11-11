@@ -3,7 +3,7 @@
 // because the events transport that raises most of these is not a component.
 
 import { useSyncExternalStore } from "react";
-import { APP_TITLE } from "../../contracts/runtime.js";
+import { APP_TITLE, DISCONNECTED_TITLE } from "../../contracts/runtime.js";
 
 export type Urgency = "assertive" | "polite";
 
@@ -77,9 +77,11 @@ export function resetAnnouncer(): void {
 
 /**
  * The tab title, owned by exactly one writer. Two effects both writing `document.title` fight, so
- * the route label and the approval marker compose here instead.
+ * the route label and the approval marker compose here instead. A window without a working credential
+ * takes `DISCONNECTED_TITLE`, so a launch raises a live window or opens a fresh one instead of it.
  */
-export function composeTitle(sectionLabel: string | undefined, approvalPending: boolean): string {
+export function composeTitle(sectionLabel: string | undefined, approvalPending: boolean, connected = true): string {
+	if (!connected) return DISCONNECTED_TITLE;
 	const base = sectionLabel ? `${sectionLabel} · ${APP_TITLE}` : APP_TITLE;
 	return approvalPending ? `● Approval needed — ${base}` : base;
 }

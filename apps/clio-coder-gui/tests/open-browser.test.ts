@@ -3,7 +3,8 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { isAppWindowTitle, wmctrlAppWindow } from "../server/launcher/window-focus.js";
+import { composeTitle } from "../client/interaction/announcer.js";
+import { isAppWindowTitle, SWAY_APP_CRITERIA, wmctrlAppWindow } from "../server/launcher/window-focus.js";
 import { serverOptions } from "../server/options.js";
 import { browserCommand, focusAppWindow, openBrowser } from "../server/process-policy.js";
 import { relaunchWindow, type WindowAnswer } from "../server/relaunch-model.js";
@@ -63,6 +64,20 @@ test("a launch on a Linux desktop raises an open app window and otherwise report
 		await focusAppWindow({ PATH: join(dir, "missing"), DISPLAY: ":0", SWAYSOCK: "/nowhere" }, "linux"),
 		false,
 	);
+});
+
+test("a window that lost its credential is titled so no launch raises it in place of a live one", () => {
+	const dead = composeTitle("Tasks", true, false);
+	const live = composeTitle("Tasks", false, true);
+	const sway = new RegExp(/^\[title="(.*)"\]$/.exec(SWAY_APP_CRITERIA)?.[1] ?? "");
+	for (const suffix of ["", " - Google Chrome", " — Mozilla Firefox"]) {
+		assert.ok(!isAppWindowTitle(dead + suffix), dead + suffix);
+		assert.ok(!sway.test(dead + suffix), dead + suffix);
+		assert.ok(isAppWindowTitle(live + suffix), live + suffix);
+		assert.ok(sway.test(live + suffix), live + suffix);
+	}
+	// The dead window was opened first, so a launch used to raise it every time while a live one stood behind it.
+	assert.equal(wmctrlAppWindow(`0x01 0 host ${dead}\n0x02 0 host ${live} - Google Chrome\n`), "0x02");
 });
 
 test("a relaunch focuses only a window the app says is live, and otherwise opens the fresh link", async () => {

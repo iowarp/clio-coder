@@ -471,7 +471,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			data-mode={mode}
 		>
 			<WindowTitlebar />
-			<RouteFocus />
+			<RouteFocus connected={authed} />
 			<PwaBoot enabled={meta.data?.pwa ?? false} />
 			<a className="skip-link" href="#main">
 				Skip to content
