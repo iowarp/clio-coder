@@ -9,6 +9,7 @@
 
 import { CREDENTIAL_SHAPES } from "../../core/secret-shapes.js";
 import {
+	redactQuotedSecrets,
 	secretUrlParamValues,
 	URL_USERINFO_PATTERNS,
 	URL_USERNAME_TOKEN_RE,
@@ -223,7 +224,7 @@ const COMMAND_OUTPUT_URL_PARAM_VALUE_RE = /^[A-Za-z0-9._~%+/=-]{8,}$/u;
  * bot tokens, JWTs and Authorization headers.
  */
 export function redactCommandOutputSecrets(text: string, tally?: RedactionTally): string {
-	let out = text;
+	let out = redactWholeQuotedSecrets(text, tally);
 	for (const pattern of COMMAND_OUTPUT_SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
 			if (pattern.kind === "sk-key" && !HAS_DIGIT_RE.test(String(match[0]))) return String(match[0]);
@@ -240,6 +241,35 @@ export function redactCommandOutputSecrets(text: string, tally?: RedactionTally)
 	}
 	parts.push(out.slice(copied));
 	return parts.join("");
+}
+
+const QUOTED_MARKER = "[redacted]";
+const QUOTED_ASSIGNMENT_MARKER = "[redacted:assignment]";
+// A quoted header whose value only names a variable, `"Authorization: Bearer $TOKEN"`, which the quoted pass would hide.
+const QUOTED_HEADER_ENV_REFERENCE_RE =
+	/(["'])\s*[A-Za-z0-9_-]+\s*:\s*(?:(?:bearer|basic|token)\s+)?\$(?:[A-Z_][A-Z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})\1/giu;
+const HELD_SEGMENT_RE = /\uE000(\d+)\uE001/gu;
+
+/**
+ * Replace a quoted credential value (`TOKEN="a b"`, `--password 'a b'`) whole, before the value-shaped patterns run:
+ * they stop at whitespace, so a space inside the quotes left the rest of the secret in the text.
+ */
+function redactWholeQuotedSecrets(text: string, tally?: RedactionTally): string {
+	if (text.includes("\uE000")) return text;
+	const held: string[] = [];
+	const guarded = text.replace(QUOTED_HEADER_ENV_REFERENCE_RE, (segment: string) => {
+		held.push(segment);
+		return `\uE000${held.length - 1}\uE001`;
+	});
+	const masked = redactQuotedSecrets(guarded);
+	if (masked === guarded) return text;
+	const quoted =
+		held.length === 0 ? masked : masked.replace(HELD_SEGMENT_RE, (_m, index: string) => held[Number(index)] ?? "");
+	const parts = quoted.split(QUOTED_MARKER);
+	const added = parts.length - text.split(QUOTED_MARKER).length;
+	if (tally && added > 0) tally.count += added;
+	// A marker already in the text is not ours to rename.
+	return added === parts.length - 1 ? parts.join(QUOTED_ASSIGNMENT_MARKER) : quoted;
 }
 
 const HEAD_KEEPING_KINDS: ReadonlySet<string> = new Set(
@@ -273,7 +303,7 @@ export function redactSecretsText(
 		keepAssignmentValue?: (value: string, before: string) => boolean;
 	},
 ): string {
-	let out = text;
+	let out = redactWholeQuotedSecrets(text, tally);
 	for (const pattern of SECRET_PATTERNS) {
 		out = out.replace(pattern.re, (...match: unknown[]) => {
 			if (!secretShapeHolds(pattern.kind, String(match[0]))) return String(match[0]);
