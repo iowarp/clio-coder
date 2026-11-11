@@ -82,3 +82,18 @@ test("the tree label editor is the shared input row in the body, not a fake care
 		match(view.getHint(), /\[Enter\] commit label/u);
 	}
 });
+
+test("the settings rail says select, never move", () => {
+	const items = buildSettingsSections([]).flatMap((section) => section.items);
+	const center = new SettingsCenter(items, {
+		getBodyHeight: () => 22,
+		prepareChange: () => null,
+		onApply: () => {},
+		onCancel: () => {},
+	});
+	for (const width of [80, 120, 200]) {
+		const rail = stripTerminalSequences(center.railHint(width));
+		match(rail, /\[↑↓\] select/u, rail);
+		doesNotMatch(rail, /\bmove\b/u, rail);
+	}
+});

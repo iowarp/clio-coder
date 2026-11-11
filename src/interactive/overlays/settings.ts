@@ -3149,7 +3149,7 @@ export class SettingsCenter implements Component {
 			[
 				...(editable ? [{ key: "Enter", verb: "open" }] : []),
 				...(twoLanes ? [{ key: "Tab", verb: "to sections", short: "sections", critical: true }] : []),
-				{ key: "↑↓", verb: "move", critical: false },
+				{ key: "↑↓", verb: "select", critical: false },
 				...(twoLanes && editable && item.values?.length ? [{ key: "Space", verb: "preview", critical: false }] : []),
 				...(twoLanes && isShortcutRow(item) ? [{ key: "*", verb: "pin", critical: false }] : []),
 				filter,

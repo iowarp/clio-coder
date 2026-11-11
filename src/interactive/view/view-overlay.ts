@@ -413,7 +413,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, filtered: bool
 						`[↑↓] select · [Enter] detail · [Esc] ${listEsc}`,
 						`[Enter] detail · [Esc] ${listEsc}`,
 					]
-				: ["[↑↓] scroll · [i] details · [Esc] back to list", "[i] details · [Esc] back to list", "[Esc] back to list"];
+				: ["[↑↓] scroll · [i] detail · [Esc] back to list", "[i] detail · [Esc] back to list", "[Esc] back to list"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
 	}
 	if (focus === "list") {
@@ -435,7 +435,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, filtered: bool
 			{ key: "PgUp/PgDn", verb: "page" },
 			{ key: "g/G", verb: "top/bottom" },
 			...(canVerify ? [{ key: "v", verb: "verify" }] : []),
-			{ key: "i", verb: "info" },
+			{ key: "i", verb: "detail" },
 			{ key: "o", verb: "path" },
 		],
 		"back to list",
@@ -771,8 +771,8 @@ export class ViewOverlayView implements Component {
 				: `Details${position} · i preview · Esc list`
 			: this.focus === "content"
 				? narrowHeader
-					? `Preview${position} · i info`
-					: `Preview${position} · n/p item · i info · Esc list`
+					? `Preview${position} · i detail`
+					: `Preview${position} · n/p item · i detail · Esc list`
 				: `Preview${position} · Enter/Tab focus`;
 		const header = [
 			padAnsi(

@@ -176,7 +176,7 @@ it("identifies provider packages and limits their catalog hints to the selected 
 			ok(!detail.includes("lab-skill"));
 			match(detail, /not loaded components/);
 			match(detail, /\[i\] review install/);
-			ok(!detail.includes("[Enter] members"), "an uninstalled package has no members to open");
+			ok(!detail.includes("[Enter] detail"), "an uninstalled package has no members to open");
 		}
 	}
 });

@@ -585,9 +585,9 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			});
 		if (actions.update) entries.push({ key: "u", verb: "update" });
 		if (actions.remove) entries.push({ key: "x", verb: "remove" });
-		// Enter is named only where it opens members; a pane is Tab's, and at
-		// split width Enter on a component did nothing while the rail said detail.
-		if (actions.open) entries.push({ key: "Enter", verb: "members" });
+		// Enter is named only where it opens a package's members; a pane is Tab's,
+		// and at split width Enter on a component did nothing while the rail said detail.
+		if (actions.open) entries.push({ key: "Enter", verb: "detail" });
 		if (actions.use) entries.push({ key: "v", verb: "use" });
 		return entries;
 	};

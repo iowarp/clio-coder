@@ -930,6 +930,7 @@ describe("library browser behavior", () => {
 			installedHints.map((entry) => entry.key),
 			["e", "u", "x", "Enter"],
 		);
+		equal(installedHints.at(-1)?.verb, "detail", "Enter opens the package's detail, named like every list");
 	});
 
 	it("keeps a package name readable at a narrow width and compacts its metadata", () => {
@@ -957,7 +958,8 @@ describe("library browser behavior", () => {
 			body = plain(view.render(60).join("\n"));
 		}
 		equal(body.includes("PgUp/PgDn scroll"), false, "no pane is drawn");
-		const everywhere = `${body}\n${plain(view.getHint(41))}`;
+		// The dock asks for the hint with the rail's room plus the three cells it spends around it.
+		const everywhere = `${body}\n${plain(view.getHint(41 + 3))}`;
 		for (const key of ["e", "u", "x", "Enter"])
 			equal(everywhere.includes(`[${key}] `), true, `${key} is discoverable with no pane drawn`);
 	});

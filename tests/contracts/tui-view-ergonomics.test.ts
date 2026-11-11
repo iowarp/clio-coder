@@ -94,8 +94,11 @@ test("view gives narrow lists the full width and lets a focused preview move bet
 	view.render(60);
 	await settle();
 	match(plain(view, 60), /Preview · 1\/2[\s\S]*Read the retry module/u);
-	match(plain(view, 40), /Preview · 1\/2 · i info/u);
-	doesNotMatch(plain(view, 40), /i inf…/u);
+	match(plain(view, 40), /Preview · 1\/2 · i detail/u);
+	doesNotMatch(plain(view, 40), /i det…/u);
+	const wide = `${plain(view, 160)}\n${view.getHint(160)}`;
+	match(wide, /i detail/u);
+	doesNotMatch(wide, /\binfo\b/u, wide);
 	view.handleInput("n");
 	match(plain(view, 60), /Preview · 2\/2[\s\S]*Run the retry tests/u);
 	view.handleInput("p");
