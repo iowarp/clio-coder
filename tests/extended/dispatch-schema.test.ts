@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
 import { mergeOperatorNamedChecks, operatorNamedChecks } from "../../src/domains/dispatch/operator-checks.js";
+import { scoutReadWorkspace } from "../../src/domains/dispatch/scout-workspace.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -31,6 +36,55 @@ function modeEnum(schema: unknown): string[] {
 }
 
 describe("dispatch schema composition", () => {
+	it("grants absolute intent.read_roots as read-only extra roots and still refuses an outside cwd", () => {
+		const base = mkdtempSync(join(tmpdir(), "clio-coder-read-roots-"));
+		try {
+			const workspace = join(base, "repo");
+			const outside = join(base, "reference");
+			mkdirSync(join(workspace, "src"), { recursive: true });
+			mkdirSync(outside, { recursive: true });
+			const granted = scoutReadWorkspace({
+				agentId: "coder",
+				readOnlyScout: false,
+				workspaceRoot: workspace,
+				intent: { read_roots: ["src/", outside], write_roots: ["src/"] },
+				worktree: true,
+				writeRoots: undefined,
+			});
+			assert.ok(granted.ok);
+			assert.deepEqual(granted.extraReadRoots, [realpathSync(outside)]);
+			assert.deepEqual((granted.intent as { read_roots: unknown }).read_roots, ["src/"]);
+			const spec = resolveWorkerSandboxSpec({
+				mode: "auto",
+				readOnly: false,
+				cwd: workspace,
+				writeBoundaries: [`${workspace}/src/`],
+				allowedTools: [],
+				networkSetting: false,
+				dependencyRoots: granted.extraReadRoots ?? [],
+			});
+			assert.ok(spec?.readableRoots.includes(realpathSync(outside)));
+			assert.ok(spec?.readOnlyPaths.includes(realpathSync(outside)));
+			assert.ok(!spec?.writableRoots.includes(realpathSync(outside)));
+			for (const refused of [
+				{ intent: { read_roots: [join(base, "missing")] } },
+				{ intent: { read_roots: [workspace] } },
+				{ intent: { read_roots: ["src/"] }, cwd: outside },
+			]) {
+				const result = scoutReadWorkspace({
+					agentId: "coder",
+					readOnlyScout: false,
+					workspaceRoot: workspace,
+					worktree: false,
+					writeRoots: undefined,
+					...refused,
+				});
+				assert.equal(result.ok, false, JSON.stringify(refused));
+			}
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
 	it("routes explicit reviews mentioning tests to the verifier without changing test-writing or explicit recipes", () => {
 		const parsed = dispatchRequestsFromArgs(
 			{

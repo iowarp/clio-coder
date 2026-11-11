@@ -282,6 +282,9 @@ function dispatchRequestFromArgs(
 	cwd = workspace.cwd;
 	request.cwd = cwd;
 	let rawIntent = workspace.intent;
+	if (workspace.extraReadRoots !== undefined && workspace.extraReadRoots.length > 0) {
+		request.extraReadRoots = workspace.extraReadRoots;
+	}
 	if (workspace.externalReadRoot !== undefined) {
 		if (args.detach === true)
 			return {

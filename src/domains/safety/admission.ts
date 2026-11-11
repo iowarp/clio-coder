@@ -309,6 +309,41 @@ function readOnlyEffect(call: ClassifierCall, decision: SafetyDecision, workerCo
 	);
 }
 
+/** A project's own check, run as a bare package script or test runner with plain path arguments. */
+const WORKER_CHECK_COMMAND =
+	/^(?:TMPDIR=[\w./-]+\s+)?(?:pnpm|npm)\s+(?:run\s+)?(?:test|lint|check|typecheck|build)(?::[\w.-]+)?(?:\s+--(?:\s+[\w=./:-]+)+)?$/u;
+const WORKER_CHECK_ID = /^(?:test|lint|check|typecheck|build)(?::[\w.-]+)?$/u;
+const WORKER_CHECK_ARG = /^[\w=./:-]+$/u;
+
+/**
+ * A dispatched worker's focused check inside the task worktree it owns is its
+ * own authority: it runs the project's declared check under the worker's
+ * sandbox, so nobody has to answer an ask for it. Arbitrary commands, a cwd
+ * outside the attested worktree and `unsandboxed` keep their asks.
+ */
+function workerOwnTaskCheck(effect: ClassifierCall, decision: SafetyDecision, input: AdmissionInput): boolean {
+	if (decision.classification.actionClass !== "execute") return false;
+	const worktree = input.git?.taskWorktree;
+	if (worktree === undefined || input.git === undefined) return false;
+	const args = effect.args ?? {};
+	if (args.unsandboxed !== undefined && args.unsandboxed !== false) return false;
+	if (effect.tool === ToolNames.Bash) {
+		if (typeof args.command !== "string" || !WORKER_CHECK_COMMAND.test(args.command.trim())) return false;
+	} else if (effect.tool === ToolNames.Verify) {
+		if (typeof args.check !== "string" || !WORKER_CHECK_ID.test(args.check)) return false;
+		if (args.path !== undefined || args.browser !== undefined) return false;
+		const extra = args.args;
+		if (
+			extra !== undefined &&
+			!(Array.isArray(extra) && extra.every((a) => typeof a === "string" && WORKER_CHECK_ARG.test(a)))
+		)
+			return false;
+	} else return false;
+	const base = input.cwd ?? input.git.cwd;
+	const cwd = typeof args.cwd === "string" && args.cwd.length > 0 ? resolve(base, args.cwd) : base;
+	return worktree.attest(cwd).ok;
+}
+
 function readOnlyRun(input: AdmissionInput): boolean {
 	return input.constraints?.readOnly === true || input.constraints?.turnConstraints?.readOnly === true;
 }
@@ -608,6 +643,7 @@ function admit(input: AdmissionInput): AdmissionDisposition {
 		if (gitControl !== undefined && !mainAuthorized) {
 			return workerGitControlAsk(call.tool, gitControl, effectDecision, level);
 		}
+		if (principal === "worker" && level === "default" && workerOwnTaskCheck(effect, effectDecision, input)) continue;
 		const inputs = autonomyCallInputs(effect, effectDecision, input.autonomyExtra ?? {});
 		const disposition = mapAutonomy(level, effectDecision.classification.actionClass, inputs.options);
 		if (disposition === "allow") {

@@ -3072,7 +3072,8 @@ function workerSandboxFor(input: {
 			: {}),
 		allowedTools: input.allowedTools,
 		networkSetting: input.settings?.safety.sandboxNetwork === true,
-		dependencyRoots,
+		// Dispatch-granted read roots ride with the dependency roots: readable, never writable.
+		dependencyRoots: [...dependencyRoots, ...(input.req.extraReadRoots ?? [])],
 		...(input.settings !== undefined
 			? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
 			: {}),

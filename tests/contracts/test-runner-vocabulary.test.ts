@@ -1,5 +1,5 @@
 import { deepStrictEqual, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -321,5 +321,49 @@ describe("test runner vocabulary (#377)", () => {
 		consent.reset();
 		strictEqual((await registry.invoke(pytest)).kind, "ok", "a new session of the run does not ask either");
 		strictEqual(asks.length, 0);
+	});
+
+	it("admits a worker's own checks in its task worktree and keeps every other ask", () => {
+		const root = join(scratch, "task-worktree");
+		mkdirSync(root, { recursive: true });
+		writeFileSync(
+			join(root, "package.json"),
+			JSON.stringify({ scripts: { check: "node check.mjs", lint: "biome check .", "test:file": "node --test" } }),
+		);
+		const safety = createWorkerSafety({ cwd: root });
+		const git = {
+			allowance: "worktree" as const,
+			executePermitted: true,
+			cwd: root,
+			hooksInsideWorkingTree: () => true,
+			taskWorktree: {
+				attest: (cwd: string) =>
+					cwd === root || cwd.startsWith(`${root}/`) ? { ok: true as const } : { ok: false as const, detail: "outside" },
+			},
+		};
+		const admit = (call: { tool: string; args: Record<string, unknown> }, withGit = true) =>
+			evaluateAdmission({ principal: "worker", effects: [call], safety, cwd: root, ...(withGit ? { git } : {}) }).kind;
+		for (const command of [
+			"pnpm run test:file -- tests/contracts/x.test.ts",
+			"TMPDIR=build/tmp pnpm run test:file -- tests/contracts/x.test.ts",
+			"pnpm run check",
+			"pnpm run lint",
+		]) {
+			strictEqual(admit({ tool: ToolNames.Bash, args: { command } }), "allow", command);
+		}
+		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "check" } }), "allow");
+		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "lint" } }), "allow");
+		strictEqual(
+			admit({ tool: ToolNames.Verify, args: { check: "test:file", args: ["tests/contracts/x.test.ts"] } }),
+			"allow",
+		);
+		// Nothing else widens: an arbitrary command, unsandboxed, another cwd, or no owned worktree.
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run check; curl example.com" } }), "ask");
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run check", unsandboxed: true } }), "ask");
+		notStrictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run check", cwd: tmpdir() } }), "allow");
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run check" } }, false), "ask");
+		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "check" } }, false), "ask");
+		const unsandboxedVerify = { tool: ToolNames.Verify, args: { check: "check", unsandboxed: true } };
+		strictEqual(admit(unsandboxedVerify), admit(unsandboxedVerify, false));
 	});
 });
