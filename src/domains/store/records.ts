@@ -119,17 +119,24 @@ export async function appendRecord(backend: StoreBackend, body: StoreRecordBody)
 	throw new StoreRefusal("io", `Could not claim a record sequence number for ${body.tag}/${body.blob}; try again.`);
 }
 
-/** All records for one blob in `seq` order; unparseable bodies are counted and skipped. */
+/**
+ * Records for one blob in `seq` order; unparseable bodies are counted and
+ * skipped. With `limit`, only the newest `limit` records are read and parsed:
+ * names are walked backwards and reading stops once enough have parsed.
+ */
 export async function readBlobHistory(
 	backend: StoreBackend,
 	tag: string,
 	blob: string,
+	options: { limit?: number } = {},
 ): Promise<{ records: StoreRecord[]; skipped: number }> {
 	if (!(await backend.tagExists(recordsTag(tag)))) return { records: [], skipped: 0 };
+	const limit = options.limit === undefined ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(options.limit));
 	const records: StoreRecord[] = [];
 	let skipped = 0;
-	for (const name of await listRecordNames(backend, tag, blob)) {
-		const data = await backend.getRecord(recordsTag(tag), name);
+	const names = limit === 0 ? [] : await listRecordNames(backend, tag, blob);
+	for (let index = names.length - 1; index >= 0 && records.length < limit; index--) {
+		const data = await backend.getRecord(recordsTag(tag), names[index] as string);
 		if (data === null) continue;
 		try {
 			const parsed = JSON.parse(Buffer.from(data).toString("utf8")) as Partial<StoreRecord> | null;

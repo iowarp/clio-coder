@@ -191,6 +191,31 @@ describe("store records", () => {
 			deepStrictEqual(await backend.listTags(), ["results", "results/raw"]);
 		}));
 
+	it("reads only the newest records when a limit is given", () =>
+		withBackend(async (backend) => {
+			for (let n = 0; n < 5; n++) {
+				await appendRecord(backend, { kind: "note", tag: "sim", blob: "h", note: `n${n}`, producedBy: by });
+			}
+			const reads: string[] = [];
+			const counting: StoreBackend = {
+				...backend,
+				getRecord: (tag, name) => {
+					reads.push(name);
+					return backend.getRecord(tag, name);
+				},
+			};
+			const { records } = await readBlobHistory(counting, "sim", "h", { limit: 2 });
+			deepStrictEqual(
+				records.map((record) => record.seq),
+				[4, 5],
+			);
+			strictEqual(reads.length, 2);
+			deepStrictEqual(
+				(await readBlobHistory(backend, "sim", "h")).records.map((record) => record.seq),
+				[1, 2, 3, 4, 5],
+			);
+		}));
+
 	it("reports each drift value", () => {
 		const put = { identity: { bytes: 2, modifiedMs: 5, sha256: null } } as StoreRecord;
 		strictEqual(driftOf(put, { bytes: 2, modifiedMs: 5, version: null }), "none");
