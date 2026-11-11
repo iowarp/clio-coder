@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
+import { resolveClioDirs } from "../../src/core/xdg.js";
 import {
 	type CompileInputs,
 	compile,
@@ -77,9 +78,21 @@ describe("prompts.profile v2 (S-82)", () => {
 		return compile(loadFragments(), inputs as CompileInputs);
 	};
 
+	// The prompt names the package root and the live Clio home, which vary with the checkout and the test's
+	// TMPDIR. Sizes are measured as if installed at fixed paths so the bounds check the prompt, not the host.
+	const installedSize = (text: string) => {
+		const dirs = resolveClioDirs();
+		const paths: Array<[string, string]> = [
+			[dirs.config, "/home/user/.config/clio-coder"],
+			[dirs.state, "/home/user/.local/state/clio-coder"],
+			[resolvePackageRoot(), "/usr/local/lib/node_modules/@iowarp/clio-coder"],
+		];
+		return paths.reduce((acc, [host, fixed]) => acc.split(host).join(fixed), text).length;
+	};
+
 	it("fits the D-02 size bounds on the reference fixture", () => {
-		const attended = session("attended-default").systemPrompt.length;
-		const headless = session("headless-default").systemPrompt.length;
+		const attended = installedSize(session("attended-default").systemPrompt);
+		const headless = installedSize(session("headless-default").systemPrompt);
 		ok(attended <= 26_000, `attended ${attended}`);
 		ok(headless <= 19_000, `headless ${headless}`);
 	});
@@ -113,7 +126,7 @@ describe("prompts.profile v2 (S-82)", () => {
 	const overBudget = (table: FragmentTable) =>
 		budgets.flatMap(([name, budget]) => {
 			const compiled = budgetCompile(table, name);
-			const size = compiled.systemPrompt.length;
+			const size = installedSize(compiled.systemPrompt);
 			const breakdown = compiled.sections.map((section) => `${section.id}~${section.tokenEstimate}t`).join(", ");
 			return size > budget ? [`${name} ${size} > ${budget}: ${breakdown}`] : [];
 		});
