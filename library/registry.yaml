@@ -814,9 +814,9 @@ entries:
       per-tool action classes for analysis beyond it. Read tools run without
       asking; file-writing tools ask first; each server needs one online launch
       to build its environment before it runs offline."
-    version: 0.2.0
+    version: 0.2.1
     sourceUrl: plugins/science-data
-    sha256: adb231a0bed2b1de4325f3ac83bc21c22d04ba4e838c437a4cb9c49e229b44c4
+    sha256: 50d6029a6678faf7823b16f6c58a1accc9fe27c70cc7fd1574ed23c64d8c3d9f
     provides:
       - kind: skill
         name: science-data
