@@ -2584,6 +2584,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 							notifications.add({ level: "info", key: `report:reply:${index}`, text });
 					})
 					.catch(() => {});
+				// The opt-in census (R-23): nothing at all unless report.census is on and an endpoint is set.
+				const census = deps.getSettings?.().report;
+				if (census?.census === "on")
+					void import("../domains/lifecycle/index.js")
+						.then(({ runCensus }) => runCensus({ stateDir: deps.stateDir, settings: census, version: runningVersion }))
+						.catch(() => {});
 				void import("./update-monitor.js")
 					.then(({ startUpdateMonitor }) => {
 						if (updateAbort.signal.aborted) return;

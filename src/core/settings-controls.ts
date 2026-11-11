@@ -535,6 +535,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"interface.exitSummary": ["auto", "brief", "standard", "report", "off"],
 	"telemetry.mode": ["standard", "research"],
 	"report.offers": ["ask", "off"],
+	"report.census": ["off", "on"],
 	"prompts.profile": ["v1", "v2"],
 	"safety.autonomy": ["default", "yolo"],
 	"safety.yoloConfinement": ["contained", "unconfined"],
@@ -784,6 +785,14 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"report.offers": [
 		"Suggest reports",
 		"When Clio itself fails, such as an internal error or a crash, it may suggest /report: at most once a session and once a week, and never again for a problem you declined. Off never suggests. Nothing is sent without your keypress.",
+	],
+	"report.census": [
+		"Census",
+		"On counts this install once a month with one request to the census endpoint: no identifier, no query, no body. Off sends nothing. Nothing is sent while the endpoint is empty.",
+	],
+	"report.censusEndpoint": [
+		"Census endpoint",
+		"The https base URL the census requests <endpoint>/v1/<minor>/<os>.txt from. Empty (the default) sends nothing.",
 	],
 	"turnControl.workflows": [
 		"Before Clio answers",

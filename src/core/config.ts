@@ -1517,10 +1517,18 @@ function validateReport(issues: Issues, raw: unknown, settings: ClioSettings): v
 		issues.add("report", `expected a map, got ${describe(raw)}`);
 		return;
 	}
-	issues.unknownKeys("report", raw, ["offers"]);
+	issues.unknownKeys("report", raw, ["offers", "census", "censusEndpoint"]);
 	if ("offers" in raw) {
 		const parsed = expectEnum(issues, "report.offers", raw.offers, ["ask", "off"] as const);
 		if (parsed !== undefined) settings.report.offers = parsed;
+	}
+	if ("census" in raw) {
+		const parsed = expectEnum(issues, "report.census", raw.census, ["off", "on"] as const);
+		if (parsed !== undefined) settings.report.census = parsed;
+	}
+	if ("censusEndpoint" in raw) {
+		if (typeof raw.censusEndpoint === "string") settings.report.censusEndpoint = raw.censusEndpoint;
+		else issues.add("report.censusEndpoint", `expected a string, got ${describe(raw.censusEndpoint)}`);
 	}
 }
 

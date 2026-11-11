@@ -369,9 +369,13 @@ On macOS, `sandbox-exec` provides a seatbelt backend when its probe succeeds. Th
 
 `report.offers` decides whether Clio may suggest `/report` after one of its own failures, such as an internal error or a crash in an earlier session. `ask` allows at most one suggestion a session and one a week, and never again for a problem the operator declined; `off` never suggests. Clio never sends a report on its own.
 
+`report.census` is an opt-in install count, off by default. When it is `on` and `report.censusEndpoint` names an https base URL, the terminal UI requests `<endpoint>/v1/<minor>/<os>.txt` (for example `/v1/0.8/linux.txt`) at most once a calendar month, five seconds after boot. The request carries no identifier, query string, body or custom header; the once-a-month stamp lives in `census.json` in the state directory, so counting requests counts installs without telling one install from another. With the endpoint empty (the default), off, in headless runs, ACP and workers, or with `CLIO_CODER_UPDATE_CHECK=0`, `NO_UPDATE_NOTIFIER` or `CI` set, nothing is sent and no file is written.
+
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `report.offers` | `ask` | immediately |
+| `report.census` | `off` | restart |
+| `report.censusEndpoint` | `""` | restart |
 
 ### Prompts
 
