@@ -87,6 +87,30 @@ function workerProviderHttpStatus(result: SpawnedWorkerResult | null): number | 
 	return match === null ? null : Number(match[0]);
 }
 
+/** Lines of a worker's stderr tail that carry the provider's own message. */
+const PROVIDER_MESSAGE_LINE = /^(?:\[worker\] (?:agent ended with stopreason=error|provider error): |(?=acp ))(.*)$/;
+
+/**
+ * The provider's message alone: the worker's last provider error and the
+ * stderr lines that quote one. Text patterns run only over this, so a port
+ * number, a test name or a file error elsewhere in the tail cannot read as a
+ * provider status.
+ */
+function providerMessageText(result: SpawnedWorkerResult | null, providerError?: string | null): string {
+	const tail = (result?.stderrTail ?? "").toLowerCase();
+	// A tail with no worker line came from a peer or runtime that writes the provider's answer as is.
+	const lines = !/^\[worker\] /m.test(tail)
+		? tail.length > 0
+			? [tail]
+			: []
+		: tail
+				.split("\n")
+				.map((line) => PROVIDER_MESSAGE_LINE.exec(line)?.[1])
+				.filter((line): line is string => line !== undefined);
+	if (typeof providerError === "string" && providerError.length > 0) lines.push(providerError.toLowerCase());
+	return lines.join("\n");
+}
+
 function resultText(result: SpawnedWorkerResult | null, providerError?: string | null): string {
 	return [result?.stderrTail, providerError]
 		.filter((part): part is string => typeof part === "string" && part.length > 0)
@@ -250,11 +274,18 @@ export function classifyFailure(
 	// fell to worker-runtime and retried on another runtime against the same
 	// slow target.
 	if (httpStatus === 408) return "target-transient";
-	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
-	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
-	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";
-	if (/capacity|overloaded|queue full/.test(diagnostic)) return "capacity";
-	if (evidence.timedOut || outcome === "timed_out" || TRANSIENT_TARGET_TEXT.test(diagnostic)) {
+	// The typed status decides before any text: it is what the provider answered.
+	if (httpStatus === 401 || httpStatus === 403) return "target-auth";
+	if (httpStatus === 429) return "target-rate-limit";
+	if (httpStatus !== null && httpStatus >= 500 && httpStatus < 600) return "target-transient";
+	const message = providerMessageText(result, providerError);
+	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(message)) return "target-auth";
+	if (/\b429\b|rate[ -]?limit|too many requests/.test(message)) return "target-rate-limit";
+	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(message)) return "node-resource";
+	// Anthropic's overloaded_error is the provider's own load, not this node's capacity.
+	if (/overloaded_error/.test(message)) return "target-transient";
+	if (/capacity|overloaded|queue full/.test(message)) return "capacity";
+	if (evidence.timedOut || outcome === "timed_out" || TRANSIENT_TARGET_TEXT.test(message)) {
 		return "target-transient";
 	}
 	if (outcome === "failed") return "worker-runtime";

@@ -146,6 +146,28 @@ describe("dispatch failure classification", () => {
 		);
 	});
 
+	it("reads status numbers and load words only from the provider message, typed status first", () => {
+		for (const tail of [
+			"[worker] tool output follows\nlistening on 127.0.0.1:4290\nnot ok 3 - handles 401 retries\nError: EACCES: permission denied, open 'x'",
+			"[worker] tool output: sk-429 queue at 503 items on the gpu test\nError: boom",
+		]) {
+			strictEqual(classifyTail(tail), "worker-runtime", tail);
+		}
+		strictEqual(
+			classifyTail(`${WORKER_PROVIDER_HTTP_STATUS_MARKER}401\n[worker] agent ended with stopReason=error: nope`),
+			"target-auth",
+		);
+		strictEqual(
+			classifyTail(`${WORKER_PROVIDER_HTTP_STATUS_MARKER}529\n[worker] agent ended with stopReason=error: busy`),
+			"target-transient",
+		);
+		const overloaded = classifyTail(
+			'[worker] agent ended with stopReason=error: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+		);
+		strictEqual(overloaded, "target-transient", "overloaded_error");
+		strictEqual(decideRetry(overloaded, 0, 2).excludedRouteParts.includes("node"), false);
+	});
+
 	it("treats bare 500s and connection failures as target-transient", () => {
 		for (const tail of [
 			"[worker] provider error: 500 status code (no body)",
