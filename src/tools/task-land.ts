@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
-import { internalGitArgv } from "../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { SAFE_TASK_RUN_ID } from "../core/task-worktree-claim.js";
 import {
 	COMMIT_IDENTITY,
@@ -88,7 +88,7 @@ function run(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): GitResul
 		encoding: "utf8",
 		timeout: 60_000,
 		maxBuffer: 16 * 1024 * 1024,
-		env: { ...process.env, LC_ALL: "C", LANGUAGE: "", ...env },
+		env: { ...withoutRepositoryEnv(), LC_ALL: "C", LANGUAGE: "", ...env },
 	});
 	return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }

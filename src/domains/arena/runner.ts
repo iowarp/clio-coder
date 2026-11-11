@@ -12,7 +12,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { internalGitArgv } from "../../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { ensureProjectIgnore } from "../../core/project-root.js";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -88,6 +88,7 @@ function git(cwd: string, args: string[]): string {
 		stdio: ["ignore", "pipe", "pipe"],
 		maxBuffer: 64 * 1024 * 1024,
 		timeout: 60_000,
+		env: withoutRepositoryEnv(),
 	});
 }
 

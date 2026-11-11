@@ -5,7 +5,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
-import { internalGitArgv } from "../../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { hostCommitIdentity } from "../../tools/task-worktree.js";
 import { RESEARCH_COMMIT_IDENTITY } from "./types.js";
 
@@ -14,6 +14,7 @@ export function git(cwd: string, args: ReadonlyArray<string>): string {
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 60_000,
 		maxBuffer: 64 * 1024 * 1024,
+		env: withoutRepositoryEnv(),
 	})
 		.toString("utf8")
 		.trim();

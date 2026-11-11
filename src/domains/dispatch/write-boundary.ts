@@ -34,7 +34,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { internalGitArgv } from "../../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../../core/internal-git.js";
 import { asDirectoryPathBoundary, pathBoundaryEntryCovers } from "../../core/path-boundary.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -61,6 +61,7 @@ function git(root: string, args: ReadonlyArray<string>, input?: string): string 
 		stdio: ["pipe", "pipe", "pipe"],
 		timeout: GIT_TIMEOUT_MS,
 		maxBuffer: 64 * 1024 * 1024,
+		env: withoutRepositoryEnv(),
 		...(input === undefined ? {} : { input }),
 	});
 }
@@ -70,6 +71,7 @@ function gitBytes(root: string, args: ReadonlyArray<string>): Buffer {
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: GIT_TIMEOUT_MS,
 		maxBuffer: 256 * 1024 * 1024,
+		env: withoutRepositoryEnv(),
 	});
 }
 

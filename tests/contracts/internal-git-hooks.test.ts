@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { installInternalGitPolicy } from "../../src/core/internal-git.js";
 import { createGitHooksFingerprinter } from "../../src/core/sandbox/git-hooks-fingerprint.js";
+import { git as researchGit } from "../../src/domains/research/git.js";
 import { createGitHookDriftGuard } from "../../src/domains/safety/hook-drift.js";
 import { createInternalGitPolicy, type InternalGitDriftRecord } from "../../src/domains/safety/internal-git-policy.js";
 import { probeGit } from "../../src/domains/session/workspace/git-probe.js";
@@ -162,4 +163,19 @@ test("a clean filter added after the baseline does not run in Clio's status prob
 	deepStrictEqual(steady.records, []);
 	rmSync(planted.scratch, { recursive: true, force: true });
 	rmSync(baseline.scratch, { recursive: true, force: true });
+});
+
+test("Clio's internal git writers ignore a GIT_DIR a git-driven runner exported", () => {
+	const fixture = repository();
+	const other = repository();
+	const saved = process.env.GIT_DIR;
+	process.env.GIT_DIR = join(other.root, ".git");
+	try {
+		strictEqual(researchGit(fixture.root, ["rev-parse", "--absolute-git-dir"]), join(fixture.root, ".git"));
+	} finally {
+		if (saved === undefined) delete process.env.GIT_DIR;
+		else process.env.GIT_DIR = saved;
+		rmSync(fixture.scratch, { recursive: true, force: true });
+		rmSync(other.scratch, { recursive: true, force: true });
+	}
 });

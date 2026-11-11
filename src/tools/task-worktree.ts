@@ -20,7 +20,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { stripAuthoredTrailers } from "../core/commit-message.js";
 import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
-import { internalGitArgv } from "../core/internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import {
 	LEGACY_TASK_WORKTREE_KIND,
@@ -146,6 +146,7 @@ function gitBytes(root: string, args: string[], options: GitOptions = {}): Buffe
 		stdio: ["ignore", "pipe", "pipe"],
 		timeout: 30_000,
 		...options,
+		env: withoutRepositoryEnv(options.env),
 	});
 }
 
@@ -361,7 +362,7 @@ export function commitWorktreePath(
 		git(
 			path,
 			[...hostCommitIdentity(path, identity), "commit", "-m", attributed, "--no-verify"],
-			authorship === null ? {} : { env: { ...process.env, ...authorship.env } },
+			authorship === null ? {} : { env: { ...withoutRepositoryEnv(), ...authorship.env } },
 		);
 	}
 	const leftUncommitted = untrackedPaths(path).filter((entry) => !excluded.has(entry));
@@ -441,7 +442,7 @@ export function mergeWorktreeBranch(
 	let mergeHeadPath: string | undefined;
 	// Conflict-path reporting parses Git diagnostics, so merge subprocesses need a stable locale.
 	const authorship = autonomousLandAuthorship(root);
-	const mergeEnv = { ...process.env, ...authorship?.env, LC_ALL: "C", LANGUAGE: "" };
+	const mergeEnv = { ...withoutRepositoryEnv(), ...authorship?.env, LC_ALL: "C", LANGUAGE: "" };
 	const mergeMessage =
 		authorship === null
 			? message
@@ -947,6 +948,7 @@ export function taskWorktreeBaseDiff(worktree: TaskWorktree): string | null {
 			stdio: ["ignore", "pipe", "pipe"],
 			timeout: 30_000,
 			maxBuffer: BASE_DIFF_MAX_BYTES,
+			env: withoutRepositoryEnv(),
 		}).toString("utf8");
 	} catch {
 		// Fail open: the gate is an extra signal, and its other checks still run.

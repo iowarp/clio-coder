@@ -2,7 +2,7 @@ import { execFile, execFileSync } from "node:child_process";
 import fs, { type Dir } from "node:fs";
 import { join, sep } from "node:path";
 import { performance } from "node:perf_hooks";
-import { internalGitArgv } from "./internal-git.js";
+import { internalGitArgv, withoutRepositoryEnv } from "./internal-git.js";
 
 /**
  * Cooperative-yield surface for the async enumeration forms. Structurally
@@ -251,6 +251,7 @@ function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): GitLi
 	try {
 		output = execFileSync("git", internalGitArgv(gitVisibleFilesArgs(candidates), cwd), {
 			cwd,
+			env: withoutRepositoryEnv(),
 			maxBuffer: GIT_OUTPUT_LIMIT_BYTES,
 			stdio: ["ignore", "pipe", "ignore"],
 		});
@@ -270,7 +271,7 @@ function gitVisibleFilesAsync(cwd: string, candidates?: ReadonlyArray<string>): 
 			resolve(null);
 			return;
 		}
-		execFile("git", argv, { cwd, maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
+		execFile("git", argv, { cwd, env: withoutRepositoryEnv(), maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
 			resolve(error ? null : splitGitPathOutput(stdout));
 		});
 	});

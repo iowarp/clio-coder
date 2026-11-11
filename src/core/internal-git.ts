@@ -278,3 +278,25 @@ export function internalGitArgv(args: ReadonlyArray<string>, cwd?: string): stri
 		...rest,
 	];
 }
+
+/** Variables that point git at another repository than the one its `-C` or `cwd` names. */
+const REPOSITORY_ENV = [
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_COMMON_DIR",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_PREFIX",
+	"GIT_NAMESPACE",
+];
+
+/**
+ * A copy of `env` without the variables a git-driven runner (a hook,
+ * `git bisect run`, `rebase --exec`) exports for its own repository, so an
+ * internal git call writes the repository it names, never the runner's.
+ */
+export function withoutRepositoryEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const copy = { ...env };
+	for (const name of REPOSITORY_ENV) Reflect.deleteProperty(copy, name);
+	return copy;
+}
