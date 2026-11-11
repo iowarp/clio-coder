@@ -233,15 +233,29 @@ export function presentWorkerContractAnswer(
  * One member's answer as a line a person reads: a typed report's first claim or fact, else its first line of prose.
  * A council collects typed reports, so its raw text is JSON the operator was never meant to read.
  */
-function councilAnswerGist(answer: string): string {
+export function councilAnswerGist(answer: string): string {
 	const value = exactWorkerAnswerObject(answer);
 	const typed =
 		value === null
 			? null
-			: (researchReport(value) ?? worldKnowledgeReport(value) ?? debuggerReport(value) ?? verifierReport(value));
+			: (researchReport(value) ??
+				worldKnowledgeReport(value) ??
+				debuggerReport(value) ??
+				verifierReport(value) ??
+				scoutReport(value) ??
+				firstFindingClaim(value));
 	const first = typed?.lines.find((line) => line.trim().length > 0 && !line.startsWith("  "));
 	const line = (first ?? answer.split("\n").find((row) => row.trim().length > 0) ?? "").replace(/^-\s*/u, "").trim();
 	return safeWorkerAnswerText(line);
+}
+
+/** A scout-shaped answer that misses a field the full report needs still has a claim a person can read. */
+function firstFindingClaim(value: Record<string, unknown>): PresentedContractAnswer | null {
+	if (!Array.isArray(value.findings)) return null;
+	const first: unknown = value.findings[0];
+	if (!isObject(first)) return value.findings.length === 0 ? { lines: ["No findings reported."] } : null;
+	const claim = reportString(first.claim);
+	return claim === null ? null : { lines: [claim] };
 }
 
 /** The council's own answer in words, without the member gists a board column already shows. */

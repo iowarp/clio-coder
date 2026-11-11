@@ -9,6 +9,7 @@ import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
 import {
+	councilAnswerGist,
 	councilCollectedWords,
 	exactWorkerAnswerObject,
 	type PresentedContractAnswer,
@@ -655,7 +656,7 @@ function headerWord(entry: WorkerEntryState): string {
 /** A settled council member's answer in one line; a running one has none yet, and its live line says what it does. */
 function councilMemberGist(entry: WorkerEntryState): string {
 	if (isPending(entry) || entry.text.trim().length === 0) return "";
-	const lines = presentedContractAnswer(entry)?.lines ?? entry.text.split("\n");
+	const lines = presentedContractAnswer(entry)?.lines ?? [councilAnswerGist(entry.text)];
 	const first = lines.find((line) => line.trim().length > 0) ?? "";
 	return displayText(entry, "gist", first.replace(/^\s*-\s*/u, "").trim());
 }

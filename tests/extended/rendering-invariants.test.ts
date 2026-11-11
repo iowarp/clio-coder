@@ -3034,6 +3034,23 @@ describe("agent invocations", () => {
 		);
 	});
 
+	it("reads a settled council member's typed answer in words, not raw JSON", () => {
+		const member = card({
+			assignmentId: "m1",
+			agentId: "scout",
+			origin: "user",
+			council: { group: "g1", label: "fast", round: 1 },
+			text: '{"findings":[{"claim":"calc.py defines add and mul with no input checks"}]}',
+		});
+		const memberRows = renderWorkerEntryLines(member, 160, {
+			detail: transcriptDetail("standard"),
+			siblings: [member],
+		}).map(stripTerminalSequences);
+		const memberRow = memberRows.find((row) => row.startsWith("  fast")) ?? "";
+		match(memberRow, /calc\.py defines add and mul with no input checks/u);
+		doesNotMatch(memberRow, /\{"findings"/u);
+	});
+
 	it("names a failover's attempt in the card header as well as on its rail row", () => {
 		const entry = card({
 			assignmentId: "b1",

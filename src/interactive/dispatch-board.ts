@@ -45,8 +45,10 @@ import {
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import {
+	councilAnswerGist,
 	councilCollectedWords,
 	councilSynthesisLines,
+	exactWorkerAnswerObject,
 	liveWorkerAnswerText,
 	presentWorkerContractAnswer,
 } from "./renderers/worker-answer.js";
@@ -1408,6 +1410,9 @@ function councilMemberTail(row: DispatchBoardRow): string {
 		progress.settled,
 	);
 	if (presented !== null) return presented.lines.join("\n");
+	// A settled member whose typed answer the full presenter could not take still reads as words, never as raw JSON.
+	if (progress.settled === true && exactWorkerAnswerObject(progress.tailText) !== null)
+		return councilAnswerGist(progress.tailText);
 	return redactStreamingSecretString(progress.tailText, progress.completed === true);
 }
 
