@@ -7,8 +7,8 @@
  * package identities instead, so reinstalls, disables and removals keep consent.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { clioProjectRoot } from "./project-root.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
@@ -314,6 +314,47 @@ function surfacePaths(root: string, surface: ProjectTrustSurface): string[] {
 	}
 }
 
+/**
+ * Repository files a hook declaration names by relative path (`./scripts/lint.sh`,
+ * `tools/check.py`), resolved from the workspace root and from each declared
+ * `cwd`, with their content hashes: approving the hooks file then pins the
+ * scripts it runs, so an edit to one asks again. Only regular files inside
+ * the root count; a declaration naming none keeps its plain hash.
+ */
+function hookScriptEntries(root: string, files: ReadonlyArray<ProjectSurfaceFile>): Array<[string, string]> {
+	const entries = new Map<string, string>();
+	let realRoot = root;
+	try {
+		realRoot = realpathSync(root);
+	} catch {
+		// Keep the spelled root.
+	}
+	for (const file of files) {
+		if (file.text === null) continue;
+		const bases = [root];
+		for (const match of file.text.matchAll(/^\s*-?\s*cwd\s*:\s*["']?([^"'#\s]+)/gmu)) {
+			if (match[1] !== undefined) bases.push(resolve(root, match[1]));
+		}
+		for (const match of file.text.matchAll(/[\w.@+~-]*\/[\w./@+~-]*/gu)) {
+			const word = match[0];
+			if (word.startsWith("/") || word.includes("://")) continue;
+			for (const base of bases) {
+				const target = resolve(base, word);
+				if (entries.has(target)) continue;
+				try {
+					const real = realpathSync(target);
+					const rel = relative(realRoot, real);
+					if (rel.startsWith("..") || isAbsolute(rel) || !statSync(real).isFile()) continue;
+					entries.set(target, sha256(readFileSync(real)));
+				} catch {
+					// A word that names no readable file pins nothing.
+				}
+			}
+		}
+	}
+	return [...entries.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
 /** Safety entries resolve relative to their canonical source, so provenance is authority too. */
 export function safetySurfaceTrustHash(canonicalSourcePath: string, contentHash: string): string {
 	return sha256(JSON.stringify([[resolve(canonicalSourcePath), contentHash]]));
@@ -396,7 +437,12 @@ function captureOwnProjectSurface(workspaceRoot: string, surface: ProjectTrustSu
 			? files[0]?.hash
 				? safetySurfaceTrustHash(files[0].path, files[0].hash)
 				: null
-			: sha256(JSON.stringify(files.map((file) => [file.path, file.hash])));
+			: sha256(
+					JSON.stringify([
+						...files.map((file) => [file.path, file.hash]),
+						...(surface === "hooks" ? hookScriptEntries(root, files) : []),
+					]),
+				);
 	return {
 		workspaceRoot: root,
 		surface,

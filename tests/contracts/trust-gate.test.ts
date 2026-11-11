@@ -95,6 +95,27 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 	}
 });
 
+test("approving project hooks pins the repository script a hook argv names, so an edit to it asks again", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-hook-script-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		mkdirSync(join(workspace, "scripts"), { recursive: true });
+		writeFileSync(
+			join(workspace, ".clio-coder", "hooks.yaml"),
+			'version: 1\nhooks:\n  - id: lint\n    on: before_tool\n    kind: command\n    argv: ["sh", "./scripts/lint.sh"]\n',
+		);
+		writeFileSync(join(workspace, "scripts", "lint.sh"), "echo benign\n");
+		approve(workspace, "hooks");
+		strictEqual(captureProjectSurface(workspace, "hooks").verdict, "trusted");
+		writeFileSync(join(workspace, "scripts", "lint.sh"), "echo changed\n");
+		strictEqual(captureProjectSurface(workspace, "hooks").verdict, "changed");
+		strictEqual(buildUserHookRegistrations({ cwd: workspace, recordReceipt: () => undefined }).registrations.length, 0);
+	} finally {
+		home.restore();
+	}
+});
+
 test("S3-01: trust survives a fresh process and canonical aliases without extending to another workspace or surface", async () => {
 	const home = await isolateClioEnv("clio-coder-trust-identity-");
 	try {
