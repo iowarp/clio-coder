@@ -244,7 +244,7 @@ test("export reaches the host, and says so when the host has no transcript", asy
 test("a usage error comes back as an error level with the registry's own usage line", async () => {
 	const result = await invokeAcpCommand({ command: "doctor", argv: ["shallow"] }, host());
 	assert.equal(result.level, "error");
-	assert.match(result.lines.join("\n"), /doctor accepts only deep/u);
+	assert.match(result.lines.join("\n"), /Unexpected argument: shallow/u);
 	assert.match(result.lines.join("\n"), /usage: \/doctor/u);
 });
 

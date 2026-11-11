@@ -513,7 +513,15 @@ export function invokeAcpCommand(
 		throw invalid("not_wired", "skill expansion is not wired in this session");
 	}
 
-	const parsed = rule.name === "loop" ? parseLoopRequest(argv) : parseSlashCommand(joinArgv(rule.name, argv));
+	let parsed = rule.name === "loop" ? parseLoopRequest(argv) : parseSlashCommand(joinArgv(rule.name, argv));
+	// A retired verb of this same command (`doctor deep` is now `/doctor --deep`) runs its replacement,
+	// so a client that kept the old spelling keeps working for the release that retires it.
+	if (parsed.kind === "retired" && "command" in parsed.entry.to) {
+		const replacement = parsed.entry.to.command;
+		if (replacement === `/${rule.name}` || replacement.startsWith(`/${rule.name} `)) {
+			parsed = parseSlashCommand(parsed.rest ? `${replacement} ${parsed.rest}` : replacement);
+		}
+	}
 	if (!parsedBelongsTo(parsed, rule.name, entry.kinds)) {
 		throw invalid("command_not_exposed", "command is not exposed over ACP");
 	}
