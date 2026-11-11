@@ -6,6 +6,7 @@ import { CLIO_SELF_DEVELOPMENT_SKILLS } from "../../src/core/clio-repo.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { agentSkillToolPolicy, withModelSkillActivation } from "../../src/core/skill-activation.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
+import { loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import {
 	clearPluginSnapshots,
 	disablePlugin,
@@ -244,4 +245,29 @@ it("repo guidance tracks actual skill capability, autonomy and turn restrictions
 	t.after(() => noSkills.extension.stop?.());
 	const suppressed = await noSkills.contract.compileSessionPrompt({ sessionId: "disabled", cwd, sessionInputs: inputs });
 	strictEqual(suppressed.systemPrompt.includes("# Self-development skills"), false);
+});
+
+it("binds the self-development skills to built-in edit recipes that require context only in Clio's checkout", async (t) => {
+	const env = await isolateClioEnv("clio-self-development-recipes-");
+	t.after(() => env.restore());
+	const dir = path.join(import.meta.dirname, "../../src/domains/agents/builtins");
+	const bound = (cwd: string, id: string) =>
+		loadRecipesFromDir({ source: "builtin", dir, cwd }).find((recipe) => recipe.id === id)?.skills ?? [];
+	const repo = path.resolve(import.meta.dirname, "../..");
+	ok(bound(repo, "coder").includes("clio-coder-dev"));
+	ok(bound(repo, "coder").includes("clio-coder-test"));
+	// verifier and tester do not require context, so agent spec policy forbids binding them a skill.
+	deepStrictEqual(
+		bound(repo, "verifier").filter((name) => name.startsWith("clio-coder-")),
+		[],
+	);
+	deepStrictEqual(
+		bound(repo, "scout").filter((name) => name.startsWith("clio-coder-")),
+		[],
+	);
+	const elsewhere = env.dir;
+	deepStrictEqual(
+		bound(elsewhere, "coder").filter((name) => name.startsWith("clio-coder-")),
+		[],
+	);
 });

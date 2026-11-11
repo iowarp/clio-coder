@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { detectClioCoderRepo } from "../../core/clio-repo.js";
 import { readSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
@@ -58,8 +59,23 @@ function boundSkillCatalog(input: LoadSkillsInput): SkillList {
 	return catalog;
 }
 
+/**
+ * In Clio's own checkout a built-in recipe that edits gets `clio-coder-dev`
+ * and one that edits or verifies gets `clio-coder-test`, when discovery has
+ * them; elsewhere, and for read-only recipes, nothing is added.
+ */
+function selfDevelopmentSkills(recipe: AgentRecipe, source: RecipeSource): string[] {
+	if (source.source !== "builtin" || !detectClioCoderRepo(source.cwd ?? process.cwd()).isClioCoderRepo) return [];
+	const edits = recipe.capabilityClass === "workspace-edit";
+	if (!edits && recipe.capabilityClass !== "verification") return [];
+	// A bound skill needs a required context tool (agent spec policy); recipes without it get none.
+	if (!recipe.toolRequirements.required.includes("context")) return [];
+	return [...(edits ? ["clio-coder-dev"] : []), "clio-coder-test"].filter((name) => !recipe.skills.includes(name));
+}
+
 function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRecipe {
-	if (recipe.skills.length === 0) return { ...recipe, boundSkillPaths: [] };
+	const selfSkills = selfDevelopmentSkills(recipe, source);
+	if (recipe.skills.length === 0 && selfSkills.length === 0) return { ...recipe, boundSkillPaths: [] };
 	// Builtins may bind a package-owned skill. Custom recipes deliberately use
 	// only the operator's discovered skill roots; a recipe cannot smuggle an
 	// arbitrary filesystem path into worker context through a skill name.
@@ -98,7 +114,9 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	if (missing.length > 0) {
 		throw new Error(`agent recipe: ${recipe.filepath}: bound skill(s) unavailable: ${missing.join(", ")}`);
 	}
-	const boundSkillPaths = recipe.skills.map((skill) => {
+	// Optional: a disabled or missing self-development skill never fails discovery.
+	const bound = [...recipe.skills, ...selfSkills.filter((skill) => byName.has(skill))];
+	const boundSkillPaths = bound.map((skill) => {
 		const filePath = byName.get(skill);
 		if (filePath === undefined) throw new Error(`agent recipe: ${recipe.filepath}: bound skill unavailable: ${skill}`);
 		return filePath;
@@ -106,7 +124,8 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	return {
 		...recipe,
 		boundSkillPaths,
-		boundSkillDescriptions: recipe.skills.map((skill) => descriptions.get(skill) ?? ""),
+		...(selfSkills.length > 0 ? { skills: bound } : {}),
+		boundSkillDescriptions: bound.map((skill) => descriptions.get(skill) ?? ""),
 	};
 }
 
