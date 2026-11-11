@@ -1,37 +1,58 @@
 {
 	"task": "07",
 	"name": "wait-as-job",
-	"profile": "v1",
+	"profile": "v2",
 	"target": "litellm",
-	"model": "mini/qwen3.8-27b-iq4r-v4",
+	"model": "dynamo/qwopus3.8-27b-flash-v2",
 	"run": 0,
 	"surface": "acp",
-	"commit": "3d11e1757",
+	"commit": "a3f59fe62",
 	"parts": [
 		{
 			"exit": 0,
-			"final": "Set up. I'm polling for `out/done.flag` every 30 seconds \u2014 it's not there yet (only `log.txt` is in `out/`). The moment it appears, I'll tell you and give you a summary of `out/log.txt` in that turn, then stop polling.\n\nTwo assumptions, easy to change:\n- **Bound:** I'm watching for up to **1 hour**. If the flag hasn't shown by then I'll say so and you can tell me to keep going.\n- **Granularity:** 30s between checks, so I'll report within ~30s of the file appearing.\n\nJob `job-8365915e` is active; the first check runs now.",
+			"final": "Job created (`job-080197d0`). It polls every 5 s for up to ~10 min; when `out/done.flag` appears it reads `out/log.txt` and summarizes it here.",
 			"tools": [
 				{
 					"name": "bash",
 					"via": "acp",
 					"args": {
-						"command": "ls -la out/ 2>&1; echo \"---\"; test -f out/done.flag && echo \"flag exists\" || echo \"flag missing\""
+						"command": "ls -la out/ 2>/dev/null || echo \"out/ does not exist yet\""
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "job",
+					"via": "acp",
+					"args": {
+						"op": "call",
+						"capability": "job",
+						"args": {
+							"action": "create",
+							"runner": "command",
+							"argv": ["test", "-f", "out/done.flag"],
+							"every_ms": 5000,
+							"count": 120
+						}
 					},
 					"error": true,
 					"text": "{}"
 				},
 				{
-					"name": "ls",
+					"name": "job",
 					"via": "acp",
 					"args": {
 						"op": "call",
-						"capability": "ls",
+						"capability": "job",
 						"args": {
-							"path": "out"
+							"action": "create",
+							"runner": "command",
+							"argv": ["ls", "-1", "out/done.flag"],
+							"every_ms": 5000,
+							"count": 120
 						}
 					},
-					"error": false,
+					"error": true,
 					"text": "{}"
 				},
 				{
@@ -53,20 +74,9 @@
 						"args": {
 							"action": "create",
 							"runner": "command",
-							"argv": [
-								"python3",
-								"-c",
-								"import json,os; print(json.dumps({'flag': os.path.exists('/scratch/evw-fixture/out/done.flag')}))"
-							],
+							"argv": ["find", "out/done.flag", "-type", "f"],
 							"every_ms": 5000,
-							"until": {
-								"path": ["flag"],
-								"op": "eq",
-								"value": true
-							},
-							"on_match": "main_turn",
-							"follow_up": "out/done.flag has appeared, ending the wait the operator asked for. Tell them the flag is present, then read out/log.txt and give a concise summary of it (lead with the bottom line).",
-							"for_ms": 3600000
+							"count": 120
 						}
 					},
 					"error": true,
@@ -81,33 +91,33 @@
 						"args": {
 							"action": "create",
 							"runner": "main",
-							"every_ms": 30000,
-							"for_ms": 3600000,
-							"prompt": "Polling check for out/done.flag. Using a read or find tool (not bash), check whether the file out/done.flag exists in the workspace. If it does NOT exist: reply in one line that out/done.flag is still pending and do nothing else. If it DOES exist: (1) read out/log.txt and give the operator a concise summary that leads with the bottom line; (2) state that out/done.flag has appeared, so the requested wait is complete; (3) call monitor with mode=list to find this polling job (the main-runner job whose prompt mentions out/done.flag), then call the job capability with action=stop and that job_id so the poll does not fire again."
+							"every_ms": 5000,
+							"count": 120,
+							"prompt": "Check whether out/done.flag exists (e.g. with a read or ls). If it does not exist yet, reply only 'still waiting' and do nothing else. If it now exists, stop polling: read out/log.txt and give the operator a concise summary of its contents."
 						}
 					},
 					"error": false,
 					"text": "{}"
 				}
 			],
-			"rounds": 5,
+			"rounds": 1,
 			"usage": [],
 			"blocked": [],
 			"acp_methods": [],
 			"prompt": "Tell me when out/done.flag appears, then summarize out/log.txt.",
 			"stop": "end_turn",
 			"error": null,
-			"seconds": 111.8,
+			"seconds": 23.2,
 			"stderr_tail": "",
 			"files_changed": []
 		}
 	],
 	"verdict": false,
-	"note": "job=3 failedJob=1 cmdjobOk=0 sleepCalls=0",
+	"note": "job=5 failedJob=3 cmdjobOk=0 sleepCalls=0",
 	"counters": {
-		"rounds": 5,
-		"tool_calls": 5,
-		"malformed_gateway": 1
+		"rounds": 1,
+		"tool_calls": 6,
+		"malformed_gateway": 3
 	},
-	"source": "real: mini/qwen3.8-27b-iq4r-v4 v1 run 0 commit 3d11e1757"
+	"source": "real: dynamo/qwopus3.8-27b-flash-v2 v2 run 0 commit a3f59fe62"
 }

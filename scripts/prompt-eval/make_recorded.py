@@ -67,8 +67,9 @@ def m06_fail(r):
 
 def m07_pass(r):
     p = r["parts"][0]
-    p["tools"] = [t for t in p["tools"] if t["name"] == "read"] + [T("job", {"op": "call", "capability": "job", "args": {"action": "create", "runner": "command", "argv": ["test", "-f", "out/done.flag"]}})]
-    return "one successful command job, no bash sleep"
+    p["tools"] = [t for t in p["tools"] if t["name"] == "read"] + [T("job", {"op": "call", "capability": "job", "args": {"action": "create", "runner": "command", "argv": ["sh", "-c", "test -f out/done.flag && echo '{\"done\":true}' || echo '{\"done\":false}'"],
+        "until": {"path": ["done"], "op": "eq", "value": True}}})]
+    return "one command job with an until predicate, no bash sleep"
 
 
 def m08_pass(r):

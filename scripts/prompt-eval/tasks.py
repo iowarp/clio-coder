@@ -233,13 +233,32 @@ def s06(r):
     return (not d and not tb and done), f"dispatch={len(d)} tasks={len(tb)} changed={changed(p)}"
 
 
+JOB_FIELDS = {"action", "job_id", "runner", "every_ms", "count", "timeout_ms", "for_ms", "prompt", "allow", "argv", "cwd",
+              "until", "on_match", "follow_up", "until_stopped"}
+
+
 def s07(r):
+    # The criterion is the model's choice, a job with a command predicate. Default autonomy refuses every
+    # recurring command (nobody can approve it), so a well-formed command job counts whether or not it was admitted.
     p = r["parts"][0]
     jobs = [t for t in p["tools"] if re.search(r"\bjob\b", str(t["name"]), re.I) or (t["name"] == "gateway" and "job" in blob(t))]
-    job_cmd = [t for t in jobs if not t["error"] and re.search(r'"runner": "command"', blob(t))]
+
+    def job_args(t):
+        a = t.get("args") or {}
+        return a["args"] if isinstance(a.get("args"), dict) and a.get("capability") == "job" else a
+
+    def command_job(t):
+        a = job_args(t)
+        argv = a.get("argv")
+        return (a.get("action") == "create" and a.get("runner") == "command" and set(a) <= JOB_FIELDS
+                and isinstance(a.get("until"), dict) and isinstance(argv, list) and bool(argv)
+                and all(isinstance(w, str) for w in argv) and "=" not in argv[0])
+
+    job_cmd = [t for t in jobs if command_job(t)]
+    admitted = [t for t in job_cmd if not t["error"]]
     sleeps = [t for t in p["tools"] if re.search(r"\bsleep\b|until ", blob(t)) and not re.search(r"\bjob\b", str(t["name"]), re.I)]
-    failed = sum(1 for t in jobs if t["error"])
-    return (bool(job_cmd) and not sleeps), f"job={len(jobs)} failedJob={failed} cmdjobOk={len(job_cmd)} sleepCalls={len(sleeps)}"
+    return (bool(job_cmd) and not sleeps), (f"job={len(jobs)} commandJob={len(job_cmd)} admitted={len(admitted)} "
+                                           f"sleepCalls={len(sleeps)}")
 
 
 def s08(r):

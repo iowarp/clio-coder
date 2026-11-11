@@ -1,41 +1,89 @@
 {
 	"task": "07",
 	"name": "wait-as-job",
-	"profile": "v1",
-	"target": "litellm",
-	"model": "mini/qwen3.8-27b-iq4r-v4",
-	"run": 0,
+	"profile": "v2",
+	"target": "copilot",
+	"model": "claude-haiku-5.5",
+	"run": 1,
 	"surface": "acp",
-	"commit": "3d11e1757",
+	"commit": "a3f59fe62",
 	"parts": [
 		{
 			"exit": 0,
-			"final": "Set up. I'm polling for `out/done.flag` every 30 seconds \u2014 it's not there yet (only `log.txt` is in `out/`). The moment it appears, I'll tell you and give you a summary of `out/log.txt` in that turn, then stop polling.\n\nTwo assumptions, easy to change:\n- **Bound:** I'm watching for up to **1 hour**. If the flag hasn't shown by then I'll say so and you can tell me to keep going.\n- **Granularity:** 30s between checks, so I'll report within ~30s of the file appearing.\n\nJob `job-8365915e` is active; the first check runs now.",
+			"final": "Not done yet: `out/done.flag` does not exist as of 08:02 CST, so I have not summarized `out/log.txt`.\n\nI first tried a command-polling job, and the harness refused it because the scheduled shell command was not admitted. I did not retry that route. Instead I created a main-prompt job (`job-92b26687-c129-4149-bb52-237ee1935b6e`) that checks for the flag every 60 seconds, for up to 60 checks, with its tools limited to `read`. When the flag appears, it reads `out/log.txt` and sends you the summary.\n\nLimits: the job checks with the `read` tool, so it can only see the flag once it exists, and it stops after 60 checks (about an hour). If the flag has not appeared by then, ask me to check again. The job also cannot run shell commands.",
 			"tools": [
 				{
+					"name": "bash",
+					"via": "acp",
+					"args": {
+						"command": "ls -la out/ 2>&1; test -f out/done.flag && echo PRESENT || echo ABSENT",
+						"output_policy": "bounded"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
+					"name": "gateway",
+					"via": "acp",
+					"args": {
+						"op": "describe",
+						"capability": "job"
+					},
+					"error": false,
+					"text": "{}"
+				},
+				{
 					"name": "job",
-					"via": "gateway",
+					"via": "acp",
 					"args": {
 						"op": "call",
 						"capability": "job",
 						"args": {
 							"action": "create",
 							"runner": "command",
-							"argv": ["test", "-f", "out/done.flag"]
+							"argv": ["sh", "-c", "if [ -f out/done.flag ]; then echo '{\"done\":true}'; else echo '{\"done\":false}'; fi"],
+							"cwd": ".",
+							"every_ms": 10000,
+							"until": {
+								"path": ["done"],
+								"op": "eq",
+								"value": true
+							},
+							"on_match": "main_turn",
+							"follow_up": "out/done.flag has appeared. Read out/log.txt and summarize it for the operator.",
+							"for_ms": 3600000
 						}
 					},
+					"error": true,
+					"text": "{}"
+				},
+				{
+					"name": "job",
+					"via": "acp",
+					"args": {
+						"args": {
+							"action": "create",
+							"runner": "main",
+							"every_ms": 60000,
+							"count": 60,
+							"allow": ["read"],
+							"prompt": "Check whether out/done.flag exists in the workspace using the read tool on out/done.flag. If it does not exist, do nothing further. If it exists, read out/log.txt and summarize it for the operator, stating the bottom line first."
+						},
+						"capability": "job",
+						"op": "call"
+					},
 					"error": false,
-					"text": ""
+					"text": "{}"
 				}
 			],
-			"rounds": 5,
+			"rounds": 1,
 			"usage": [],
 			"blocked": [],
 			"acp_methods": [],
 			"prompt": "Tell me when out/done.flag appears, then summarize out/log.txt.",
 			"stop": "end_turn",
 			"error": null,
-			"seconds": 111.8,
+			"seconds": 20.5,
 			"stderr_tail": "",
 			"files_changed": []
 		}
@@ -43,9 +91,9 @@
 	"verdict": false,
 	"note": "job=3 failedJob=1 cmdjobOk=0 sleepCalls=0",
 	"counters": {
-		"rounds": 5,
-		"tool_calls": 5,
+		"rounds": 1,
+		"tool_calls": 4,
 		"malformed_gateway": 1
 	},
-	"source": "synthetic: one successful command job, no bash sleep (from mini/qwen3.8-27b-iq4r-v4 v1)"
+	"source": "real: claude-haiku-5.5 v2 run 1 commit a3f59fe62"
 }

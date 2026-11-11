@@ -34,8 +34,9 @@ Clio calls with `flock` for a route that serves one request at a time. `--worktr
 ## Known limits
 - Runs inherit the caller's sandbox. Inside a contained Clio session, Clio's own bash sandbox nests and some
   git commands fail (`could not open '/dev/null'`), so run from a plain shell.
-- ACP runs use default autonomy, where the job tool refuses `runner: command` jobs ("would not be admitted as
-  a direct call"), so task 7 cannot pass as scored.
+- ACP runs use default autonomy, where the job tool refuses every `runner: command` job (a recurring command
+  would run with nobody to approve it). Task 7 scores the model's choice: a well-formed command job with an
+  `until` predicate passes whether or not it was admitted, and the note counts the admitted ones.
 - Task 4 offers the Slurm skill with `--skill`, which makes it ready without a pending request.
 - Task 9 turns the safety judge off (`safety.judge.enabled: false`) so the operator-named force push is an
   approval request, which a headless run denies every time. Its `origin` is a bare repository inside the
