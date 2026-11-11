@@ -120,6 +120,25 @@ describe("release decisions", () => {
 		strictEqual(nextStep(facts({ releaseRun: timedOut }), { npm: { accepted: true } }).step, "wait-npm");
 	});
 
+	it("finishes a published candidate after the version branch moved past it", async () => {
+		const { nextStep } = await import(planModule);
+		const failed = releaseRun("failure", { status: "completed", conclusion: "success" }, { status: "completed" });
+		const served = { served: true, integrityMatches: true };
+		const head = "d".repeat(40);
+		const foreign = { head, descends: true, toolingOnly: false };
+		const after = { npm: { accepted: true } };
+		// The moved branch never sends the release back to push or into endless reruns.
+		const step = nextStep(facts({ pushed: false, npm: served, releaseRun: failed, moved: foreign }), after);
+		strictEqual(step.step, "finish-published");
+		strictEqual(step.head, head);
+		strictEqual(nextStep(facts({ npm: served, releaseRun: failed, moved: foreign }), after).step, "finish-published");
+		// Tooling-only commits may finish it from the new head.
+		const tooling = { ...foreign, toolingOnly: true };
+		strictEqual(nextStep(facts({ pushed: false, npm: served, moved: tooling }), after).step, "dispatch-release");
+		// Before npm accepted, a moved branch is a new candidate, as before.
+		strictEqual(nextStep(facts({ pushed: false, ci: null, local: { wanted: false }, moved: foreign }), {}).step, "push");
+	});
+
 	it("publishes only the ci.yml run's artifact, never the local candidate", async () => {
 		const { ciCandidateDirectory, publishArgs } = await import(planModule);
 		const ciRun = { id: 42 };

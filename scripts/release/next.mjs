@@ -41,6 +41,7 @@ import {
 	rerunStarted,
 	runState,
 	tmpdirProblem,
+	toolingOnly,
 	versionBranch,
 } from "./plan.mjs";
 import { acquireLock, LockHeld, loadReceipt, newReceipt, recordEvent, saveReceipt } from "./receipt.mjs";
@@ -358,6 +359,12 @@ export async function readFacts(mode, receipt, context) {
 	}
 	const npm = { served: Boolean(published), integrityMatches };
 
+	// After npm accepted, origin's version branch may have moved past the candidate (another session's commit).
+	let moved = null;
+	const branchHead = mode === "release" ? remoteHead(receipt.branch) : null;
+	if (branchHead && branchHead !== commit && (npm.served || receipt.npm?.accepted === true))
+		moved = { head: branchHead, ...descent(commit, branchHead, receipt.branch) };
+
 	let isPublished = false;
 	let tagsBehind = [];
 	let postPending = [];
@@ -390,6 +397,29 @@ export async function readFacts(mode, receipt, context) {
 		tagsBehind,
 		postPending,
 		foreignRuns,
+		moved,
+	};
+}
+
+/** Whether `head` descends from `commit`, and whether only release tooling differs between them. */
+function descent(commit, head, branch) {
+	const ancestor = () => {
+		try {
+			run("git", ["merge-base", "--is-ancestor", commit, head], { stdio: "pipe" });
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	try {
+		run("git", ["cat-file", "-e", `${head}^{commit}`], { stdio: "pipe" });
+	} catch {
+		run("git", ["fetch", "--quiet", "origin", branch]);
+	}
+	if (!ancestor()) return { descends: false, toolingOnly: false };
+	return {
+		descends: true,
+		toolingOnly: toolingOnly(git("diff", "--name-only", commit, head).split("\n").filter(Boolean)),
 	};
 }
 
@@ -638,6 +668,19 @@ async function perform(step, facts, receipt, context) {
 				);
 			return;
 		}
+		case "finish-published":
+			// release.yml finishes only from the version branch head, and only tooling commits may follow the
+			// published candidate, so the owner parks the other commits and restores the branch to it.
+			throw new Error(
+				[
+					`npm serves ${version} from ${commit}, but origin/${receipt.branch} moved to ${step.head} with commits that are not release tooling.`,
+					`Finish the published commit: keep the new commits on another branch, put ${receipt.branch} back at ${commit.slice(0, 12)}, then run release:next again; it dispatches release.yml there (tag, release, main, website).`,
+					`  git push origin ${step.head}:refs/heads/${receipt.branch}-after-${version}`,
+					`  git push --force-with-lease=${receipt.branch}:${step.head} origin ${commit}:refs/heads/${receipt.branch}`,
+					`  git switch --detach ${commit}`,
+					"  pnpm run release:next",
+				].join("\n"),
+			);
 		default:
 			throw new Error(`No action for step ${step.step}.`);
 	}

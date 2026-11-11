@@ -151,6 +151,7 @@ export const alreadyPublished = (stderr) =>
  *   tagsBehind: string[]
  *   postPending: string[]
  *   foreignRuns: number[]               in-flight runs on this commit that the receipt does not own
+ *   moved: { head, descends, toolingOnly } | null   origin's version branch head when it is not the candidate
  * Receipt: { npm: { accepted } | null, rehearsal: { checked, drafted, stubbed, tornDown } | null }
  */
 export function nextStep(facts, receipt) {
@@ -171,7 +172,21 @@ export function nextStep(facts, receipt) {
 		if (facts.postPending.length) return { step: "post", items: facts.postPending };
 		return { step: "done" };
 	}
-	if (!facts.pushed) {
+	// npm took the candidate and the version branch then moved past it: never push or rerun, which
+	// loop on "Version branch moved". Tooling-only commits may finish it (release.yml's finishing
+	// head); any other commit leaves the owner to finish the published commit itself.
+	let pushed = facts.pushed;
+	const moved = facts.moved;
+	if (facts.mode === "release" && moved?.descends && (facts.npm.served || receipt.npm?.accepted === true)) {
+		if (!moved.toolingOnly)
+			return {
+				step: "finish-published",
+				head: moved.head,
+				reason: `npm took the candidate, then the version branch moved to ${moved.head.slice(0, 12)} with commits that are not release tooling`,
+			};
+		pushed = true;
+	}
+	if (!pushed) {
 		const tree = facts.tree;
 		if (!tree.clean) return stop("commit the candidate first; the tree must be clean");
 		// A rehearsal pushes only a scratch branch, so it may start from any local branch.
