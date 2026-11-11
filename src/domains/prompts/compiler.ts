@@ -522,6 +522,7 @@ function renderCapabilityMap(
 	reachable: (name: string) => boolean,
 	starterCalls: ReadonlyMap<string, string>,
 	notes: ReadonlyMap<string, string>,
+	compact = false,
 ): { lines: string[]; mapped: ReadonlySet<string> } {
 	const byTool = new Map<string, CapabilityMapEntry>();
 	for (const entry of entries) {
@@ -551,7 +552,15 @@ function renderCapabilityMap(
 			const shape = entry.argumentShape?.includes(" args=")
 				? entry.argumentShape.replace(/^Required args: [^.]*\. /u, "")
 				: entry.argumentShape;
-			let guidance = route && shape ? ` ${shape}` : example ? ` Example: ${example}.` : "";
+			let guidance = compact
+				? route && entry.argumentShape?.startsWith("Required args:")
+					? ` ${entry.argumentShape.split(" args=")[0]}`
+					: ""
+				: route && shape
+					? ` ${shape}`
+					: example
+						? ` Example: ${example}.`
+						: "";
 			if (Buffer.byteLength(guidance) > argumentBytesRemaining) {
 				guidance =
 					route && entry.argumentShape?.startsWith("Required args:") ? ` ${entry.argumentShape.split(" args=")[0]}` : "";
@@ -751,6 +760,21 @@ const SETTINGS_ROUTING_ROW =
 const GATEWAY_CALLING_RULE =
 	'Call a (gateway) entry with gateway(op="call", capability="<name>", args={...}); naming it does not attach it. With no arguments shown, gateway(op="describe", capability="<name>") first; never guess argument names. Not listed: gateway(op="find", query="<two to four words>"). Discovery grants no authority.';
 
+/** S-87: v2 drops map examples when the chat model's window is under 48,000 tokens. */
+const COMPACT_CONTEXT_WINDOW_TOKENS = 48_000;
+
+/** S-87: v2 system-prompt budgets in characters on the reference fixture; raising one is a reviewed change. */
+export const PROMPT_BUDGET_CHARS = { attended: 26_000, acp: 25_000, headless: 19_000, worker: 11_500 } as const;
+
+function isCompactPrompt(inputs: SessionPromptInputs): boolean {
+	return (
+		inputs.promptProfile === "v2" &&
+		typeof inputs.contextWindow === "number" &&
+		inputs.contextWindow > 0 &&
+		inputs.contextWindow < COMPACT_CONTEXT_WINDOW_TOKENS
+	);
+}
+
 function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: string): string {
 	if (inputs.providerSupportsTools === false) {
 		return [
@@ -808,13 +832,16 @@ function renderToolContractBlock(inputs: SessionPromptInputs, autonomyLevel: str
 		mapped,
 		starterCalls,
 		notes,
+		isCompactPrompt(inputs),
 	);
 	// A note whose capability has no map entry still gets one entry of its own.
 	for (const [tool, note] of notes) {
 		if (inMap.has(tool)) continue;
 		const example = starterCalls.get(tool);
 		const route = admitted.has(tool) ? "" : " (gateway)";
-		map.push(`- \`${tool}\`${route}: ${note}${example === undefined ? "" : ` Example: ${example}.`}`);
+		map.push(
+			`- \`${tool}\`${route}: ${note}${example === undefined || isCompactPrompt(inputs) ? "" : ` Example: ${example}.`}`,
+		);
 	}
 	const askUser = reachable("ask_user") && inputs.headless !== true && inputs.operatorInterviews === true;
 	return [

@@ -8,6 +8,7 @@ import {
 	type CompileInputs,
 	compile,
 	compileWorker,
+	PROMPT_BUDGET_CHARS,
 	type WorkerPromptInputs,
 } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
@@ -81,6 +82,26 @@ describe("prompts.profile v2 (S-82)", () => {
 		const headless = session("headless-default").systemPrompt.length;
 		ok(attended <= 26_000, `attended ${attended}`);
 		ok(headless <= 19_000, `headless ${headless}`);
+	});
+
+	it("stays within PROMPT_BUDGET_CHARS per tier (S-87)", () => {
+		const check = (tier: string, name: string, budget: number) => {
+			const compiled = session(name);
+			const size = compiled.systemPrompt.length;
+			const breakdown = compiled.sections.map((section) => `${section.id}~${section.tokenEstimate}t`).join(", ");
+			ok(size <= budget, `${tier} ${size} > ${budget}: ${breakdown}`);
+		};
+		check("attended", "attended-default", PROMPT_BUDGET_CHARS.attended);
+		check("headless", "headless-default", PROMPT_BUDGET_CHARS.headless);
+	});
+
+	it("compact profile drops map examples under a 48k window (S-87)", () => {
+		const full = session("attended-default", { contextWindow: 200_000 }).systemPrompt;
+		const compact = session("attended-default", { contextWindow: 32_768 }).systemPrompt;
+		ok(compact.length < full.length, `${compact.length} < ${full.length}`);
+		const start = compact.indexOf("## Capability map");
+		const map = compact.slice(start, compact.indexOf("\n\n", start + 20));
+		ok(map.length > 0 && !map.includes('args={"') && !map.includes("Example:"), map);
 	});
 
 	it("lays sections in the D-02 order and drops the v1 core fragments", () => {
