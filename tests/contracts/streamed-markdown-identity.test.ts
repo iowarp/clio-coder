@@ -17,6 +17,11 @@ const texts = {
 	headed: "# Plan\nIntro line.\n## Step one\nFirst line.\nSecond line.\n## Step two\n- a\n- b\n## End\nDone.\n",
 	joined:
 		"Text.\n```ts\nconst a = 1;\n```\nAfter code.\n> quoted\n## H\n---\nRule above.\n1. one\n### Last\n    indented\n## Tail\n",
+	// A `$$` line whose body does not read as math yet is a paragraph until its closing `$$` makes one math block.
+	"pending math before a fence": "Intro.\n\n$$\n```x\n$$\n\nAfter.\n",
+	"pending math before a heading": "Intro.\n\n$$\n# head\n$$\n\nAfter.\n",
+	"pending math across a blank line": "Intro.\n\n$$\n\nfoo\n\n$$\n\nAfter.\n",
+	"pending math inside a paragraph": "Para\n$$\nfoo\n# H\n$$\n\nAfter.\n",
 };
 const finished = (text: string): string[] => {
 	const panel = createChatPanel({ now: () => 1_000 });
@@ -64,4 +69,10 @@ test("a streamed answer with no blank lines settles at its block boundaries", ()
 	deepStrictEqual(settledMarkdownHead("- a\n- b\n## H\nx\n", "\u2800", 99), { length: 13, spacing: true });
 	deepStrictEqual(settledMarkdownHead("- a\n- b\n## H\n", "\u2800", 99), { length: 8, spacing: false });
 	deepStrictEqual(settledMarkdownHead("- a\n- b\n- c\n", "\u2800", 99), { length: 0, spacing: false });
+	// A `$$` line not yet read as math keeps the cut above it, and none after it until it closes. Closed, the math
+	// block takes in the blank line after it, so the next cut sits after the block that follows.
+	const pending = "One.\n\n$$\n\nfoo\n\nbar\n";
+	deepStrictEqual(settledMarkdownHead(pending, "\u2800", 99), { length: pending.indexOf("$$"), spacing: false });
+	const closed = `${pending}$$\n\nAfter.\n\nTail.\n`;
+	deepStrictEqual(settledMarkdownHead(closed, "\u2800", 99), { length: closed.indexOf("Tail"), spacing: false });
 });

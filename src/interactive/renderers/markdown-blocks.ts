@@ -16,6 +16,8 @@ import { holdInlineMath, mathFenceAfter } from "./inline-math.js";
  *   list or indented code block above continues across the blank run;
  * - the text before it holds no reference definition, which resolves links anywhere in the text;
  * - the inline-math transform has no fence open there, since its fence state runs across the whole text;
+ * - no block above it holds a display-math opening line (`$$`, `\[`) that Pi has not read as math, since a closing
+ *   line arriving later makes one math block from that line on, across blank lines and the blocks between;
  * - neither block beside the blank run holds only HTML comments, since pi-tui 1.5.1 and later draw no row for such
  *   a block and drop one blank run beside it, and which run goes depends on the blocks around it.
  *
@@ -104,6 +106,9 @@ function joinedCut(
 	return { spacing: block !== "list" && !(block === "paragraph" && next === "list") };
 }
 
+/** A display-math opening line, as Pi's block extension starts one. */
+const MATH_OPENER = /(?:^|\n) {0,3}(?:\$\$|\\\[)/u;
+
 /** A line that may start a heading, fence or rule, or a blank line: where any cut can sit. */
 const CUT_CANDIDATE = /(?:^|\n)(?:[ \t]*\n| {0,3}(?:#{1,6}(?:[ \t]|\n)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}\n))/u;
 
@@ -140,11 +145,15 @@ export function settledMarkdownHead(source: string, hold: string, limit: number)
 	let offset = 0;
 	let line = 0;
 	let cut: SettledHead = { length: 0, spacing: false };
+	let mathPending = false;
 	for (let index = 0; index < tokens.length; index++) {
-		const raw = tokens[index]?.raw ?? "";
+		const token = tokens[index];
+		const raw = token?.raw ?? "";
 		offset += raw.length;
 		for (let at = raw.indexOf("\n"); at >= 0; at = raw.indexOf("\n", at + 1)) line += 1;
-		if (index + 1 === tokens.length) continue;
+		// A math opening line still read as text may become one math block with whatever follows; no cut sits after it.
+		if (!mathPending && token?.type !== "latexBlock" && token?.type !== "code") mathPending = MATH_OPENER.test(raw);
+		if (mathPending || index + 1 === tokens.length) continue;
 		let spacing = false;
 		if (tokens[index]?.type === "space") {
 			if (index === 0) continue;

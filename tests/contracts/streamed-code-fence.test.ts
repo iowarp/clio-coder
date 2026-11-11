@@ -86,6 +86,64 @@ for (const [name, fence] of Object.entries(MARKER_LINES)) {
 	});
 }
 
+// A `$$` line whose body does not read as math yet is a paragraph, and the block after it is a block of its own,
+// until the closing line makes one math block of them all.
+const PENDING_MATH = {
+	"a fence": "Intro.\n\n$$\n```x\n$$\n",
+	"a heading": "Intro.\n\n$$\n# head\n$$\n",
+	"blank lines": "Intro.\n\n$$\n\nfoo\n\n$$\n\nAfter.\n",
+	"a heading inside a paragraph": "Para\n$$\nfoo\n# H\n$$\n\nAfter.\n",
+};
+
+for (const [name, text] of Object.entries(PENDING_MATH)) {
+	test(`every frame of streamed display math opened before ${name} matches the text drawn whole`, () => {
+		for (const width of [23, 80]) {
+			const streamed = panel();
+			for (let at = 0; at < text.length; at += 1) {
+				streamed.applyEvent({ type: "text_delta", delta: text.slice(at, at + 1) } as never);
+				deepStrictEqual(streamed.render(width), whole(text.slice(0, at + 1), width), `at ${at + 1}`);
+			}
+			const done = panel();
+			const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+			for (const view of [streamed, done]) view.applyEvent({ type: "message_end", message } as never);
+			deepStrictEqual(streamed.render(width), done.render(width), "finished");
+		}
+	});
+}
+
+test("every frame of seeded fences of marker, math and wrapped lines matches the text drawn whole", () => {
+	// A fixed seed keeps the cases the same on every run; each draws an opening line and up to ten lines from the pool.
+	let seed = 991;
+	const pick = <T>(items: readonly T[]): T => {
+		seed = (seed * 1_103_515_245 + 12_345) & 0x7fffffff;
+		return items[seed % items.length] as T;
+	};
+	const openers = ["```ts", "````md", "~~~", "~~~~js", "```", "```js title", "```python", "$$", "\\["];
+	const pool = ["`", "``", "~", "~~", "~~~", "```", "````", "```~", "~~~`"];
+	pool.push("\t```", "  ```", "    ```", "```py", "```x");
+	pool.push("~~~~", "$x$ here", "a $b$ c", "$$", "const t = `", "`;", "x\r", "", "", "word ".repeat(9), "/* c", "*/ d");
+	pool.push("\tindented", "- item", "# head");
+	for (let n = 0; n < 160; n += 1) {
+		const lines = [pick(openers)];
+		for (let count = pick([2, 4, 6, 8, 10]); count > 0; count -= 1) lines.push(pick(pool));
+		const text = `Intro.\n\n${lines.join("\n")}${pick(["", "\n"])}${pick(["", "", "After $q$ text.\n"])}`;
+		const bareCodeFences = pick([false, true]);
+		const width = pick([23, 31, 47, 64, 80]);
+		const step = pick([1, 2, 3, 4]);
+		const streamed = panel(bareCodeFences);
+		for (let at = 0; at < text.length; at += step) {
+			streamed.applyEvent({ type: "text_delta", delta: text.slice(at, at + step) } as never);
+			const end = Math.min(at + step, text.length);
+			const label = `${JSON.stringify(text)} at ${end}, width ${width}`;
+			deepStrictEqual(streamed.render(width), whole(text.slice(0, end), width, bareCodeFences), label);
+		}
+		const done = panel(bareCodeFences);
+		const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+		for (const view of [streamed, done]) view.applyEvent({ type: "message_end", message } as never);
+		deepStrictEqual(streamed.render(width), done.render(width), `${JSON.stringify(text)} finished`);
+	}
+});
+
 test("a delta to a long open fence lexes only the line still open", () => {
 	const streamed = panel();
 	streamed.applyEvent({ type: "text_delta", delta: "Intro.\n\n```ts\n" } as never);
