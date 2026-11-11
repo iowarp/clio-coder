@@ -9172,6 +9172,9 @@ export function createDispatchBundle(
 								branch: req.taskWorktree.branch,
 								task: req.task,
 								executedCheckingCalls: countCheckingCalls(toolStats),
+								...(observedRunEffects.executedShellCommands !== undefined
+									? { executedShellCommands: observedRunEffects.executedShellCommands }
+									: {}),
 								removedTests: removedTestCases(taskWorktreeBaseDiff(req.taskWorktree) ?? ""),
 							}
 						: null;

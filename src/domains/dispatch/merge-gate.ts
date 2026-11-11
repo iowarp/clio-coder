@@ -15,6 +15,8 @@ export interface MergeGateInput {
 	branch: string;
 	task?: string;
 	executedCheckingCalls?: number;
+	/** Shell commands the worker ran to a clean exit, verbatim; absent when the caller did not record them. */
+	executedShellCommands?: ReadonlyArray<string>;
 	/** Test cases or test files the task branch removed against its base, from `removedTestCases`. */
 	removedTests?: ReadonlyArray<string>;
 }
@@ -116,6 +118,32 @@ const VALIDATION_SUBJECT = /\b(?:tests?|checks?|validation|npm|pnpm|pytest|vites
 const VALIDATION_REQUEST =
 	/\b(?:run|runs|running|execute|validate|verify|test)\b[^.\n]{0,100}\b(?:tests?|checks?|validation|npm|pnpm|pytest|vitest|jest|tsc|lint|typecheck)\b/iu;
 
+/**
+ * "Verify the change by running: python3 -B -c 'import calc'" or "Run `make check` to verify": the task names the
+ * exact command its validation is. Only these two spellings count, so "run the app" names nothing.
+ */
+const NAMED_CHECK_BY_RUNNING =
+	/\b(?:verify|validate|check|test)\b[^\n]{0,80}?\bby\s+running\s*:?\s*(`[^`\n]+`|[^\n]+)/iu;
+const NAMED_CHECK_RUN_TO_VERIFY = /\brun\s+`([^`\n]+)`\s+to\s+(?:verify|validate|check|test)\b/iu;
+
+function normalizeCommand(command: string): string {
+	return command.trim().replace(/\s+/gu, " ");
+}
+
+/** The command the task names as its check, or null when it names none. */
+function taskNamedCheck(task: string): string | null {
+	const byRunning = NAMED_CHECK_BY_RUNNING.exec(task)?.[1];
+	const raw = byRunning ?? NAMED_CHECK_RUN_TO_VERIFY.exec(task)?.[1];
+	if (raw === undefined) return null;
+	const command = normalizeCommand(
+		raw
+			.split(/\.\s/u)[0]
+			?.replace(/^`|`$/gu, "")
+			.replace(/[.;,]+$/u, "") ?? "",
+	);
+	return command.length > 0 ? command : null;
+}
+
 function taskRequestsValidation(task: string): boolean {
 	return task
 		.split(TASK_CLAUSE_SPLIT)
@@ -185,6 +213,19 @@ export function mergeGateVerdict(input: MergeGateInput): MergeGateVerdict | null
 		return {
 			reason: "the task requested validation but the worker executed no check",
 			appliesWhen: "once the requested validation passes",
+		};
+	}
+	// Unrelated clean calls (`python3 --version`, `echo hello`) satisfy the count above, so a task that names its
+	// check also needs that command among the ones that ran (rcsmoke zbook N1).
+	const named = input.task !== undefined ? taskNamedCheck(input.task) : null;
+	if (
+		named !== null &&
+		input.executedShellCommands !== undefined &&
+		!input.executedShellCommands.some((command) => normalizeCommand(command).includes(named))
+	) {
+		return {
+			reason: `the task named its check (${boundedCheck(named)}) but the worker never ran it`,
+			appliesWhen: "once that check passes",
 		};
 	}
 	if (input.contract === null) return null;

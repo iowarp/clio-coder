@@ -233,6 +233,27 @@ it("withholds requested validation even when the worker omits declaredChecks", (
 	);
 });
 
+it("withholds a task-named check the worker never ran, though unrelated shell calls succeeded", () => {
+	const input = {
+		quality: "unmeasured",
+		hostStatus: undefined,
+		contract: { kind: "mutation-report" as const },
+		output: '{"validations":[]}',
+		branch: "clio-coder/task/calc",
+		task: "Add mul(a,b) to calc.py. Verify the change by running: python3 -B -c 'import calc'",
+		executedCheckingCalls: 2,
+		executedShellCommands: ["python3 --version", 'echo "hello"'],
+	};
+	match(mergeWithheldDetail(input) ?? "", /python3 -B -c 'import calc'.*never ran/u);
+	strictEqual(mergeWithheldDetail({ ...input, executedShellCommands: ["cd /w && python3 -B -c 'import calc'"] }), null);
+	strictEqual(mergeWithheldDetail({ ...input, hostStatus: "verified" }), null);
+	strictEqual(
+		mergeWithheldDetail({ ...input, task: "Add mul. Run `python3 -B -c 'import calc'` to verify it." }) === null,
+		false,
+	);
+	strictEqual(mergeWithheldDetail({ ...input, task: "Add mul and run the app." }), null);
+});
+
 it("a declared unrun check holds the merge unless the task opted out of validation", () => {
 	const input = {
 		quality: "unmeasured",

@@ -88,6 +88,8 @@ export interface RunEffects {
 	 * exactly why attribution was downgraded instead of exposing only a boolean.
 	 */
 	writeRecordDowngrades: ReadonlyArray<WriteRecordDowngrade>;
+	/** Bash commands that ran to a clean exit, verbatim, in run order. */
+	executedShellCommands?: ReadonlyArray<string>;
 }
 
 export interface WriteRecordDowngrade {
@@ -119,6 +121,8 @@ interface PendingEffects {
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
+	/** The bash command text, null for other tools. */
+	shellCommand: string | null;
 	/** The tool's own outcome, when the call reached it. Stays null when the engine answered instead. */
 	outcome: "ok" | "error" | "blocked" | null;
 }
@@ -234,6 +238,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const verificationCommands = new Set<string>();
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
+	const executedShellCommands: string[] = [];
 	return {
 		start(toolCallId, toolName, args) {
 			const paths = mutationTargets(toolName, args);
@@ -258,6 +263,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationRevision,
 				verificationCommand,
 				opaque,
+				shellCommand: toolName === ToolNames.Bash ? commandOf(args) : null,
 				outcome: null,
 			});
 		},
@@ -303,6 +309,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
+			if (effects.shellCommand !== null && effects.outcome !== "blocked") executedShellCommands.push(effects.shellCommand);
 		},
 		checkOutcome(toolCallId, outcome) {
 			const effects = pending.get(toolCallId);
@@ -321,6 +328,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				verificationCommands: new Set(verificationCommands),
 				writeRecordComplete: writeRecordDowngrades.size === 0,
 				writeRecordDowngrades: [...writeRecordDowngrades.values()].map((entry) => ({ ...entry })),
+				executedShellCommands: [...executedShellCommands],
 			};
 		},
 	};
