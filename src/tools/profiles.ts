@@ -91,7 +91,7 @@ function uniquePreservingOrder(tools: ReadonlyArray<ToolName>): ToolName[] {
 
 /** Words or paths that say a task is about finding its way through code, where `code_nav` earns its calls. */
 const NAVIGATION_TASK =
-	/\b(?:codemap|codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?|cmd|pkg|lib)\/|\.(?:[cm]?[tj]sx?|py|pyw|go|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|java|rb)\b/i;
+	/\b(?:codemap|codewiki|symbol|symbols|entry\s*points?|where\s+is|code_nav|call\s*sites?|references?|imports?|exports?|map|mapping|navigate|navigation|topology|architecture|boundar(?:y|ies)|ownership|trace|locate|find\s+(?:the\s+)?(?:implementation|definition|module|file|path))\b|(?:^|\s)(?:src|tests?|cmd|pkg|lib)\/|\.(?:[cm]?[tj]sx?|py|pyw|go|rs|c|h|cc|cpp|cxx|hpp|hh|hxx|java|rb|kts?|swift|php|cs|scala|sh)\b/i;
 
 /** Appended to a worker's task message when {@link codeNavTaskSteering} applies. */
 export const CODE_NAV_TASK_STEERING = "This task names no source path; prefer `read` and `grep` over `code_nav`.";

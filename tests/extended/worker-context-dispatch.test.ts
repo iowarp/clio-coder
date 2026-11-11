@@ -15,7 +15,7 @@ import type { AgentMessage } from "../../src/engine/types.js";
 import { startWorkerRun } from "../../src/engine/worker-runtime.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { resolvedDispatchPlanFromArgs } from "../../src/tools/dispatch-plan.js";
-import { CODE_NAV_TASK_STEERING } from "../../src/tools/profiles.js";
+import { CODE_NAV_TASK_STEERING, codeNavTaskSteering } from "../../src/tools/profiles.js";
 import { parseWorkerSpec, WORKER_SPEC_VERSION_SKEW } from "../../src/worker/spec-contract.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -210,6 +210,14 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 		}
 	});
 }
+
+test("a task naming a source file in any common language is not steered away from code_nav", () => {
+	const tools = [ToolNames.CodeNav, ToolNames.Read, ToolNames.Grep];
+	const steered = (task: string) => codeNavTaskSteering({ task, agentId: "worker", tools });
+	for (const file of ["App.kt", "build.kts", "View.swift", "index.php", "Program.cs", "Main.scala", "deploy.sh"])
+		equal(steered(`Fix the bug in ${file}.`), false, file);
+	equal(steered("Update the README badge and the .css colors."), true);
+});
 
 test("ACP receives one portable splice, seals its context provenance, and refuses native fork", async () => {
 	const env = await isolateClioEnv("clio-coder-acp-worker-context-");
