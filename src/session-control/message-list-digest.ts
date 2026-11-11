@@ -146,7 +146,9 @@ export function createMessageListFold(): MessageListFold {
 			return {
 				messages: snapshot,
 				messageTokens,
-				digest(count = length): string {
+				digest(requested = length): string {
+					// Cached per prefix length, so a count past the end is the whole list and keyed as such.
+					const count = Math.min(Math.max(0, requested), length);
 					const cached = digests.get(count);
 					if (cached !== undefined) return cached;
 					const digest =

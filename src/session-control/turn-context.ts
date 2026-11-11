@@ -1074,9 +1074,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// The identity, route, and length checks are cheap and run first; `||`
 		// short-circuits, so the content digest is only computed for a prefix that
 		// still looks like the attested one. The digest covers the attested prefix
-		// and never the tail, so an append does not invalidate the anchor; the
-		// prefix bytes are captured anew on every publication, sharing the full
-		// fingerprint serialization while still detecting every in-place edit.
+		// and never the tail, so an append does not invalidate the anchor. The
+		// history fold caches each message's bytes and trusts them while the
+		// message's identity and key/leaf trace match, so an in-place edit still
+		// re-folds from the first changed message.
 		if (
 			anchor.runtime !== agentRuntime ||
 			anchor.model !== agentRuntime.agent.state.model ||

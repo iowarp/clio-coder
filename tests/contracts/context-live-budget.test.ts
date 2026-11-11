@@ -551,6 +551,8 @@ describe("live budget adapter", () => {
 			deepStrictEqual(observed.messageTokens, list.map(estimateAgentMessageTokens), `${label}, tokens`);
 		};
 		check("initial");
+		// A count past the end reads the whole list and must not be cached for the longer list it names.
+		strictEqual(fold.observe(list).digest(list.length + 2), whole(list), "past the end");
 		list.push(assistant("c"), toolResult("d"));
 		check("appended");
 		(list[1] as { content: { type: string; text: string }[] }).content[0] = { type: "text", text: "B" };
