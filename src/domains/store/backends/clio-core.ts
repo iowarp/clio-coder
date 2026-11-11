@@ -182,7 +182,8 @@ export async function createClioCoreStoreBackend(
 			// Not cached yet.
 		}
 		const destDir = path.join(tagDir, `.get-${process.pid}-${randomBytes(6).toString("hex")}`);
-		// Cached copies are blob bytes, so they stay owner-only like the local backend's.
+		// Cached copies are blob bytes, so like the local backend's they sit in owner-only directories and are
+		// read-only: a write through the path `get` returned can never look like the stored blob.
 		await mkdir(destDir, { recursive: true, mode: 0o700 });
 		try {
 			const got = await host.call(
@@ -195,7 +196,7 @@ export async function createClioCoreStoreBackend(
 				throw new StoreRefusal("io", `The clio-core host wrote ${got.path}, outside ${destDir}.`);
 			if ((await stat(got.path)).size !== info.bytes)
 				throw new StoreRefusal("io", `Blob ${blob} in tag ${tag} changed while it was being read; try again.`);
-			await chmod(got.path, 0o600);
+			await chmod(got.path, 0o400);
 			await utimes(got.path, new Date(), new Date(info.modifiedMs));
 			await clearCachePath(tagDir, target);
 			await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
