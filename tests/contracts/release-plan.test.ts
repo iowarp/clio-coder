@@ -143,7 +143,10 @@ describe("release decisions", () => {
 		const { startOverCancels } = await import(planModule);
 		const receipt = { releaseRun: { id: 7 }, ciRun: { id: 6 } };
 		deepStrictEqual(
-			startOverCancels(receipt, () => "waiting").map(({ id, argv }) => [id, argv.slice(0, 3)]),
+			startOverCancels(receipt, () => "waiting").map(({ id, argv }: { id: number; argv: string[] }) => [
+				id,
+				argv.slice(0, 3),
+			]),
 			[[7, ["run", "cancel", "7"]]],
 		);
 		deepStrictEqual(
@@ -154,6 +157,15 @@ describe("release decisions", () => {
 			startOverCancels({ releaseRun: null }, () => "waiting"),
 			[],
 		);
+	});
+
+	it("stops before npm publish when the qualified artifact's digest changed", async () => {
+		const { nextStep } = await import(planModule);
+		const waiting = releaseRun("waiting", { status: "completed", conclusion: "success" }, { status: "waiting" });
+		const ci = (artifactDigest: string) => ({ ...(facts().ci as Facts), artifactDigest });
+		const receipt = { ciRun: { id: 1, artifactDigest: "sha256:aa" } };
+		strictEqual(nextStep(facts({ ci: ci("sha256:aa"), releaseRun: waiting }), receipt).step, "publish-npm");
+		strictEqual(nextStep(facts({ ci: ci("sha256:bb"), releaseRun: waiting }), receipt).step, "stop");
 	});
 
 	it("publishes only the ci.yml run's artifact, never the local candidate", async () => {

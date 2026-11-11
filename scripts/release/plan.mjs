@@ -230,6 +230,11 @@ export function nextStep(facts, receipt) {
 	const preflight = run ? latestJob(run.jobs, "preflight") : null;
 	const release = run ? latestJob(run.jobs, "release") : null;
 	if (!accepted) {
+		const recorded = receipt.ciRun?.artifactDigest;
+		if (recorded && ci.artifactDigest && ci.artifactDigest !== recorded)
+			return stop(
+				`the qualified candidate artifact changed (${recorded} became ${ci.artifactDigest}); qualify a new candidate commit`,
+			);
 		// The finishing path is proven against real state before the irreversible publish (item 3).
 		if (!run || run.state === "absent") return { step: "dispatch-release" };
 		if (preflight?.status !== "completed") return { step: "watch-release" };

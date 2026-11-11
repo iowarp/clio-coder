@@ -233,6 +233,12 @@ function artifactsPresent(id, commit) {
 	);
 }
 
+/** The GitHub digest (`sha256:...`) of the run's candidate artifact, or null when GitHub has none. */
+function candidateDigest(id, commit) {
+	const artifacts = reads.api(`repos/${repository}/actions/runs/${id}/artifacts?per_page=100`).artifacts;
+	return artifacts.find((artifact) => artifact.name === `candidate-${commit}` && !artifact.expired)?.digest ?? null;
+}
+
 function publishedRelease(tag) {
 	try {
 		return reads.api(`repos/${repository}/releases/tags/${encodeURIComponent(tag)}`);
@@ -340,6 +346,12 @@ export async function readFacts(mode, receipt, context) {
 	if (receipt.ciRun) {
 		const found = getRun(receipt.ciRun.id);
 		ci = { ...found, artifacts: found.state === "success" && artifactsPresent(receipt.ciRun.id, commit) };
+		// The candidate artifact's digest, recorded once, ties the published bytes to the qualified ones:
+		// a full re-run of the run replaces the artifact under the same name.
+		if (ci.artifacts) {
+			ci.artifactDigest = candidateDigest(receipt.ciRun.id, commit);
+			if (ci.artifactDigest && !receipt.ciRun.artifactDigest) receipt.ciRun.artifactDigest = ci.artifactDigest;
+		}
 	}
 	let releaseRun = mode === "release" && receipt.releaseRun ? getRun(receipt.releaseRun.id) : null;
 	const releaseHead = releaseRun?.record.head_sha ?? null;
