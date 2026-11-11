@@ -302,8 +302,10 @@ export async function openCallJournal(options: CallJournalOptions): Promise<Call
 				bytes = Buffer.alloc(0);
 			}
 			let scan = scanTelemetrySegment(bytes);
-			if (bytes.length > 0 && scan.rows[0]?.kind !== "header") {
+			const first = scan.rows[0]?.kind;
+			if (bytes.length > 0 && first !== "header" && first !== "damaged") {
 				// Another installation may own a newer segment format. Never truncate or retire it (#434).
+				// A first line that fails its checksum is damage, retired whole below like any other damaged line.
 				throw new Error("call journal segment header is unsupported");
 			}
 			// The chain is a function of the bytes alone: replay the rotated segments, then the live prefix (#434).

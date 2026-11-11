@@ -1295,6 +1295,25 @@ test("only the next owner repairs torn tails; future records survive reopening a
 	}
 });
 
+test("a damaged first journal line is retired, not refused as an unsupported header", async () => {
+	const sessionDirectory = await mkdtemp(join(tmpdir(), "telemetry-journal-"));
+	const path = join(sessionDirectory, "journal.jsonl");
+	let journal = await openCallJournal({ directory: sessionDirectory, context, writer });
+	try {
+		telemetryHub().emit("session.opened", {}, context);
+		await journal.close();
+		const bytes = await readFile(path);
+		const first = bytes.indexOf(0x0a);
+		await writeFile(path, Buffer.concat([Buffer.from("x".repeat(first)), bytes.subarray(first)]));
+		journal = await openCallJournal({ directory: sessionDirectory, context, writer });
+		const result = await readCallJournal(sessionDirectory);
+		ok(result.records.some(({ record }) => record.k === "journal.gap" && record.data.reason === "interior-corruption"));
+	} finally {
+		await journal.close();
+		await rm(sessionDirectory, { recursive: true, force: true });
+	}
+});
+
 test("the call fold deduplicates forks and retries, preserves unknown coverage and never adds token subfields twice", () => {
 	const clock = { t: "2026-10-30T12:00:00.000Z", mono: 1 };
 	const started = (): CallStarted => ({
