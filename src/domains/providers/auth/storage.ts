@@ -354,11 +354,36 @@ export function authNotRequiredStatus(providerId: string): AuthStatus {
 	};
 }
 
+const NETWORK_ERROR_CODES = new Set([
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"ENOTFOUND",
+	"EAI_AGAIN",
+	"ETIMEDOUT",
+	"ENETUNREACH",
+	"EHOSTUNREACH",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"UND_ERR_SOCKET",
+]);
+
+/** Whether a refresh failed before the token endpoint answered: fetch's own failure or a socket error code. */
+function isNetworkError(error: unknown): boolean {
+	for (let current = error, depth = 0; current instanceof Error && depth < 5; depth += 1) {
+		const code = (current as { code?: unknown }).code;
+		if (typeof code === "string" && NETWORK_ERROR_CODES.has(code)) return true;
+		if (current.name === "TypeError" && current.message === "fetch failed") return true;
+		current = current.cause;
+	}
+	return false;
+}
+
 export class AuthStorage {
 	private data: AuthStorageData = {};
 	private damage: string | null = null;
 	private writeDamage: string | null = null;
 	private readonly failedOAuth = new Map<string, OAuthCredential>();
+	/** Providers whose last failed refresh never reached the token endpoint. */
+	private readonly networkFailedOAuth = new Set<string>();
 	private runtimeOverrides = new Map<string, string>();
 	private fallbackResolver?: (providerId: string) => string | undefined;
 
@@ -590,7 +615,15 @@ export class AuthStorage {
 	}
 
 	private oauthFailureDetail(providerId: string): string {
+		if (this.networkFailedOAuth.has(providerId))
+			return "OAuth credential could not be refreshed because of a network error. The stored credential is kept; the next call retries the refresh.";
 		return `OAuth credential could not be refreshed. Run clio-coder auth login ${providerId} again.`;
+	}
+
+	private recordOAuthFailure(providerId: string, stored: OAuthCredential, error: unknown): void {
+		this.failedOAuth.set(providerId, stored);
+		if (isNetworkError(error)) this.networkFailedOAuth.add(providerId);
+		else this.networkFailedOAuth.delete(providerId);
 	}
 
 	private forAuthTarget<T extends AuthStatus>(target: AuthTarget, resolution: T): T {
@@ -719,6 +752,7 @@ export class AuthStorage {
 		rejectedApiKey: string,
 		signal: AbortSignal,
 	): Promise<AuthResolution> {
+		let refreshError: unknown;
 		try {
 			// Compare the rejected key under the lock so a concurrent rotation wins (#427).
 			const refreshed = await this.refreshOAuthCredentialWithLock(providerId, signal, rejectedApiKey);
@@ -735,11 +769,12 @@ export class AuthStorage {
 			}
 		} catch (error) {
 			if (signal.aborted) throw signal.reason ?? error;
+			refreshError = error;
 			// The rejected token must never be returned after a failed forced refresh (#427).
 			this.reload();
 		}
 		const stored = this.data[providerId];
-		if (stored?.type === "oauth") this.failedOAuth.set(providerId, stored);
+		if (stored?.type === "oauth") this.recordOAuthFailure(providerId, stored, refreshError);
 		return {
 			providerId,
 			available: false,
@@ -836,6 +871,7 @@ export class AuthStorage {
 					refreshed: false,
 				};
 			}
+			let refreshError: unknown;
 			try {
 				const refreshed = await this.refreshOAuthCredentialWithLock(
 					providerId,
@@ -854,6 +890,7 @@ export class AuthStorage {
 				}
 			} catch (error) {
 				if (opts?.signal?.aborted) throw opts.signal.reason ?? error;
+				refreshError = error;
 				// A refusal already recorded its reason on this.damage; a refresh that
 				// failed for any other reason is answered by re-reading the store below.
 				this.reload();
@@ -870,7 +907,7 @@ export class AuthStorage {
 					};
 				}
 			}
-			this.failedOAuth.set(providerId, stored);
+			this.recordOAuthFailure(providerId, stored, refreshError);
 			return {
 				providerId,
 				available: false,

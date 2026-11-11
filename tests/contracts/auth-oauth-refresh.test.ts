@@ -400,6 +400,20 @@ describe("contracts/auth OAuth refresh", () => {
 		strictEqual(readFileSync(path, "utf8"), before);
 	});
 
+	it("says a refresh that never reached the server was a network error and keeps the credential", async () => {
+		seed(-1000);
+		const before = readFileSync(path, "utf8");
+		globalThis.fetch = (async () => {
+			throw new TypeError("fetch failed", { cause: Object.assign(new Error("connect"), { code: "ECONNREFUSED" }) });
+		}) as typeof fetch;
+		const storage = open();
+		const resolved = await storage.resolveApiKey("alcf");
+		strictEqual(resolved.available, false);
+		ok(/network error/.test(resolved.detail ?? ""), String(resolved.detail));
+		ok(!/again\./.test(resolved.detail ?? ""), String(resolved.detail));
+		strictEqual(readFileSync(path, "utf8"), before);
+	});
+
 	it("keeps the committed credential when the refreshed token cannot be written", async () => {
 		seed(-1000);
 		globalThis.fetch = (async () => globusResponse("access-unwritable")) as typeof fetch;
