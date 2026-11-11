@@ -1,6 +1,10 @@
 import { foreignAgentDirs } from "../interop/registry.js";
 import type { PathPolicyInput } from "./path-policy.js";
-import { HOME_AGENT_SECRET_RELATIVE_PATHS, WORKSPACE_SECRET_PATHS } from "./secret-paths.js";
+import {
+	HOME_AGENT_SECRET_RELATIVE_PATHS,
+	HOME_SECRET_RELATIVE_PATHS,
+	WORKSPACE_SECRET_PATHS,
+} from "./secret-paths.js";
 
 /**
  * Generated trees the default policy keeps out of hand edits. The operator's
@@ -29,18 +33,14 @@ export const BUILD_OUTPUT_PATHS: ReadonlyArray<string> = [
 export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 	zeroAccessPaths: [
 		...WORKSPACE_SECRET_PATHS,
+		// The same home list the shell sandbox masks (workerSecretPaths), so a
+		// typed read and a contained `cat` refuse the same files.
+		...HOME_SECRET_RELATIVE_PATHS.map((relative) => `~/${relative}`),
 		...HOME_AGENT_SECRET_RELATIVE_PATHS.map((relative) => `~/${relative}`),
-		"~/.ssh/",
-		"~/.gnupg/",
-		"~/.aws/",
-		"~/.config/gcloud/",
-		"~/.azure/",
-		"~/.kube/",
 		"~/.docker/",
-		"~/.netrc",
-		"~/.npmrc",
-		"~/.pypirc",
-		"~/.git-credentials",
+		// Every process's environment holds the operator's exported tokens; the
+		// shell sandbox scrubs its own environment, the typed read refuses it.
+		"/proc/*/environ",
 		// Remote URLs in the repo git config can embed access tokens, and .git
 		// is hidden from grep/find but not from direct reads without this entry.
 		// The shell sandbox keeps it readable and read-only, since git needs it.
@@ -104,7 +104,10 @@ export function mergePathPolicyInputs(base: PathPolicyInput, override: PathPolic
 
 /** Operator and host authority survives every project-local exemption. */
 export const OPERATOR_PATH_POLICY: PathPolicyInput = {
-	zeroAccessPaths: DEFAULT_DAMAGE_CONTROL_PATH_POLICY.zeroAccessPaths?.filter((entry) => entry.startsWith("~/")) ?? [],
+	zeroAccessPaths:
+		DEFAULT_DAMAGE_CONTROL_PATH_POLICY.zeroAccessPaths?.filter(
+			(entry) => entry.startsWith("~/") || entry.startsWith("/proc/"),
+		) ?? [],
 	readOnlyPaths:
 		DEFAULT_DAMAGE_CONTROL_PATH_POLICY.readOnlyPaths?.filter(
 			(entry) => entry.startsWith("~/") || entry.startsWith("/") || entry.startsWith(".clio-coder/"),

@@ -31,6 +31,7 @@ export const coreTests = [
 	"damage-control-git-words",
 	"internal-git-hooks",
 	"safety-gates",
+	"safety-gate-findings",
 	"default-containment",
 	"setup-status",
 	"key-prefix",
