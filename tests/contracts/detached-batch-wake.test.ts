@@ -126,3 +126,44 @@ test("a worker in a running detached batch waiting on the main agent's decision 
 		[["permission:req-r1", "owned"]],
 	);
 });
+
+test("a worker's pending request for wider write roots wakes the idle agent once with the steer call that answers it", async () => {
+	const pending = [
+		{
+			requestId: "req-w1",
+			runId: "r1-attempt",
+			rootRunId: "r1",
+			agentId: "coder",
+			attempt: 1,
+			tool: "write_roots",
+			summary: "widen write roots to docs/guide",
+			target: "docs/guide",
+			approvalAuthority: "main",
+			deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+		},
+	];
+	const dispatch = {
+		owner: () => ({ sessionId: "owner", cwd: "/workspace" }),
+		detached: {
+			list: () => [{ id: "batch-w", sessionId: "owner", runs: [{ runId: "r1", assignmentId: "a1", agentId: "coder" }] }],
+		},
+		grants: { list: () => pending },
+	} as unknown as DispatchContract;
+	const h = harness();
+	h.world.batches = [{ id: "batch-w", total: 1, terminal: 0 }];
+	h.wake.poke();
+	h.world.decisions = detachedBatchDecisions(dispatch);
+	assert.deepEqual(
+		h.world.decisions.map((entry) => [entry.id, entry.batchId]),
+		[["write-root:req-w1", "batch-w"]],
+	);
+	h.tick();
+	await h.settle();
+	h.tick();
+	await h.settle();
+	assert.equal(h.submits.length, 1, "the request wakes the session once");
+	const text = h.submits[0]?.text ?? "";
+	assert.match(text, /widen write roots to docs\/guide/);
+	assert.match(text, /steer\(run_id="r1-attempt", action="approve" or "deny", request_id="req-w1"\)/);
+	assert.match(text, /continues this assignment as a new attempt with the wider write roots/);
+});

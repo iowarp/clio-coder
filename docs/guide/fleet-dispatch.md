@@ -1024,21 +1024,22 @@ on macOS does not count as covering the run for this purpose
 
 A write worker whose change needs a path outside its write roots stops before editing
 and calls `limitation` with reason `write-root`, the paths it needs (relative to the
-run's working directory) and a scope. That attempt ends `worker_no_work`, and its
-detail names the paths. When the dispatch came from a main session that answers worker
+run's working directory) and a scope. That attempt ends `worker_no_work`, and its detail
+names the paths. When the dispatch came from a main session that answers worker
 requests, the assignment stays open on a main-authority request whose `tool` is
 `write_roots`. The request is pushed like any worker ask (the `approval.requested` event
 and the `grants.onPending` listeners), the dispatch call yields with the exact `steer`
-line, and `monitor` lists it. At autonomy `yolo` the main agent's
-`steer(action="approve", request_id=...)` stands; below `yolo` the request goes to the
-operator's approval card, and with nobody to ask it is denied. An approval starts a new
-attempt of the same assignment with the paths added to `intent.write_roots` and the
-run's write roots, plus a briefing note naming the attempt that asked. The attempt goes
-through admission exactly like a new dispatch, so anything admission refuses settles
-the assignment with that refusal named. A denial, the request expiring
-(`fleet.limits.internalRunTimeoutMs`), cancelling the assignment, or the session
-shutting down settles it as not done and says which. The request is refused at once,
-with the reason in the detail, when a path lies outside the working directory, the
+line, and `monitor` lists it. In a detached batch in the interactive terminal, the
+request wakes an idle main agent once, like a permission request (see below). At
+autonomy `yolo` the main agent's `steer(action="approve", request_id=...)` stands; below
+`yolo` the request goes to the operator's approval card, and with nobody to ask it is
+denied. An approval starts a new attempt of the same assignment with the paths added to
+`intent.write_roots` and the run's write roots, plus a briefing note naming the attempt
+that asked. The attempt goes through admission exactly like a new dispatch, so anything
+admission refuses settles the assignment with that refusal named. A denial, the request
+expiring (`fleet.limits.internalRunTimeoutMs`), cancelling the assignment, or the
+session shutting down settles it as not done and says which. The request is refused at
+once, with the reason in the detail, when a path lies outside the working directory, the
 roots already cover every path, the assignment declared no write roots, or the widened
 list would pass 32 entries. A dispatch that cannot pause for a decision settles with a
 detail naming the re-dispatch, with `intent.write_roots` including the paths.
@@ -1210,20 +1211,21 @@ without collecting; `collect` is the authoritative terminal batch operation.
 Collect every detached batch before final synthesis.
 
 The main agent does not have to poll for a batch. In the interactive terminal, a
-detached batch that settles after the turn that dispatched it has ended wakes the
-agent with a turn of its own. The same happens when a worker in a running batch stops
-for a permission decision the main agent must make. The wake turn appears in the
-transcript as a prompt marked `detached batch update`. It names the settled batches or
-the waiting requests and how to answer them. The turn controller collects the settled
-batches into it before the model call, as it does at the start of any turn. The turn starts
-at once when the session is idle. It waits while a turn is running, a message is queued,
-a dialog is open or the composer holds a draft, and starts within about two seconds of
-those clearing ([detached-batch-wake.ts](../../src/interactive/detached-batch-wake.ts)).
-It is an ordinary turn under the session's permissions, budgets, cost caps and yolo pause.
-Each batch and each request wakes the agent at most once, and only a batch the session
-saw while it was still running can wake it. A batch that settles while its turn is still
-running is handled by the turn-end nudge instead. ACP sessions and headless `run` do
-not wake: the client or the next prompt collects there.
+detached batch that settles after the turn that dispatched it has ended wakes the agent
+with a turn of its own. The same happens when a worker in a running batch stops for a
+permission decision the main agent must make, or asks for wider write roots. The wake
+turn appears in the transcript as a prompt marked `detached batch update`. It names the
+settled batches or the waiting requests and how to answer them. The turn controller
+collects the settled batches into it before the model call, as it does at the start of
+any turn. The turn starts at once when the session is idle. It waits while a turn is
+running, a message is queued, a dialog is open or the composer holds a draft, and starts
+within about two seconds of those clearing
+([detached-batch-wake.ts](../../src/interactive/detached-batch-wake.ts)). It is an
+ordinary turn under the session's permissions, budgets, cost caps and yolo pause. Each
+batch and each request wakes the agent at most once, and only a batch the session saw
+while it was still running can wake it. A batch that settles while its turn is still
+running is handled by the turn-end nudge instead. ACP sessions and headless `run` do not
+wake: the client or the next prompt collects there.
 
 ### Review gate
 

@@ -25,6 +25,7 @@
 
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import { WRITE_ROOTS_GRANT_TOOL } from "../domains/dispatch/write-root-requests.js";
 import type { DetachedBatchNudgeView } from "../domains/middleware/index.js";
 import type { ChatLoop } from "../session-control/chat-loop.js";
 import { grantRequestLines, requestsAwaitingMain } from "../tools/grant-request-text.js";
@@ -80,8 +81,13 @@ export function detachedBatchDecisions(
 	for (const record of detached.list()) {
 		if (!ownership.ownsBatch(record)) continue;
 		const runIds = record.runs.flatMap((run) => [run.runId, run.assignmentId]);
-		for (const view of requestsAwaitingMain(dispatch, runIds))
-			decisions.push({ id: `permission:${view.requestId}`, batchId: record.id, lines: grantRequestLines(view) });
+		// A worker's request for wider write roots parks on the same broker as a
+		// permission request; its lines name the paths and the steer call, and
+		// say that approving continues the assignment as a new attempt.
+		for (const view of requestsAwaitingMain(dispatch, runIds)) {
+			const kind = view.tool === WRITE_ROOTS_GRANT_TOOL ? "write-root" : "permission";
+			decisions.push({ id: `${kind}:${view.requestId}`, batchId: record.id, lines: grantRequestLines(view) });
+		}
 		// Any other request a worker parks on the main agent joins here, keyed by its own id.
 	}
 	return decisions;
