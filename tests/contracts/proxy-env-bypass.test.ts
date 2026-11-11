@@ -2,8 +2,14 @@ import { ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { installProxyFromEnv, proxyEnvSummary, proxyForUrl } from "../../src/core/proxy-env.js";
+import { observeAnthropicResponse } from "../../src/engine/apis/anthropic-response.js";
+import { observeCodexTransport } from "../../src/engine/apis/codex-transport.js";
+import { withProxyConnectionNote } from "../../src/engine/apis/proxy-connection-error.js";
+import { observeResponsesModelId } from "../../src/engine/apis/responses-model-id.js";
+import type { Api, AssistantMessage, Model } from "../../src/engine/types.js";
 
 let proxyHits = 0;
 
@@ -63,4 +69,68 @@ test("NO_PROXY CIDR ranges and IP wildcards send matching IP hosts direct and ot
 	strictEqual(proxyForUrl("http://[fd00::1]/"), null);
 	t.mock.restoreAll();
 	strictEqual(written.join("").includes("not honoured"), false);
+});
+
+test("Anthropic, Responses, Codex and Ollama connection errors name the proxy without its credentials", async (t) => {
+	const original = getGlobalDispatcher();
+	t.after(() => setGlobalDispatcher(original));
+	const written: string[] = [];
+	t.mock.method(process.stderr, "write", (chunk: string | Uint8Array) => {
+		written.push(String(chunk));
+		return true;
+	});
+	await installProxyFromEnv({ https_proxy: "http://alice:s3cret@proxy.corp.example:3128" });
+	t.mock.restoreAll();
+
+	const failing = (api: Api) => {
+		const model = { id: "m", api, provider: "p", baseUrl: "https://provider.example/v1" } as Model<Api>;
+		const invoke = () => {
+			const stream = createAssistantMessageEventStream();
+			const error = {
+				role: "assistant",
+				content: [],
+				api,
+				provider: "p",
+				model: "m",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "error",
+				errorMessage: "Connection error.: connect ECONNREFUSED 10.0.0.1:3128",
+				timestamp: 0,
+			} as AssistantMessage;
+			stream.push({ type: "error", reason: "error", error });
+			stream.end(error);
+			return stream;
+		};
+		return { model, invoke };
+	};
+	const anthropic = failing("anthropic-messages");
+	const responses = failing("openai-responses");
+	const codex = failing("openai-codex-responses");
+	const results = [
+		await observeAnthropicResponse(anthropic.model, undefined, anthropic.invoke).result(),
+		await observeResponsesModelId(responses.model, undefined, responses.invoke).result(),
+		await observeCodexTransport(codex.model, undefined, codex.invoke).result(),
+	];
+	for (const message of results) {
+		strictEqual(
+			message.errorMessage,
+			"Connection error. (through proxy http://proxy.corp.example:3128): connect ECONNREFUSED 10.0.0.1:3128",
+		);
+		ok((message.errorMessage ?? "").includes("proxy.corp.example:3128"));
+		ok(!(message.errorMessage ?? "").includes("s3cret"));
+		ok(!(message.errorMessage ?? "").includes("alice"));
+	}
+	// Ollama's native client surfaces undici's bare `fetch failed`.
+	const ollama = withProxyConnectionNote("fetch failed", "https://ollama.example/") ?? "";
+	ok(ollama.startsWith("fetch failed (through proxy "), ollama);
+	ok(!ollama.includes("s3cret"));
+	strictEqual(withProxyConnectionNote("fetch failed", "http://127.0.0.1:11434"), "fetch failed");
+	strictEqual(withProxyConnectionNote("HTTP 400: bad request", "https://provider.example/"), "HTTP 400: bad request");
 });

@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { AnthropicResponseObservation } from "../types.js";
+import { withProxyConnectionNote } from "./proxy-connection-error.js";
 
 const RATE_LIMIT_PREFIX = "anthropic-ratelimit-unified-";
 // Max/Haiku measurements bracket expiry at 285-300 s. API-key calls use the same conservative margin.
@@ -198,6 +199,9 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 							if (oldest !== undefined) threadReplies.delete(oldest);
 						}
 					}
+					if (event.type === "error") {
+						terminal.errorMessage = withProxyConnectionNote(terminal.errorMessage, model.baseUrl);
+					}
 					annotate(terminal);
 				}
 				output.push(event);
@@ -220,7 +224,7 @@ export function observeAnthropicResponse<T extends StreamOptions>(
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 				stopReason: reason,
-				errorMessage: cause instanceof Error ? cause.message : String(cause),
+				errorMessage: withProxyConnectionNote(cause instanceof Error ? cause.message : String(cause), model.baseUrl),
 				timestamp: Date.now(),
 				anthropicResponse: observation,
 			};

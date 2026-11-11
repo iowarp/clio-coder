@@ -9,6 +9,7 @@ import {
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
 import type { CodexQuotaObservation } from "../types.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "./codex-quota.js";
+import { withProxyConnectionNote } from "./proxy-connection-error.js";
 
 /** APIs whose lifecycle events carry the provider's response object. */
 const RESPONSES_APIS: ReadonlySet<Api> = new Set(["openai-codex-responses", "openai-responses"]);
@@ -62,7 +63,10 @@ export function observeResponsesModelId<T extends StreamOptions>(
 		try {
 			for await (const event of source) {
 				if (event.type === "done") event.message.responseModelIdObservation = observation();
-				else if (event.type === "error") event.error.responseModelIdObservation = observation();
+				else if (event.type === "error") {
+					event.error.responseModelIdObservation = observation();
+					event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
+				}
 				if (quota !== null && (event.type === "done" || event.type === "error")) {
 					const terminal = event.type === "done" ? event.message : event.error;
 					(terminal as AssistantMessage & { codexQuota?: CodexQuotaObservation }).codexQuota = quota;
@@ -89,7 +93,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 				},
 				stopReason: reason,
-				errorMessage: cause instanceof Error ? cause.message : String(cause),
+				errorMessage: withProxyConnectionNote(cause instanceof Error ? cause.message : String(cause), model.baseUrl),
 				timestamp: Date.now(),
 				responseModelIdObservation: observation(),
 			};

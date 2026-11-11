@@ -38,6 +38,7 @@ import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { ollamaJson, streamOllamaChat } from "./ollama-http.js";
 import { estimateReasoningTokens, remainingContextMaxTokens } from "./output-budget.js";
+import { withProxyConnectionNote } from "./proxy-connection-error.js";
 import {
 	EXIT_RELEASE_MS,
 	forgetReleasedModel,
@@ -652,7 +653,7 @@ function runStream(
 			stream.end();
 		} catch (err) {
 			output.stopReason = signal?.aborted ? "aborted" : "error";
-			output.errorMessage = err instanceof Error ? err.message : String(err);
+			output.errorMessage = withProxyConnectionNote(err instanceof Error ? err.message : String(err), model.baseUrl);
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		}

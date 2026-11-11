@@ -2,6 +2,7 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Model, StreamO
 import { createAssistantMessageEventStream, registerSessionResourceCleanup } from "@earendil-works/pi-ai";
 import { isProviderAuthRejection } from "../../core/provider-auth-error.js";
 import type { CodexTransportCounters, CodexTransportObservation } from "../types.js";
+import { withProxyConnectionNote } from "./proxy-connection-error.js";
 
 type Bridge = typeof import("@earendil-works/pi-ai/api/openai-codex-responses");
 type Stats = ReturnType<Bridge["getOpenAICodexWebSocketDebugStats"]>;
@@ -78,6 +79,9 @@ export function observeCodexTransport<T extends StreamOptions>(
 		const finish = (message: AssistantMessage): void => {
 			if (finished) return;
 			finished = true;
+			if (message.stopReason === "error") {
+				message.errorMessage = withProxyConnectionNote(message.errorMessage, model.baseUrl);
+			}
 			const after = sessionId ? bridge?.getOpenAICodexWebSocketDebugStats(sessionId) : undefined;
 			const diff = sessionId && !call.overlap ? difference(before, after) : null;
 			const failure = message.diagnostics?.find((item) => item.type === "provider_transport_failure");
