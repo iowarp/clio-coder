@@ -13,9 +13,11 @@ import {
 	writeRestartIntent,
 } from "../../src/core/restart-intent.js";
 import { firePendingModelRestart, nextModelRestartChain, setRestartHost } from "../../src/core/restart-request.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { createInteractiveRestart, restartPreflight } from "../../src/interactive/interactive-restart.js";
 import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
+import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { createRestartSessionTool, restartSessionWorkspaceRefusal } from "../../src/tools/restart-session.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
@@ -185,4 +187,11 @@ test("the model hears once that its own build was replaced, and only in the tree
 	own = true;
 	assert.deepEqual(fire(), [{ kind: "inject_reminder", severity: "warn", message: STALE_BUILD_REMINDER }]);
 	assert.deepEqual(fire(), []);
+});
+
+test("a host outside Clio's checkout does not require restart_session", () => {
+	const errors = validateBuiltinToolPolicy([], { includeInteractiveTools: true }).filter((error) =>
+		error.includes(ToolNames.RestartSession),
+	);
+	assert.deepStrictEqual(errors, []);
 });

@@ -166,6 +166,8 @@ const VISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Vision]);
 const MEMORY_RECALL_BOUND_TOOLS = new Set<ToolName>([ToolNames.MemoryRecall]);
 /** Registered only on the orchestrator registry: an agent's report is the main session's, never a worker's. */
 const REPORT_BOUND_TOOLS = new Set<ToolName>([ToolNames.Report]);
+/** Registered only in Clio's own checkout, so no host can require it; workers still exclude it as interactive. */
+const SELF_REPO_BOUND_TOOLS = new Set<ToolName>([ToolNames.RestartSession]);
 
 /**
  * Builtin tools a native worker registry never registers on any host: the
@@ -278,6 +280,7 @@ export function validateBuiltinToolPolicy(
 		if (MUSIC_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (MEMORY_RECALL_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (REPORT_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (SELF_REPO_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);
