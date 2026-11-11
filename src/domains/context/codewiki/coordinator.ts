@@ -24,6 +24,11 @@ import type {
 import type { Codewiki } from "./schema.js";
 
 const BUILD_TIMEOUT_MS = 120_000;
+/**
+ * Every codewiki holder takes the lock asynchronously and refreshes it every few seconds, so a lock from another host
+ * whose mtime is a minute old was left by a holder that is gone, such as a stopped container on a shared mount.
+ */
+const CODEWIKI_FOREIGN_LEASE_MS = 60_000;
 const workspaceTails = new Map<string, Promise<void>>();
 const require = createRequire(import.meta.url);
 
@@ -278,7 +283,7 @@ export function coordinateCodewikiWrite(
 					await options.afterCommit?.(worker, workspace);
 					return { codewiki: !worker.changed && current ? current : worker.codewiki, worker, wrote };
 				},
-				options.signal ? { signal: options.signal } : {},
+				{ foreignExpiresMs: CODEWIKI_FOREIGN_LEASE_MS, ...(options.signal ? { signal: options.signal } : {}) },
 			);
 		},
 		options.signal,
@@ -301,7 +306,7 @@ export function coordinateCodewikiExclusive<T>(
 					signal?.throwIfAborted();
 					return task(workspace);
 				},
-				signal ? { signal } : {},
+				{ foreignExpiresMs: CODEWIKI_FOREIGN_LEASE_MS, ...(signal ? { signal } : {}) },
 			),
 		signal,
 	);

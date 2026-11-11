@@ -57,6 +57,12 @@ export interface StateFileLockOptions {
 	 * or stall a turn. Everything else fails closed.
 	 */
 	onAcquireFailure?: "throw" | "run-unlocked";
+	/**
+	 * Reclaim a lock held on another host once its mtime is this old. Only for locks every holder takes through the
+	 * asynchronous path, which refreshes the mtime every few seconds, so the age is the holder's lease expiry. Without
+	 * it a foreign holder is never adjudicated.
+	 */
+	foreignExpiresMs?: number;
 	/** What this holder is doing, recorded in the lock so a waiter can say who it waits for. */
 	note?: string;
 	/** An asynchronous wait found another holder, or the holder changed; null when its record cannot be read. */
@@ -148,8 +154,12 @@ function createLock(lockPath: string, note?: string): boolean {
 	}
 }
 
-function lockIsAbandoned(lockPath: string): boolean {
+function lockIsAbandoned(lockPath: string, foreignExpiresMs?: number): boolean {
 	const owner = readLockOwner(lockPath);
+	if (owner !== null && foreignExpiresMs !== undefined && owner.host !== null && owner.host !== hostname()) {
+		const ageMs = lockfileAgeMs(lockPath);
+		return ageMs !== null && ageMs > foreignExpiresMs;
+	}
 	if (owner !== null) return !ownerIsAlive(owner);
 	const ageMs = lockfileAgeMs(lockPath);
 	return ageMs !== null && ageMs > STALE_LOCK_MS;
@@ -180,7 +190,7 @@ function removeLockFile(lockPath: string): void {
  * unlink. The guard is held for a few synchronous syscalls. A guard left by a holder that died in that window is itself
  * reclaimed by owner, and two waiters racing that recovery in the same instant is an accepted double fault.
  */
-function reclaimAbandonedLock(lockPath: string): boolean {
+function reclaimAbandonedLock(lockPath: string, foreignExpiresMs?: number): boolean {
 	// Ends in .lock so a forced release of a dead owner's locks also clears a guard it left (#439).
 	const guardPath = `${lockPath}.reclaim.lock`;
 	if (!createLock(guardPath)) {
@@ -189,7 +199,7 @@ function reclaimAbandonedLock(lockPath: string): boolean {
 		if (!createLock(guardPath)) return false;
 	}
 	try {
-		if (lockIsAbandoned(lockPath)) removeLockFile(lockPath);
+		if (lockIsAbandoned(lockPath, foreignExpiresMs)) removeLockFile(lockPath);
 	} finally {
 		removeLockFile(guardPath);
 	}
@@ -197,9 +207,9 @@ function reclaimAbandonedLock(lockPath: string): boolean {
 }
 
 /** True once the lock is ours. Steals only from an owner that is provably gone. */
-function tryAcquire(lockPath: string, note?: string): boolean {
+function tryAcquire(lockPath: string, note?: string, foreignExpiresMs?: number): boolean {
 	if (createLock(lockPath, note)) return true;
-	if (!lockIsAbandoned(lockPath) || !reclaimAbandonedLock(lockPath)) return false;
+	if (!lockIsAbandoned(lockPath, foreignExpiresMs) || !reclaimAbandonedLock(lockPath, foreignExpiresMs)) return false;
 	// Acquire in the same attempt as the reclaim: a caller with no wait budget, such as a recovery writer, would
 	// otherwise reclaim a dead owner's lock and still give up (#434).
 	return createLock(lockPath, note);
@@ -317,7 +327,7 @@ async function acquireAsync<T>(
 		mkdirSync(dirname(lockPath), { recursive: true });
 		const deadlineMs = performance.now() + timeoutMs;
 		let reported: number | null | undefined;
-		for (let attempt = 1; !tryAcquire(lockPath, options.note); attempt += 1) {
+		for (let attempt = 1; !tryAcquire(lockPath, options.note, options.foreignExpiresMs); attempt += 1) {
 			options.signal?.throwIfAborted();
 			if (performance.now() > deadlineMs) throw timeoutError(lockPath, timeoutMs);
 			if (options.onContended) {

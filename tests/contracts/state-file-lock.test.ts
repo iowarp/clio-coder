@@ -66,6 +66,17 @@ describe("contracts/state-file-lock", () => {
 		ok(existsSync(lockPath), "a foreign host's lock is that host's to reclaim");
 	});
 
+	it("reclaims another host's lock only once its refreshed lease has expired, when the caller opts in", async () => {
+		const foreign = { host: `${hostname()}-elsewhere`, birthToken: "foreign" };
+		holdLock(999999, 1_000, foreign);
+		await rejects(
+			withStateFileLock(target, () => "unreachable", { timeoutMs: 50, foreignExpiresMs: 60_000 }),
+			/timed out/,
+		);
+		holdLock(999999, 120_000, foreign);
+		strictEqual(await withStateFileLock(target, () => "taken", { timeoutMs: 50, foreignExpiresMs: 60_000 }), "taken");
+	});
+
 	it("reclaims a same-host record whose pid was reused by another process", () => {
 		const token = processBirthToken();
 		if (token === null || token.startsWith("pid-")) return; // no birth-token source on this platform
