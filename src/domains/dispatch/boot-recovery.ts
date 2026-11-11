@@ -9,6 +9,10 @@
  * for the recovery to settle, so abandoned rows observe dead workers and no
  * stale worktree is reused. Any failure keeps the worktrees, reports once,
  * and settles the recovery; it never rejects.
+ *
+ * The git calls of compete cleanup and task-worktree recovery still run
+ * synchronously; only their place moved, from before the first frame to
+ * just after it.
  */
 
 import { readSettings } from "../../core/config.js";
@@ -62,11 +66,7 @@ async function recoverWorktrees(
 	worktreeRootSetting: WorktreeRootSetting | undefined,
 	report: (line: string) => void,
 ): Promise<void> {
-	try {
-		if (!isGitRepository(cwd)) return;
-	} catch {
-		return;
-	}
+	if (!isGitRepository(cwd)) return;
 	try {
 		const pendingGate = readPendingGateDecisions();
 		const pendingCompeteGroups = new Set<string>();

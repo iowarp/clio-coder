@@ -403,6 +403,12 @@ export interface RouteBreakerView {
 export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
+	/**
+	 * Settles once restart recovery (abandoned compete workers, task worktrees,
+	 * the ledger scan) has finished, starting it if boot has not yet. Gate and
+	 * compete recovery in the dispatch tool wait on it.
+	 */
+	awaitStartupRecovery?(): Promise<void>;
 	/** Whether `bus` is the same bus already owned by the domain progress pump. */
 	ownsProgressBus?(bus: TelemetryHub | undefined): boolean;
 	/**

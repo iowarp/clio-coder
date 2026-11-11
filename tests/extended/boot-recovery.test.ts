@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createWorktreeBootRecovery, type WorktreeBootRecovery } from "../../src/domains/dispatch/boot-recovery.js";
-import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { openLedger } from "../../src/domains/dispatch/state.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
 import {
@@ -15,6 +15,7 @@ import {
 	recoverCleanupReadyCompeteGroups,
 	registerCompeteGroupRun,
 } from "../../src/tools/compete-worktrees.js";
+import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -198,6 +199,79 @@ describe("dispatch admission during boot recovery", () => {
 			strictEqual(spawned(), 1);
 			strictEqual(openLedger({ maxRuns: 10 }).get(row.id)?.status, "dead");
 		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	function abandonedRow(cwd: string) {
+		const ledger = openLedger({ maxRuns: 10 });
+		const row = ledger.create({
+			agentId: "coder",
+			executionRole: "builder",
+			task: "interrupted work",
+			targetId: "default",
+			wireModelId: "gpt-4o",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			sessionId: null,
+			cwd,
+		});
+		ledger.update(row.id, { status: "running", pid: 999_999, heartbeatAt: row.startedAt });
+		return { ledger, row };
+	}
+
+	it("keeps a run a sibling settled while recovery was held", async () => {
+		const { ledger, row } = abandonedRow(scratch.dir);
+		await ledger.persist();
+		const recovery = heldRecovery();
+		const { bundle } = fleet(recovery);
+		try {
+			await bundle.extension.start();
+			const sibling = openLedger({ maxRuns: 10 });
+			sibling.update(row.id, { status: "completed", endedAt: new Date().toISOString(), exitCode: 0 });
+			await sibling.persist();
+
+			const gate = bundle.contract.awaitStartupRecovery?.();
+			strictEqual(recovery.starts, 1);
+			recovery.release();
+			await gate;
+			strictEqual(openLedger({ maxRuns: 10 }).get(row.id)?.status, "completed");
+		} finally {
+			await bundle.extension.stop?.();
+		}
+	});
+
+	it("holds the dispatch tool's own gate and compete recovery until boot recovery settles", async () => {
+		const recovery = heldRecovery();
+		const { bundle, spawned } = fleet(recovery);
+		await bundle.extension.start();
+		try {
+			const touched: string[] = [];
+			let held = true;
+			const dispatch = new Proxy(bundle.contract, {
+				get(target, key, receiver) {
+					if (held && typeof key === "string") touched.push(key);
+					return Reflect.get(target, key, receiver);
+				},
+			}) as DispatchContract;
+			const agents = dispatchStubContext().getContract("agents");
+			const tool = createDispatchTool({
+				dispatch,
+				getAgentSpecs: () => agents?.listSpecs() ?? [],
+				getAutonomy: () => "yolo",
+			});
+			const run = tool.run({ task: "Inspect isolated fixture evidence.", agent: "scout" }, {});
+			for (let i = 0; i < 50 && recovery.starts === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			strictEqual(recovery.starts, 1);
+			// Admission previews the plan; after that the runner touches the contract only to wait.
+			strictEqual(touched.at(-1), "awaitStartupRecovery", touched.join(","));
+			held = false;
+			recovery.release();
+			await run;
+			ok(spawned() > 0);
+		} finally {
+			recovery.release();
 			await bundle.extension.stop?.();
 		}
 	});

@@ -10002,6 +10002,13 @@ export function createDispatchBundle(
 		return operation;
 	}
 
+	/** Starts a boot recovery not yet started and settles once restart recovery has finished. */
+	async function awaitStartupRecovery(): Promise<void> {
+		if (startupRecovered) return;
+		void options?.bootRecovery?.start();
+		await startupRecovery;
+	}
+
 	async function dispatchRequest(
 		req: DispatchRequest,
 		observer?: DispatchAdmissionObserver,
@@ -10014,10 +10021,7 @@ export function createDispatchBundle(
 	}> {
 		// Restart recovery settles before any run is admitted, so no stale
 		// worktree or abandoned lease is reused (boot-recovery.ts).
-		if (!startupRecovered) {
-			void options?.bootRecovery?.start();
-			await startupRecovery;
-		}
+		await awaitStartupRecovery();
 		// A retry re-enters here with the request it was first admitted under, so
 		// only a request that has never been stamped takes the current session.
 		const sessionOrigin = options?.getSessionOrigin?.();
@@ -11000,6 +11004,9 @@ export function createDispatchBundle(
 			});
 			ledger = runLedger;
 			const recoverRuns = async (): Promise<void> => {
+				// The ledger was read before the first frame; a sibling may have settled
+				// a run since, and a scan of that stale copy would persist it as abandoned.
+				runLedger.reload();
 				// Symphony P10: restart recovery from durable artifacts. A row whose
 				// host died settles from its run's journal, or closes as stalled.
 				try {
@@ -11565,6 +11572,7 @@ export function createDispatchBundle(
 	}
 
 	const contract: DispatchContract = {
+		awaitStartupRecovery,
 		warmRouteHistory() {
 			if (routeHistoryWarmTimer !== null || draining || stopPromise !== null) return;
 			// After boot's own burst, so the first keystrokes do not contend with it.

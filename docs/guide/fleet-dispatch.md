@@ -1304,7 +1304,8 @@ worker or ACP process group, and then removes the group's registered
 worktrees and branches. This recovery starts once the first frame is up (at
 session start for a headless or ACP run), so its termination grace never holds
 the screen or input; the first dispatch waits for it to finish before it is
-admitted. If a judge output is waiting in the decision journal,
+admitted. Quitting while it runs waits for it within the shutdown budget each
+domain gets; past that budget the leftovers stay for the next start. If a judge output is waiting in the decision journal,
 the workers are quiesced but the candidates remain until that output is bound
 to a judge run whose seal verifies; a recovered winner is preserved for
 operator inspection rather than silently auto-applied after restart.

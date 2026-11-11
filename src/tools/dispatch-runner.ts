@@ -2460,6 +2460,8 @@ export async function runDispatchTool(
 		}
 		return { kind: "ok", output: catalog };
 	}
+	// Gate evidence and compete recovery below must not race the boot's own recovery of the same groups.
+	await deps.dispatch.awaitStartupRecovery?.();
 	try {
 		await recoverPendingGateEvidence(deps);
 	} catch (error) {
