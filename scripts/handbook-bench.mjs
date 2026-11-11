@@ -475,10 +475,19 @@ function runOne({ arm, task, round, options, scratch }) {
 		})
 		.filter((frame) => frame !== null);
 	const end = frames.findLast((frame) => frame.type === "turn_end") ?? {};
-	const touched = git(["diff", "--name-only", "HEAD"], dir)
-		.split("\n")
-		.concat(git(["ls-files", "--others", "--exclude-standard"], dir).split("\n"))
-		.concat(git(["log", "--format=", "--name-only", "HEAD@{1}..HEAD"], dir).split("\n"))
+	// A run can leave its clone unreadable to git; that run scores on what can be listed instead of ending the batch.
+	const listErrors = [];
+	const list = (args) => {
+		try {
+			return git(args, dir).split("\n");
+		} catch (error) {
+			listErrors.push(error instanceof Error ? error.message : String(error));
+			return [];
+		}
+	};
+	const touched = list(["diff", "--name-only", "HEAD"])
+		.concat(list(["ls-files", "--others", "--exclude-standard"]))
+		.concat(list(["log", "--format=", "--name-only", "HEAD@{1}..HEAD"]))
 		.filter(Boolean);
 	writeFileSync(join(scratch, `${arm.name}-${task.id}-${round}.jsonl`), result.stdout ?? "");
 	return {
@@ -490,6 +499,7 @@ function runOne({ arm, task, round, options, scratch }) {
 		toolCalls: frames.reduce((sum, frame) => sum + (frame.observed?.toolCalls ?? 0), 0),
 		tokens: frames.reduce((sum, frame) => sum + tokenTotals(frame), 0),
 		seconds: Math.round((Date.now() - started) / 1000),
+		...(listErrors.length > 0 ? { listErrors } : {}),
 	};
 }
 
