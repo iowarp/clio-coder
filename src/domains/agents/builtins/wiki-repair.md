@@ -11,7 +11,7 @@ category: implement
 capabilityClass: workspace-edit
 latencyClass: balanced
 projectContextTier: bounded
-budget: {toolCalls: 10, readReserve: 4, synthesis: true}
+budget: {toolCalls: 10, readReserve: 4, synthesis: true, maximum: {toolCalls: 10, readReserve: 4}}
 resultContract: {kind: artifact-report}
 tags: [docs, wiki, repair]
 ---

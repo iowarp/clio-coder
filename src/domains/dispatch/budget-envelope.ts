@@ -387,7 +387,11 @@ export function cloneRunToolBudgetEnvelope(value: unknown): RunToolBudgetEnvelop
 				typeof ceiling !== "number" ||
 				!Number.isSafeInteger(ceiling) ||
 				ceiling !==
-					Math.max(effectivePhase.toolCalls, revision?.toolCalls ?? 0, Math.min(maximum.toolCalls, value.effective.hardCap)))
+					Math.max(
+						effectivePhase.toolCalls,
+						revision?.toolCalls ?? 0,
+						value.policy.exact ? value.effective.hardCap : Math.min(maximum.toolCalls, value.effective.hardCap),
+					))
 		)
 			return undefined;
 		if (
