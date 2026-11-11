@@ -244,7 +244,10 @@ function choiceRows<T>(spec: ChoiceRowSpec<T>, index: number, windowStart: numbe
 	// the next keypress rather than at the width the menu opened on.
 	const room = terminalColumns(output) - railWidth;
 	const hasHints = choices.some((choice) => choice.hint !== undefined);
-	const labelWidth = Math.min(spec.maxLabelWidth ?? 30, Math.max(...choices.map((choice) => choice.label.length)));
+	// Labels take the width they need while the hints keep a readable column; a fixed cap cut
+	// long model names short in a wide terminal.
+	const labelCap = spec.maxLabelWidth ?? Math.max(30, room - markerWidth - 2 - 24);
+	const labelWidth = Math.min(labelCap, Math.max(...choices.map((choice) => choice.label.length)));
 	const hintRoom = room - markerWidth - labelWidth - 2;
 	const end = Math.min(choices.length, windowStart + viewport);
 	const lines: string[] = [];

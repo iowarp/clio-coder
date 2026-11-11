@@ -188,6 +188,32 @@ describe("contracts/select-keypress", () => {
 		strictEqual(labelColumns.size <= 2, true, "labels stay in one column whether or not a row is highlighted");
 	});
 
+	it("gives a long label the width a wide terminal has instead of cutting it at 30 columns", async () => {
+		const terminal = fakeTerminal(180);
+		const label = "dynamo/text-embedding-granite-278m-multilingual";
+		const pending = promptSelect({
+			choices: [
+				{ value: "a", label, hint: "loaded" },
+				{ value: "b", label: "A setup file from my lab or team", hint: "a path or https address" },
+			],
+			railPrefix: "|  ",
+			backLabel: "back",
+			input: terminal.input,
+			output: terminal.output,
+		});
+		await feed(terminal, pending, [ESCAPE]);
+		const lines = visibleLines(terminal);
+		ok(
+			lines.some((line) => line.includes(label)),
+			lines.join("\n"),
+		);
+		ok(
+			lines.some((line) => line.includes("A setup file from my lab or team")),
+			lines.join("\n"),
+		);
+		ok(!lines.some((line) => line.includes("…")), lines.join("\n"));
+	});
+
 	it("scrolls a list longer than the viewport instead of overflowing the terminal", async () => {
 		// A model list from a real server runs to dozens of ids. Drawing all of
 		// them makes the frame taller than the screen, and the cursor-up that
