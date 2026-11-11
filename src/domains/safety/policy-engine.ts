@@ -16,7 +16,7 @@ import {
 import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
 import { isSkippedSecretScanDirectory, SECRET_SCAN_LIMITS } from "../../core/sandbox/secret-files.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
-import { storeWriteSet } from "../../core/store-paths.js";
+import { storeBookkeepingPaths, storeGrantProbes, storeWriteSet } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 import { expandPath } from "../../tools/path-utils.js";
@@ -691,21 +691,40 @@ function writeRootViolation(
  */
 function evaluateWriteRoots(roots: ReadonlyArray<string>, writeRootCwd: string, call: ClassifierCall): string | null {
 	if (roots.length === 0) return null;
-	// A store write touches its records, project.json and locks besides its target, so each is judged.
-	const targets =
-		call.tool === ToolNames.Store ? storeWriteTargets(call, writeRootCwd) : [writeRootTargetPath(call, writeRootCwd)];
 	const memo = createPathWalkMemo();
+	const violationOf = (target: string): string | null =>
+		writeRootViolation(roots, target, canonicalizeRawPath(expandPath(target), writeRootCwd, memo), memo);
+	const targets =
+		call.tool === ToolNames.Store
+			? storeWriteRootTargets(call, writeRootCwd, violationOf)
+			: [writeRootTargetPath(call, writeRootCwd)];
 	for (const target of targets) {
 		if (target === null) continue;
-		const violation = writeRootViolation(
-			roots,
-			target,
-			canonicalizeRawPath(expandPath(target), writeRootCwd, memo),
-			memo,
-		);
+		const violation = violationOf(target);
 		if (violation !== null) return violation;
 	}
 	return null;
+}
+
+/**
+ * A store write touches its records, project.json and locks besides its
+ * target, so each is judged. When the roots hold a grant of the call's tag
+ * (they cover the inside of the tag and of its records tag), the store's own
+ * bookkeeping for the call is admitted with it: a grant adds only the two tag
+ * directories to the roots, so the shell sandbox never gets project.json or
+ * the locks. The op's own target is still judged.
+ */
+function storeWriteRootTargets(
+	call: ClassifierCall,
+	cwd: string,
+	violationOf: (target: string) => string | null,
+): string[] {
+	const targets = storeWriteTargets(call, cwd);
+	if (targets.length === 0) return targets;
+	const probes = storeGrantProbes(cwd, call.args);
+	if (probes.length === 0 || probes.some((probe) => violationOf(probe) !== null)) return targets;
+	const bookkeeping = new Set(storeBookkeepingPaths(cwd, String(call.args?.tag)));
+	return targets.filter((target) => !bookkeeping.has(target));
 }
 
 export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}): SafetyPolicyEngine {

@@ -193,9 +193,29 @@ export function storeReadRoots(cwd: string): string[] {
 export function storeWriteSet(cwd: string, args: Record<string, unknown> | undefined): string[] {
 	const primary = storeWriteTarget(cwd, args);
 	if (primary === null) return [];
+	return [...new Set([primary, ...storeBookkeepingPaths(cwd, String(args?.tag))])];
+}
+
+/**
+ * What the store itself writes for any write into `tag`, besides the op's
+ * own target: the records tag directory itself, `project.json` and the lock
+ * directory. A grant does not add these to a worker's write roots (its shell
+ * must not write them); the policy engine admits them with a granted call.
+ */
+export function storeBookkeepingPaths(cwd: string, tag: string): string[] {
 	const projectDir = storeProjectDir(cwd);
-	const records = storeTagDir(cwd, recordsTag(String(args?.tag)));
-	return [...new Set([primary, records, join(projectDir, "project.json"), join(projectDir, "locks")])];
+	return [storeTagDir(cwd, recordsTag(tag)), join(projectDir, "project.json"), join(projectDir, "locks")];
+}
+
+/**
+ * Paths strictly inside the call's tag directory and inside its records tag
+ * directory. Write roots that cover both hold the grant `storeGrantBoundaries`
+ * gives for the tag. Empty for read ops and malformed calls.
+ */
+export function storeGrantProbes(cwd: string, args: Record<string, unknown> | undefined): string[] {
+	if (storeWriteTarget(cwd, args) === null) return [];
+	const tag = String(args?.tag);
+	return [join(storeTagDir(cwd, tag), "blobs"), join(storeTagDir(cwd, recordsTag(tag)), "blobs")];
 }
 
 /** Where a store write lands, from tool arguments alone; null for read ops and malformed calls. */

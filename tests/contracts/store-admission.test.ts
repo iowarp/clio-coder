@@ -1,8 +1,8 @@
-import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { storeBlobPath, storeProjectDir } from "../../src/core/store-paths.js";
+import { storeBlobPath, storeGrantBoundaries, storeProjectDir } from "../../src/core/store-paths.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -86,6 +86,23 @@ describe("store safety admission", () => {
 		const engine = createSafetyPolicyEngine({ cwd, writeRoots: [`${dirname(storeBlobPath(cwd, "sim", "a.txt"))}/`] });
 		const put = engine.evaluate({ tool: ToolNames.Store, args: { op: "put", tag: "sim", path: "a.txt" } });
 		strictEqual(put.reasonCode, "write-root");
+	});
+
+	it("admits a granted put and note with the store's bookkeeping, and still refuses an ungranted tag", () => {
+		const engine = createSafetyPolicyEngine({ cwd, writeRoots: [`${cwd}/`, ...storeGrantBoundaries(cwd, ["sim"])] });
+		const judge = (args: Record<string, unknown>) => engine.evaluate({ tool: ToolNames.Store, args });
+		for (const args of [
+			{ op: "put", tag: "sim", path: "a.txt" },
+			{ op: "put", tag: "sim", path: "a.txt", blob: "nested/b.txt" },
+			{ op: "note", tag: "sim", blob: "a.txt", note: "checked" },
+		]) {
+			const verdict = judge(args);
+			notStrictEqual(verdict.reasonCode, "write-root", `${args.op}: ${JSON.stringify(verdict.reasons)}`);
+		}
+		strictEqual(judge({ op: "put", tag: "other", path: "a.txt" }).reasonCode, "write-root");
+		strictEqual(judge({ op: "note", tag: "other", blob: "a.txt", note: "x" }).reasonCode, "write-root");
+		// Creating a tag writes the tag directory itself, which a grant of the tag does not cover.
+		strictEqual(judge({ op: "create", tag: "sim" }).reasonCode, "write-root");
 	});
 
 	it("admits a cd into this project's store directory and not another project's", () => {
