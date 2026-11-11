@@ -144,3 +144,15 @@ it("keeps structural rows inert after sorting", () => {
 	strictEqual(f.closed(), 0);
 	match(f.text(), /not a place to switch/u);
 });
+
+it("pages with PgDn and PgUp and jumps with End and Home, clamped at either end", () => {
+	const f = fixture();
+	f.view.handleInput("\u001b[6~");
+	match(f.text(), /❯.*newest/u);
+	f.view.handleInput("\u001b[5~");
+	match(f.text(), /❯.*oldest/u);
+	f.view.handleInput("\u001b[F");
+	match(f.text(), /❯.*newest/u);
+	f.view.handleInput("\u001b[H");
+	match(f.text(), /❯.*oldest/u);
+});

@@ -466,6 +466,23 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			this.moveHighlight(1);
 			return;
 		}
+		// A page is the body less its chrome; a jump clamps at either end instead of refusing.
+		if (
+			matchesKey(data, "pageUp") ||
+			matchesKey(data, "pageDown") ||
+			matchesKey(data, "home") ||
+			matchesKey(data, "end")
+		) {
+			const page = Math.max(MIN_VISIBLE_ROWS, (this.bodyRows > 0 ? this.bodyRows : VISIBLE_ROWS) - 4);
+			const target = matchesKey(data, "home")
+				? 0
+				: matchesKey(data, "end")
+					? this.rows.length - 1
+					: this.highlight + (matchesKey(data, "pageUp") ? -page : page);
+			this.highlight = Math.min(this.rows.length - 1, Math.max(0, target));
+			this.invalidateLayout();
+			return;
+		}
 		if (matchesKey(data, "enter") || data === "\n") {
 			const row = this.currentRow();
 			if (!row) return;
