@@ -269,12 +269,6 @@ function stripProjectAutonomy(
 	return cleaned;
 }
 
-/**
- * A repository may lower telemetry capture but never raise it, so opening a
- * cloned project cannot switch the operator into research mode or turn on a
- * research flag their own file leaves off (#434, O6). Content capture still
- * needs the operator's workspace consent, which no settings layer grants.
- */
 /** The census sends a request to a host; only the operator's own settings may turn it on or choose the host. */
 function stripProjectReport(
 	blob: Record<string, unknown>,
@@ -301,6 +295,12 @@ function stripProjectReport(
 	return cleaned;
 }
 
+/**
+ * A repository may lower telemetry capture but never raise it, so opening a
+ * cloned project cannot switch the operator into research mode or turn on a
+ * research flag their own file leaves off (#434, O6). Content capture still
+ * needs the operator's workspace consent, which no settings layer grants.
+ */
 function stripProjectTelemetry(
 	blob: Record<string, unknown>,
 	origin: SettingsOrigin,
