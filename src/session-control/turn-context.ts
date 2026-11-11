@@ -110,6 +110,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	modelEndpointKey,
 	type ProvidersContract,
+	resolveModelReference,
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import type { LocalModelQuirks } from "../domains/providers/types/local-model-quirks.js";
@@ -693,6 +694,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let autoCompactFailures = 0;
 	// The chat and summarizer route the failures above were counted on: another route clears them.
 	let autoCompactRouteKey = "";
+	let summaryRouteMemo: { key: string; onChatRoute: boolean } | null = null;
 	// After a committed summary, automatic summaries wait until the context grows past what it left by a band, so a
 	// floor near the threshold does not pay one summary per tool batch for a few hundred tokens. Forced runs ignore it.
 	let summaryRearm: { tokensAfter: number; band: number } | null = null;
@@ -1094,6 +1096,25 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	let pendingUserImages: ReadonlyArray<unknown> = [];
+	/**
+	 * Whether the compaction summary is written on the chat route, as it is unless `context.compaction.model` names
+	 * another one. A reference that resolves to nothing reads as the chat route, the larger reserve.
+	 */
+	const summaryOnChatRoute = (agentRuntime: AgentRuntime, compactionModel: string | null | undefined): boolean => {
+		if (!compactionModel) return true;
+		const key = JSON.stringify([compactionModel, agentRuntime.targetId, agentRuntime.wireModelId]);
+		if (summaryRouteMemo?.key === key) return summaryRouteMemo.onChatRoute;
+		let onChatRoute = true;
+		try {
+			const { ref } = resolveModelReference(compactionModel, deps.providers, { use: "chat" });
+			if (ref) onChatRoute = ref.target === agentRuntime.targetId && ref.model === agentRuntime.wireModelId;
+		} catch {
+			// An invalid reference fails the summary itself; the trigger keeps the chat route's reserve.
+		}
+		summaryRouteMemo = { key, onChatRoute };
+		return onChatRoute;
+	};
+
 	const liveContextEstimate = (
 		agentRuntime: AgentRuntime,
 		pendingUserText?: string,
@@ -1683,7 +1704,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// The summary's output shares the window with the context it reads, so every
 		// trigger check here counts it; the re-checks after a free stage use the same
 		// reserve so a stage that stops short of it does not re-arm on the next turn.
-		const summaryReserve = summaryOutputReserve(agentRuntime.agent.state.model);
+		const summaryReserve = summaryOutputReserve(agentRuntime.agent.state.model, {
+			summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model),
+		});
 		const workingSetTarget = settings.context.workingSet.target * economic.fractionScale;
 		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
@@ -3285,7 +3308,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				before.tokens,
 				economic.threshold,
 				economic.triggerWindow,
-				summaryOutputReserve(agentRuntime.agent.state.model),
+				summaryOutputReserve(agentRuntime.agent.state.model, {
+					summaryOnChatRoute: summaryOnChatRoute(agentRuntime, settings.context.compaction?.model),
+				}),
 			);
 			let compacted = false;
 			// Eviction rebuilds the messages before the summary call, so a failed summary can still leave them changed.

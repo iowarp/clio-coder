@@ -39,13 +39,24 @@ export function summaryOutputBudget(
 }
 
 /**
- * Output tokens a compaction summary needs beside the context it reads; the
- * automatic trigger counts them against the window so the summary still fits.
+ * The reasoning share the trigger assumes on a reasoning route that has written no summary yet, so it keeps the
+ * summary room twice over rather than the route's whole output limit. The request itself may still ask for the limit.
+ */
+const DEFAULT_REASONING_SHARE = 0.5;
+
+/**
+ * Tokens the automatic trigger keeps free beside the context for a compaction summary, so the summary still fits.
+ * A summary written on a separate route runs in that route's own window, and the chat window then holds only the
+ * summary it returns. One written on the chat route shares the window with its output, reasoning included.
  */
 export function summaryOutputReserve(
 	model: Pick<EngineModel, "provider" | "baseUrl" | "id" | "maxTokens" | "reasoning">,
-	reserveTokens: number = DEFAULT_RESERVE_TOKENS,
+	options: { summaryOnChatRoute: boolean; reserveTokens?: number },
 ): number {
-	const { maxTokens, summaryRoom } = summaryOutputBudget(model, reserveTokens);
-	return maxTokens ?? summaryRoom;
+	const { maxTokens, summaryRoom } = summaryOutputBudget(model, options.reserveTokens ?? DEFAULT_RESERVE_TOKENS);
+	if (!options.summaryOnChatRoute || maxTokens === undefined) return summaryRoom;
+	if (model.reasoning && summaryReasoningShare(model) === undefined) {
+		return Math.min(maxTokens, Math.ceil(summaryRoom / (1 - DEFAULT_REASONING_SHARE)));
+	}
+	return maxTokens;
 }

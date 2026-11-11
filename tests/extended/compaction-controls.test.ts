@@ -1054,6 +1054,43 @@ describe("production compaction controls", () => {
 		strictEqual(attempts, 1);
 	});
 
+	it("a reasoning chat route reserves the summary room, not its whole output limit, in the trigger", async () => {
+		const f = fixture(true);
+		f.settings.context.workingSet.enabled = false;
+		let attempts = 0;
+		const { runtime, context } = automaticContext(f, (...args) => {
+			attempts++;
+			return f.run(...args);
+		});
+		f.settings.context.compaction.threshold = 0.9;
+		// A 200K reasoning route whose 128K output limit once moved the trigger to 0.9 x 200K - 128K = 52K.
+		runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow = 200_000;
+		runtime.agent.state.model = {
+			...runtime.agent.state.model,
+			contextWindow: 200_000,
+			maxTokens: 128_000,
+			reasoning: true,
+		};
+		const pending = (tokens: number) => "word ".repeat(Math.floor(tokens * 0.8));
+		const compactAt = async (tokens: number, summaryModel: string | undefined) => {
+			if (summaryModel === undefined) delete f.settings.context.compaction.model;
+			else f.settings.context.compaction.model = summaryModel;
+			attempts = 0;
+			// The pending turn alone sizes the context, so each check names the tokens it sends.
+			runtime.agent.state.messages = [];
+			await context.runAutoCompact(runtime, false, undefined, undefined, pending(tokens));
+			return attempts;
+		};
+		// The summary is written on its own route, so the chat window holds only the summary it returns.
+		strictEqual(await compactAt(53_000, "summary-target/summary"), 0);
+		strictEqual(await compactAt(150_000, "summary-target/summary"), 0);
+		strictEqual(await compactAt(172_000, "summary-target/summary"), 1);
+		// On the chat route, the first summary keeps room for reasoning without claiming the whole output limit.
+		strictEqual(await compactAt(53_000, undefined), 0);
+		strictEqual(await compactAt(150_000, undefined), 0);
+		strictEqual(await compactAt(160_000, undefined), 1);
+	});
+
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
 		const f = fixture();
 		let attempts = 0;
