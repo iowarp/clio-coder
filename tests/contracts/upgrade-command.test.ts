@@ -39,7 +39,7 @@ function installedFixture() {
 		[
 			"import fs from 'node:fs';",
 			"const args = process.argv.slice(2);",
-			"fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ entry: process.argv[1], args })+'\\n');",
+			"fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({ entry: process.argv[1], args, parent: process.env.CLIO_CODER_UPGRADE_PARENT })+'\\n');",
 			"if (args[0] === 'upgrade' || args[0] === 'doctor') process.exitCode = Number(process.env.POST_CODE || 0);",
 			"else {",
 			`  const { extractGlobalFlags } = await import(${JSON.stringify(ARGV_MODULE)});`,
@@ -141,35 +141,41 @@ test("upgrade updates the same prefix and runs checks with the exact installed e
 	assert.equal(JSON.parse(result.stdout).status, "success");
 	assert.deepEqual(f.calls(), [
 		{ command: "npm", args: ["install", "-g", "--prefix", f.prefix, "@iowarp/clio-coder@99.0.0"] },
-		{ entry: f.entry, args: ["upgrade", "--post-install", "--channel=latest", "--json"] },
+		{ entry: f.entry, args: ["upgrade", "--post-install", "--channel=latest", "--json"], parent: "1" },
 	]);
 });
 
-test("a successful upgrade asks the installed CLI to restart an idle background app", (t) => {
+test("a successful upgrade asks the installed CLI to restart an idle background app once", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);
 	const background = join(f.home.dir, "state/gui/background");
 	mkdirSync(background, { recursive: true });
 	writeFileSync(join(background, "owner.json"), "{}\n");
-	const result = f.run(
-		["--json"],
-		`runBackgroundRestart: async (installation) => {
+	const restart = `runBackgroundRestart: async (installation) => {
 			const { appendFileSync } = await import("node:fs");
 			appendFileSync(process.env.CALL_LOG, JSON.stringify({ backgroundEntry: installation.entry }) + "\\n");
 			return "Clio Coder background app was left running because it is busy.";
-		},`,
-	);
+		},`;
+	const result = f.run(["--json"], restart);
 	assert.equal(result.status, 0, result.stderr + result.stdout);
 	assert.deepEqual(f.calls().at(-1), { backgroundEntry: f.entry });
 	assert.match(result.stdout, /background app was left running because it is busy/);
 
-	const manual = f.run(
+	// The post-install run an upgrade starts leaves the restart to it, so an idle app restarts once.
+	const child = f.run(
 		["--post-install", "--skip-migrations", "--json"],
-		`runBackgroundRestart: async () => { throw new Error("must not run automatically"); },`,
+		`runBackgroundRestart: async () => { throw new Error("must not run under an upgrade"); },`,
+		{ CLIO_CODER_UPGRADE_PARENT: "1" },
 	);
-	assert.equal(manual.status, 0, manual.stderr + manual.stdout);
-	assert.doesNotMatch(manual.stdout, /must not run automatically/);
-	assert.match(manual.stdout, /clio-coder gui background restart/);
+	assert.equal(child.status, 0, child.stderr + child.stdout);
+	assert.doesNotMatch(child.stdout, /must not run under an upgrade|background app/);
+	assert.deepEqual(f.calls().at(-1), { backgroundEntry: f.entry });
+
+	// A post-install the installer runs on its own restarts the app itself.
+	const installer = f.run(["--post-install", "--skip-migrations", "--json"], restart);
+	assert.equal(installer.status, 0, installer.stderr + installer.stdout);
+	assert.equal(f.calls().filter((call) => call.backgroundEntry === f.entry).length, 2);
+	assert.match(installer.stdout, /background app was left running because it is busy/);
 });
 
 test("post-install moves a background app another installation owns and names the installer root it left", (t) => {
@@ -212,7 +218,7 @@ test("post-install moves a background app another installation owns and names th
 	assert.match(said, /shadow-bin\/clio-coder comes first on PATH and still starts the old installation/);
 	assert.match(moved.stdout, /clio-coder uninstall --inactive/);
 
-	// A newer version of the same installation keeps the restart advice and never hands over.
+	// A newer version of the same installation restarts the app and never hands over.
 	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: f.root }));
 	const same = f.run(
 		["--post-install", "--skip-migrations"],
@@ -221,7 +227,7 @@ test("post-install moves a background app another installation owns and names th
 	);
 	assert.equal(same.status, 0, same.stderr + same.stdout);
 	assert.doesNotMatch(same.stdout + same.stderr, /must not hand over/);
-	assert.match(same.stdout, /clio-coder gui background restart/);
+	assert.deepEqual(f.calls().at(-1)?.args, ["gui", "background", "restart", "--if-idle"]);
 });
 
 test("restart follows successful checks, relaunches with argv the real parser accepts, and propagates the new CLI's exit status", (t) => {

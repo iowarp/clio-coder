@@ -318,6 +318,12 @@ function stakeInstall(
 	};
 }
 
+/**
+ * Marks the post-install runs an upgrade starts, its own and the installer's,
+ * so they leave the background restart to the upgrade, which does it once.
+ */
+const UPGRADE_CHILD_ENV = { CLIO_CODER_UPGRADE_PARENT: "1" } as const;
+
 async function runInstallerUpgrade(installation: Installation, invocation: UpgradeInvocation): Promise<Installation> {
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined)
@@ -325,6 +331,7 @@ async function runInstallerUpgrade(installation: Installation, invocation: Upgra
 	await runChild(invocation.command, invocation.args, process.platform === "win32" ? "install.ps1" : "install.sh", {
 		...process.env,
 		...invocation.env,
+		...UPGRADE_CHILD_ENV,
 	});
 	const updated = readInstallerRecord(record.root);
 	if (updated === null) throw new Error(`install.sh finished but ${join(record.root, "install.json")} is unreadable`);
@@ -355,7 +362,10 @@ async function runPostInstallUpgrade(
 ): Promise<void> {
 	const args = [installation.entry, "upgrade", "--post-install", `--channel=${opts.channel}`, "--json"];
 	if (opts.skipMigrations) args.push("--skip-migrations");
-	const output = await runChild(nodeFor(installation), args, "clio-coder upgrade --post-install");
+	const output = await runChild(nodeFor(installation), args, "clio-coder upgrade --post-install", {
+		...process.env,
+		...UPGRADE_CHILD_ENV,
+	});
 	let report: { steps: Array<{ type: string; message: string }>; warnings: string[] };
 	try {
 		report = JSON.parse(output);
@@ -618,9 +628,9 @@ export async function runUpgradeCommand(
 						"clio-coder gui background install --handover",
 					);
 				}
-			} else {
+			} else if (!(opts.postInstall && process.env.CLIO_CODER_UPGRADE_PARENT === "1")) {
 				// The new installation restarts an idle app itself, and an app 0.7.0 started at once; a busy one
-				// moves on the next clio-coder gui after its work is done.
+				// moves on the next clio-coder gui after its work is done. Under an upgrade, the upgrade does it.
 				try {
 					presenter.note(await deps.runBackgroundRestart(activeInstallation));
 				} catch (error) {

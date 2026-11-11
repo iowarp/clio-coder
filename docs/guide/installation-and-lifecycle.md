@@ -752,8 +752,9 @@ sessions; the uninstall operation below deliberately removes those roots.
 After a successful upgrade, and when this state root has an owned graphical
 background app, `upgrade` runs `clio-coder gui background restart --if-idle` and
 prints its one-line result. A failure there is a warning, not a failed upgrade.
-With `--post-install` it prints the `clio-coder gui background restart` command
-instead and restarts nothing.
+A `--post-install` run does the same, so an installer that runs it on its own
+restarts the app too; the post-install runs that `upgrade` starts leave the
+restart to it, so the app restarts once.
 
 Every installer upgrade lands in a new `versions/<version>` prefix, and two
 versions of one installer install count as one installation when the app is
