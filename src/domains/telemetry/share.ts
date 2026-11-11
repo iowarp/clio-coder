@@ -883,6 +883,8 @@ function profileViolation(files: TelemetryScopeFiles, profile: ShareProfile, ins
 	for (const segment of files.segments)
 		for (const row of scanTelemetrySegment(segment.bytes).rows) {
 			if (row.kind === "retired") continue;
+			if (row.kind === "skipped" && row.k !== undefined)
+				return `holds a ${row.k} record that fails its schema, a Clio Coder bug to report`;
 			if (row.kind === "skipped" || row.kind === "damaged") return "holds a line this version cannot read";
 			if (row.kind === "header") {
 				if (row.header.clockOrigin.host !== installId) return "holds a segment header naming another host";

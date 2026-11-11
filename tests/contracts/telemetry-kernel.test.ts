@@ -319,6 +319,7 @@ test("segment readers preserve future records and distinguish a torn tail from i
 	deepStrictEqual(readTelemetryRecord({ ...record, cc: "content-bearing" }), {
 		kind: "skipped",
 		reason: "invalid-record",
+		k: record.k,
 	});
 	for (const definition of Object.values(EVENTS))
 		if (definition.durability === "journal") strictEqual(Value.Check(definition.schema, undefined), false);

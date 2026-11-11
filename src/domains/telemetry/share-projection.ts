@@ -29,7 +29,9 @@ export type AnonKind = "host" | "user" | "path" | "endpoint" | "config" | "model
  * the schema leaves open stays when it is identifier shaped ({@link TOKEN}), anything else becomes a `name` anonymous
  * id. `tool` and `runtime`: a built-in tool or runtime stays, an operator's own (an MCP tool, a plugin runtime) becomes
  * a `name` anonymous id. `name`: an identity an operator chooses (an agent, a rule, a hook, a flow recipient) is always
- * anonymous. `token-keys`: a dictionary whose keys are `token`s and whose values are closed.
+ * anonymous. `token-keys`: a dictionary whose keys are `token`s and whose values are closed. `evidence`: a
+ * `matcher:subject@scope` match description that a built-in rule records stays; another keeps a built-in matcher and
+ * scope around an anonymous subject, so it still matches the field's pattern, and anything else is dropped.
  */
 export type FieldProjection =
 	| "keep"
@@ -44,6 +46,7 @@ export type FieldProjection =
 	| "tool"
 	| "runtime"
 	| "token-keys"
+	| "evidence"
 	| AnonKind
 	| { readonly [field: string]: FieldProjection };
 
@@ -474,7 +477,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"middleware.fired": {
 		...keep("hook", "phase", "effects", "severity"),
 		ruleId: "name",
-		evidence: "token",
+		evidence: "evidence",
 		tool: "tool",
 	},
 	"system_one.decided": {
@@ -714,6 +717,46 @@ const MINTED_ID = new RegExp(
 );
 /** An identifier-shaped word of a harness vocabulary: no whitespace, no path separator, at most 64 characters. */
 const TOKEN = /^(?=.{1,64}$)[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$/u;
+/** A middleware rule's `matcher:subject@scope`, as `middleware.fired` evidence's schema admits it. */
+const EVIDENCE = /^([a-z][a-z0-9-]{0,31}):([A-Za-z0-9_.-]{1,64})(?:@([a-z][a-z0-9-]{0,31}))?$/u;
+/**
+ * The evidence Clio's own rules record, which a share keeps verbatim. Any other evidence (an operator's rule or hook)
+ * keeps its matcher and scope only when both are ones these use, with its subject anonymized; else it is dropped. A
+ * built-in missing here is only anonymized or dropped, never leaked.
+ */
+const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
+	"check:completion-evidence@turn-end",
+	"check:uncited-line-numbers@final-answer",
+	"count:enumerated-steps@operator-request",
+	"count:failure-recurrence@task-memory",
+	"count:open-tasks@turn-end",
+	"count:ready-detached-batches@turn-end",
+	"count:repeated-call@tool-args",
+	"diff:mutating-turn@board-scope",
+	"flag:untrustedInstructionMarkers@tool-result",
+	"match:completed-dispatch@user-turn",
+	"match:guidance-entry@turn",
+	"match:marketplace-capability@task",
+	"observer:file-mutation@tool-result",
+	"observer:skill-activation@tool-result",
+	"observer:turn-outcome@turn",
+	"path:compacted-file@tool-args",
+	"path:protected-artifact@tool-args",
+	"rank:skills@task",
+	"regex:ANNOUNCED_WORK@assistant-text",
+	"regex:TOOL_CALL_PROSE@assistant-text",
+	"regex:WORKER_CLAIM_PATTERNS@assistant-text",
+	"typed:claims-log@task",
+	"typed:hypothesis-slate@tool-args",
+	"typed:verify.check@tool-args",
+	"typed:verify.report@tool-result",
+]);
+const EVIDENCE_MATCHERS: ReadonlySet<string> = new Set(
+	[...BUILTIN_EVIDENCE].map((text) => text.slice(0, text.indexOf(":"))),
+);
+const EVIDENCE_SCOPES: ReadonlySet<string> = new Set(
+	[...BUILTIN_EVIDENCE].map((text) => text.slice(text.indexOf("@") + 1)),
+);
 const TOOL_VOCABULARY: ReadonlySet<string> = new Set([
 	...Object.values(ToolNames),
 	"auto",
@@ -876,6 +919,14 @@ function projectField(
 	if (projection === "id") return mapStrings(value, (text) => (MINTED_ID.test(text) ? text : anonymize("id", text)));
 	if (projection === "token")
 		return mapStrings(value, (text) => (TOKEN.test(text) ? readable("token", text) : anonymize("name", text)));
+	if (projection === "evidence") {
+		if (typeof value !== "string") return DROP;
+		if (BUILTIN_EVIDENCE.has(value)) return readable("token", value);
+		const parts = EVIDENCE.exec(value);
+		const [, matcher = "", subject = "", scope] = parts ?? [];
+		if (!parts || !EVIDENCE_MATCHERS.has(matcher) || (scope !== undefined && !EVIDENCE_SCOPES.has(scope))) return DROP;
+		return `${matcher}:${anonymize("name", subject)}${scope !== undefined ? `@${scope}` : ""}`;
+	}
 	if (projection === "tool")
 		return mapStrings(value, (text) => (TOOL_VOCABULARY.has(text) ? readable("tool", text) : anonymize("name", text)));
 	if (projection === "runtime")

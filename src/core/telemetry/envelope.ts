@@ -97,7 +97,8 @@ export type RecordRead =
 	| { kind: "header"; header: SegmentHeader }
 	/** A kind this version retired on purpose. It stays in the hash chain and counts as nothing: not unreadable, not skipped. */
 	| { kind: "retired"; k: string }
-	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true }
+	/** `k` names a known record kind whose payload failed its schema, so a reader can say which record it was. */
+	| { kind: "skipped"; reason: "unknown-kind" | "unknown-version" | "invalid-record"; segment?: true; k?: string }
 	/** A complete interior line whose checksum failed; what it held is unknown. */
 	| { kind: "damaged" };
 
@@ -139,13 +140,12 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 	const definition = journalDefinition(value.k);
 	if (value.kv !== definition.version) return { kind: "skipped", reason: "unknown-version" };
 	const data = value.data;
-	if (value.tier !== definition.tier || value.cc !== definition.cc || !validPayload(value.k, data)) {
-		return { kind: "skipped", reason: "invalid-record" };
-	}
+	const invalid = { kind: "skipped", reason: "invalid-record", k: value.k } as const;
+	if (value.tier !== definition.tier || value.cc !== definition.cc || !validPayload(value.k, data)) return invalid;
 	if (value.k === "call.started" || value.k === "call.settled") {
 		const call = data as JournalPayload<"call.started">;
 		if (value.ctx.callId !== call.callId || value.ctx.attemptId !== call.attemptId) {
-			return { kind: "skipped", reason: "invalid-record" };
+			return invalid;
 		}
 	}
 	if (
@@ -156,6 +156,6 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 			value.ctx.callId ||
 			value.ctx.attemptId)
 	)
-		return { kind: "skipped", reason: "invalid-record" };
+		return invalid;
 	return { kind: "record", record: value as TelemetryRecord };
 }

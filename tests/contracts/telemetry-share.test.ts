@@ -28,6 +28,7 @@ import {
 	importShareArchive,
 	planShare,
 	resolveShareScopes,
+	SHARE_PROFILE_NAMES,
 	sealSharedScope,
 	telemetryShareSource,
 	verifyShareArchive,
@@ -648,6 +649,71 @@ test("a report share anonymizes engine, step and digest ids and the record conte
 		const engine = (decided.record.data as EventPayload<"system_one.decided">).routes[0]?.engine;
 		strictEqual(decided.record.ctx.agent.id, engine);
 		for (const row of rows) if (row.kind === "header") strictEqual(row.header.clockOrigin.birthToken, null);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a session where a built-in middleware fired shares under every profile, its evidence still schema-valid", async () => {
+	const root = await mkdtemp(join(tmpdir(), "telemetry-share-middleware-"));
+	try {
+		const stateDir = join(root, "operator");
+		const sessionId = "ses_middleware";
+		const context: TelemetryContext = { sessionId, agent: { role: "main", id: sessionId } };
+		await liveJournal(telemetrySessionDirectory(stateDir, sessionId), context, [
+			{ kind: "session.opened", data: {} },
+			{
+				kind: "middleware.fired",
+				data: {
+					hook: "turn_end",
+					phase: "sync",
+					ruleId: "check:completion-evidence@turn-end",
+					effects: ["inject_reminder"],
+					evidence: "check:completion-evidence@turn-end",
+				},
+			},
+			{
+				kind: "middleware.fired",
+				data: {
+					hook: "after_tool",
+					phase: "sync",
+					ruleId: "operator-rule",
+					effects: ["inject_reminder"],
+					evidence: "regex:Private_Nightingale.x@assistant-text",
+					tool: "write",
+				},
+			},
+		]);
+		const selection = {
+			sessions: [sessionId],
+			runs: [],
+			repo: null,
+			since: null,
+			until: null,
+			live: "snapshot",
+		} as const;
+		for (const profile of SHARE_PROFILE_NAMES) {
+			const { scopes, skipped } = resolveShareScopes(stateDir, selection);
+			const plan = planShare({ scopes, skipped, profile, source: freshShareSource(), writer });
+			const out = join(root, `${profile}.tar.gz`);
+			await writeShare(plan, out);
+			strictEqual(verifyShareArchive(await readFile(out)).failure, null, profile);
+			const rows = scanTelemetrySegment(plan.scopes[0]?.journal ?? Buffer.alloc(0)).rows;
+			ok(
+				rows.every((row) => row.kind !== "skipped" && row.kind !== "damaged"),
+				profile,
+			);
+			const fired = rows.filter((row) => row.kind === "record" && row.record.k === "middleware.fired");
+			strictEqual(fired.length, 2, profile);
+			const first = fired[0];
+			ok(first?.kind === "record");
+			const evidence = (first.record.data as EventPayload<"middleware.fired">).evidence ?? "";
+			strictEqual(evidence, "check:completion-evidence@turn-end", profile);
+			const second = fired[1];
+			ok(second?.kind === "record");
+			const operator = (second.record.data as EventPayload<"middleware.fired">).evidence ?? "";
+			match(operator, /^regex:anon_[0-9a-f]{16}@assistant-text$/u, profile);
+		}
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
