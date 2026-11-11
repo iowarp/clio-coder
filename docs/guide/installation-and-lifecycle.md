@@ -49,6 +49,19 @@ version. The banner, `--version`, `clio-coder doctor` and the ACP handshake all 
 label, and extension version ranges are checked against the version without `-dev`, the release the
 development tree is becoming.
 
+### npm install-scripts warning
+
+npm versions that gate dependency install scripts behind `allowScripts` may print, on
+`npm install -g @iowarp/clio-coder`, that `@google/genai` (preinstall) and `protobufjs`
+(postinstall) have install scripts not yet covered by `allowScripts`. The installation is
+complete and works without them: the `@google/genai` preinstall is `echo 'preinstall: no-op'`,
+and the `protobufjs` postinstall only prints a warning when a package that depends on it
+pins a version range in a style it does not recommend. Neither builds, downloads or writes
+anything Clio Coder needs, so skipping them is safe. To silence the warning, allow them as
+npm suggests, once with `npm install -g --allow-scripts=@google/genai,protobufjs @iowarp/clio-coder`
+or for every global install with
+`npm config set allow-scripts=@google/genai,protobufjs --location=user`.
+
 ### Try a pre-release
 
 The `latest` channel contains stable releases. `beta` contains release candidates
