@@ -23,7 +23,9 @@ import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
 	createTaskWorktree,
+	overlayTaskWorktree,
 	recoverTaskWorktrees,
+	restoreTaskWorktreeOverlay,
 	shareTaskWorktreeDependencies,
 	withStrayWrites,
 } from "../../src/tools/task-worktree.js";
@@ -346,6 +348,35 @@ describe("task worktree root", () => {
 		});
 		strictEqual(short?.level, "warn");
 		match(short?.detail ?? "", /\.clio-coder\/worktrees \(ext4, .*\); .* using the project root$/u);
+	});
+
+	it("never lands a file Clio overlaid in a worktree, even when the run dies before putting it back", () => {
+		const crashed = createTaskWorktree(root, "run-overlay-crash", undefined, "merge");
+		overlayTaskWorktree(crashed.path, [{ file: "a.txt", content: "compiled rules\n" }]);
+		strictEqual(readFileSync(join(crashed.path, "a.txt"), "utf8"), "compiled rules\n");
+		strictEqual(git(crashed.path, "status", "--porcelain"), "");
+		const forced = spawnSync("git", ["-C", crashed.path, "add", "a.txt"], { encoding: "utf8" });
+		ok(forced.status !== 0, "an explicit add of an overlaid path is refused");
+		writeFileSync(join(crashed.path, "b.txt"), "b\n");
+		const receipt = applyTaskWorktree({
+			worktree: crashed,
+			apply: "merge",
+			authoredPaths: [join(crashed.path, "b.txt")],
+		});
+		strictEqual(receipt.applied, true);
+		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "a\n");
+		strictEqual(readFileSync(join(root, "b.txt"), "utf8"), "b\n");
+		cleanupTaskWorktree(crashed, true);
+
+		const run = createTaskWorktree(root, "run-overlay", undefined, "merge");
+		const overlay = overlayTaskWorktree(run.path, [{ file: "a.txt", content: "compiled rules\n" }]);
+		writeFileSync(join(run.path, "a.txt"), "the worker edited the overlay\n");
+		restoreTaskWorktreeOverlay(overlay);
+		strictEqual(readFileSync(join(run.path, "a.txt"), "utf8"), "a\n");
+		strictEqual(git(run.path, "ls-files", "-v", "a.txt"), "H a.txt");
+		throws(() => overlayTaskWorktree(run.path, [{ file: "../repo/a.txt", content: "x" }]), /leaves the worktree/u);
+		throws(() => overlayTaskWorktree(run.path, [{ file: "untracked.txt", content: "x" }]));
+		cleanupTaskWorktree(run, true);
 	});
 
 	it("names a worker's writes outside its worktree on the receipt, because they reach no branch", () => {

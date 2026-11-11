@@ -10,7 +10,7 @@ import type { DomainName } from "../../src/core/domain-loader.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
-import { piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
+import { opencodeCliRuntime, piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -253,6 +253,114 @@ for (const event of [
 			stale: 1,
 			notCarried: 0,
 		});
+	} finally {
+		await bundle.extension.stop?.();
+	}
+});
+
+test("OpenCode in a task worktree reads the compiled rules from its AGENTS.md, which never lands", {
+	timeout: 30_000,
+}, async () => {
+	execFileSync("git", ["init", "-q", root]);
+	// The session runs from the fixture repository, so its handbook is the session's and not a sister's.
+	process.chdir(root);
+	execFileSync("git", ["-C", root, "config", "user.name", "Fixture"]);
+	execFileSync("git", ["-C", root, "config", "user.email", "fixture@example.invalid"]);
+	const seenPath = join(root, "bin", "seen.json");
+	writeFileSync(
+		join(root, "bin", "opencode"),
+		`#!/usr/bin/env node
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+let stdin = "";
+for await (const chunk of process.stdin) stdin += chunk;
+writeFileSync(${JSON.stringify(seenPath)}, JSON.stringify({ agents: readFileSync("AGENTS.md", "utf8"), stdin }));
+writeFileSync("src/cart.ts", "export const cents = (value: number): number => Math.round(value);\\n");
+appendFileSync("AGENTS.md", "- An edit the task did not ask for.\\n");
+const answer = JSON.stringify({ mutatedPaths: ["src/cart.ts"], validations: [{ name: "fixture", passed: true, evidence: "edited" }], summary: "edited" });
+for (const event of [
+  { type: "text", sessionID: "session-1", part: { type: "text", text: answer } },
+  { type: "step_finish", sessionID: "session-1", part: { type: "step-finish", cost: 0, tokens: { input: 3, output: 1 } } },
+]) process.stdout.write(JSON.stringify(event) + "\\n");
+`,
+	);
+	chmodSync(join(root, "bin", "opencode"), 0o755);
+	writeFileSync(join(root, ".gitignore"), "bin/\n");
+	writeFileSync(join(root, "package.json"), JSON.stringify({ name: "demo", scripts: { test: "node --test" } }));
+	writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+	mkdirSync(join(root, "src"));
+	writeFileSync(join(root, "src", "cart.ts"), "export const cents = (value: number): number => value;\n");
+	writeFileSync(
+		join(root, "CLIO-CODER.md"),
+		"# Demo\n\nDemo prices carts.\n\n## Hard invariants\n\n1. Never write to the operator's real home from tests.\n",
+	);
+	const agents =
+		"# Notes\n\n- Money is integer cents; see `src/cart.ts`.\n- Run `pnpm run test:all` before committing.\n";
+	writeFileSync(join(root, "AGENTS.md"), agents);
+	execFileSync("git", ["-C", root, "add", "."]);
+	execFileSync("git", ["-C", root, "commit", "-qm", "base"]);
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [
+		{ id: "opencode-test", runtime: "opencode-cli", defaultModel: "opencode-cli-default", trustedUnmediated: true },
+	];
+	settings.fleet.default.target = "opencode-test";
+	settings.fleet.default.model = "opencode-cli-default";
+	settings.fleet.retry.maxRetries = 0;
+	settings.safety.autonomy = "default";
+	const base = dispatchStubContext({
+		settings,
+		runtime: opencodeCliRuntime,
+		agentTools: ["read", "write"],
+		useRuntimeDefaultAgentBudget: true,
+	});
+	const bundle = makeDispatchBundle({
+		...base,
+		getContract: ((name: DomainName) =>
+			name === "context" ? { renderPromptContext } : base.getContract(name)) as typeof base.getContract,
+	});
+	await bundle.extension.start();
+	const run = async (task: string) => {
+		const dispatched = await bundle.contract.dispatch({
+			agentId: "coder",
+			target: "opencode-test",
+			task,
+			worktree: true,
+			apply: "preserve",
+			executionRole: "builder",
+			requestOrigin: "user",
+			cwd: root,
+		});
+		const receipt = await dispatched.finalPromise;
+		equal(receipt.outcome, "succeeded", receipt.failureMessage);
+		const seen = JSON.parse(readFileSync(seenPath, "utf8")) as { agents: string; stdin: string };
+		rmSync(seenPath);
+		return { receipt, ...seen };
+	};
+	try {
+		const overlaid = await run("Round the cart total");
+		ok(overlaid.agents.includes("Never write to the operator's real home from tests."), overlaid.agents);
+		ok(overlaid.agents.includes("Money is integer cents; see `src/cart.ts`."), overlaid.agents);
+		ok(overlaid.agents.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."));
+		ok(!overlaid.agents.includes("test:all"), overlaid.agents);
+		ok(!overlaid.stdin.includes("<project-rules>"), "the rules are not sent twice");
+		deepStrictEqual(overlaid.receipt.projectContext?.peerInstructions, {
+			delivery: "overlay",
+			files: ["AGENTS.md"],
+			stale: 1,
+			notCarried: 0,
+		});
+		const worktree = overlaid.receipt.worktree;
+		ok(worktree?.commit);
+		deepStrictEqual(worktree.changedPaths, ["src/cart.ts"]);
+		equal(readFileSync(join(worktree.path, "AGENTS.md"), "utf8"), agents);
+		equal(execFileSync("git", ["-C", worktree.path, "status", "--porcelain"], { encoding: "utf8" }), "");
+		equal(execFileSync("git", ["-C", root, "show", `${worktree.commit}:AGENTS.md`], { encoding: "utf8" }), agents);
+		equal(readFileSync(join(root, "AGENTS.md"), "utf8"), agents);
+
+		// A task that names the file edits the real one, so the harness reads it as it is.
+		const named = await run("Tidy AGENTS.md and round the cart total");
+		equal(named.agents, agents);
+		equal(named.receipt.projectContext?.peerInstructions?.delivery, "coexist");
+		ok(named.stdin.includes("<project-rules>"), named.stdin);
 	} finally {
 		await bundle.extension.stop?.();
 	}

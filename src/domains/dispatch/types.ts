@@ -134,12 +134,13 @@ export interface RunProjectContextProvenance {
 	sections?: string[];
 	/**
 	 * A delegated harness's own repository instruction files (repository-relative) and how the run's rules reached
-	 * it: `single-source` when the harness started without the files and read the compiled rules alone, `coexist`
-	 * when it read the files unreconciled beside them. `stale` counts the files' rules the tree no longer supports;
+	 * it: `single-source` when the harness started without the files and read the compiled rules alone, `overlay`
+	 * when the compiled rules were written over the files in the run's task worktree and put back before its change
+	 * was taken, `coexist` when it read the files unreconciled beside them. `stale` counts the files' rules the tree no longer supports;
 	 * `notCarried` those that hold but did not fit the bound.
 	 */
 	peerInstructions?: {
-		delivery: "single-source" | "coexist";
+		delivery: "single-source" | "overlay" | "coexist";
 		files: string[];
 		stale: number;
 		notCarried: number;

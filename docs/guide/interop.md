@@ -136,14 +136,21 @@ off so the peer reads one source:
 | `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | single source | `--setting-sources user` |
 | `codex-cli` | `AGENTS.override.md`, else `AGENTS.md` | single source | `-c project_doc_max_bytes=0` |
 | `pi-cli` | `AGENTS.md`, else `CLAUDE.md` | single source | `--no-context-files` |
-| `opencode-cli` | `AGENTS.md`, else `CLAUDE.md` | coexist | none |
+| `opencode-cli` | `AGENTS.md`, else `CLAUDE.md` | overlay in a task worktree, else coexist | none |
 
 `--setting-sources user` also stops Claude Code from loading the project's
 `.claude/settings.json` and `.claude/settings.local.json`, including their
-hooks and permission rules. OpenCode has no switch, so it reads its files
-beside the compiled rules. A peer also reads them beside the usual project
-message when a handbook is prose without sections, because there is nothing to
-compile it into. Antigravity, ACP peers, and tier `none` keep their current
+hooks and permission rules. OpenCode has no switch. When its run has its own
+task worktree, Clio writes the compiled rules over the nearest instruction file
+in that worktree and empties the others for the run, so OpenCode reads them
+there and not in the message. Each overlaid file is marked skip-worktree in the
+worktree's index and put back before the change is taken, so it never reaches
+the task branch, even when the run dies before the restore. The overlay is
+skipped when the task names one of those files, when one is not a regular file
+Git tracks, or when the run is on a remote host. OpenCode then reads its files
+beside the compiled rules (coexist). A peer also reads them beside the usual
+project message when a handbook is prose without sections, because there is
+nothing to compile it into. Antigravity, ACP peers, and tier `none` keep their current
 behavior. The run record's `projectContext.peerInstructions` names the delivery,
 the files, the count of rules the tree no longer supports (`stale`), and the
 count that hold but did not fit the bound (`notCarried`).

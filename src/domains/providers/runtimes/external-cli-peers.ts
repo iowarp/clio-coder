@@ -23,5 +23,5 @@ export const opencodeCliRuntime = createExternalCliRuntime({
 	authNotice: "Uses the installed `opencode` command and its own configured provider login.",
 	provider: "opencode-cli",
 	// OpenCode run has no switch that skips them.
-	repositoryInstructions: { files: ["AGENTS.md"], fallback: ["CLAUDE.md"], delivery: "coexist" },
+	repositoryInstructions: { files: ["AGENTS.md"], fallback: ["CLAUDE.md"], delivery: "overlay" },
 });

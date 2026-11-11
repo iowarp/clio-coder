@@ -189,12 +189,14 @@ export interface DecisionAlias {
  * In each directory from the repository root down to the run's directory the harness reads every name in `files`
  * that is present there, or, when none is, the first present name in `fallback`. With "single-source" the adapter
  * starts the harness with its documented switch that skips those files, so the rules compiled for the run are the
- * only project rules it reads; with "coexist" the harness reads them anyway and the compiled rules ride beside them.
+ * only project rules it reads. A harness without such a switch declares "overlay": when the run has its own task
+ * worktree the compiled rules are written over those files there for the run and put back before its change is
+ * taken; otherwise, and for "coexist", the harness reads its files and the compiled rules ride beside them.
  */
 export interface RepositoryInstructionFiles {
 	files: ReadonlyArray<string>;
 	fallback?: ReadonlyArray<string>;
-	delivery: "single-source" | "coexist";
+	delivery: "single-source" | "overlay" | "coexist";
 }
 
 export interface RuntimeDescriptor {

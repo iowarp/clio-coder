@@ -4,12 +4,13 @@
  * repository; this compiles the run's handbook together with the rules of
  * those files that still hold into one rule set (see `compilePeerHandbook`)
  * and says how it reaches the harness: in place of the files when the runtime
- * declares a switch that skips them, beside them otherwise. Nothing here
- * writes to the files or argues with them.
+ * declares a switch that skips them, written over them in the run's own task
+ * worktree when it declares an overlay, beside them otherwise. Nothing here
+ * writes to the operator's files or argues with them.
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import type { HandbookLedgerEntry } from "../context/bootstrap.js";
@@ -29,6 +30,8 @@ export interface PeerInstructions {
 	notCarried: number;
 	/** The compiled rules; absent when the handbook has no sections to compile, so the run keeps its usual message. */
 	text?: string;
+	/** For an overlay, what to write over each file in the task worktree for the run (worktree-relative paths). */
+	overlay?: Array<{ file: string; content: string }>;
 }
 
 interface PeerFile {
@@ -103,6 +106,43 @@ async function judgePeerFiles(cwd: string, files: ReadonlyArray<PeerFile>): Prom
 	return pending;
 }
 
+async function tracked(root: string, files: ReadonlyArray<string>): Promise<boolean> {
+	const result = await runCommandVector(
+		"git",
+		internalGitArgv(["-C", root, "ls-files", "--error-unmatch", "--", ...files.map((file) => `:(top,literal)${file}`)]),
+		{ timeoutMs: 5000 },
+	);
+	return result.exitCode === 0;
+}
+
+/**
+ * An overlay needs the run's own task worktree, files Git tracks there as
+ * regular files, and a task that does not name them: a task asked to edit
+ * the file must see and change the real one.
+ */
+async function overlayAllowed(
+	input: PeerInstructionsInput,
+	root: string,
+	files: ReadonlyArray<PeerFile>,
+): Promise<boolean> {
+	if (input.taskWorktree === undefined || resolve(input.taskWorktree) !== root) return false;
+	const declared = new Set(
+		input.declaredPaths.map((path) => (isAbsolute(path) ? resolve(path) : resolve(input.cwd, path))),
+	);
+	for (const file of files) {
+		if (declared.has(resolve(file.path))) return false;
+		try {
+			if (!lstatSync(file.path).isFile()) return false;
+		} catch {
+			return false;
+		}
+	}
+	return tracked(
+		root,
+		files.map((file) => file.file),
+	);
+}
+
 interface PeerInstructionsInput {
 	declared: RepositoryInstructionFiles | undefined;
 	cwd: string;
@@ -113,13 +153,18 @@ interface PeerInstructionsInput {
 	maxChars: number;
 	/** Clio tool and recipe names: a handbook rule citing one only makes sense inside Clio. */
 	clioNames: ReadonlyArray<string>;
+	/** The run's own task worktree, when it has one. */
+	taskWorktree?: string;
+	/** Paths the task declares or names; an overlay never covers one of them. */
+	declaredPaths: ReadonlyArray<string>;
 }
 
 /**
  * Null when the runtime reads no instruction files or the repository has none
- * of them, so the run is unchanged. Single source is used only when the
- * handbook compiled; a handbook of prose alone keeps its usual message and the
- * harness's files are read beside it.
+ * of them, so the run is unchanged. Single source and overlay are used only
+ * when the handbook compiled; a handbook of prose alone keeps its usual message
+ * and the harness's files are read beside it. An overlay the run cannot take
+ * falls back to coexist.
  */
 export async function resolvePeerInstructions(input: PeerInstructionsInput): Promise<PeerInstructions | null> {
 	if (input.declared === undefined) return null;
@@ -142,11 +187,11 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 		facts: treeFacts(repositoryRoot(input.cwd)),
 		clioNames: input.clioNames,
 	});
-	return {
-		delivery: input.declared.delivery,
-		files: names,
-		stale: peer.stale,
-		notCarried: peer.notCarried,
-		text: peer.text,
-	};
+	const result = { files: names, stale: peer.stale, notCarried: peer.notCarried, text: peer.text };
+	if (input.declared.delivery !== "overlay") return { delivery: input.declared.delivery, ...result };
+	if (!(await overlayAllowed(input, repositoryRoot(input.cwd), files))) return { delivery: "coexist", ...result };
+	// The harness reads every one of these files; the nearest holds the rules and the others are emptied for the run.
+	const nearest = names.length - 1;
+	const overlay = names.map((file, index) => ({ file, content: index === nearest ? `${peer.text}\n` : "" }));
+	return { delivery: "overlay", ...result, overlay };
 }

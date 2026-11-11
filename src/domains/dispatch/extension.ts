@@ -136,12 +136,15 @@ import {
 	keptTaskWorktreeDetail,
 	LEFT_UNCOMMITTED_LIST_LIMIT,
 	mergeDestination,
+	overlayTaskWorktree,
 	previewTaskWorktree,
 	protectedPathsChangedByWorktreeBranch,
 	receiptWithDrift,
+	restoreTaskWorktreeOverlay,
 	settleTaskWorktree,
 	shareTaskWorktreeDependencies,
 	snapshotTaskWorktree,
+	type TaskWorktreeOverlay,
 	taskWorktreeBaseDiff,
 	taskWorktreeHoldsWork,
 	WORKTREE_CHANGED_SINCE_PREVIEW,
@@ -2289,6 +2292,8 @@ interface DispatchLifecycleStage {
 	/** Decision refs sealed on the request by the dispatch tool; null when the parent board was empty. */
 	decisionRefs: ReadonlyArray<string> | null;
 	projectContext: RunProjectContextProvenance;
+	/** What to write over a delegated harness's instruction files in the run's task worktree; absent without an overlay. */
+	peerOverlay?: ReadonlyArray<{ file: string; content: string }>;
 	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
 	rulesApplied: string[];
 	/** Whether the operator profile rendered non-empty content into this run's system prompt. */
@@ -6094,6 +6099,8 @@ export function createDispatchBundle(
 						workingPaths: pathScope.workingContextPaths,
 						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
+						...(req.taskWorktree !== undefined ? { taskWorktree: req.taskWorktree.path } : {}),
+						declaredPaths: [...pathScope.workingContextPaths, ...pathScope.writeBoundaries, ...pathScope.inferredOnlyPaths],
 					})
 				: null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
@@ -6116,7 +6123,12 @@ export function createDispatchBundle(
 			permit,
 			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
 			projectPrompt,
-			...(peer?.text !== undefined ? { peerHandbook: peer.text } : {}),
+			// An overlay reaches the harness through its own file, so the message does not carry the rules twice.
+			...(peer?.overlay !== undefined
+				? { peerHandbook: "" }
+				: peer?.text !== undefined
+					? { peerHandbook: peer.text }
+					: {}),
 			projectReadTools:
 				target.runtime.kind === "subprocess"
 					? null
@@ -6189,6 +6201,7 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
+			...(peer?.overlay !== undefined ? { peerOverlay: peer.overlay } : {}),
 			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
@@ -7867,6 +7880,17 @@ export function createDispatchBundle(
 		let followerWorker: SpawnedWorker | null = null;
 		// A held follower joins its batch's board once its worker can take deliveries.
 		let subscribeHeldBoard: (() => void) | null = null;
+		let peerOverlay: TaskWorktreeOverlay | null = null;
+		const restorePeerOverlay = (): void => {
+			if (peerOverlay === null) return;
+			try {
+				restoreTaskWorktreeOverlay(peerOverlay);
+			} catch (error) {
+				// The skip-worktree mark stays on what was not put back, so the landing still leaves it out.
+				reportDispatchDiagnostic(`restore peer instructions in task worktree ${req.taskWorktree?.runId}`, error);
+			}
+			peerOverlay = null;
+		};
 		const callUsage = spec.telemetryContext ? createRunCallUsage(spec.telemetryContext) : undefined;
 		let runJournal: RunTelemetryJournal | undefined;
 		let parentJournal: TelemetrySessionLease | undefined;
@@ -7933,6 +7957,17 @@ export function createDispatchBundle(
 			const spawnNow = (): SpawnedWorker => {
 				// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
 				if (narrowPermitToLiveLevel()) spec = buildSpec();
+				const peerInstructions = lifecycle.projectContext.peerInstructions;
+				if (lifecycle.peerOverlay !== undefined && req.taskWorktree !== undefined && peerInstructions !== undefined) {
+					try {
+						if (placement !== null && placement.node.kind !== "local") throw new Error("the worktree is on another node");
+						peerOverlay = overlayTaskWorktree(req.taskWorktree.path, lifecycle.peerOverlay);
+					} catch (error) {
+						// The harness reads its own files after all; the record says so.
+						peerInstructions.delivery = "coexist";
+						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
+					}
+				}
 				return (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 			};
 			if (prefixClaim?.role === "follower") {
@@ -7969,6 +8004,7 @@ export function createDispatchBundle(
 				);
 			} else worker = spawnNow();
 		} catch (error) {
+			restorePeerOverlay();
 			prefixLeader?.release();
 			await closeRunJournal();
 			leaseSlot.release();
@@ -8022,7 +8058,8 @@ export function createDispatchBundle(
 			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
-		const workerDone = worker.promise;
+		// Put the harness's files back before anything reads the worktree's change.
+		const workerDone = peerOverlay === null ? worker.promise : worker.promise.finally(restorePeerOverlay);
 		if (prefixLeader) {
 			const release = prefixLeader.release;
 			workerDone.then(release, release);

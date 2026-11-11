@@ -403,6 +403,76 @@ export function commitWorktreePath(
 	};
 }
 
+/** Tracked files Clio wrote over in a task worktree for one run, with what to put back. */
+export interface TaskWorktreeOverlay {
+	path: string;
+	files: ReadonlyArray<{ file: string; original: Buffer; mode: number; parent: string }>;
+}
+
+function overlayTarget(path: string, file: string): string {
+	const target = resolve(path, file);
+	const rel = relative(resolve(path), target);
+	if (rel.length === 0 || rel.startsWith("..") || isAbsolute(rel))
+		throw new Error(`overlay path ${file} leaves the worktree`);
+	return target;
+}
+
+/**
+ * Write `files` (worktree-relative regular files Git tracks) over a task
+ * worktree for one run. Each path is first marked skip-worktree in the
+ * worktree's own index, so no host commit, diff or status sees what was
+ * written and `git add` of it is refused: a run that dies before
+ * `restoreTaskWorktreeOverlay` still cannot land it.
+ */
+export function overlayTaskWorktree(
+	path: string,
+	files: ReadonlyArray<{ file: string; content: string }>,
+): TaskWorktreeOverlay {
+	const written: Array<TaskWorktreeOverlay["files"][number]> = [];
+	try {
+		for (const { file, content } of files) {
+			const target = overlayTarget(path, file);
+			const stat = lstatSync(target);
+			if (!stat.isFile()) throw new Error(`overlay path ${file} is not a regular file`);
+			git(path, ["ls-files", "--error-unmatch", "--", `:(top,literal)${file}`]);
+			const entry = {
+				file,
+				original: readFileSync(target),
+				mode: stat.mode & 0o777,
+				parent: realpathSync(dirname(target)),
+			};
+			git(path, ["update-index", "--skip-worktree", "--", file]);
+			written.push(entry);
+			safeResourceWrite(target, content, { mode: entry.mode });
+		}
+	} catch (error) {
+		restoreTaskWorktreeOverlay({ path, files: written });
+		throw error;
+	}
+	return { path, files: written };
+}
+
+/**
+ * Put back what `overlayTaskWorktree` replaced, whatever the run did to those
+ * paths. A path whose directory no longer resolves where it did is left alone
+ * with its skip-worktree mark, so nothing is written outside the worktree and
+ * the landing still drops it.
+ */
+export function restoreTaskWorktreeOverlay(overlay: TaskWorktreeOverlay): void {
+	let failure: unknown;
+	for (const { file, original, mode, parent } of overlay.files) {
+		try {
+			const target = overlayTarget(overlay.path, file);
+			if (realpathSync(dirname(target)) !== parent) throw new Error(`overlay path ${file} moved during the run`);
+			safeResourceWrite(target, original, { mode });
+			git(overlay.path, ["update-index", "--no-skip-worktree", "--", file]);
+		} catch (error) {
+			failure ??= error;
+		}
+	}
+	if (failure !== undefined) throw failure;
+}
+
 /** The bounded account of new files a host commit left out, or undefined when it left none. */
 export function leftUncommittedReport(paths: ReadonlyArray<string>): TaskWorktreeReceipt["leftUncommitted"] {
 	return paths.length === 0 ? undefined : { count: paths.length, paths: paths.slice(0, LEFT_UNCOMMITTED_LIST_LIMIT) };
