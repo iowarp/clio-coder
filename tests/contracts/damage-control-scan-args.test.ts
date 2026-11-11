@@ -167,3 +167,19 @@ test("a built-in zero-access block is not attributed to a project policy that do
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("a bash read of a built-in zero-access path is Clio's safety net, not a project policy", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-builtin-secret-"));
+	try {
+		const bare = createSafetyPolicyEngine({ cwd: root });
+		for (const command of ["cat .env", "grep API_URL .env"])
+			for (const posture of ["default", "yolo"] as const) {
+				const decision = bare.evaluate({ tool: ToolNames.Bash, args: { command } }, posture);
+				strictEqual(decision.kind, "block", command);
+				strictEqual(decision.reasonCode, "secret_path_bash", command);
+				strictEqual(decision.policySource, "damage-control:base", `${command} at ${posture}`);
+			}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

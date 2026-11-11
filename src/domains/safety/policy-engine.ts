@@ -884,12 +884,16 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (scannedCommand !== null) {
 			const secretRead = evaluateBashZeroAccessRead(zeroAccessPolicy, scannedCommand, callCwd);
 			if (secretRead !== null) {
+				// Only an entry the project authored is the project's policy; the rest is Clio's built-in protection.
+				const own = operatorPolicy();
+				const ownZero = { ...own, entries: own.entries.filter((entry) => entry.kind === "zeroAccessPaths") };
+				const authored = evaluateBashZeroAccessRead(ownZero, scannedCommand, callCwd) !== null;
 				return {
 					reasonCode: "secret_path_bash",
 					reasons: [
 						`bash read of zero-access path blocked: '${secretRead.token}' matches ${secretRead.entrySource}. Check presence with exit codes only (grep -sq "^NAME=" <file>); have the user supply values through their own terminal (read -s), never through chat or command output.`,
 					],
-					policySource: "project-policy",
+					policySource: authored ? "project-policy" : "damage-control:base",
 				};
 			}
 		}
