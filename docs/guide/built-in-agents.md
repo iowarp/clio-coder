@@ -311,8 +311,8 @@ messages, in the order a worker reads them, each present only when it applies:
 - **Declared result requirements**: the `expected_outputs` and `verification` entries of a typed dispatch intent, labeled as requirements and never as evidence.
 - **Compete stance** for a compete candidate.
 - **Memory** (when the request carries an approved memory section).
-- **Agent ledger** (when the dispatch unit has more than one concurrent peer): the shared board of path claims, findings, and reviews, capped at 4,000 characters and labeled as untrusted peer data.
 - **Briefing**: the dispatching agent's briefing, inside `<<<DISPATCH-BRIEFING ... DISPATCH-BRIEFING>>>` and labeled as untrusted context data.
+- **Agent ledger** (when the dispatch unit has more than one concurrent peer): the shared board of path claims, findings, and reviews, capped at 4,000 characters and labeled as untrusted peer data. It follows everything a batch's members share, so they share a prompt prefix.
 - **Predecessor handoffs** (playbook steps with declared dependencies): each predecessor's output inside `<<<PREDECESSOR ... >>>` markers, labeled as data.
 - **Pipeline input** (`pipeline`-mode steps after the first): the previous
   step's final assistant output, threaded as data inside a fixed
