@@ -383,6 +383,31 @@ test("a filter in a submodule's own config does not run from Clio's status probe
 	rmSync(inner.scratch, { recursive: true, force: true });
 });
 
+test("Clio's diff and show of a moved submodule do not run the submodule's diff.external under diff.submodule=diff", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const top = repository();
+	const inner = repository();
+	git(top.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.root, "sub");
+	git(top.root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sub");
+	const sub = join(top.root, "sub");
+	writeFileSync(join(sub, "a.txt"), "moved\n");
+	git(sub, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "move");
+	git(top.root, "config", "diff.submodule", "diff");
+	const marker = join(top.scratch, "submodule-external-ran");
+	git(sub, "config", "diff.external", markerScript(join(top.scratch, "external.sh"), marker));
+	session(top.root, top.scratch);
+	execFileSync("git", internalGitArgv(["-C", top.root, "diff"]));
+	strictEqual(existsSync(marker), false, "the working-tree diff did not run it");
+	git(top.root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "bump");
+	execFileSync("git", internalGitArgv(["-C", top.root, "show", "HEAD"]));
+	execFileSync("git", internalGitArgv(["-C", top.root, "log", "-p", "-1"]));
+	strictEqual(existsSync(marker), false, "show and log -p of the bump did not run it");
+	spawnSync("git", ["-C", top.root, "show", "HEAD"]);
+	ok(existsSync(marker), "a plain git show runs it, so the fixture is live");
+	rmSync(top.scratch, { recursive: true, force: true });
+	rmSync(inner.scratch, { recursive: true, force: true });
+});
+
 test("Clio's internal git writers ignore a GIT_DIR a git-driven runner exported", () => {
 	const fixture = repository();
 	const other = repository();

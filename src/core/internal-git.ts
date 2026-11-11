@@ -13,9 +13,9 @@ import path from "node:path";
  * running a program: no core.fsmonitor command (status, diff and ls-files
  * would run it to refresh the index), no signature check through
  * log.showSignature, and no optional index write, which would fire the
- * post-index-change hook. `diff`, `log` and `show` also get `--no-ext-diff` and
- * `--no-textconv`, so diff.external, diff.<driver>.command and textconv
- * drivers never run, and `status` and the `diff` family get
+ * post-index-change hook. `diff`, `log` and `show` also get `--no-ext-diff`,
+ * `--no-textconv` and `--submodule=short`, so diff.external, diff.<driver>.command
+ * and textconv drivers never run, in the repository or a submodule, and `status` and the `diff` family get
  * `--ignore-submodules=dirty`, so no status runs inside a submodule's
  * checkout under that submodule's own config. A read also asks the installed {@link InternalGitPolicy}
  * through its cheap config check: after executable config in the repository
@@ -42,9 +42,13 @@ export const INTERNAL_GIT_BASE_OPTIONS: ReadonlyArray<string> = Object.freeze([
 	"log.showSignature=false",
 ]);
 
-/** Subcommands that print patches through diff.external and textconv drivers. */
+/**
+ * Subcommands that print patches through diff.external and textconv drivers. `--submodule=short` beats a
+ * diff.submodule=diff, which would run a second git diff inside a moved submodule without these flags,
+ * under that submodule's own config.
+ */
 const PATCH_SUBCOMMANDS: ReadonlySet<string> = new Set(["diff", "log", "show"]);
-const PATCH_FLAGS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv"];
+const PATCH_FLAGS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv", "--submodule=short"];
 
 /**
  * Reads that look inside each submodule's checkout for changes by running a status there, under the submodule's
