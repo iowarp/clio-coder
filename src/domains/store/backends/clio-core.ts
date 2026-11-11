@@ -16,7 +16,13 @@ import {
 import { clioCachePath } from "../../../core/xdg.js";
 import type { StoreBackend } from "../backend.js";
 import type { CoreHost } from "../core-host/supervisor.js";
-import { type StoreBackendFacts, type StoreBlobPut, type StoreBlobStat, StoreRefusal } from "../types.js";
+import {
+	compileBlobPattern,
+	type StoreBackendFacts,
+	type StoreBlobPut,
+	type StoreBlobStat,
+	StoreRefusal,
+} from "../types.js";
 
 /** The top of the CTE chain (filesystem 560 over cache 563); the default client binds the bottom, 512.0. */
 export const CLIO_CORE_CHAIN_TOP_POOL = "563.0";
@@ -360,14 +366,7 @@ export async function createClioCoreStoreBackend(
 		listBlobs: (tag, q) =>
 			guarded(async () => {
 				const tagName = physical(tag);
-				let matcher: RegExp | null = null;
-				if (q.pattern !== undefined) {
-					try {
-						matcher = new RegExp(`^(?:${q.pattern})$`);
-					} catch (error) {
-						throw new StoreRefusal("invalid-name", `Invalid blob pattern: ${messageOf(error)}`);
-					}
-				}
+				const matcher = q.pattern !== undefined ? compileBlobPattern(q.pattern) : null;
 				const offset = Math.max(0, Math.floor(q.offset));
 				const limit = Math.max(0, Math.floor(q.limit));
 				const wanted = offset + limit + 1;

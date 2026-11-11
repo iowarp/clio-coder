@@ -51,3 +51,37 @@ export class StoreRefusal extends Error {
 		this.reason = reason;
 	}
 }
+
+/** Longest blob-name pattern a listing accepts; patterns come from the model and the CLI. */
+export const STORE_PATTERN_MAX_LENGTH = 256;
+
+/**
+ * A quantified group whose body is itself quantified, such as `(a+)+` or `(.*x)*`: the
+ * shape that backtracks exponentially on a near-miss name.
+ */
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[*+]|\{\d+,?\d*\})(?:[^()\\]|\\.)*\)(?:[*+]|\{\d+,?\d*\})/;
+const BACKREFERENCE = /\\(?:[1-9]|k<)/;
+
+/**
+ * Compile a blob-name pattern anchored to the whole name, refusing (`invalid-name`) one that
+ * is too long, uses a backreference or nests quantifiers, so a listing cannot hang on it.
+ */
+export function compileBlobPattern(pattern: string): RegExp {
+	if (pattern.length > STORE_PATTERN_MAX_LENGTH) {
+		throw new StoreRefusal("invalid-name", `Invalid blob pattern: longer than ${STORE_PATTERN_MAX_LENGTH} characters`);
+	}
+	if (BACKREFERENCE.test(pattern)) {
+		throw new StoreRefusal("invalid-name", "Invalid blob pattern: backreferences are not allowed");
+	}
+	if (NESTED_QUANTIFIER.test(pattern)) {
+		throw new StoreRefusal("invalid-name", "Invalid blob pattern: a quantified group may not contain another quantifier");
+	}
+	try {
+		return new RegExp(`^(?:${pattern})$`);
+	} catch (error) {
+		throw new StoreRefusal(
+			"invalid-name",
+			`Invalid blob pattern: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}

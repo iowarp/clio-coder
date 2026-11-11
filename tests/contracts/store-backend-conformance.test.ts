@@ -112,6 +112,9 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			});
 			deepStrictEqual((await backend.listBlobs("t", { pattern: "txt", offset: 0, limit: 10 })).names, []);
 			await rejects(backend.listBlobs("t", { pattern: "(", offset: 0, limit: 1 }), refusedWith("invalid-name"));
+			for (const pattern of ["(a+)+", "(.*x)*", "(a)\\1", "a".repeat(257)]) {
+				await rejects(backend.listBlobs("t", { pattern, offset: 0, limit: 1 }), refusedWith("invalid-name"));
+			}
 		}));
 
 	test(`${name}: links in a blob's parents and tags resolving outside the project are refused`, (t) =>

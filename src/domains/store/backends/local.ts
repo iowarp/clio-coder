@@ -37,7 +37,7 @@ import { clioCachePath, clioDataDir } from "../../../core/xdg.js";
 import { withFileMutationQueue } from "../../../tools/file-mutation-queue.js";
 import type { StoreBackend } from "../backend.js";
 import { withStoreLock } from "../lock.js";
-import { type StoreBackendFacts, type StoreBlobPut, StoreRefusal } from "../types.js";
+import { compileBlobPattern, type StoreBackendFacts, type StoreBlobPut, StoreRefusal } from "../types.js";
 
 const XATTR_KEY_MAX_BYTES = 255;
 const XATTR_VALUE_MAX_BYTES = 64 * 1024;
@@ -471,14 +471,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 		listBlobs: (tag, q) =>
 			guarded(async () => {
 				const blobsDir = path.join(await requireTag(tag), "blobs");
-				let matcher: RegExp | null = null;
-				if (q.pattern !== undefined) {
-					try {
-						matcher = new RegExp(`^(?:${q.pattern})$`);
-					} catch (error) {
-						throw new StoreRefusal("invalid-name", `Invalid blob pattern: ${messageOf(error)}`);
-					}
-				}
+				const matcher = q.pattern !== undefined ? compileBlobPattern(q.pattern) : null;
 				const offset = Math.max(0, Math.floor(q.offset));
 				const limit = Math.max(0, Math.floor(q.limit));
 				const wanted = offset + limit + 1;

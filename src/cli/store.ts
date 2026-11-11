@@ -14,6 +14,7 @@ import {
 	validateTagName,
 } from "../core/store-paths.js";
 import {
+	compileBlobPattern,
 	openStoreBackend,
 	type StoreBackend,
 	type StoreBackendFacts,
@@ -257,7 +258,7 @@ export async function storeVerify(
 	const backend = await openStoreBackend(cwd);
 	await requireTag(backend, tag);
 	const present = await allBlobs(backend, tag, options.pattern);
-	const matcher = options.pattern !== undefined ? new RegExp(`^(?:${options.pattern})$`) : null;
+	const matcher = options.pattern !== undefined ? compileBlobPattern(options.pattern) : null;
 	const recorded = [...(await recordedBlobNames(backend, tag))].filter((name) => matcher?.test(name) ?? true);
 	const names = [...new Set([...present, ...recorded])].sort();
 	const result: VerifyResult = {

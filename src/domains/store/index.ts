@@ -10,7 +10,7 @@ export type {
 	StoreRefusalReason,
 	StoreTagClass,
 } from "./types.js";
-export { StoreRefusal } from "./types.js";
+export { compileBlobPattern, StoreRefusal } from "./types.js";
 
 /**
  * The store backend for this project, as `<dataDir>/store/backend.json` selects it.
