@@ -7,6 +7,7 @@ import { after, before, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { scoutReadWorkspace } from "../../src/domains/dispatch/scout-workspace.js";
 import { evaluateAdmission } from "../../src/domains/safety/admission.js";
+import { detectValidationCommand } from "../../src/domains/safety/protected-artifacts.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { taskWorktreeManifestsChanged } from "../../src/tools/task-worktree.js";
 
@@ -142,5 +143,30 @@ describe("granted read roots refuse sensitive directories", () => {
 			if (saved === undefined) delete process.env.HOME;
 			else process.env.HOME = saved;
 		}
+	});
+});
+
+describe("unattended test runners refuse option arguments after --", () => {
+	it("keeps a package test script with an option after -- behind the ask", () => {
+		const root = join(scratch, "runner");
+		mkdirSync(root, { recursive: true });
+		writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+		const safety = createWorkerSafety({ cwd: root });
+		const admit = (call: { tool: string; args: Record<string, unknown> }) =>
+			evaluateAdmission({ principal: "worker", effects: [call], safety, cwd: root }).kind;
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "npm test -- tests/x.test.ts" } }), "allow");
+		strictEqual(admit({ tool: ToolNames.Bash, args: { command: "pnpm run test:unit -- tests/x.test.ts" } }), "allow");
+		for (const command of [
+			"npm test -- --prefix=/",
+			"npm test -- --import=./pwn.mjs",
+			"pnpm run test -- tests/x.test.ts --require=./pwn.cjs",
+			"yarn test -- -r ./pwn.cjs",
+			"bun run test:unit -- --config=./pwn.json",
+		]) {
+			strictEqual(admit({ tool: ToolNames.Bash, args: { command } }), "ask", command);
+			strictEqual(detectValidationCommand(command).kind, "none", command);
+		}
+		strictEqual(admit({ tool: ToolNames.Verify, args: { check: "test", args: ["--import=./pwn.mjs"] } }), "ask");
+		strictEqual(detectValidationCommand("npm test -- tests/x.test.ts").kind, "validation");
 	});
 });

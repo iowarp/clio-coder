@@ -447,28 +447,35 @@ function versionProbePattern(): RegExp {
  * here maps to a `detectValidationCommand` label, and
  * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
  * Arguments stay bare words: quoting, substitution, and operators fall through
- * to the rails below.
+ * to the rails below. A package script's arguments after `--` may not begin
+ * with `-`, so `--import`, `--require`, `--config` or `--prefix` keeps its ask.
  */
 export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
-	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:pnpm-test", re: /^pnpm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:yarn-test", re: /^yarn\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:bun-test", re: /^bun\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:pnpm-test",
+		re: /^pnpm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+	},
+	{
+		id: "builtin:yarn-test",
+		re: /^yarn\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+	},
+	{ id: "builtin:bun-test", re: /^bun\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
 	{
 		id: "builtin:npm-test-script",
-		re: /^npm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+		re: /^npm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:pnpm-test-script",
-		re: /^pnpm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+		re: /^pnpm\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:yarn-test-script",
-		re: /^yarn\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+		re: /^yarn\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	{
 		id: "builtin:bun-test-script",
-		re: /^bun\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/,
+		re: /^bun\s+run\s+test:[\w=./:-]+(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
 	},
 	// uv can provision dependencies before pytest; --no-sync keeps #377's
 	// unattended allowance from authorizing environment synchronization.
@@ -541,10 +548,13 @@ function pythonRunnerBehindWorkspacePythonPath(command: string): { id: string; r
  * explicitly declares the command safe.
  */
 export const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
-	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:npm-typecheck", re: /^npm\s+run\s+typecheck(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:npm-ci-script", re: /^npm\s+run\s+ci(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{ id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
+	{
+		id: "builtin:npm-typecheck",
+		re: /^npm\s+run\s+typecheck(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/,
+	},
+	{ id: "builtin:npm-ci-script", re: /^npm\s+run\s+ci(?:\s+--\s+[\w=./:][\w=./:-]*(?:\s+[\w=./:][\w=./:-]*)*)?$/ },
 ];
 
 function matchesRepositoryCommand(command: string): boolean {

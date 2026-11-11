@@ -1706,6 +1706,9 @@ function validationMatch(
 ): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
+		// An option after `--` reaches the script's runtime (`--import`, `--require`), so it is not the project's check.
+		const separator = args.indexOf("--");
+		if (separator >= 0 && args.slice(separator + 1).some((arg) => arg.startsWith("-"))) return null;
 		if (args[0] === "test") return `${executable} test`;
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
 		if (script === "test") return `${executable} test`;
