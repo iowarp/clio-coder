@@ -7,6 +7,8 @@
  * or spoof the UI that approves it.
  */
 
+import { STORE_REPLACES_ARG, storeReplacedBlob } from "../../core/store-paths.js";
+import { ToolNames } from "../../core/tool-names.js";
 import { characterClassSwitchRate, createRedactionTally, redactSecretsText } from "../evidence/redact.js";
 import { isSecretArgKey, redactSecretString } from "./redaction.js";
 
@@ -558,6 +560,12 @@ export function describeCallTarget(
 	const allowedFields = CALL_TARGET_FIELDS[tool] ?? [];
 	const allowed = new Set(allowedFields);
 	const parts: string[] = [];
+	// Admission's replace marker is Clio's own fact: the line says what the put replaces, first so no cut drops it.
+	const replaced = tool === ToolNames.Store ? storeReplacedBlob(args) : null;
+	if (replaced !== null) {
+		const name = renderAllowedTargetValue(`${replaced.tag}:${replaced.blob}`);
+		if (name !== null) parts.push(`replaces ${name} (${replaced.bytes} bytes)`);
+	}
 	for (const field of allowedFields) {
 		if (!(field in args)) continue;
 		// The bash tool fills this default in on every call, so it says nothing about this one.
@@ -579,6 +587,7 @@ export function describeCallTarget(
 	}
 	for (const [field, value] of Object.entries(args)) {
 		if (allowed.has(field) || field.startsWith(HARNESS_ARG_PREFIX)) continue;
+		if (tool === ToolNames.Store && field === STORE_REPLACES_ARG) continue;
 		// An edit's replacements are the call itself, and the mutation row counts them too; `<array 1 item>` said neither.
 		if (tool === "edit" && field === "edits" && Array.isArray(value)) {
 			parts.push(countLabel(value.length, "replacement", "replacements"));

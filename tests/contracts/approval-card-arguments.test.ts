@@ -1,11 +1,13 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { STORE_REPLACES_ARG } from "../../src/core/store-paths.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import {
 	createRedactionTally,
 	redactCommandOutputSecrets,
 	redactSecretsText,
 } from "../../src/domains/evidence/redact.js";
-import { describeCallTarget } from "../../src/domains/safety/call-target.js";
+import { describeCallTarget, WORKER_CALL_TARGET_MAX_CHARS } from "../../src/domains/safety/call-target.js";
 import { redactSecretString } from "../../src/domains/safety/redaction.js";
 
 /**
@@ -141,5 +143,26 @@ describe("approval card arguments of an uncurated tool", () => {
 		for (const line of shown) ok(!line.includes("opaque-session") && !line.includes(gitToken), line);
 		strictEqual(redactSecretString('{"author":"Jane Doe","max_tokens":42}'), '{"author":"Jane Doe","max_tokens":42}');
 		strictEqual(redactSecretString("the bearer of bad news"), "the bearer of bad news");
+	});
+});
+
+describe("approval line of a store put that replaces a blob", () => {
+	it("says what the put replaces in plain words, never admission's marker", () => {
+		const named = { op: "put", tag: "fleet", blob: "v1", path: "out/v1.txt", note: "hello", [STORE_REPLACES_ARG]: 26894 };
+		// The worker's escalation event, which the operator feed prints, and the approval card.
+		const event = describeCallTarget(ToolNames.Store, named, undefined, WORKER_CALL_TARGET_MAX_CHARS);
+		const card = describeCallTarget(ToolNames.Store, named);
+		for (const line of [event, card]) {
+			ok(line.startsWith("replaces fleet:v1 (26894 bytes)"), line);
+			doesNotMatch(line, /__storeReplaces|=26894/u);
+		}
+		strictEqual(
+			describeCallTarget(ToolNames.Store, { op: "put", tag: "fleet", path: "out/v3.csv", [STORE_REPLACES_ARG]: 1234 }),
+			"replaces fleet:v3.csv (1234 bytes) · op=<string 3 bytes> · tag=<string 5 bytes> · path=out/v3.csv",
+		);
+		strictEqual(
+			describeCallTarget(ToolNames.Store, { op: "put", tag: "fleet", path: "out/v3.csv" }),
+			"op=<string 3 bytes> · tag=<string 5 bytes> · path=out/v3.csv",
+		);
 	});
 });

@@ -35,6 +35,22 @@ export function storeReplacedBytes(args: Readonly<Record<string, unknown>> | und
 	return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
 }
 
+/**
+ * The blob a put's admission found it replacing (its tag, its name, which defaults to the source
+ * path's basename like the put's own, and its size), else null. Both the safety judge and the
+ * operator's approval line describe a replace from this instead of showing the marker.
+ */
+export function storeReplacedBlob(
+	args: Readonly<Record<string, unknown>> | undefined,
+): { tag: string; blob: string; bytes: number } | null {
+	if (args?.op !== "put") return null;
+	const bytes = storeReplacedBytes(args);
+	if (bytes === null) return null;
+	const { tag, blob, path } = args;
+	const name = typeof blob === "string" && blob.length > 0 ? blob : typeof path === "string" ? basename(path) : "";
+	return { tag: String(tag), blob: name, bytes };
+}
+
 const TAG_CHARS = /^[A-Za-z0-9._/-]+$/u;
 // Printable ASCII without `#` (reserved for record names) and `\`.
 const BLOB_CHARS = /^[\x20-\x22\x24-\x5b\x5d-\x7e]+$/u;
