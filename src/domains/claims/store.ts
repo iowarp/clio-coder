@@ -60,7 +60,20 @@ export function claimsLogPath(projectRoot: string): string {
 	return join(clioStateDir(), "claims", `${createHash("sha256").update(projectRoot, "utf8").digest("hex")}.jsonl`);
 }
 
-/** Write lines to the end of a log under its lock; `lines` sees the log as it stands once the lock is held. */
+/**
+ * The most bytes one log line may hold. Every record is bounded by capture, so a longer line is damage or a writer
+ * bug: it is never appended, and on read it counts as unreadable without being parsed.
+ */
+export const CLAIMS_LOG_LINE_MAX_BYTES = 64 * 1024;
+
+function withinLineBound(line: string): boolean {
+	return line.length <= CLAIMS_LOG_LINE_MAX_BYTES && Buffer.byteLength(line, "utf8") <= CLAIMS_LOG_LINE_MAX_BYTES;
+}
+
+/**
+ * Write lines to the end of a log under its lock; `lines` sees the log as it stands once the lock is held. A line over
+ * the bound is dropped.
+ */
 async function appendLines(path: string, lines: (current: string) => string[]): Promise<void> {
 	const dir = dirname(path);
 	const created = !existsSync(dir);
@@ -69,7 +82,7 @@ async function appendLines(path: string, lines: (current: string) => string[]): 
 		const fd = openSync(path, "a+", 0o600);
 		try {
 			const current = readFileSync(fd, "utf8");
-			const next = lines(current);
+			const next = lines(current).filter(withinLineBound);
 			if (next.length === 0) return;
 			// A line torn by a crash is closed off, so the append starts a line of its own.
 			const prefix = current.length === 0 || current.endsWith("\n") ? "" : "\n";
@@ -96,6 +109,8 @@ export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise
 			const lines: string[] = [];
 			const history = { claims: [...log.records], edges: [...log.edges] };
 			for (const claim of group) {
+				// Checked here, not only in appendLines, so an unwritten claim derives no edges.
+				if (!withinLineBound(JSON.stringify(claim))) continue;
 				const edges = deriveClaimEdges(history, [claim]);
 				lines.push(JSON.stringify(claim), ...edges.map((edge) => JSON.stringify(edge)));
 				history.claims.push(claim);
@@ -500,6 +515,10 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 	for (const line of text.split("\n")) {
 		index += 1;
 		if (line.trim().length === 0) continue;
+		if (!withinLineBound(line)) {
+			read.unreadable += 1;
+			continue;
+		}
 		let value: unknown;
 		try {
 			value = JSON.parse(line);

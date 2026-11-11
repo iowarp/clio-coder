@@ -287,6 +287,38 @@ describe("claims ledger (#406)", () => {
 		}
 	});
 
+	it("never writes a line over the bound and reads one as unreadable without parsing it", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const claim = claimFromVerifyResult({
+				details: numericDetails(true, "passed"),
+				project,
+				at: "2026-11-06T00:00:00.000Z",
+				source,
+			});
+			assert.ok(claim);
+			await appendClaims([claim]);
+			const logPath = claimsLogPath(project);
+			const before = readFileSync(logPath, "utf8");
+			const { id: _id, ...rest } = { ...claim, text: "x".repeat(70 * 1024) };
+			const huge = { ...rest, id: claimRecordId(rest) };
+			await appendClaims([huge]);
+			assert.equal(readFileSync(logPath, "utf8"), before, "an oversize claim is not appended and derives no edge");
+			appendFileSync(logPath, `${JSON.stringify(huge)}\n`);
+			const read = readClaims(project);
+			assert.deepEqual(
+				read.records.map((record) => record.id),
+				[claim.id],
+			);
+			assert.equal(read.unreadable, 1);
+		} finally {
+			env.restore();
+		}
+	});
+
 	it("reads a repeated claim, edge or regression line once", async () => {
 		const env = await isolateClioEnv("clio-claims-");
 		try {
