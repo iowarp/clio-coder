@@ -3056,6 +3056,22 @@ describe("agent invocations", () => {
 		doesNotMatch(detailed, /\{"findings"/u);
 	});
 
+	it("reads a settled poll member's ballot in words, not raw JSON", () => {
+		const member = card({
+			assignmentId: "p1",
+			agentId: "scout",
+			origin: "user",
+			council: { group: "g1", label: "p1", round: 1 },
+			text: '{"verdict":"no","text":"91 is 7 times 13"}',
+		});
+		const rows = renderWorkerEntryLines(member, 160, { detail: transcriptDetail("standard"), siblings: [member] }).map(
+			stripTerminalSequences,
+		);
+		const row = rows.find((line) => line.startsWith("  p1")) ?? "";
+		match(row, /no: 91 is 7 times 13/u);
+		doesNotMatch(row, /\{"verdict"/u);
+	});
+
 	it("names a council that only collected by its size, not by a member's route", () => {
 		const report = {
 			members: [

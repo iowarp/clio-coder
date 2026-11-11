@@ -253,8 +253,17 @@ export function councilMemberAnswerLines(answer: string): string[] | null {
 		debuggerReport(value) ??
 		verifierReport(value) ??
 		scoutReport(value) ??
-		firstFindingClaim(value);
+		firstFindingClaim(value) ??
+		ballotAnswer(value);
 	return typed === null ? null : typed.lines.map(safeWorkerAnswerText);
+}
+
+/** A poll member's ballot (`{"verdict","text"}`) as its verdict and reason. */
+function ballotAnswer(value: Record<string, unknown>): PresentedContractAnswer | null {
+	const verdict = reportString(value.verdict);
+	if (verdict === null) return null;
+	const text = reportString(value.text);
+	return { lines: [text === null ? verdict : `${verdict}: ${text}`] };
 }
 
 /** A scout-shaped answer that misses a field the full report needs still has a claim a person can read. */
