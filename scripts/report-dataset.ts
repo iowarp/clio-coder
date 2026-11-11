@@ -107,7 +107,7 @@ function recordIdAt(ms: number): string {
 }
 
 /** The same id re-minted `shiftMs` earlier with fresh random bits, or null when it carries no mint time. */
-function shiftedMintedId(value: string, shiftMs: number): string | null {
+export function shiftedMintedId(value: string, shiftMs: number): string | null {
 	const uuid = UUID_V7_ID.exec(value);
 	if (uuid) {
 		const hex = Math.max(0, Number.parseInt(`${uuid[2]}${uuid[3]}`, 16) - shiftMs)
@@ -131,7 +131,10 @@ function shiftedMintedId(value: string, shiftMs: number): string | null {
 	const run = COMPACT_RUN_ID.exec(value);
 	if (run) {
 		const [, prefix = "", y, mo, d, h, mi, sec] = run;
-		const at = new Date(Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`) - shiftMs).toISOString();
+		const parsed = Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`);
+		// Run-id shaped but no real time (month 13, second 61): an opaque id, so no digit of it survives.
+		if (Number.isNaN(parsed)) return `${prefix}${randomBytes(8).toString("hex")}`;
+		const at = new Date(parsed - shiftMs).toISOString();
 		return `${prefix}${at.replace(/[-:]|\.\d{3}/gu, "")}-${randomBytes(3).toString("hex")}`;
 	}
 	return null;
