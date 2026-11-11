@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: Exact qualified commit (must be this version branch head)
+        description: Exact qualified commit (this version branch head; for finish, an ancestor of it that npm already serves)
         required: true
         type: string
       qualification_run:
@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       mode:
-        description: Stable/rc release, a deterministic dev snapshot of the qualified branch head, or a check that runs preflight only
+        description: Stable/rc release, a deterministic dev snapshot of the qualified branch head, a check that runs preflight only, or finish, which completes the tag, GitHub release, main and website of a version npm already serves from an ancestor of the branch head and never publishes
         required: true
         default: release
         type: choice
@@ -21,6 +21,7 @@ on:
           - release
           - dev
           - check
+          - finish
       version_branch:
         description: Version branch a check run plans for, when dispatched from a rehearse/* branch
         required: false

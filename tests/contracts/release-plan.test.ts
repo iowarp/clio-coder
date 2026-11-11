@@ -131,6 +131,12 @@ describe("release decisions", () => {
 		const step = nextStep(facts({ pushed: false, npm: served, releaseRun: failed, moved: foreign }), after);
 		strictEqual(step.step, "finish-published");
 		strictEqual(step.head, head);
+		// It finishes through release.yml's finish mode from the ancestor, never a force push of the branch.
+		strictEqual(step.mode, "finish");
+		const finishing = { npm: { accepted: true }, releaseRun: { id: 9, mode: "finish" } };
+		const running = releaseRun("in_progress", { status: "completed", conclusion: "success" });
+		strictEqual(nextStep(facts({ npm: served, releaseRun: running, moved: foreign }), finishing).step, "watch-release");
+		strictEqual(nextStep(facts({ npm: served, releaseRun: failed, moved: foreign }), finishing).step, "rerun-release");
 		strictEqual(nextStep(facts({ npm: served, releaseRun: failed, moved: foreign }), after).step, "finish-published");
 		// Tooling-only commits may finish it from the new head.
 		const tooling = { ...foreign, toolingOnly: true };

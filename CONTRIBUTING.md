@@ -209,7 +209,14 @@ release-tooling bug appears after npm accepted the version, commit the fix to
 the version branch: once npm serves the candidate, `release.yml` may finish
 from a head that adds only release-tooling files (`scripts/release*.mjs`,
 `scripts/release/`, `release.yml`, `tests/contracts/release-*.test.ts`). The
-tag, tarball and website still come from the candidate. A different npm
+tag, tarball and website still come from the candidate. If the version branch
+moved on with other commits after npm accepted the version, the command
+dispatches `release.yml` with `mode: finish` for the published candidate
+instead of asking for a force push: that mode requires npm to already serve
+the exact qualified bytes and the candidate to be an ancestor of the version
+branch head, finishes only the tag, GitHub release, main and website steps that
+have not completed, never republishes to npm, and leaves the version branch and
+its later commits in place. A different npm
 integrity or tag commit stops the operation. If an artifact expires, prepare a
 new candidate commit; do not rebuild a previously qualified commit.
 Prereleases use npm `beta` and a GitHub prerelease, and keep the development

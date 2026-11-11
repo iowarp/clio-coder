@@ -185,16 +185,25 @@ export function nextStep(facts, receipt) {
 	}
 	// npm took the candidate and the version branch then moved past it: never push or rerun, which
 	// loop on "Version branch moved". Tooling-only commits may finish it (release.yml's finishing
-	// head); any other commit leaves the owner to finish the published commit itself.
+	// head); any other commit is finished by release.yml's finish mode from the published ancestor,
+	// which never republishes and leaves the branch's later commits in place.
 	let pushed = facts.pushed;
 	const moved = facts.moved;
 	if (facts.mode === "release" && moved?.descends && (facts.npm.served || receipt.npm?.accepted === true)) {
-		if (!moved.toolingOnly)
+		if (!moved.toolingOnly) {
+			const run = receipt.releaseRun?.mode === "finish" ? facts.releaseRun : null;
+			if (run?.state === "waiting") return { step: "approve-release" };
+			if (["queued", "pending", "in_progress"].includes(run?.state)) return { step: "watch-release" };
+			if (run && run.state !== "absent" && run.state !== "success") return { step: "rerun-release" };
+			if (run?.state === "success")
+				return stop("the finish run passed but the public state does not verify; inspect it before any retry");
 			return {
 				step: "finish-published",
+				mode: "finish",
 				head: moved.head,
 				reason: `npm took the candidate, then the version branch moved to ${moved.head.slice(0, 12)} with commits that are not release tooling`,
 			};
+		}
 		pushed = true;
 	}
 	if (!pushed) {

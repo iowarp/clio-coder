@@ -681,19 +681,25 @@ async function perform(step, facts, receipt, context) {
 				);
 			return;
 		}
-		case "finish-published":
-			// release.yml finishes only from the version branch head, and only tooling commits may follow the
-			// published candidate, so the owner parks the other commits and restores the branch to it.
-			throw new Error(
-				[
-					`npm serves ${version} from ${commit}, but origin/${receipt.branch} moved to ${step.head} with commits that are not release tooling.`,
-					`Finish the published commit: keep the new commits on another branch, put ${receipt.branch} back at ${commit.slice(0, 12)}, then run release:next again; it dispatches release.yml there (tag, release, main, website).`,
-					`  git push origin ${step.head}:refs/heads/${receipt.branch}-after-${version}`,
-					`  git push --force-with-lease=${receipt.branch}:${step.head} origin ${commit}:refs/heads/${receipt.branch}`,
-					`  git switch --detach ${commit}`,
-					"  pnpm run release:next",
-				].join("\n"),
+		case "finish-published": {
+			// npm serves the candidate and the version branch moved on with other commits. release.yml's
+			// finish mode completes the tag, GitHub release, main and website from the published
+			// ancestor without republishing or moving the branch.
+			await confirm(
+				`npm serves ${version} from ${commit}, but origin/${receipt.branch} moved to ${step.head}. Dispatch release.yml in finish mode for ${commit.slice(0, 12)}; it never republishes to npm and leaves ${receipt.branch} in place.`,
+				"finish release",
 			);
+			const title = `release finish ${version} ${receipt.nonce}-${receipt.events.length}`;
+			const id = await dispatch(
+				"release.yml",
+				receipt.branch,
+				{ sha: commit, qualification_run: receipt.ciRun.id, mode: "finish" },
+				title,
+			);
+			receipt.releaseRun = { id, attempt: 1, mode: "finish" };
+			console.log(`  https://github.com/${repository}/actions/runs/${id}`);
+			return recordEvent(receipt, "finish-published", "dispatched", { id });
+		}
 		default:
 			throw new Error(`No action for step ${step.step}.`);
 	}
