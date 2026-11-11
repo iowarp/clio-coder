@@ -33,8 +33,11 @@ import {
 import {
 	CONNECTABLE_LIST_CAPTION,
 	type ConnectableProviderRow,
+	type LogoutChoice,
 	listConnectableProviderRows,
+	listLogoutChoices,
 	renderConnectableProviderRows,
+	renderLogoutChoices,
 	resolveCliProviderReference,
 } from "./provider-target.js";
 import { promptText } from "./select.js";
@@ -224,10 +227,6 @@ async function promptForLoginTarget(rows: ReadonlyArray<ConnectableProviderRow>)
 	}
 }
 
-function storedCredentialRows(rows: ReadonlyArray<ConnectableProviderRow>): ConnectableProviderRow[] {
-	return rows.filter((row) => row.status?.source === "stored-api-key" || row.status?.source === "stored-oauth");
-}
-
 function statusForResolvedTarget(
 	resolved: NonNullable<ReturnType<typeof resolveCliProviderReference>>,
 	auth: ReturnType<typeof openAuthStorage>,
@@ -241,34 +240,35 @@ function statusForResolvedTarget(
 	return auth.statusForTarget(resolved.authTarget, { includeFallback: false });
 }
 
-async function promptForLogoutTarget(rows: ReadonlyArray<ConnectableProviderRow>): Promise<string | null> {
-	if (rows.length === 0) {
+/** The active chat target when it holds a key, else its runtime, else the first choice. */
+function defaultLogoutChoice(choices: ReadonlyArray<LogoutChoice>): string {
+	const settings = readSettings();
+	const active = settings.chat.target ? settings.targets.find((entry) => entry.id === settings.chat.target) : undefined;
+	const ids = new Set(choices.map((choice) => choice.id));
+	if (active && ids.has(active.id)) return active.id;
+	if (active && ids.has(active.runtime)) return active.runtime;
+	return choices[0]?.id ?? "";
+}
+
+async function promptForLogoutTarget(choices: ReadonlyArray<LogoutChoice>): Promise<string | null> {
+	if (choices.length === 0) {
 		printError("no stored target credentials");
 		return null;
 	}
 	const rl = createInterface({ input, output });
-	const defaultTarget = defaultAuthTarget(rows) ?? rows[0]?.entry.runtimeId ?? "";
+	const defaultTarget = defaultLogoutChoice(choices);
 	try {
 		process.stdout.write("Remove stored credentials:\n");
-		let lastGroup: ConnectableProviderRow["entry"]["group"] | null = null;
-		for (const [index, row] of rows.entries()) {
-			if (row.entry.group !== lastGroup) {
-				lastGroup = row.entry.group;
-				process.stdout.write(`  ${supportGroupLabel(row.entry.group)}:\n`);
-			}
-			process.stdout.write(
-				`    ${String(index + 1).padStart(2)}. ${row.entry.runtimeId.padEnd(22)} ${String(row.status?.source ?? "disconnected")}\n`,
-			);
-		}
+		process.stdout.write(renderLogoutChoices(choices, true).replace(/^/gmu, "  ").replace(/ +$/u, ""));
 		process.stdout.write("\n");
 		for (;;) {
-			const answer = (await rl.question(`Selection (number or runtime id) [${defaultTarget}]: `)).trim();
+			const answer = (await rl.question(`Selection (number, runtime or target id) [${defaultTarget}]: `)).trim();
 			const value = answer.length > 0 ? answer : defaultTarget;
 			const numeric = Number(value);
-			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= rows.length) {
-				return rows[numeric - 1]?.entry.runtimeId ?? null;
+			if (Number.isInteger(numeric) && numeric >= 1 && numeric <= choices.length) {
+				return choices[numeric - 1]?.id ?? null;
 			}
-			if (rows.some((row) => row.entry.runtimeId === value)) return value;
+			if (choices.some((choice) => choice.id === value)) return value;
 			process.stderr.write(`unknown selection: ${value}\n`);
 		}
 	} catch {
@@ -575,13 +575,13 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 	}
 	const target = args[0];
 	if (!target) {
-		const rows = storedCredentialRows(listConnectableProviderRows());
+		const choices = listLogoutChoices();
 		if (!input.isTTY || !output.isTTY) {
-			process.stdout.write(renderConnectableProviderRows(rows));
+			process.stdout.write(renderLogoutChoices(choices));
 			process.stderr.write(USAGE);
 			return 2;
 		}
-		return promptForLogoutTarget(rows).then((picked) => (picked ? runLogout([picked]) : 1));
+		return promptForLogoutTarget(choices).then((picked) => (picked ? runLogout([picked]) : 1));
 	}
 	if (args.length > 1) {
 		printError("auth logout accepts at most one target or runtime");

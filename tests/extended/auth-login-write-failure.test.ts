@@ -173,3 +173,30 @@ describe("contracts/auth logout <runtime> with only a target key stored", () => 
 		}
 	});
 });
+
+describe("contracts/auth logout listing", () => {
+	it("lists the target that holds a key by its own id, which logout then removes", async () => {
+		const scratch = await isolateClioEnv("clio-coder-auth-logout-list-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(join(configDir, "settings.yaml"), LOGOUT_SETTINGS);
+			writeFileSync(
+				join(configDir, "credentials.yaml"),
+				["version: 2", "entries:", "  target:work-openai:", "    type: api_key", `    key: "${STORED_KEY}"`, ""].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const listing = await captureAuth(["logout"]);
+			strictEqual(listing.code, 2);
+			const listed = listing.stdout
+				.split("\n")
+				.map((line) => line.trim().split(/\s+/u)[0] ?? "")
+				.filter((id) => id === RUNTIME || id === "work-openai");
+			strictEqual(listed.join(","), "work-openai", listing.stdout);
+			const removed = await captureAuth(["logout", "work-openai"]);
+			strictEqual(removed.code, 0, removed.stderr);
+		} finally {
+			scratch.restore();
+		}
+	});
+});

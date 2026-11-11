@@ -1,6 +1,7 @@
 import { readSettings } from "../core/config.js";
 import { openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "../domains/providers/auth/index.js";
 import {
+	type AuthStatus,
 	EMPTY_CAPABILITIES,
 	listProviderSupportEntries,
 	type ProviderSupportEntry,
@@ -95,6 +96,61 @@ export function listConnectableProviderRows(): ConnectableProviderRow[] {
 			}
 			return { entry, status, targetCount: targets.length };
 		});
+}
+
+/** One credential `auth logout` can remove, named by the id that removes it. */
+export interface LogoutChoice {
+	/** A runtime id for the runtime's own credential, a target id for a key stored under `target:<id>`. */
+	id: string;
+	label: string;
+	group: ProviderSupportEntry["group"];
+	source: "stored-api-key" | "stored-oauth";
+}
+
+/**
+ * The stored credentials `auth logout` can remove. A target's own key is listed
+ * under the target id, because logout by runtime id removes only the runtime's
+ * credential; listing the runtime would offer a choice that removes nothing.
+ */
+export function listLogoutChoices(): LogoutChoice[] {
+	ensureSetupRuntimeRegistry();
+	const settings = readSettings();
+	const auth = openAuthStorage();
+	const stored = (status: AuthStatus): LogoutChoice["source"] | null =>
+		status.available && (status.source === "stored-api-key" || status.source === "stored-oauth") ? status.source : null;
+	return listProviderSupportEntries(getRuntimeRegistry().list())
+		.filter((entry) => entry.connectable)
+		.flatMap((entry) => {
+			const runtime = getRuntimeRegistry().get(entry.runtimeId);
+			if (!runtime) return [];
+			const choices: LogoutChoice[] = [];
+			const runtimeAuth = resolveRuntimeAuthTarget(runtime);
+			const own = stored(auth.statusForTarget(runtimeAuth, { includeFallback: false }));
+			if (own) choices.push({ id: entry.runtimeId, label: entry.label, group: entry.group, source: own });
+			for (const target of settings.targets) {
+				if (target.runtime !== entry.runtimeId || !targetRequiresAuth(target, runtime)) continue;
+				const targetAuth = resolveAuthTarget(target, runtime);
+				if (targetAuth.providerId === runtimeAuth.providerId) continue;
+				const source = stored(auth.statusForTarget(targetAuth, { includeFallback: false }));
+				if (source) choices.push({ id: target.id, label: `${entry.label} target`, group: entry.group, source });
+			}
+			return choices;
+		});
+}
+
+export function renderLogoutChoices(choices: ReadonlyArray<LogoutChoice>, numbered = false): string {
+	let lastGroup: ProviderSupportEntry["group"] | null = null;
+	const lines: string[] = [];
+	const widths = columnWidths(choices.map((choice) => [choice.id, choice.label, choice.source]));
+	for (const [index, choice] of choices.entries()) {
+		if (choice.group !== lastGroup) {
+			lastGroup = choice.group;
+			lines.push(`${supportGroupLabel(choice.group)}:`);
+		}
+		const number = numbered ? `${String(index + 1).padStart(2)}. ` : "";
+		lines.push(`  ${number}${formatColumnRow([choice.id, choice.label, choice.source], widths)}`);
+	}
+	return `${lines.join("\n")}\n`;
 }
 
 export function renderConnectableProviderRows(rows: ReadonlyArray<ConnectableProviderRow>): string {
