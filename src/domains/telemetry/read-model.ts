@@ -543,6 +543,9 @@ function extendAnalysis(
 	for (let index = folded; index < head.length; index += 1)
 		for (const attemptId of grow(growth, head[index] as TelemetryRecord)) touched.add(attemptId);
 	growth.head = head;
+	// A new call can move its route's engine floor, and with it which earlier calls a cold group holds.
+	if (touched.size > 0)
+		for (const key of analysis.selections.keys()) if (key.startsWith(COLD_SELECTION)) analysis.selections.delete(key);
 	for (const attemptId of touched) {
 		const before = analysis.byAttempt.get(attemptId);
 		const folded = growth.folder.attempt(attemptId);
@@ -850,7 +853,7 @@ function selectionOf(analysis: Analysis, group: { by: FactGroup; key: string } |
 		return selection;
 	}
 	const matches = (attempt: Attempt) => (group ? attemptInGroup(attempt, group) : true);
-	selection = selectionState(analysis.attempts.filter(matches), matches);
+	selection = selectionState(group ? groupAttempts(analysis.attempts, group) : analysis.attempts, matches);
 	selections.set(key, selection);
 	if (selections.size > SELECTION_CACHE_LIMIT + 1)
 		for (const oldest of selections.keys())
@@ -928,6 +931,14 @@ function divergence(attempt: Attempt): Fact<string | null> {
 	return attempt.replay !== null && fact.kind === "unknown"
 		? { kind: "measured", value: attempt.replay, source: "local-count" }
 		: fact;
+}
+
+const COLD_SELECTION = "cold\u0000";
+
+/** A group's attempts; a cold group holds breaks only, so a call that hit its route's engine floor is in none. */
+function groupAttempts(attempts: readonly Attempt[], group: { by: FactGroup; key: string }): Attempt[] {
+	if (group.by !== "cold") return attempts.filter((attempt) => attemptInGroup(attempt, group));
+	return cacheBreaks(attempts).filter((attempt) => coldKeys(attempt).includes(group.key));
 }
 
 function attemptInGroup(attempt: Attempt, group: { by: FactGroup; key: string }): boolean {
@@ -1016,7 +1027,7 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 			const attempt = owned.byAttempt.get(ref.attemptId);
 			return attempt ? { parts: [{ attempts: [attempt], gap: 0 }], attempt, describe: "one process attempt" } : null;
 		}
-		const attempts = group ? owned.attempts.filter((attempt) => attemptInGroup(attempt, group)) : owned.attempts;
+		const attempts = group ? groupAttempts(owned.attempts, group) : owned.attempts;
 		return {
 			parts: [{ attempts, gap: owned.gap }],
 			describe: `the process journal's attempts${group ? ` where ${group.by}=${group.key}` : ""}`,
@@ -1035,7 +1046,7 @@ function select(view: View, ref: ParsedFactRef): Selection | null {
 		// An aggregate-only run cannot be split by group; its share stays unknown (#434).
 		const aggregate = run.fold.source === "calls" ? 0 : 1;
 		return {
-			parts: [{ attempts: run.attempts.filter((attempt) => attemptInGroup(attempt, group)), gap: run.gap + aggregate }],
+			parts: [{ attempts: groupAttempts(run.attempts, group), gap: run.gap + aggregate }],
 			describe: `the run's attempts where ${group.by}=${group.key}`,
 		};
 	}

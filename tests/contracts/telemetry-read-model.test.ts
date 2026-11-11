@@ -936,6 +936,37 @@ test("C-05: cached share skips an omitted read, and whole-block reads learn the 
 	ok(share?.kind === "measured" && Math.abs(share.value - (100 * 20_480) / (20_480 + 7_400)) < 1e-9);
 });
 
+test("a cause's re-prefill counts only its breaks, not the calls that fell short of the engine floor", () => {
+	let second = 0;
+	const call = (cacheRead: number, input: number, verdict: CallSettled["cache"]["verdict"], rePrefilled: number) =>
+		telemetryCall("cache-floor-cause", {
+			at: new Date(Date.UTC(2026, 10, 6, 12, 0, second++)).toISOString(),
+			usage: { cacheRead, input },
+			cache: { verdict, rePrefilledTokens: { kind: "measured", value: rePrefilled, source: "local-count" } },
+		});
+	const sourceOf = (records: readonly TelemetryRecord[]): SessionSource => ({
+		...source,
+		sessionId: "cache-floor-cause",
+		journal: { ...source.journal, records },
+	});
+	// Whole 2,048-token blocks, each short by under two blocks: hot once three calls teach the engine floor, though
+	// each alone re-prefilled enough to be a break.
+	const early = [...call(6_144, 2_600, "partial", 2_600), ...call(6_144, 2_700, "partial", 2_700)];
+	const cold = call(0, 9_000, "cold", 9_000);
+	const later = call(8_192, 2_100, "partial", 2_100);
+	const causes = (report: ReturnType<typeof cacheReport>) =>
+		report.byCause.map((row) => [row.cause, row.breaks, row.rePrefilled.display]);
+	const live = sourceOf([...early, ...cold]);
+	deepStrictEqual(causes(cacheReport(live, now)), [["unattributed", 3, "14,300"]]);
+	// The call that teaches the floor arrives after the cause was read.
+	const grown = sourceOf([...early, ...cold, ...later]);
+	continueSource(grown, live);
+	const report = cacheReport(grown, now);
+	deepStrictEqual([report.engineFloor?.[0]?.calls, report.breaks.length], [3, 1]);
+	deepStrictEqual(causes(report), [["unattributed", 1, "9,000"]]);
+	deepStrictEqual(causes(cacheReport(sourceOf([...early, ...cold, ...later]), now)), causes(report));
+});
+
 test("a resumed request that departs from the last journaled one mid-transcript is a replay mismatch", () => {
 	let second = 0;
 	const d = (c: string) => c.repeat(16);
