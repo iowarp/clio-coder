@@ -58,8 +58,12 @@ const hostScript = join(scratch, "host.cjs");
 writeFileSync(hostScript, HOST);
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const fast: Partial<CoreHostTiming> = { callMs: 400, progressMs: 200, pingIntervalMs: 50, closeGraceMs: 500 };
-const launch = (mode: string, timing: Partial<CoreHostTiming> = fast) =>
+// The core tier runs beside the GUI and package tiers on small CI runners, where a starved child can take seconds to
+// answer. A test that expects an answer gets deadlines far beyond that; only the silent host's test waits one out, and
+// its deadline still leaves the host's stderr line time to arrive.
+const roomy: Partial<CoreHostTiming> = { callMs: 20_000, progressMs: 10_000, pingIntervalMs: 50, closeGraceMs: 2_000 };
+const expiring: Partial<CoreHostTiming> = { ...roomy, callMs: 1_500 };
+const launch = (mode: string, timing: Partial<CoreHostTiming> = roomy) =>
 	startCoreHost({ command: process.execPath, args: [hostScript, mode], timing });
 const unavailable = (pattern: RegExp) => (error: unknown) =>
 	error instanceof StoreRefusal && error.reason === "unavailable" && pattern.test(error.message);
@@ -93,7 +97,7 @@ test("ping is answered while a long put runs", async () => {
 });
 
 test("a host that stops answering is quarantined with its stderr tail, then restarted once", async () => {
-	const host = await launch("silent");
+	const host = await launch("silent", expiring);
 	try {
 		await rejects(host.call("getOrCreateTag", { tag: "sim" }), unavailable(/deadline[\s\S]*stuck in GetBlob/));
 		strictEqual(host.state, "quarantined");
@@ -114,7 +118,7 @@ test("a host that writes garbage is quarantined", async () => {
 	}
 });
 
-test("a host that exits at start reports its exit code and stderr without routine runtime logging (M-40 F17)", async () => {
+test("a host that exits at start reports its exit code and stderr without routine runtime logging", async () => {
 	await rejects(launch("exit-at-start"), (error: unknown) => {
 		ok(unavailable(/exited with code 3[\s\S]*ERROR 7 WaitForLocalServer[\s\S]*cannot attach to runtime/)(error));
 		const message = (error as Error).message;
