@@ -9,7 +9,7 @@ import { resolvePackageRoot } from "../../src/core/package-root.js";
 import type { ProcessTerminal, Terminal } from "../../src/engine/tui.js";
 import { ApplicationInputTuiMainScreen, VStack } from "../../src/engine/tui.js";
 import { createProcessTerminalLease } from "../../src/interactive/terminal-lease.js";
-import { buildIdPlugin, currentBuildId } from "../../tsup.config.js";
+import { buildIdPlugin, currentBuildId, filesToPrune } from "../../tsup.config.js";
 
 const cleanups: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -37,6 +37,21 @@ it("mints a fresh build id for every build the bundler starts, watch rebuilds in
 		ids.push(currentBuildId());
 	}
 	assert.notEqual(ids[0], ids[1]);
+});
+
+it("prunes only chunks that neither the new build nor a build a live process runs still lists", () => {
+	const present = ["cli/index.js", "chunk-NEW.js", "chunk-HELD.js", "chunk-GONE.js", "chunk-SHARED.js"];
+	const current = ["cli/index.js", "chunk-NEW.js", "chunk-SHARED.js", "gui/client/index.html"];
+	const lists = new Map([
+		["held", ["cli/index.js", "chunk-HELD.js", "chunk-SHARED.js"]],
+		["dead", ["cli/index.js", "chunk-GONE.js"]],
+	]);
+	assert.deepEqual(filesToPrune(present, current, lists, new Set(["held", "unknown"])), ["chunk-GONE.js"]);
+	assert.deepEqual(
+		filesToPrune(present, current, lists, new Set()),
+		["chunk-HELD.js", "chunk-GONE.js"],
+		"with no live holder the result equals a clean build",
+	);
 });
 
 it("tells an ACP client to restart the agent when its build was replaced", () => {

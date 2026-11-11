@@ -1,6 +1,16 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +27,8 @@ const require = createRequire(import.meta.url);
 const buildStartedAt = performance.now();
 /** Minted at each build's start, so every watch rebuild records an id that matches its own chunks. */
 let buildId = randomUUID();
+/** The dist-relative files the most recent esbuild run wrote, from its metafile. */
+let lastBuildOutputs: string[] = [];
 
 /** The build id module; only its chunk changes from one build to the next. */
 const BUILD_ID_MODULE = /[\\/]src[\\/]core[\\/]build-id\.ts$/;
@@ -31,9 +43,15 @@ export const buildIdPlugin = {
 	setup(build: {
 		onStart(callback: () => void): void;
 		onLoad(options: { filter: RegExp }, callback: () => { contents: string; loader: "ts" }): void;
+		onEnd?(callback: (result: { metafile?: { outputs: Record<string, unknown> } | undefined }) => void): void;
 	}): void {
 		build.onStart(() => {
 			buildId = randomUUID();
+		});
+		build.onEnd?.((result) => {
+			lastBuildOutputs = Object.keys(result.metafile?.outputs ?? {}).map((path) =>
+				path.replaceAll("\\", "/").replace(/^(?:\.\/)?dist\//u, ""),
+			);
 		});
 		build.onLoad({ filter: BUILD_ID_MODULE }, () => ({
 			contents: `export const runningBuildId: string | null = ${JSON.stringify(buildId)};\n`,
@@ -45,6 +63,83 @@ export const buildIdPlugin = {
 /** The id the most recent build carries; `onSuccess` writes it to dist/build.json. */
 export function currentBuildId(): string {
 	return buildId;
+}
+
+/** Older builds whose file lists stay beside dist/build.json so a prune can honor them. */
+const RETAINED_BUILD_LISTS = 5;
+
+/**
+ * The `.js` files present in dist/ that the new build does not list and that
+ * no build a live process still runs lists either. A rebuild no longer cleans
+ * dist/, so a running process keeps the hashed chunks it has not loaded yet;
+ * with no live holder the result is what a clean build would leave.
+ */
+export function filesToPrune(
+	present: readonly string[],
+	current: readonly string[],
+	lists: ReadonlyMap<string, readonly string[]>,
+	liveIds: ReadonlySet<string>,
+): string[] {
+	const keep = new Set(current);
+	for (const id of liveIds) for (const file of lists.get(id) ?? []) keep.add(file);
+	return present.filter((file) => file.endsWith(".js") && !keep.has(file));
+}
+
+/** Build ids that live processes registered as holds (src/core/running-build.ts); dead holds are removed. */
+function liveHeldBuildIds(holds: string): Set<string> {
+	const ids = new Set<string>();
+	for (const name of existsSync(holds) ? readdirSync(holds) : []) {
+		const path = join(holds, name);
+		try {
+			const hold = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown; build?: unknown };
+			if (!Number.isInteger(hold.pid) || typeof hold.build !== "string") throw new Error("malformed hold");
+			process.kill(hold.pid as number, 0);
+			ids.add(hold.build);
+		} catch (error) {
+			// EPERM means the process lives under another user; anything else is a dead or broken hold.
+			if ((error as NodeJS.ErrnoException).code === "EPERM") continue;
+			rmSync(path, { force: true });
+		}
+	}
+	return ids;
+}
+
+/**
+ * Records this build's file list under dist/builds/, keeps the newest lists,
+ * and deletes every chunk neither this build nor a live holder's build lists.
+ */
+function retainAndPrune(id: string, files: string[]): void {
+	const builds = join("dist", "builds");
+	mkdirSync(builds, { recursive: true });
+	writeFileSync(join(builds, `${id}.json`), `${JSON.stringify({ id, files })}\n`);
+	const lists = new Map<string, string[]>();
+	const recorded = readdirSync(builds)
+		.filter((name) => /^[0-9a-f-]{36}\.json$/u.test(name))
+		.map((name) => ({ name, at: statSync(join(builds, name)).mtimeMs }))
+		.sort((a, b) => b.at - a.at);
+	for (const [index, { name }] of recorded.entries()) {
+		if (index >= RETAINED_BUILD_LISTS) {
+			rmSync(join(builds, name), { force: true });
+			continue;
+		}
+		try {
+			const list = JSON.parse(readFileSync(join(builds, name), "utf8")) as { files?: unknown };
+			if (Array.isArray(list.files)) lists.set(name.slice(0, -".json".length), list.files.map(String));
+		} catch {
+			// An unreadable list holds no files.
+		}
+	}
+	const present = distFiles((name) => name.endsWith(".js"));
+	for (const file of filesToPrune(present, files, lists, liveHeldBuildIds(join(builds, "holds"))))
+		rmSync(join("dist", file), { force: true });
+}
+
+/** Files under dist/ relative to it, outside the GUI client (replaced as a unit) and the retained lists. */
+function distFiles(match: (name: string) => boolean): string[] {
+	return readdirSync("dist", { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile() && match(entry.name))
+		.map((entry) => join(entry.parentPath, entry.name).slice("dist/".length).replaceAll("\\", "/"))
+		.filter((file) => !file.startsWith("builds/") && !file.startsWith("gui/client."));
 }
 
 /**
@@ -160,7 +255,11 @@ export default defineConfig({
 	splitting: true,
 	sourcemap: false,
 	metafile: true,
-	clean: true,
+	// A rebuild keeps the hashed chunks of the previous build so a running
+	// process can still load the ones it has not imported yet; onSuccess prunes
+	// every chunk no live process needs. `scripts/build.ts --clean` restores a
+	// full clean.
+	clean: false,
 	// The extension author types ship as self-contained bundled declarations,
 	// so an installed extension type-checks without the loose src/ graph or
 	// Clio's bundled devDependencies, and that source can live in the source
@@ -219,12 +318,21 @@ export default defineConfig({
 		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
 		const { build: buildClient } = await import(pathToFileURL(appRequire.resolve("vite")).href);
 		const clientStartedAt = performance.now();
+		// Built beside the live directory and swapped in, so a GUI request during
+		// the build never sees a half-written client.
+		const client = join(process.cwd(), "dist/gui/client");
+		const nextClient = `${client}.next`;
+		const oldClient = `${client}.old`;
 		await buildClient({
 			configFile: "apps/clio-coder-gui/vite.config.ts",
 			configLoader: "runner",
 			logLevel: buildVerbose() ? "info" : "warn",
-			build: { outDir: join(process.cwd(), "dist/gui/client"), emptyOutDir: true },
+			build: { outDir: nextClient, emptyOutDir: true },
 		});
+		rmSync(oldClient, { recursive: true, force: true });
+		if (existsSync(client)) renameSync(client, oldClient);
+		renameSync(nextClient, client);
+		rmSync(oldClient, { recursive: true, force: true });
 		reportBuildStage("GUI client", clientStartedAt, artifactBytes("dist/gui/client"));
 		const assetsStartedAt = performance.now();
 		vendorGrammars();
@@ -258,10 +366,14 @@ export default defineConfig({
 			)}\n`,
 		);
 		reportBuildStage("Runtime assets", assetsStartedAt, artifactBytes("dist/assets"));
-		const files = readdirSync("dist", { recursive: true, withFileTypes: true })
-			.filter((entry) => entry.isFile() && /\.(?:js|wasm|html)$/.test(entry.name))
-			.map((entry) => join(entry.parentPath, entry.name).slice("dist/".length).replaceAll("\\", "/"));
+		// The new build's own outputs come from the esbuild metafile, which leaves
+		// out chunks kept from earlier builds; without one every file counts.
+		const written = new Set(lastBuildOutputs);
+		const files = distFiles((name) => /\.(?:js|wasm|html)$/.test(name)).filter(
+			(file) => !file.endsWith(".js") || file.startsWith("gui/client/") || written.size === 0 || written.has(file),
+		);
 		writeFileSync("dist/build.json", `${JSON.stringify({ id: buildId, files })}\n`);
+		retainAndPrune(buildId, files);
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

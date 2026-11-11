@@ -7,7 +7,12 @@ import { buildColor, buildVerbose } from "./build-output.js";
 if (process.argv.includes("--build-worker")) {
 	const [{ build }, { default: config }] = await Promise.all([import("tsup"), import("../tsup.config.js")]);
 	if (typeof config === "function" || Array.isArray(config)) throw new Error("Expected one root build configuration.");
-	await build({ ...config, config: false, ...(process.argv.includes("--watch") ? { watch: true } : {}) });
+	await build({
+		...config,
+		config: false,
+		...(process.argv.includes("--clean") ? { clean: true } : {}),
+		...(process.argv.includes("--watch") ? { watch: true } : {}),
+	});
 } else {
 	const verbose = buildVerbose() || process.argv.includes("--watch");
 	const color = buildColor();

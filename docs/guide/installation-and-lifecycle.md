@@ -816,7 +816,15 @@ rebuild deleted shows the reinstall advice as a notice instead of a stack, and
 the session keeps running. Over ACP the failed request carries the
 `incomplete_installation` code and asks the client to restart the agent from the
 editor. Every build, each `pnpm run dev` watch rebuild included, writes a fresh
-id to `dist/build.json`. In Clio Coder's
+id to `dist/build.json`. A rebuild no longer empties `dist/`: hashed chunks
+from earlier builds stay until no live process from that checkout still runs
+the build that lists them. Each long-lived process records its build in
+`dist/builds/holds/`, the last five builds keep their file lists in
+`dist/builds/`, and the build deletes every other chunk, so with no session
+running the result equals a clean build. A session that outlives a rebuild
+therefore keeps loading its own features; workers, pane viewers and GUI
+sessions started afterwards run the new build.
+`node --import tsx scripts/build.ts --clean` empties `dist/` first. In Clio Coder's
 own source tree, running from that tree's build, the model is also told once
 that the code it edited is not what runs and to `/restart` before verifying.
 

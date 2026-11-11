@@ -90,6 +90,25 @@ interface RunningBuild {
 }
 
 /**
+ * A process running from a checkout's dist/ records its build there, so the
+ * next build of that checkout keeps the chunks this process may still import
+ * (tsup.config.ts prunes only chunks no live hold lists). Installed packages
+ * are never rebuilt in place and get no hold.
+ */
+function holdBuildFiles(record: RunningBuild): string | null {
+	if (!existsSync(join(record.root, ".git"))) return null;
+	try {
+		const directory = join(record.root, "dist", "builds", "holds");
+		mkdirSync(directory, { recursive: true });
+		const hold = join(directory, `${record.pid}.json`);
+		safeResourceWrite(hold, `${JSON.stringify({ pid: record.pid, build: record.build })}\n`);
+		return hold;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Only long-lived Clio processes register; read-only CLI commands never create state.
  */
 export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): void {
@@ -107,9 +126,11 @@ export function registerRunningBuild(surface: "gui" | "tui" | "acp" | "run"): vo
 			surface,
 		};
 		safeResourceWrite(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+		const hold = holdBuildFiles(record);
 		process.once("exit", () => {
 			try {
 				rmSync(file, { force: true });
+				if (hold) rmSync(hold, { force: true });
 			} catch {
 				/* Reset may already have removed the state directory. */
 			}
