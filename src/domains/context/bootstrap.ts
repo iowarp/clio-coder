@@ -221,6 +221,8 @@ export interface RunBootstrapSummary {
 	dirtyFiles: number;
 	adoption: RunBootstrapAdoptionSummary;
 	proposalPath?: string;
+	/** Restated rules merged and checker ids corrected while compiling, when there were any. */
+	compile?: HandbookCompileReport;
 }
 
 export interface RunBootstrapAdoptionSummary {
@@ -1050,6 +1052,8 @@ interface ClaimCitations {
 	cites?: (path: string) => boolean;
 	/** Cited files that do not support the claim, cut from citation lists when another cited file does. */
 	unsupporting?: (cited: string[]) => string[];
+	/** The evidence was read in full and contradicts the claim: cut the sentence instead of marking it. */
+	refuted?: (cited: string[]) => boolean;
 }
 
 /**
@@ -1074,6 +1078,7 @@ function withUnsupportedClaimsMarked(
 		];
 		const missing = cited.length > 0 ? unsupported(cited) : null;
 		if (missing === null) return withoutCitations(sentence, new Set(citations.unsupporting?.(cited) ?? []));
+		if (citations.refuted?.(cited) === true) return "";
 		const note = ` (unverified: ${missing})`;
 		const end = /([.!?])(\s*)$/.exec(sentence);
 		return end ? `${sentence.slice(0, end.index)}${note}${end[1]}${end[2]}` : `${sentence.trimEnd()}${note}`;
@@ -1247,7 +1252,9 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
 	// fileText is lowercased, so every comparison here is.
 	const preloaded = new Set<string>();
 	const launchers = new Set<string>();
+	const scriptTexts: string[] = [];
 	const addPreloads = (dir: string, script: string): void => {
+		scriptTexts.push(script.toLowerCase());
 		const launch = plainNodeLaunch(script, dir);
 		if (!launch) return;
 		for (const path of launch.preloads) preloaded.add(path.toLowerCase());
@@ -1265,13 +1272,27 @@ function withUnsupportedPreloadsMarked(line: string, evidence: ModelGroundingCor
 			// An unparsable manifest preloads nothing.
 		}
 	}
-	return withUnsupportedClaimsMarked(line, PRELOAD_CLAIM_RE, (cited) => {
-		const missing = cited.filter(
+	const missingPreloads = (cited: string[]): string[] =>
+		cited.filter(
 			(path) => MODULE_FILE_RE.test(path) && !preloaded.has(path.toLowerCase()) && !launchers.has(path.toLowerCase()),
 		);
-		if (missing.length === 0) return null;
-		return `${missing.map((path) => `\`${path}\``).join(", ")} ${missing.length === 1 ? "is" : "are"} not preloaded by a package script`;
-	});
+	// A module no script text names, and that launches nothing itself, is verified absent: the claim is
+	// dropped, not marked. A cited launcher such as a spawn script may preload in its own code.
+	const namedByNoScript = (path: string): boolean => {
+		const lower = path.toLowerCase();
+		if (/--(?:import|require|loader)\b|preload/.test(evidence.fileText(path) ?? "--import")) return false;
+		return !scriptTexts.some((text) => text.includes(lower) || text.includes(posix.basename(lower)));
+	};
+	return withUnsupportedClaimsMarked(
+		line,
+		PRELOAD_CLAIM_RE,
+		(cited) => {
+			const missing = missingPreloads(cited);
+			if (missing.length === 0) return null;
+			return `${missing.map((path) => `\`${path}\``).join(", ")} ${missing.length === 1 ? "is" : "are"} not preloaded by a package script`;
+		},
+		{ refuted: (cited) => scriptTexts.length > 0 && missingPreloads(cited).every(namedByNoScript) },
+	);
 }
 
 /**
@@ -1452,11 +1473,31 @@ function handbookRuleTokens(rule: string): ReadonlySet<string> {
 const CITED_FILE_RE = /^`[^`\s/]+\/[^`\s]/;
 
 /** Most words match: two bullets that only cite the same files may state different obligations. */
-function rewordsHandbookRule(tokens: ReadonlySet<string>, kept: ReadonlyArray<ReadonlySet<string>>): boolean {
-	return kept.some((other) => {
+/** Two rules that cite different checker ids (`rule3`, `rule9`) are different rules, however alike they read. */
+function sameRuleIds(a: string, b: string): boolean {
+	const ids = (text: string): string => [...new Set(text.match(/\brule\d+\b/g) ?? [])].sort().join(",");
+	const left = ids(a);
+	const right = ids(b);
+	return left === "" || right === "" || left === right;
+}
+
+/**
+ * The kept rule this one rewords: most of its words match. With `citedFloor`, a lower share also counts when
+ * both cite the same file below the root, as two wordings of one handbook rule usually do.
+ */
+function rewordedRule<T extends ReadonlySet<string>>(
+	tokens: ReadonlySet<string>,
+	kept: ReadonlyArray<T>,
+	citedFloor?: number,
+): T | undefined {
+	return kept.find((other) => {
 		const shorter = tokens.size <= other.size ? tokens : other;
 		const longer = tokens.size <= other.size ? other : tokens;
-		return shorter.size > 0 && [...shorter].filter((token) => longer.has(token)).length / shorter.size >= 0.7;
+		if (shorter.size === 0) return false;
+		const shared = [...shorter].filter((token) => longer.has(token));
+		const share = shared.length / shorter.size;
+		if (share >= 0.7) return true;
+		return citedFloor !== undefined && share >= citedFloor && shared.some((token) => CITED_FILE_RE.test(token));
 	});
 }
 
@@ -1543,6 +1584,46 @@ function checkerRuleList(input: BootstrapGenerateInput): CheckerRule[] {
 	}
 	const number = (code: string): number => Number(/\d+/.exec(code)?.[0] ?? 0);
 	return rules.sort((a, b) => a.path.localeCompare(b.path) || number(a.code) - number(b.code));
+}
+
+/** What compiling the handbook merged or corrected in the rules it kept; reported, never silent. */
+interface HandbookCompileReport {
+	merged: { kept: string; dropped: string }[];
+	ruleIds: { from: string; to: string }[];
+	unknownRuleIds: string[];
+}
+
+/**
+ * A rule that cites one checker id (`rule15`) is held against the checker's own rules. When another id's text
+ * matches the rule clearly better, the id was renumbered since the rule was written and is rewritten; when no
+ * checker rule matches and the id is absent, it is reported. A sentence the checker section derived is left as is.
+ */
+function correctedRuleIds(line: string, rules: ReadonlyArray<CheckerRule>, report?: HandbookCompileReport): string {
+	if (rules.length === 0) return line;
+	const ids = [...new Set([...line.matchAll(/\brule\d+\b/g)].map((match) => match[0]))];
+	const id = ids[0];
+	if (ids.length !== 1 || id === undefined || rules.some((rule) => rule.sentence === line)) return line;
+	const tokens = handbookRuleTokens(line.replaceAll(id, " "));
+	const score = (rule: CheckerRule): number => {
+		const own = handbookRuleTokens(rule.sentence.replace(/\s*Checked as `[^`]+` by `[^`]+`\.$/, ""));
+		return own.size === 0 ? 0 : [...own].filter((token) => tokens.has(token)).length / own.size;
+	};
+	let best: { code: string; score: number } | undefined;
+	let cited = -1;
+	for (const rule of rules) {
+		const value = score(rule);
+		if (rule.code === id) cited = Math.max(cited, value);
+		if (!best || value > best.score) best = { code: rule.code, score: value };
+	}
+	if (!best || best.score < 0.3) {
+		if (cited < 0 && !report?.unknownRuleIds.includes(id)) report?.unknownRuleIds.push(id);
+		return line;
+	}
+	// Rules of one checker share its vocabulary, so a renumbering must win clearly: on this repository's own
+	// handbook a correct id scored 0.27 against 0.38 for a neighbour, and the renumbered owner rule 0.27 against 0.46.
+	if (best.code === id || best.score < 0.4 || best.score - Math.max(cited, 0) < 0.15) return line;
+	report?.ruleIds.push({ from: id, to: best.code });
+	return line.replace(new RegExp(`\\b${id}\\b`, "g"), best.code);
 }
 
 /** Whether handbook prose names a rule code, alone (`rule8`) or in a list (`rules 10 and 14`). */
@@ -1812,6 +1893,7 @@ function stabilizeGeneratedOutput(
 	onModelSectionRetained?: () => void,
 	groundModelOutput = false,
 	onProtected?: (content: ProtectedHandbook) => void,
+	report?: HandbookCompileReport,
 ): BootstrapStructuredOutput {
 	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
 	const existing = input.existingClioMd;
@@ -1880,12 +1962,35 @@ function stabilizeGeneratedOutput(
 	for (const rule of architectural) {
 		if (!authoredInvariants.includes(rule.sentence)) pushUnique(protectedInvariants, rule.sentence);
 	}
-	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushUnique(protectedInvariants, rule);
-	for (const rule of authoredInvariants) pushUnique(protectedInvariants, rule);
+	// Carried and authored rules lead and are not cut for length, but one that rewords an earlier one is the
+	// same rule twice: the first wording stays and the pair is reported.
+	const protectedWording = new Map<ReadonlySet<string>, string>();
+	const rewordingOf = (rule: string): string | undefined => {
+		const candidates = [...protectedWording].filter(([, kept]) => sameRuleIds(rule, kept)).map(([tokens]) => tokens);
+		const match = rewordedRule(handbookRuleTokens(rule), candidates, 0.55);
+		return match ? protectedWording.get(match) : undefined;
+	};
+	const pushProtected = (rule: string): void => {
+		if (protectedInvariants.includes(rule)) return;
+		const kept = rewordingOf(rule);
+		if (kept !== undefined) {
+			report?.merged.push({ kept, dropped: rule });
+			return;
+		}
+		protectedWording.set(handbookRuleTokens(rule), rule);
+		protectedInvariants.push(rule);
+	};
+	for (const rule of carried) if (!authoredInvariants.includes(rule)) pushProtected(rule);
+	for (const rule of authoredInvariants) pushProtected(rule);
 	// A previous section block counts as stated only by a rule the final fit cannot cut, word for word.
 	const protectedKeys = new Set(protectedInvariants.map(normalizeHandbookRule));
+	// A model rule that only resembles a carried one may flip it or add a clause, so it stays (see above).
 	const modelInvariants = invariants.filter(
-		(rule) => !protectedInvariants.includes(rule) && !restatesArchitecture(rule) && !duplicatesCarried(rule),
+		(rule) =>
+			!authoredInvariants.includes(rule) &&
+			!protectedInvariants.includes(rule) &&
+			!restatesArchitecture(rule) &&
+			!duplicatesCarried(rule),
 	);
 	const retainedInvariants = [
 		...protectedInvariants,
@@ -1923,15 +2028,23 @@ function stabilizeGeneratedOutput(
 				? protectedKeys.has(normalizeHandbookRule(block))
 				: restatesHandbookRule(handbookRuleTokens(block), uncarriedRuleTokens) || duplicatesCarried(block);
 		// A bullet that rewords an earlier bullet of the same section is dropped; the first wording stays.
-		const keptHere: ReadonlySet<string>[] = [];
+		const keptHere = new Map<ReadonlySet<string>, string>();
 		const body = handbookBlocks(section.body)
 			.filter((block) => {
 				if (!/^\s*(?:[-*+]\s|\d+[.)]\s)/.test(block)) return true;
 				if (restatesKept(block) || restatesArchitecture(block)) return false;
 				if (!carriedSection) {
 					const tokens = handbookRuleTokens(block);
-					if (rewordsHandbookRule(tokens, keptHere)) return false;
-					keptHere.push(tokens);
+					const match = rewordedRule(
+						tokens,
+						[...keptHere].filter(([, kept]) => sameRuleIds(block, kept)).map(([keys]) => keys),
+						0.55,
+					);
+					if (match) {
+						report?.merged.push({ kept: keptHere.get(match) ?? "", dropped: block });
+						return false;
+					}
+					keptHere.set(tokens, block);
 				}
 				return true;
 			})
@@ -2009,13 +2122,20 @@ function stabilizeGeneratedOutput(
 		invariants: protectedInvariants,
 		sections: [...carriedSections].map(([section, blocks]) => ({ title: section.title, body: blocks.join("\n") })),
 	});
+	const fixIds = (line: string): string => correctedRuleIds(line, checkerRules, report);
 	return {
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
 		identity: existing?.identity ?? stabilizedIdentity(input, base.identity, tomlFiles),
-		conventions: retainedConventions,
-		invariants: retainedInvariants,
-		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
+		conventions: retainedConventions.map(fixIds),
+		invariants: retainedInvariants.map(fixIds),
+		sections: [
+			...retainedOrdinarySections.map((section) => {
+				const body = handbookBlocks(section.body).map(fixIds).join("\n");
+				return body === section.body ? section : { ...section, body };
+			}),
+			...(verification ? [verification] : []),
+		],
 	};
 }
 
@@ -2199,6 +2319,24 @@ function formatAdoptionLine(summary: RunBootstrapSummary): string | null {
 	return `  adoption ${verb} ${adoption.sourceCount} source${adoption.sourceCount === 1 ? "" : "s"} (${adoption.projectSourceCount} project, ${global}); ${adoption.importedRuleCount} candidate rule${adoption.importedRuleCount === 1 ? "" : "s"}; ${adoption.conflictCount} conflict${adoption.conflictCount === 1 ? "" : "s"}; ${adoption.rejectedCount} rejected`;
 }
 
+function formatCompileLines(summary: RunBootstrapSummary): string[] {
+	const compile = summary.compile;
+	if (!compile) return [];
+	const clip = (rule: string): string => {
+		const flat = rule.replace(/\s+/g, " ").trim();
+		return flat.length > 100 ? `${flat.slice(0, 99)}…` : flat;
+	};
+	const lines: string[] = [];
+	if (compile.merged.length > 0) {
+		lines.push(`  merged ${compile.merged.length} restated rule${compile.merged.length === 1 ? "" : "s"}`);
+		if (summary.action === "previewed")
+			for (const pair of compile.merged) lines.push(`    kept: ${clip(pair.kept)}`, `    dropped: ${clip(pair.dropped)}`);
+	}
+	for (const fix of compile.ruleIds) lines.push(`  rule id ${fix.from} rewritten to ${fix.to}`);
+	for (const id of compile.unknownRuleIds) lines.push(`  rule id ${id} not found in the checker`);
+	return lines;
+}
+
 function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 	const contextLine =
 		summary.contextFileCount > 0
@@ -2214,6 +2352,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 			"clio-coder context init preview",
 			`  ${contextLine}; codemap would index ${summary.codewikiEntries} entr${summary.codewikiEntries === 1 ? "y" : "ies"}; ${dirtyLine}; no files written`,
 			...(adoptionLine ? [adoptionLine] : []),
+			...formatCompileLines(summary),
 			"",
 		].join("\n");
 	}
@@ -2235,6 +2374,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 			...(proposalLine ? [proposalLine] : []),
 			"  CLIO-CODER.md was not changed. Re-run with --apply only after reviewing the proposal.",
 			...(adoptionLine ? [adoptionLine] : []),
+			...formatCompileLines(summary),
 			"",
 		].join("\n");
 	}
@@ -2244,6 +2384,7 @@ function formatBootstrapSummary(summary: RunBootstrapSummary): string {
 		"  git policy: CLIO-CODER.md and what you author under .clio-coder/ can be committed; .clio-coder/.gitignore keeps generated files and *.local.yaml out of Git.",
 		...(proposalLine ? [proposalLine] : []),
 		...(adoptionLine ? [adoptionLine] : []),
+		...formatCompileLines(summary),
 		"",
 	].join("\n");
 }
@@ -2619,6 +2760,11 @@ async function runBootstrapWork(
 		input.proposeClioMd === true || (hadClioMd && input.generate !== undefined && !replaceClioMd && input.adopt !== true);
 	let output: BootstrapStructuredOutput;
 	let protectedContent: ProtectedHandbook | undefined;
+	const compileReport: HandbookCompileReport = { merged: [], ruleIds: [], unknownRuleIds: [] };
+	const compiled = (): { compile?: HandbookCompileReport } =>
+		compileReport.merged.length + compileReport.ruleIds.length + compileReport.unknownRuleIds.length > 0
+			? { compile: compileReport }
+			: {};
 	let generation: BootstrapGenerationTelemetry = {
 		mode: shouldGenerate ? "heuristic" : existingParsed ? "existing" : "heuristic",
 		parserOutcome: "not-run",
@@ -2740,6 +2886,7 @@ async function runBootstrapWork(
 			(content) => {
 				protectedContent = content;
 			},
+			compileReport,
 		);
 		if (generation.mode === "model" && retainedModelSections === 0) {
 			generation = {
@@ -2799,6 +2946,7 @@ async function runBootstrapWork(
 			codewikiEntries: codewikiEntryCount,
 			dirtyFiles: countStatusLines(previewStatus),
 			adoption: summarizeAdoption(adoption, "preview"),
+			...compiled(),
 		};
 		out(input.io, formatBootstrapSummary(summary));
 		progress(input, { phase: "done", status: "completed", message: "context preview ready; no files written" });
@@ -2885,6 +3033,7 @@ async function runBootstrapWork(
 		dirtyFiles: countStatusLines(postStatus),
 		adoption: summarizeAdoption(adoption, adoptionApplied ? "adopt" : "scan"),
 		...(proposalPath ? { proposalPath } : {}),
+		...compiled(),
 	};
 	out(input.io, formatBootstrapSummary(summary));
 	if (action === "wrote" || action === "refreshed") {

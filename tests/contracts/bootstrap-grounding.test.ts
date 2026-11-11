@@ -318,12 +318,8 @@ it("marks a module a rule calls preloaded when no plain node script preloads it"
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	ok(
-		handbook.includes(
-			`${claim.slice(0, -1)} (unverified: \`tests/harness/scratch-env.ts\` is not preloaded by a package script).`,
-		),
-		handbook,
-	);
+	// No script names `scratch-env.ts`, so the claim is refuted outright and dropped rather than marked.
+	ok(!handbook.includes("tests/harness/scratch-env.ts"), handbook);
 	ok(handbook.includes(launcher), handbook);
 	ok(handbook.includes(`${workspace}\n`), handbook);
 	ok(handbook.includes(`${pooled}\n`), handbook);
@@ -1074,4 +1070,51 @@ it("records no tool call total when a started dispatch left no receipt", async (
 	const generation = readClioState(cwd)?.lastBootstrap;
 	strictEqual(generation?.runId, "settled", JSON.stringify(generation));
 	strictEqual(generation?.toolCalls, undefined, JSON.stringify(generation));
+});
+
+it("merges a handbook's restated rules, keeps the first wording and corrects a renumbered rule id", async () => {
+	mkdirSync(join(cwd, "src", "widgets"), { recursive: true });
+	mkdirSync(join(cwd, "tests", "boundaries"), { recursive: true });
+	writeFileSync(join(cwd, "src", "widgets", "render.ts"), "export function renderWidget(): string { return ''; }\n");
+	writeFileSync(join(cwd, "src", "widgets", "owner.ts"), "export const registrar = {};\n");
+	writeFileSync(
+		join(cwd, "tests", "boundaries", "check-owners.ts"),
+		[
+			"/**",
+			" * 1. Every widget test file stays under the widgets suite directory.",
+			" * 2. The render registrar capability of the widget owner is named only inside src/widgets/owner.ts.",
+			" */",
+			"export function runOwnersCheck(): string[] {",
+			'\treturn ["rule1: a widget test is outside its suite", "rule2: the registrar is named outside its owner"];',
+			"}",
+			"",
+		].join("\n"),
+	);
+	const kept = "Exported names from `src/widgets/render.ts` stay stable between minor releases.";
+	const restated = "Exported names from `src/widgets/render.ts` must stay stable across minor releases.";
+	const recipe = "- A new widget kind registers its renderer through `renderWidget` in `src/widgets/render.ts`.";
+	const recipeAgain =
+		"- A new widget kind registers its renderer through `renderWidget` in `src/widgets/render.ts` first.";
+	const owner =
+		"The render registrar capability of the widget owner is named only inside `src/widgets/owner.ts` (rule1).";
+	writeFileSync(
+		join(cwd, "CLIO-CODER.md"),
+		serializeClioMd({
+			projectName: "harbor",
+			identity: "A widget renderer.",
+			invariants: [kept, restated, owner],
+			conventions: [],
+			sections: [{ title: "Change recipes", body: [recipe, recipeAgain].join("\n") }],
+		}),
+	);
+	let stdout = "";
+	await runBootstrap({ cwd, applyClioMd: true, io: { stdout: (text) => (stdout += text), stderr: () => {} } });
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	strictEqual(handbook.match(/stay stable/g)?.length, 1, handbook);
+	ok(handbook.includes(kept), handbook);
+	strictEqual(handbook.match(/registers its renderer/g)?.length, 1, handbook);
+	ok(handbook.includes(`${recipe}\n`), handbook);
+	ok(handbook.includes("`src/widgets/owner.ts` (rule2)."), handbook);
+	ok(stdout.includes("merged 2 restated rules"), stdout);
+	ok(stdout.includes("rule id rule1 rewritten to rule2"), stdout);
 });
