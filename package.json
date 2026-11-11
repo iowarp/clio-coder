@@ -119,6 +119,7 @@
 		"test": "node scripts/ci-tests.mjs core",
 		"test:gui": "node scripts/ci-tests.mjs gui",
 		"test:list": "node scripts/ci-tests.mjs list",
+		"check:lane": "node scripts/check-lane.mjs",
 		"check:gui": "pnpm --filter @iowarp/clio-coder-gui typecheck && pnpm --filter @iowarp/clio-coder-gui lint",
 		"ci": "node scripts/release-candidate.mjs qualify",
 		"ci:release": "node scripts/release-candidate.mjs qualify",
