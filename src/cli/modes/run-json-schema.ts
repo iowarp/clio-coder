@@ -286,6 +286,14 @@ export interface RunJsonDispatchScopeNoticeFrame extends DispatchScopeNoticeView
 	type: "dispatch_scope_notice";
 }
 
+/** A `run --agent --json` dispatch that admission refused before any worker started; no model was called. */
+export interface RunJsonAdmissionRefusedFrame {
+	type: "admission_refused";
+	agentId: string;
+	message: string;
+	exitCode: number;
+}
+
 export interface RunJsonDispatchedRunOutcome {
 	runId: string;
 	agentId: string;
@@ -363,6 +371,7 @@ export type RunJsonMainFrame =
 export type RunJsonAgentFrame =
 	| RunJsonAgentSessionFrame
 	| RunJsonDispatchScopeNoticeFrame
+	| RunJsonAdmissionRefusedFrame
 	| RunJsonWorkerEventFrame
 	| RunJsonWorkerAgentEndFrame
 	| RunJsonOpaqueWorkerEventFrame

@@ -31,6 +31,7 @@ import { ProvidersDomainModule } from "../domains/providers/index.js";
 import { runtimeNotRegistered } from "../domains/providers/retired-runtimes.js";
 import { loadSkills, ResourcesDomainModule } from "../domains/resources/index.js";
 import { SafetyDomainModule } from "../domains/safety/index.js";
+import { redactUrlCredentials } from "../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SessionCostCeilingError } from "../domains/scheduling/budget.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
@@ -46,7 +47,7 @@ import { classifyDefaultTarget } from "./default-target.js";
 import { buildInitialMessage, readPipedStdin } from "./initial-message.js";
 import { createJsonCredentialScrub, projectDispatchJsonEvent } from "./modes/json-stream.js";
 import { writeFrame } from "./modes/jsonl.js";
-import type { RunJsonAgentFrame } from "./modes/run-json-schema.js";
+import type { RunJsonAdmissionRefusedFrame, RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
 import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
@@ -138,7 +139,7 @@ export function explicitTargetMissing(targetId: string): boolean {
  * in memory, so a CI job with one key in its environment runs without a setup step. Null leaves the
  * run to its established path; a number is the exit code for a choice the operator has to make.
  */
-async function borrowHeadlessRoute(
+export async function borrowHeadlessRoute(
 	targetId: string | undefined,
 	model: string | undefined,
 ): Promise<{ settings: ClioSettings; notice: string } | number | null> {
@@ -161,10 +162,13 @@ async function borrowHeadlessRoute(
 		projectTargets,
 	});
 	if (found.kind === "none") {
-		if (found.reservedForMemory !== undefined && model === undefined)
+		// The memory refusal is the whole answer; booting on would add the generic no-target line after it.
+		if (found.reservedForMemory !== undefined && model === undefined) {
 			writeRunDiagnostic(
 				`clio-coder run: the only usable saved target, ${found.reservedForMemory}, is reserved for memory (context.memory.target); add a chat target or pass --target <id>\n`,
 			);
+			return 2;
+		}
 		return null;
 	}
 	if (found.kind === "several") {
@@ -924,14 +928,46 @@ async function runDispatch(
 			// Asking for an agent reserved for internal orchestration is an admission
 			// refusal like any other, and no model was called. Matched against the
 			// refusal the spec's own audience produces, not against failure text at large.
-			(failedSpec && isUserOriginAudienceRefusal(failedSpec, msg)) ||
-			/target '.+' not found/.test(msg) ||
-			msg.includes("unknown agent recipe") ||
-			msg.includes("admission") ||
-			msg.includes("capability") ||
-			msg.includes("budget");
-		return await stopDomains(err instanceof SessionCostCeilingError ? SESSION_COST_CEILING_EXIT_CODE : refused ? 2 : 1);
+			isAdmissionRefusal(msg, failedSpec);
+		const exitCode = err instanceof SessionCostCeilingError ? SESSION_COST_CEILING_EXIT_CODE : refused ? 2 : 1;
+		const refusedFrame = admissionRefusedFrame(parsed, msg, refused, exitCode);
+		if (refusedFrame !== null) {
+			writeJsonHeader();
+			writeAgentFrame(refusedFrame);
+		}
+		return await stopDomains(exitCode);
 	}
+}
+
+/** Whether a dispatch failure is an admission refusal: no worker started and no model was called. */
+function isAdmissionRefusal(
+	msg: string,
+	failedSpec: Parameters<typeof isUserOriginAudienceRefusal>[0] | null | undefined,
+): boolean {
+	return (
+		(failedSpec ? isUserOriginAudienceRefusal(failedSpec, msg) : false) ||
+		/target '.+' not found/.test(msg) ||
+		msg.includes("unknown agent recipe") ||
+		msg.includes("admission") ||
+		msg.includes("capability") ||
+		msg.includes("budget")
+	);
+}
+
+/** The structured frame a `run --agent --json` stream carries for a refused admission; null otherwise. */
+export function admissionRefusedFrame(
+	parsed: Pick<RunCliArgs, "json" | "agentId">,
+	message: string,
+	refused: boolean,
+	exitCode: number,
+): RunJsonAdmissionRefusedFrame | null {
+	if (!parsed.json || !refused) return null;
+	return {
+		type: "admission_refused",
+		agentId: parsed.agentId ?? "",
+		message: redactUrlCredentials(message),
+		exitCode,
+	};
 }
 
 /** The refused shadow run as the user-facing command that covers it, keeping the route flags (DF-3). */
