@@ -30,7 +30,21 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AUTONOMY_CEILING_ENV } from "../../src/core/bash-exec.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { YOLO_CONFINEMENT_PIN_ENV } from "../../src/domains/safety/autonomy.js";
+
+/**
+ * The keys a Clio session writes into its tool commands' environment. A test
+ * run from that session's bash inherits them, so a scratch env drops them.
+ */
+export const GENERATED_TOOL_ENV_KEYS = [AUTONOMY_CEILING_ENV, YOLO_CONFINEMENT_PIN_ENV] as const;
+
+/** Removes the generated tool env keys from `env` in place. */
+export function dropGeneratedToolEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
+	return env;
+}
 
 let envLockChain: Promise<void> = Promise.resolve();
 
@@ -147,6 +161,7 @@ export async function isolateClioEnv(prefix = "clio-coder-scratch-"): Promise<Is
 	const envBackup: NodeJS.ProcessEnv = { ...process.env };
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	Object.assign(process.env, scratchClioEnvVars(dir));
+	dropGeneratedToolEnv(process.env);
 	resetXdgCache();
 	return {
 		dir,

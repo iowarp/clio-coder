@@ -997,6 +997,20 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const operatorDefault = operatorDefaultScope(level);
 		return operatorDefault === undefined ? {} : { operatorDefault };
 	};
+	/**
+	 * A host effect that declares `unsandboxed: true` (a scheduled job's argv)
+	 * always runs outside the sandbox: it is not a model's request to escape
+	 * one. It is judged as the uncontained call it is, as on a host without a
+	 * sandbox, so it earns no containment relief and raises no escape ask.
+	 */
+	const hostEffectScope = (
+		effectCall: ClassifierCall,
+		level: AutonomyLevel,
+	): { operatorYolo?: OperatorYoloScope; operatorDefault?: OperatorDefaultScope } => {
+		const scope = withOperatorScope(level);
+		if (effectCall.args?.unsandboxed !== true || scope.operatorDefault === undefined) return scope;
+		return { operatorDefault: { ...scope.operatorDefault, sandbox: false } };
+	};
 	const shellSandboxPolicy = (
 		roots: { workspace: string; scratchRoots: ReadonlyArray<string>; readOnly?: true },
 		sessionId: string | undefined,
@@ -1975,7 +1989,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				effects: [effect.call],
 				safety: deps.safety,
 				autonomy: level,
-				...withOperatorScope(level),
+				...hostEffectScope(effect.call, level),
 				...(deps.workerExecuteAutonomy !== undefined ? { workerExecuteAutonomy: deps.workerExecuteAutonomy } : {}),
 				...(effectSpec !== undefined
 					? { normalize: (raw: SafetyDecision) => applyRegisteredToolClassification(raw, effectSpec) }
@@ -2007,17 +2021,25 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		const refused = hard ?? soft ?? consent;
 		if (refused === null) return null;
 		const reason = `${call.tool} refused: ${refused.label} would not be admitted as a direct call (${refused.cause})`;
+		const scheduled = call.tool === ToolNames.Job;
 		const reasonCode = hard !== null ? "host_effect_blocked" : "host_effect_not_admitted";
 		const blocked: SafetyDecision = {
 			kind: "block",
 			classification: decision.classification,
 			rejection: {
 				short: reason,
-				detail: `${reason}. Host verification runs each declared check as the dispatching agent, so each check must pass the admission its direct call would.`,
-				hints: [
-					"Run the check yourself with verify after the run settles, or declare a check the policy recognizes.",
-					"Approving the dispatch does not approve the commands its verification runs.",
-				],
+				detail: scheduled
+					? `${reason}. A scheduled job runs its command as this session, outside any sandbox, so the command must pass the admission its direct uncontained call would.`
+					: `${reason}. Host verification runs each declared check as the dispatching agent, so each check must pass the admission its direct call would.`,
+				hints: scheduled
+					? [
+							"Schedule a command the policy recognizes, or run the command yourself with bash.",
+							"Approving the job does not approve the command it runs.",
+						]
+					: [
+							"Run the check yourself with verify after the run settles, or declare a check the policy recognizes.",
+							"Approving the dispatch does not approve the commands its verification runs.",
+						],
 			},
 			...(decision.policy !== undefined ? { policy: { ...decision.policy, reasonCode } } : {}),
 		};

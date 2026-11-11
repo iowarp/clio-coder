@@ -14,7 +14,7 @@ import { resetXdgCache } from "../../src/core/xdg.js";
 import type { RunEnvelope } from "../../src/domains/dispatch/types.js";
 import type { SettledRunRecord } from "../../src/domains/telemetry/index.js";
 import { readRunJournal } from "./run-journal.js";
-import { scratchClioEnvVars } from "./scratch-env.js";
+import { dropGeneratedToolEnv, scratchClioEnvVars } from "./scratch-env.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");
@@ -56,13 +56,13 @@ export interface HeadlessScratch {
 export function headlessScratch(prefix: string): HeadlessScratch {
 	const root = mkdtempSync(join(tmpdir(), prefix));
 	const homeEnv = scratchClioEnvVars(root, { requireHomePrefix: true });
-	const env: NodeJS.ProcessEnv = {
+	const env: NodeJS.ProcessEnv = dropGeneratedToolEnv({
 		...process.env,
 		NODE_ENV: "test",
 		NO_COLOR: "1",
 		...homeEnv,
 		CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
-	};
+	});
 	initializeScratchHome(root);
 	return {
 		root,
