@@ -44,7 +44,7 @@ describe("contracts/install-script", () => {
 
 	it("keeps the body inside main() so a truncated download runs nothing", () => {
 		const text = readFileSync(SCRIPT, "utf8");
-		match(text, /\nmain "\$@"\n$/u, "main is the last line");
+		match(text, /\n\{ main "\$@"; \}\n$/u, "main runs from a brace group on the last line");
 		strictEqual(text.indexOf("\nmain() {"), text.lastIndexOf("\nmain() {"));
 	});
 

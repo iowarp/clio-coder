@@ -1037,4 +1037,5 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 	report_path
 }
 
-main "$@"
+# A group runs only once its closing brace arrived, so a truncated download runs nothing.
+{ main "$@"; }

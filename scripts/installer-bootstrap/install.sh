@@ -41,4 +41,5 @@ main() {
 	if [ -z "$version" ]; then set -- "$@" --version "$channel"; fi
 	sh "$file" "$@"
 }
-main "$@"
+# A group runs only once its closing brace arrived, so a truncated download runs nothing.
+{ main "$@"; }
