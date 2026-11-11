@@ -141,17 +141,28 @@ function assertedValue(normalized: string, values: string): string | undefined {
 	return undefined;
 }
 
-const BRINGS_IN_RE =
-	/\b(?:add|adds|adding|create|creates|creating|introduce|introduces|reintroduce|restore|install|installs|import|imports|use|uses|using|depend on|require|requires|vendor|bring back|commit|check in)\b/;
+const BRINGS_IN =
+	"add|adds|adding|create|creates|creating|introduce|introduces|reintroduce|restore|install|installs|import|imports|use|uses|using|depend on|require|requires|vendor|bring back|commit|check in";
+
+/** Words that open a new condition, so a negation before them does not govern what follows. */
+const CONDITION_BREAK_RE = /\b(?:without|before|after|from|when|whenever|unless|until|while|if|so|but)\b/;
+
+/** The bring-in verb directly governing the citation: at most an article or earlier citations of the same list between them. */
+const GOVERNED_RE = new RegExp(
+	`\\b(?:${BRINGS_IN})\\s+(?:(?:a|an|the|any|another|new|back)\\s+)*(?:\`[^\`]*\`\\s*(?:,|or|and|nor)?\\s*)*$`,
+);
 
 /**
  * Whether the rule forbids bringing in what it cites at `index`: "Never add
  * `lodash`" or "Do not create `src/x.js`". Such a citation names something the
- * tree should not hold, so its absence does not make the rule stale.
+ * tree should not hold, so its absence does not make the rule stale. The verb
+ * must take the citation as its object under the negation: "Never commit
+ * without running `x`" and "Never import from `y`" cite what must exist.
  */
 export function forbidsCitation(text: string, index: number): boolean {
-	const clause = clauseBefore(text.toLowerCase(), index);
-	return NEGATION_RE.test(clause) && BRINGS_IN_RE.test(clause);
+	const clause = (clauseBefore(text.toLowerCase(), index).split(CONDITION_BREAK_RE).at(-1) ?? "").trimStart();
+	const verb = GOVERNED_RE.exec(clause);
+	return verb !== null && NEGATION_RE.test(clause.slice(0, verb.index));
 }
 
 /** The tree-fact values a rule asserts, for the keys the table can check. */

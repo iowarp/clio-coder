@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1356,13 +1356,20 @@ it("context init --verify grounds on the tree from any directory, never on a sta
 			"- Never add `lodash` to the dependencies.",
 			"- Do not create `src/widgets/legacy.js`; extend `src/widgets/paint.ts` instead.",
 			"- Shapes come from `oldShape`.",
+			"- Never commit without running `scripts/check-widgets.ts`.",
+			"- Do not add a settings key without updating `src/core/defaults.ts`.",
+			"- Never import from `src/old/widgets.ts`.",
 			"",
 		].join("\n"),
 	);
 	writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 	rmSync(join(cwd, "src", "widgets", "render.ts"));
 	execFileSync("git", ["add", "-A"], { cwd });
-	execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "t"], { cwd });
+	execFileSync(
+		"git",
+		["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "t"],
+		{ cwd },
+	);
 	const previous = process.cwd();
 	process.chdir(join(cwd, "src"));
 	const io = captureIo();
@@ -1380,14 +1387,36 @@ it("context init --verify grounds on the tree from any directory, never on a sta
 			[7, "stale"],
 			[8, "unverifiable"],
 			[9, "unverifiable"],
-			[10, "verified"],
+			[10, "unverifiable"],
 			[11, "verified"],
 			[12, "stale"],
+			[13, "stale"],
+			[14, "stale"],
+			[15, "stale"],
 		],
 	);
 	const fromSubdirectory = readHandbookFreshness(join(cwd, "src"));
 	ok(typeof fromSubdirectory.verifiedCommit === "string", JSON.stringify(fromSubdirectory));
-	strictEqual(fromSubdirectory.attention, 3);
+	strictEqual(fromSubdirectory.attention, 6);
+	// Writing the handbook drops the verdicts that judged the replaced text.
+	await runBootstrap({
+		cwd,
+		rewriteClioMd: true,
+		io: { stdout: () => {}, stderr: () => {} },
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return { projectName: "harbor", identity: "A widget renderer.", invariants: [], conventions: [] };
+		},
+	});
+	strictEqual(readHandbookFreshness(cwd).attention, 0);
+});
+
+it("context init refuses a CLIO-CODER.md it cannot read with a sentence, not a raw error", async () => {
+	mkdirSync(join(cwd, "CLIO-CODER.md"));
+	await rejects(runBootstrap({ cwd, io: { stdout: () => {}, stderr: () => {} } }), (error: Error) => {
+		ok(/^CLIO-CODER\.md exists but cannot be read \(EISDIR\); /.test(error.message), error.message);
+		return true;
+	});
 });
 
 it("context init --adopt leaves out an imported rule whose citation the tree no longer holds", async () => {
@@ -1400,6 +1429,7 @@ it("context init --adopt leaves out an imported rule whose citation the tree no 
 			"- Never edit `src/legacy/old.ts` by hand.",
 			"- Never edit `src/widgets/render.ts` without updating `src/index.ts`.",
 			"- Never add `lodash` to the dependencies.",
+			"- Never import from `src/old/widgets.ts`.",
 			"",
 		].join("\n"),
 	);
@@ -1409,6 +1439,7 @@ it("context init --adopt leaves out an imported rule whose citation the tree no 
 	strictEqual(imported.includes("test:unit"), false, imported);
 	strictEqual(imported.includes("src/legacy"), false, imported);
 	ok(imported.includes("Never add `lodash`"), imported);
+	strictEqual(imported.includes("src/old/"), false, imported);
 });
 
 it("does not let a rule stated only in a sibling handbook ground a model line", async () => {

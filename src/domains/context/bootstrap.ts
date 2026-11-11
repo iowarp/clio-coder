@@ -2168,8 +2168,8 @@ function stabilizeGeneratedOutput(
 			!restatesArchitecture(rule) &&
 			!duplicatesCarried(rule),
 	);
-	// A worker receives the invariants ahead of every other rule, so model rules stop at the count and the
-	// total length that leave its budget room for the Tests and Gotchas rules.
+	// A worker receives the invariants ahead of every other rule, so model rules end at the count, and one
+	// that would pass the total length is skipped for a shorter one, leaving room for the Tests and Gotchas rules.
 	const retainedInvariants = [...protectedInvariants];
 	let invariantChars = retainedInvariants.reduce((sum, rule) => sum + rule.length, 0);
 	for (const rule of modelInvariants) {
@@ -2826,7 +2826,6 @@ export interface HandbookVerification {
 	entries: HandbookLedgerEntry[];
 }
 
-/** The enclosing repository root, as the handbook walk finds it; outside a repository, `cwd` itself. */
 /** The index, less every file the tree no longer holds, so a deleted file never grounds a citation. */
 function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<string>, root: string): Codewiki {
 	const present = new Set(repositoryFiles);
@@ -2839,6 +2838,7 @@ function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<strin
 			try {
 				text = readFileSync(join(root, path), "utf8");
 			} catch {
+				// The tree listing named it but it cannot be read now (removed or unreadable): it names no symbol.
 				text = "";
 			}
 			texts.set(path, text);
@@ -2957,7 +2957,9 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 				entry("contradicted", `${fact.source} states ${fact.key} ${fact.value}`);
 				continue;
 			}
-			if (citations.length > 0 || ids.length > 0) entry("verified", "every citation resolves");
+			const checked = [...line.matchAll(CODE_TOKEN_RE)].filter((match) => match[1] && !forbidsCitation(line, match.index));
+			if (checked.length > 0 || ids.length > 0) entry("verified", "every citation resolves");
+			else if (citations.length > 0) entry("unverifiable", "cites only what it forbids, which the tree cannot confirm");
 			else entry("unverifiable", "cites nothing the tree can check");
 		}
 	}
@@ -3153,18 +3155,11 @@ export type AcceptProposalResult =
 	| { ok: false; proposalPath?: string; reason: string };
 
 /**
- * Writes a stored proposal's bytes to CLIO-CODER.md, but only while the handbook
- * still hashes to the sidecar's `sourceHash`, so an edit made after the draft
- * was written is never overwritten. `ref` is a proposal path, file name or id;
- * without it the newest proposal is taken.
+ * Drops the last `--verify` verdicts for the handbook file at `handbookPath`
+ * once new text replaces it: they judged text that is gone, and `--verify`
+ * judges the new text.
  */
-/**
- * What an accepted proposal changes besides the handbook: the generation that
- * drafted a new CLIO-CODER.md becomes state.lastBootstrap, and the last
- * `--verify` verdicts for the replaced file are dropped, since they judged text
- * that is gone. `--verify` judges the new text.
- */
-function recordAcceptedProposal(cwd: string, handbookPath: string, generation: unknown): void {
+function dropVerifyVerdicts(cwd: string, handbookPath: string): void {
 	const root = handbookRoot(cwd);
 	const file = relative(root, handbookPath).split(sep).join("/");
 	const ledger = readLedgerFile(root);
@@ -3177,11 +3172,26 @@ function recordAcceptedProposal(cwd: string, handbookPath: string, generation: u
 			...(ledger.verifiedAt ? { verifiedAt: ledger.verifiedAt } : {}),
 			verification: ledger.verification.filter((entry) => entry.source.file !== file),
 		});
+}
+
+/**
+ * What an accepted proposal changes besides the handbook: the generation that
+ * drafted a new CLIO-CODER.md becomes state.lastBootstrap, and the replaced
+ * file's verify verdicts are dropped.
+ */
+function recordAcceptedProposal(cwd: string, handbookPath: string, generation: unknown): void {
+	dropVerifyVerdicts(cwd, handbookPath);
 	const state = readClioState(cwd);
 	if (state && handbookPath === join(cwd, "CLIO-CODER.md") && isBootstrapGenerationState(generation))
 		writeClioState(cwd, { ...state, lastBootstrap: generation });
 }
 
+/**
+ * Writes a stored proposal's bytes to CLIO-CODER.md, but only while the handbook
+ * still hashes to the sidecar's `sourceHash`, so an edit made after the draft
+ * was written is never overwritten. `ref` is a proposal path, file name or id;
+ * without it the newest proposal is taken.
+ */
 export function acceptHandbookProposal(cwd: string, ref?: string): AcceptProposalResult {
 	const resolved = resolveProposal(cwd, ref);
 	if ("error" in resolved) return { ok: false, reason: resolved.error };
@@ -3479,7 +3489,15 @@ async function runBootstrapWork(
 	input.signal?.throwIfAborted();
 	const hadClioMd = existsSync(join(cwd, "CLIO-CODER.md"));
 	const originalClioMdText = readExistingClioMdText(cwd);
-	const originalClioMdHash = hashExistingFile(join(cwd, "CLIO-CODER.md"));
+	let originalClioMdHash: string | null;
+	try {
+		originalClioMdHash = hashExistingFile(join(cwd, "CLIO-CODER.md"));
+	} catch (err) {
+		const code = (err as NodeJS.ErrnoException).code ?? "unreadable";
+		throw new Error(
+			`CLIO-CODER.md exists but cannot be read (${code}); make it a readable file or move it aside, then run context init again.`,
+		);
+	}
 	const useExistingClioMdAsSource = hadClioMd && input.rewriteClioMd !== true;
 	const existingClioMdText = useExistingClioMdAsSource ? originalClioMdText : null;
 	const existingClioMd = useExistingClioMdAsSource ? tryReadClioMd(cwd) : null;
@@ -3754,6 +3772,7 @@ async function runBootstrapWork(
 				return "proposed";
 			} else if (wouldPublish) {
 				clioMdPath = writeClioMdFile(cwd, output);
+				dropVerifyVerdicts(cwd, clioMdPath);
 				return hadClioMd ? "refreshed" : "wrote";
 			}
 			return "preserved";

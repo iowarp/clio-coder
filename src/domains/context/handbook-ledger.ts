@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { clioProjectRoot } from "../../core/project-root.js";
 
 /** Where `context init` records each handbook rule's verdict; `--verify` refreshes it against the tree. */
 export function handbookLedgerPath(cwd: string): string {
@@ -13,13 +14,7 @@ export function handbookLedgerPath(cwd: string): string {
  * reader of the verify record resolves the same directory.
  */
 export function handbookRoot(cwd: string): string {
-	let directory = resolve(cwd);
-	while (!existsSync(join(directory, ".git"))) {
-		const parent = dirname(directory);
-		if (parent === directory) return resolve(cwd);
-		directory = parent;
-	}
-	return directory;
+	return clioProjectRoot(cwd);
 }
 
 interface LedgerFileShape {
