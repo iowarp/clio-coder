@@ -360,7 +360,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   its mechanics go into public datasets, and the consent text prints with the
   bundle. A dataset release (built by the maintainers with
   `scripts/report-dataset.ts`, which publishes nothing itself) takes only
-  bundles that granted `dataset`, re-keys their ids, shifts each trace's times
+  bundles that granted `dataset`, re-keys their ids (re-minting ids that carry a time), shifts each trace's times
   to start at 2000-01-01, drops rare values, needs at least 20 traces and
   leaves out withdrawn reports. Every byte is checked for this machine's identifiers; a hit names the
   member and the kind of identifier and exits 1. The bundle is kept at 0600
