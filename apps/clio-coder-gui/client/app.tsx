@@ -19,6 +19,7 @@ import { appCommands, type PaletteTask } from "./interaction/commands.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { onReportRequest, type ReportRequest } from "./report/report-events.js";
+import { offerNotice } from "./report/report-model.js";
 import { ASIDE_DOCK_QUERY, toggleAside, useAsideExpanded } from "./shell/aside-state.js";
 import { OpenWorkspaceDialog } from "./shell/OpenWorkspaceDialog.js";
 import { SessionControlNotice, SessionControlsProvider, useSessionCommands } from "./shell/SessionControls.js";
@@ -401,6 +402,44 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		</div>
 	) : null;
 	const collapsed = sidebarCollapsed && !phone;
+	// The report domain decides whether a failure may be offered (its rules, its ledger and `report.offers`); the
+	// app asks once per failed turn and shows the answer as an ordinary inline notice that never takes focus.
+	const lastTurn = snapshot?.turns.at(-1);
+	const failedTurnId = lastTurn?.status === "failed" ? lastTurn.id : null;
+	const offer = useQuery({
+		queryKey: ["report-offer", activeWorkspaceId ?? "", sessionId ?? "", failedTurnId ?? ""],
+		queryFn: () =>
+			client.call(
+				routes.problemReportOffer,
+				{ params: { id: activeWorkspaceId ?? "" }, query: {}, body: { sessionId: sessionId ?? "" } },
+				crypto.randomUUID(),
+			),
+		enabled: activeWorkspaceId !== null && sessionId !== null && failedTurnId !== null,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
+	const [dismissedOffers, setDismissedOffers] = useState<ReadonlySet<string>>(() => new Set());
+	const shownOffer = offerNotice(offer.data, dismissedOffers);
+	const offerNoticeView = shownOffer ? (
+		<div className="app-update-notice" role="status">
+			<p>
+				{shownOffer.text}{" "}
+				<button
+					type="button"
+					onClick={() => setReportRequest(sessionId !== null ? { sessionId } : {})}
+				>
+					{shownOffer.link}
+				</button>{" "}
+				<button
+					type="button"
+					className="secondary"
+					onClick={() => setDismissedOffers((previous) => new Set(previous).add(shownOffer.fingerprint))}
+				>
+					Dismiss
+				</button>
+			</p>
+		</div>
+	) : null;
 	const authed = client.signedIn && !refused;
 	if (wizardMode !== null && authed && meta.data?.apiVersion === API_VERSION)
 		return (
@@ -486,6 +525,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 				<main id="main" className="wb-main" data-mode={mode} tabIndex={-1}>
 					{staleNotice}
 					{pendingNotice}
+					{offerNoticeView}
 					{authed ? <SessionControlNotice connected={connection === "Connected"} /> : null}
 					{!client.signedIn || refused ? (
 						<Reconnect refused={refused} />

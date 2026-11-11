@@ -6,6 +6,8 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark, TONE_GLYPHS } from "../design/status.js";
+import { requestReport } from "../report/report-events.js";
+import { failedRunReport } from "../report/report-model.js";
 import { steeringAffordances } from "./composer-model.js";
 import { FleetRunPanel } from "./FleetRunPanel.js";
 import { RunSteer, type RunSteering } from "./FleetStrip.js";
@@ -78,6 +80,7 @@ function RunNode({
 	expanded,
 	onToggle,
 	steering,
+	sessionId,
 }: {
 	node: WorkerNode;
 	/** The drawn depth, capped so a deep chain keeps its task text readable. */
@@ -87,8 +90,11 @@ function RunNode({
 	expanded: boolean;
 	onToggle: () => void;
 	steering: RunSteering | undefined;
+	/** The session the run belongs to; a failed run's "Report this" drafts from it. */
+	sessionId: string;
 }) {
 	const { run, missingParent } = node;
+	const report = failedRunReport(run, sessionId);
 	const detailId = useId();
 	const facts = runFacts(run);
 	return (
@@ -134,6 +140,11 @@ function RunNode({
 				</Link>
 			</div>
 			{run.record ? <RunRecordLine record={run.record} /> : null}
+			{report !== null ? (
+				<button type="button" className="secondary agents-node__report" onClick={() => requestReport(report)}>
+					Report this
+				</button>
+			) : null}
 			{expanded ? (
 				<div className="agents-node__detail" id={detailId}>
 					<dl>
@@ -252,6 +263,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 								expanded={selected === node.run.runId}
 								onToggle={() => setSelected(selected === node.run.runId ? null : node.run.runId)}
 								steering={steering}
+								sessionId={session.id}
 							/>
 						))}
 					</ol>

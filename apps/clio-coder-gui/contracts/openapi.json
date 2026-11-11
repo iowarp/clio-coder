@@ -4185,6 +4185,18 @@
 												"additionalProperties": false
 											}
 										]
+									},
+									"bundle": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "none"
+											},
+											{
+												"type": "string",
+												"const": "debug"
+											}
+										]
 									}
 								},
 								"additionalProperties": false
@@ -4306,6 +4318,376 @@
 											"additionalProperties": false
 										}
 									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/reports/{draft}/bundle": {
+			"post": {
+				"operationId": "problemReportBundle",
+				"summary": "Build a draft's diagnostic bundle for review without writing or attaching it",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "draft",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^rpt_[0-9A-HJKMNP-TV-Z]{26}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"transcript": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"draftId",
+										"sha256",
+										"bytes",
+										"transcript",
+										"readable",
+										"anonymized",
+										"withheld",
+										"kept",
+										"neverKept",
+										"consent",
+										"members"
+									],
+									"properties": {
+										"draftId": {
+											"type": "string"
+										},
+										"sha256": {
+											"type": "string"
+										},
+										"bytes": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"transcript": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["turns", "of"],
+													"properties": {
+														"turns": {
+															"type": "integer"
+														},
+														"of": {
+															"type": "integer"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"readable": {
+											"type": "object",
+											"required": ["model", "runtime", "tool", "token"],
+											"properties": {
+												"model": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"runtime": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"tool": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"token": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												}
+											},
+											"additionalProperties": false
+										},
+										"anonymized": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["kind", "count"],
+												"properties": {
+													"kind": {
+														"type": "string"
+													},
+													"count": {
+														"type": "integer"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"withheld": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"kept": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										},
+										"neverKept": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										},
+										"consent": {
+											"type": "object",
+											"required": ["debug", "transcript"],
+											"properties": {
+												"debug": {
+													"type": "string"
+												},
+												"transcript": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"members": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "text"],
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"text": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/reports/offer": {
+			"post": {
+				"operationId": "problemReportOffer",
+				"summary": "Whether the report offer rules allow suggesting a report for this session now",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["sessionId"],
+								"properties": {
+									"sessionId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["offer", "refusal"],
+									"properties": {
+										"offer": {
+											"anyOf": [
+												{
+													"type": "object",
+													"required": ["text", "fingerprint"],
+													"properties": {
+														"text": {
+															"type": "string"
+														},
+														"fingerprint": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"refusal": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
 								}
 							}
 						},

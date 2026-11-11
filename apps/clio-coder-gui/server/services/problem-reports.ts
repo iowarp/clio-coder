@@ -1,7 +1,10 @@
 import { Value } from "typebox/value";
 import {
+	ProblemReportBundle,
+	type ProblemReportBundleRequest,
 	type ProblemReportChoices,
 	type ProblemReportEdits,
+	ProblemReportOffer,
 	type ProblemReportPlanRequest,
 	ProblemReportRows,
 	ProblemReportSent,
@@ -39,11 +42,29 @@ export class ProblemReportsService {
 			await this.ops.call("reports.send", { cwd, draftId, choices }, { deadlineMs: 150_000 }),
 		);
 	}
+	async bundle(workspaceId: string, draftId: string, request: ProblemReportBundleRequest) {
+		const cwd = await this.cwd(workspaceId);
+		return this.checked(
+			ProblemReportBundle,
+			await this.ops.call("reports.bundle", { cwd, draftId, request }, { deadlineMs: 60_000 }),
+		);
+	}
+	async offer(workspaceId: string, sessionId: string) {
+		const cwd = await this.cwd(workspaceId);
+		return this.checked(ProblemReportOffer, await this.ops.call("reports.offer", { cwd, sessionId }));
+	}
 	async status(workspaceId: string) {
 		const cwd = await this.cwd(workspaceId);
 		return this.checked(ProblemReportRows, await this.ops.call("reports.status", { cwd }));
 	}
-	private checked<S extends typeof ProblemReportView | typeof ProblemReportSent | typeof ProblemReportRows>(
+	private checked<
+		S extends
+			| typeof ProblemReportView
+			| typeof ProblemReportSent
+			| typeof ProblemReportRows
+			| typeof ProblemReportBundle
+			| typeof ProblemReportOffer,
+	>(
 		schema: S,
 		raw: unknown,
 	) {

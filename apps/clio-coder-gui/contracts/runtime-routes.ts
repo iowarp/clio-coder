@@ -45,6 +45,12 @@ export const routes = {
 	problemReportPlan: { name: "problemReportPlan", method: "POST", path: "/api/workspaces/:id/reports/plan" },
 	problemReportUpdate: { name: "problemReportUpdate", method: "PATCH", path: "/api/workspaces/:id/reports/:draft" },
 	problemReportSend: { name: "problemReportSend", method: "POST", path: "/api/workspaces/:id/reports/:draft/send" },
+	problemReportBundle: {
+		name: "problemReportBundle",
+		method: "POST",
+		path: "/api/workspaces/:id/reports/:draft/bundle",
+	},
+	problemReportOffer: { name: "problemReportOffer", method: "POST", path: "/api/workspaces/:id/reports/offer" },
 	arenaMatches: { name: "arenaMatches", method: "GET", path: "/api/workspaces/:id/arena/matches" },
 	arenaMatch: { name: "arenaMatch", method: "GET", path: "/api/workspaces/:id/arena/matches/:matchId" },
 	arenaStandings: { name: "arenaStandings", method: "GET", path: "/api/workspaces/:id/arena/standings" },

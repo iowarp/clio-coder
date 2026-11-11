@@ -39,10 +39,54 @@ export const ProblemReportChoices = Type.Object(
 		duplicate: Type.Optional(
 			Type.Union([Type.Literal("new"), Type.Object({ comment: Type.Integer({ minimum: 1 }) }, closed)]),
 		),
+		/** The send step's consent radio: "debug" attaches the bundle the Attach step showed; anything else attaches none. */
+		bundle: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("debug")])),
 	},
 	closed,
 );
 export type ProblemReportChoices = Static<typeof ProblemReportChoices>;
+export const ProblemReportBundleRequest = Type.Object({ transcript: Type.Optional(Type.Boolean()) }, closed);
+export type ProblemReportBundleRequest = Static<typeof ProblemReportBundleRequest>;
+/** The diagnostic bundle as the report domain built it, unwritten: ticks, inventory and every member for the viewer. */
+export const ProblemReportBundle = Type.Object(
+	{
+		draftId: Type.String(),
+		sha256: Type.String(),
+		bytes: Type.Integer({ minimum: 0 }),
+		transcript: Type.Union([Type.Object({ turns: Type.Integer(), of: Type.Integer() }, closed), Type.Null()]),
+		readable: Type.Object(
+			{
+				model: Type.Array(Type.String()),
+				runtime: Type.Array(Type.String()),
+				tool: Type.Array(Type.String()),
+				token: Type.Array(Type.String()),
+			},
+			closed,
+		),
+		anonymized: Type.Array(Type.Object({ kind: Type.String(), count: Type.Integer() }, closed)),
+		withheld: Type.Integer({ minimum: 0 }),
+		kept: Type.Array(Type.String()),
+		neverKept: Type.Array(Type.String()),
+		consent: Type.Object({ debug: Type.String(), transcript: Type.String() }, closed),
+		members: Type.Array(Type.Object({ name: Type.String(), text: Type.String() }, closed)),
+	},
+	closed,
+);
+export type ProblemReportBundle = Static<typeof ProblemReportBundle>;
+export const ProblemReportOfferRequest = Type.Object(
+	{ sessionId: Type.String({ pattern: "^[A-Za-z0-9_.:-]{1,128}$" }) },
+	closed,
+);
+export type ProblemReportOfferRequest = Static<typeof ProblemReportOfferRequest>;
+/** Whether the report domain's offer rules let the app suggest a report now; null with the rule that refused. */
+export const ProblemReportOffer = Type.Object(
+	{
+		offer: Type.Union([Type.Object({ text: Type.String(), fingerprint: Type.String() }, closed), Type.Null()]),
+		refusal: Type.Union([Type.String(), Type.Null()]),
+	},
+	closed,
+);
+export type ProblemReportOffer = Static<typeof ProblemReportOffer>;
 
 const Mask = Type.Object(
 	{

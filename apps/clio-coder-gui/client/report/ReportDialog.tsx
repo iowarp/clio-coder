@@ -8,11 +8,13 @@ import type { Client } from "../api/client.js";
 import { Dialog } from "../interaction/Dialog.js";
 import type { ReportRequest } from "./report-events.js";
 import {
+	attachView,
 	hasUnplannedEdits,
 	INITIAL_REPORT_STATE,
 	type ReportFields,
 	reportControls,
 	reportReducer,
+	sendChoices,
 } from "./report-model.js";
 import "./report.css";
 
@@ -47,7 +49,11 @@ export function ReportDialog({
 				{
 					params: { id: workspaceId },
 					query: {},
-					body: { kind: "bug", ...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}) },
+					body: {
+						kind: "bug",
+						...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
+						...(request.summary !== undefined ? { summary: request.summary } : {}),
+					},
 				},
 				crypto.randomUUID(),
 			)
@@ -56,7 +62,7 @@ export function ReportDialog({
 		return () => {
 			live = false;
 		};
-	}, [client, workspaceId, request.sessionId, failed]);
+	}, [client, workspaceId, request.sessionId, request.summary, failed]);
 
 	const view = state.view;
 	const update = (edits: ProblemReportEdits) => {
@@ -72,6 +78,18 @@ export function ReportDialog({
 			.catch(failed);
 	};
 	const replan = () => update({ ...state.edits, credit: state.choices.credit });
+	const buildBundle = (transcript: boolean) => {
+		if (view === null) return;
+		dispatch({ type: "busy", busy: "bundle" });
+		client
+			.call(
+				routes.problemReportBundle,
+				{ params: { id: workspaceId, draft: view.draftId }, query: {}, body: { transcript } },
+				crypto.randomUUID(),
+			)
+			.then((bundle) => dispatch({ type: "bundled", bundle }))
+			.catch(failed);
+	};
 	const send = (duplicate?: { comment: number } | "new") => {
 		if (view === null || (!reportControls(state).sendEnabled && duplicate === undefined)) return;
 		dispatch({ type: "busy", busy: "send" });
@@ -82,8 +100,7 @@ export function ReportDialog({
 					params: { id: workspaceId, draft: view.draftId },
 					query: {},
 					body: {
-						consent: true,
-						replyCheck: state.choices.replyCheck,
+						...sendChoices(state),
 						...(duplicate !== undefined ? { duplicate } : {}),
 					},
 				},
@@ -93,6 +110,7 @@ export function ReportDialog({
 			.catch(failed);
 	};
 	const controls = reportControls(state);
+	const attach = attachView(state);
 	const value = (field: keyof ReportFields) => state.edits[field] ?? view?.fields[field] ?? "";
 	const steps = ["review", "attach", "send"] as const;
 
@@ -233,8 +251,87 @@ export function ReportDialog({
 							</div>
 						) : state.step === "attach" ? (
 							<div className="report-dialog__pane" role="tabpanel">
-								<p>No diagnostic bundle is attached. Only the text on the Review step is sent.</p>
+								<p>
+									A diagnostic bundle is attached only if you choose it on the Send step. Review what it would
+									carry here first.
+								</p>
+								<label className="report-dialog__tick">
+									<input
+										type="checkbox"
+										checked={state.choices.transcript}
+										disabled={view === null || state.busy !== null}
+										onChange={(event) => dispatch({ type: "transcript", value: event.target.checked })}
+									/>
+									Include the conversation excerpt
+								</label>
+								{state.bundle && state.choices.transcript ? <p>{state.bundle.consent.transcript}</p> : null}
+								<ul className="report-dialog__ticks" aria-label="Bundle">
+									{attach.ticks.map((tick) => (
+										<li key={tick}>{tick}</li>
+									))}
+								</ul>
+								{attach.readable.length > 0 ? (
+									<>
+										<p className="report-dialog__label">Left readable:</p>
+										<ul>
+											{attach.readable.map((line) => (
+												<li key={line}>{line}</li>
+											))}
+										</ul>
+									</>
+								) : null}
+								{attach.anonymized.length > 0 ? (
+									<>
+										<p className="report-dialog__label">Replaced by anonymous names:</p>
+										<ul>
+											{attach.anonymized.map((line) => (
+												<li key={line}>{line}</li>
+											))}
+										</ul>
+									</>
+								) : null}
+								{attach.kept.length > 0 ? (
+									<>
+										<p className="report-dialog__label">A bundle keeps:</p>
+										<ul>
+											{attach.kept.map((line) => (
+												<li key={line}>{line}</li>
+											))}
+										</ul>
+										<p className="report-dialog__label">It never keeps:</p>
+										<ul>
+											{attach.neverKept.map((line) => (
+												<li key={line}>{line}</li>
+											))}
+										</ul>
+									</>
+								) : null}
+								{state.viewer && state.bundle ? (
+									<section className="report-dialog__viewer" aria-label="Bundle members, read-only">
+										{state.bundle.members.map((member) => (
+											<details key={member.name}>
+												<summary>{member.name}</summary>
+												<pre className="report-dialog__preview">{member.text}</pre>
+											</details>
+										))}
+									</section>
+								) : null}
 								<div className="actions">
+									<button
+										type="button"
+										disabled={view === null || state.busy !== null}
+										onClick={() => buildBundle(state.choices.transcript)}
+									>
+										{state.bundle ? "Rebuild bundle" : "Build bundle"}
+									</button>
+									<button
+										type="button"
+										disabled={!attach.viewEnabled}
+										aria-pressed={state.viewer}
+										onClick={() => dispatch({ type: "viewer", open: !state.viewer })}
+									>
+										View bundle
+									</button>
 									<button type="button" onClick={() => dispatch({ type: "go", step: "send" })}>
 										Next
 									</button>
@@ -249,6 +346,30 @@ export function ReportDialog({
 									))}
 								</ol>
 								{view?.plan.rateWarning ? <p>{view.plan.rateWarning}</p> : null}
+								<fieldset className="report-dialog__consent">
+									<legend>Diagnostic bundle</legend>
+									<label className="report-dialog__tick">
+										<input
+											type="radio"
+											name="report-bundle"
+											checked={state.choices.attach === "none"}
+											onChange={() => dispatch({ type: "attach", value: "none" })}
+										/>
+										Do not attach a bundle; send only the text
+									</label>
+									<label className="report-dialog__tick">
+										<input
+											type="radio"
+											name="report-bundle"
+											checked={state.choices.attach === "debug"}
+											disabled={!attach.attachOffered}
+											onChange={() => dispatch({ type: "attach", value: "debug" })}
+										/>
+										{state.bundle
+											? `Attach the bundle I reviewed. ${state.bundle.consent.debug}`
+											: "Attach a bundle (build and review it on the Attach step first)"}
+									</label>
+								</fieldset>
 								<label className="report-dialog__tick">
 									<input
 										type="checkbox"

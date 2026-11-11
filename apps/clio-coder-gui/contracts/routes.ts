@@ -66,9 +66,13 @@ import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import {
+	ProblemReportBundle,
+	ProblemReportBundleRequest,
 	ProblemReportChoices,
 	ProblemReportDraftParams,
 	ProblemReportEdits,
+	ProblemReportOffer,
+	ProblemReportOfferRequest,
 	ProblemReportPlanRequest,
 	ProblemReportRows,
 	ProblemReportSent,
@@ -376,6 +380,24 @@ export const routes = {
 		response: ProblemReportSent,
 		summary: "Send a reviewed problem report draft; requires consent from the dialog's Send button",
 		...runtimeRoutes.problemReportSend,
+	}),
+	problemReportBundle: defineRoute({
+		...post,
+		status: 200,
+		params: ProblemReportDraftParams,
+		body: ProblemReportBundleRequest,
+		response: ProblemReportBundle,
+		summary: "Build a draft's diagnostic bundle for review without writing or attaching it",
+		...runtimeRoutes.problemReportBundle,
+	}),
+	problemReportOffer: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		body: ProblemReportOfferRequest,
+		response: ProblemReportOffer,
+		summary: "Whether the report offer rules allow suggesting a report for this session now",
+		...runtimeRoutes.problemReportOffer,
 	}),
 	arenaMatches: defineRoute({
 		...get,

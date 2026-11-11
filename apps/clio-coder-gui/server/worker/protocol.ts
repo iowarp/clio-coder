@@ -5,6 +5,7 @@ import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
 import type { Machine, MachineMutation } from "../../contracts/machines.js";
 import type {
+	ProblemReportBundleRequest,
 	ProblemReportChoices,
 	ProblemReportEdits,
 	ProblemReportPlanRequest,
@@ -71,6 +72,11 @@ export interface Methods {
 	"reports.update": { params: { cwd: string; draftId: string; edits: ProblemReportEdits }; result: unknown };
 	"reports.send": { params: { cwd: string; draftId: string; choices: ProblemReportChoices }; result: unknown };
 	"reports.status": { params: { cwd: string }; result: unknown };
+	"reports.bundle": {
+		params: { cwd: string; draftId: string; request: ProblemReportBundleRequest };
+		result: unknown;
+	};
+	"reports.offer": { params: { cwd: string; sessionId: string }; result: unknown };
 }
 export type Method = keyof Methods;
 export type Call = {

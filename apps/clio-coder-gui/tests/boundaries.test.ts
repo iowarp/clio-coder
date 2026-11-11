@@ -61,6 +61,8 @@ const adapters = new Set([
 	"src/domains/interop/index.ts",
 	// The report dialog's host: the same plan and send as the terminal and ACP flows (R-24).
 	"src/domains/report/dialog-flow.ts",
+	// The bundle builder and offer rules for the Attach step and the offer notice, through the domain's index.
+	"src/domains/report/index.ts",
 	"src/domains/lifecycle/doctor.ts",
 	"src/domains/lifecycle/setup-status.ts",
 	"src/domains/resources/library-inventory.ts",

@@ -44,6 +44,9 @@ serveWorker(async (call, progress) => {
 		if (call.method === "reports.send")
 			return reportDialog.send(call.params.cwd, call.params.draftId, call.params.choices);
 		if (call.method === "reports.status") return reportDialog.status(call.params.cwd);
+		if (call.method === "reports.bundle")
+			return reportDialog.bundle(call.params.cwd, call.params.draftId, call.params.request);
+		if (call.method === "reports.offer") return reportDialog.offer(call.params.cwd, call.params.sessionId);
 	}
 	throw new AppProblem("unsupported", "Method is not available in the ops worker.");
 }, closeMachines);

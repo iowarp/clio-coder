@@ -11,4 +11,6 @@ export function reportRoutes(app: Hono, hub: EventHub, reports: ReportsService, 
 	register(app, hub, routes.problemReportPlan, ({ params, body }) => problems.plan(params.id, body));
 	register(app, hub, routes.problemReportUpdate, ({ params, body }) => problems.update(params.id, params.draft, body));
 	register(app, hub, routes.problemReportSend, ({ params, body }) => problems.send(params.id, params.draft, body));
+	register(app, hub, routes.problemReportBundle, ({ params, body }) => problems.bundle(params.id, params.draft, body));
+	register(app, hub, routes.problemReportOffer, ({ params, body }) => problems.offer(params.id, body.sessionId));
 }

@@ -6,6 +6,8 @@ const EVENT = "clio:report-problem";
 export interface ReportRequest {
 	/** The session a failed card reports on; its recorded observations fill the draft on the host. */
 	sessionId?: string;
+	/** A short title the host starts the draft with, such as the failed run it came from. */
+	summary?: string;
 }
 
 export function requestReport(request: ReportRequest = {}): void {
