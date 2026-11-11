@@ -873,6 +873,12 @@ it("closes a real extension panel and cycles Interop kinds with encoded c only i
 	f.terminal.input("/");
 	f.terminal.input("c");
 	assert.equal(notices.length, 1);
+	f.terminal.input("\x1b");
+	f.terminal.input("\x1b");
+	assert.equal(f.state(), "interop", "the filter and then search mode are layers before close");
+	f.terminal.input("u");
+	f.terminal.input("s");
+	assert.deepEqual(notices.slice(1), ["u is now s here", "Adoption destination: project."]);
 });
 
 it("scrolls the expanded footer with a draft while overlays and search retain keyboard ownership", () => {

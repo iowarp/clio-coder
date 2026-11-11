@@ -234,7 +234,7 @@ function reviewChoices(applicable: boolean, verb: string, consequence: string, d
 			? { key: "Esc", verb: "back to review", consequence: "closes the paths; nothing changes" }
 			: { key: "Esc", verb: "cancel", consequence: "changes nothing and returns to the Library" },
 		{
-			key: "d",
+			key: "Tab",
 			verb: detail ? "hide paths" : "paths",
 			consequence: detail ? "back to the review" : "shows paths and digests",
 		},
@@ -809,7 +809,8 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 					backOutOneLayer(reviewLayers());
 					return;
 				}
-				if (data === "d") {
+				// E-21: detail is Tab; d still answers for one release (the review has no notice row to say it moved).
+				if (matchesKey(data, "tab") || data === "d") {
 					body.detail = !body.detail;
 					tui.requestRender();
 					return;
@@ -838,7 +839,7 @@ function openReviewOverlay(tui: TUI, spec: ReviewOverlaySpec): OverlayHandle {
 				: buildResponsiveHint(
 						[
 							...(spec.applicable ? [{ key: "Enter", verb: spec.verb }] : []),
-							{ key: "d", verb: body.detail ? "hide paths" : "paths" },
+							{ key: "Tab", verb: body.detail ? "hide paths" : "paths" },
 						],
 						escapeHintEntry(reviewLayers()) ?? { key: "Esc", verb: "cancel" },
 					)(innerWidth),

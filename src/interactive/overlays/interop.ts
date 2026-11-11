@@ -44,6 +44,7 @@ import {
 	tableRows,
 	titleRow,
 } from "../theme/index.js";
+import { movedKeyNotice } from "./confirm-once.js";
 import { detailWithHead, type ListOverlayHandle, type ListOverlayItem, openListOverlay } from "./list-overlay.js";
 
 /** @internal exported for contract tests */
@@ -220,7 +221,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 						[
 							{ key: "a", verb: "connect", consequence: "appends exactly this entry to delegation.agents", tone: "action" },
 							{
-								key: "d",
+								key: "x",
 								verb: "decline",
 								consequence: "records the decision; Clio proposes it again when its binary version or path changes",
 							},
@@ -690,7 +691,7 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		if (selected?.id.startsWith("proposal:")) {
 			return [
 				{ key: "a", verb: "connect", critical: true },
-				{ key: "d", verb: "decline", critical: true },
+				{ key: "x", verb: "decline", critical: true },
 			];
 		}
 		if (selected?.id.startsWith("inventory:") && selected.cells?.text !== NOTHING_ADOPTABLE)
@@ -709,20 +710,17 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		emptyMessage: INTEROP_EMPTY,
 		status: (width) => statusLine(settings, counts(), pending, width),
 		globalHints: [
-			{ key: "u/p", verb: "adopt into user/project", short: "scope" },
+			{ key: "s", verb: "adopt into user/project", short: "scope" },
 			{ key: "c", verb: "kinds" },
 		],
 		globalActions: {
-			p: () => {
-				settings.scope = "project";
+			s: () => {
+				settings.scope = settings.scope === "user" ? "project" : "user";
 				reset();
-				ctx.notice("info", "Adoption destination: project.");
+				ctx.notice("info", `Adoption destination: ${settings.scope}.`);
 			},
-			u: () => {
-				settings.scope = "user";
-				reset();
-				ctx.notice("info", "Adoption destination: user.");
-			},
+			p: () => ctx.notice("info", movedKeyNotice("p", "s")),
+			u: () => ctx.notice("info", movedKeyNotice("u", "s")),
 			c: () => {
 				settings.filter = KIND_CYCLE[(KIND_CYCLE.indexOf(settings.filter) + 1) % KIND_CYCLE.length];
 				reset();
@@ -745,7 +743,8 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				reset(`inventory:${plan.host}`);
 			},
 			a: (item) => decide(item, deps.accept),
-			d: (item) => decide(item, deps.decline),
+			x: (item) => decide(item, deps.decline),
+			d: () => ctx.notice("info", movedKeyNotice("d", "x")),
 		},
 		onClose: close,
 	});
