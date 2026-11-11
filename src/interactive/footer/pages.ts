@@ -238,7 +238,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	// Runs from before this Clio started are history: `12 cancelled` beside an exit card's `0 workers` read as this visit's.
 	const pastOnly = rows.length > 0 && rows.every((row) => row.earlier === true);
 	const capacity = state.agent.localCapacity;
-	const cap = capacity ? `cap ${capacity.limit} · ${capacity.bound}` : "";
+	// The auto maximum's bound is named "cap"; `cap 8 · cap` read as a row cut mid-word.
+	const cap = capacity ? `cap ${capacity.limit} · ${capacity.bound === "cap" ? "built-in max" : capacity.bound}` : "";
 	const meta = [pastOnly ? `earlier sessions · ${counts}` : counts, cap].filter(Boolean).join(" · ");
 	const liveNotices = state.notices.filter((notice) => notice.presentation !== "setting");
 	const notices = formatNotificationPanel(liveNotices, width, {

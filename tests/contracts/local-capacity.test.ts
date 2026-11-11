@@ -171,6 +171,14 @@ describe("fleet.concurrency auto placement surfaces", () => {
 			rows.push(...dashboardPageViewport(snapshot, 120, 240, "Alt+U", offset).rows);
 		match(rows.map(stripTerminalSequences).join("\n"), /Workers ─.*cap 2 · memory/u);
 	});
+
+	it("names the built-in maximum in words, never as a second bare `cap`", () => {
+		const snapshot = footerState();
+		snapshot.agent.localCapacity = { limit: 8, bound: "cap" };
+		const text = dashboardPageViewport(snapshot, 120, 240, "Alt+U").rows.map(stripTerminalSequences).join("\n");
+		match(text, /Workers ─.*cap 8 · built-in max/u);
+		strictEqual(/cap 8 · cap\b/u.test(text), false);
+	});
 });
 
 describe("dispatch capacity under auto", () => {
