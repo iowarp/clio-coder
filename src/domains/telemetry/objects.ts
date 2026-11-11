@@ -277,6 +277,8 @@ function withheldCredentials(value: unknown, tally: RedactionTally, credential =
 	);
 }
 
+const ENV_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u;
+
 /**
  * The redaction an object's preimage gets before it is hashed, and a share re-applies to every record and object it
  * exports: a credential-named property's whole value, value patterns, URL userinfo, query credentials and secret
@@ -287,6 +289,9 @@ export function redactTelemetryValue<T>(value: T, tally: RedactionTally, secretM
 	const named = withheldCredentials(secretMaps ? withheldSecretMaps(value) : value, tally);
 	return JSON.parse(canonicalJson(named), (key, item: unknown) => {
 		if (typeof item !== "string") return item;
+		// `auth.apiKeyEnvVar` names an environment variable, not its value; a name shape stays readable, anything else
+		// (a key pasted into the field) is still redacted below.
+		if (key === "apiKeyEnvVar" && ENV_VARIABLE_NAME.test(item)) return item;
 		const scrubbed = redactSecretString(item);
 		if (scrubbed !== item) tally.count += 1;
 		return secretValues(key, scrubbed);

@@ -12,7 +12,7 @@ import { pruneProviderCheckpoints } from "../../../core/provider-checkpoint.js";
 import { providerCheckpointFromMessage } from "../../../core/provider-checkpoint-handle.js";
 import type { EventPayload } from "../../../core/telemetry/events.js";
 import { telemetryHub } from "../../../core/telemetry/hub.js";
-import { pricesCalls, pricingBasisFields } from "../../../core/telemetry/pricing.js";
+import { pricingBasisFields } from "../../../core/telemetry/pricing.js";
 import { sessionPaths } from "../../../engine/session.js";
 import type { AgentMessage, EngineModel } from "../../../engine/types.js";
 import type { MemoryRuntime } from "../../memory/runtime.js";
@@ -172,6 +172,27 @@ async function resolveCompactionModel(
 }
 
 /** What a compaction needs of telemetry: its session's journal. */
+/**
+ * Checks one summary call against the session cost ceiling. An unpriced route
+ * projects nothing, but the session's settled spend may already be at the
+ * ceiling, so the check runs whatever the route's pricing.
+ */
+export async function admitCompactionSummaryCall(
+	admission: CompactionFlowAdmission | undefined,
+	hold: AdmissionHold,
+	signal?: AbortSignal,
+): Promise<void> {
+	await admission?.scheduling?.admitPaidRequest?.({
+		waitForRaise: admission.headless !== true,
+		...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
+		// The ceiling held this summary call, so its admission stage reads as a budget wait (#424, #434).
+		onBlocked: () => {
+			hold.waitedOn = "budget";
+		},
+		...(signal ? { signal } : {}),
+	});
+}
+
 export type CompactionTelemetry = Pick<TelemetryContract, "acquireTelemetrySession">;
 
 export async function runCompactionFlow(
@@ -258,17 +279,7 @@ export async function runCompactionFlow(
 		const admitSummary = async (hold: AdmissionHold): Promise<void> => {
 			if (admission?.summaryAdmitted) return;
 			await budget?.beforeSummaryCall?.(hold);
-			if (pricesCalls(resolved.pricedBy)) {
-				await admission?.scheduling?.admitPaidRequest?.({
-					waitForRaise: admission.headless !== true,
-					...(admission.getCeilingUsd ? { getCeilingUsd: admission.getCeilingUsd } : {}),
-					// The ceiling held this summary call, so its admission stage reads as a budget wait (#424, #434).
-					onBlocked: () => {
-						hold.waitedOn = "budget";
-					},
-					...(budget?.signal ? { signal: budget.signal } : {}),
-				});
-			}
+			await admitCompactionSummaryCall(admission, hold, budget?.signal);
 		};
 
 		let result: CompactResult;
