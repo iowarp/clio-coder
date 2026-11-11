@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -172,6 +172,37 @@ describe("release decisions", () => {
 		const receipt = { ciRun: { id: 1, artifactDigest: "sha256:aa" } };
 		strictEqual(nextStep(facts({ ci: ci("sha256:aa"), releaseRun: waiting }), receipt).step, "publish-npm");
 		strictEqual(nextStep(facts({ ci: ci("sha256:bb"), releaseRun: waiting }), receipt).step, "stop");
+	});
+
+	it("finishes only a version npm serves from an ancestor of the branch head, never publishing", async () => {
+		const { finishGate } = await import("../../scripts/release-publish.mjs");
+		const scratch = mkdtempSync(join(tmpdir(), "clio-finish-"));
+		try {
+			const tarball = join(scratch, "iowarp-clio-coder-0.7.1.tgz");
+			writeFileSync(tarball, "qualified bytes");
+			const integrity = `sha512-${createHash("sha512").update("qualified bytes").digest("base64")}`;
+			const receipt = { name: "@iowarp/clio-coder", version: "0.7.1", commit, tarball };
+			const head = "b".repeat(40);
+			const calls: string[] = [];
+			const served = { name: receipt.name, version: receipt.version, dist: { integrity } };
+			const deps = (published: unknown, ancestor: boolean) => ({
+				registry: async (name: string, version: string) => (calls.push(`registry ${name}@${version}`), published),
+				isAncestor: (a: string, b: string) => (calls.push(`ancestor ${a} ${b}`), ancestor),
+			});
+			await rejects(finishGate({ receipt, commit, branchHead: head }, deps(null, true)), /needs npm to serve/u);
+			await rejects(
+				finishGate({ receipt, commit, branchHead: head }, deps({ ...served, dist: { integrity: "sha512-x" } }, true)),
+				/different bytes/u,
+			);
+			await rejects(finishGate({ receipt, commit, branchHead: head }, deps(served, false)), /not an ancestor/u);
+			strictEqual(await finishGate({ receipt, commit, branchHead: head }, deps(served, true)), commit);
+			ok(calls.every((call) => call.startsWith("registry ") || call.startsWith("ancestor ")));
+			// The only npm publish in the publisher is the rehearsal's dry run.
+			const source = readFileSync(new URL("../../scripts/release-publish.mjs", import.meta.url), "utf8");
+			deepStrictEqual(source.match(/\[\s*"publish"[^\]]*/gu)?.map((args) => args.includes("--dry-run")), [true]);
+		} finally {
+			rmSync(scratch, { recursive: true, force: true });
+		}
 	});
 
 	it("publishes only the ci.yml run's artifact, never the local candidate", async () => {
