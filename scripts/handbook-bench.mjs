@@ -405,14 +405,10 @@ export function scoreRun(task, answer, touched) {
 	return Math.max(0, Number(((checks.filter(Boolean).length - traps.length) / checks.length).toFixed(3)));
 }
 
+/** Measured input and output tokens from an `agent_end` frame's usage. */
 function tokenTotals(frame) {
-	let total = 0;
-	const walk = (value, key) => {
-		if (typeof value === "number" && /tokens?$/i.test(key) && !/cache|max|limit|window/i.test(key)) total += value;
-		else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) walk(v, k);
-	};
-	walk(frame, "");
-	return total;
+	if (frame.type !== "agent_end") return 0;
+	return (frame.usage?.input?.measured ?? 0) + (frame.usage?.output?.measured ?? 0);
 }
 
 function runOne({ arm, task, round, options, scratch }) {
@@ -458,8 +454,12 @@ function runOne({ arm, task, round, options, scratch }) {
 		...(options.model ? ["--model", options.model] : []),
 		...(options.thinking ? ["--thinking", options.thinking] : []),
 		...(task.mode === "read" ? ["--read-only"] : ["--autonomy", "yolo"]),
+		// The worker tier runs a coder worker, whose handbook is the 6000-character compile for the declared paths.
+		...(options.tier === "worker" ? ["--agent", "coder"] : []),
 		"--",
-		task.prompt,
+		options.tier === "worker"
+			? [task.prompt, ...(task.key ?? task.files ?? []).map((path) => `@${path}`)].join("\n")
+			: task.prompt,
 	];
 	const started = Date.now();
 	const result = spawnSync(process.execPath, argv, { cwd: dir, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -487,7 +487,7 @@ function runOne({ arm, task, round, options, scratch }) {
 		round,
 		exitCode: result.status,
 		score: scoreRun(task, String(end.text ?? ""), [...new Set(touched)]),
-		toolCalls: end.observed?.toolCalls ?? null,
+		toolCalls: frames.reduce((sum, frame) => sum + (frame.observed?.toolCalls ?? 0), 0),
 		tokens: frames.reduce((sum, frame) => sum + tokenTotals(frame), 0),
 		seconds: Math.round((Date.now() - started) / 1000),
 	};
@@ -540,7 +540,8 @@ function flags(argv) {
 		if (!arg.startsWith("--")) continue;
 		const name = arg.slice(2);
 		const next = argv[index + 1];
-		const value = next === undefined || next.startsWith("--") ? true : (index++, next);
+		const value = next === undefined || next.startsWith("--") ? true : next;
+		if (value !== true) index += 1;
 		if (name === "arm") out.arm.push(String(value));
 		else out[name] = value;
 	}
@@ -551,7 +552,7 @@ const USAGE = `usage:
   node --import tsx scripts/handbook-bench.mjs score --handbook <file> [--reference <file>] [--tree <dir>]
   node scripts/handbook-bench.mjs replay --commits <sha,sha,...> [--out <dir>]
   node scripts/handbook-bench.mjs run --arm <name>=<file>|none ... --tasks <dir> [--rounds 2] [--max-runs 40]
-      [--target <id>] [--model <id>] [--thinking <level>] [--config-dir <dir>] [--timeout 600] [--yes]`;
+      [--target <id>] [--model <id>] [--thinking <level>] [--config-dir <dir>] [--timeout 600] [--tier main|worker] [--yes]`;
 
 async function main(argv) {
 	const [command, ...rest] = argv;
@@ -620,6 +621,7 @@ async function main(argv) {
 			thinking: typeof options.thinking === "string" ? options.thinking : undefined,
 			configDir: typeof options["config-dir"] === "string" ? resolve(options["config-dir"]) : undefined,
 			timeout: Number(options.timeout ?? 600),
+			tier: options.tier === "worker" ? "worker" : "main",
 		};
 		const rows = [];
 		for (let round = 1; round <= rounds; round += 1)
