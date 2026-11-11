@@ -7,8 +7,11 @@ import { holdInlineMath, mathFenceAfter } from "./inline-math.js";
  * delta; at 500 KB that lex was 78% of a frame. A head cut here renders once per width and only the tail is lexed
  * again.
  *
- * A cut sits after a run of blank lines that Pi's lexer reads as a top-level space token between two blocks, and
- * only where no later text can move it:
+ * A cut sits after a run of blank lines that Pi's lexer reads as a top-level space token between two blocks, or
+ * between two blocks with no blank line where the first is closed by the line that starts the second: a heading,
+ * fence or rule, or a paragraph, list or quote that a heading, fence or rule ends. Pi follows most blocks with a
+ * spacing row only when another block comes next, so such a head renders with that row added (`spacing`). A cut
+ * sits only where no later text can move it:
  * - the line after the blank run is complete, so its indent and marker are known, which is what decides whether a
  *   list or indented code block above continues across the blank run;
  * - the text before it holds no reference definition, which resolves links anywhere in the text;
@@ -75,18 +78,50 @@ function isHiddenCommentBlock(token: Tokens.Generic | undefined): boolean {
 	return token?.type === "html" && token.raw.replace(HTML_COMMENT_REGEX, "").trim() === "";
 }
 
+/** Blocks that end where the next line starts a heading, fence or rule. */
+const ENDED_BY_INTERRUPT = new Set(["paragraph", "list", "blockquote"]);
+/** Blocks that a line cannot continue: whatever follows starts a block of its own. */
+const SELF_CLOSING = new Set(["heading", "code", "hr"]);
+const INTERRUPTS = new Set(["heading", "code", "hr"]);
+const AFTER_SELF_CLOSING = new Set(["heading", "code", "hr", "paragraph", "list", "blockquote"]);
+
 /**
- * The length of the longest head of `source` that renders apart from the rest exactly as within the whole, at most
- * `limit`; 0 when there is none yet. Null when the text holds a reference definition or a carriage return, so it
- * never splits.
+ * Whether Pi ends a top-level block with no blank line, where `next` comes straight after `block` as their source
+ * reads, and whether the whole then draws a spacing row between them. Undefined where no cut may sit.
  */
-export function settledMarkdownHead(source: string, hold: string, limit: number): number | null {
+function joinedCut(
+	first: Tokens.Generic | undefined,
+	second: Tokens.Generic | undefined,
+): { spacing: boolean } | undefined {
+	// An indented code block draws its spacing apart from the rule below, so a cut stays clear of one.
+	if (first?.codeBlockStyle === "indented" || second?.codeBlockStyle === "indented") return undefined;
+	const block = first?.type;
+	const next = second?.type;
+	if (block === undefined || next === undefined) return undefined;
+	if (SELF_CLOSING.has(block) ? !AFTER_SELF_CLOSING.has(next) : !ENDED_BY_INTERRUPT.has(block) || !INTERRUPTS.has(next))
+		return undefined;
+	// pi-tui draws no spacing row after a list, nor after a paragraph a list follows.
+	return { spacing: block !== "list" && !(block === "paragraph" && next === "list") };
+}
+
+/** A line that may start a heading, fence or rule, or a blank line: where any cut can sit. */
+const CUT_CANDIDATE = /(?:^|\n)(?:[ \t]*\n| {0,3}(?:#{1,6}(?:[ \t]|\n)|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}\n))/u;
+
+/** A settled head: how long it is, and whether the whole draws a spacing row right after it. */
+export type SettledHead = { length: number; spacing: boolean };
+
+/**
+ * The longest head of `source` that renders apart from the rest exactly as within the whole, at most `limit`
+ * long; length 0 when there is none yet. A head with `spacing` renders as within the whole only with a blank line
+ * added after it. Null when the text holds a reference definition or a carriage return, so it never splits.
+ */
+export function settledMarkdownHead(source: string, hold: string, limit: number): SettledHead | null {
 	// Marked rewrites CR line ends, which would shift every offset after them.
 	if (source.includes("\r")) return null;
 	// Every reference definition holds `]:`, and one can complete on a line after its label, so a text that may
 	// hold one is always lexed.
-	const firstBlank = source.search(/\n[ \t]*\n/u);
-	if ((firstBlank < 0 || firstBlank >= limit) && !source.includes("]:")) return 0;
+	const candidate = source.search(CUT_CANDIDATE);
+	if ((candidate < 0 || candidate >= limit) && !source.includes("]:")) return { length: 0, spacing: false };
 	const text = holdInlineMath(source, hold).replace(/\t/g, "   ");
 	const lexer = text.includes("$$") || text.includes("\\[") ? latexLexer : plainLexer;
 	const tokens = lexer.lexer(text);
@@ -104,17 +139,25 @@ export function settledMarkdownHead(source: string, hold: string, limit: number)
 	}
 	let offset = 0;
 	let line = 0;
-	let cut = 0;
+	let cut: SettledHead = { length: 0, spacing: false };
 	for (let index = 0; index < tokens.length; index++) {
 		const raw = tokens[index]?.raw ?? "";
 		offset += raw.length;
 		for (let at = raw.indexOf("\n"); at >= 0; at = raw.indexOf("\n", at + 1)) line += 1;
-		if (tokens[index]?.type !== "space" || index === 0 || index + 1 === tokens.length) continue;
-		if (isHiddenCommentBlock(tokens[index - 1]) || isHiddenCommentBlock(tokens[index + 1])) continue;
+		if (index + 1 === tokens.length) continue;
+		let spacing = false;
+		if (tokens[index]?.type === "space") {
+			if (index === 0) continue;
+			if (isHiddenCommentBlock(tokens[index - 1]) || isHiddenCommentBlock(tokens[index + 1])) continue;
+		} else {
+			const joined = joinedCut(tokens[index], tokens[index + 1]);
+			if (joined === undefined) continue;
+			spacing = joined.spacing;
+		}
 		if (text[offset - 1] !== "\n" || text.indexOf("\n", offset) < 0 || fenceOpen[line] !== false) continue;
 		const at = lineStart[line] ?? Number.POSITIVE_INFINITY;
-		if (at <= limit) cut = at;
+		if (at <= limit) cut = { length: at, spacing };
 	}
 	// The tokens must account for every character, or their offsets cannot be trusted.
-	return offset === text.length ? cut : 0;
+	return offset === text.length ? cut : { length: 0, spacing: false };
 }

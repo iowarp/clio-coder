@@ -319,6 +319,8 @@ type SettledBlocks = {
 	pieces: string[];
 	/** Where each piece ends in the prose, ascending; the last is `length`. */
 	cuts: number[];
+	/** Per cut, whether the whole draws a spacing row after it that a head ending there must add. */
+	spacing: boolean[];
 	/** The redaction projection's restart count the head was cut under; a restart may have changed the head. */
 	restarts: number;
 	/** How far the prose reached at the last search for a cut. A new cut needs a line completed after that. */
@@ -1295,7 +1297,7 @@ function renderSettledSplit(
 	// diffusion frame or a replaced message. Comparing the head itself would cost a pass over the reply per frame.
 	const restarts = secrets.restarts;
 	if (settled === undefined || settled.restarts !== restarts)
-		settled = { length: 0, pieces: [], cuts: [], restarts, searched: 0 };
+		settled = { length: 0, pieces: [], cuts: [], spacing: [], restarts, searched: 0 };
 	seg.settled = settled;
 	// Everything after the head, read from the projection's pieces rather than sliced off the whole prose.
 	const from = settled.length;
@@ -1305,16 +1307,17 @@ function renderSettledSplit(
 	if (region.indexOf("\n", Math.max(0, settled.searched - from)) >= 0 || region.includes("]:")) {
 		settled.searched = from + region.length;
 		const limit = secrets.settledLength - from;
-		const cut = limit > 0 ? settledMarkdownHead(region, CODE_SPACE, limit) : 0;
-		if (cut === null) {
+		const head = limit > 0 ? settledMarkdownHead(region, CODE_SPACE, limit) : { length: 0, spacing: false };
+		if (head === null) {
 			seg.settled = null;
 			return null;
 		}
-		if (cut > 0) {
-			settled.pieces.push(region.slice(0, cut));
-			settled.length = from + cut;
+		if (head.length > 0) {
+			settled.pieces.push(region.slice(0, head.length));
+			settled.length = from + head.length;
 			settled.cuts.push(settled.length);
-			region = region.slice(cut);
+			settled.spacing.push(head.spacing);
+			region = region.slice(head.length);
 		}
 	}
 	const epoch = skinEpoch();
@@ -1331,13 +1334,9 @@ function renderSettledSplit(
 		if (runStart < 0) runStart = index;
 		if (cut - layout.through < SETTLED_RUN_CODE_UNITS && index !== last) continue;
 		const exit = { fenceOpen: false };
-		const rows = markdownRows(
-			chatMarkdown(settled.pieces.slice(runStart, index + 1).join(""), bareFences),
-			width,
-			bareFences,
-			undefined,
-			exit,
-		);
+		// A run that ends where the next block follows with no blank line draws the spacing row the whole would.
+		const run = settled.pieces.slice(runStart, index + 1).join("") + (settled.spacing[index] ? "\n" : "");
+		const rows = markdownRows(chatMarkdown(run, bareFences), width, bareFences, undefined, exit);
 		// The transcript's fence tracking misread a row as a fence and would carry it into the next run.
 		if (exit.fenceOpen) {
 			seg.settled = null;
