@@ -530,7 +530,9 @@ reduction caused solely by Clio Coder's own workers while still observing change
 host pressure. Calls inside the sampling interval reuse that same paired sample.
 
 When a host input binds the limit, the `/settings` fleet row for `local` shows
-it after the busy count (`ready · 1/2 busy · memory-bound at 2`). The footer chip shows
+it after the busy count (`ready · 1/2 busy · memory-bound at 2`), and the
+expanded footer dashboard's workers line ends with `cap 2 · memory` (`cap 8 · built-in max`
+when only the built-in maximum binds). The footer chip shows
 only the live worker count. `clio-coder configure` shows what `auto` resolves to on
 the current host, and `clio-coder doctor` reports it as the local worker capacity.
 
@@ -1821,7 +1823,9 @@ hard block.
   `○ ran no tools`, or canceled) and the duration. The block body renders the worker
   prose down a rail, a rail line with tokens processed, context and tool calls (hidden
   in Minimal output), and a `quality` line that keeps validation quality separate
-  from execution status. A failure reason prints on the rail.
+  from execution status. A failure reason prints on the rail. A council synthesis
+  that succeeded while some members gave no answer is headed `! partial` instead of a
+  plain success.
 - Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail: Minimal identity/outcome, Default short summary, Detailed bounded activity and a larger summary, and a settled Detailed card keeps its answer and failure. A run waiting on an approval says so at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
 - Sharing: nothing an operator-started run (`/run`, `/delegate`) produced enters
   the main model's context unless `--share` was passed or the operator runs
