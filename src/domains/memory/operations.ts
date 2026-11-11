@@ -147,10 +147,25 @@ export function canonicalMemoryRepositoryIdentity(repositoryPath: string): Memor
 /** Root commits read once per session per repository key; `null` means none could be read. */
 const repositoryFingerprints = new Map<string, string | null>();
 /**
- * Every root commit any ref of the repository reaches, read with the fingerprint. A record learned on another branch
- * whose history starts elsewhere (an orphan branch, or a history merged in later) still belongs to this repository.
+ * Every root commit any ref of the repository reaches. A record learned on another branch whose history starts
+ * elsewhere (an orphan branch, or a history merged in later) still belongs to this repository. Walking every ref can
+ * take seconds on a large repository, so it runs at the first record whose fingerprint differs, never at session start.
  */
 const repositoryRootCommits = new Map<string, ReadonlySet<string>>();
+
+function reachableRootCommits(key: string): ReadonlySet<string> {
+	let roots = repositoryRootCommits.get(key);
+	if (roots === undefined) {
+		try {
+			roots = new Set(rootCommits(key, ["--all"]));
+		} catch {
+			// A broken ref walk leaves only the HEAD fingerprint matching.
+			roots = new Set();
+		}
+		repositoryRootCommits.set(key, roots);
+	}
+	return roots;
+}
 
 function rootCommits(cwd: string, revisions: ReadonlyArray<string>): string[] {
 	const out = execFileSync("git", ["rev-list", "--max-parents=0", ...revisions], {
@@ -177,12 +192,9 @@ export function primeMemoryRepositoryFingerprint(cwd: string): void {
 	try {
 		if (existsSync(join(identity.key, ".git")) && !existsSync(join(identity.key, ".git", "shallow"))) {
 			fingerprint = rootCommits(identity.key, ["HEAD"])[0] ?? null;
-			if (fingerprint !== null)
-				repositoryRootCommits.set(identity.key, new Set([fingerprint, ...rootCommits(identity.key, ["--all"])]));
 		}
 	} catch {
-		// No git, no commits, or a broken repository: path-only matching. The HEAD fingerprint stands when only the
-		// walk over every ref failed.
+		// No git, no commits, or a broken repository: path-only matching.
 	}
 	repositoryFingerprints.set(identity.key, fingerprint);
 }
@@ -277,7 +289,7 @@ function repositoryApplies(record: MemoryRecord, activeRepository: MemoryReposit
 		record.repository.fingerprint !== undefined &&
 		activeRepository.fingerprint !== undefined &&
 		record.repository.fingerprint !== activeRepository.fingerprint &&
-		!repositoryRootCommits.get(activeRepository.key)?.has(record.repository.fingerprint)
+		!reachableRootCommits(activeRepository.key).has(record.repository.fingerprint)
 	) {
 		return false;
 	}

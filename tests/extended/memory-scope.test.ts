@@ -107,15 +107,15 @@ describe("memory scope boundary", () => {
 		ok(active?.fingerprint !== undefined && active.fingerprint !== mainRoot);
 		const keyed = (id: string, fingerprint: string) =>
 			record(id, "repo", { kind: "canonical-path", key: root, fingerprint });
-		const selected = selectMemoryForPrompt([keyed("main", mainRoot), keyed("other", "c".repeat(40))], {
-			scopes: ["repo"],
-			tokenBudget: 10_000,
-			activeRepository: active,
-		});
-		deepStrictEqual(
-			selected.map(({ id }) => id),
-			["main"],
+		// Every ref is walked when a record first needs it, not at session start: a root made after priming counts.
+		git("checkout", "-q", "--orphan", "docs");
+		git("commit", "-q", "--allow-empty", "-m", "docs root");
+		const docsRoot = git("rev-parse", "HEAD");
+		const selected = selectMemoryForPrompt(
+			[keyed("main", mainRoot), keyed("docs", docsRoot), keyed("other", "c".repeat(40))],
+			{ scopes: ["repo"], tokenBudget: 10_000, activeRepository: active },
 		);
+		deepStrictEqual(selected.map(({ id }) => id).sort(), ["docs", "main"]);
 	});
 
 	it("creates a redacted, review-required promotion with source provenance", () => {
