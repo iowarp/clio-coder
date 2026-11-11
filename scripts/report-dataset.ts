@@ -58,6 +58,12 @@ type RareKind = (typeof RARE_KINDS)[number];
 
 const ANON = /anon_[0-9a-f]{16}/gu;
 const RECORD_ID = /^rec_([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+/** Every other minted id that carries its own mint time: a UUIDv7 under any prefix, a ULID, a compact-UTC run id. */
+const UUID_V7_ID =
+	/^([a-z][a-z0-9]{0,11}[_:-])?([0-9a-f]{8})-([0-9a-f]{4})(-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u;
+const ULID_ID = /^([a-z][a-z0-9]{0,11}[_:-])?([0-9A-HJKMNP-TV-Z]{10})([0-9A-HJKMNP-TV-Z]{16})$/u;
+const COMPACT_RUN_ID = /^([a-z][a-z0-9]{0,11}[_:-])?(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z(-[0-9a-f]{6})$/u;
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const EPOCH_MS_MIN = 1e12;
 const EPOCH_MS_MAX = 1e13;
 const TIME_KEY = /(?:At|Ms|Time|Ts|Epoch)$|^(?:wall|ts|time)$/u;
@@ -98,6 +104,37 @@ function recordIdAt(ms: number): string {
 	const rand = randomBytes(10).toString("hex");
 	const variant = ((Number.parseInt(rand.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
 	return `rec_${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${rand.slice(0, 3)}-${variant}${rand.slice(4, 7)}-${rand.slice(8, 20)}`;
+}
+
+/** The same id re-minted `shiftMs` earlier with fresh random bits, or null when it carries no mint time. */
+function shiftedMintedId(value: string, shiftMs: number): string | null {
+	const uuid = UUID_V7_ID.exec(value);
+	if (uuid) {
+		const hex = Math.max(0, Number.parseInt(`${uuid[2]}${uuid[3]}`, 16) - shiftMs)
+			.toString(16)
+			.padStart(12, "0")
+			.slice(-12);
+		const rand = randomBytes(10).toString("hex");
+		const variant = ((Number.parseInt(rand.slice(3, 4), 16) & 0x3) | 0x8).toString(16);
+		return `${uuid[1] ?? ""}${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${rand.slice(0, 3)}-${variant}${rand.slice(4, 7)}-${rand.slice(8, 20)}`;
+	}
+	const ulid = ULID_ID.exec(value);
+	if (ulid) {
+		let ms = 0;
+		for (const char of ulid[2] ?? "") ms = ms * 32 + CROCKFORD.indexOf(char);
+		let time = "";
+		for (let left = Math.max(0, ms - shiftMs), n = 0; n < 10; n += 1, left = Math.floor(left / 32))
+			time = `${CROCKFORD[left % 32]}${time}`;
+		const rand = [...randomBytes(16)].map((byte) => CROCKFORD[byte % 32]).join("");
+		return `${ulid[1] ?? ""}${time}${rand}`;
+	}
+	const run = COMPACT_RUN_ID.exec(value);
+	if (run) {
+		const [, prefix = "", y, mo, d, h, mi, sec] = run;
+		const at = new Date(Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${sec}Z`) - shiftMs).toISOString();
+		return `${prefix}${at.replace(/[-:]|\.\d{3}/gu, "")}-${randomBytes(3).toString("hex")}`;
+	}
+	return null;
 }
 
 /**
@@ -181,6 +218,11 @@ function mapper(
 				records.set(value, mapped);
 			}
 			return mapped;
+		}
+		const minted = records.get(value) ?? shiftedMintedId(value, shiftMs);
+		if (minted !== null) {
+			records.set(value, minted);
+			return minted;
 		}
 		return value.replace(ANON, (id) => `anon_${createHmac("sha256", releaseKey).update(id).digest("hex").slice(0, 16)}`);
 	};
@@ -494,6 +536,13 @@ export function withdraw(store: string, reportId: string): Array<{ release: stri
 // ---------------------------------------------------------------------------------------------------------------
 // Self-check over synthetic bundles: admission, unlinking, the rare-value rule, the minimum size and withdrawal.
 
+/** Minted ids whose own bits carry the real time they were made: a UUIDv7 call id and a compact-UTC run id. */
+const SELF_CALL_ID = `cal_${Date.now()
+	.toString(16)
+	.padStart(12, "0")
+	.replace(/^(.{8})(.{4})$/u, "$1-$2")}-7abc-8def-0123456789ab`;
+const SELF_RUN_ID = `${new Date().toISOString().replace(/[-:]|\.\d{3}/gu, "")}-abc123`;
+
 async function syntheticStore(
 	root: string,
 	total: number,
@@ -511,7 +560,7 @@ async function syntheticStore(
 	const rareModel = "zqx-rare-model-1";
 	for (let n = 0; n < total; n += 1) {
 		const sessionId = `ses_selfcheck${n}`;
-		const ctx = { sessionId, agent: { role: "main", id: sessionId } };
+		const ctx = { sessionId, agent: { role: "main", id: sessionId }, parentRunId: SELF_RUN_ID, callId: SELF_CALL_ID };
 		const journal = await openCallJournal({
 			directory: telemetrySessionDirectory(stateDir, sessionId),
 			context: ctx as never,
@@ -523,7 +572,7 @@ async function syntheticStore(
 				data:
 					kind === "session.opened"
 						? {}
-						: { stopReason: "stop", terminal: { cause: null, stage: null, retries: 0, callIds: [] } },
+						: { stopReason: "stop", terminal: { cause: null, stage: null, retries: 0, callIds: [SELF_CALL_ID] } },
 				ctx,
 				wallMs: Date.now() + n * 1000,
 				mono: performance.now(),
@@ -604,6 +653,26 @@ export async function selfCheck(): Promise<string[]> {
 		assert(!/rpt_[0-9A-Z]{26}/u.test(all), "a report id survived");
 		const times = all.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu) ?? [];
 		assert(times.length > 0 && times.every((time) => time < "2000-01-02"), "a timestamp after 2000-01-02 survived");
+		for (const id of [SELF_CALL_ID, SELF_RUN_ID]) assert(!all.includes(id), `minted id ${id} survived`);
+		// The exporter's own seal is minted at build time, which dates the release, not the reporter.
+		const seals = new Set(
+			all
+				.split("\n")
+				.filter((line) => line.includes('"share.sealed"'))
+				.flatMap((line) => line.match(/rec_[0-9a-f-]{36}/gu) ?? []),
+		);
+		const reported = all
+			.split("\n")
+			.filter((line) => !line.includes('"share.sealed"'))
+			.join("\n")
+			.replace(/rec_[0-9a-f-]{36}/gu, (id) => (seals.has(id) ? "" : id));
+		for (const hit of reported.matchAll(/\b[a-z]{3}_([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-/gu))
+			assert(
+				Number.parseInt(`${hit[1]}${hit[2]}`, 16) < EPOCH + 86_400_000,
+				`a UUIDv7 id decodes after 2000-01-02: ${reported.slice(Math.max(0, (hit.index ?? 0) - 10), (hit.index ?? 0) + 120).replace(/\s+/gu, " ")}`,
+			);
+		for (const [stamp] of all.matchAll(/\b\d{8}T\d{6}Z(?=-[0-9a-f]{6})/gu))
+			assert(stamp < "20000102", `a compact-UTC run id after 2000-01-02 survived: ${stamp}`);
 		passed.push("unlinking: no report id, original anonymous, scope or install id, or real timestamp survives");
 		const epochs = [...all.matchAll(/"(\w+)":(\d{12,13})\b/gu)];
 		assert(
