@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -22,16 +31,18 @@ export interface CheckoutWriterLeaseRecord {
 	processBirthToken: string;
 	acquiredAt: string;
 	/**
-	 * When the holder last proved it still runs, and how long that proof lasts. Absent in records written before
-	 * holders heartbeat; such a record is judged by its pid alone, and another host's is honored indefinitely.
+	 * When the holder last proved it still runs, by its own clock, and how long that proof lasts. Absent in records
+	 * written before holders heartbeat; such a record is judged by its pid alone, and another host's is honored
+	 * indefinitely. The age that lapses it is read from the record file's modification time, never from this field.
 	 */
 	heartbeatAt?: string;
 	heartbeatExpiresMs?: number;
 }
 
 /**
- * How often a holder refreshes its record, and how long a refresh stays good. The expiry spans several missed beats
- * and absorbs clock skew between hosts sharing the state directory well short of it.
+ * How often a holder refreshes its record, and how long a refresh stays good. The expiry spans several missed beats;
+ * the age it bounds is measured on the clock of the filesystem that stores the record, so skew between the hosts
+ * sharing the state directory does not enter it.
  */
 export const CHECKOUT_WRITER_LEASE_HEARTBEAT_MS = 15_000;
 export const CHECKOUT_WRITER_LEASE_EXPIRY_MS = 120_000;
@@ -119,24 +130,41 @@ function readRecord(path: string): CheckoutWriterLeaseRecord | null {
 	}
 }
 
-/** True when the record carries a heartbeat that has lapsed; a record without one never reads as expired. */
-function heartbeatExpired(record: CheckoutWriterLeaseRecord, nowMs: number): boolean {
-	if (record.heartbeatAt === undefined || record.heartbeatExpiresMs === undefined) return false;
-	// A beat stamped ahead of this clock is skew, not age, so it reads as fresh.
-	return nowMs - Date.parse(record.heartbeatAt) > record.heartbeatExpiresMs;
+/**
+ * How long ago the holder last wrote its record, on the clock of the filesystem that stores it: the record's
+ * modification time against a file this reader writes beside it now. The holder's clock and this host's never meet,
+ * so a holder running behind is not broken while it beats and one running ahead is not held past its last beat.
+ */
+function recordAgeMs(path: string): number {
+	const probe = join(dirname(path), `.clock-${hostname()}-${process.pid}`);
+	try {
+		writeFileSync(probe, String(process.pid));
+		return statSync(probe).mtimeMs - statSync(path).mtimeMs;
+	} catch {
+		return Date.now() - statSync(path).mtimeMs;
+	} finally {
+		rmSync(probe, { force: true });
+	}
 }
 
-function ownerAlive(record: CheckoutWriterLeaseRecord, probe: CheckoutWriterLeaseProbe, nowMs: number): boolean {
+/** True when the record carries a heartbeat that has lapsed; a record without one never reads as expired. */
+function heartbeatExpired(record: CheckoutWriterLeaseRecord, path: string): boolean {
+	if (record.heartbeatAt === undefined || record.heartbeatExpiresMs === undefined) return false;
+	return recordAgeMs(path) > record.heartbeatExpiresMs;
+}
+
+function ownerAlive(record: CheckoutWriterLeaseRecord, path: string, probe: CheckoutWriterLeaseProbe): boolean {
 	// Another host's pid cannot be probed from here, so no local pid check judges it (#439): its holder stays live
 	// until its heartbeat lapses, and a record that carries none stays live.
-	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, nowMs);
+	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return !heartbeatExpired(record, path);
 	if (probe.zombie?.(record.pid) === true) return false;
 	const current = probe.birthToken(record.pid);
 	// A different birth token is a different process on a reused pid.
 	if (current === null || current !== record.processBirthToken) return false;
-	// Where the token cannot tell a reused pid from the holder, a live pid proves nothing on its own: the holder's
-	// lapsed heartbeat shows it is gone.
-	if (probe.tokenProvesDeath === false) return (probe.alive?.(record.pid) ?? false) && !heartbeatExpired(record, nowMs);
+	// Where the token cannot tell a reused pid from the holder (no readable start time, as on macOS and Windows), a
+	// live pid proves nothing on its own: the holder's lapsed heartbeat shows it is gone. A holder whose process stalls
+	// past the expiry without beating reads as gone too.
+	if (probe.tokenProvesDeath === false) return (probe.alive?.(record.pid) ?? false) && !heartbeatExpired(record, path);
 	return true;
 }
 
@@ -261,7 +289,7 @@ export function acquireCheckoutWriterLease(input: {
 	const nowMs = input.nowMs ?? Date.now();
 	withStateFileLockSync(path, () => {
 		const existing = readRecord(path);
-		if (existing !== null && ownerAlive(existing, input.probe ?? defaultProbe, nowMs)) {
+		if (existing !== null && ownerAlive(existing, path, input.probe ?? defaultProbe)) {
 			const where = existing.host !== undefined && existing.host !== hostname() ? ` on host ${existing.host}` : "";
 			throw new Error(`checkout_writer_lease_held: checkout writer lease is held by pid ${existing.pid}${where}`);
 		}

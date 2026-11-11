@@ -9,6 +9,7 @@ import {
 	realpathSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
@@ -209,43 +210,51 @@ test("a writer lease held on another host, or by a zombie, is judged by host and
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+/** Write a lease record as its holder last did `writtenAgoMs` before now, stamping `heartbeatAt` with its own clock. */
+function writeLeaseRecord(
+	path: string,
+	record: Record<string, unknown>,
+	writtenAgoMs: number,
+	holderClockSkewMs = 0,
+	heartbeat = true,
+): void {
+	const writtenAt = Date.now() - writtenAgoMs;
+	writeFileSync(
+		path,
+		JSON.stringify({
+			version: 1,
+			acquiredAt: new Date(writtenAt - 3_600_000 + holderClockSkewMs).toISOString(),
+			...record,
+			...(heartbeat
+				? { heartbeatAt: new Date(writtenAt + holderClockSkewMs).toISOString(), heartbeatExpiresMs: 120_000 }
+				: {}),
+		}),
+	);
+	utimesSync(path, writtenAt / 1000, writtenAt / 1000);
+}
 test("another host's writer lease is honored until its heartbeat lapses, never by a local pid check", () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const nowMs = Date.parse("2026-01-01T12:00:00.000Z");
 	const first = acquireCheckoutWriterLease({ checkout: root, holder });
 	const path = first.path;
 	first.release();
 	// The pid is dead here; on another host that proves nothing.
-	const foreign = (beatAgoMs: number | undefined) =>
-		writeFileSync(
+	const foreign = (writtenAgoMs: number, heartbeat = true) =>
+		writeLeaseRecord(
 			path,
-			JSON.stringify({
-				version: 1,
-				checkout: root,
-				host: "other-node.invalid",
-				pid: 999_999_999,
-				processBirthToken: "1",
-				acquiredAt: new Date(nowMs - 3_600_000).toISOString(),
-				...(beatAgoMs === undefined
-					? {}
-					: { heartbeatAt: new Date(nowMs - beatAgoMs).toISOString(), heartbeatExpiresMs: 120_000 }),
-			}),
+			{ checkout: root, host: "other-node.invalid", pid: 999_999_999, processBirthToken: "1" },
+			writtenAgoMs,
+			0,
+			heartbeat,
 		);
 	try {
 		foreign(60_000);
-		throws(
-			() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }),
-			/held by pid 999999999 on host other-node/u,
-		);
-		// A beat stamped ahead of this clock is skew between hosts, not a lapse.
-		foreign(-30_000);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }), /on host other-node/u);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /held by pid 999999999 on host other-node/u);
 		// A record from a writer that never beats keeps the old rule: held.
-		foreign(undefined);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs }), /on host other-node/u);
+		foreign(3_600_000, false);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /on host other-node/u);
 		foreign(121_000);
-		const taken = acquireCheckoutWriterLease({ checkout: root, holder, nowMs });
+		const taken = acquireCheckoutWriterLease({ checkout: root, holder });
 		const record = JSON.parse(readFileSync(path, "utf8"));
 		strictEqual(record.host, hostname());
 		strictEqual(record.pid, process.pid);
@@ -254,37 +263,48 @@ test("another host's writer lease is honored until its heartbeat lapses, never b
 		rmSync(root, { recursive: true, force: true });
 	}
 });
+test("another host's writer lease ages on the shared filesystem's clock, not on either host's", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const first = acquireCheckoutWriterLease({ checkout: root, holder });
+	const path = first.path;
+	first.release();
+	const foreign = (writtenAgoMs: number, holderClockSkewMs: number) =>
+		writeLeaseRecord(
+			path,
+			{ checkout: root, host: "other-node.invalid", pid: 999_999_999, processBirthToken: "1" },
+			writtenAgoMs,
+			holderClockSkewMs,
+		);
+	try {
+		// A holder whose clock runs 200 s behind this one, beating now, still holds the checkout.
+		foreign(5_000, -200_000);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /on host other-node/u);
+		// A holder whose clock runs 500 s ahead, silent for 121 s, is gone.
+		foreign(121_000, 500_000);
+		acquireCheckoutWriterLease({ checkout: root, holder }).release();
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 test("a local writer lease whose pid now names a different process is stale", () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
 	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
-	const nowMs = Date.parse("2026-01-01T12:00:00.000Z");
 	const first = acquireCheckoutWriterLease({ checkout: root, holder });
 	const path = first.path;
 	first.release();
 	// process.ppid is alive; the recorded start time is not its own.
 	const local = (token: string, beatAgoMs: number) =>
-		writeFileSync(
-			path,
-			JSON.stringify({
-				version: 1,
-				checkout: root,
-				host: hostname(),
-				pid: process.ppid,
-				processBirthToken: token,
-				acquiredAt: new Date(nowMs - 3_600_000).toISOString(),
-				heartbeatAt: new Date(nowMs - beatAgoMs).toISOString(),
-				heartbeatExpiresMs: 120_000,
-			}),
-		);
+		writeLeaseRecord(path, { checkout: root, host: hostname(), pid: process.ppid, processBirthToken: token }, beatAgoMs);
 	// Where no start time is readable the token is the pid itself, so it cannot tell a reused pid apart.
 	const pidOnly = { birthToken: (pid: number) => `pid-${pid}`, tokenProvesDeath: false, alive: () => true };
 	try {
 		local(`${processBirthToken(process.ppid)}0`, 0);
-		acquireCheckoutWriterLease({ checkout: root, holder, nowMs }).release();
+		acquireCheckoutWriterLease({ checkout: root, holder }).release();
 		local(`pid-${process.ppid}`, 0);
-		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, nowMs, probe: pidOnly }), /held by pid/u);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder, probe: pidOnly }), /held by pid/u);
 		local(`pid-${process.ppid}`, 121_000);
-		acquireCheckoutWriterLease({ checkout: root, holder, nowMs, probe: pidOnly }).release();
+		acquireCheckoutWriterLease({ checkout: root, holder, probe: pidOnly }).release();
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

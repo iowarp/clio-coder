@@ -684,9 +684,12 @@ refreshes every 15 seconds. A live sibling process
 causes admission to fail with `checkout_writer_lease_held` and the holder pid.
 A dead owner is reclaimed, and so is a pid that now names a different process
 (its start time differs from the recorded one; where no start time can be read,
-the lapsed heartbeat decides). A lease from another host sharing the state
-directory is never judged by a local pid check: it is honored until its heartbeat
-is 120 seconds old, so those hosts need roughly synchronized clocks. A record
+the lapsed heartbeat decides, so on macOS and Windows a holder whose process
+stalls for 120 seconds without beating loses the lease). A lease from another host
+sharing the state directory is never judged by a local pid check: it is honored
+until its heartbeat is 120 seconds old. That age is read on the clock of the
+filesystem holding the state directory (the record's modification time against a
+file the reader writes beside it), so the hosts' clocks need not agree. A record
 written before holders heartbeat, on another host, stays held. The lease remains held until the last
 writer settles, including writers collected from detached batches. Read-only
 runs never acquire it.
