@@ -6,7 +6,6 @@
 
 import type { CallObservation } from "../core/call-failure.js";
 import type { AgentRole } from "../core/telemetry/enums.js";
-import { pricesCalls } from "../core/telemetry/pricing.js";
 import { beginCall, processTelemetryContext } from "../core/telemetry/producer.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import type { ProvidersContract } from "../domains/providers/contract.js";
@@ -82,14 +81,14 @@ export function createSideRequestAdmission(deps: {
 		};
 		try {
 			signal.throwIfAborted();
-			if (pricesCalls(pricing.pricedBy)) {
-				if (deps.scheduling?.admitPaidRequest) {
-					await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
-				} else {
-					const currentUsd = (await deps.telemetry?.settledSessionSpend())?.usd ?? 0;
-					const ceilingUsd = deps.getCeilingUsd();
-					if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
-				}
+			// Checked whatever the route's pricing: an unpriced route projects nothing, but the session's settled
+			// spend may already be at the ceiling.
+			if (deps.scheduling?.admitPaidRequest) {
+				await deps.scheduling.admitPaidRequest({ waitForRaise: false, getCeilingUsd: deps.getCeilingUsd, signal });
+			} else {
+				const currentUsd = (await deps.telemetry?.settledSessionSpend())?.usd ?? 0;
+				const ceilingUsd = deps.getCeilingUsd();
+				if (sessionCeilingReached(currentUsd, ceilingUsd)) throw new SessionCostCeilingError(currentUsd, ceilingUsd);
 			}
 			signal.throwIfAborted();
 			if (deps.currentSession() !== session) throw new Error("System One session changed before the request");

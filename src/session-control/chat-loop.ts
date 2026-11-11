@@ -19,7 +19,7 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricesCalls, pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
+import { pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
@@ -2135,7 +2135,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (!agentRuntime) return { ok: false, reason: notConfiguredNotice(deps.getSettings().chat) };
 		const resolution = agentRuntime.runtimeResolution;
 		try {
-			if (admitHere && pricesCalls(resolution.pricedBy)) {
+			// An unpriced route projects nothing, but the session's settled spend may already be at the ceiling.
+			if (admitHere) {
 				await deps.scheduling?.admitPaidRequest?.({
 					waitForRaise: deps.headless !== true,
 					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
@@ -2164,21 +2165,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * request gives its endpoint slot back for the hold, because a paused request must not hold capacity.
 	 */
 	const sideCallAdmission =
-		(runtime: AgentRuntime, origin: ReturnType<SessionContract["current"]>, slot: EndpointSlot, signal?: AbortSignal) =>
+		(origin: ReturnType<SessionContract["current"]>, slot: EndpointSlot, signal?: AbortSignal) =>
 		async (hold: AdmissionHold): Promise<void> => {
-			if (pricesCalls(runtime.runtimeResolution.pricedBy)) {
-				const telemetry = telemetryContext();
-				await deps.scheduling?.admitPaidRequest?.({
-					waitForRaise: deps.headless !== true,
-					getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
-					onBlocked: () => {
-						hold.waitedOn = "budget";
-						slot.release();
-					},
-					...(telemetry ? { telemetry } : {}),
-					...(signal ? { signal } : {}),
-				});
-			}
+			// Checked whatever the route's pricing: an unpriced route projects nothing, but the session's settled
+			// spend may already be at the ceiling.
+			const telemetry = telemetryContext();
+			await deps.scheduling?.admitPaidRequest?.({
+				waitForRaise: deps.headless !== true,
+				getCeilingUsd: () => deps.getSettings().safety.limits.sessionCostUsd,
+				onBlocked: () => {
+					hold.waitedOn = "budget";
+					slot.release();
+				},
+				...(telemetry ? { telemetry } : {}),
+				...(signal ? { signal } : {}),
+			});
 			if ((deps.session?.current()?.id ?? null) !== (origin?.id ?? null))
 				throw new Error("session changed before the request");
 			slot.acquire();
@@ -4170,7 +4171,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result = await withEndpointSlot(prepared.runtime, (slot) =>
 					sideQuestionRound({
 						...sideCallJournal(prepared.runtime, "btw", prepared.origin),
-						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
+						beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only: the round appends its own message to this copy, so
@@ -4226,7 +4227,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								(sampling) =>
 									draftRound({
 										...sideCallJournal(prepared.runtime, "helper", prepared.origin),
-										beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
+										beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
 										admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 										model: prepared.runtime.agent.state.model,
 										// One snapshot for every candidate, read-only as the side question's is.
@@ -4278,7 +4279,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				result = await withEndpointSlot(prepared.runtime, (slot) =>
 					handoffRound({
 						...sideCallJournal(prepared.runtime, "handoff", prepared.origin),
-						beforeRequest: sideCallAdmission(prepared.runtime, prepared.origin, slot, options.signal),
+						beforeRequest: sideCallAdmission(prepared.origin, slot, options.signal),
 						admitFlow: () => deps.admitRuntimeFlow?.(prepared.runtime) ?? null,
 						model: prepared.runtime.agent.state.model,
 						// Read-only, exactly as the side-question round treats it.
