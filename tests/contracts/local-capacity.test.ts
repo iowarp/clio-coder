@@ -14,6 +14,7 @@ import {
 	WORKER_MEMORY_ESTIMATE_BYTES,
 } from "../../src/domains/scheduling/local-capacity.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import { usesLocalCapacity } from "../../src/interactive/footer/dashboard.js";
 import { dashboardPageViewport } from "../../src/interactive/footer/pages.js";
 import { fleetNodeRows } from "../../src/interactive/overlays/settings.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -170,6 +171,13 @@ describe("fleet.concurrency auto placement surfaces", () => {
 		for (let offset = 1; offset <= first.maxOffset; offset++)
 			rows.push(...dashboardPageViewport(snapshot, 120, 240, "Alt+U", offset).rows);
 		match(rows.map(stripTerminalSequences).join("\n"), /Workers ─.*cap 2 · memory/u);
+	});
+
+	it("counts only local, non-gateway runs toward the local worker cap", () => {
+		strictEqual(usesLocalCapacity({ runtimeKind: "http" }), false);
+		strictEqual(usesLocalCapacity({ runtimeKind: "subprocess", node: "gpu-box" }), false);
+		strictEqual(usesLocalCapacity({ runtimeKind: "subprocess" }), true);
+		strictEqual(usesLocalCapacity({ runtimeKind: "sdk", node: "local" }), true);
 	});
 
 	it("names the built-in maximum in words, never as a second bare `cap`", () => {
