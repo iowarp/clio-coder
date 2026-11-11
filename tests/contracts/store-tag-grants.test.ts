@@ -2,14 +2,16 @@ import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { storeGrantBoundaries, storeProjectDir } from "../../src/core/store-paths.js";
+import { STORE_REPLACES_ARG, storeGrantBoundaries, storeProjectDir } from "../../src/core/store-paths.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { isDispatchIntent, normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { confineGrantOnlyWriters, writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
+import { classify } from "../../src/domains/safety/action-classifier.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
-import { createStoreTool } from "../../src/tools/store/store-tool.js";
+import { createStoreTool, storeAdmissionFacts } from "../../src/tools/store/store-tool.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function withWorkspace(fn: (root: string) => Promise<void>): Promise<void> {
@@ -77,20 +79,26 @@ describe("store tag grants", () => {
 		);
 	});
 
-	it("refuses a put over an existing blob on a backend admission cannot stat", () =>
+	it("admits a put over an existing clio-core blob as destructive once admission has stat it", () =>
 		withWorkspace(async (root) => {
 			const local = await openStoreBackend(root);
 			const openBackend = async () => ({ ...local, kind: "clio-core" as const });
 			const main = createStoreTool({ getCwd: () => root, writable: true, openBackend });
 			await main.run({ op: "create", tag: "results" });
-			const first = await main.run({ op: "put", tag: "results", path: "out/summary.csv" });
-			strictEqual(first.kind, "ok", JSON.stringify(first));
-			const worker = createStoreTool({ getCwd: () => root, writable: false, grant: { tags: ["results"] }, openBackend });
-			for (const tool of [main, worker]) {
-				const replaced = await tool.run({ op: "put", tag: "results", path: "out/summary.csv" });
-				strictEqual(replaced.kind, "error");
-				match(String((replaced as { message?: unknown }).message), /already exists on the clio-core backend/);
-			}
+			const put = { op: "put", tag: "results", path: "out/summary.csv" };
+			const fresh = await storeAdmissionFacts(put, root, openBackend);
+			strictEqual(classify({ tool: ToolNames.Store, args: fresh }).actionClass, "write");
+			strictEqual((await main.run(fresh)).kind, "ok");
+			const replacing = await storeAdmissionFacts({ ...put, [STORE_REPLACES_ARG]: false }, root, openBackend);
+			deepStrictEqual(classify({ tool: ToolNames.Store, args: replacing }), {
+				actionClass: "destructive",
+				reasons: ["store-replace: results:summary.csv"],
+			});
+			strictEqual((await main.run(replacing)).kind, "ok");
+			// A replace admission did not see (a blob created after it) is still refused.
+			const unseen = await main.run(put);
+			strictEqual(unseen.kind, "error");
+			match(String((unseen as { message?: unknown }).message), /already exists on the clio-core backend/);
 		}));
 
 	it("parallel writers granted the same tag do not overlap", () =>

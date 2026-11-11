@@ -223,6 +223,8 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 				{
 					...storeToolSurface,
 					prepareAdmissionArguments: (args) => prepareStoreAdmissionArguments(args, getWorkspaceRoot()),
+					resolveAdmissionFacts: async (args) =>
+						(await import("./store/store-tool.js")).storeAdmissionFacts(args, getWorkspaceRoot()),
 				},
 				async () =>
 					(await import("./store/store-tool.js")).createStoreTool({

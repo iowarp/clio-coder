@@ -1,7 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { observeFileHash } from "../../core/run-records.js";
-import { isRecordsTag, validateBlobName, validateTagName } from "../../core/store-paths.js";
+import { isRecordsTag, STORE_REPLACES_ARG, validateBlobName, validateTagName } from "../../core/store-paths.js";
 import {
 	openStoreBackend,
 	type StoreBackend,
@@ -216,6 +216,38 @@ async function statShape(
 	};
 }
 
+/**
+ * A put's admission arguments with STORE_REPLACES_ARG set when its blob already exists on a
+ * backend admission cannot stat on disk, so the put is admitted as the replace it is. Any value
+ * the model sent is dropped; an unreachable backend sets nothing, and the put then refuses itself.
+ */
+export async function storeAdmissionFacts(
+	args: Record<string, unknown>,
+	cwd: string,
+	openBackend: (cwd: string) => Promise<StoreBackend> = openStoreBackend,
+): Promise<Record<string, unknown>> {
+	const out: Record<string, unknown> = { ...args };
+	delete out[STORE_REPLACES_ARG];
+	if (out.op !== "put") return out;
+	const prepared = prepareStoreArguments(out);
+	const tag = prepared.tag;
+	const source = prepared.path;
+	const blob =
+		typeof prepared.blob === "string" && prepared.blob.length > 0
+			? prepared.blob
+			: typeof source === "string"
+				? path.basename(source)
+				: "";
+	if (typeof tag !== "string" || validateTagName(tag) !== null || validateBlobName(blob) !== null) return out;
+	try {
+		const backend = await openBackend(cwd);
+		if (backend.kind !== "local" && (await backend.statBlob(tag, blob)) !== null) out[STORE_REPLACES_ARG] = true;
+	} catch {
+		// Unreachable: the tool reaches the same backend, refuses, and says why.
+	}
+	return out;
+}
+
 async function runOp(
 	op: StoreOp,
 	args: Record<string, unknown>,
@@ -314,9 +346,9 @@ async function runOp(
 		let replaced = false;
 		const stored = await withStoreLock(cwd, blobLockKey(tag, blob), async () => {
 			replaced = (await backend.statBlob(tag, blob)) !== null;
-			// Admission sees only the local layout, so it judges a replace on another backend as a plain write.
-			// Such a replace goes through remove, which is admitted as destructive, instead.
-			if (replaced && backend.kind !== "local")
+			// Admission stats another backend's blob beforehand (storeAdmissionFacts); a replace it did not
+			// see, such as a blob created since, goes through remove, which is admitted as destructive.
+			if (replaced && backend.kind !== "local" && args[STORE_REPLACES_ARG] !== true)
 				throw new StoreToolError(
 					`store: ${tag}:${blob} already exists on the ${backend.kind} backend, which keeps no versions; ` +
 						`remove ${tag}:${blob} first, then put again.`,

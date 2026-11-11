@@ -22,6 +22,12 @@ export const STORE_BLOB_MAX_BYTES = 480;
 export const STORE_RECORDS_SUFFIX = "/.records";
 /** Physical prefix a clio-core backend will use: `agentspace/<projectKey>/<tag>`. */
 export const STORE_NATIVE_PREFIX = "agentspace";
+/**
+ * Set on a `put`'s admission arguments, never by the model, when the blob it names already
+ * exists on a backend whose layout admission cannot stat (clio-core): admission then judges
+ * the put as the replace it is.
+ */
+export const STORE_REPLACES_ARG = "__storeReplaces";
 
 const TAG_CHARS = /^[A-Za-z0-9._/-]+$/u;
 // Printable ASCII without `#` (reserved for record names) and `\`.

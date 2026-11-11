@@ -276,6 +276,12 @@ export interface ToolSpec {
 	 * share. Resource owners must pair it with `disposeAdmissionArguments`.
 	 */
 	prepareAdmissionArguments?(args: Record<string, unknown>): Record<string, unknown>;
+	/**
+	 * Awaited before `prepareAdmissionArguments` for facts admission needs that only an
+	 * async read can give, such as whether a remote store blob exists. It returns the
+	 * arguments admission and execution then see, and never throws.
+	 */
+	resolveAdmissionFacts?(args: Record<string, unknown>): Promise<Record<string, unknown>>;
 	/** Release provisional resources when prepared admission is denied or execution returns. */
 	disposeAdmissionArguments?(args: Record<string, unknown>): void;
 	/** Trusted admission artifact renderer used by policy after preparation. */
@@ -2280,7 +2286,11 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 
 	/** Admit, park or run one call; `invoke` adds the main agent's denial memory around it. */
 	const invokeAdmitted = async (call: ClassifierCall, options?: ToolInvokeOptions): Promise<RegistryVerdict> => {
-		const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
+		const factSpec = tools.get(call.tool as ToolName);
+		const factCall = factSpec?.resolveAdmissionFacts
+			? { ...call, args: await factSpec.resolveAdmissionFacts(call.args ?? {}) }
+			: call;
+		const admissionCall = prepareAdmissionCall(factSpec, factCall);
 		const outcome = admit(admissionCall, undefined, options);
 		if (outcome.kind === "terminal") {
 			disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
