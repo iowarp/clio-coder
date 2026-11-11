@@ -1808,12 +1808,12 @@ hard block.
 
 - Every run carries the origin that asked for it. The board and the transcript
   worker block mark it with a glyph: `◇` for a run the operator started with `/run`
-  or `/delegate`, `◆` for one the model started by calling a dispatch tool, and
+  to a Clio recipe or an external agent, `◆` for one the model started by calling a dispatch tool, and
   a quiet `·` on the board for Clio Coder's internal helper runs (transcript helper
   rows use `↳`). A running `◇` on the board is therefore the operator's own work.
   The footer shows the live worker count (`N workers`) and the Activity page's
   Workers rule a summary such as `2 active · 1 done`; neither splits by origin.
-- A `/run` or `/delegate` reports its admission once. A run that never started, such as
+- A `/run` reports its admission once. A run that never started, such as
   one naming an unknown agent or an unusable target, reads as `<command> refused: <reason>`
   with no run to inspect, and a failure after the run began reads as that run's failure
   with its `/view dispatch:<runId>` link. A run still waiting for a worker slot after a
@@ -1835,7 +1835,7 @@ hard block.
   that succeeded while some members gave no answer is headed `! partial` instead of a
   plain success.
 - Model-launched workers use `◆`; operator-launched workers use `◇`. Both follow the current output detail: Minimal identity/outcome, Default short summary, Detailed bounded activity and a larger summary, and a settled Detailed card keeps its answer and failure. A run waiting on an approval says so at every tier. `Alt+O` cycles the tiers for the session. `/view transcript` and `/view dispatch:<runId>` expose full available details. Execution success and validation quality remain separate facts.
-- Sharing: nothing an operator-started run (`/run`, `/delegate`) produced enters
+- Sharing: nothing an operator-started run (`/run`) produced enters
   the main model's context unless `--share` was passed or the operator runs
   `/fleet share [runId]`; runs the model started return through the dispatch tool result as
   usual. What enters is a bounded note of the shape

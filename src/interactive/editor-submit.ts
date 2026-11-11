@@ -48,7 +48,7 @@ export const EDITOR_BASH_SHUTDOWN_MS = 6000;
  * transcript, so both also leave the line empty.
  */
 function isRejectedCommand(command: SlashCommand): boolean {
-	return command.kind === "usage-error" || (command.kind === "retired" && "menuLetter" in command.entry.to);
+	return command.kind === "usage-error";
 }
 
 export interface EditorSubmitExpansion {
@@ -558,10 +558,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		// Explicit blank arguments must reach the parser before trimming (#443).
 		const command = parseSlashCommand(literalText);
 		if (isRejectedCommand(command)) {
-			// A retired key command whose arguments were the draft hands them back for the key.
-			deps.editor.setText(
-				command.kind === "retired" && command.entry.keepsText && command.rest ? command.rest : literalText,
-			);
+			deps.editor.setText(literalText);
 			deps.dispatchCommand(literalText);
 		} else if (command.kind === "unknown-command") {
 			const draft = chatDraft(literalText);

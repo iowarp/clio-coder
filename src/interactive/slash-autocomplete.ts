@@ -13,7 +13,6 @@ import {
 	COMMANDS_REFUSED_DURING_TURN,
 	type CommandMatch,
 	commandReference,
-	isRetiredCommandName,
 	lettersInOrder,
 	lineRunsBare,
 	matchCommandReference,
@@ -554,8 +553,6 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		if (cursorCol <= context.commandEnd) {
 			const prefix = context.line.slice(context.commandStart, cursorCol);
 			// A complete built-in name wins: Enter runs it instead of a longer sibling (`/skill`, not `/skills`).
-			// A retired name typed in full does too, so Enter shows its notice and runs the successor
-			// instead of whichever row its description matched (`/workspace` would open Rewind).
 			// An alias or a prompt template typed in full is the same: `/status` opens Usage and
 			// `/review` runs its template instead of a fuzzy row (`status-report`, `/library`).
 			// One listing serves the exact-name guard, the template rows and the extension-command
@@ -563,7 +560,6 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 			const templates = this.promptTemplates();
 			if (
 				refs.some((ref) => ref.name === prefix || ref.aliases?.some((alias) => alias.name === prefix)) ||
-				isRetiredCommandName(prefix) ||
 				templates.some((template) => template.name === prefix)
 			)
 				return null;

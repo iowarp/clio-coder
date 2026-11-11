@@ -131,10 +131,9 @@ import type { WorkerEntryState } from "./worker-stream.js";
 
 /**
  * Put a finished worker run's answer into the main agent's context. Bare
- * `/fleet share` takes the newest one. `oldName` marks the retired `/share`
- * spelling, kept one release for ACP clients.
+ * `/fleet share` takes the newest one.
  */
-type ShareCommandVariant = { kind: "share"; runId?: string; oldName?: true };
+type ShareCommandVariant = { kind: "share"; runId?: string };
 type ArchiveCommandVariant =
 	| { kind: "archive-export"; path: string }
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean };
@@ -218,7 +217,7 @@ type SlashCommandVariant =
 	| ReportCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
-	/** `oldName` marks the retired `/delegate` spelling, kept one release for ACP clients; `/run` reaches the same path. */
+	/** `/run <external-id>`: hand a task to an external ACP agent. */
 	| {
 			kind: "delegate";
 			agentId: string;
@@ -226,7 +225,6 @@ type SlashCommandVariant =
 			source: string;
 			share?: boolean;
 			readOnly?: boolean;
-			oldName?: true;
 	  }
 	| { kind: "btw"; question: string }
 	| { kind: "draft"; request: string; count: number }
@@ -314,92 +312,7 @@ const LIBRARY_KIND_WORDS = new Map<string, LibraryEntryKind>(
 	}),
 );
 
-export type SlashCommand =
-	| SlashCommandVariant
-	| { kind: "eggs"; action: "status" | "off"; id?: string }
-	| { kind: "retired"; name: string; rest: string; entry: RetiredCommand };
-
-/**
- * A command name that answers for exactly one release after it is retired
- * (D-TUI 4.1). `to.command` runs its replacement with the old arguments
- * appended; `to.menuLetter` names the Ctrl+G letter of the key that replaced
- * it. The `retired-commands` hygiene check fails once `since` is no longer the
- * current release, so every entry is deleted in the next dev tree.
- */
-export interface RetiredCommand {
-	/** One word, or two for a retired subcommand such as `library reload`. */
-	name: string;
-	since: string;
-	to: { command: string } | { menuLetter: string; action: string };
-	/** The old arguments were the draft itself; they go back to the composer. */
-	keepsText?: true;
-}
-
-export const RETIRED_COMMANDS: ReadonlyArray<RetiredCommand> = [
-	{ name: "background", since: "0.8.0", to: { menuLetter: "d", action: "clio-coder.dispatch.background" } },
-	{ name: "branch", since: "0.8.0", to: { command: "/fork" } },
-	{ name: "editor", since: "0.8.0", to: { menuLetter: "g", action: "clio-coder.editor.external" }, keepsText: true },
-	{
-		name: "interrupt",
-		since: "0.8.0",
-		to: { menuLetter: "s", action: "clio-coder.message.interrupt" },
-		keepsText: true,
-	},
-	{ name: "notifications", since: "0.8.0", to: { menuLetter: "x", action: "clio-coder.notifications.dismiss" } },
-	{ name: "health", since: "0.8.0", to: { command: "/usage health" } },
-	{ name: "systemone", since: "0.8.0", to: { command: "/usage health" } },
-	{ name: "skills", since: "0.8.0", to: { command: "/library skills" } },
-	{ name: "prompts", since: "0.8.0", to: { command: "/library prompts" } },
-	{ name: "agents", since: "0.8.0", to: { command: "/library agents" } },
-	{ name: "interop", since: "0.8.0", to: { command: "/library interop" } },
-	{ name: "workspace off", since: "0.8.0", to: { command: "/extensions leave" } },
-	{ name: "workspace", since: "0.8.0", to: { command: "/extensions" } },
-	{ name: "library reload", since: "0.8.0", to: { command: "/reload library" } },
-	{ name: "extensions reload", since: "0.8.0", to: { command: "/reload extensions" } },
-	{ name: "peer", since: "0.8.0", to: { command: "/panes peer" } },
-	{ name: "doctor deep", since: "0.8.0", to: { command: "/doctor --deep" } },
-	{ name: "loop list", since: "0.8.0", to: { command: "/loop" } },
-	{ name: "loop cancel", since: "0.8.0", to: { command: "/loop stop --now" } },
-];
-
-/** `/delegate` stays a live command for ACP clients; only its unparsable forms take this redirect. */
-const DELEGATE_RETIRED: RetiredCommand = { name: "delegate", since: "0.8.0", to: { command: "/run" } };
-
-/** A one-word retired name, typed bare, must reach `dispatchRetiredCommand` rather than a palette row. */
-export function isRetiredCommandName(name: string): boolean {
-	return RETIRED_COMMANDS.some((entry) => entry.name === name);
-}
-
-/** A two-word name such as `library reload` retires a verb of a live command, so it is checked first. */
-function matchRetiredCommand(trimmed: string, twoWordOnly = false): SlashCommand | null {
-	if (!trimmed.startsWith("/")) return null;
-	const [first = "", second = ""] = trimmed.slice(1).split(/\s+/u);
-	const twoWord = second ? RETIRED_COMMANDS.find((entry) => entry.name === `${first} ${second}`) : undefined;
-	if (twoWordOnly && !twoWord) return null;
-	const entry = twoWord ?? RETIRED_COMMANDS.find((candidate) => candidate.name === first);
-	if (!entry) return null;
-	const rest = trimmed
-		.slice(1)
-		.replace(twoWord ? /^\S+\s+\S+/u : /^\S+/u, "")
-		.trim();
-	return { kind: "retired", name: entry.name, rest, entry };
-}
-
-function dispatchRetiredCommand(
-	command: Extract<SlashCommand, { kind: "retired" }>,
-	ctx: SlashCommandContext,
-): SlashCommandDispatchResult {
-	const { to } = command.entry;
-	if ("command" in to) {
-		const line = command.rest ? `${to.command} ${command.rest}` : to.command;
-		ctx.notice("info", `/${command.name} is now ${to.command}; ran it.`);
-		return dispatchSlashCommand(parseSlashCommand(line), ctx);
-	}
-	const label = ctx.keyboardActions?.menuLabel(to.menuLetter) ?? "a terminal key";
-	ctx.notice("info", `/${command.name} is now a key: ${label}.`);
-	ctx.render?.();
-	return "rejected";
-}
+export type SlashCommand = SlashCommandVariant | { kind: "eggs"; action: "status" | "off"; id?: string };
 
 export type SlashCommandKind = SlashCommand["kind"];
 
@@ -743,7 +656,7 @@ function externalIgnoredFlags(options: RunCommandOptions): string[] {
 	return used.filter(([on]) => on).map(([, flag]) => flag);
 }
 
-/** Start an external agent run: what `/run <external-id>` and the retired `/delegate` both do. */
+/** Start an external agent run: what `/run <external-id>` does. */
 function startDelegate(command: Extract<SlashCommand, { kind: "delegate" }>, ctx: SlashCommandContext): void {
 	ctx.echoOperatorCommand?.(command.source);
 	const start = admissionSignal();
@@ -1097,9 +1010,7 @@ function shareWorkerRun(runId: string | undefined, ctx: SlashCommandContext): vo
 	if (!entry) {
 		ctx.notice(
 			"error",
-			runId === undefined
-				? "no finished /run or /delegate result for /fleet share yet"
-				: `no finished run ${runId} in this session`,
+			runId === undefined ? "no finished /run result for /fleet share yet" : `no finished run ${runId} in this session`,
 		);
 		return;
 	}
@@ -1506,11 +1417,6 @@ export interface BuiltinSlashCommand {
 	aliases?: ReadonlyArray<CommandAlias>;
 	/** Excluded from /help, autocomplete, and the docs command table. */
 	hidden?: boolean;
-	/**
-	 * Release that retired this name. A hidden entry kept only so ACP clients can
-	 * still call an old name; the `retired-commands` hygiene check expires it.
-	 */
-	retiredSince?: string;
 	args?: CommandArgsSpec;
 	/** Stable copy shown beside first-token subcommand completions. */
 	subcommandDescriptions?: Readonly<Record<string, string>>;
@@ -2053,23 +1959,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "share",
-		rank: 3,
-		acp: { injectsUserTurn: true },
-		description: "Share a worker result with the main agent (now /fleet share)",
-		group: "Work",
-		// Kept one release so ACP clients that call `share` keep working; /fleet owns the kind.
-		hidden: true,
-		retiredSince: "0.8.0",
-		kinds: [],
-		args: { positionals: [{ name: "run-id", required: false }] },
-		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "share", reason: parsed.error };
-			return { kind: "share", ...(parsed.positionals[0] ? { runId: parsed.positionals[0] } : {}), oldName: true };
-		},
-		handle() {},
-	},
-	{
 		name: "archive",
 		rank: 3,
 		acp: {},
@@ -2270,52 +2159,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				ctx.render?.();
 			})();
 			ctx.awaitDispatchStart?.(start.promise);
-		},
-	},
-	{
-		name: "delegate",
-		rank: 3,
-		acp: { streams: "dispatch" },
-		description: "Hand a task to an external ACP agent (now /run)",
-		group: "Work",
-		// Kept one release so ACP clients that call `delegate` keep working; `/run <external-id>` is the new spelling.
-		hidden: true,
-		retiredSince: "0.8.0",
-		kinds: ["delegate"],
-		args: {
-			parseFlagsBeforeRest: true,
-			flags: [{ name: "--share" }, { name: "--read-only" }],
-			positionals: [
-				{ name: "agent-id", required: true },
-				{ name: "task", required: true, rest: true },
-			],
-		},
-		fromArgs(parsed, trimmed) {
-			// A form that does not parse goes to /run, whose usage is the one to learn.
-			if (parsed.error) {
-				const rest = trimmed.replace(/^\/delegate/u, "").trim();
-				return { kind: "retired", name: "delegate", rest, entry: DELEGATE_RETIRED };
-			}
-			return {
-				kind: "delegate",
-				agentId: parsed.positionals[0] ?? "",
-				task: parsed.positionals[1] ?? "",
-				source: trimmed,
-				...(parsed.flags.has("--share") ? { share: true } : {}),
-				...(parsed.flags.has("--read-only") ? { readOnly: true } : {}),
-				oldName: true,
-			};
-		},
-		handle(command, ctx) {
-			if (command.kind !== "delegate") return;
-			// A Clio recipe is what /run runs; only an external ACP agent keeps the /delegate path.
-			if (!command.agentId.startsWith("acp:") && ctx.listAgents?.().some((agent) => agent.id === command.agentId)) {
-				const rest = command.source.replace(/^\/delegate/u, "").trim();
-				const result = dispatchRetiredCommand({ kind: "retired", name: "delegate", rest, entry: DELEGATE_RETIRED }, ctx);
-				return result === "rejected" ? result : undefined;
-			}
-			if (command.oldName && ctx.keyboardActions) ctx.notice("info", "/delegate is now /run");
-			startDelegate(command, ctx);
 		},
 	},
 	{
@@ -2757,7 +2600,6 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		handle(command, ctx) {
 			if (command.kind === "share") {
-				if (command.oldName && ctx.keyboardActions) ctx.notice("info", "/share is now /fleet share");
 				shareWorkerRun(command.runId, ctx);
 				return;
 			}
@@ -3859,15 +3701,11 @@ export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
-	const retiredVerb = matchRetiredCommand(trimmed, true);
-	if (retiredVerb) return retiredVerb;
 	const resolved = resolveAlias(trimmed);
 	for (const entry of BUILTIN_SLASH_COMMANDS) {
 		const match = entry.match ? entry.match(resolved) : matchFromSpec(entry, resolved);
 		if (match) return match;
 	}
-	const retired = matchRetiredCommand(trimmed);
-	if (retired) return retired;
 	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
 		if (COMMAND_SHAPED_TOKEN.test(token) || isExtensionCommandToken(token) || isComposedCommandToken(token))
@@ -3994,7 +3832,6 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		return "rejected";
 	}
 	if (command.kind === "usage-error") return answerUsage(command, ctx);
-	if (command.kind === "retired") return dispatchRetiredCommand(command, ctx);
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return "rejected";
 	return entry.handle(command, ctx) === "rejected" ? "rejected" : "accepted";

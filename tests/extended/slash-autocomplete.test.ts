@@ -96,13 +96,13 @@ test("unprovided dynamic slots have no values", async () => {
 	deepStrictEqual(result, null);
 });
 
-test("a retired name, alias or template typed in full offers no row, so Enter submits it", async () => {
+test("an alias or template typed in full offers no row, so Enter submits it", async () => {
 	const templates = [
 		{ name: "review", description: "Review the diff" },
 		{ name: "status-report", description: "Weekly status" },
 	];
 	const provider = createSlashCommandAutocompleteProvider({ fdPath: null, promptTemplates: () => templates });
-	for (const line of ["/workspace", "/health", "/review", "/status"]) {
+	for (const line of ["/review", "/status"]) {
 		const result = await provider.getSuggestions([line], 0, line.length, { signal: new AbortController().signal });
 		deepStrictEqual(result, null, line);
 	}

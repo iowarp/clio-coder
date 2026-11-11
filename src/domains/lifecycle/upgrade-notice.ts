@@ -25,7 +25,7 @@ const KEYBOARD_FACING_CHANGES: Readonly<Record<string, string>> = Object.freeze(
 		"/skills, /prompts, /agents and /interop moved under /library, /health and /systemone under /usage health, " +
 		"/branch is /fork, /peer is /panes peer, /share is /fleet share and /workspace off is /extensions leave; " +
 		"/interrupt, /editor, /background and /notifications became keys (Alt+S, Alt+G, Ctrl+G d, Ctrl+G x); " +
-		"the old names answer with a notice for this release only.",
+		"the old names are gone.",
 });
 
 /**

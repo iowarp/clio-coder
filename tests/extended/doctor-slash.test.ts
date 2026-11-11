@@ -41,9 +41,7 @@ describe("/doctor", () => {
 	it("is registered with an optional deep mode and nothing else", () => {
 		deepStrictEqual(parseSlashCommand("/doctor"), { kind: "doctor", deep: false });
 		deepStrictEqual(parseSlashCommand("/doctor --deep"), { kind: "doctor", deep: true });
-		// The old positional answers for one release through the retired-name table.
-		strictEqual(parseSlashCommand("/doctor deep").kind, "retired");
-		for (const input of ["/doctor fix", "/doctor --deep extra"]) {
+		for (const input of ["/doctor deep", "/doctor fix", "/doctor --deep extra"]) {
 			strictEqual(parseSlashCommand(input).kind, "usage-error", input);
 		}
 		const reference = commandReference().find((entry) => entry.name === "doctor");

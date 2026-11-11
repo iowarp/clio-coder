@@ -180,23 +180,21 @@ it("queue recovery prefixes both queue kinds exactly once and keeps literal bang
 	f.controller.restoreQueuedFollowUpsToEditor();
 	assert.equal(f.editor.getText(), "prior steer\n\nprior follow-up\n\n!draft");
 });
-it("retired key commands name their key and run nothing", () => {
+it("a removed command name is an unknown command like any other", () => {
 	const notices: string[] = [];
 	const context = {
-		keyboardActions: { menuLabel: (letter: string) => `Ctrl+G ${letter.toUpperCase()}` },
 		notice: (_level: string, text: string) => notices.push(text),
 		render: noop,
 	} as unknown as SlashCommandContext;
-	for (const line of ["/background", "/editor", "/interrupt correct text", "/notifications dismiss"])
-		assert.equal(dispatchSlashCommand(parseSlashCommand(line), context), "rejected");
-	assert.deepEqual(notices, [
-		"/background is now a key: Ctrl+G D.",
-		"/editor is now a key: Ctrl+G G.",
-		"/interrupt is now a key: Ctrl+G S.",
-		"/notifications is now a key: Ctrl+G X.",
-	]);
-	const retired = parseSlashCommand("/interrupt correct text");
-	assert.equal(retired.kind === "retired" ? retired.rest : undefined, "correct text");
+	for (const line of ["/background", "/editor", "/branch", "/skills", "/share", "/delegate codex task"]) {
+		const parsed = parseSlashCommand(line);
+		assert.equal(parsed.kind, "unknown-command", line);
+		assert.equal(dispatchSlashCommand(parsed, context), "rejected", line);
+	}
+	assert.ok(
+		notices.every((text) => !/ is now /u.test(text)),
+		notices.join("\n"),
+	);
 });
 it("clearing pasted input lets a newly typed bang become an intentional command", () => {
 	const f = fixture();
@@ -277,42 +275,4 @@ it("Enter on a slash row that leaves the typed line unchanged submits it", async
 	editor.handleInput("\r");
 	assert.equal(editor.getText(), "/model claude-sonnet-5.5");
 	assert.deepEqual(submitted, ["/model claude-sonnet-5.5"]);
-});
-
-it("every /delegate form that fails to parse names /run first", () => {
-	const notices: string[] = [];
-	const context = {
-		keyboardActions: { menuLabel: () => "" },
-		notice: (_level: string, text: string) => notices.push(text),
-		render: noop,
-	} as unknown as SlashCommandContext;
-	for (const line of ["/delegate", "/delegate --bogus"]) {
-		notices.length = 0;
-		dispatchSlashCommand(parseSlashCommand(line), context);
-		assert.equal(notices[0], "/delegate is now /run; ran it.", line);
-		assert.match(notices.at(-1) ?? "", /usage: \/run/u, line);
-	}
-});
-
-it("/delegate naming a Clio recipe runs it the /run way instead of refusing it as ACP", async () => {
-	const notices: string[] = [];
-	const requests: Record<string, unknown>[] = [];
-	const context = {
-		keyboardActions: { menuLabel: () => "" },
-		listAgents: () => [{ id: "scout" }],
-		isExternalAgent: () => false,
-		dispatch: {
-			async dispatch(request: Record<string, unknown>) {
-				requests.push(request);
-				throw new Error("stop here");
-			},
-		},
-		io: {},
-		notice: (_level: string, text: string) => notices.push(text),
-		render: noop,
-	} as unknown as SlashCommandContext;
-	dispatchSlashCommand(parseSlashCommand("/delegate scout list files"), context);
-	await new Promise((resolve) => setImmediate(resolve));
-	assert.equal(notices[0], "/delegate is now /run; ran it.");
-	assert.equal(requests[0]?.delegationAgentId, undefined);
 });

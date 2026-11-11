@@ -78,9 +78,6 @@ test("read-only is available on each operator dispatch command", () => {
 	const run = parseSlashCommand("/run --read-only builder Inspect");
 	equal(run.kind, "run");
 	if (run.kind === "run") equal(run.options.readOnly, true);
-	const delegate = parseSlashCommand("/delegate --read-only peer Inspect");
-	equal(delegate.kind, "delegate");
-	if (delegate.kind === "delegate") equal(delegate.readOnly, true);
 	const headless = parseRunCliArgs(["--agent", "builder", "--read-only", "Inspect"]);
 	equal(headless.readOnly, true);
 	const invalid = parseRunCliArgs(["--agent", "builder", "--autonomy", "yolo", "Inspect"]);
@@ -109,8 +106,8 @@ test("operator slash flags reach dispatch requests", async () => {
 		parsed.options,
 	);
 	equal(runRequest?.readOnly, true);
-	const delegated = parseSlashCommand("/delegate --read-only peer Inspect");
-	if (delegated.kind !== "delegate") throw new Error("expected delegate command");
+	const delegated = parseSlashCommand("/run --read-only acp:peer Inspect");
+	if (delegated.kind !== "run") throw new Error("expected run command");
 	let resolveRequest!: (request: Record<string, unknown>) => void;
 	const requested = new Promise<Record<string, unknown>>((resolve) => {
 		resolveRequest = resolve;

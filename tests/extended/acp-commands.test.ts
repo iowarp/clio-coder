@@ -65,12 +65,12 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all eighteen allowlisted commands", async () => {
+test("the catalog projects all sixteen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
-	assert.equal(ACP_COMMAND_RULES.length, 18);
-	assert.equal(catalog.commands.length, 18);
-	assert.equal(ACP_COMMANDS_CAPABILITY.count, 18);
+	assert.equal(ACP_COMMAND_RULES.length, 16);
+	assert.equal(catalog.commands.length, 16);
+	assert.equal(ACP_COMMANDS_CAPABILITY.count, 16);
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
 		[
@@ -78,10 +78,8 @@ test("the catalog projects all eighteen allowlisted commands", async () => {
 			"skill",
 			"mcp",
 			"doctor",
-			"share",
 			"archive",
 			"run",
-			"delegate",
 			"oracle",
 			"council",
 			"poll",
@@ -159,11 +157,11 @@ test("streams and injectsUserTurn mark exactly the commands that earn them", asy
 	const catalog = acpCommandCatalog();
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.streams === "dispatch").map((command) => command.name),
-		["run", "delegate", "oracle", "council", "poll"],
+		["run", "oracle", "council", "poll"],
 	);
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.injectsUserTurn === true).map((command) => command.name),
-		["skill", "share", "oracle", "loop", "fleet", "tasks"],
+		["skill", "oracle", "loop", "fleet", "tasks"],
 	);
 	assert.equal(descriptor("export").streams, undefined);
 	assert.equal(descriptor("export").injectsUserTurn, undefined);
@@ -273,10 +271,10 @@ test("a dispatch command reports that it started, because its result is an event
 		})(),
 		finalPromise: new Promise(() => {}),
 	}));
-	const result = await invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
+	const result = await invokeAcpCommand({ command: "run", argv: ["acp:codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);
 	assert.equal(result.level, "info");
-	assert.deepEqual(result.lines, ["delegate started; progress arrives as _clio-coder/event dispatch kinds"]);
+	assert.deepEqual(result.lines, ["run started; progress arrives as _clio-coder/event dispatch kinds"]);
 	// A run refused at admission never started, so the reply is the refusal and never "started".
 	const refused = await invokeAcpCommand(
 		{ command: "run", argv: ["ghost", "summarize the diff"] },
@@ -288,11 +286,11 @@ test("a dispatch command reports that it started, because its result is an event
 
 test("a command that is wired reports its own outcome instead of a started line", async () => {
 	const shared = await invokeAcpCommand(
-		{ command: "share", argv: [] },
+		{ command: "fleet", argv: ["share"] },
 		host({ listWorkerRuns: () => [], submitOperatorNote: () => assert.fail("nothing to share") }),
 	);
 	assert.equal(shared.level, "error");
-	assert.match(shared.lines.join("\n"), /no finished \/run or \/delegate result for \/fleet share yet/u);
+	assert.match(shared.lines.join("\n"), /no finished \/run result for \/fleet share yet/u);
 
 	const seeded = await invokeAcpCommand(
 		{ command: "memory", argv: ["seed"] },
@@ -344,7 +342,7 @@ test("the announced capability names the two methods a client calls", async () =
 			version: 1,
 			list: "_clio-coder/commands/list",
 			invoke: "_clio-coder/commands/invoke",
-			count: 18,
+			count: 16,
 		},
 	);
 });
@@ -354,7 +352,7 @@ test("host catalog advertises only wired commands and context operations", async
 	const catalog = control.catalog();
 	assert.deepEqual(
 		catalog.commands.map((command) => command.name),
-		["mcp", "run", "delegate", "context"],
+		["mcp", "run", "context"],
 	);
 	assert.equal(control.capability.count, catalog.commands.length);
 	assert.deepEqual(Object.keys(catalog.commands.find((command) => command.name === "context")?.args.subcommands ?? {}), [
@@ -380,7 +378,7 @@ test("doctor returns completed asynchronous findings and contains failures", asy
 			},
 		}),
 	);
-	assert.deepEqual(await control.invoke({ command: "doctor", argv: ["deep"] }), {
+	assert.deepEqual(await control.invoke({ command: "doctor", argv: ["--deep"] }), {
 		level: "warn",
 		lines: ["target unavailable", "check configuration"],
 	});

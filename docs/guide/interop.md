@@ -83,7 +83,7 @@ default.
 
 ```text
 /run --target opencode-local --worktree coder Fix the parser test and report the checks.
-/delegate opencode Review the proposed parser change and its edge cases.
+/run acp:opencode Review the proposed parser change and its edge cases.
 /panes peer --cwd /path/to/project codex Investigate the failing build.
 ```
 
@@ -108,7 +108,7 @@ change the answer. Headless Codex runs read-only work under
 list), Pi (`--tools read,grep,find,ls`), Antigravity (`--mode plan --sandbox`,
 whose sandbox restricts its terminal only) and OpenCode rely on a tool list or
 a mode the peer itself honors, so a read-only run on them is refused before
-launch. An ACP peer can write without asking, so `/delegate --read-only` is
+launch. An ACP peer can write without asking, so `/run --read-only` to an ACP peer is
 refused for every peer, and a delegation from a read-only session is refused
 too. A peer configured with `toolGovernance: agent-managed` is an explicit
 operator opt-in to peer-owned tools and needs `trustedUnmediated: true` in user

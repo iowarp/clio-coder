@@ -78,7 +78,7 @@ test("an interactive or ACP session's tool limits bound every turn, before and a
 	}
 });
 
-test("a TUI /delegate under --delegate-tools read dispatches a worker limited to read", async () => {
+test("a TUI /run to an external agent under --delegate-tools read dispatches a worker limited to read", async () => {
 	const toolLimits = extractGlobalFlags(["--delegate-tools", "read"]).toolLimits;
 	assert.ok(toolLimits);
 	const loop = limitedChatLoop(toolLimits);
@@ -102,10 +102,10 @@ test("a TUI /delegate under --delegate-tools read dispatches a worker limited to
 		},
 	} as unknown as InteractiveSlashRuntimeDeps);
 	try {
-		runtime.dispatchCommand("/delegate codex rewrite the build script");
+		runtime.dispatchCommand("/run acp:codex rewrite the build script");
 		await new Promise((resolve) => setImmediate(resolve));
 		const request = dispatched.at(0);
-		assert.ok(request, "/delegate dispatched nothing");
+		assert.ok(request, "/run dispatched nothing");
 		assert.deepEqual(request.turnConstraints, toolLimits);
 		assert.equal(turnDelegatesTool(request.turnConstraints, "read"), true);
 		assert.equal(turnDelegatesTool(request.turnConstraints, "write"), false);

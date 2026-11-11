@@ -472,12 +472,10 @@ function parseLoopRequest(argv: ReadonlyArray<string>): SlashCommand {
 }
 
 /** The parse must land on a kind the allowlisted entry itself declares, or on that entry's usage error. */
-/** A name kept one release for ACP clients owns no kind; it parses only to the kind of the command that replaced it. */
-const KEPT_NAME_KINDS: Readonly<Record<string, ReadonlyArray<SlashCommandKind>>> = { share: ["share"] };
 
 function parsedBelongsTo(parsed: SlashCommand, name: string, kinds: ReadonlyArray<SlashCommandKind>): boolean {
 	if (parsed.kind === "usage-error") return parsed.command === name;
-	return kinds.includes(parsed.kind) || (KEPT_NAME_KINDS[name]?.includes(parsed.kind) ?? false);
+	return kinds.includes(parsed.kind);
 }
 
 /**
@@ -514,15 +512,7 @@ export function invokeAcpCommand(
 		throw invalid("not_wired", "skill expansion is not wired in this session");
 	}
 
-	let parsed = rule.name === "loop" ? parseLoopRequest(argv) : parseSlashCommand(joinArgv(rule.name, argv));
-	// A retired verb of this same command (`doctor deep` is now `/doctor --deep`) runs its replacement,
-	// so a client that kept the old spelling keeps working for the release that retires it.
-	if (parsed.kind === "retired" && "command" in parsed.entry.to) {
-		const replacement = parsed.entry.to.command;
-		if (replacement === `/${rule.name}` || replacement.startsWith(`/${rule.name} `)) {
-			parsed = parseSlashCommand(parsed.rest ? `${replacement} ${parsed.rest}` : replacement);
-		}
-	}
+	const parsed = rule.name === "loop" ? parseLoopRequest(argv) : parseSlashCommand(joinArgv(rule.name, argv));
 	if (!parsedBelongsTo(parsed, rule.name, entry.kinds)) {
 		throw invalid("command_not_exposed", "command is not exposed over ACP");
 	}

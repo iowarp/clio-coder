@@ -41,10 +41,10 @@ test("share hands the most recent finished operator run to the model, from the r
 	const control = acpCommandControl(
 		host({ bus, listWorkerRuns: () => ledger.list(), submitOperatorNote: (text) => notes.push(text) }),
 	);
-	assert.ok(names(control).includes("share"), "share is offered once its host members are wired");
-	const empty = await control.invoke({ command: "share", argv: [] });
+	assert.ok(names(control).includes("fleet"), "fleet share is offered once its host members are wired");
+	const empty = await control.invoke({ command: "fleet", argv: ["share"] });
 	assert.equal(empty.level, "error");
-	assert.match(empty.lines.join("\n"), /no finished \/run or \/delegate result for \/fleet share yet/);
+	assert.match(empty.lines.join("\n"), /no finished \/run result for \/fleet share yet/);
 	bus.emit("run.started", {
 		runId: "run-1",
 		assignmentId: "run-1",
@@ -67,12 +67,12 @@ test("share hands the most recent finished operator run to the model, from the r
 		exitCode: 0,
 		toolActivity: null,
 	} as never);
-	const shared = await control.invoke({ command: "share", argv: [] });
+	const shared = await control.invoke({ command: "fleet", argv: ["share"] });
 	assert.notEqual(shared.level, "error", shared.lines.join("\n"));
 	assert.equal(notes.length, 1);
 	assert.match(notes[0] ?? "", /verifier/);
 	assert.match(notes[0] ?? "", /Sample B reads 4\.2\./);
-	const unknown = await control.invoke({ command: "share", argv: ["run-9"] });
+	const unknown = await control.invoke({ command: "fleet", argv: ["share", "run-9"] });
 	assert.equal(unknown.level, "error");
 	assert.match(unknown.lines.join("\n"), /no finished run run-9/);
 	ledger.dispose();

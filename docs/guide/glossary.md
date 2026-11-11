@@ -163,7 +163,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `ParsedClioMd` in [clio-md.ts](../../src/domains/context/clio-md.ts).
 
 ### 40. Delegate
-- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `integrations.externalAgents.entries` and invoked with `/delegate`. A delegate is a foreign harness, not a model target.
+- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `integrations.externalAgents.entries` and invoked with `/run <agent-id>`. A delegate is a foreign harness, not a model target.
 - **Owning Type**: `DelegationAgentConfig` in [defaults.ts](../../src/core/defaults.ts).
 
 ### 41. Working Set
