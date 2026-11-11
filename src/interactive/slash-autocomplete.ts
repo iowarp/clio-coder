@@ -1,3 +1,4 @@
+import { SETTINGS_AREAS } from "../core/settings-areas.js";
 import { type ExtensionCommandRow, resolveExtensionCommands } from "../domains/extensions/operator-commands.js";
 import {
 	type AutocompleteItem,
@@ -663,7 +664,10 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 				continue;
 			}
 			if (completion.token === beforeCursor && options.force !== true) continue;
-			const effectDescription = completion.description ?? ref.subcommandDescriptions?.[completion.token];
+			const effectDescription =
+				completion.description ??
+				ref.subcommandDescriptions?.[completion.token] ??
+				(ref.name === "settings" ? SETTINGS_AREAS.find((area) => area.id === completion.token)?.label : undefined);
 			const isFlag = completion.token.startsWith("--");
 			const trail = [`/${ref.name}`, ...(selectedSubcommand ? [selectedSubcommand] : [])];
 			const subSpec = result.submenu ? ref.args.subcommands?.[completion.token] : undefined;

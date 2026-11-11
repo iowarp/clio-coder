@@ -156,7 +156,8 @@ export type SlashReportRequest =
 	| { kind: "draft"; draftId: string }
 	| { kind: "security" };
 
-export const SETTINGS_AREA_IDS = SETTINGS_AREAS.map((area) => area.id);
+/** The seven areas a person names; Recent & Pinned is the landing page, not a destination. */
+export const SETTINGS_AREA_IDS = SETTINGS_AREAS.filter((area) => area.id !== "recent").map((area) => area.id);
 export type { SettingsAreaId };
 
 /** What `/library <verb> <ref>` asks the browser to review once it is open. */

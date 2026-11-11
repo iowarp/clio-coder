@@ -1,4 +1,4 @@
-/** Shared navigation for configure and /settings. Keep this module free of UI and I/O imports. */
+/** The eight sections `clio-coder configure` and the desktop app share; /settings has its own areas in settings-areas.ts. Keep this module free of UI and I/O imports. */
 export const SETTINGS_SECTIONS = [
 	{
 		id: "targets",

@@ -550,9 +550,9 @@ function itemFacts(theme: ClioTheme, context: InspectorContext, item: SettingsCe
 	if (context.homeLabel !== undefined) facts.push(chip(theme, `in ${context.homeLabel}`, "muted"));
 	if (context.pinnable && context.pinned)
 		facts.push(
-			chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · p unpins` : `${GLYPH.favorite} pinned`, "muted"),
+			chip(theme, context.rowKeysLive ? `${GLYPH.favorite} pinned · * unpins` : `${GLYPH.favorite} pinned`, "muted"),
 		);
-	else if (context.pinnable && context.rowKeysLive) facts.push(chip(theme, "p pins", "muted"));
+	else if (context.pinnable && context.rowKeysLive) facts.push(chip(theme, "* pins", "muted"));
 	return facts;
 }
 
@@ -671,10 +671,10 @@ function scopeNote(item: SettingsCenterItem, context: InspectorContext): string 
 		? ""
 		: context.pinned
 			? context.rowKeysLive
-				? ` · ${GLYPH.favorite} pinned, p unpins`
+				? ` · ${GLYPH.favorite} pinned, * unpins`
 				: ` · ${GLYPH.favorite} pinned`
 			: context.rowKeysLive
-				? " · p pins"
+				? " · * pins"
 				: "";
 	if (item.id.startsWith("maintenance.")) return `Enter ${item.currentValue}`;
 	if (item.id === "targets.add-cta")

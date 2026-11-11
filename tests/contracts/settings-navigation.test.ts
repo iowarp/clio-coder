@@ -52,13 +52,13 @@ test("every existing settings control has exactly one home and canonical persist
 	}
 	const byId = new Map(items.map((item) => [item.id, item]));
 	for (const [id, home] of [
-		["budget.concurrency", "fleet"],
-		["guardrails.workerToolCallCap", "fleet"],
+		["budget.concurrency", "workers"],
+		["guardrails.workerToolCallCap", "workers"],
 		["guardrails.internalDispatchTimeoutMs", "advanced"],
-		["panes.journal", "fleet"],
+		["panes.journal", "workers"],
 		["terminal.smoothStreaming", "chat"],
 		["attribution.gitCommits", "workspace"],
-		["skills.trustProjectCompatRoots", "integrations"],
+		["skills.trustProjectCompatRoots", "workspace"],
 		["workers.onPermission", "safety"],
 		["delegation.defaults.toolGovernance", "safety"],
 		["watchdog.enabled", "safety"],
@@ -85,7 +85,7 @@ test("slash links use the same canonical areas and keep previous section names r
 			ok(resolveSettingsArea(name) !== undefined, `previous section name '${name}' no longer opens an area`);
 		}
 	}
-	// Model choice moved out of Chat into Models & Inference; only retry stayed in Chat.
+	// Model choice moved out of Chat into Models; only retry stayed in Chat.
 	for (const name of ["orchestrator", "models", "model", "thinking"]) strictEqual(resolveSettingsArea(name), "models");
 	strictEqual(resolveSettingsArea("retry"), "chat");
 	deepStrictEqual(parseSlashCommand("/settings chat model-picker"), {
@@ -134,7 +134,7 @@ test("every area renders within narrow and wide terminals, and headings are skip
 
 test("settings groups collect related controls and preserve the target inventory column heading", () => {
 	const sections = buildSettingsSections(fixture());
-	strictEqual(sections.find((section) => section.id === "targets")?.items[0]?.id, "targets");
+	strictEqual(sections.find((section) => section.id === "models")?.items[1]?.id, "targets");
 	const context = sections.find((section) => section.id === "context");
 	ok(context);
 	let group = "";

@@ -2086,7 +2086,7 @@ async function runConfigSectionsMenu(
 		const presenter = createLifecyclePresenter({ stream: streams.out });
 		presenter.header("Clio Coder Settings", "configure");
 		presenter.note(`Source: ${shortenPath(settingsPath())}`);
-		presenter.note("Same sections as /settings. Changes here become your saved defaults.");
+		presenter.note("Changes here become your saved defaults.");
 		presenter.blank();
 		const choice = await pickEntry(
 			rl,

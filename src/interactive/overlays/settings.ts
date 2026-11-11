@@ -1074,7 +1074,7 @@ function targetAddCta(): SettingsCenterItem {
 		label: "Add a target",
 		currentValue: "Open target wizard",
 		description: "Add a target without leaving the TUI. Review and save its runtime, credentials, URL and model.",
-		section: "targets",
+		section: "models",
 		configPath: "targets.add-cta",
 		affordance: "Enter: open target wizard",
 		scope: "live",
@@ -2195,7 +2195,6 @@ export function buildSettingsSections(
 			),
 			(item) => ({ id: item.id, path: item.configPath ?? item.id }),
 		);
-		if (section.id === "targets") return { id: section.id, label: section.label, items: rows };
 		const groups = new Map<string, SettingsCenterItem[]>();
 		for (const item of rows) {
 			const group = settingsPlacementForRow(item.id, item.configPath ?? item.id).group;
@@ -2796,16 +2795,6 @@ function isRowBudgeted(child: Component): child is Component & RowBudgetedBody {
 function sectionCount(section: SettingsCenterSection, whole: SettingsCenterSection = section): string {
 	const matches = section.items.filter((item) => item.presentationKind !== "group-header").length;
 	const filtered = whole !== section;
-	if (section.id === "targets") {
-		const count = whole.items.filter((item) => item.targetConsole !== undefined).length;
-		const noun = count === 1 ? "connection" : "connections";
-		// An action row such as Add a target is not a connection. A filter that
-		// found only the action read `0 of 2 connections` beside `1 match`, so a
-		// filtered lane counts rows, the same unit the match count uses.
-		if (!filtered) return `${count} ${noun}`;
-		const rows = whole.items.filter((item) => item.presentationKind !== "group-header").length;
-		return `${matches} of ${rows} ${rows === 1 ? "row" : "rows"}`;
-	}
 	const count = whole.items.filter((item) => item.presentationKind !== "group-header").length;
 	const noun = count === 1 ? "setting" : "settings";
 	return filtered ? `${matches} of ${count} ${noun}` : `${count} ${noun}`;
@@ -2882,7 +2871,7 @@ export class SettingsCenter implements Component {
 		return this.shortcuts.pinned.includes(item.id);
 	}
 
-	/** `p` pins or unpins the selected setting. The row keeps its identity, so the cursor follows it between groups. */
+	/** `*` pins or unpins the selected setting. The row keeps its identity, so the cursor follows it between groups. */
 	private togglePin(): void {
 		const item = this.selectedItem();
 		if (!isShortcutRow(item)) return;
@@ -2982,11 +2971,11 @@ export class SettingsCenter implements Component {
 			this.level = "rows";
 			return;
 		}
-		if (kb.matches(data, "tui.select.up") || data === "k") {
+		if (kb.matches(data, "tui.select.up")) {
 			this.moveSelection(-1);
 			return;
 		}
-		if (kb.matches(data, "tui.select.down") || data === "j") {
+		if (kb.matches(data, "tui.select.down")) {
 			this.moveSelection(1);
 			return;
 		}
@@ -2994,7 +2983,7 @@ export class SettingsCenter implements Component {
 			this.cyclePreview();
 			return;
 		}
-		if (data === "p" && this.level === "rows") {
+		if (data === "*" && this.level === "rows") {
 			this.togglePin();
 			return;
 		}
@@ -3010,8 +2999,8 @@ export class SettingsCenter implements Component {
 			this.back();
 			return;
 		}
-		// Every other list on this surface filters as you type; a letter here that no key owns starts the same filter.
-		if (TYPED_CHARACTER.test(data)) {
+		// Typing always filters: every printable character but Space and `*` starts the filter, in both lanes.
+		if (TYPED_CHARACTER.test(data) && data !== "*") {
 			this.filterDraft = "";
 			this.filterInput.setValue("");
 			this.handleFilterKey(data);
@@ -3105,7 +3094,7 @@ export class SettingsCenter implements Component {
 	}
 
 	/**
-	 * The rail for the lane that owns the keys. It used to list Space and `p` in the
+	 * The rail for the lane that owns the keys. It used to list Space and the pin key in the
 	 * section lane that ignores them, offer `open` on a read-only row where Enter does
 	 * nothing, and lose Tab first at 108 columns, the one key that changes lanes.
 	 */
@@ -3122,7 +3111,7 @@ export class SettingsCenter implements Component {
 			return buildResponsiveHint([{ key: "Enter", verb: "apply filter", short: "apply" }], esc)(innerWidth);
 		}
 		const twoLanes = this.renderedWidth >= WIDE_LAYOUT_MIN_WIDTH;
-		const filter: HintEntry = { key: "/", verb: "filter", critical: false };
+		const filter: HintEntry = { key: "type", verb: "filter", critical: false };
 		if (owner === "sections") {
 			return buildResponsiveHint(
 				[
@@ -3142,7 +3131,7 @@ export class SettingsCenter implements Component {
 				...(twoLanes ? [{ key: "Tab", verb: "to sections", short: "sections", critical: true }] : []),
 				{ key: "↑↓", verb: "move", critical: false },
 				...(twoLanes && editable && item.values?.length ? [{ key: "Space", verb: "preview", critical: false }] : []),
-				...(twoLanes && isShortcutRow(item) ? [{ key: "p", verb: "pin", critical: false }] : []),
+				...(twoLanes && isShortcutRow(item) ? [{ key: "*", verb: "pin", critical: false }] : []),
 				filter,
 			],
 			esc,
@@ -3188,7 +3177,9 @@ export class SettingsCenter implements Component {
 	private matchesFilter(item: SettingsCenterItem, context: string): boolean {
 		const terms = settingsFilterTerms(this.effectiveFilterQuery());
 		if (terms.length === 0) return true;
-		const haystack = [item.label ?? "", item.configPath ?? "", item.description ?? "", context].join("\n").toLowerCase();
+		const haystack = [item.label ?? "", item.configPath ?? "", item.description ?? "", item.currentValue ?? "", context]
+			.join("\n")
+			.toLowerCase();
 		return terms.every((term) => haystack.includes(term));
 	}
 
@@ -3851,13 +3842,22 @@ export class SettingsCenter implements Component {
 		const selected = this.rowIndex(section.id);
 		const labelWidth = settingsLabelWidth(section.items);
 		const selectedId = cursorVisible ? (section.items[selected]?.id ?? null) : null;
-		let lines: string[] = [];
-		let starts: number[] = [];
-		if (section.id === "targets") {
-			({ lines, starts } = renderTargetTable(theme, section.items, selectedId, width, labelWidth));
-		} else {
+		const lines: string[] = [];
+		const starts: number[] = [];
+		{
+			// Models opens with the connections table; the rest of the area renders as setting rows.
+			const tableItems = section.items.filter((item) => item.id === "targets" || item.targetConsole !== undefined);
+			const table =
+				tableItems.length > 0 ? renderTargetTable(theme, tableItems, selectedId, width, labelWidth) : undefined;
 			section.items.forEach((item, index) => {
 				starts.push(lines.length);
+				const tableIndex = table ? tableItems.indexOf(item) : -1;
+				if (table && tableIndex >= 0) {
+					const from = table.starts[tableIndex] ?? table.lines.length;
+					const to = table.starts[tableIndex + 1] ?? table.lines.length;
+					lines.push(...table.lines.slice(from, to));
+					return;
+				}
 				const isSelected = index === selected && cursorVisible;
 				const display = this.displayValueFor(item, isSelected);
 				lines.push(
@@ -3892,7 +3892,7 @@ export class SettingsCenter implements Component {
 					start: shown[0] ?? 0,
 					end: shown.at(-1) ?? 0,
 					total: ordinals.length,
-					unit: section.id === "targets" ? "rows" : "settings",
+					unit: "settings",
 				},
 				width,
 			),

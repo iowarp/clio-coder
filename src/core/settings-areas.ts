@@ -12,65 +12,67 @@ export const SETTINGS_AREAS = [
 		aliases: ["pinned", "shortcuts", "recents"],
 	},
 	{
-		id: "targets",
-		label: "Connections",
-		description: "Where models come from: apps, providers, sign-in, server addresses, and discovered models.",
-		aliases: ["connections", "connection", "auth", "target", "providers"],
-	},
-	{
 		id: "models",
-		label: "Models & Inference",
-		description: "Which model answers in chat, how much it reasons, how long it may write, and how you switch models.",
-		aliases: ["model", "inference", "orchestrator", "thinking"],
+		label: "Models",
+		description:
+			"Where models come from and which one answers: connections, the chat model, reasoning, speed, and quick switching.",
+		aliases: [
+			"targets",
+			"target",
+			"connections",
+			"connection",
+			"auth",
+			"providers",
+			"model",
+			"inference",
+			"orchestrator",
+			"thinking",
+		],
 	},
 	{
 		id: "chat",
-		label: "Chat",
-		description: "How replies show up and recover: output detail, streaming, alerts, and retrying a failed reply.",
-		aliases: ["retry"],
+		label: "Chat and display",
+		description: "How replies show up and recover: output detail, streaming, alerts, retries, transcript, and guidance.",
+		aliases: ["interface", "appearance", "terminal", "layout", "display", "retry"],
 	},
 	{
-		id: "agents",
-		label: "Agents & Delegation",
-		description: "Which profile each agent uses, automatic routing, and the scouts that prepare an answer.",
-		aliases: ["agent", "delegation", "delegate", "scouts", "routing"],
-	},
-	{
-		id: "fleet",
-		label: "Fleet",
-		description: "The worker fleet: default model, profiles, machines, parallelism, limits, and run history.",
-		aliases: ["workers"],
+		id: "workers",
+		label: "Workers",
+		description: "Workers and agents: default worker, profiles, agent routes, machines, limits, run history, and loops.",
+		aliases: ["agents", "agent", "fleet", "delegation", "delegate", "scouts", "routing", "worker", "loops"],
 	},
 	{
 		id: "context",
-		label: "Context & Memory",
+		label: "Context and memory",
 		description: "How Clio keeps long conversations useful and whether a background model records task memory.",
 		aliases: ["compaction", "memory"],
 	},
 	{
-		id: "workspace",
-		label: "Workspace & Files",
-		description: "The files pane, where task copies live, and how Git commits credit Clio.",
-		aliases: ["files", "file", "git", "worktrees"],
-	},
-	{
 		id: "safety",
-		label: "Permissions & Limits",
-		description: "What Clio may do without asking, plus approval, spending, tool, and review limits.",
-		aliases: ["permissions", "autonomy", "budget", "watchdog", "limits"],
+		label: "Safety and limits",
+		description: "What Clio may do without asking: autonomy, the safety judge, sandbox, approvals, review, and spending.",
+		aliases: ["permissions", "autonomy", "budget", "watchdog", "limits", "judge", "sandbox"],
 	},
 	{
-		id: "interface",
-		label: "Appearance",
-		description: "What the terminal looks like: transcript layout, scrollbar, guidance, and companion panes.",
-		aliases: ["appearance", "terminal", "panes", "pane", "layout"],
-	},
-	{
-		id: "integrations",
-		label: "Integrations",
-		description:
-			"Optional connections to other coding agents, startup plugins, the resource library, and project imports.",
-		aliases: ["skills", "skill", "extensions", "interop", "library", "plugins"],
+		id: "workspace",
+		label: "Workspace",
+		description: "Panes, files, Git, task copies, the library, external agents, and plugins.",
+		aliases: [
+			"panes",
+			"pane",
+			"files",
+			"file",
+			"git",
+			"worktrees",
+			"integrations",
+			"library",
+			"plugins",
+			"skills",
+			"skill",
+			"extensions",
+			"interop",
+			"music",
+		],
 	},
 	{
 		id: "advanced",
@@ -95,20 +97,26 @@ export function resolveSettingsArea(name: string): SettingsAreaId | undefined {
 /** Group labels in display order, per area. A row's group is the one its placement names. */
 export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly string[]>> = {
 	recent: ["Pinned", "Recent", "Suggested"],
-	targets: [],
-	models: ["Chat model", "Reasoning & length", "Speed", "Quick switch"],
-	chat: ["Replies", "Alerts", "Recovery"],
-	agents: ["Agent routes", "Automatic routing", "Before Clio answers"],
-	fleet: ["Default worker", "Profiles", "Capacity & placement", "Limits & retries", "Run history"],
+	models: ["Connections", "Chat model", "Reasoning & length", "Speed", "Quick switch"],
+	chat: ["Replies", "Alerts", "Recovery", "Transcript", "Guidance", "Updates", "Graphical app"],
+	workers: [
+		"Default worker",
+		"Profiles",
+		"Agent routes",
+		"Automatic routing",
+		"Machines",
+		"Limits & retries",
+		"Run history",
+		"Loops",
+		"Before Clio answers",
+	],
 	context: ["Compaction", "Context cleanup", "Proactive memory", "Semantic search"],
-	workspace: ["Files pane", "Task copies", "Git"],
-	safety: ["Autonomy", "Worker approvals", "External agents", "Review", "Spending & tool limits"],
-	interface: ["Transcript", "Guidance", "Updates", "Panes"],
-	integrations: ["External agents", "Startup plugins", "Project resources", "Resource library"],
+	safety: ["Autonomy", "Safety judge", "Worker approvals", "Sandbox", "Review", "Spending & tool limits"],
+	workspace: ["Files pane", "Panes", "Git", "Task copies", "Library", "External agents", "Plugins"],
 	advanced: [
 		"Maintenance",
 		"Retry timing",
-		"Fleet timing",
+		"Worker timing",
 		"External agent timing",
 		"Size limits",
 		"Context tuning",
@@ -149,7 +157,7 @@ const place = (area: SettingsAreaId, group = ""): SettingsPlacement => ({ area, 
  * path. Anything unplaced falls into Advanced "Other" so no row is unreachable.
  */
 export function settingsPlacementForRow(id: string, path: string): SettingsPlacement {
-	if (id === "targets" || id === "targets.add-cta" || under(path, "targets")) return place("targets");
+	if (id === "targets" || id === "targets.add-cta" || under(path, "targets")) return place("models", "Connections");
 	if (id.startsWith("maintenance.")) return place("advanced", "Maintenance");
 	if (RAW_COLLECTIONS.has(path) && !GUIDED_ROW_IDS.has(id)) return place("advanced", "Raw collections");
 	switch (path) {
@@ -166,7 +174,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "chat.retry.maxRetries":
 			return place("chat", "Recovery");
 		case "chat.loopsUntilStopped":
-			return place("chat", "Loops");
+			return place("workers", "Loops");
 		case "interface.outputDetail":
 		case "interface.smoothStreaming":
 			return place("chat", "Replies");
@@ -176,39 +184,39 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "interface.mode":
 		case "interface.exitSummary":
 		case "interface.fullscreenScrollbar":
-			return place("interface", "Transcript");
+			return place("chat", "Transcript");
 		case "interface.demo":
-			return place("interface", "Guidance");
+			return place("chat", "Guidance");
 		case "interface.autoUpdate":
-			return place("interface", "Updates");
+			return place("chat", "Updates");
 		case "interface.guiTurnCapacity":
-			return place("interface", "Graphical app");
+			return place("chat", "Graphical app");
 		case "fleet.worktrees.root":
 			return place("workspace", "Task copies");
 		case "fleet.concurrency":
 		case "fleet.staggerSharedPrefix":
-			return place("fleet", "Capacity & placement");
+			return place("workers", "Machines");
 		case "fleet.limits.toolCallsPerRun":
 		case "fleet.retry.maxRetries":
-			return place("fleet", "Limits & retries");
+			return place("workers", "Limits & retries");
 		case "fleet.limits.internalRunTimeoutMs":
 		case "safety.limits.workerResponseSeconds":
 		case "fleet.retry.routeCooldownMs":
 		case "fleet.retry.breakerThreshold":
-			return place("advanced", "Fleet timing");
+			return place("advanced", "Worker timing");
 		case "fleet.adaptiveRouting.roles":
 		case "fleet.adaptiveRouting.postures":
-			return place("agents", "Automatic routing");
+			return place("workers", "Automatic routing");
 		case "integrations.externalAgents.defaults.toolGovernance":
-			return place("safety", "External agents");
+			return place("safety", "Worker approvals");
 		case "integrations.externalAgents.entries":
-			return place("integrations", "External agents");
+			return place("workspace", "External agents");
 		case "integrations.externalAgents.defaults.connectTimeoutMs":
 		case "integrations.externalAgents.defaults.turnTimeoutMs":
 		case "integrations.externalAgents.defaults.permissionTimeoutMs":
 			return place("advanced", "External agent timing");
 		case "integrations.runtimePlugins":
-			return place("integrations", "Startup plugins");
+			return place("workspace", "Plugins");
 		case "context.toolResultMaxBytes":
 		case "safety.limits.readBytesPerCall":
 		case "safety.limits.observationBytesPerTurn":
@@ -258,31 +266,31 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		case "safety.sandboxPassEnv":
 		case "safety.sandboxUnixSockets":
 		case "safety.scratchRoots":
-			return place("safety", "Worker approvals");
+			return place("safety", "Sandbox");
 		default:
 	}
 	if (under(path, "chat.modelPicker")) return place("models", "Quick switch");
 	if (under(path, "chat.retry")) return place("advanced", "Retry timing");
 	if (under(path, "interface.panes.files")) return place("workspace", "Files pane");
-	if (under(path, "interface.panes")) return place("interface", "Panes");
+	if (under(path, "interface.panes")) return place("workspace", "Panes");
 	// The music player lives in a pane dock, so its switches sit with the other panes.
-	if (under(path, "integrations.music")) return place("interface", "Panes");
+	if (under(path, "integrations.music")) return place("workspace", "Panes");
 	if (under(path, "integrations.git")) return place("workspace", "Git");
-	if (under(path, "integrations.projectResources")) return place("integrations", "Project resources");
-	if (under(path, "integrations.library")) return place("integrations", "Resource library");
-	if (under(path, "turnControl")) return place("agents", "Before Clio answers");
-	if (under(path, "fleet.agentProfiles")) return place("agents", "Agent routes");
-	if (under(path, "fleet.default")) return place("fleet", "Default worker");
-	if (under(path, "fleet.profiles")) return place("fleet", "Profiles");
+	if (under(path, "integrations.projectResources")) return place("workspace", "Library");
+	if (under(path, "integrations.library")) return place("workspace", "Library");
+	if (under(path, "turnControl")) return place("workers", "Before Clio answers");
+	if (under(path, "fleet.agentProfiles")) return place("workers", "Agent routes");
+	if (under(path, "fleet.default")) return place("workers", "Default worker");
+	if (under(path, "fleet.profiles")) return place("workers", "Profiles");
 	if (path === "fleet.defaultNode" || under(path, "fleet.nodes") || under(path, "fleet.endpoints"))
-		return place("fleet", "Capacity & placement");
-	if (under(path, "fleet.history")) return place("fleet", "Run history");
+		return place("workers", "Machines");
+	if (under(path, "fleet.history")) return place("workers", "Run history");
 	if (under(path, "fleet.permissions")) return place("safety", "Worker approvals");
 	if (under(path, "safety.review")) return place("safety", "Review");
-	if (under(path, "safety.judge")) return place("safety", "Autonomy");
+	if (under(path, "safety.judge")) return place("safety", "Safety judge");
 	if (under(path, "systemOne") || under(path, "chat.steering")) return place("advanced", "Experimental");
 	if (under(path, "telemetry")) return place("advanced", "Telemetry");
-	if (under(path, "report")) return place("interface", "Guidance");
+	if (under(path, "report")) return place("chat", "Guidance");
 	if (under(path, "prompts")) return place("advanced", "Experimental");
 	if (under(path, "context.workingSet") || under(path, "context.memory") || under(path, "context.compaction"))
 		return place("advanced", "Context tuning");
