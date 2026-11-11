@@ -29,7 +29,7 @@ A dispatched worker reads the store but does not write it, unless its dispatch g
 
 The store uses the **local** backend unless you choose otherwise: blobs are plain files under the Clio data directory. Nothing needs to be installed, and `clio-coder doctor` reports `store backend: local (no selection; the default)`.
 
-The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOWarp clio-core runtime (the `iowarp-core` Python package, 2.4.0 or later; records survive a runtime crash only with a build whose `clio_cte_core_ext.Client` has `AsyncSyncTag`, clio-core 6c54cdbf or later). Choose it when the store must live in clio-core's tiers, be shared through its FUSE mount, or sit beside other clio-core data:
+The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOWarp clio-core runtime (the `iowarp-core` Python package). It needs clio-core built from its integration branch at PLACEHOLDER-CORE8-SHA or later; no released `iowarp-core` wheel carries the bindings it uses yet. Choose it when the store must live in clio-core's tiers, be shared through its FUSE mount, or sit beside other clio-core data:
 
 ```sh
 clio-coder store backend clio-core --python /path/to/venv/bin/python3 --config /path/to/clio.yaml --pool 570.0
