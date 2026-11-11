@@ -395,7 +395,7 @@ const WELCOME_HINTS: ReadonlyArray<{
 			["/help", "Find a command by name"],
 		],
 		keys: [
-			["clio-coder.status.toggle", "Cycle dashboard pages"],
+			["clio-coder.status.toggle", "Open or close the dashboard"],
 			["clio-coder.dispatchBoard.toggle", "Show the workers"],
 			["clio-coder.files.toggle", "Show or hide files"],
 			["clio-coder.library.toggle", "Open the library"],

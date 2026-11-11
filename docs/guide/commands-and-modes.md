@@ -509,8 +509,7 @@ view keeps its own scroll position while the overlay stays open.
 
 One direction on every surface. A filled meter cell always means consumed
 capacity, and every percentage counts what is used: Accounts labels its meters
-`used`, the compact meters on the Status page print the same figure, and a
-footer or worker badge reads `weekly 9% used`.
+`used`, and a footer or worker badge reads `weekly 9% used`.
 
 Subscription percentages describe an account-wide provider window shared across
 your sessions and devices. Session tokens and costs describe only what this
@@ -525,10 +524,13 @@ and fleet islands read the same cached readings the overlay does.
 
 - The **Detailed welcome launchpad** carries an `AI usage · used` section beside the wordmark with an `Accounts` field when an account reported. It needs at least 48 columns and 30 rows. It reserves two rows from the first paint; a longer summary ends in `… /usage`. With no reading, those rows point at `/help` and `/context`, or stay blank beside the hint column from 160 columns. The Default and Minimal welcomes read no quota.
 - The **compact footer** has two lines. Line 1 carries the working directory, the Git branch with a dirty marker, the context counter and tokens per second. Line 2 carries one notice, tip, hint or urgent prompt on the left and, on the right, the active worker count, active skills and the selected model's weekly headroom. The weekly figure appears only when the account and model group are identifiable, and the footer never promotes an unrelated account's busier window in place of the selected model's.
-- The expanded dashboard's **Status** page puts the session total above the
-  account meters, **Activity** shows shared account usage under each live worker, and
-  **Context** states that request occupancy and account limits are different
-  quantities.
+- The expanded dashboard (`Alt+U`) is one glance page: what Clio is doing now, one
+  context line, one spend line with the session ceiling, the workers with shared account
+  usage under each live one, and live notices. It is at most eight rows, a third of the
+  terminal when shorter, and `Alt+PgUp`/`Alt+PgDn` scroll a longer workers list. Its last
+  line names `/context`, `/usage` and `/fleet` for detail. The local machine block (CPU,
+  memory, GPU, network and disk) is on the Health view of `/usage`, sampled only while
+  that view is shown.
 
 #### What Clio Coder does not claim
 
@@ -636,7 +638,7 @@ Three rules cover every key:
 | `Shift+Tab` | `t` | Cycle supported thinking effort for this session | `/thinking` |
 | `Alt+O` | `o` | Cycle output detail: Minimal, Default, Detailed | |
 | `Alt+L` | `l` | Toggle the top-level Library | `/library` |
-| `Alt+U` | `u` | Cycle the dashboard: Activity, Context, Status, closed | |
+| `Alt+U` | `u` | Open the one-page dashboard; press again to close it | |
 | `Alt+W` | `w` | Workers dock in a `--with-panes` session (first tap shows it and moves the keyboard in, a tap on a visible dock parks it, a second tap within 400 ms closes it); the Fleet Runs board without a pane host | `/fleet` |
 | `Alt+E` | `e` | Show or hide the files pane (first tap), close it (second tap within 400 ms); bound inside Yazi too | `/files` |
 | `Alt+A` | `a` | Show or hide the music pane (first tap), close it (second tap within 400 ms); bound inside cliamp too | `/music` |

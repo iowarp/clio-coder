@@ -15,6 +15,8 @@ import { matchesKey, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { USAGE_TAB_NAMES, type UsageTab } from "../session-control/slash-commands.js";
 import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
+import { machineBlock } from "./footer/pages.js";
+import { createLocalMachineSampler } from "./footer/system-metrics.js";
 import { type HealthDataOptions, healthData, healthLines } from "./health-overlay.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import type { QuotaProviders, RecordedWorkerRun } from "./quota-view.js";
@@ -510,6 +512,8 @@ class UsageOverlayBody implements Component {
 		},
 		private readonly getOutputStyle: () => OutputStyle,
 		private readonly getHealthLines: (width: number, style: OutputStyle) => string[],
+		/** Told which tab each frame shows, so the machine sampler runs only under Health. */
+		private readonly onTabShown: (tab: number) => void = () => {},
 	) {}
 
 	/** Whether the open view has more than it shows, so the scroll keys move something. */
@@ -544,6 +548,7 @@ class UsageOverlayBody implements Component {
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
+		this.onTabShown(this.tab);
 		const style = this.getOutputStyle();
 		const data = this.getData();
 		const quota = this.getQuotaSnapshots();
@@ -663,6 +668,8 @@ export function openUsageOverlay(
 	let verified = readVerified();
 	const now = options?.now ?? (() => Date.now());
 	const sessions = options?.listSessions?.() ?? [];
+	// The local machine is sampled only while the Health tab is on screen.
+	const machine = createLocalMachineSampler(() => tui.requestRender());
 	const body = new UsageOverlayBody(
 		() => ({ view: readModel?.live() ?? null, missing: readModel ? NOT_STARTED : NOT_AVAILABLE, recall, verified }),
 		() => {
@@ -682,7 +689,12 @@ export function openUsageOverlay(
 			now,
 		},
 		options?.getOutputStyle ?? (() => "standard"),
-		(width, style) => healthLines(healthData(readModel, options?.health), width, style),
+		(width, style) => [
+			...healthLines(healthData(readModel, options?.health), width, style),
+			"",
+			...machineBlock(machine.snapshot(), now(), width),
+		],
+		(tab) => machine.setActive(tab === 5),
 	);
 	if (options?.tab) body.tab = Math.max(0, USAGE_TAB_NAMES.indexOf(options.tab));
 	const handle = showClioOverlayFrame(tui, body, {
@@ -725,6 +737,7 @@ export function openUsageOverlay(
 		...handle,
 		hide(): void {
 			quotaFeed.dispose();
+			machine.dispose();
 			unsubscribe();
 			for (const off of offs) off();
 			handle.hide();

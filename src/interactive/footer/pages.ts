@@ -15,13 +15,13 @@ import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { contextCategorySwatch, contextPercentRole, renderContextMeterBar } from "../context-meter.js";
+import { contextPercentRole, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dispatch-board.js";
 import { ACTIVE_DISPATCH_STATUSES, FAILED_DISPATCH_STATUSES, formatFooterTokens } from "../footer-panel.js";
 import { actionKeyLabel, formatKeyLabel } from "../keybinding-manager.js";
 import type { QuotaProviders } from "../quota-view.js";
-import { quotaAccountRows, routeWeeklyQuota } from "../quota-view.js";
+import { routeWeeklyQuota } from "../quota-view.js";
 import {
 	brandMark,
 	type ClioTheme,
@@ -52,6 +52,7 @@ import {
 	topNotification,
 } from "./notifications.js";
 import type { FooterTelemetry } from "./spend.js";
+import type { LocalMachineMetrics } from "./system-metrics.js";
 import {
 	activeTaskLine,
 	blockedTaskLines,
@@ -72,8 +73,6 @@ function workerRowsOf(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<Disp
 	return rows.filter((row) => row.plan === undefined);
 }
 
-export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
-export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 /** At this width and above a page lays its sections out in two columns. */
 const FOOTER_SPLIT_COLUMNS = 84;
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
@@ -237,7 +236,9 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		.join(" · ");
 	// Runs from before this Clio started are history: `12 cancelled` beside an exit card's `0 workers` read as this visit's.
 	const pastOnly = rows.length > 0 && rows.every((row) => row.earlier === true);
-	const meta = pastOnly ? `earlier sessions · ${counts}` : counts;
+	const capacity = state.agent.localCapacity;
+	const cap = capacity ? `cap ${capacity.limit} · ${capacity.bound}` : "";
+	const meta = [pastOnly ? `earlier sessions · ${counts}` : counts, cap].filter(Boolean).join(" · ");
 	const liveNotices = state.notices.filter((notice) => notice.presentation !== "setting");
 	const notices = formatNotificationPanel(liveNotices, width, {
 		maxRows: liveNotices.length,
@@ -251,6 +252,8 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 		...session,
 		...tasks,
 		...notices,
+		contextLine(state, width),
+		spendLine(state, width),
 		sectionRule(theme, width, "Workers", { ...(meta ? { meta } : {}) }),
 	];
 	if (rows.length === 0) {
@@ -299,8 +302,6 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 
 /** The longest bar a page meter draws; past this a wide terminal gets room, not resolution. */
 const PAGE_METER_CELLS = 48;
-/** A legend column wider than this puts its numbers too far from their labels to read as one row. */
-const LEGEND_COLUMN_MAX = 52;
 
 /** `label ━━━━━━──── 62%` for a page meter whose tone names the limit it approaches. */
 function pageMeter(label: string, value: number | null, max: number, width: number, amount?: string): string {
@@ -316,11 +317,10 @@ function pageMeter(label: string, value: number | null, max: number, width: numb
 }
 
 /**
- * Context: how full the window is. The category meter with its figure on the
- * first row, the headroom facts on the second, then the composition with its
- * numbers aligned and the cache facts beneath.
+ * The dashboard's one context line: the category meter with its figure when the
+ * ledger is known, the budget's own figure otherwise. `/context` has the rest.
  */
-function contextPage(state: FooterDashboardRenderState, width: number): string[] {
+function contextLine(state: FooterDashboardRenderState, width: number): string {
 	const theme = clioTheme();
 	const ledger = state.context.ledger;
 	const facts = state.context;
@@ -333,37 +333,13 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			percent === null ? "" : ` · ${theme.fg(contextPercentRole(percent), formatContextPercent(percent))}`
 		}`;
 	};
-	const budgetBar = (): string => {
+	if (!ledger) {
 		const window = facts.contextWindow;
 		if (!window) return `${theme.fg("fieldName", "context")} ${theme.fg("unknownValue", "window unknown")}`;
 		// A known window with no input figure yet is not an unknown window.
 		return facts.used === null
 			? `${theme.fg("fieldName", "context")} ${budgetFigure()}`
 			: pageMeter("context", facts.used, window, width, budgetFigure());
-	};
-	if (!ledger) {
-		return [
-			budgetBar(),
-			chipRow(
-				theme,
-				[
-					facts.compactionThreshold === null
-						? null
-						: labelled(
-								"compaction",
-								`${facts.compactionAuto ? "auto" : "manual"} @${Math.round(facts.compactionThreshold * 100)}%`,
-							),
-					facts.clioMd ? theme.fg("counter", facts.clioMd) : null,
-					facts.memory ? theme.fg("counter", facts.memory) : null,
-					facts.extensions && facts.extensions.installed > 0
-						? labelled("extensions", `${facts.extensions.active}/${facts.extensions.installed}`)
-						: null,
-					facts.budget ? theme.fg("annotation", `${facts.budget.inputSource} accounting`) : null,
-				],
-				width,
-			),
-			...emptyState(theme, "Detailed context accounting appears after the prompt is compiled.", width),
-		];
 	}
 	const figure = facts.budget
 		? budgetFigure()
@@ -374,113 +350,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			}`;
 	const barCells = Math.max(4, width - visibleWidth(figure) - 2);
 	// Every live session has a budget beside its ledger: the figure is the budget's, the categories the ledger's.
-	const bar = `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
-	const compaction =
-		ledger.contextWindow <= 0
-			? "on server overflow"
-			: ledger.compactionAuto
-				? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}`
-				: "manual";
-	const headroom = chipRow(
-		theme,
-		[
-			labelled("free", theme.fg("counter", ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown")),
-			ledger.reserveTokens > 0 ? labelled("reserve", theme.fg("counter", formatFooterTokens(ledger.reserveTokens))) : null,
-			labelled("compaction", theme.fg("counter", compaction)),
-		],
-		width,
-	);
-	// Where the figures came from is a second thought, so it takes the second row.
-	const provenance = chipRow(
-		theme,
-		[
-			labelled("tools", theme.fg("counter", String(ledger.toolCount))),
-			theme.fg("annotation", ledger.measured ? "provider-anchored" : "estimated"),
-			facts.budget && (ledger.measured || facts.budget.inputSource !== "estimated")
-				? theme.fg("annotation", `${facts.budget.inputSource} input`)
-				: null,
-			ledger.contextWindowSource ? theme.fg("annotation", `${ledger.contextWindowSource} window`) : null,
-		],
-		width,
-	);
-	const groups = ledger.meter.filter((group) => group.tokens > 0);
-	// Swatch, label, tokens and percent: `▰ Tool results    31k  11.8%`, the
-	// numbers right-aligned in fixed cells so the column reads down.
-	const legend = (entries: typeof groups, room: number): string[] => {
-		const labelWidth = Math.max(4, room - 2 - 2 - 7 - 2 - 6);
-		return entries.map((group) => {
-			const label = padAnsi(theme.fg("legend", group.label), labelWidth);
-			const tokens = formatFooterTokens(group.tokens).padStart(7);
-			const percent = (group.percent === null ? "?" : `${group.percent.toFixed(1)}%`).padStart(6);
-			return `${contextCategorySwatch(group.category, theme)} ${label}  ${theme.fg("counter", tokens)}  ${theme.fg(group.percent === null ? "unknownValue" : "counter", percent)}`;
-		});
-	};
-	const half = Math.ceil(groups.length / 2);
-	const composition =
-		width >= FOOTER_SPLIT_COLUMNS
-			? columns(
-					legend(groups.slice(0, half), Math.min(LEGEND_COLUMN_MAX, Math.floor((width - 3) / 2))),
-					legend(groups.slice(half), Math.min(LEGEND_COLUMN_MAX, width - Math.floor((width - 3) / 2) - 3)),
-					width,
-				)
-			: legend(groups, Math.min(LEGEND_COLUMN_MAX, width));
-	const out = [
-		bar,
-		headroom,
-		provenance,
-		sectionRule(theme, width, facts.budget ? "Capture diagnostics" : "Composition", {
-			meta: "/context for detail",
-		}),
-		...composition,
-	];
-	const journaled = state.telemetry.kind === "ready" ? state.telemetry.promptCache : null;
-	const cache = chipRow(
-		theme,
-		[
-			journaled ? labelled("cache read", theme.fg("counter", journaled.read)) : null,
-			journaled ? labelled("write", theme.fg("counter", journaled.write)) : null,
-			journaled ? labelled("uncached", theme.fg("counter", journaled.uncached)) : null,
-			journaled ? labelled("backend", theme.fg("counter", journaled.verdict)) : null,
-			ledger.promptCache
-				? labelled("shell", theme.fg("counter", ledger.promptCache.shellReused ? "reused" : "rebuilt"))
-				: null,
-		],
-		width,
-	);
-	if (cache.length > 0) out.push(cache);
-	const history = chipRow(
-		theme,
-		[
-			ledger.lastCompaction
-				? labelled(
-						"last compaction",
-						theme.fg(
-							"counter",
-							`${formatFooterTokens(ledger.lastCompaction.tokensBefore)} ${GLYPH.next} ${formatFooterTokens(ledger.lastCompaction.tokensAfter)} · ${clean(ledger.lastCompaction.trigger)}`,
-						),
-					)
-				: null,
-			ledger.prewarm
-				? labelled(
-						"prewarm",
-						theme.fg(
-							"counter",
-							`${ledger.prewarm.tokens === null ? "tokens unreported" : `${formatFooterTokens(ledger.prewarm.tokens)} tokens`} in ${formatCompactMs(ledger.prewarm.ms)}${ledger.prewarm.aborted ? " · interrupted" : ""}`,
-						),
-					)
-				: null,
-		],
-		width,
-	);
-	if (history.length > 0) out.push(history);
-	out.push(theme.fg("annotation", "Context is per request · subscription limits are account-wide · /usage"));
-	const key = [
-		"Filled = context · empty = available · shaded = reserve; small buckets receive one cell.",
-		"Filled = context · empty = available · shaded = reserve",
-		`${GLYPH.contextFull} used · ${GLYPH.contextFree} free · ${GLYPH.contextReserve} reserve`,
-	].find((text) => visibleWidth(text) <= width);
-	if (key !== undefined) out.push(theme.fg("annotation", key));
-	return out;
+	return `${renderContextMeterBar(ledger, barCells, theme)}  ${figure}`;
 }
 
 /** Whole-session spend across every branch (#434 §11.3, decision A). */
@@ -500,63 +370,10 @@ function sessionSpendChips(telemetry: FooterTelemetry): string[] {
 	];
 }
 
-function trackedCost(telemetry: FooterTelemetry): string {
-	if (telemetry.kind === "unavailable") return "not available";
-	if (telemetry.kind === "reading") return "reading";
-	return telemetry.cost ?? "nothing charged yet";
-}
-
-/** Guardian wording for the expanded memory row; null leaves the step outcome showing. */
-function guardianLabel(
-	state: "off" | "idle" | "reviewing" | "waiting-capacity" | "unavailable" | undefined,
-): string | null {
-	switch (state) {
-		case "reviewing":
-			return "reviewing";
-		case "waiting-capacity":
-			return "waiting for endpoint capacity";
-		case "unavailable":
-			return "model tier unavailable";
-		default:
-			return null;
-	}
-}
-
-/**
- * Status: what the session costs and what the machine is doing. Spend and the
- * shared account limits lead, because they are the figures that run out; the
- * local machine, the worker cap and the connections follow.
- */
-function statusPage(state: FooterDashboardRenderState, width: number): string[] {
+/** The dashboard's one spend line: the session's tokens and cost against the ceiling. `/usage` has the rest. */
+function spendLine(state: FooterDashboardRenderState, width: number): string {
 	const theme = clioTheme();
-	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
-	const mib = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
-	const throughput = (value: number) =>
-		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
-	const resource = state.resources;
-	const capacity = state.agent.localCapacity;
-	const memory = state.session.memoryIntervention;
-	const workerRows = workerRowsOf(state.dispatchRows);
-	const active = workerRows.filter((row) => ACTIVE_DISPATCH_STATUSES.has(row.status)).length;
-	const completed = workerRows.filter((row) => row.status === "completed").length;
-	const failed = workerRows.filter((row) => FAILED_DISPATCH_STATUSES.has(row.status)).length;
-	const toolCalls = Object.values(state.toolCounts.tools).reduce((a, b) => a + b, 0);
-	const value = (text: string): string =>
-		theme.fg(
-			/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending|not available|not reported)/u.test(text)
-				? "unknownValue"
-				: "fieldValue",
-			clean(text),
-		);
-	const facts = (entries: ReadonlyArray<readonly [string, string]>, room: number): string[] =>
-		factRows(
-			theme,
-			entries.map(([label, text]) => ({ label, value: value(text), fit: "clip" as const })),
-			room,
-			{ labelWidth: 14 },
-		);
-
-	const spend = chipRow(
+	return chipRow(
 		theme,
 		[
 			...sessionSpendChips(state.telemetry),
@@ -574,8 +391,32 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		],
 		width,
 	);
-	const accounts = quotaAccountRows(state.quota ?? [], width, { compact: true, now: state.now });
+}
 
+/**
+ * The local machine: CPU, memory, GPU, network and disk, as the Health tab of
+ * `/usage` shows them while it samples.
+ */
+export function machineBlock(resource: LocalMachineMetrics | null, now: number, width: number): string[] {
+	const theme = clioTheme();
+	const gib = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+	const mib = (bytes: number) => `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
+	const throughput = (value: number) =>
+		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
+	const value = (text: string): string =>
+		theme.fg(
+			/^(unknown|unreported|unavailable|not sampled|sampling|warming up|pending|not available|not reported)/u.test(text)
+				? "unknownValue"
+				: "fieldValue",
+			clean(text),
+		);
+	const facts = (entries: ReadonlyArray<readonly [string, string]>, room: number): string[] =>
+		factRows(
+			theme,
+			entries.map(([label, text]) => ({ label, value: value(text), fit: "clip" as const })),
+			room,
+			{ labelWidth: 14 },
+		);
 	const half = Math.floor((width - 3) / 2);
 	const cpu = pageMeter("CPU", resource ? resource.cpuPercent : null, 100, width >= FOOTER_SPLIT_COLUMNS ? half : width);
 	const ramUsed = resource ? resource.hostTotalBytes - resource.hostFreeBytes : null;
@@ -613,7 +454,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const machine = [
 		sectionRule(theme, width, "Machine", {
 			meta: resource
-				? `${resource.scope} · sampled ${Math.max(0, Math.round((state.now - resource.sampledAt) / 1000))}s ago`
+				? `${resource.scope} · sampled ${Math.max(0, Math.round((now - resource.sampledAt) / 1000))}s ago`
 				: "local OS · sampling",
 		}),
 		...columns([cpu], [ram], width),
@@ -639,77 +480,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		),
 	];
 
-	const workers = [
-		sectionRule(theme, width, "Workers", {
-			meta: capacity ? `cap ${capacity.limit} · ${capacity.bound}` : "cap not sampled",
-		}),
-		...factRows(
-			theme,
-			[
-				{
-					label: "Workers",
-					value: chipRow(
-						theme,
-						[
-							theme.fg(active > 0 ? "activity" : "counter", `${active} active`),
-							theme.fg("counter", `${completed} done`),
-							theme.fg(failed > 0 ? "error" : "counter", `${failed} failed`),
-						],
-						Number.POSITIVE_INFINITY,
-					),
-				},
-				{ label: "Worker cap", value: value(capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled") },
-				{
-					label: "Tool calls",
-					value: value(
-						`${toolCalls} ${toolCalls === 1 ? "call" : "calls"} · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`,
-					),
-				},
-			],
-			width,
-			{ labelWidth: 14 },
-		),
-	];
-
-	const names = (items: string[] | undefined) =>
-		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
-	const left: Array<readonly [string, string]> = [
-		...(state.session.name ? [["Session", clean(state.session.name)] as const] : []),
-		["Target", state.session.target ?? "No model selected"],
-		["Tracked cost", trackedCost(state.telemetry)],
-		["MCP connected", names(state.connections?.mcp)],
-		["Plugins active", names(state.connections?.plugins)],
-		[
-			"Extensions",
-			state.context.extensions
-				? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
-				: "unreported",
-		],
-	];
-	const right: Array<readonly [string, string]> = [
-		[
-			"Memory bank",
-			memory
-				? `${memory.size} entries · ${guardianLabel(memory.guardian) ?? (memory.stepInFlight ? "updating" : (memory.lastDecision ?? "idle"))}`
-				: "not reported",
-		],
-		["Context work", state.agent.contextActivity?.message ?? "idle"],
-		[
-			"Headroom",
-			state.context.ledger?.contextWindow
-				? `${formatFooterTokens(state.context.ledger.freeTokens)} tokens free`
-				: "unknown",
-		],
-	];
-	const connections = [
-		sectionRule(theme, width, "Connections"),
-		...columns(
-			facts(left, width >= FOOTER_SPLIT_COLUMNS ? half : width),
-			facts(right, width >= FOOTER_SPLIT_COLUMNS ? width - half - 3 : width),
-			width,
-		),
-	];
-	return [spend, ...accounts, ...workers, ...machine, ...connections];
+	return machine;
 }
 
 /**
@@ -1009,19 +780,16 @@ function fitNoticeWords(text: string, width: number): string {
 	return whole === null ? truncateToWidth(text, room, GLYPH.ellipsis, false) : `${whole}${GLYPH.ellipsis}`;
 }
 
-const DASHBOARD_ROOMY_ROWS = 30;
-
 /**
- * The expanded footer: tab row, rule, a bounded content viewport, rule, hint.
+ * The expanded footer: one glance page. Title row, rule, a bounded content viewport, rule, hint.
  * Height is a function of the terminal alone, so a page never changes height
  * as its live values change; content that does not fit scrolls.
  */
 export function dashboardPageViewport(
 	state: FooterDashboardRenderState,
-	page: DashboardPage,
 	width: number,
 	terminalRows: number,
-	cycleKey: string,
+	toggleKey: string,
 	scrollOffset = 0,
 ): { rows: string[]; offset: number; maxOffset: number } {
 	const theme = clioTheme();
@@ -1034,19 +802,10 @@ export function dashboardPageViewport(
 			"fieldValue",
 			padAnsi(`${pad}${truncateToWidth(line, innerWidth, GLYPH.ellipsis, true)}${pad}`, safeWidth),
 		);
-	// A terminal with room shows a whole page rather than a scroll: the Context page alone runs to twelve rows.
-	const budget = Math.max(6, Math.min(terminalRows >= DASHBOARD_ROOMY_ROWS ? 16 : 12, terminalRows - 6));
-	const tabs = DASHBOARD_PAGES.map((name, index) =>
-		name === page
-			? theme.style("selectedOption", `${GLYPH.cursor} ${index + 1} ${name}`, { bold: true })
-			: theme.fg("menuOption", `  ${index + 1} ${name}`),
-	);
-	// The rule keeps the brand from reading as part of whichever tab sits first.
-	const brand = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} `;
-	const tabText =
-		innerWidth >= 52
-			? `${brand}${tabs.join(" ")}`
-			: `${brand}${theme.style("selectedOption", `${GLYPH.cursor} ${page}`, { bold: true })} ${theme.fg("positionCount", `${DASHBOARD_PAGES.indexOf(page) + 1}/${DASHBOARD_PAGES.length}`)}`;
+	// A glance, not a standing view: the transcript keeps two thirds of the terminal, and the workers list scrolls.
+	const budget = Math.max(6, Math.min(8, Math.floor(terminalRows / 3)));
+	// The rule keeps the brand from reading as part of the title.
+	const tabText = `${brandMark(theme)} ${theme.fg("border", GLYPH.rail)} ${theme.style("selectedOption", "Dashboard", { bold: true })}`;
 	// The route sits flush right, the way a title row carries its meta, so the
 	// tabs and the identity read as one row with two ends rather than a sentence.
 	const identityRoom = innerWidth - visibleWidth(tabText) - 4;
@@ -1056,14 +815,10 @@ export function dashboardPageViewport(
 		identityText.length > 0
 			? `${tabText}${" ".repeat(Math.max(1, innerWidth - visibleWidth(tabText) - visibleWidth(identityText)))}${identityText}`
 			: truncateToWidth(tabText, innerWidth, GLYPH.ellipsis, true);
-	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
-	const cycle = `${cycleKey || "Dashboard"} ${GLYPH.next} ${next}`;
-	const where = page === "Status" ? "/usage · /context" : "composer stays active";
+	const cycle = `${toggleKey || "Dashboard"} ${GLYPH.next} close`;
+	const where = "/context · /usage · /fleet for detail";
 	const available = budget - 4;
-	let content: string[];
-	if (page === "Activity") content = activityPage(state, innerWidth);
-	else if (page === "Context") content = contextPage(state, innerWidth);
-	else content = statusPage(state, innerWidth);
+	let content = activityPage(state, innerWidth);
 	content = content.flatMap((line) => (visibleWidth(line) > innerWidth ? wrapTextWithAnsi(line, innerWidth) : [line]));
 	const maxOffset = Math.max(0, content.length - available);
 	const offset = Math.max(0, Math.min(maxOffset, Math.floor(scrollOffset)));
@@ -1075,7 +830,7 @@ export function dashboardPageViewport(
 						start: offset + 1,
 						end: Math.min(content.length, offset + available),
 						total: content.length,
-						keys: innerWidth >= 64 ? ["Alt+PgUp/PgDn scroll", cycle] : [cycle],
+						keys: innerWidth >= 64 ? ["Alt+PgUp/PgDn scroll", cycle, where] : [cycle],
 					},
 					innerWidth,
 				)
@@ -1091,11 +846,10 @@ export function dashboardPageViewport(
 
 export function renderDashboardPage(
 	state: FooterDashboardRenderState,
-	page: DashboardPage,
 	width: number,
 	terminalRows: number,
-	cycleKey: string,
+	toggleKey: string,
 	scrollOffset = 0,
 ): string[] {
-	return dashboardPageViewport(state, page, width, terminalRows, cycleKey, scrollOffset).rows;
+	return dashboardPageViewport(state, width, terminalRows, toggleKey, scrollOffset).rows;
 }

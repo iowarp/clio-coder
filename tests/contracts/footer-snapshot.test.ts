@@ -9,7 +9,11 @@ import { buildFooterDashboard, capabilityLabels } from "../../src/interactive/fo
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import type { Notification } from "../../src/interactive/footer/notifications.js";
 import { formatNotificationPanel } from "../../src/interactive/footer/notifications.js";
-import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
+import {
+	dashboardPageViewport,
+	renderCompactDashboard,
+	renderDashboardPage,
+} from "../../src/interactive/footer/pages.js";
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import { GLYPH } from "../../src/interactive/theme/index.js";
@@ -124,25 +128,13 @@ test("minimal and demo-off footers suppress teaching without hiding immediate co
 
 test("footer pages use snapshot time and preserve their row contracts at release widths", () => {
 	const state = footerState();
-	state.resources = {
-		sampledAt: 9000,
-		scope: "local OS",
-		hostTotalBytes: 1024 ** 3,
-		hostFreeBytes: 512 * 1024 ** 2,
-		processRssBytes: 1000,
-		cpuPercent: 40,
-		network: null,
-		disk: null,
-		gpu: null,
-	};
 	for (const width of [60, 80, 120, 200]) {
 		const compact = renderCompactDashboard(state, width);
 		strictEqual(compact.length, 2);
-		for (const page of DASHBOARD_PAGES) {
-			const rows = renderDashboardPage(state, page, width, 240, "Alt+U");
-			strictEqual(rows.length, 16);
-			match(stripTerminalSequences(rows[0] ?? ""), new RegExp(page));
-			if (page === "Status") match(rows.map(stripTerminalSequences).join("\n"), /3s ago/);
+		{
+			const rows = renderDashboardPage(state, width, 240, "Alt+U");
+			strictEqual(rows.length, 8);
+			match(stripTerminalSequences(rows[0] ?? ""), /Dashboard/);
 			for (const row of [...rows, ...compact]) {
 				ok(visibleWidth(row) <= width);
 				const plain = row.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "");
@@ -212,7 +204,10 @@ test("retrying and cancelling workers count as active on every footer surface", 
 	match(dispatchSegment(state.dispatchRows) ?? "", /2 active/u);
 	for (const width of [60, 80, 120, 200]) {
 		const compact = renderCompactDashboard(state, width);
-		const expanded = renderDashboardPage(state, "Status", width, 240, "Alt+U");
+		const first = dashboardPageViewport(state, width, 240, "Alt+U");
+		const expanded = [...first.rows];
+		for (let offset = 1; offset <= first.maxOffset; offset++)
+			expanded.push(...dashboardPageViewport(state, width, 240, "Alt+U", offset).rows);
 		match(compact.map(stripTerminalSequences).join("\n"), /2 workers/u);
 		match(expanded.map(stripTerminalSequences).join("\n"), /2 active/u);
 		for (const line of [...compact, ...expanded]) {

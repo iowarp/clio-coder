@@ -32,14 +32,10 @@ import { launchpadShowsHints } from "../welcome-dashboard.js";
 import { createDemoHints } from "./demo-hints.js";
 import type { ComposerKeyContext, KeyHintFacts } from "./key-hints.js";
 import type { Notification, NotificationCenter } from "./notifications.js";
-import { formatNotificationPanel } from "./notifications.js";
-import type { DashboardPage } from "./pages.js";
-import { DASHBOARD_PAGES, dashboardPageViewport, renderCompactDashboard } from "./pages.js";
+import { dashboardPageViewport, renderCompactDashboard } from "./pages.js";
 import { routeFirstOutput, silenceNoteForms } from "./silence-note.js";
 import type { FooterTelemetry } from "./spend.js";
 import { footerTelemetry } from "./spend.js";
-import type { LocalMachineMetrics } from "./system-metrics.js";
-import { createLocalMachineSampler } from "./system-metrics.js";
 
 export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
@@ -140,7 +136,6 @@ export interface FooterDashboardRenderState {
 	keyHintFacts?: KeyHintFacts;
 	background?: ReadonlyArray<BackgroundCall>;
 	welcomeVisible?: boolean;
-	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
 	costCeilingUsd?: number;
 
@@ -274,7 +269,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
 	let dashboardMode: FooterDashboardMode = "compact";
-	let page: DashboardPage = "Activity";
 	let scrollOffset = 0;
 	let maxScrollOffset = 0;
 	let scrollRows = 8;
@@ -309,7 +303,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		return {
 			outputStyle: settings?.interface.outputDetail ?? "standard",
 			...(deps.getExtensionFacts ? { extensionFacts: deps.getExtensionFacts(width) } : {}),
-			resources: machine.snapshot(),
 			quota: deps.getQuotaSnapshots?.() ?? [],
 			...(current?.runtime && wireModelId
 				? {
@@ -448,18 +441,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const current = state(width);
 		const lifecycleHint = deps.getLifecycleHint?.();
 		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("annotation", lifecycleHint), width)] : [];
-		// The Activity page lists every notice itself, which is what the footer's chip opens onto.
-		const notices =
-			dashboardMode === "compact" || page === "Activity"
-				? []
-				: formatNotificationPanel(
-						current.notices.filter((notice) => notice.presentation !== "setting"),
-						width,
-						{
-							maxRows: 1,
-							...(deps.dismissKeyLabel ? { dismissKeyLabel: deps.dismissKeyLabel } : {}),
-						},
-					).slice(1);
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine =
 			dashboardMode === "expanded" && contributed.length
@@ -468,12 +449,11 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const workspace = deps.getWorkspaceLine?.(width);
 		const workspaceLine = workspace ? [fitDashboardLine(workspace, width)] : [];
 		// Keep the highest-priority notice readable in full; the dismiss hint exposes the next.
-		const supplementary = [...workspaceLine, ...extensionLine, ...lifecycleLine, ...notices];
+		const supplementary = [...workspaceLine, ...extensionLine, ...lifecycleLine];
 		const grid =
 			dashboardMode === "expanded"
 				? dashboardPageViewport(
 						current,
-						page,
 						width,
 						terminalRows() - supplementary.length,
 						actionKeyLabel("clio-coder.status.toggle") ?? "",
@@ -495,14 +475,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	};
 	const setExpanded = (expanded: boolean): void => {
 		dashboardMode = expanded ? "expanded" : "compact";
-		page = "Activity";
 		scrollOffset = 0;
-		machine.setActive(false);
 		refresh();
 	};
-	const machine = createLocalMachineSampler(() => {
-		if (!disposed) refresh();
-	});
 	refresh();
 	const resolveBranch = deps.resolveCurrentBranch ?? getCurrentBranch;
 	void resolveBranch(process.cwd()).then((name) => {
@@ -529,19 +504,11 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			return true;
 		},
 		toggleExpanded() {
-			if (dashboardMode === "compact") setExpanded(true);
-			else if (page === "Status") setExpanded(false);
-			else {
-				scrollOffset = 0;
-				page = DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1] ?? "Activity";
-				machine.setActive(page === "Status");
-				refresh();
-			}
+			setExpanded(dashboardMode === "compact");
 			return dashboardMode;
 		},
 		dispose() {
 			disposed = true;
-			machine.dispose();
 		},
 	};
 }

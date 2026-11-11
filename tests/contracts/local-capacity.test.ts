@@ -14,7 +14,7 @@ import {
 	WORKER_MEMORY_ESTIMATE_BYTES,
 } from "../../src/domains/scheduling/local-capacity.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import { renderDashboardPage } from "../../src/interactive/footer/pages.js";
+import { dashboardPageViewport } from "../../src/interactive/footer/pages.js";
 import { fleetNodeRows } from "../../src/interactive/overlays/settings.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -162,11 +162,14 @@ describe("fleet.concurrency auto placement surfaces", () => {
 		strictEqual(scheduling.fleet?.get("local")?.capacityBound, "configured");
 	});
 
-	it("names the local worker limit and its binding input in the live Status page", () => {
+	it("names the local worker limit and its binding input on the dashboard's Workers rule", () => {
 		const snapshot = footerState();
 		snapshot.agent.localCapacity = { limit: 2, bound: "memory" };
-		const text = renderDashboardPage(snapshot, "Status", 120, 240, "Alt+U").map(stripTerminalSequences).join("\n");
-		match(text, /Worker cap\s+2 · memory/u);
+		const first = dashboardPageViewport(snapshot, 120, 240, "Alt+U");
+		const rows = [...first.rows];
+		for (let offset = 1; offset <= first.maxOffset; offset++)
+			rows.push(...dashboardPageViewport(snapshot, 120, 240, "Alt+U", offset).rows);
+		match(rows.map(stripTerminalSequences).join("\n"), /Workers ─.*cap 2 · memory/u);
 	});
 });
 

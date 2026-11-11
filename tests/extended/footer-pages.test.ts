@@ -4,25 +4,21 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { createWorkerProgressFold } from "../../src/domains/telemetry/worker-progress.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { contextCategorySwatch, renderContextMeterBar } from "../../src/interactive/context-meter.js";
 import type { FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
 import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import {
-	DASHBOARD_PAGES,
 	dashboardPageViewport,
 	renderCompactDashboard,
 	renderDashboardPage,
 } from "../../src/interactive/footer/pages.js";
 import { footerTelemetry } from "../../src/interactive/footer/spend.js";
-import { formatFooterTokens } from "../../src/interactive/footer-panel.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
 	renderToolExecution,
 	renderToolPreview,
 	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
-import { clioTheme } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { runUsageOf, telemetryViewOf } from "../harness/telemetry-view.js";
 
@@ -97,46 +93,37 @@ function state(): FooterDashboardRenderState {
 }
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
 /** Expanded pages are a bounded viewport that scrolls, so content checks read every scroll position. */
-function scrolled(
-	snapshot: FooterDashboardRenderState,
-	page: (typeof DASHBOARD_PAGES)[number],
-	width: number,
-	rows: number,
-): string[] {
-	const first = dashboardPageViewport(snapshot, page, width, rows, "alt+u", 0);
+function scrolled(snapshot: FooterDashboardRenderState, width: number, rows: number): string[] {
+	const first = dashboardPageViewport(snapshot, width, rows, "alt+u", 0);
 	const all = [...first.rows];
 	for (let offset = 1; offset <= first.maxOffset; offset += 1)
-		all.push(...dashboardPageViewport(snapshot, page, width, rows, "alt+u", offset).rows);
+		all.push(...dashboardPageViewport(snapshot, width, rows, "alt+u", offset).rows);
 	return all;
 }
 
-test("dashboard pages devote space to agents, context composition and complete status", () => {
+test("the dashboard is one glance page: agents, one context line, one spend line and where the detail lives", () => {
 	for (const width of [40, 80, 120, 172]) {
-		for (const page of DASHBOARD_PAGES) {
-			const rows = renderDashboardPage(state(), page, width, 40, "Alt+U");
-			ok(
-				rows.every((line) => visibleWidth(line) <= width),
-				`${page} ${width}`,
-			);
-			ok(rows.length <= 33, `${page} exceeded footer budget`);
-			match(plain(rows), /Alt\+U/);
-		}
+		const rows = renderDashboardPage(state(), width, 40, "Alt+U");
+		ok(
+			rows.every((line) => visibleWidth(line) <= width),
+			`${width}`,
+		);
+		ok(rows.length <= 8, `${width} exceeded footer budget`);
+		match(plain(rows), /Alt\+U/);
 	}
-	const activity = plain(renderDashboardPage(state(), "Activity", 172, 120, "Alt+U"));
+	const activity = plain(scrolled(state(), 172, 120));
 	match(activity, /scout/);
 	match(activity, /internal agent/);
 	match(activity, /Explore the dispatch/);
 	doesNotMatch(activity, /context 17k/);
 	match(activity, /blade\/mini\/qwopus/);
-	const context = plain(renderDashboardPage(state(), "Context", 172, 120, "Alt+U"));
-	match(context, /Composition/);
-	match(context, /\/ 262\.1k · 26\.1%/);
-	const status = plain(scrolled(state(), "Status", 172, 120));
-	match(status, /Connections ─/);
-	match(status, /Machine ─/);
+	match(activity, /\/ 262\.1k · 26\.1%/);
+	match(activity, /ceiling/);
+	doesNotMatch(activity, /Connections ─|Machine ─|Composition/);
+	match(plain(renderDashboardPage(state(), 172, 120, "Alt+U")), /\/context · \/usage · \/fleet for detail/);
 });
 
-test("resolved dashboard shortcut cycles Activity, Context, Status and closed without capturing text", () => {
+test("the resolved dashboard shortcut opens the page and closes it again without capturing text", () => {
 	const previous = getKeybindings();
 	createKeybindingManager({
 		...DEFAULT_SETTINGS,
@@ -149,15 +136,12 @@ test("resolved dashboard shortcut cycles Activity, Context, Status and closed wi
 		getTerminalRows: () => 40,
 	});
 	try {
-		const modes = [];
-		for (const page of DASHBOARD_PAGES) {
-			modes.push(footer.toggleExpanded());
-			const text = plain(footer.view.render(120));
-			match(text, new RegExp(`❯ \\d ${page}`));
-			match(text, /Ctrl\+U/);
-		}
+		const modes = [footer.toggleExpanded()];
+		const text = plain(footer.view.render(120));
+		match(text, /Dashboard/);
+		match(text, /Ctrl\+U → close/);
 		modes.push(footer.toggleExpanded());
-		deepStrictEqual(modes, ["expanded", "expanded", "expanded", "compact"]);
+		deepStrictEqual(modes, ["expanded", "compact"]);
 		strictEqual(footer.isExpanded(), false);
 	} finally {
 		footer.dispose();
@@ -220,7 +204,7 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 		{ ...row, taskSummary: task },
 		{ ...row, runId: "second-scout", taskSummary: "Inspect the dashboard telemetry." },
 	]);
-	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
+	const text = plain(scrolled(snapshot, 160, 120));
 	match(text, /Read the interview implementation/);
 	match(text, /Inspect the dashboard telemetry\./);
 	match(text, /in 68,000.*out 2,000/);
@@ -232,7 +216,7 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	const progress = createWorkerProgressFold();
 	const render = () => {
 		snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({ ...row, progress: progress.snapshot() }));
-		return plain(scrolled(snapshot, "Activity", 160, 120));
+		return plain(scrolled(snapshot, 160, 120));
 	};
 	progress.observe({
 		type: "clio_coder_tool_start",
@@ -278,52 +262,6 @@ test("compact footer exposes workspace, headroom and worker count in bounded res
 	doesNotMatch(text, /autonomy|yolo|70k processed|standard|exploring/);
 });
 
-test("Status renders live resource telemetry instead of a configuration dump", () => {
-	const footer = buildFooterDashboard({
-		providers: { list: () => [] } as never,
-		resolveCurrentBranch: async () => null,
-		getTerminalColumns: () => 172,
-		getTerminalRows: () => 75,
-		getSettings: () => DEFAULT_SETTINGS,
-	});
-	try {
-		for (let i = 0; i < 3; i++) footer.toggleExpanded();
-		// The expanded page is a bounded viewport, so read every scroll position.
-		const pages = [footer.view.render(172)];
-		for (let step = 0; step < 20 && footer.scroll(8); step += 1) pages.push(footer.view.render(172));
-		const text = plain(pages.flat());
-		match(text, /Connections ─/);
-		match(text, /Machine ─/);
-		match(text, /Clio RSS/);
-		match(text, /RAM/);
-		match(text, /GPU/);
-		match(text, /Subscriptions.*no journaled quota/);
-		match(text, /ceiling \$5\.00 tracked pricing only/);
-		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
-	} finally {
-		footer.dispose();
-	}
-});
-
-test("Context dashboard shares the overlay category swatches and filled/free/reserve grid", () => {
-	const snapshot = state();
-	const ledger = snapshot.context.ledger;
-	ok(ledger);
-	const theme = clioTheme();
-	const rows = scrolled(snapshot, "Context", 172, 120);
-	const ansi = rows.join("\n");
-	// The legend beside the three-row grid previews the first two categories and a "more" row.
-	for (const group of ledger.meter.filter((group) => group.tokens > 0).slice(0, 2)) {
-		ok(ansi.includes(contextCategorySwatch(group.category, theme)));
-	}
-	// The page draws the overlay's meter as one bar, so compare the glyphs rather than the escape sequences.
-	const figure = `${formatFooterTokens(ledger.usedTokens)} / ${formatFooterTokens(ledger.contextWindow)} · 26.1%`;
-	const bar = renderContextMeterBar(ledger, 168 - figure.length - 2, theme);
-	ok(plain(rows).includes(stripTerminalSequences(bar)));
-	match(plain(rows), /free .*reserve .*compaction/);
-	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
-});
-
 test("finished agents collapse into bounded history while retries retain live cards", () => {
 	const snapshot = state();
 	const row = snapshot.dispatchRows[0];
@@ -337,14 +275,14 @@ test("finished agents collapse into bounded history while retries retain live ca
 			taskSummary: "Historical verbose task must not render",
 		})),
 	];
-	const text = plain(scrolled(snapshot, "Activity", 160, 120));
+	const text = plain(scrolled(snapshot, 160, 120));
 	match(text, /Active retry task/);
 	match(text, /Workers ─.*1 active · 8 done/);
 	match(text, /✓ done.*scout.*in 68,000.*out 2,000.*\/view dispatch:done-0/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
-	const settled = plain(scrolled(snapshot, "Activity", 86, 75));
+	const settled = plain(scrolled(snapshot, 86, 75));
 	match(settled, /Workers ─.*1 failed/);
 	match(settled, /failed.*scout/);
 	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
@@ -355,15 +293,13 @@ test("expanded pages have identical viewport-relative height across widths and l
 	for (const width of [40, 86, 160])
 		for (const height of [24, 40, 75, 93]) {
 			const snapshot = state();
-			for (const page of DASHBOARD_PAGES) {
-				const rows = renderDashboardPage(snapshot, page, width, height, "alt+u");
-				strictEqual(rows.length, Math.max(6, Math.min(height >= 30 ? 16 : 12, height - 6)));
-				ok(rows.every((row) => visibleWidth(row) <= width));
-			}
+			const rows = renderDashboardPage(snapshot, width, height, "alt+u");
+			strictEqual(rows.length, Math.max(6, Math.min(8, Math.floor(height / 3))));
+			ok(rows.every((row) => visibleWidth(row) <= width));
 			snapshot.dispatchRows = [];
 			strictEqual(
-				renderDashboardPage(snapshot, "Activity", width, height, "alt+u").length,
-				Math.max(6, Math.min(height >= 30 ? 16 : 12, height - 6)),
+				renderDashboardPage(snapshot, width, height, "alt+u").length,
+				Math.max(6, Math.min(8, Math.floor(height / 3))),
 			);
 		}
 });
@@ -489,11 +425,9 @@ test("worker cards and Status distinguish shared account limits from recorded se
 		runtimeId: "claude-code",
 		runtimeKind: "subprocess",
 	}));
-	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared claude-code.*91% used/);
-	const status = plain(renderDashboardPage(snapshot, "Status", 160, 120, "alt+u"));
-	match(status, /session 0 tokens · nothing charged yet/);
-	match(status, /claude-code · Weekly.* 91%/);
-	match(plain(renderDashboardPage(snapshot, "Context", 160, 120, "alt+u")), /subscription limits are account-wide/);
+	const activity = plain(scrolled(snapshot, 160, 120));
+	match(activity, /Account.*Shared claude-code.*91% used/);
+	match(activity, /session 0 tokens · nothing charged yet/);
 });
 
 test("compact quota stays beside the selected model while workspace and rotating hints remain visible", () => {

@@ -815,8 +815,6 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 	});
 	f.editor.setText("keep this draft");
 	footer.setExpanded(true);
-	footer.toggleExpanded();
-	footer.toggleExpanded();
 	const before = footer.view.render(40);
 	f.terminal.input("\x1b[6;3~");
 	assert.notDeepEqual(footer.view.render(40), before);
@@ -846,7 +844,7 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 	}
 	assert.ok(settled, "scrolling reaches a bounded end");
 	const content = reached.map(stripTerminalSequences).join("\n");
-	for (const label of ["CPU", "RAM", "Workers", "Worker cap", "Sampling", "Scope", "GPU"])
-		assert.match(content, new RegExp(label), "the shortest viewport leaves no Status field unreachable");
+	for (const label of ["context", "spend", "Workers", "No workers yet"])
+		assert.match(content, new RegExp(label), "the shortest viewport leaves no dashboard row unreachable");
 	assert.equal(f.editor.getText(), "keep this draft");
 });

@@ -155,7 +155,7 @@ test("detailed welcome accounts wrap in the usage field list and fold in reduced
 	}
 });
 
-test("footer keeps unassociated accounts out of compact rows and supplies all accounts to Status", () => {
+test("footer keeps unassociated accounts out of compact rows and the dashboard", () => {
 	let columns = 160;
 	let notices: { key: string | null; id: string; level: "error"; text: string; addedAt: number; expiresAt: null }[] = [];
 	const footer = buildFooterDashboard({
@@ -182,15 +182,12 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		footer.refresh();
 		match(plain(footer.view.render(160)), /Connection lost/);
 		footer.toggleExpanded();
-		footer.toggleExpanded();
-		footer.toggleExpanded();
 		const pages = [footer.view.render(160)];
 		for (let page = 0; page < 20 && footer.scroll(8); page++) pages.push(footer.view.render(160));
-		const status = plain(pages.flat());
-		match(status, /Claude Code · Weekly.* 9%/);
-		match(status, /Codex · Weekly.* 76%/);
-		match(status, /Antigravity · Weekly.* 73%/);
-		doesNotMatch(status, /not reported by provider|\/cost/);
+		const glance = plain(pages.flat());
+		// Account limits live in /usage; the one-page dashboard names it for detail.
+		doesNotMatch(glance, /Codex · Weekly|not reported by provider|\/cost/);
+		match(glance, /\/usage/);
 	} finally {
 		footer.dispose();
 	}

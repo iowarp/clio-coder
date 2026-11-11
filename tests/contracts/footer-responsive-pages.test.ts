@@ -1,7 +1,7 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
-import { dashboardPageViewport, renderCompactDashboard } from "../../src/interactive/footer/pages.js";
+import { dashboardPageViewport, machineBlock, renderCompactDashboard } from "../../src/interactive/footer/pages.js";
 import { footerState } from "../harness/footer-fixture.js";
 
 test("the narrow footer gives workspace and branch a readable row with context at the right edge", () => {
@@ -84,55 +84,43 @@ test("a narrow attention row preserves workspace and context with armed skill fa
 	match(stripTerminalSequences(renderCompactDashboard(state, 60)[1] ?? ""), /choose key/i);
 });
 
-function allContent(page: "Context" | "Status", width: number): string[] {
-	const state = footerState();
-	const lines: string[] = [];
-	let offset = 0;
-	for (;;) {
-		const viewport = dashboardPageViewport(state, page, width, 240, "Alt+U", offset);
-		for (const row of viewport.rows) ok(visibleWidth(row) <= width);
-		lines.push(...viewport.rows.slice(2, -2).map(stripTerminalSequences));
-		if (viewport.offset === viewport.maxOffset) return lines;
-		offset += 8;
-	}
-}
-
-test("Context and Status retain stacked and split sections through compact scrolling viewports", () => {
-	for (const width of [60, 80, 83, 84, 87, 88, 120, 200]) {
-		const status = allContent("Status", width);
-		match(status.join("\n"), /Tool calls/);
-		const cost = status.findIndex((line) => line.includes("Connections ─"));
-		const machine = status.findIndex((line) => line.includes("Machine ─"));
-		ok(cost >= 0 && machine >= 0);
-		ok(machine < cost);
-		const cpu = status.find((line) => line.includes("CPU")) ?? "";
-		ok(width < 88 ? !cpu.includes("RAM") : cpu.includes("RAM"), "machine meters split only when wide");
-		const context = allContent("Context", width);
-		const heading = context.findIndex((line) => line.includes("Composition"));
-		ok(heading >= 0);
-		match(context[heading + 1] ?? "", /[A-Za-z]/);
+test("the machine block splits its meters only when wide and names its sampling", () => {
+	const resource = {
+		cpuPercent: 12,
+		hostTotalBytes: 16 * 1024 ** 3,
+		hostFreeBytes: 8 * 1024 ** 3,
+		processRssBytes: 200 * 1024 ** 2,
+		sampledAt: 1000,
+		scope: "local OS",
+		network: null,
+		disk: null,
+		gpu: null,
+	};
+	for (const width of [60, 80, 83, 84, 120, 200]) {
+		const lines = machineBlock(resource, 3000, width).map(stripTerminalSequences);
+		for (const row of lines) ok(stripTerminalSequences(row).length <= width);
+		const cpu = lines.find((line) => line.includes("CPU")) ?? "";
+		ok(width < 84 ? !cpu.includes("RAM") : cpu.includes("RAM"), "machine meters split only when wide");
+		for (const label of ["Machine ─", "Clio RSS", "Sampling", "Scope"]) match(lines.join("\n"), new RegExp(label));
 	}
 });
 
-test("small Status viewports expose every health fact by scrolling without exceeding their row budget", () => {
+test("small dashboard viewports scroll the one page without exceeding their row budget", () => {
 	const state = footerState();
-	state.agent.localCapacity = { limit: 2, bound: "memory" };
 	for (const width of [24, 40, 60, 120]) {
-		for (const height of [12, 18, 30]) {
-			const first = dashboardPageViewport(state, "Status", width, height, "Alt+U");
+		for (const height of [12, 18, 24, 30, 40]) {
+			const first = dashboardPageViewport(state, width, height, "Alt+U");
 			const rows = [...first.rows];
 			for (let offset = 1; offset <= first.maxOffset; offset++) {
-				const next = dashboardPageViewport(state, "Status", width, height, "Alt+U", offset);
+				const next = dashboardPageViewport(state, width, height, "Alt+U", offset);
 				strictEqual(next.rows.length, first.rows.length);
 				rows.push(...next.rows);
 			}
-			ok(first.rows.length <= Math.min(height >= 30 ? 16 : 12, height - 6));
+			ok(first.rows.length <= 8);
 			for (const row of rows) ok(visibleWidth(row) <= width);
-			const text = rows.map(stripTerminalSequences).join("\n");
-			for (const label of ["CPU", "RAM", "Worker cap", "Sampling", "Scope"]) match(text, new RegExp(label));
-			const last = dashboardPageViewport(state, "Status", width, height, "Alt+U", Number.MAX_SAFE_INTEGER);
+			const last = dashboardPageViewport(state, width, height, "Alt+U", Number.MAX_SAFE_INTEGER);
 			strictEqual(last.offset, last.maxOffset);
-			strictEqual(dashboardPageViewport(state, "Status", width, height, "Alt+U", -100).offset, 0);
+			strictEqual(dashboardPageViewport(state, width, height, "Alt+U", -100).offset, 0);
 		}
 	}
 });

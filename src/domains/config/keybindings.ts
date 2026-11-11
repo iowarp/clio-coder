@@ -115,9 +115,9 @@ export const CLIO_APP_KEYBINDINGS = {
 	"clio-coder.status.toggle": {
 		defaultKeys: "alt+u",
 		label: "Dashboard",
-		description: "Dashboard pages: Activity → Context → Status → closed",
+		description: "Open or close the one-page dashboard",
 		scope: "composer",
-		kind: "cycle",
+		kind: "toggle",
 		repeat: false,
 		leader: "u",
 	},
