@@ -39,6 +39,7 @@ EXIT_PROTOCOL = 2
 RECORDS_SUFFIX = "/.records"
 XATTR_METHODS = ("AsyncTagSetXattr", "AsyncTagGetXattr", "AsyncTagListXattr")
 PUT_IF_ABSENT = "AsyncPutBlobIfAbsent"
+SYNC_TAG = "AsyncSyncTag"
 DEL_TAG_BINDING = "clio_cte_core_ext.Client.AsyncDelTag"
 FS_BINDING = "clio_cfs_ext.Client"
 # A put writes `.<leaf>#put-<12 hex>` beside the blob, then renames it over; `#` is never in a blob name.
@@ -419,6 +420,11 @@ class Core:
         if answer["code"] == self.cte.PUT_EXISTS_RC:
             return {"outcome": "exists"}
         check_rc(answer["code"], "PutBlobIfAbsent")
+        # Flush the tag so the record survives a runtime crash; wheels older than the binding skip it.
+        if hasattr(self.client, SYNC_TAG):
+            code = rc_of(self.client.AsyncSyncTag(tag_id), "SyncTag")
+            if code != 0:
+                log(f"SyncTag after a record put to {args['tag']} returned {code}; the record may not survive a crash")
         return {"outcome": "written"}
 
     def record_size(self, tag_id, blob):

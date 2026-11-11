@@ -155,7 +155,17 @@ class Client:
     def AsyncDelTag(self, tag_id):
         deleted.append(tag_id)
         return Future()
+    def AsyncPutBlobIfAbsent(self, tag_id, blob, data, flags): return Future({"code": 0})
+    def AsyncSyncTag(self, tag_id):
+        synced.append(tag_id)
+        return Future()
+class OldClient(Client):
+    def __getattribute__(self, name):
+        if name == "AsyncSyncTag": raise AttributeError(name)
+        return object.__getattribute__(self, name)
+synced = []
 class Cte:
+    PUT_EXISTS_RC = 60
     Client = Client
     class PoolQuery:
         @staticmethod
@@ -167,6 +177,11 @@ try:
     core.get_record({"tag": "t", "blob": "r1"})
 except host.Refusal as error:
     out["get"] = [error.reason, error.message]
+core.put_record_if_absent({"tag": "t", "blob": "r2", "data": "eA=="})
+core.client = OldClient()
+out["oldPut"] = core.put_record_if_absent({"tag": "t", "blob": "r3", "data": "eA=="})["outcome"]
+core.client = Client()
+out["synced"] = synced
 core.del_tag({"tag": "t"})
 out["deleted"], out["cached"] = deleted, "t" in core.tag_ids
 open(sys.argv[2], "w").write(json.dumps(out))
@@ -179,9 +194,17 @@ test("the Python host names a record lost at a restart and deletes tags through 
 	const host = join(process.cwd(), "assets", "core-host", "clio_core_host.py");
 	const run = spawnSync("python3", ["-B", script, host, result], { encoding: "utf8" });
 	strictEqual(run.status, 0, run.stderr);
-	const out = JSON.parse(readFileSync(result, "utf8")) as { get: [string, string]; deleted: number[]; cached: boolean };
+	const out = JSON.parse(readFileSync(result, "utf8")) as {
+		get: [string, string];
+		deleted: number[];
+		cached: boolean;
+		synced: number[];
+		oldPut: string;
+	};
 	strictEqual(out.get[0], "io");
 	ok(/t:r1 was lost at a clio-core restart/u.test(out.get[1]), out.get[1]);
 	strictEqual(JSON.stringify(out.deleted), "[5]");
 	strictEqual(out.cached, false);
+	strictEqual(JSON.stringify(out.synced), "[5]", "a record put syncs its tag once; an older wheel skips it");
+	strictEqual(out.oldPut, "written");
 });
