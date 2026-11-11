@@ -1459,8 +1459,7 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 		const price = (userText: string) =>
 			estimateAgentContextTokens({ systemPrompt, messages: [buildUserMessage(userText)] });
 		const fits =
-			input.model.contextWindow > 0 &&
-			price(proposed) + Math.min(maxTokens ?? 1024, 1024) + 64 <= input.model.contextWindow;
+			input.model.contextWindow > 0 && price(proposed) + (maxTokens ?? summaryRoom) + 64 <= input.model.contextWindow;
 		if (!fits) return declined("no-fit", { proposed: price(proposed), window: input.model.contextWindow });
 		const use = { originalInputTokens: price(raw), substitutedInputTokens: price(proposed) };
 		if (use.substitutedInputTokens >= use.originalInputTokens)

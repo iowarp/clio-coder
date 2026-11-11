@@ -27,11 +27,14 @@ export const DEFAULT_COMPACTION_THRESHOLD = 0.8;
  * Defensive behavior:
  *   - non-positive or NaN contextWindow returns a no-op verdict.
  *   - thresholds outside (0, 1] disable the trigger.
+ * `reserveOutputTokens` counts the summary output the compaction call will
+ * request, so the trigger fires while that request still fits the window.
  */
 export function shouldCompact(
 	contextTokens: number,
 	threshold: number,
 	contextWindow: number,
+	reserveOutputTokens = 0,
 ): ContextCompactionVerdict {
 	const base: ContextCompactionVerdict = {
 		shouldCompact: false,
@@ -44,7 +47,8 @@ export function shouldCompact(
 	if (!Number.isFinite(contextTokens) || contextTokens <= 0) return base;
 	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return base;
 
-	const pressure = contextTokens / contextWindow;
+	const reserve = Number.isFinite(reserveOutputTokens) && reserveOutputTokens > 0 ? reserveOutputTokens : 0;
+	const pressure = (contextTokens + reserve) / contextWindow;
 	return {
 		shouldCompact: pressure >= threshold,
 		pressure,

@@ -1751,3 +1751,11 @@ describe("compaction cut inside a tool batch", () => {
 		ok(cut !== 2, "the cut splits the tool batch");
 	});
 });
+
+describe("compaction trigger output reservation", () => {
+	it("counts the summary output reservation against the window", async () => {
+		const { shouldCompact } = await import("../../src/domains/session/compaction/auto.js");
+		strictEqual(shouldCompact(70_000, 0.8, 100_000).shouldCompact, false);
+		strictEqual(shouldCompact(70_000, 0.8, 100_000, 16_000).shouldCompact, true);
+	});
+});
