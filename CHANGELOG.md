@@ -92,6 +92,10 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder dev flywheel` prints a Usage headline for Clio Coder (npm downloads, install-script requests, GitHub views and clones over 7 days, stars, forks, open reports, shares on file, the latest release and its share of downloads, stale data sources, the latest weekly digest issue) and the maintainers' ranked backlog of failures, regressions, feature requests, latent demand and friction from iowarp/clio-metrics. `--kind <kind>` and `--top N` narrow the backlog, a `why` column prints under its row, `file-me` rows print last with a title ready to paste, and `--json` prints `{usage, backlog}`. `--pull <shareId|all>` lets a maintainer decrypt and import the shares named in up to 1000 `has-bundle` issues and 1000 discussions. The `clio-coder-dev` skill starts a Clio dev session from `dev flywheel --json` and asks the maintainer before filing a `file-me` item.
 - After one of its own failures (an internal error, the same turn-ending fault again, compaction failing three times running, or a crash the previous process recorded), Clio Coder may suggest `/report`, at most once a session and once a week, never in the first session, during a turn, for a problem you declined, or at yolo while you are away. A shown suggestion lapses after two minutes or when the session changes. `report.offers: off` turns it off, and so does "Don't ask again". A crash leaves a record under the state directory, which the next session offers as a prefilled bug draft without escape sequences or hidden characters; a mistake in `settings.yaml` is not recorded as a crash. A headless run that hit an internal fault prints one stderr line naming `clio-coder report --last`, except in CI or `--json` mode.
 - The agent gets a `report` capability that saves a scrubbed draft for you to review (one per session, three unsent per install) or asks once whether to; it never sends one, and workers do not get it. Its draft drops escape sequences and hidden characters, raises a notice instead of opening the review mid-turn, and is sent only from your own review: never by `report send --yes` or from a session's `bash`. A `clio-coder report` that a Clio Coder session's `bash` runs sends nothing without that review, even at yolo, and what it composed is kept as the agent's draft. A `gh` issue filed against iowarp/clio-coder from `bash` still runs and gains a note naming `/report`.
+- The desktop app has a Report a problem dialog over the same report plan: it previews the draft and asks for consent before anything is sent.
+- An opt-in census (`report.census`, off by default, and only with `report.censusEndpoint` set) lets the terminal UI count the install with one request a month that carries no identifier, query or body. In CI or with the update check switched off nothing is read, written or sent.
+- Maintainers can build a consented dataset release from report bundles with `scripts/report-dataset.ts`: only bundles whose sender granted the dataset scope, ids re-keyed, times (strings and epoch numbers) shifted to 2000-01-01, rare values removed, at least 20 traces, and withdrawals honoured. It publishes nothing.
+- `/report` previews over ACP keep the send instruction and gates for long reports, showing the first 150 body lines, and `/report send --comment` or `--new` in the terminal says the review asks about a matching issue instead of ignoring the flag.
 
 ### Commands and the TUI
 
@@ -114,6 +118,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Alt+U opens a one-page dashboard and closes it on the next press; the machine readings moved to the Health tab of `/usage`.
 - Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, and PgUp, PgDn, Home and End move through `/tree`.
 - `x` in Tasks, the steering queue and Memory, and `s` in Decisions, ask once before they act.
+- `/config` opens Settings on Connections in place, also during a turn, instead of suspending the terminal UI; `clio-coder configure` is unchanged.
 
 ### Sign-in, setup and providers
 
@@ -140,6 +145,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An OpenRouter model missing from the catalog stops at the session cost ceiling.
 - An OAuth refresh that fails on a network error says so and that the next call retries, instead of asking for a new login.
 - First launch no longer adopts a local server's embedding model as the chat model.
+- `clio-coder auth logout <runtime>` names the targets that hold their own stored key and how to drop one, instead of saying nothing is stored.
 
 ### Shared folders and sessions
 
@@ -361,6 +367,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An Esc followed quickly by another key no longer splits arrow and Alt sequences in local terminals.
 - A second Clio Coder in the same workspace no longer takes over, and closes, the first one's workers dock.
 - The pane event stream backs off when the pane host refuses or drops the subscription instead of reconnecting at once.
+- A question report whose send timed out no longer posts a second discussion when retried right away.
+- A call journal whose first line is damaged is set aside and journaling continues, instead of failing as an unsupported header.
+- A poll job's deadline wake is announced once; cancelling or closing afterwards no longer records a second continuation.
 
 ### Internal
 
@@ -373,6 +382,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Prompt fragments declare when they apply (`requires`, `surfaces`, `when`, row conditions), and a hygiene check fails when a fragment names a tool or command its session may not have.
 - Prompt size budgets per tier are a contract test for the v2 profile, and v2 leaves the capability map's examples out when the context window is under 48,000 tokens.
 - In Clio Coder's own checkout, headless runs load the self-development skills before editing, and dispatched workers are told which tree their running build came from; `pnpm run check:lane` runs a lane's pre-READY gates in one command.
+- The report labeler workflow is held to the same action pinning and permission checks as CI and release.
 
 ### Known limits
 
