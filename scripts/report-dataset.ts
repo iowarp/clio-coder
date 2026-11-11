@@ -679,7 +679,8 @@ export async function selfCheck(): Promise<string[]> {
 		passed.push("unlinking: no report id, original anonymous, scope or install id, or real timestamp survives");
 		const epochs = [...all.matchAll(/"(\w+)":(\d{12,13})\b/gu)];
 		assert(
-			epochs.some(([, key]) => key === "monoEpochWallMs") && epochs.every(([, , ms]) => Number(ms) < EPOCH + 86_400_000),
+			// A shared header withholds its clock epoch (monoEpochWallMs is 0); any epoch value left must be shifted.
+			/"monoEpochWallMs":0\b/u.test(all) && epochs.every(([, , ms]) => Number(ms) < EPOCH + 86_400_000),
 			`an epoch-ms value after 2000-01-02 survived: ${epochs
 				.filter(([, , ms]) => Number(ms) >= EPOCH + 86_400_000)
 				.map(([m]) => m)
@@ -687,7 +688,7 @@ export async function selfCheck(): Promise<string[]> {
 				.join(" ")}`,
 		);
 		assert(result.ambiguous.length === 0, `ambiguous epoch fields: ${result.ambiguous.join(", ")}`);
-		passed.push("epoch-ms values under time-shaped keys are shifted too");
+		passed.push("the shared clock epoch is withheld and no epoch-ms value after 2000-01-02 survives");
 		assert(!all.includes(rareModel), "the rare model id survived");
 		assert(
 			all.includes("rare_model") && all.includes("zqx-common-model"),
