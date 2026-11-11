@@ -83,3 +83,11 @@ function readdirName(dir: string): string {
 	strictEqual(names.length, 1);
 	return names[0] ?? "";
 }
+
+test("S-76: the launch card runs after the workspace relaunch, so a hosted child does not ask again", () => {
+	const source = readFileSync(join(import.meta.dirname, "../../src/cli/clio.ts"), "utf8");
+	const relaunch = source.indexOf("maybeLaunchWorkspace(options, startupSettings)");
+	const card = source.indexOf("runProjectTrustCard(process.cwd())");
+	ok(relaunch > 0 && card > 0);
+	ok(card > relaunch, "the trust card must follow the workspace relaunch decision");
+});

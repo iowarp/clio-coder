@@ -213,9 +213,18 @@ export async function runClioCommand(
 			return 0;
 		}
 	}
+	if (startupSettings) {
+		// The workspace launcher runs after the configuration gate, so a first
+		// run answers its questions in the plain terminal, and before the lease,
+		// so nothing has claimed the terminal the pane host is about to take.
+		const { maybeLaunchWorkspace } = await import("./workspace-launch.js");
+		const launched = await maybeLaunchWorkspace(options, startupSettings);
+		if (launched !== null) return launched;
+	}
 	let trustCardNotices: string[] | undefined;
 	if (terminalLeaseEligible(options)) {
 		// One card for the repository's own configuration, before anything reads it into the session (S-76).
+		// It runs after the workspace relaunch so only the process that hosts the session asks.
 		const { runProjectTrustCard } = await import("./project-trust-card.js");
 		const outcome = await runProjectTrustCard(process.cwd());
 		if (outcome === "trusted") {
@@ -224,14 +233,6 @@ export async function runClioCommand(
 		} else if (outcome === "skipped") {
 			trustCardNotices = ["Project configuration not active · restart Clio to review it, or run clio-coder config trust"];
 		}
-	}
-	if (startupSettings) {
-		// The workspace launcher runs after the configuration gate, so a first
-		// run answers its questions in the plain terminal, and before the lease,
-		// so nothing has claimed the terminal the pane host is about to take.
-		const { maybeLaunchWorkspace } = await import("./workspace-launch.js");
-		const launched = await maybeLaunchWorkspace(options, startupSettings);
-		if (launched !== null) return launched;
 	}
 	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
 		// Every completed hosted process releases its workspace, including a
