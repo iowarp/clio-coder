@@ -31,12 +31,12 @@ const STOCK_LFS_FILTER = new Map(
 );
 
 /**
- * A filter driver set in the repository's own config, local or worktree scope, other than stock git-lfs, or
- * config git could not list, which may set one.
+ * A filter driver set in the repository's own config, local or worktree scope, other than stock git-lfs, a git-lfs
+ * extension command, which that filter runs, or config git could not list, which may set either.
  */
 function repositoryFilter(entry: GitHookFile): boolean {
 	if (entry.key === UNLISTED_GIT_CONFIG_KEY) return true;
-	if (entry.key === undefined || !entry.key.startsWith("filter.")) return false;
+	if (entry.key === undefined || !(entry.key.startsWith("filter.") || entry.key.startsWith("lfs."))) return false;
 	if (entry.scope !== "local" && entry.scope !== "worktree") return false;
 	return STOCK_LFS_FILTER.get(entry.key) !== entry.hash;
 }
@@ -235,7 +235,7 @@ function noticeFor(record: Omit<InternalGitDriftRecord, "message" | "announce">,
 		return `[safety] Clio ${ran}, because git cannot list the repository's git config within its time and size bounds, so a filter driver or hook it sets could run unseen. This lasts until the config lists again.`;
 	}
 	if (record.outcome === "skipped" && record.changes.length === 0)
-		return `[safety] Clio does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
+		return `[safety] Clio does not run its own status and diff probes in ${record.repository}, because the repository's own config sets a filter driver or git-lfs extension command whose key cannot be overridden from the command line: ${record.unneutralized.join(", ")}. They resume once it is removed or renamed.`;
 	if (record.outcome === "skipped")
 		return `[safety] Clio stopped running its own status and diff probes in ${record.repository}, because executable git config changed during this session and cannot be overridden from the command line: ${changed}. They resume once the change is reverted or you approve it on the agent's next git command.`;
 	if (record.outcome === "overridden")

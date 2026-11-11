@@ -297,7 +297,7 @@ test("an include target missing at the baseline is watched, so a filter it gains
 	rmSync(scratch, { recursive: true, force: true });
 });
 
-test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line does not", () => {
+test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line or an extension command does not", () => {
 	const { root, scratch } = repository();
 	const fingerprinter = createGitHooksFingerprinter(root);
 	const guard = createGitHookDriftGuard({
@@ -319,6 +319,14 @@ test("a repository's stock git-lfs filter stays on for Clio's reads, and one wit
 	git(root, "config", "filter.lfs.clean", "git-lfs clean -- %f\ntouch /tmp/x");
 	ok(read().includes("filter.lfs.clean="), "a stock-looking first line with more after it is off");
 	ok(!read().includes("filter.lfs.process="));
+	git(root, "config", "filter.lfs.clean", "git-lfs clean -- %f");
+	// git-lfs runs an extension's command from inside the stock filter, and no -c turns one off.
+	git(root, "config", "lfs.extension.planted.clean", "touch /tmp/x");
+	strictEqual(
+		policy.read?.({ repository: root, operation: "status" }),
+		null,
+		"a repository lfs extension refuses the read",
+	);
 	rmSync(scratch, { recursive: true, force: true });
 });
 

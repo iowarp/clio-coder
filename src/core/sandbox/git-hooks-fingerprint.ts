@@ -173,6 +173,9 @@ function gitConfigValueRuns(key: string, value: string): boolean {
 			return sub !== null && name === "cmd";
 		case "interactive":
 			return sub === null && name === "difffilter";
+		case "lfs":
+			// git-lfs runs `lfs.extension.<name>.clean` and `smudge` from inside its filter.
+			return sub?.toLowerCase().startsWith("extension.") === true && (name === "clean" || name === "smudge");
 		default:
 			return false;
 	}
