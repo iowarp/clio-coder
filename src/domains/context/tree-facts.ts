@@ -120,20 +120,38 @@ const VERB = String.raw`\b(?:always\s+|must\s+|should\s+|prefer\s+|use\s+|run\s+
 const NEGATION_RE =
 	/\b(?:not|never|no longer|avoid|instead of|rather than)\b|\b(?:don|doesn|isn|aren|shouldn|mustn)['’]?t\b/;
 
+/** The clause of `text` that ends at `index`: what precedes it back to the last sentence, semicolon or colon break. */
+function clauseBefore(text: string, index: number): string {
+	return (
+		text
+			.slice(0, index)
+			.split(/[;,:.!?]\s/)
+			.at(-1) ?? ""
+	);
+}
+
 /**
  * The first of `values` a rule asserts in a clause that does not negate it: "Do
  * not use npm; use pnpm" asserts pnpm, and "Never use yarn" asserts nothing.
  */
 function assertedValue(normalized: string, values: string): string | undefined {
 	for (const match of normalized.matchAll(new RegExp(`${VERB}(${values})\\b`, "g"))) {
-		const clause =
-			normalized
-				.slice(0, match.index)
-				.split(/[;,:.!?]\s/)
-				.at(-1) ?? "";
-		if (!NEGATION_RE.test(clause)) return match[1];
+		if (!NEGATION_RE.test(clauseBefore(normalized, match.index))) return match[1];
 	}
 	return undefined;
+}
+
+const BRINGS_IN_RE =
+	/\b(?:add|adds|adding|create|creates|creating|introduce|introduces|reintroduce|restore|install|installs|import|imports|use|uses|using|depend on|require|requires|vendor|bring back|commit|check in)\b/;
+
+/**
+ * Whether the rule forbids bringing in what it cites at `index`: "Never add
+ * `lodash`" or "Do not create `src/x.js`". Such a citation names something the
+ * tree should not hold, so its absence does not make the rule stale.
+ */
+export function forbidsCitation(text: string, index: number): boolean {
+	const clause = clauseBefore(text.toLowerCase(), index);
+	return NEGATION_RE.test(clause) && BRINGS_IN_RE.test(clause);
 }
 
 /** The tree-fact values a rule asserts, for the keys the table can check. */

@@ -1,10 +1,25 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 /** Where `context init` records each handbook rule's verdict; `--verify` refreshes it against the tree. */
 export function handbookLedgerPath(cwd: string): string {
 	return join(cwd, ".clio-coder", "state", "handbook-ledger.json");
+}
+
+/**
+ * The repository root above `cwd`, or `cwd` outside Git. `--verify` judges the
+ * effective handbook from there and records it in that root's ledger, so every
+ * reader of the verify record resolves the same directory.
+ */
+export function handbookRoot(cwd: string): string {
+	let directory = resolve(cwd);
+	while (!existsSync(join(directory, ".git"))) {
+		const parent = dirname(directory);
+		if (parent === directory) return resolve(cwd);
+		directory = parent;
+	}
+	return directory;
 }
 
 interface LedgerFileShape {
@@ -23,7 +38,7 @@ export interface HandbookFreshness {
 export function readHandbookFreshness(cwd: string): HandbookFreshness {
 	let parsed: LedgerFileShape;
 	try {
-		parsed = JSON.parse(readFileSync(handbookLedgerPath(cwd), "utf8")) as LedgerFileShape;
+		parsed = JSON.parse(readFileSync(handbookLedgerPath(handbookRoot(cwd)), "utf8")) as LedgerFileShape;
 	} catch {
 		return { verifiedCommit: null, attention: 0 };
 	}

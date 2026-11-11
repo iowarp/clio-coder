@@ -1335,7 +1335,9 @@ it("context init --verify --apply proposes removing a flagged list rule whole an
 });
 
 it("context init --verify grounds on the tree from any directory, never on a stale index or an instruction file", async () => {
+	writeFileSync(join(cwd, "src", "widgets", "shape.ts"), "export function oldShape(): number {\n\treturn 1;\n}\n");
 	await runBootstrap({ cwd, io: { stdout: () => {}, stderr: () => {} } });
+	writeFileSync(join(cwd, "src", "widgets", "shape.ts"), "export const shape = 1;\n");
 	execFileSync("git", ["init", "-q"], { cwd });
 	writeFileSync(join(cwd, "src", "widgets", "paint.ts"), "export const paint = 1;\n");
 	writeFileSync(join(cwd, "AGENTS.md"), "Set `HARBOR_MODE` to strict before a release.\n");
@@ -1351,11 +1353,16 @@ it("context init --verify grounds on the tree from any directory, never on a sta
 			"- Set `HARBOR_MODE` before a release.",
 			`- ${"Keep every widget small and readable. ".repeat(20).trim()}`,
 			"- Do not use npm; use pnpm for installs.",
+			"- Never add `lodash` to the dependencies.",
+			"- Do not create `src/widgets/legacy.js`; extend `src/widgets/paint.ts` instead.",
+			"- Shapes come from `oldShape`.",
 			"",
 		].join("\n"),
 	);
 	writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
 	rmSync(join(cwd, "src", "widgets", "render.ts"));
+	execFileSync("git", ["add", "-A"], { cwd });
+	execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "t"], { cwd });
 	const previous = process.cwd();
 	process.chdir(join(cwd, "src"));
 	const io = captureIo();
@@ -1373,8 +1380,14 @@ it("context init --verify grounds on the tree from any directory, never on a sta
 			[7, "stale"],
 			[8, "unverifiable"],
 			[9, "unverifiable"],
+			[10, "verified"],
+			[11, "verified"],
+			[12, "stale"],
 		],
 	);
+	const fromSubdirectory = readHandbookFreshness(join(cwd, "src"));
+	ok(typeof fromSubdirectory.verifiedCommit === "string", JSON.stringify(fromSubdirectory));
+	strictEqual(fromSubdirectory.attention, 3);
 });
 
 it("context init --adopt leaves out an imported rule whose citation the tree no longer holds", async () => {
@@ -1386,6 +1399,7 @@ it("context init --adopt leaves out an imported rule whose citation the tree no 
 			"- Always run `npm run test:unit` before pushing.",
 			"- Never edit `src/legacy/old.ts` by hand.",
 			"- Never edit `src/widgets/render.ts` without updating `src/index.ts`.",
+			"- Never add `lodash` to the dependencies.",
 			"",
 		].join("\n"),
 	);
@@ -1394,6 +1408,7 @@ it("context init --adopt leaves out an imported rule whose citation the tree no 
 	ok(imported.includes("without updating `src/index.ts`."), imported);
 	strictEqual(imported.includes("test:unit"), false, imported);
 	strictEqual(imported.includes("src/legacy"), false, imported);
+	ok(imported.includes("Never add `lodash`"), imported);
 });
 
 it("does not let a rule stated only in a sibling handbook ground a model line", async () => {

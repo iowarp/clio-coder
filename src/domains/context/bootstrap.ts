@@ -58,7 +58,7 @@ import {
 	orderSectionsForWorkers,
 	type ProtectedHandbook,
 } from "./handbook-budget.js";
-import { handbookLedgerPath } from "./handbook-ledger.js";
+import { handbookLedgerPath, handbookRoot } from "./handbook-ledger.js";
 import { instructionUnits } from "./instruction-units.js";
 import { ContextOperationAbortError } from "./operation-result.js";
 import { packageManager } from "./package-manager.js";
@@ -75,7 +75,7 @@ import {
 	statePath as resolveStatePath,
 	writeClioState,
 } from "./state.js";
-import { contradictingFact, factClaims, type TreeFact, treeFacts } from "./tree-facts.js";
+import { contradictingFact, factClaims, forbidsCitation, type TreeFact, treeFacts } from "./tree-facts.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
@@ -2639,9 +2639,14 @@ function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
  * or every concrete file it names exists and its text survives grounding.
  */
 function staleCitationReason(line: string, corpus: ModelGroundingCorpus): string | null {
-	const citations = [...line.matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? "").filter(Boolean);
-	if (citations.length === 0) return null;
+	const cited = [...line.matchAll(CODE_TOKEN_RE)].filter((match) => match[1]);
+	if (cited.length === 0) return null;
+	// A citation the rule forbids bringing in is expected to be absent.
+	const unforbidden = cited.filter((match) => !forbidsCitation(line, match.index));
+	if (unforbidden.length === 0) return null;
+	const citations = unforbidden.map((match) => match[1] ?? "");
 	const missing = citations.filter((token) => !groundedToken(token, corpus));
+	if (missing.length === 0 && unforbidden.length < cited.length) return null;
 	const missingFile = missing.some((token) => CONCRETE_FILE_RE.test(citedPath(token)));
 	if (!missingFile && groundedModelBody(line, corpus).length > 0) return null;
 	return missing.length > 0
@@ -2822,23 +2827,33 @@ export interface HandbookVerification {
 }
 
 /** The enclosing repository root, as the handbook walk finds it; outside a repository, `cwd` itself. */
-function handbookRoot(cwd: string): string {
-	let directory = resolve(cwd);
-	while (!existsSync(join(directory, ".git"))) {
-		const parent = dirname(directory);
-		if (parent === directory) return resolve(cwd);
-		directory = parent;
-	}
-	return directory;
-}
-
 /** The index, less every file the tree no longer holds, so a deleted file never grounds a citation. */
-function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<string>): Codewiki {
+function codewikiOnTree(codewiki: Codewiki, repositoryFiles: ReadonlyArray<string>, root: string): Codewiki {
 	const present = new Set(repositoryFiles);
 	const files = codewiki.files.filter((file) => present.has(file.path));
-	if (files.length === codewiki.files.length) return codewiki;
-	const ids = new Set(files.map((file) => file.id));
-	return { ...codewiki, files, symbols: codewiki.symbols.filter((symbol) => ids.has(symbol.fileId)) };
+	const paths = new Map(files.map((file) => [file.id, file.path]));
+	const texts = new Map<string, string>();
+	const textOf = (path: string): string => {
+		let text = texts.get(path);
+		if (text === undefined) {
+			try {
+				text = readFileSync(join(root, path), "utf8");
+			} catch {
+				text = "";
+			}
+			texts.set(path, text);
+		}
+		return text;
+	};
+	// A symbol counts only while its file still names it: an index older than the tree keeps removed functions.
+	const symbols = codewiki.symbols.filter((symbol) => {
+		const path = paths.get(symbol.fileId);
+		if (path === undefined) return false;
+		const name = symbol.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		return new RegExp(`(?<![\\w$])${name}(?![\\w$])`).test(textOf(path));
+	});
+	if (files.length === codewiki.files.length && symbols.length === codewiki.symbols.length) return codewiki;
+	return { ...codewiki, files, symbols };
 }
 
 /**
@@ -2863,7 +2878,7 @@ export async function verifyHandbook(cwd: string): Promise<HandbookVerification>
 	const projectType = detectProjectType(root);
 	const indexed = readCodewiki(root);
 	const codewiki = indexed
-		? codewikiOnTree(indexed, repositoryFiles)
+		? codewikiOnTree(indexed, repositoryFiles, root)
 		: (await buildCodewikiCandidate(root, projectType)).codewiki;
 	const enforcement = collectEnforcementInventory(root, repositoryFiles);
 	const adoption = scanAgentConfigs({ cwd: root, includeGlobal: false });
