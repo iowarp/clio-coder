@@ -67,6 +67,7 @@ export const coreTests = [
 	"detached-batch-wake",
 	"dispatch-prefix-stagger",
 	"monitor-steer-tools",
+	"dispatch-write-root-request",
 	"gateway-authority",
 	"mutation-atomicity",
 	"open-browser",
