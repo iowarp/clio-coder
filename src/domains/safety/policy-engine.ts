@@ -77,6 +77,7 @@ import {
 	bareInlineShellScript,
 	commandArgumentSegments,
 	decodedLocaleQuoting,
+	extractCommandCdScopedTargets,
 	extractCommandDeleteTargets,
 	extractCommandPathWalks,
 	extractCommandWriteTargets,
@@ -850,15 +851,15 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (pathBlock !== null) {
 			return { reasonCode: pathBlock.reasonCode, reasons: [pathBlock.reason], policySource: "project-policy" };
 		}
-		// A shell target is also judged from every directory a literal cd in the
-		// command reaches, so `cd .clio-coder && echo x > safety.yaml` meets the
-		// same rail as `echo x > .clio-coder/safety.yaml`.
-		if (call.tool === ToolNames.Bash) {
-			for (const candidate of candidates) {
+		// A shell target after a literal cd is also judged from the directory
+		// that cd leaves the shell in, so `cd .clio-coder && echo x > safety.yaml`
+		// meets the same rail as `echo x > .clio-coder/safety.yaml`.
+		if (call.tool === ToolNames.Bash && mutationCommand !== null) {
+			for (const target of extractCommandCdScopedTargets(mutationCommand)) {
 				const decision = evaluatePathPolicy(
-					candidate.operation === "delete" ? deletes : pathPolicy,
-					candidate.operation,
-					candidate.lexical,
+					target.operation === "delete" ? deletes : pathPolicy,
+					target.operation,
+					target.path,
 					callCwd,
 					walkMemo,
 				);

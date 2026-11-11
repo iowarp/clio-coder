@@ -1055,6 +1055,44 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
  * location. This intentionally covers only deterministic, path-bearing
  * patterns; broader command admission remains owned by the policy engine.
  */
+/**
+ * Write and delete targets of the steps that follow a literal `cd`, spelled
+ * from the directory that cd chain leaves the shell in (`cd ..` included).
+ * A target written before any cd is not listed: the call cwd already judges it.
+ */
+export function extractCommandCdScopedTargets(command: string): Array<{ operation: "write" | "delete"; path: string }> {
+	const out: Array<{ operation: "write" | "delete"; path: string }> = [];
+	let cdDir: string | null = null;
+	for (const tokens of expandedShellSegments(command, 0, true)) {
+		const argv = shellCommandArguments(tokens);
+		const cd = cdTarget(argv);
+		if (cd !== null) {
+			cdDir = cdDir === null || cd.startsWith("/") || cd.startsWith("~") ? cd : path.posix.join(cdDir, cd);
+			continue;
+		}
+		if (cdDir === null) continue;
+		const writes: string[] = [];
+		collectRedirectTargets(tokens, writes);
+		collectInvokedWriteTargets(argv, writes);
+		collectInPlaceEditTargets(argv, writes);
+		const deletes: string[] = [];
+		const commandIndex = commandTokenIndex(argv);
+		if (commandIndex !== null) {
+			const executable = basenameToken(argv[commandIndex]);
+			const args = pathArgs(argv, commandIndex);
+			if (executable === "rm") deletes.push(...args);
+			else if (executable === "mv" && args.length >= 2) deletes.push(...args.slice(0, -1));
+			else if (executable === "find" && argv.includes("-delete")) deletes.push(...findRoots(argv.slice(commandIndex + 1)));
+		}
+		const base = cdDir;
+		const spell = (target: string) =>
+			target.startsWith("/") || target.startsWith("~") ? target : path.posix.join(base, target);
+		for (const target of writes.filter(isInterestingWriteTarget)) out.push({ operation: "write", path: spell(target) });
+		for (const target of deletes.filter(isInterestingWriteTarget)) out.push({ operation: "delete", path: spell(target) });
+	}
+	return out;
+}
+
 export function extractCommandDeleteTargets(command: string): string[] {
 	const targets: string[] = [];
 	for (const tokens of expandedShellSegments(command)) {

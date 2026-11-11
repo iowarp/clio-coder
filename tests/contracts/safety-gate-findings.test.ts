@@ -75,6 +75,20 @@ describe("safety gate findings", () => {
 		}
 	});
 
+	it("judges a shell target from a cd only when the target follows it", () => {
+		for (const command of [
+			"npm run build > build.log 2>&1; cd dist && ls",
+			"echo x > out.txt && cd dist && ls",
+			"cd build && make && cd .. && ./run.sh > out.log",
+		]) {
+			strictEqual(kind({ tool: ToolNames.Bash, args: { command } }, "yolo"), "allow", command);
+		}
+		strictEqual(
+			kind({ tool: ToolNames.Bash, args: { command: "cd src && cd .. && cd dist && echo x > a.js" } }),
+			"block",
+		);
+	});
+
 	it("refuses a path argument longer than any real path without walking it", () => {
 		const long = Array.from({ length: 50_000 }, () => "a").join("/");
 		strictEqual(kind({ tool: ToolNames.Read, args: { path: long } }), "block");
