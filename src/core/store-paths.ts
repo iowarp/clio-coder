@@ -166,7 +166,8 @@ function storeCacheDir(cwd: string): string {
 
 /**
  * This project's directory in the clio-core mount that `<storeRoot>/backend.json`
- * names, or null: with a mount, `store get` hands back paths in it instead of copies.
+ * names, or null. `store get` hands back copies with or without a mount; a script
+ * may still read blobs through it.
  */
 function storeMountProjectDir(cwd: string): string | null {
 	try {
@@ -182,7 +183,7 @@ function storeMountProjectDir(cwd: string): string | null {
 /**
  * Trees outside the workspace the model may read: this project's store
  * directory, the clio-core cache whose copies `store get` hands back, and
- * this project's directory in a selected clio-core mount.
+ * this project's directory in a selected clio-core mount, which a script may read.
  */
 export function storeReadRoots(cwd: string): string[] {
 	const mounted = storeMountProjectDir(cwd);

@@ -20,7 +20,7 @@ export interface StoreBackend {
 	// Whole-object data path. CTE: TruncateBlob then PutBlob at offsets; GetBlob at offsets.
 	/** Never re-reads the blob's name to describe the put: a concurrent put may own it by then. */
 	putBlobFromFile(tag: string, blob: string, source: string, signal?: AbortSignal): Promise<StoreBlobPut>;
-	/** A readable local path. `copied` is true when the backend had to materialize bytes to produce it. */
+	/** A read-only local copy whose writes cannot change the stored blob. `copied` is true when the backend materialized bytes for it. */
 	getBlobAsPath(tag: string, blob: string, signal?: AbortSignal): Promise<{ path: string; copied: boolean }>;
 	// Small records. CTE: PutBlobIfAbsent, GetBlob.
 	putRecordIfAbsent(tag: string, blob: string, data: Uint8Array): Promise<"written" | "exists">;

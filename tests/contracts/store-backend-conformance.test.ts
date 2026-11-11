@@ -4,15 +4,17 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { storeProjectDir, storeTagDir } from "../../src/core/store-paths.js";
 import type { StoreBackend } from "../../src/domains/store/backend.js";
+import { createClioCoreStoreBackend } from "../../src/domains/store/backends/clio-core.js";
 import { openStoreBackend } from "../../src/domains/store/index.js";
 import { StoreRefusal } from "../../src/domains/store/types.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { memoryHost } from "../harness/store-memory-host.js";
 
 function refusedWith(reason: string) {
 	return (error: unknown) => error instanceof StoreRefusal && error.reason === reason;
 }
 
-/** The contract every backend must pass; a clio-core backend calls this with its own factory later. */
+/** The contract every backend must pass. */
 export function runStoreBackendConformance(name: string, make: (cwd: string) => Promise<StoreBackend>): void {
 	async function withBackend(fn: (backend: StoreBackend, scratch: string, cwd: string) => Promise<void>) {
 		const env = await isolateClioEnv("clio-coder-store-");
@@ -118,28 +120,6 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 			}
 		}));
 
-	test(`${name}: links in a blob's parents and tags resolving outside the project are refused`, (t) =>
-		withBackend(async (backend, scratch, cwd) => {
-			if (backend.kind !== "local") {
-				t.skip("links can be planted only in the local layout");
-				return;
-			}
-			await backend.getOrCreateTag("t");
-			const source = join(scratch, "s");
-			writeFileSync(source, "s");
-			const outside = join(scratch, "outside");
-			mkdirSync(outside);
-			symlinkSync(outside, join(storeTagDir(cwd, "t"), "blobs", "dir"));
-			await rejects(backend.putBlobFromFile("t", "dir/x", source), refusedWith("is-link"));
-			deepStrictEqual(readdirSync(outside), []);
-			const tagsDir = join(storeTagDir(cwd, "t"), "..");
-			mkdirSync(join(outside, "evil", "blobs"), { recursive: true });
-			writeFileSync(join(outside, "evil", "tag.json"), "{}");
-			symlinkSync(join(outside, "evil"), join(tagsDir, "evil"));
-			await rejects(backend.putBlobFromFile("evil", "x", source), refusedWith("is-link"));
-			await rejects(backend.delTag("evil"), refusedWith("is-link"));
-		}));
-
 	test(`${name}: tag attributes keep the CTE size limits`, () =>
 		withBackend(async (backend) => {
 			await backend.getOrCreateTag("t");
@@ -152,6 +132,41 @@ export function runStoreBackendConformance(name: string, make: (cwd: string) => 
 }
 
 runStoreBackendConformance("local", openStoreBackend);
+runStoreBackendConformance("clio-core", async (cwd) =>
+	createClioCoreStoreBackend(cwd, memoryHost(), { cacheRoot: join(cwd, "..", "cache") }),
+);
+// The mount holds nothing here, so any path the backend hands back from it fails the contract.
+runStoreBackendConformance("clio-core with a mount", async (cwd) => {
+	const mount = join(cwd, "..", "mount");
+	mkdirSync(mount, { recursive: true });
+	return createClioCoreStoreBackend(cwd, memoryHost(), { cacheRoot: join(cwd, "..", "cache"), mount });
+});
+
+test("local: links in a blob's parents and tags resolving outside the project are refused", async () => {
+	const env = await isolateClioEnv("clio-coder-store-links-");
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd, { recursive: true });
+		const backend = await openStoreBackend(cwd);
+		const scratch = env.dir;
+		await backend.getOrCreateTag("t");
+		const source = join(scratch, "s");
+		writeFileSync(source, "s");
+		const outside = join(scratch, "outside");
+		mkdirSync(outside);
+		symlinkSync(outside, join(storeTagDir(cwd, "t"), "blobs", "dir"));
+		await rejects(backend.putBlobFromFile("t", "dir/x", source), refusedWith("is-link"));
+		deepStrictEqual(readdirSync(outside), []);
+		const tagsDir = join(storeTagDir(cwd, "t"), "..");
+		mkdirSync(join(outside, "evil", "blobs"), { recursive: true });
+		writeFileSync(join(outside, "evil", "tag.json"), "{}");
+		symlinkSync(join(outside, "evil"), join(tagsDir, "evil"));
+		await rejects(backend.putBlobFromFile("evil", "x", source), refusedWith("is-link"));
+		await rejects(backend.delTag("evil"), refusedWith("is-link"));
+	} finally {
+		env.restore();
+	}
+});
 
 test("local: a blob named *.tmp is listed; only the backend's own temp siblings are hidden", async () => {
 	const env = await isolateClioEnv("clio-coder-store-tmp-");

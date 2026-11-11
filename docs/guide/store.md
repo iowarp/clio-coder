@@ -48,5 +48,5 @@ The command probes the interpreter, the daemon and its version, the host and a d
 - A clio-core space reserved over `agentspace/<project key>/` charges both the records and the data blobs, so its space usage covers records and data (agentspace operator 01d8a7d or later).
 - A put over an existing blob asks first, as a replace does on the local backend; clio-core keeps no blob versions.
 - `rm-tag` removes the tag's blob files from the clio filesystem along with its records, so their space is freed and a re-created tag starts empty. A runtime whose filesystem binding cannot remove directories leaves the empty directories behind.
-- With a `--mount`, `store get` returns the path inside the mount, and the model may read it.
+- With a `--mount`, `store get` still hands back a read-only copy, as without one: a write through the mount would change the blob with no record or lock. A script may still read blobs through the mount.
 - Through the FUSE mount, `close()` publishes a file's size asynchronously. A writer that hands a file to a reader outside the mount calls `fsync` before closing it (or the runtime runs with `CLIO_FUSE_ASYNC_FLUSH=0`).

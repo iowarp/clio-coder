@@ -42,7 +42,10 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
 export interface ClioCoreStoreOptions {
 	/** Pool the host must address; `startCoreHost` was launched with it. Defaults to the chain top. */
 	pool?: string;
-	/** A `clio_cte_fuse` mount over the same pool; `getBlobAsPath` returns paths in it instead of copying. */
+	/**
+	 * A `clio_cte_fuse` mount over the same pool. `getBlobAsPath` still hands back a read-only copy, since a write
+	 * through the mount would change the blob with no record or lock. A path in the mount still maps back to its blob.
+	 */
 	mount?: string;
 	/** Root of the materialization cache; defaults to `<cacheDir>/store`. */
 	cacheRoot?: string;
@@ -317,7 +320,7 @@ export async function createClioCoreStoreBackend(
 				);
 				if (typeof put.sha256 !== "string" || !SHA256_HEX.test(put.sha256))
 					throw new StoreRefusal("io", `The clio-core host stored ${tag}:${blob} without reporting its sha256.`);
-				if (options.mount === undefined) await refreshCached(tag, blob, signal);
+				await refreshCached(tag, blob, signal);
 				return {
 					bytes: put.bytes,
 					modifiedMs: put.modifiedMs,
@@ -328,14 +331,7 @@ export async function createClioCoreStoreBackend(
 			}),
 
 		getBlobAsPath: (tag, blob, signal) =>
-			guarded(async () => {
-				if (options.mount !== undefined) {
-					if ((await statBlob(tag, blob)) === null)
-						throw new StoreRefusal("not-found", `Tag ${tag} has no blob named ${blob}.`);
-					return { path: path.join(options.mount, physical(tag), blob), copied: false };
-				}
-				return { path: await materialize(tag, blob, signal), copied: true };
-			}),
+			guarded(async () => ({ path: await materialize(tag, blob, signal), copied: true })),
 
 		putRecordIfAbsent: (tag, blob, data) =>
 			guarded(async () => {

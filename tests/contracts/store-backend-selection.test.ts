@@ -100,7 +100,7 @@ describe("store backend selection", () => {
 			}
 		}));
 
-	it("a clio-core mount's project directory is a store read root, since get hands back paths in it", () =>
+	it("a clio-core mount's project directory is a store read root, since a script may read blobs through it", () =>
 		withHome(async (dir, root) => {
 			const mount = join(dir, "mnt");
 			const inMount = join(mount, "agentspace", storeProjectKey(storeProjectRoot(root)));
