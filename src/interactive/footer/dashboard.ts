@@ -54,11 +54,6 @@ import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import type { AgentWorkFacts, ContextEngineFacts, SessionFacts, ToolTallySnapshot, WorkspaceFacts } from "./widgets.js";
 import { fitDashboardLine, formatToolTally } from "./widgets.js";
 
-/** A run on the local node that is not a remote HTTP gateway call holds a local worker slot. */
-export function usesLocalCapacity(row: Pick<DispatchBoardRow, "node" | "runtimeKind">): boolean {
-	return (row.node === undefined || row.node === "local") && row.runtimeKind !== "http";
-}
-
 export type { ToolTallySnapshot } from "./widgets.js";
 
 export type FooterDashboardMode = "compact" | "expanded";
@@ -375,7 +370,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				contextActivity: deps.getContextActivity?.() ?? null,
 				lastTurn: deps.getLastTurnSummary?.() ?? null,
 				taskBoard: deps.getTaskBoard?.() ?? null,
-				localCapacity: dispatch.some(usesLocalCapacity) ? (deps.getLocalCapacity?.() ?? null) : null,
+				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
 			silenceNotes: status
 				? silenceNoteForms(
