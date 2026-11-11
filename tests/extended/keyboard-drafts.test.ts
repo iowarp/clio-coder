@@ -186,7 +186,7 @@ it("a removed command name is an unknown command like any other", () => {
 		notice: (_level: string, text: string) => notices.push(text),
 		render: noop,
 	} as unknown as SlashCommandContext;
-	for (const line of ["/background", "/editor", "/branch", "/skills", "/share", "/delegate codex task"]) {
+	for (const line of ["/branch", "/skills", "/share", "/delegate codex task"]) {
 		const parsed = parseSlashCommand(line);
 		assert.equal(parsed.kind, "unknown-command", line);
 		assert.equal(dispatchSlashCommand(parsed, context), "rejected", line);
@@ -195,6 +195,24 @@ it("a removed command name is an unknown command like any other", () => {
 		notices.every((text) => !/ is now /u.test(text)),
 		notices.join("\n"),
 	);
+});
+it("a command that became a key answers with that key", () => {
+	const notices: string[] = [];
+	const context = {
+		notice: (_level: string, text: string) => notices.push(text),
+		render: noop,
+	} as unknown as SlashCommandContext;
+	const keys: Record<string, string> = {
+		"/interrupt": "Alt+S",
+		"/editor": "Alt+G",
+		"/background": "Ctrl+G d",
+		"/notifications": "Ctrl+G x",
+	};
+	for (const [line, key] of Object.entries(keys)) {
+		notices.length = 0;
+		assert.equal(dispatchSlashCommand(parseSlashCommand(line), context), "accepted", line);
+		assert.deepEqual(notices, [`${line} is now a key: press ${key}.`], line);
+	}
 });
 it("clearing pasted input lets a newly typed bang become an intentional command", () => {
 	const f = fixture();
