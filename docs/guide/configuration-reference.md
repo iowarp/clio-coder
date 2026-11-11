@@ -490,7 +490,7 @@ Run `clio-coder context <subcommand> --help` for the installed usage. The subcom
 | `--preview` | For `context init`, show the plan without writing any files. |
 | `--heuristic` | For `context init`, skip model exploration and use the deterministic generator. |
 | `--adopt` | For `context init`, refresh only the managed imported-agent-context section. |
-| `--global` | For `context init`, include global sibling agent context from the user home directory. |
+| `--global` | For `context init`, include global sibling agent context (`~/.codex/AGENTS.md`) from the interop home: `CLIO_CODER_INTEROP_HOME`, else the user home; `none` reads nothing. |
 | `--propose`, `--apply`, `--rewrite` | For `context init` over an existing CLIO-CODER.md: write an ignored draft, update the handbook from a draft grounded in it, or replace it with a fresh draft that ignores it. |
 | `--accept [<path or id>]` | For `context init`, write a stored proposal to CLIO-CODER.md unchanged, only while the handbook still matches the one the proposal was drafted from. |
 | `--depth` | For `context init`, exploration bound: `quick` (8 calls, 2 minutes), `standard` (16, 4) or `deep` (32, 8). For `context wiki`, generation depth: `auto`, `simple`, `medium`, or `detailed`. |

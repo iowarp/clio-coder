@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { interopUserHome } from "../../src/core/xdg.js";
+import { scanAgentConfigs } from "../../src/domains/context/adoption.js";
 import { discoverInteropInventory } from "../../src/domains/interop/inventory.js";
 import { INTEROP_AGENT_KINDS } from "../../src/domains/interop/registry.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
@@ -100,4 +101,27 @@ it("opencode skills under XDG_CONFIG_HOME load from the root inventory lists", a
 		loadSkills({ cwd }).items.some((item) => item.name === "xdg-only"),
 		true,
 	);
+});
+
+it("context init --global reads the interop home and nothing when it is none", async (t) => {
+	const env = await isolateClioEnv("clio-interop-global-");
+	t.after(() => env.restore());
+	const operatorHome = join(env.dir, "operator");
+	const interopHome = join(env.dir, "interop");
+	for (const home of [operatorHome, interopHome]) {
+		mkdirSync(join(home, ".codex"), { recursive: true });
+		writeFileSync(join(home, ".codex", "AGENTS.md"), "- Always keep responses concise.\n");
+	}
+	const cwd = join(env.dir, "workspace");
+	mkdirSync(cwd, { recursive: true });
+	process.env.HOME = operatorHome;
+	const globalPaths = () =>
+		scanAgentConfigs({ cwd, includeGlobal: true })
+			.sourceSnapshots.filter((snapshot) => snapshot.scope === "global")
+			.map((snapshot) => snapshot.path);
+
+	process.env.CLIO_CODER_INTEROP_HOME = interopHome;
+	deepStrictEqual(globalPaths(), [join(interopHome, ".codex", "AGENTS.md")]);
+	process.env.CLIO_CODER_INTEROP_HOME = "none";
+	deepStrictEqual(globalPaths(), []);
 });

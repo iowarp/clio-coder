@@ -3,6 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { interopUserHome } from "../../core/xdg.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { instructionUnits } from "./instruction-units.js";
 import type { TreeFact } from "./tree-facts.js";
@@ -725,8 +726,10 @@ export function adoptionSnapshotsHash(snapshots: ReadonlyArray<AdoptionSourceSna
 
 export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResult {
 	const cwd = resolve(options.cwd);
-	const home = resolve(options.homeDir ?? homedir());
-	const includeGlobal = options.includeGlobal === true;
+	// Global sources live under the interop home; CLIO_CODER_INTEROP_HOME=none leaves none to read.
+	const userHome = options.homeDir !== undefined ? resolve(options.homeDir) : interopUserHome();
+	const home = userHome === null ? resolve(homedir()) : resolve(userHome);
+	const includeGlobal = options.includeGlobal === true && userHome !== null;
 	const sources: AdoptionSource[] = [];
 	const rejected: AdoptionRejectedSource[] = [];
 	let acceptedSourceBytes = 0;
@@ -883,14 +886,17 @@ export function adoptionSourcesChanged(
 	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
 	options: AdoptionSourcesChangedOptions = {},
 ): boolean {
-	const homeDir = resolve(options.homeDir ?? inferAdoptionHome(snapshots) ?? homedir());
+	const userHome =
+		options.homeDir ?? (interopUserHome() === null ? null : (inferAdoptionHome(snapshots) ?? interopUserHome()));
+	const homeDir = resolve(userHome ?? homedir());
 	const cwd = options.cwd ? resolve(options.cwd) : inferAdoptionCwd(snapshots, homeDir);
-	if (!cwd) return recordedAdoptionSourcesChanged(snapshots, homeDir);
+	if (!cwd) return recordedAdoptionSourcesChanged(snapshots, homeDir, userHome !== null);
 
 	const current = scanAgentConfigs({
 		cwd,
 		homeDir,
-		includeGlobal: options.includeGlobal ?? snapshots.some((snapshot) => snapshot.scope === "global"),
+		includeGlobal:
+			userHome !== null && (options.includeGlobal ?? snapshots.some((snapshot) => snapshot.scope === "global")),
 		...(options.workspaceFiles ? { workspaceFiles: options.workspaceFiles } : {}),
 	}).sourceSnapshots;
 	return adoptionSnapshotsHash(current) !== adoptionSnapshotsHash(snapshots);
@@ -903,10 +909,11 @@ export function adoptionSourcesChanged(
  */
 function recordedAdoptionSourcesChanged(
 	snapshots: ReadonlyArray<AdoptionSourceSnapshot>,
-	homeDirOverride?: string,
+	homeDir: string,
+	globalReadable: boolean,
 ): boolean {
-	const homeDir = resolve(homeDirOverride ?? inferAdoptionHome(snapshots) ?? homedir());
 	for (const snapshot of snapshots) {
+		if (snapshot.scope === "global" && !globalReadable) return true;
 		const current = readCandidate(
 			{
 				path: snapshot.path,
