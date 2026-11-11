@@ -83,6 +83,16 @@ export function restartContinuationMessage(text: string, buildId: string | null)
 /** Longest task text `/restart <text>` carries into the restarted session. */
 export const RESTART_CONTINUATION_MAX = 2000;
 
+/** The first turn of a restarted session: "Restarted on build <id> (<commit>)." then the task; no parenthesis without a commit. */
+export function formatRestartContinuation(
+	buildId: string | null | undefined,
+	commit: string | null | undefined,
+	text: string,
+): string {
+	const build = buildId || "source";
+	return `Restarted on build ${build}${commit ? ` (${commit})` : ""}. ${text}`;
+}
+
 function restartContinuationPath(stateDir: string): string {
 	return join(stateDir, "restart-continuation.json");
 }
