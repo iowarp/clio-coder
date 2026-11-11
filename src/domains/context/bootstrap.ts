@@ -53,7 +53,9 @@ import type { Fingerprint } from "./fingerprint.js";
 import {
 	fitGeneratedHandbook,
 	handbookBlocks,
+	markWorkerScopes,
 	normalizeHandbookRule,
+	orderSectionsForWorkers,
 	type ProtectedHandbook,
 } from "./handbook-budget.js";
 import { handbookLedgerPath } from "./handbook-ledger.js";
@@ -81,6 +83,8 @@ export interface BootstrapStructuredOutput {
 	invariants: string[];
 	sections?: ClioMdSection[];
 	importedAgentContext?: string;
+	conventionsOverride?: string;
+	sectionsBeforeConventions?: number;
 }
 
 export interface BootstrapIo {
@@ -2194,10 +2198,16 @@ function stabilizeGeneratedOutput(
 			!restatesArchitecture(rule) &&
 			!duplicatesCarried(rule),
 	);
-	const retainedInvariants = [
-		...protectedInvariants,
-		...modelInvariants.slice(0, Math.max(0, HANDBOOK_TARGETS.invariants - protectedInvariants.length)),
-	];
+	// A worker receives the invariants ahead of every other rule, so model rules stop at the count and the
+	// total length that leave its budget room for the Tests and Gotchas rules.
+	const retainedInvariants = [...protectedInvariants];
+	let invariantChars = retainedInvariants.reduce((sum, rule) => sum + rule.length, 0);
+	for (const rule of modelInvariants) {
+		if (retainedInvariants.length >= HANDBOOK_TARGETS.invariants) break;
+		if (invariantChars + rule.length > HANDBOOK_TARGETS.invariantsTotalChars) continue;
+		retainedInvariants.push(rule);
+		invariantChars += rule.length;
+	}
 	const uncarriedInvariantTokens = retainedInvariants.filter((rule) => !carried.includes(rule)).map(handbookRuleTokens);
 	const typescriptConvention = tsconfigConvention(
 		input.cwd,
@@ -2335,7 +2345,7 @@ function stabilizeGeneratedOutput(
 		conventions: retainedConventions.map(fixIds),
 		invariants: retainedInvariants.map(fixIds),
 		sections: [
-			...retainedOrdinarySections.map((section) => {
+			...orderSectionsForWorkers(retainedOrdinarySections).map((section) => {
 				const body = handbookBlocks(section.body).map(fixIds).join("\n");
 				return body === section.body ? section : { ...section, body };
 			}),
@@ -2403,6 +2413,8 @@ function bootstrapOutputFromParsed(parsed: ParsedClioMd): BootstrapStructuredOut
 		out.sections = parsed.sections.map((section) => ({ title: section.title, body: section.body }));
 	}
 	if (parsed.importedAgentContext) out.importedAgentContext = parsed.importedAgentContext;
+	if (parsed.conventionsOverride) out.conventionsOverride = parsed.conventionsOverride;
+	if (parsed.sectionsBeforeConventions) out.sectionsBeforeConventions = parsed.sectionsBeforeConventions;
 	return out;
 }
 
@@ -3389,10 +3401,12 @@ async function runBootstrapWork(
 		output = replaceImportedAgentContext(output, renderImportedAgentContext(adoption));
 	}
 	if (shouldGenerate && generation.mode !== "existing") {
-		output = fitGeneratedHandbook(output, protectedContent, ({ chars, lines }) =>
-			warn(
-				input.io,
-				`  warning: the carried and authored hard invariants and carried section blocks exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
+		output = markWorkerScopes(
+			fitGeneratedHandbook(output, protectedContent, ({ chars, lines }) =>
+				warn(
+					input.io,
+					`  warning: the carried and authored hard invariants and carried section blocks exceed the CLIO-CODER.md target on their own (${chars} characters, ${lines} lines; target ${HANDBOOK_TARGETS.chars} and ${HANDBOOK_TARGETS.lines}); they were kept whole. Shorten or retire them in the handbook.\n`,
+				),
 			),
 		);
 	}

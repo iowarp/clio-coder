@@ -7,6 +7,11 @@ import { runInitCommand } from "../../src/cli/init.js";
 import { type BootstrapRunTelemetry, runBootstrap } from "../../src/domains/context/bootstrap.js";
 import { HANDBOOK_TARGETS, serializeClioMd } from "../../src/domains/context/clio-md.js";
 import { fitGeneratedHandbook } from "../../src/domains/context/handbook-budget.js";
+import {
+	compileHandbook,
+	selectWorkerHandbook,
+	workerHandbookAudience,
+} from "../../src/domains/context/handbook-units.js";
 import { readClioState } from "../../src/domains/context/state.js";
 import type { DispatchContract } from "../../src/domains/dispatch/contract.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -37,6 +42,12 @@ beforeEach(async () => {
 });
 
 afterEach(() => isolated.restore());
+
+/** The Docs and prose rules of a generated handbook, without the section's `paths=none` override line. */
+function docsRules(handbook: string): string {
+	const body = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	return body.replace(/^<!-- clio: paths=none -->\n/, "");
+}
 
 it("keeps model rules that cite real files, strings, globs and symbols, and drops invented ones", async () => {
 	mkdirSync(join(cwd, "docs", "guide"), { recursive: true });
@@ -596,7 +607,7 @@ it("keeps rules that share a carried rule's citations but state another obligati
 	ok(handbook.includes(`1. ${carried}\n2. ${approval}\n`), handbook);
 	ok(handbook.includes(`- ${convention}`), handbook);
 	ok(handbook.includes(recipe), handbook);
-	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	const docs = docsRules(handbook);
 	strictEqual(docs, [previousDocs, modelDocs].join("\n"), handbook);
 });
 
@@ -624,7 +635,7 @@ it("keeps every carried invariant when the model repeats one at the end of a ful
 	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
 	const rules = [...hard.matchAll(/^\d+\. (.+)$/gm)].map((match) => match[1]);
 	deepStrictEqual(rules.slice(0, carried.length), carried, handbook);
-	strictEqual(rules.length, 20, handbook);
+	strictEqual(rules.length, HANDBOOK_TARGETS.invariants, handbook);
 });
 
 it("carries a section title the rewrite dropped with the blocks that name a defined check", async () => {
@@ -678,7 +689,12 @@ it("carries a section title the rewrite dropped with the blocks that name a defi
 	const titles = [...handbook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
 	deepStrictEqual(titles, [
 		"Hard invariants",
-		...modelTitles.slice(0, 6),
+		"Tests",
+		"Gotchas",
+		"Change recipes",
+		"Git and release",
+		"Widgets",
+		"Rendering",
 		"Docs and prose",
 		"Verification expectations",
 	]);
@@ -756,7 +772,7 @@ it("returns a previous block under a kept title unless a protected rule states i
 		},
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
-	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	const docs = docsRules(handbook);
 	strictEqual(docs, [previousCorpus, modelDocs].join("\n"), handbook);
 });
 
@@ -821,7 +837,7 @@ it("keeps carried invariants and sections whole when model content fills the han
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	ok(handbook.length <= HANDBOOK_TARGETS.chars, `${handbook.length}`);
 	for (const rule of carried) ok(handbook.includes(rule), handbook);
-	const docs = handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	const docs = docsRules(handbook);
 	strictEqual(docs, docsRule, handbook);
 });
 
@@ -877,7 +893,7 @@ async function docsUnderFullBudget(
 	});
 	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
 	ok(handbook.trimEnd().split("\n").length <= HANDBOOK_TARGETS.lines, handbook);
-	return handbook.split("## Docs and prose")[1]?.split("\n## ")[0]?.trim() ?? "";
+	return docsRules(handbook);
 }
 
 const DOCS_RULE =
@@ -1349,4 +1365,48 @@ it("reports the rejected sibling rules with their source line and reason, in the
 		rejected.map(([status, at]) => [status, at, reasons.get(at ?? "")?.reason]),
 	);
 	deepStrictEqual(report.absorb?.handbooks, ["CLAUDE.md"]);
+});
+
+it("shapes a generated handbook so a 6000-character coder compile reaches its Tests and Gotchas rules", async () => {
+	const filler = distinctFiller();
+	await runBootstrap({
+		cwd,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: Array.from({ length: 10 }, (_, i) => filler(`Invariant ${i + 1}`, 560)),
+				conventions: [filler("Convention one", 120)],
+				sections: ["Change recipes", "Widgets", "Gotchas", "Tests"].map((title) => ({
+					title,
+					body: [1, 2].map((step) => `- ${filler(`${title} rule ${step}`, 160)}`).join("\n"),
+				})),
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	const hard = handbook.split("## Hard invariants")[1]?.split("\n## ")[0] ?? "";
+	ok(hard.trim().length <= HANDBOOK_TARGETS.invariantsTotalChars, `${hard.trim().length}`);
+	const titles = [...handbook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+	deepStrictEqual(titles.slice(0, 6), [
+		"Hard invariants",
+		"Tests",
+		"Gotchas",
+		"Conventions",
+		"Change recipes",
+		"Widgets",
+	]);
+	for (const title of ["Tests", "Gotchas", "Conventions"])
+		ok(handbook.includes(`## ${title}\n\n<!-- clio: paths=none -->\n`), handbook);
+	ok(!handbook.includes("## Change recipes\n\n<!--"), handbook);
+	const compiled = compileHandbook(handbook, "CLIO-CODER.md");
+	ok(compiled);
+	const worker = selectWorkerHandbook([compiled], {
+		audience: workerHandbookAudience("coder", null),
+		cwd,
+		workingPaths: ["README.md"],
+		maxChars: 6000,
+	}).text;
+	ok(worker.includes("Tests rule 1") && worker.includes("Gotchas rule 1"), worker);
 });

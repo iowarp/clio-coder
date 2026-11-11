@@ -45,6 +45,60 @@ export function handbookBlocks(body: string): string[] {
 	return result;
 }
 
+const LEADING_SECTIONS: ReadonlyArray<RegExp> = [/^tests?\b/i, /gotcha/i];
+const RECIPE_SECTION = /change recipe/i;
+/** Sections whose rules hold anywhere, though they cite deep paths as examples. */
+const UNSCOPED_SECTIONS: ReadonlyArray<RegExp> = [/^tests?\b/i, /gotcha/i, /\bgit\b|release/i, /\bdocs?\b|prose/i];
+const PATHS_NONE = "<!-- clio: paths=none -->";
+const OVERRIDE_LINE = /^<!--\s*clio:.*-->$/;
+
+function sectionRank(title: string): number {
+	const leading = LEADING_SECTIONS.findIndex((pattern) => pattern.test(title));
+	if (leading >= 0) return leading;
+	return RECIPE_SECTION.test(title) ? LEADING_SECTIONS.length : LEADING_SECTIONS.length + 1;
+}
+
+/**
+ * The order a fleet worker's packer fills after the invariants: Tests, Gotchas,
+ * then Conventions (placed by the serializer), Change recipes, then the rest.
+ * The sort is stable, so sections of one rank keep their order.
+ */
+export function orderSectionsForWorkers<T extends ClioMdSection>(sections: ReadonlyArray<T>): T[] {
+	return sections
+		.map((section, index) => ({ section, index, rank: sectionRank(section.title) }))
+		.sort((a, b) => a.rank - b.rank || a.index - b.index)
+		.map((entry) => entry.section);
+}
+
+/**
+ * A rule citing a path two directories deep is scoped to that path for workers.
+ * The generator's citation rule puts such paths on most lines, so the sections
+ * whose rules hold anywhere say `paths=none`; Change recipes stay path-scoped.
+ * Conventions follow the leading Tests and Gotchas sections.
+ */
+export function markWorkerScopes(output: BootstrapStructuredOutput): BootstrapStructuredOutput {
+	const sections = (output.sections ?? []).map((section) => {
+		if (!UNSCOPED_SECTIONS.some((pattern) => pattern.test(section.title))) return section;
+		const lines = section.body.split("\n");
+		if (OVERRIDE_LINE.test(lines.find((line) => line.trim().length > 0)?.trim() ?? "")) return section;
+		const rest = lines
+			.filter((line) => line.trim() !== PATHS_NONE)
+			.join("\n")
+			.trim();
+		return { ...section, body: `${PATHS_NONE}\n${rest}` };
+	});
+	let leading = 0;
+	while (leading < sections.length && sectionRank(sections[leading]?.title ?? "") < LEADING_SECTIONS.length)
+		leading += 1;
+	const { sectionsBeforeConventions: _before, ...rest } = output;
+	return {
+		...rest,
+		sections,
+		conventionsOverride: "paths=none",
+		...(leading > 0 ? { sectionsBeforeConventions: leading } : {}),
+	};
+}
+
 /** What stabilization keeps whatever the model wrote: checker, carried and authored invariants, and carried blocks. */
 export interface ProtectedHandbook {
 	invariants: ReadonlyArray<string>;
@@ -91,7 +145,7 @@ export function fitGeneratedHandbook(
 		return carried ? [carried] : [];
 	});
 	const size = (): { chars: number; lines: number } => {
-		const text = serializeClioMd({ ...result, sections: [...(result.sections ?? []), ...reserved] });
+		const text = serializeClioMd(markWorkerScopes({ ...result, sections: [...(result.sections ?? []), ...reserved] }));
 		return { chars: text.length, lines: text.trimEnd().split("\n").length };
 	};
 	const fits = (): boolean => {

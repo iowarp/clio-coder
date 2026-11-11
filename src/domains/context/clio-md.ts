@@ -23,6 +23,10 @@ export interface ParsedClioMd {
 	invariants: string[];
 	sections: ClioMdSection[];
 	importedAgentContext: string | null;
+	/** The `clio:` override comment heading the Conventions section, without its delimiters. */
+	conventionsOverride?: string;
+	/** How many custom sections precede Conventions; zero when Conventions leads them. */
+	sectionsBeforeConventions?: number;
 	fingerprint: ClioMdFingerprintFooter | null;
 	firstInit: boolean;
 	warnings: string[];
@@ -59,6 +63,10 @@ export interface SerializeClioMdInput {
 	invariants: ReadonlyArray<string>;
 	sections?: ReadonlyArray<ClioMdSection>;
 	importedAgentContext?: string;
+	/** Written as `<!-- clio: ... -->` on the line after the Conventions heading. */
+	conventionsOverride?: string;
+	/** Custom sections rendered between Hard invariants and Conventions. */
+	sectionsBeforeConventions?: number;
 	fingerprint?: ClioMdFingerprintFooter | null;
 }
 
@@ -67,16 +75,18 @@ const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
  * Size targets for a generated handbook. The parser warns past them, the
  * bootstrap clamps model output to them, and the merge caps to them. Ten
  * model invariants, eight conventions and 4000-character sections hold a change
- * recipe section as large as the one that decided real tasks, while the whole
- * file still preloads in full. The file holds up to twenty invariants because
- * the import rules a project's checker declares lead the model's own ten.
+ * recipe section as large as the one that decided real tasks. A fleet worker
+ * receives 6000 characters with invariants first, so generated invariants stop
+ * at sixteen rules and 3000 characters in total, leaving room for the Tests and
+ * Gotchas rules that follow them, and the whole file targets 12000 characters.
  */
 export const HANDBOOK_TARGETS = {
 	lines: 200,
-	chars: 24_000,
+	chars: 12_000,
 	conventions: 8,
 	conventionChars: 600,
-	invariants: 20,
+	invariants: 16,
+	invariantsTotalChars: 3000,
 	modelInvariants: 10,
 	invariantChars: 800,
 	sections: 8,
@@ -312,7 +322,11 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	if (charLen(identity) > 600) warnings.push("identity paragraph is longer than the generator target");
 
 	const sections = readSections(afterH1);
-	const conventions = parseBullets(sectionBody(sections, "conventions"));
+	const conventionsBody = sectionBody(sections, "conventions");
+	const conventions = parseBullets(conventionsBody);
+	const conventionsOverride = /^<!--\s*clio:\s*(.*?)\s*-->$/.exec(conventionsBody.split("\n", 1)[0]?.trim() ?? "")?.[1];
+	const conventionsAt = sections.findIndex((section) => section.title.toLowerCase() === "conventions");
+	const sectionsBeforeConventions = conventionsAt < 0 ? 0 : extraSections(sections.slice(0, conventionsAt)).length;
 	const invariants = parseNumbered(sectionBody(sections, "hard invariants"));
 	const customSections = extraSections(sections);
 	const importedAgentContext = sectionBody(sections, "imported agent context") || null;
@@ -350,6 +364,8 @@ export function parseClioMd(source: string): ClioMdParseResult {
 			invariants,
 			sections: customSections,
 			importedAgentContext,
+			...(conventionsOverride ? { conventionsOverride } : {}),
+			...(sectionsBeforeConventions > 0 ? { sectionsBeforeConventions } : {}),
 			fingerprint: footerResult.footer,
 			firstInit: footerResult.firstInit,
 			warnings,
@@ -373,14 +389,20 @@ function renderWithoutParse(input: SerializeClioMdInput): string {
 		lines.push("", "## Hard invariants", "", ...invariants.map((item, index) => `${index + 1}. ${item}`));
 	}
 	const conventions = input.conventions.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
-	if (conventions.length > 0) {
-		lines.push("", "## Conventions", "", ...conventions.map((item) => `- ${item}`));
-	}
-	for (const section of input.sections ?? []) {
+	const pushConventions = (): void => {
+		if (conventions.length === 0) return;
+		const override = input.conventionsOverride ? [`<!-- clio: ${normalizeInline(input.conventionsOverride)} -->`] : [];
+		lines.push("", "## Conventions", "", ...override, ...conventions.map((item) => `- ${item}`));
+	};
+	const sections = input.sections ?? [];
+	const leading = Math.min(input.sectionsBeforeConventions ?? 0, sections.length);
+	for (const [index, section] of sections.entries()) {
+		if (index === leading) pushConventions();
 		const title = normalizeInline(section.title);
 		const body = normalizeNestedMarkdown(section.body);
 		if (title.length > 0 && body.length > 0) lines.push("", `## ${title}`, "", body);
 	}
+	if (leading >= sections.length) pushConventions();
 	const imported = input.importedAgentContext ? normalizeNestedMarkdown(input.importedAgentContext) : undefined;
 	if (imported && imported.length > 0) {
 		lines.push("", "## Imported agent context", "", imported);
