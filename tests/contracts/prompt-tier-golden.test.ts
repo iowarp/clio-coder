@@ -11,7 +11,7 @@ import {
 	PROMPT_BUDGET_CHARS,
 	type WorkerPromptInputs,
 } from "../../src/domains/prompts/compiler.js";
-import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
+import { type FragmentTable, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 
 /**
  * The six prompt tiers (attended and headless at default and yolo, the coder
@@ -84,24 +84,61 @@ describe("prompts.profile v2 (S-82)", () => {
 		ok(headless <= 19_000, `headless ${headless}`);
 	});
 
-	it("stays within PROMPT_BUDGET_CHARS per tier (S-87)", () => {
-		const check = (tier: string, name: string, budget: number) => {
-			const compiled = session(name);
+	// ACP is the attended surface without the TUI: no operator interviews unless the client offers them.
+	const budgets = [
+		["attended-default", PROMPT_BUDGET_CHARS.attended],
+		["attended-yolo", PROMPT_BUDGET_CHARS.attended],
+		["acp", PROMPT_BUDGET_CHARS.acp],
+		["headless-default", PROMPT_BUDGET_CHARS.headless],
+		["headless-yolo", PROMPT_BUDGET_CHARS.headlessYolo],
+		["worker-coder", PROMPT_BUDGET_CHARS.worker],
+		["worker-scout", PROMPT_BUDGET_CHARS.worker],
+	] as const;
+	const budgetCompile = (table: FragmentTable, name: string) => {
+		const tier = JSON.parse(
+			readFileSync(join(dir, `${name === "acp" ? "attended-default" : name}.inputs.json`), "utf8"),
+		) as Tier;
+		if (tier.kind === "worker") return compileWorker(table, { ...tier.inputs, promptProfile: "v2" });
+		const { operatorInterviews: _interviews, ...sessionInputs } = tier.inputs.sessionInputs;
+		return compile(table, {
+			...tier.inputs,
+			sessionInputs: { ...(name === "acp" ? sessionInputs : tier.inputs.sessionInputs), promptProfile: "v2" },
+		});
+	};
+	const overBudget = (table: FragmentTable) =>
+		budgets.flatMap(([name, budget]) => {
+			const compiled = budgetCompile(table, name);
 			const size = compiled.systemPrompt.length;
 			const breakdown = compiled.sections.map((section) => `${section.id}~${section.tokenEstimate}t`).join(", ");
-			ok(size <= budget, `${tier} ${size} > ${budget}: ${breakdown}`);
-		};
-		check("attended", "attended-default", PROMPT_BUDGET_CHARS.attended);
-		check("headless", "headless-default", PROMPT_BUDGET_CHARS.headless);
-		check("attended", "attended-yolo", PROMPT_BUDGET_CHARS.attended);
-		check("headless", "headless-yolo", PROMPT_BUDGET_CHARS.headless);
-		for (const name of ["worker-coder", "worker-scout"]) {
-			const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as Tier;
-			if (tier.kind !== "worker") throw new Error(`${name} is not a worker tier`);
-			const compiled = compileWorker(loadFragments(), { ...tier.inputs, promptProfile: "v2" });
-			const size = compiled.systemPrompt.length;
-			ok(size <= PROMPT_BUDGET_CHARS.worker, `worker ${name} ${size} > ${PROMPT_BUDGET_CHARS.worker}`);
+			return size > budget ? [`${name} ${size} > ${budget}: ${breakdown}`] : [];
+		});
+
+	it("stays within PROMPT_BUDGET_CHARS per tier", () => {
+		deepStrictEqual(overBudget(loadFragments()), []);
+	});
+
+	it("fails the session budgets when any rendered fragment grows by 1,000 characters", () => {
+		const table = loadFragments();
+		const sessionTiers = ["attended-default", "attended-yolo", "acp", "headless-default", "headless-yolo"];
+		const rendered = new Set(
+			sessionTiers.flatMap((name) =>
+				budgetCompile(table, name).fragmentManifest.flatMap((entry) => (entry.dynamic ? [] : [entry.id])),
+			),
+		);
+		let grown = 0;
+		for (const id of rendered) {
+			const fragment = table.byId.get(id);
+			if (fragment === undefined) continue;
+			const byId = new Map(table.byId).set(id, { ...fragment, body: `${fragment.body}\n${"x".repeat(1_000)}` });
+			const bigger = { ...table, byId };
+			const changed = sessionTiers.some(
+				(name) => budgetCompile(bigger, name).systemPrompt !== budgetCompile(table, name).systemPrompt,
+			);
+			if (!changed) continue;
+			grown++;
+			ok(overBudget(bigger).length > 0, `${id} grew by 1,000 characters within every budget`);
 		}
+		ok(grown >= 5, `${grown} fragments checked`);
 	});
 
 	it("compact profile drops map examples under a 48k window (S-87)", () => {
