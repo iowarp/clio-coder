@@ -24,6 +24,7 @@ import {
 	memoryViewSignature,
 } from "./memory-view-model.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
+import { confirmOnceRail } from "./overlays/confirm-once.js";
 import { type ListOverlayItem, ListOverlayView } from "./overlays/list-overlay.js";
 import { chipRow, clioTheme, dotSep, fitUnits, rule, statusChip } from "./theme/index.js";
 import { skinEpoch } from "./theme/tokens.js";
@@ -153,6 +154,8 @@ export class MemoryOverlayView implements Component {
 	private signature: string | null = null;
 	private renderMemo: { width: number; status: string; listLines: string[]; lines: string[] } | null = null;
 	private pendingGlobalEntryId: string | null = null;
+	/** The record a first `x` asked about; a second `x` on it rejects, any other key keeps it. */
+	private armedReject: string | null = null;
 	private promotionMessage: { token: "activity" | "warning" | "success" | "error"; text: string } | null = null;
 	private promotionInFlight = false;
 	private rows: Record<string, ListOverlayItem[]> = { lessons: [], task: [], review: [], diagnostics: [] };
@@ -172,7 +175,17 @@ export class MemoryOverlayView implements Component {
 		}
 		if (handlers.onReview) {
 			actions.a = (item) => this.review(item, "approve", onChange);
-			actions.x = (item) => this.review(item, "reject", onChange);
+			actions.x = (item) => {
+				const record = this.selectedRecord(item);
+				if (record === null) return;
+				if (this.armedReject !== record.id) {
+					this.armedReject = record.id;
+					onChange();
+					return;
+				}
+				this.armedReject = null;
+				this.review(item, "reject", onChange);
+			};
 		}
 		this.list = new ListOverlayView(
 			{
@@ -253,6 +266,7 @@ export class MemoryOverlayView implements Component {
 		// A key that lands between the refresh and the repaint must act on the rows
 		// the operator is looking at, so the sync happens before the routing.
 		this.sync();
+		if (data !== "x") this.armedReject = null;
 		this.list.handleInput(data);
 	}
 
@@ -397,6 +411,7 @@ export class MemoryOverlayView implements Component {
 		}
 		const record = this.handlers.onReview ? this.selectedRecord(item) : null;
 		if (record === null) return [];
+		if (this.armedReject === record.id) return confirmOnceRail("x", "reject", record.id);
 		const state = memoryReviewState(record);
 		return [
 			...(state === "approved" ? [] : [{ key: "a", verb: "approve" }]),

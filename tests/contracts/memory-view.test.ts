@@ -143,6 +143,14 @@ test("explicit search does not invoke reject, and an operator review updates the
 	view.handleInput("\u001b");
 	view.handleInput("x");
 	await new Promise<void>((resolve) => setImmediate(resolve));
+	strictEqual(reviews, 0, "the first x only asks");
+	match(view.getHint(200), /x again/u);
+	view.handleInput("j");
+	view.handleInput("x");
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	strictEqual(reviews, 0, "another key kept the record, so this x asks again");
+	view.handleInput("x");
+	await new Promise<void>((resolve) => setImmediate(resolve));
 	strictEqual(reviews, 1);
 	doesNotMatch(plain(view), /Run node verify/u);
 	view.handleInput(nextTab);
