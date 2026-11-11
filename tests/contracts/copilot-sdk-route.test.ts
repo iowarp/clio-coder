@@ -22,6 +22,7 @@ import { classifyFailure } from "../../src/domains/dispatch/failure-classificati
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 import { copilotAuthState, detectCopilotLogin, prepareCopilotSdk } from "../../src/domains/providers/copilot-setup.js";
 import { endpointCapacityFor, registerForegroundStream } from "../../src/domains/providers/endpoint-capacity.js";
+import { toContextOverflowError } from "../../src/domains/providers/errors.js";
 import { isRetryableErrorMessage } from "../../src/domains/session/retry.js";
 import { callSettlementFromMessage, reportedModelFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { copilotSdkAccount, listCopilotSdkModels } from "../../src/engine/ai.js";
@@ -134,6 +135,11 @@ class FakeSession {
 		}
 	}
 	async run(prompt) {
+		if (prompt.includes("over budget")) {
+			this.emit("session.error", { errorType: "query", message: "Execution failed: Request exceeds the model's prompt budget after reserving output (228300 tokens; limit 200000)" });
+			this.emit("session.idle", {});
+			return;
+		}
 		if (prompt.includes("refuse")) {
 			this.emit("session.error", { errorType: "quota", errorCode: "quota_exceeded", statusCode: 429, message: "premium request allowance exhausted, rate limit" });
 			this.emit("session.idle", {});
@@ -527,6 +533,13 @@ test("a listed prompt budget below the context window is the window Clio compact
 	} finally {
 		models.splice(0, models.length, ...original);
 	}
+});
+
+test("a request over Copilot's prompt budget is a context overflow, so recovery compacts and retries", async () => {
+	const failed = await step({ messages: [user("over budget")] }, "budget-session");
+	strictEqual(failed.stopReason, "error");
+	ok(toContextOverflowError(failed.errorMessage), failed.errorMessage);
+	strictEqual(isCopilotRefusal(failed.errorMessage), false);
 });
 
 test("a model the runtime does not serve fails naming the account's enabled models; an unlisted one it serves runs", async () => {

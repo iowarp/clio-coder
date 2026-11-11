@@ -490,8 +490,9 @@ function refusalMessage(data: {
 	if (["authentication", "authorization", "policy", "quota", "rate_limit"].includes(type)) {
 		return `${COPILOT_REFUSAL_PREFIX} (${type}${detail ? `: ${detail}` : ""}): ${text}`;
 	}
-	if (type === "context_limit")
-		return `GitHub Copilot context limit: ${text} (the prompt exceeds the model's maximum context length)`;
+	// Copilot reports its prompt budget as a "query" failure; it is an overflow all the same, so recovery compacts.
+	if (type === "context_limit" || /exceeds the model's prompt budget/i.test(text))
+		return `GitHub Copilot context limit: ${text} (the prompt exceeds the context window)`;
 	return `GitHub Copilot ${type}${detail ? ` (${detail})` : ""}: ${text}`;
 }
 
