@@ -2,9 +2,10 @@
  * The one resolver for `fleet.concurrency`.
  *
  * A numeric setting is the exact worker limit for both the global pool and the
- * local node. `auto` sizes only the local node from host facts: usable CPUs,
- * available memory, and a cgroup memory limit when one is set, so a job inside
- * a batch allocation is not sized from the whole machine. Cgroup headroom counts
+ * local node. `auto` sizes only the local node from host facts: usable CPUs
+ * (capped by a cgroup CPU quota), available memory, and a cgroup memory limit
+ * when one is set, so a job inside a batch allocation or container is not sized
+ * from the whole machine. Cgroup headroom counts
  * the working set, not reclaimable page cache. The global pool under
  * `auto` resolves to the upper cap, because SSH nodes carry their own
  * `maxWorkers` and a small orchestrator host must not shrink remote work.
@@ -16,7 +17,7 @@
 
 import { readFileSync } from "node:fs";
 import { availableParallelism, freemem, totalmem } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 /** Which input decided the worker limit. */
 export type LocalCapacityBound = "configured" | "cpu" | "memory" | "cgroup" | "cap";
@@ -27,7 +28,9 @@ export interface LocalCapacity {
 }
 
 export interface HostCapacityFacts {
-	/** Usable CPUs for this process; respects affinity masks such as a Slurm cpuset. */
+	/**
+	 * Usable CPUs for this process; respects affinity masks such as a Slurm cpuset, and a cgroup v2 `cpu.max` quota.
+	 */
 	cpus: number;
 	/** Host memory available to new processes (Linux MemAvailable). */
 	availableMemoryBytes: number;
@@ -160,14 +163,18 @@ export interface HostCapacityProbe {
 	availableMemory?: () => number;
 	/** This process's cgroup v2 directory, or null when it cannot be read. */
 	cgroupDir?: () => string | null;
+	/** The cgroup v2 mount; quotas are read from `cgroupDir` up to and including it. */
+	cgroupRoot?: string;
 }
+
+const CGROUP_ROOT = "/sys/fs/cgroup";
 
 function ownCgroupDir(): string | null {
 	try {
 		const line = readFileSync("/proc/self/cgroup", "utf8")
 			.split("\n")
 			.find((entry) => entry.startsWith("0::"));
-		return line === undefined ? null : join("/sys/fs/cgroup", line.slice(3).trim());
+		return line === undefined ? null : join(CGROUP_ROOT, line.slice(3).trim());
 	} catch {
 		return null;
 	}
@@ -204,6 +211,26 @@ function cgroupWorkingSetHeadroom(dir: string, limitBytes: number): number | nul
 	return Math.max(0, limit - workingSet);
 }
 
+/**
+ * CPUs a cgroup v2 quota grants: the tightest `cpu.max` quota/period from `dir`
+ * up to `root`, rounded up as the Go and Java runtimes do, since a quota of 1.5
+ * CPUs still runs two workers at three-quarter speed. Null when no cgroup on the
+ * way sets a quota (`max`). The affinity mask still applies on top.
+ */
+function cgroupCpuQuota(dir: string, root: string): number | null {
+	let quota: number | null = null;
+	for (let current = dir; ; current = dirname(current)) {
+		const fields = readCgroupFile(current, "cpu.max")?.trim().split(/\s+/u);
+		const max = Number(fields?.[0]);
+		const period = Number(fields?.[1]);
+		if (Number.isFinite(max) && max > 0 && Number.isFinite(period) && period > 0)
+			quota = Math.min(quota ?? Number.POSITIVE_INFINITY, Math.max(1, Math.ceil(max / period)));
+		const rest = relative(root, current);
+		if (rest === "" || rest.startsWith("..") || current === dirname(current)) break;
+	}
+	return quota;
+}
+
 /** Read this process's host facts. Tests inject facts instead of calling this. */
 export function observeHostCapacityFacts(probe: HostCapacityProbe = {}): HostCapacityFacts {
 	const total = (probe.totalMemory ?? totalmem)();
@@ -212,14 +239,16 @@ export function observeHostCapacityFacts(probe: HostCapacityProbe = {}): HostCap
 	const constrained = (probe.constrainedMemory ?? (() => process.constrainedMemory()))();
 	const limited = Number.isFinite(constrained) && constrained > 0 && constrained < total;
 	let cgroupAvailableBytes: number | null = null;
+	const dir = (probe.cgroupDir ?? ownCgroupDir)();
 	if (limited) {
-		const dir = (probe.cgroupDir ?? ownCgroupDir)();
 		cgroupAvailableBytes =
 			(dir === null ? null : cgroupWorkingSetHeadroom(dir, constrained)) ??
 			(probe.availableMemory ?? (() => process.availableMemory()))();
 	}
+	const affinity = (probe.cpus ?? availableParallelism)();
+	const quota = dir === null ? null : cgroupCpuQuota(dir, probe.cgroupRoot ?? CGROUP_ROOT);
 	return {
-		cpus: (probe.cpus ?? availableParallelism)(),
+		cpus: quota === null ? affinity : Math.min(affinity, quota),
 		availableMemoryBytes: (probe.freeMemory ?? freemem)(),
 		cgroupAvailableBytes,
 	};

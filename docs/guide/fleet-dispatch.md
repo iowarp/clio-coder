@@ -515,7 +515,7 @@ of four inputs:
 
 | Input | Rule |
 | --- | --- |
-| cpu | usable CPUs from `os.availableParallelism()`, which honors affinity masks such as a Slurm cpuset |
+| cpu | usable CPUs from `os.availableParallelism()`, which honors affinity masks such as a Slurm cpuset, capped by a cgroup v2 CPU quota: the tightest `cpu.max` quota divided by its period, rounded up, in this process's cgroup or any parent, so a container granted four CPUs on a 16-CPU host counts four |
 | memory | (available memory minus a 2 GiB reserve) divided by 1 GiB per worker |
 | cgroup | when a cgroup memory limit is set: (the headroom minus a 512 MiB reserve) divided by 1 GiB per worker. The headroom is `memory.max` minus the working set, `anon` plus `shmem` (plus `kernel` where reported) from `memory.stat`, so file pages the kernel can reclaim do not count; without `memory.stat` it is Node's `process.availableMemory()`. The reserve is smaller than the host's because the host kernel is not charged to the cgroup |
 | cap | 8 |

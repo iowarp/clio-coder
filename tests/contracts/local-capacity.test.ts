@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -124,6 +124,41 @@ describe("fleet.concurrency auto resolution", () => {
 			monotonicNow: () => 0,
 		});
 		strictEqual(sampler.resolve("auto").limit, 6);
+	});
+});
+
+describe("cgroup CPU quota", () => {
+	/** A cgroup root holding `rootMax` and a child cgroup holding `childMax`, sampled with 16 CPUs in the affinity mask. */
+	function cpusUnder(rootMax: string, childMax: string): number {
+		const root = mkdtempSync(join(tmpdir(), "cgroup-root-"));
+		const child = join(root, "job");
+		mkdirSync(child);
+		writeFileSync(join(root, "cpu.max"), `${rootMax}\n`);
+		writeFileSync(join(child, "cpu.max"), `${childMax}\n`);
+		try {
+			return observeHostCapacityFacts({
+				cpus: () => 16,
+				freeMemory: () => 40 * GiB,
+				totalMemory: () => 64 * GiB,
+				constrainedMemory: () => 0,
+				cgroupRoot: root,
+				cgroupDir: () => child,
+			}).cpus;
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}
+
+	it("caps usable CPUs at the tightest cpu.max quota on the way to the cgroup root, rounded up", () => {
+		// A container granted four CPUs sees all sixteen in its affinity mask.
+		strictEqual(cpusUnder("400000 100000", "max 100000"), 4);
+		deepStrictEqual(resolveLocalConcurrency("auto", host({ cpus: cpusUnder("max 100000", "400000 100000") })), {
+			limit: 4,
+			bound: "cpu",
+		});
+		strictEqual(cpusUnder("max 100000", "150000 100000"), 2);
+		strictEqual(cpusUnder("max 100000", "max 100000"), 16);
+		strictEqual(cpusUnder("3200000 100000", "max 100000"), 16);
 	});
 });
 
