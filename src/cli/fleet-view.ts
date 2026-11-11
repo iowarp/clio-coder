@@ -209,6 +209,13 @@ function eventTranscriptLine(line: Extract<RunFeedLine, { kind: "event" }>): Run
 				detail: `${call}${reason}` || undefined,
 			};
 		}
+		case "clio_coder_helper_result_rejected": {
+			// The reason leads; the feed row keeps the whole submission.
+			const words = [line.reason, line.detail === undefined ? undefined : `submitted ${line.detail}`]
+				.filter((part) => part !== undefined)
+				.join(" · ");
+			return { at: line.at, label: "result rejected", detail: sanitizeBounded(words, DETAIL_MAX_WIDTH) || undefined };
+		}
 	}
 	return { at: line.at, label: sanitizeBounded(line.type, 64), detail };
 }

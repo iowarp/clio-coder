@@ -167,6 +167,16 @@ export interface ClioHelperResultEvent {
 	payload: StructuredHelperResult;
 }
 
+/**
+ * A terminal result the host refused, with why. `submitted` is the payload as
+ * the model sent it, serialized and cut to a bound; the parent redacts and
+ * bounds it again before the run's display feed keeps it.
+ */
+export interface ClioHelperResultRejectedEvent {
+	type: "clio_coder_helper_result_rejected";
+	payload: { reason: string; submitted: string };
+}
+
 export type ClioWorkerEvent =
 	| WorkerTelemetryFrame
 	| ClioToolStartEvent
@@ -179,4 +189,5 @@ export type ClioWorkerEvent =
 	| ClioSteerReceivedEvent
 	| ClioRunOutcomeEvent
 	| ClioFlowRestrictionsEvent
-	| ClioHelperResultEvent;
+	| ClioHelperResultEvent
+	| ClioHelperResultRejectedEvent;

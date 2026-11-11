@@ -65,6 +65,8 @@ export const TEXT_COALESCE_MS = 250;
 const TEXT_CHUNK_MAX_BYTES = 4096;
 /** Bytes kept of a reason or a call object; the viewer bounds its rows again. */
 const FACT_MAX_BYTES = 240;
+/** Bytes kept of a terminal result the worker refused, so a failed run shows what was submitted. */
+const REJECTED_RESULT_MAX_BYTES = 4096;
 
 /**
  * Events the feed does not write. Each is either covered by a richer line
@@ -252,6 +254,16 @@ function runFeedEntryFromEvent(
 	if (type === "clio_coder_steer_received") {
 		const chars = finiteCount(payload.chars);
 		return { at, type, ...(chars !== undefined ? { detail: `${chars} chars` } : {}) };
+	}
+	if (type === "clio_coder_helper_result_rejected") {
+		const reason = boundedText(payload.reason);
+		const submitted = typeof payload.submitted === "string" ? payload.submitted.trim() : "";
+		// Redacted before the bound, like every row (#446).
+		const detail =
+			submitted.length > 0
+				? truncateUtf8(redactSecretsText(submitted, createRedactionTally()), REJECTED_RESULT_MAX_BYTES, "…")
+				: undefined;
+		return { at, type, ...(detail !== undefined ? { detail } : {}), ...(reason !== undefined ? { reason } : {}) };
 	}
 	return runTailEntryFromEvent(normalized, at);
 }

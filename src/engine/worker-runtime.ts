@@ -193,6 +193,11 @@ const GRANT_REQUEST_FRAME_BUDGET_BYTES = 14 * 1024;
 /** Exact call and enforced permission conditions; never reuse an answer across asking axes. */
 /** Bound on the description a grant frame carries; the judge reads fewer characters still. */
 const GRANT_MCP_DESCRIPTION_CHARS = 1000;
+/**
+ * Characters of a refused terminal result sent to the parent, well past the
+ * feed's own bound so the parent redacts before anything it keeps is cut.
+ */
+const REJECTED_HELPER_RESULT_MAX_CHARS = 16 * 1024;
 
 /** An MCP tool's trust class and registered description for a worker's grant request, else undefined. */
 function workerMcpToolFeatures(
@@ -952,6 +957,19 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		emit({ type: "clio_coder_helper_result", payload: checked.structured });
 		return null;
 	};
+	// The refusal reason alone cannot show what the model actually submitted.
+	const reportRejectedHelperResult = (submitted: unknown, reason: string): void => {
+		let text: string;
+		try {
+			text = JSON.stringify(submitted) ?? String(submitted);
+		} catch {
+			text = String(submitted);
+		}
+		emit({
+			type: "clio_coder_helper_result_rejected",
+			payload: { reason, submitted: text.slice(0, REJECTED_HELPER_RESULT_MAX_CHARS) },
+		});
+	};
 
 	/**
 	 * Fold one successful read into the observed spans. The request says where
@@ -1227,7 +1245,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// terminal-handoff repair that exhausts its budget must run here too.
 		// Run from a `turn_end` subscriber, the exhausted bound arrived after the
 		// decision and cost one extra provider request.
-		finishTurn: ({ toolResults }) => {
+		finishTurn: ({ message, toolResults }) => {
 			if (
 				helperSchema !== null &&
 				acceptedHelperResult === null &&
@@ -1244,6 +1262,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						.map((block) => block.text)
 						.join("\n") ??
 					"The terminal handoff was not accepted.";
+				// Every refused handoff, whether the contract, the tool schema or the batch rule refused it.
+				for (const block of message.content) {
+					if (block.type === "toolCall" && block.name === INTERNAL_HELPER_RESULT_TOOL)
+						reportRejectedHelperResult(block.arguments, reason);
+				}
 				repairHelperResult(reason);
 			}
 			return helperSchema !== null && (acceptedHelperResult !== null || workerBoundFailure !== null)
@@ -1815,12 +1838,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			isTerminalAssistantMessage(event.message)
 		) {
 			const text = assistantMessageText(event.message);
+			let submitted: unknown;
 			let reason: string | null;
+			let refused = false;
 			try {
-				reason = acceptHelperResult(JSON.parse(text ?? ""));
+				submitted = JSON.parse(text ?? "");
+				reason = acceptHelperResult(submitted);
+				refused = reason !== null;
 			} catch {
 				reason = "The internal result must be a JSON object conforming to the declared contract.";
 			}
+			if (refused && reason !== null) reportRejectedHelperResult(submitted, reason);
 			if (reason !== null) repairHelperResult(reason);
 		}
 		if (
@@ -1876,6 +1904,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				const parsed = parseJsonObjectPayload(assistantMessageText(event.message) ?? "");
 				if (parsed.ok) {
 					const reason = acceptHelperResult(parsed.value);
+					if (reason !== null) reportRejectedHelperResult(parsed.value, reason);
 					if (reason !== null && !(zeroToolRepairQueued && toolExecutionsStarted === 0)) repairHelperResult(reason);
 				}
 			} else if (violation !== null && formatFailure) {

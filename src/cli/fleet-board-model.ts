@@ -311,6 +311,14 @@ function applyEvent(cursor: FoldCursor, line: Extract<RunFeedLine, { kind: "even
 		case "clio_coder_run_outcome":
 			pushRow(cursor, { at: line.at, kind: "error", text: detail, ...(line.reason ? { reason: line.reason } : {}) });
 			return;
+		case "clio_coder_helper_result_rejected":
+			pushRow(cursor, {
+				at: line.at,
+				kind: "error",
+				text: `result rejected${line.reason ? `: ${line.reason}` : ""}`,
+				...(detail.length > 0 ? { reason: `submitted ${detail}` } : {}),
+			});
+			return;
 		case "clio_coder_steer_received":
 			pushRow(cursor, { at: line.at, kind: "note", text: `steering received${detail ? ` (${detail})` : ""}` });
 			return;

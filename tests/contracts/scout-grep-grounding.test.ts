@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { RunEventJournalEntry } from "../../src/domains/dispatch/run-event-journal.js";
+import { attachRunEventJournalBridge } from "../../src/domains/dispatch/run-event-journal-bridge.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { AgentEvent } from "../../src/engine/types.js";
 import type { ClioWorkerEvent } from "../../src/engine/worker-events.js";
@@ -36,6 +38,29 @@ const submit = (line: number): Call => ({
 		proposedSubtasks: [],
 	}),
 });
+
+/** The display feed the dispatch domain would write for these worker events. */
+function feedRows(events: ReadonlyArray<AgentEvent | ClioWorkerEvent>): RunEventJournalEntry[] {
+	const rows: RunEventJournalEntry[] = [];
+	const handlers = new Map<string, (payload: unknown) => void>();
+	const bus = {
+		subscribe(channel: string, handler: (payload: unknown) => void) {
+			handlers.set(channel, handler);
+			return () => {};
+		},
+		emit() {},
+	};
+	const journal = {
+		open() {},
+		append: (_runId: string, entry: RunEventJournalEntry) => rows.push(entry),
+		result() {},
+		terminal() {},
+	};
+	const bridge = attachRunEventJournalBridge(bus as never, { journal: journal as never, nowMs: () => 0 });
+	for (const event of events) handlers.get("run.progressed")?.({ runId: "scout-run", agentId: "scout", event });
+	bridge.stop();
+	return rows;
+}
 
 async function runScout(rounds: Call[][]) {
 	const env = await isolateClioEnv("clio-scout-grep-grounding-");
@@ -111,4 +136,52 @@ test("a line the grep did not show still fails grounding", { timeout: 15_000 }, 
 	ok(exhausted?.type === "clio_coder_run_outcome");
 	strictEqual(exhausted.payload.outcomeCode, "result_contract_exhausted");
 	ok(/overlays\.ts:2 \(this run read only 6-6, 7-7\)/u.test(exhausted.payload.detail ?? ""), exhausted.payload.detail);
+});
+
+test("a citation that cannot be read fails the run and the feed keeps each rejected submission", {
+	timeout: 15_000,
+}, async () => {
+	const token = `ghp_${"a".repeat(36)}`;
+	const unreadable: Call = {
+		name: "clio_submit_result",
+		arguments: JSON.stringify({
+			findings: [{ claim: `No match; token ${token} is unrelated.`, path: "overlays.ts directory", line: 1 }],
+			needsSplit: false,
+			proposedSubtasks: [],
+		}),
+	};
+	const { result, events } = await runScout([[grep], [unreadable], [unreadable], [unreadable]]);
+	strictEqual(result.exitCode, 1);
+	const exhausted = events.find((event) => event.type === "clio_coder_run_outcome");
+	ok(exhausted?.type === "clio_coder_run_outcome");
+	strictEqual(exhausted.payload.outcomeCode, "result_contract_exhausted");
+	ok(
+		/Scout citation cannot be read: overlays\.ts directory/u.test(exhausted.payload.detail ?? ""),
+		exhausted.payload.detail,
+	);
+	const rejected = feedRows(events).filter((row) => row.type === "clio_coder_helper_result_rejected");
+	strictEqual(rejected.length, 3, "the first submission and both repairs are on the feed");
+	for (const row of rejected) {
+		ok(/Scout citation cannot be read: overlays\.ts directory/u.test(row.reason ?? ""), row.reason);
+		ok(row.detail?.includes('"path":"overlays.ts directory"'), row.detail);
+		ok(row.detail?.includes("[redacted:github-token]"), row.detail);
+		strictEqual(row.detail?.includes(token), false);
+	}
+});
+
+test("a submission the tool schema refuses is on the feed too", { timeout: 15_000 }, async () => {
+	const lineless: Call = {
+		name: "clio_submit_result",
+		arguments: JSON.stringify({
+			findings: [{ claim: "The opener is bound to a local.", path: "overlays.ts" }],
+			needsSplit: false,
+			proposedSubtasks: [],
+		}),
+	};
+	const { result, events } = await runScout([[grep], [lineless], [submit(6)]]);
+	strictEqual(result.exitCode, 0, JSON.stringify(events.filter((event) => event.type === "clio_coder_run_outcome")));
+	const rejected = feedRows(events).filter((row) => row.type === "clio_coder_helper_result_rejected");
+	strictEqual(rejected.length, 1);
+	ok(/findings\.0\.line: missing/u.test(rejected[0]?.reason ?? ""), rejected[0]?.reason);
+	ok(rejected[0]?.detail?.includes('"claim":"The opener is bound to a local."'), rejected[0]?.detail);
 });
