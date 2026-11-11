@@ -30,8 +30,8 @@ PROGRESS_SECONDS = 2.0
 CALL_SECONDS = 25.0
 # A call still waiting after STALL_SECONDS asks whether the runtime answers at all, so a stopped runtime is
 # refused in seconds rather than at CALL_SECONDS (M-40 F16).
-STALL_SECONDS = 1.0
-PROBE_SECONDS = 3.0
+STALL_SECONDS = 0.5
+PROBE_SECONDS = 2.0
 LIVENESS_TAG = "^clio-core-host-liveness$"
 ATTACH_SECONDS = 10.0
 EXIT_ATTACH_FAILED = 3
