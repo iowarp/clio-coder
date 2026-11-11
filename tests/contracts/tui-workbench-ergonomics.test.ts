@@ -151,7 +151,7 @@ for (const width of widths) {
 		);
 		const empty = board.render(width);
 		bounded(empty, width);
-		assert.match(plain(empty), /Use \/run or \/delegate to start a run\./u);
+		assert.match(plain(empty), /Use \/run to start a run\./u);
 		board.selectNext();
 		assert.equal(board.selectedRow(), null);
 		rows = [boardRow("研究-long-1"), boardRow("研究-long-2")];

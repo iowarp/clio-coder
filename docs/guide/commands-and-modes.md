@@ -447,7 +447,7 @@ Names retired in 0.8.0 answer for this release only, with a notice, and are remo
 | `/mcp` | `/mcp \| /mcp trust <id> [class] \| /mcp untrust <id>` | List MCP servers (bare, or `list`) or manage explicit trust for project MCP servers with optional action class |
 | `/extensions` | `/extensions [dev\|mute\|unmute [target] \| leave]` | Inspect extensions, manage development and muted runtimes for this session, or leave the active extension workspace with `leave`. `/reload extensions` reloads them. See [Extensions](harness-extensions.md#running-and-managing-runtimes). |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--read-only] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch and `--read-only` runs the worker [read-only](../architecture/safety-model.md#read-only-runs), on runtimes that can enforce it. |
-| `/delegate` | `/delegate [--read-only] [--share] <agent-id> <task>` | Run a configured ACP peer as a managed run with a sealed run record. `--read-only` is refused, because an ACP peer can write without asking, so no peer can guarantee a [read-only run](../architecture/safety-model.md#read-only-runs). |
+| `/delegate` | retired in 0.8.0 | Now `/run <agent-id> <task>`; `/delegate` stays hidden for one release so ACP clients keep working. |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3). `Enter` on a finished draft puts it in the composer, unsent |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
@@ -572,7 +572,7 @@ show equal percentages are never merged.
 | `/model` and `/thinking` | Choose a model for this session (Enter), or press `s` on a picker row to save it for the project or globally. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md). |
 | `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Candidates differ by sampling temperature, or by prompt angle for models that refuse a sampler, with one retry without `temperature` on an `Unsupported parameter: temperature` rejection. In `/draft`, `Enter` on a finished draft closes the overlay and appends its text to the composer below anything already typed, never sending it, and `Esc` closes without taking anything. |
 | `/council` | Runs a roster declared under `fleet.rosters` of two to five read-only members: the roster named `default`, or the one `--roster` names. With no `--roster` and no `default` roster, the notice points at `fleet.rosters` in `settings.yaml`. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/fleet share <runId>`. |
-| `/run` and `/delegate` | Start a worker or ACP peer as a managed run with a sealed run record. Its answer is separate from main-agent context until shared with `--share` or `/fleet share`. |
+| `/run` | Start a worker or ACP peer as a managed run with a sealed run record. Its answer is separate from main-agent context until shared with `--share` or `/fleet share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
 | `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
 | `/tasks` | Inspect session tasks and the durable project task inbox. ↑/↓ select a row, Tab and Shift+Tab jump between sections, and a board taller than the dock scrolls to keep the selection in view, pages with PgUp/PgDn, and shows its position. `a` adds an operator task; `h`, `d` and `x` hand, finish or drop the selected one. Acceptance checks travel with handed tasks; receipts show whether they passed. |
@@ -600,7 +600,7 @@ Use `/draft <prompt>` to get a few candidate answers without tools or transcript
 
 ### Run a worker and share the answer
 
-Use `/run <agent> <task>` to start a worker as a managed run with a sealed run record. Its answer stays separate from the main conversation until you share it with `/fleet share <runId>` or start the run with `--share`. `/delegate` starts an ACP peer; see the command table for its arguments.
+Use `/run <agent> <task>` to start a worker as a managed run with a sealed run record. Its answer stays separate from the main conversation until you share it with `/fleet share <runId>` or start the run with `--share`. The same `/run` starts a configured ACP peer: a fleet agent wins a name both use, `acp:<id>` forces the peer, and flags a peer cannot honour (`--agent-profile`, `--runtime`, `--target`, `--model`, `--thinking`, `--tool-profile`, `--require`, `--worktree`) are refused rather than dropped.
 
 ### Resuming sessions
 
@@ -927,7 +927,7 @@ safety:
 
 ## Dispatch and Built-In Agents
 
-Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/panes peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and run records are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
+Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker, a configured headless coding peer or a configured ACP peer, and `/panes peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and run records are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md) for peer setup and workspace choices.
 
 ## Environment Variables
 

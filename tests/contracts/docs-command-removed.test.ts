@@ -17,7 +17,7 @@ test("the CLI rejects docs and its former flags while normal help omits it", (t)
 	const help = run(["--help"]);
 	assert.equal(help.status, 0, help.stderr);
 	assert.doesNotMatch(help.stdout, /clio-coder docs/u);
-	assert.match(help.stdout, /^  clio-coder gui /mu);
+	assert.match(help.stdout, /^ {2}clio-coder gui /mu);
 	for (const flags of [["--help"], ["--stop"], ["safety", "--no-open"], ["--foreground"]]) {
 		const result = run(["docs", ...flags]);
 		assert.equal(result.status, 2, result.stdout + result.stderr);

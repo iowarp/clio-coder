@@ -634,6 +634,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(deps.extensionDev ? { extensionDev: deps.extensionDev } : {}),
 		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
+		isExternalAgent: (id) =>
+			(deps.getSettings?.().integrations.externalAgents.entries ?? []).some((entry) => entry.id === id),
 		...archiveCommandHost(deps.share),
 		openUsage: deps.openUsage,
 		openSideQuestion: deps.openSideQuestion,

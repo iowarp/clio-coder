@@ -256,7 +256,7 @@ function activityPage(state: FooterDashboardRenderState, width: number): string[
 	if (rows.length === 0) {
 		lines.push(
 			...emptyState(theme, "No workers yet.", width, {
-				remedy: "Rows appear here as agents start; /run or /delegate starts one.",
+				remedy: "Rows appear here as agents start; /run starts one.",
 			}),
 		);
 		return lines;

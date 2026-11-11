@@ -441,7 +441,7 @@ export const DEFAULT_DELEGATION_TURN_TIMEOUT_MS = 0;
 export const DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120_000;
 
 export interface DelegationAgentConfig {
-	/** Stable id used by /delegate and dispatch receipts. */
+	/** Stable id used by /run and dispatch receipts. */
 	id: string;
 	/** ACP stdio command. Official ACP v1 stdio messages are newline-delimited JSON-RPC. */
 	command: string;

@@ -337,11 +337,7 @@ function buildItems(deps: InteropOverlayDeps, settings: AdoptionSettings): ListO
 			...detailWithHead((width) => ({
 				head: [
 					titleRow(theme, agent.id, width, { meta: "delegation agent" }),
-					...chipRows(
-						theme,
-						[statusChip(theme, "ok", "connected"), chip(theme, `/delegate ${agent.id} <task>`, "muted")],
-						width,
-					),
+					...chipRows(theme, [statusChip(theme, "ok", "connected"), chip(theme, `/run ${agent.id} <task>`, "muted")], width),
 				],
 				rest: [
 					...commandBlock(theme, command, width),

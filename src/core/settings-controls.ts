@@ -232,7 +232,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 		"How long Clio waits for your answer to an external agent's permission request.",
 	targets: "Inference targets available for chat and workers. Add one with `clio-coder targets add`.",
 	keybindings: "Custom key overrides layered on the defaults.",
-	"delegation.agents": "Other coding agents you can call through /delegate.",
+	"delegation.agents": "Other coding agents you can call through /run.",
 	"library.catalog": "Path to the private resource catalog; blank uses the one in your config directory.",
 	"library.remote": "Git remote the catalog syncs with; blank keeps the library entirely local.",
 	"library.confirmedRemote": "The remote you approved. Syncing waits until it matches the current library remote.",

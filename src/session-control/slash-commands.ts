@@ -216,7 +216,16 @@ type SlashCommandVariant =
 	| ReportCommandVariant
 	/** `source` is the line the operator typed, echoed above the run's transcript block. */
 	| { kind: "run"; agentId: string; task: string; options: RunCommandOptions; source: string }
-	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean; readOnly?: boolean }
+	/** `oldName` marks the retired `/delegate` spelling, kept one release for ACP clients; `/run` reaches the same path. */
+	| {
+			kind: "delegate";
+			agentId: string;
+			task: string;
+			source: string;
+			share?: boolean;
+			readOnly?: boolean;
+			oldName?: true;
+	  }
 	| { kind: "btw"; question: string }
 	| { kind: "draft"; request: string; count: number }
 	/** `/oracle <question>`: one read-only advisory run briefed on the record, never on the transcript. */
@@ -696,6 +705,62 @@ export async function handleRun(
 	);
 }
 
+/**
+ * The external agent a `/run` names, or null for a fleet agent. A fleet agent
+ * wins a name collision; `acp:<id>` forces the external one.
+ */
+function externalRunAgent(agentId: string, ctx: SlashCommandContext): string | null {
+	if (agentId.startsWith("acp:")) return agentId.slice("acp:".length) || null;
+	if (ctx.listAgents?.().some((agent) => agent.id === agentId)) return null;
+	return ctx.isExternalAgent?.(agentId) === true ? agentId : null;
+}
+
+/** `/run` flags an external agent cannot honour; refusing them beats dropping them silently. */
+function externalIgnoredFlags(options: RunCommandOptions): string[] {
+	const used: Array<[boolean, string]> = [
+		[options.workerProfile !== undefined, "--agent-profile"],
+		[options.workerRuntime !== undefined, "--runtime"],
+		[options.target !== undefined, "--target"],
+		[options.model !== undefined, "--model"],
+		[options.thinkingLevel !== undefined, "--thinking"],
+		[options.toolProfile !== undefined, "--tool-profile"],
+		[(options.requiredCapabilities?.length ?? 0) > 0, "--require"],
+		[options.worktree === true, "--worktree"],
+	];
+	return used.filter(([on]) => on).map(([, flag]) => flag);
+}
+
+/** Start an external agent run: what `/run <external-id>` and the retired `/delegate` both do. */
+function startDelegate(command: Extract<SlashCommand, { kind: "delegate" }>, ctx: SlashCommandContext): void {
+	ctx.echoOperatorCommand?.(command.source);
+	const start = admissionSignal();
+	void (async () => {
+		try {
+			await handleDelegate(
+				command.agentId,
+				command.task,
+				{
+					onAdmission: start.resolve,
+					dispatch: ctx.dispatch,
+					io: ctx.io,
+					notice: ctx.notice,
+					bus: ctx.bus,
+					...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
+					...standingLimits(ctx),
+				},
+				{ share: command.share === true, readOnly: command.readOnly === true },
+			);
+		} catch (error) {
+			// A throw before admission is a delegation that never started; say so instead of losing it.
+			ctx.notice("error", `run did not start: ${error instanceof Error ? error.message : String(error)}`);
+		} finally {
+			start.resolve("refused");
+		}
+		ctx.render?.();
+	})();
+	ctx.awaitDispatchStart?.(start.promise);
+}
+
 async function handleDelegate(
 	agentId: string,
 	task: string,
@@ -1123,6 +1188,8 @@ export interface SessionCommandContext {
 		decline: (kind: InteropAgentId) => void;
 	};
 	listAgents?: () => ReadonlyArray<AgentSpec>;
+	/** Whether `id` names a configured external (ACP) agent, so `/run <id>` hands it the task. */
+	isExternalAgent?: (id: string) => boolean;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	/** `/usage [tab]`; the Health tab shows journal losses, event-loop lag, transport, quota and breakers. */
@@ -2081,6 +2148,30 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		handle(command, ctx) {
 			if (command.kind !== "run") return;
 			const { agentId, task, options } = command;
+			const external = externalRunAgent(agentId, ctx);
+			if (external !== null) {
+				const ignored = externalIgnoredFlags(options);
+				if (ignored.length > 0) {
+					ctx.notice(
+						"error",
+						`${external} is an external agent, which ignores ${ignored.join(", ")}. usage: /run <agent> [--share] [--read-only] <task>`,
+					);
+					ctx.render?.();
+					return "rejected";
+				}
+				startDelegate(
+					{
+						kind: "delegate",
+						agentId: external,
+						task,
+						source: command.source,
+						...(options.share ? { share: true } : {}),
+						...(options.readOnly ? { readOnly: true } : {}),
+					},
+					ctx,
+				);
+				return;
+			}
 			ctx.echoOperatorCommand?.(command.source);
 			const start = admissionSignal();
 			void (async () => {
@@ -2115,10 +2206,13 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "delegate",
-		rank: 2,
+		rank: 3,
 		acp: { streams: "dispatch" },
-		description: "Hand a task to an external ACP agent",
+		description: "Hand a task to an external ACP agent (now /run)",
 		group: "Work",
+		// Kept one release so ACP clients that call `delegate` keep working; `/run <external-id>` is the new spelling.
+		hidden: true,
+		retiredSince: "0.8.0",
 		kinds: ["delegate"],
 		args: {
 			parseFlagsBeforeRest: true,
@@ -2130,47 +2224,20 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		fromArgs(parsed, trimmed) {
 			if (parsed.error) return usageError("delegate", parsed.error);
-			const agentId = parsed.positionals[0] ?? "";
-			const task = parsed.positionals[1] ?? "";
 			return {
 				kind: "delegate",
-				agentId,
-				task,
+				agentId: parsed.positionals[0] ?? "",
+				task: parsed.positionals[1] ?? "",
 				source: trimmed,
 				...(parsed.flags.has("--share") ? { share: true } : {}),
 				...(parsed.flags.has("--read-only") ? { readOnly: true } : {}),
+				oldName: true,
 			};
 		},
 		handle(command, ctx) {
 			if (command.kind !== "delegate") return;
-			ctx.echoOperatorCommand?.(command.source);
-			const share = command.share === true;
-			const start = admissionSignal();
-			void (async () => {
-				try {
-					await handleDelegate(
-						command.agentId,
-						command.task,
-						{
-							onAdmission: start.resolve,
-							dispatch: ctx.dispatch,
-							io: ctx.io,
-							notice: ctx.notice,
-							bus: ctx.bus,
-							...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
-							...standingLimits(ctx),
-						},
-						{ share, readOnly: command.readOnly === true },
-					);
-				} catch (error) {
-					// A throw before admission is a delegation that never started; say so instead of losing it.
-					ctx.notice("error", `delegate did not start: ${error instanceof Error ? error.message : String(error)}`);
-				} finally {
-					start.resolve("refused");
-				}
-				ctx.render?.();
-			})();
-			ctx.awaitDispatchStart?.(start.promise);
+			if (command.oldName && ctx.keyboardActions) ctx.notice("info", "/delegate is now /run");
+			startDelegate(command, ctx);
 		},
 	},
 	{

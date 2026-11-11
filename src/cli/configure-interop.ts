@@ -149,7 +149,7 @@ async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropReviewOu
 		for (const id of result.wired) {
 			wired.push(id);
 			// A caller with a rail lists what it wrote in its own completion rows.
-			if (!io.presenter) printOk(`delegation agent ${id} added; use \`/delegate ${id} <task>\``);
+			if (!io.presenter) printOk(`delegation agent ${id} added; use \`/run ${id} <task>\``);
 		}
 	}
 	if (declined.length > 0) {

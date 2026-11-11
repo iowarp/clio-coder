@@ -136,6 +136,37 @@ test("operator slash flags reach dispatch requests", async () => {
 	equal(delegateRequest.readOnly, true);
 });
 
+test("/run hands a configured external agent the task and refuses fleet-only flags", async () => {
+	let resolveRequest!: (request: Record<string, unknown>) => void;
+	const requested = new Promise<Record<string, unknown>>((resolve) => {
+		resolveRequest = resolve;
+	});
+	const notices: string[] = [];
+	const context = {
+		dispatch: {
+			async dispatch(request: Record<string, unknown>) {
+				resolveRequest(request);
+				return {
+					runId: "peer",
+					events: (async function* () {})(),
+					finalPromise: Promise.resolve({ outcome: "succeeded", exitCode: 0 }),
+				};
+			},
+		},
+		io: {},
+		notice: (_level: string, text: string) => notices.push(text),
+		render: () => {},
+		listAgents: () => [],
+		isExternalAgent: (id: string) => id === "peer",
+	} as unknown as SlashCommandContext;
+	equal(dispatchSlashCommand(parseSlashCommand("/run --model m peer Inspect"), context), "rejected");
+	match(notices.join("\n"), /peer is an external agent, which ignores --model/);
+	equal(dispatchSlashCommand(parseSlashCommand("/run --read-only peer Inspect"), context), "accepted");
+	const request = await requested;
+	equal(request.delegationAgentId, "peer");
+	equal(request.readOnly, true);
+});
+
 test("headless --agent rejects main-agent autonomy before boot", async () => {
 	equal(await runClioRun(["--agent", "builder", "--autonomy", "yolo", "Inspect"]), 2);
 });

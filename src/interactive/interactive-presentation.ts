@@ -1086,13 +1086,21 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		...(deps.commandUnavailable ? { unavailable: deps.commandUnavailable } : {}),
 		...(deps.commandHidden ? { hidden: deps.commandHidden } : {}),
 		completionSources: {
-			agents: async () =>
-				(deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({
+			agents: async () => {
+				const fleet = (deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({
 					id: agent.id,
 					value: agent.id,
 					label: agent.id,
 					description: agent.description,
-				})),
+				}));
+				// External agents follow, marked; a name a fleet agent already owns takes `acp:` to reach them.
+				const taken = new Set(fleet.map((row) => row.id));
+				const external = (deps.getSettings?.().integrations.externalAgents.entries ?? []).map((entry) => {
+					const value = taken.has(entry.id) ? `acp:${entry.id}` : entry.id;
+					return { id: value, value, label: value, description: `external · ${entry.command}` };
+				});
+				return [...fleet, ...external];
+			},
 			targets: async () =>
 				deps.providers.list().map(({ target, reason }) => ({
 					id: target.id,

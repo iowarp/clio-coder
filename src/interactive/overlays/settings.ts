@@ -333,7 +333,7 @@ function delegationAgentsAffordance(
 		})),
 		...agents.map((agent) => ({
 			value: `${DELEGATION_REMOVE_PREFIX}${agent.id}`,
-			label: `Remove ${agent.id}; /delegate ${agent.id} stops resolving`,
+			label: `Remove ${agent.id}; /run ${agent.id} stops resolving`,
 			presentationKind: "destructive-action" as const,
 		})),
 	];

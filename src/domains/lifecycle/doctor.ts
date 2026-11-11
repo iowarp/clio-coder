@@ -966,7 +966,7 @@ export async function runDoctorInteropChecks(projectRoot: string = process.cwd()
 			ok: true,
 			level: "warn",
 			name: `interop ${agent.id}`,
-			detail: `configured peer command \`${agent.command}\` does not resolve on PATH; /delegate ${agent.id} will fail to spawn`,
+			detail: `configured peer command \`${agent.command}\` does not resolve on PATH; /run ${agent.id} will fail to spawn`,
 		});
 	}
 	if (foreign.length > 0) {

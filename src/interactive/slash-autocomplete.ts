@@ -190,7 +190,6 @@ export const COMPLETION_SLOT_MANIFEST: Readonly<Record<string, CompletionSlotNam
 	"run:flag:--agent-profile": "agent-profiles",
 	"run:flag:--target": "targets",
 	"run:flag:--model": "models",
-	"delegate:pos:agent-id": "external-agents",
 	"council:flag:--roster": "rosters",
 	"skill:pos:name": "skills",
 	"fleet/share:pos:run-id": "shareable-runs",

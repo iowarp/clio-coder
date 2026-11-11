@@ -2070,7 +2070,7 @@ function formatDispatchBoardBody(
 ): string[] {
 	const theme = clioTheme();
 	if (rows.length === 0) {
-		return emptyState(theme, "No fleet runs yet", width, { remedy: "Use /run or /delegate to start a run." });
+		return emptyState(theme, "No fleet runs yet", width, { remedy: "Use /run to start a run." });
 	}
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };
 	const endpointQueued: Record<string, number> = {};
@@ -2513,7 +2513,7 @@ export function formatTaskIslandLines(
 	if (visibleItems.length === 0) {
 		const theme = clioTheme();
 		body.push(theme.fg("annotation", "No active fleet runs."));
-		body.push(theme.fg("annotation", "Use /run or /delegate to spawn agents."));
+		body.push(theme.fg("annotation", "Use /run to spawn agents."));
 	} else {
 		for (let i = 0; i < visibleItems.length; i++) {
 			const item = visibleItems[i];
