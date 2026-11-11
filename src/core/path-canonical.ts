@@ -66,11 +66,18 @@ export function canonicalizeRawPath(rawPath: string, base: string, memo?: PathWa
 	return walkFrom(path.join(root, ...parts.slice(0, up)), parts.slice(up), memo);
 }
 
+/**
+ * One realpath(3) call where the platform has it. Node's JavaScript realpath
+ * lstats every component of every path, which made a listing of a large
+ * directory cost seconds; Windows keeps it for its drive and UNC handling.
+ */
+const realpathImpl: (target: string) => string = process.platform === "win32" ? realpathSync : realpathSync.native;
+
 function realpathOf(target: string, memo: PathWalkMemo | undefined): string | null {
 	if (memo?.realpath.has(target)) return memo.realpath.get(target) as string | null;
 	let resolved: string | null = null;
 	try {
-		resolved = path.resolve(realpathSync(target));
+		resolved = path.resolve(realpathImpl(target));
 	} catch {
 		// Missing, or a link that does not resolve.
 	}
