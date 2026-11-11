@@ -147,8 +147,9 @@ there and not in the message. Each overlaid file is marked skip-worktree in the
 worktree's index and put back before the change is taken, so it never reaches
 the task branch, even when the run dies before the restore. The overlay is
 skipped when the task names one of those files, when one is not a regular file
-Git tracks, or when the run is on a remote host. OpenCode then reads its files
-beside the compiled rules (coexist). A peer also reads them beside the usual
+Git tracks, or when the run is on a remote host, and it is dropped when Clio
+cannot write a file at spawn. OpenCode then reads its files beside the compiled
+rules in the message (coexist). A peer also reads them beside the usual
 project message when a handbook is prose without sections, because there is
 nothing to compile it into. Antigravity, ACP peers, and tier `none` keep their current
 behavior. The run record's `projectContext.peerInstructions` names the delivery,

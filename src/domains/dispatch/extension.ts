@@ -2264,6 +2264,11 @@ interface DispatchWorkerSpecInput {
 	extensionHooks?: ReadonlyArray<WorkerExtensionHook>;
 }
 
+type PeerPromptComposition = Pick<
+	DispatchLifecycleStage,
+	"dynamicPromptMessages" | "projectContext" | "compiledPromptHash" | "promptSignature" | "dynamicHash"
+>;
+
 interface DispatchLifecycleStage {
 	recipe: AgentRecipe | null;
 	pathScope: DispatchPathScope;
@@ -2294,6 +2299,8 @@ interface DispatchLifecycleStage {
 	projectContext: RunProjectContextProvenance;
 	/** What to write over a delegated harness's instruction files in the run's task worktree; absent without an overlay. */
 	peerOverlay?: ReadonlyArray<{ file: string; content: string }>;
+	/** The run's prompt with the rules in the message instead, for when the overlay cannot be written at spawn. */
+	peerCoexist?: PeerPromptComposition;
 	/** Rule ids the worker prompt compiler selected into this run's system prompt; [] when none matched. */
 	rulesApplied: string[];
 	/** Whether the operator profile rendered non-empty content into this run's system prompt. */
@@ -6103,7 +6110,7 @@ export function createDispatchBundle(
 						declaredPaths: [...pathScope.workingContextPaths, ...pathScope.writeBoundaries, ...pathScope.inferredOnlyPaths],
 					})
 				: null;
-		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
+		const dynamicContext: WorkerDynamicContext = {
 			ledgerAssignments: ledgerAssignmentsFor(req, pathScope),
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
@@ -6123,12 +6130,6 @@ export function createDispatchBundle(
 			permit,
 			...(req.taskWorktree !== undefined ? { taskWorktree: true } : {}),
 			projectPrompt,
-			// An overlay reaches the harness through its own file, so the message does not carry the rules twice.
-			...(peer?.overlay !== undefined
-				? { peerHandbook: "" }
-				: peer?.text !== undefined
-					? { peerHandbook: peer.text }
-					: {}),
 			projectReadTools:
 				target.runtime.kind === "subprocess"
 					? null
@@ -6140,17 +6141,33 @@ export function createDispatchBundle(
 			ledgerToolAvailable:
 				target.runtime.kind === "http" && targetToolCapability(target) && effectiveTools.includes(ToolNames.Ledger),
 			workspace: readWorkspaceRootFacts(cwd, req.taskWorktree?.root),
-		});
-		const projectContextProvenance = projectContextProvenanceFor(tier, dynamicPromptMessages, peer);
-		const dynamicText = dynamicPromptMessages.map((message) => message.body).join("\n\n");
-		const compiledPromptHash = promptCompositionHash([
-			systemPrompt,
-			dynamicText,
-			...(req.contextSeed ? [req.contextSeed.provenance.contentHash] : []),
-		]);
+		};
+		const composePrompt = (delivered: PeerInstructions | null): PeerPromptComposition => {
+			// An overlay reaches the harness through its own file, so the message does not carry the rules twice.
+			const peerHandbook = delivered?.overlay !== undefined ? "" : delivered?.text;
+			const messages = buildDynamicPromptMessages(req, {
+				...dynamicContext,
+				...(peerHandbook !== undefined ? { peerHandbook } : {}),
+			});
+			const text = messages.map((message) => message.body).join("\n\n");
+			const hash = promptCompositionHash([
+				systemPrompt,
+				text,
+				...(req.contextSeed ? [req.contextSeed.provenance.contentHash] : []),
+			]);
+			return {
+				dynamicPromptMessages: messages,
+				projectContext: projectContextProvenanceFor(tier, messages, delivered),
+				compiledPromptHash: hash,
+				promptSignature: hash,
+				dynamicHash: messages.length > 0 ? sha256(text) : sha256(""),
+			};
+		};
+		const composed = composePrompt(peer);
+		const { dynamicPromptMessages, compiledPromptHash, dynamicHash } = composed;
+		const projectContextProvenance = composed.projectContext;
 		const staticCompositionHash = promptHash(systemPrompt);
 		const sessionShellHash = staticCompositionHash;
-		const dynamicHash = dynamicPromptMessages.length > 0 ? sha256(dynamicText) : sha256("");
 		const personaOverride = personaOverrideFor(req, staticCompositionHash);
 		const currentToolSignature = toolSignatureOf(effectiveTools);
 		const auth = targetRequiresAuth(target.target, target.runtime)
@@ -6201,7 +6218,18 @@ export function createDispatchBundle(
 			personaOverride,
 			decisionRefs: req.decisionRefs ?? null,
 			projectContext: projectContextProvenance,
-			...(peer?.overlay !== undefined ? { peerOverlay: peer.overlay } : {}),
+			...(peer?.overlay !== undefined
+				? {
+						peerOverlay: peer.overlay,
+						peerCoexist: composePrompt({
+							delivery: "coexist",
+							files: peer.files,
+							stale: peer.stale,
+							notCarried: peer.notCarried,
+							...(peer.text !== undefined ? { text: peer.text } : {}),
+						}),
+					}
+				: {}),
 			rulesApplied: compiledWorkerPrompt.rulesApplied ?? [],
 			operatorProfileApplied: compiledWorkerPrompt.operatorProfileApplied ?? false,
 			capabilityMismatch,
@@ -7957,14 +7985,14 @@ export function createDispatchBundle(
 			const spawnNow = (): SpawnedWorker => {
 				// Nothing waits between here and spawn: the worker launches at the dispatcher's level now.
 				if (narrowPermitToLiveLevel()) spec = buildSpec();
-				const peerInstructions = lifecycle.projectContext.peerInstructions;
-				if (lifecycle.peerOverlay !== undefined && req.taskWorktree !== undefined && peerInstructions !== undefined) {
+				if (lifecycle.peerOverlay !== undefined && lifecycle.peerCoexist !== undefined && req.taskWorktree !== undefined) {
 					try {
 						if (placement !== null && placement.node.kind !== "local") throw new Error("the worktree is on another node");
 						peerOverlay = overlayTaskWorktree(req.taskWorktree.path, lifecycle.peerOverlay);
 					} catch (error) {
-						// The harness reads its own files after all; the record says so.
-						peerInstructions.delivery = "coexist";
+						// The harness reads its own files after all, so the rules go in the message and the record says coexist.
+						Object.assign(lifecycle, lifecycle.peerCoexist);
+						spec = buildSpec();
 						reportDispatchDiagnostic(`write peer instructions in task worktree ${req.taskWorktree.runId}`, error);
 					}
 				}

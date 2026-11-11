@@ -442,11 +442,23 @@ export function overlayTaskWorktree(
 				parent: realpathSync(dirname(target)),
 			};
 			git(path, ["update-index", "--skip-worktree", "--", file]);
+			try {
+				safeResourceWrite(target, content, { mode: entry.mode });
+			} catch (error) {
+				// A file the write left as it was must be seen again, or a later edit to it would never land.
+				if (readFileSync(target).equals(entry.original)) {
+					git(path, ["update-index", "--no-skip-worktree", "--", file]);
+				} else written.push(entry);
+				throw error;
+			}
 			written.push(entry);
-			safeResourceWrite(target, content, { mode: entry.mode });
 		}
 	} catch (error) {
-		restoreTaskWorktreeOverlay({ path, files: written });
+		try {
+			restoreTaskWorktreeOverlay({ path, files: written });
+		} catch {
+			// What could not be put back keeps its mark; the write failure is the one to report.
+		}
 		throw error;
 	}
 	return { path, files: written };

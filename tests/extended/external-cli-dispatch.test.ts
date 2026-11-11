@@ -312,11 +312,21 @@ for (const event of [
 		agentTools: ["read", "write"],
 		useRuntimeDefaultAgentBudget: true,
 	});
-	const bundle = makeDispatchBundle({
-		...base,
-		getContract: ((name: DomainName) =>
-			name === "context" ? { renderPromptContext } : base.getContract(name)) as typeof base.getContract,
-	});
+	// Placement runs between the prompt and the spawn: a locked worktree root there makes the overlay write fail.
+	let lockWorktree = false;
+	const bundle = makeDispatchBundle(
+		{
+			...base,
+			getContract: ((name: DomainName) =>
+				name === "context" ? { renderPromptContext } : base.getContract(name)) as typeof base.getContract,
+		},
+		{
+			resolveNode: (req) => {
+				if (lockWorktree && req.taskWorktree !== undefined) chmodSync(req.taskWorktree.path, 0o555);
+				return null;
+			},
+		},
+	);
 	await bundle.extension.start();
 	const run = async (task: string) => {
 		const dispatched = await bundle.contract.dispatch({
@@ -361,6 +371,18 @@ for (const event of [
 		equal(named.agents, agents);
 		equal(named.receipt.projectContext?.peerInstructions?.delivery, "coexist");
 		ok(named.stdin.includes("<project-rules>"), named.stdin);
+
+		// An overlay that cannot be written leaves the harness its own file and sends the rules in the message.
+		lockWorktree = true;
+		const unwritable = await run("Round the cart total");
+		lockWorktree = false;
+		const locked = unwritable.receipt.worktree?.path;
+		ok(locked);
+		chmodSync(locked, 0o755);
+		equal(unwritable.agents, agents);
+		equal(unwritable.receipt.projectContext?.peerInstructions?.delivery, "coexist");
+		ok(unwritable.stdin.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."));
+		equal(execFileSync("git", ["-C", locked, "ls-files", "-v", "AGENTS.md"], { encoding: "utf8" }), "H AGENTS.md\n");
 	} finally {
 		await bundle.extension.stop?.();
 	}
