@@ -10,6 +10,7 @@ import {
 } from "../../core/skill-activation.js";
 import type { RunOwnerTelemetryContext } from "../../core/telemetry/context.js";
 import { mainAgent } from "../../core/telemetry/context.js";
+import { isUnreportedUsageNotice } from "../../core/telemetry/pricing.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
@@ -1119,6 +1120,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		process.stderr.write(`clio-coder run: session ${sessionId}\n`);
 	};
 	const jsonProjector = createHeadlessJsonProjector();
+	// The cost cap's no-usage notice, repeated once in the exit summary when it fired this run.
+	let unreportedUsage: string | null = null;
 	const unsubscribe = chat.onEvent((event) => {
 		writeTextSessionId();
 		if (mode === "json") {
@@ -1151,6 +1154,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					: event.text;
 			process.stderr.write(`clio-coder run: ${redactUrlCredentials(text)}\n`);
 		}
+		if (event.type === "notice" && unreportedUsage === null && isUnreportedUsageNotice(event.text))
+			unreportedUsage = event.text;
 		recordToolEnd(runStats, event);
 		if (event.type === "message_end") {
 			if (event.message.role === "assistant") runStats.toolRounds.push(...readToolRounds(event.message));
@@ -1436,6 +1441,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// What the harness saw, beside the model's account; stdout stays the answer and the exit code is unchanged.
 	const observedLine = observed !== null && mode === "text" ? formatHeadlessObservedLine(observed) : null;
 	if (observedLine !== null) process.stderr.write(`${observedLine}\n`);
+	if (unreportedUsage !== null && mode === "text")
+		process.stderr.write(`clio-coder run: ${redactUrlCredentials(unreportedUsage)}\n`);
 	if (mode === "json") writeJsonHeader(true, true);
 	writeRunEnd(terminal);
 	await frameChain;

@@ -212,3 +212,8 @@ const UNREPORTED_USAGE_SPEND = "reported no token usage; its spend is estimated 
 export function unreportedUsageNotice(targetId: string): string {
 	return `${targetId} ${UNREPORTED_USAGE_SPEND}`;
 }
+
+/** Whether a notice is the one `unreportedUsageNotice` wrote. */
+export function isUnreportedUsageNotice(text: string): boolean {
+	return text.endsWith(` ${UNREPORTED_USAGE_SPEND}`);
+}
