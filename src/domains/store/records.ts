@@ -80,7 +80,7 @@ async function listRecordNames(backend: StoreBackend, tag: string, blob: string)
 	const pattern = `${escapeRegExp(blob)}#\\d{${SEQ_DIGITS}}`;
 	const names: string[] = [];
 	for (let offset = 0; ; offset += HISTORY_PAGE) {
-		const page = await backend.listBlobs(recordsTag(tag), { pattern, offset, limit: HISTORY_PAGE });
+		const page = await backend.listBlobs(recordsTag(tag), { pattern, prefix: `${blob}#`, offset, limit: HISTORY_PAGE });
 		names.push(...page.names);
 		if (!page.hasMore) return names;
 	}

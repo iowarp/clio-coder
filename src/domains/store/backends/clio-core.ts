@@ -376,6 +376,7 @@ export async function createClioCoreStoreBackend(
 					});
 					for (const name of names) {
 						if (!isRecordsTag(tag) && PUT_TEMP.test(name)) continue;
+						if (q.prefix !== undefined && !name.startsWith(q.prefix)) continue;
 						if (matcher === null || matcher.test(name)) matches.push(name);
 					}
 					if (!hasMore) break;

@@ -476,6 +476,9 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				const limit = Math.max(0, Math.floor(q.limit));
 				const wanted = offset + limit + 1;
 				const matches: string[] = [];
+				const start = q.prefix ?? "";
+				// A directory is entered only when a name under it can start with `start`.
+				const reachable = (key: string): boolean => key.startsWith(start) || start.startsWith(key);
 				const walk = async (dir: string, prefix: string): Promise<void> => {
 					let entries: Dirent[];
 					try {
@@ -494,8 +497,8 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 						const name = `${prefix}${entry.name}`;
 						// Dirent types come from lstat, so a link is neither a directory nor a file here.
 						if (entry.isDirectory()) {
-							await walk(path.join(dir, entry.name), `${name}/`);
-						} else if (entry.isFile() && !TEMP_SIBLING.test(entry.name)) {
+							if (reachable(`${name}/`)) await walk(path.join(dir, entry.name), `${name}/`);
+						} else if (entry.isFile() && !TEMP_SIBLING.test(entry.name) && name.startsWith(start)) {
 							if (matcher === null || matcher.test(name)) matches.push(name);
 						}
 					}

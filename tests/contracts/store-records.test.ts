@@ -1,10 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { runRecordsDir } from "../../src/core/run-records.js";
-import { storeProjectKey, storeProjectRoot } from "../../src/core/store-paths.js";
+import { recordsTag, storeProjectKey, storeProjectRoot, storeTagDir } from "../../src/core/store-paths.js";
 import type { StoreBackend } from "../../src/domains/store/backend.js";
 import { createClioCoreStoreBackend } from "../../src/domains/store/backends/clio-core.js";
 import type { CoreHost } from "../../src/domains/store/core-host/supervisor.js";
@@ -312,6 +312,27 @@ describe("store records", () => {
 				[1, 2, 3, 4, 5],
 			);
 		}));
+
+	it(
+		"lists one blob's records without walking the other blobs' records",
+		{ skip: process.platform === "win32" || process.getuid?.() === 0 },
+		() =>
+			withBackend(async (backend, root) => {
+				await appendRecord(backend, { kind: "note", tag: "sim", blob: "run/h", note: "mine", producedBy: by });
+				await appendRecord(backend, { kind: "note", tag: "sim", blob: "other/b", note: "theirs", producedBy: by });
+				// A walk into another blob's directory now fails, so only a listing that skips it can succeed.
+				const other = join(storeTagDir(root, recordsTag("sim")), "blobs", "other");
+				chmodSync(other, 0o000);
+				try {
+					deepStrictEqual(
+						(await readBlobHistory(backend, "sim", "run/h")).records.map((record) => record.note),
+						["mine"],
+					);
+				} finally {
+					chmodSync(other, 0o700);
+				}
+			}),
+	);
 
 	it("reports each drift value", () => {
 		const put = { identity: { bytes: 2, modifiedMs: 5, sha256: null } } as StoreRecord;

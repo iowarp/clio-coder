@@ -27,10 +27,13 @@ export interface StoreBackend {
 	getRecord(tag: string, blob: string): Promise<Uint8Array | null>;
 	// Listing and removal. CTE: GetBlobSize, BlobQuery (full-match regex), DelBlob.
 	statBlob(tag: string, blob: string): Promise<StoreBlobStat | null>;
-	/** `pattern` is a regular expression matched against the whole blob name (CTE `BlobQuery`); names come back sorted. */
+	/**
+	 * `pattern` is a regular expression matched against the whole blob name (CTE `BlobQuery`); names come back sorted.
+	 * `prefix` is a literal start every name must have, so a backend can skip the parts of the tag no such name lives in.
+	 */
 	listBlobs(
 		tag: string,
-		q: { pattern?: string; offset: number; limit: number },
+		q: { pattern?: string; prefix?: string; offset: number; limit: number },
 	): Promise<{ names: string[]; hasMore: boolean }>;
 	delBlob(tag: string, blob: string): Promise<boolean>;
 	/** The blob whose bytes a resolved local path (a `getBlobAsPath` result) holds, else null; provenance names inputs by it. */
