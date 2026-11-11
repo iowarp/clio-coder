@@ -74,7 +74,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Writers that break the same stale store lock take turns, so only one of them holds the lock.
 - `clio-coder store` reaches the store from a shell: `tags`, `ls`, `stat`, `history`, `verify`, `put`, `get`, `rm`, `rm-tag`, `adopt` (move the store of a checkout that moved) and `where`.
 - An opt-in clio-core backend: `clio-coder store backend clio-core` probes the interpreter, the clio-core daemon, its version, the host and durability, and selects clio-core for the data directory only when every check passes. Clio Coder processes share one daemon through a bundled Python host. A selected clio-core that cannot attach fails the call and never falls back to local. `store backend local` removes the selection, and switching never moves data. Local stays the default. The clio-core backend is experimental in 0.8.0 and needs a clio-core build at commit 6c54cdbf or later; the store guide says how to get one.
-- A dispatch can grant a worker store tags (`tags`) to `put` and `note` into; without a grant the worker's store stays read-only and the dispatching session puts results. With the clio-core backend selected the grant also reaches a worker on an SSH fleet node; with the local backend that grant is still refused.
+- A dispatch can grant a worker store tags (`tags`) to `put` and `note` into; without a grant the worker's store stays read-only and the dispatching session puts results. A grant to a worker on an SSH fleet node is refused at admission on every backend, because the worker there opens its own home's store; run that task on the local node or drop the tags.
 - The science-data skill starts from the store, passes store blobs to `run_script` as declared inputs instead of copying them into the tree, is offered for everyday questions about simulation data ("What variables are in the simulation output?") and grants its output tag to the workers it dispatches. The science-data pack 0.2.1 requires Clio Coder 0.8.0.
 - The store guide in the docs covers choosing a backend and what clio-core keeps across a restart. A clio-core put over an existing blob asks first, as a replace does on the local backend, and tag and blob names can no longer alias each other. A clio-core record put is synced before the call returns, so its history survives a clio-core runtime crash. On clio-core, `rm-tag` removes the tag's blob files and frees their space.
 - A clio-core call fails within 3 seconds when the runtime stops answering, a process killed by a signal releases the shared clio-core daemon, and with `--mount` the model may read the path `store get` returns.
@@ -82,6 +82,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The local backend refuses a blob name that nests under another blob or matches a blob's directory with a clear error, and a history with a limit reads only the blob's newest records.
 - A worker whose work was a `put` or `note` into its granted tag is no longer failed as "did no work", a `put` without a grant says how to get one instead of refusing an internal store path, and dispatch reads a `tags` grant a model sent as a JSON string.
 - `run_script` takes a store blob as a declared input, as `<tag>:<blob>` or the path `store get` returned: the script reads it in place, nothing is copied into the workspace, and a later `put` of its result names the blob and its hash in `used`. Other absolute input paths are still refused.
+- A blob-name pattern (`store ls`, `store verify` and the tool's `list`) is limited to 256 characters, with no backreferences and no quantified group that contains another quantifier, so a pattern cannot hang a listing.
 
 ### Reports to the maintainers
 
@@ -235,6 +236,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Evidence redaction replaces a quoted credential value (`TOKEN="a b"`, `--password 'a b'`) whole; a space inside the quotes no longer leaves the rest of the secret in the text.
 - `clio-coder mcp list` never prints the values of `env` entries in `mcp.yaml`.
 - A runtime plugin that names itself after a well-known provider no longer receives that provider's key from the environment (`xai` and `XAI_API_KEY`, for example); it gets only the variable it declares or a target's `apiKeyEnvVar`.
+- After a `read`, `grep` or shell read of a secret-bearing file such as a dotenv, a later `web_read` or `web_fetch` whose URL could carry data (a query, fragment, userinfo or long opaque path segment) asks under rule `secret-read-then-fetch`, so under yolo the judge decides; a bare address still runs.
 
 ### Desktop app
 
@@ -257,6 +259,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `context init` merges a handbook rule stated twice in different words, keeping the first wording, in invariants, conventions and each section's bullets (two rules citing different checker ids never merge). A rule citing a checker id that another id of that checker matches clearly better gets the id corrected, an id the checker lacks is reported, and preview lists the merges.
 - Compaction no longer extends a live provider session when the summary's output reservation would not fit the context window; it summarizes in a fresh request instead. The automatic compaction trigger counts the same reservation.
 - When a handbook's invariants overflow a worker's budget, part of the budget stays reserved for the worker's own handbook sections and the omitted invariants are named.
+- A `copilot-sdk` target can opt into Copilot's long-context tier with `contextTier: long_context`: its sessions ask for that tier, compact against the tier's prompt budget and use its long-context prices, and the footer, `/model` and `doctor` show the tier. Without the key nothing is sent and the default tier applies.
 
 ### Memory
 
@@ -353,6 +356,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A turn that ends while dispatched workers still run closes with "Turn ended · N workers running" instead of "✓ Done", and a `monitor` wait or collect that runs out its time ends "timed out !" instead of showing a success mark.
 - The fleet dispatch guide no longer says Clio Coder reruns the whole-repo lint when a task branch merges; it does not.
 - A dispatched coder that needs to write outside its write roots can ask for them instead of giving up: approving the request (the main agent's steer at yolo, otherwise the operator's approval card) continues the same assignment as a new attempt with the wider roots, an idle interactive session is woken to answer it, and a denial, expiry or shutdown ends the assignment saying why.
+- Under `fleet.concurrency: auto` in a container or batch job, the cgroup headroom counts the working set instead of reclaimable page cache, so reading large files no longer shrinks the local worker count, and a local capacity refusal names the limit that binds ("memory-bound at 1 from cgroup headroom; set fleet.concurrency to pin it").
 
 ### Extensions and MCP
 
