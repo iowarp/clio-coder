@@ -706,6 +706,28 @@ describe("vacuous loop checks", () => {
 		}
 	});
 
+	it("reads a runner behind an environment prefix, uv run, poetry run or sh -c, and node's default test names", () => {
+		const changed = [
+			"tests/new.test.ts",
+			"src/a-test.js",
+			"src/test-b.mjs",
+			"lib/test.js",
+			"lib/contest.js",
+			"py/test_x.py",
+		];
+		const files = (argv: string[]) => changedCheckFiles([{ argv, cwd: "" }], changed);
+		const node = ["lib/test.js", "src/a-test.js", "src/test-b.mjs", "tests/new.test.ts"];
+		deepStrictEqual(files(["node", "--test"]), node);
+		deepStrictEqual(files(["NODE_ENV=test", "node", "--test"]), node);
+		deepStrictEqual(files(["TZ=UTC", "jest"]), ["tests/new.test.ts"]);
+		deepStrictEqual(files(["bash", "-c", "pnpm build && NODE_ENV=test node --test"]), node);
+		deepStrictEqual(files(["uv", "run", "--with", "pytest-xdist", "pytest", "py"]), ["py/test_x.py"]);
+		deepStrictEqual(files(["uv", "run", "-m", "pytest"]), ["py/test_x.py"]);
+		deepStrictEqual(files(["poetry", "run", "python", "-m", "pytest"]), ["py/test_x.py"]);
+		deepStrictEqual(files(["uv", "run", "ruff", "check"]), []);
+		deepStrictEqual(files(["sh", "-c", "echo node --test"]), []);
+	});
+
 	it("a fleet loop check whose changed-test run executes a worker's test earns no Tested-by", async () => {
 		const { compileExecutionPlan } = await import("../../src/domains/dispatch/execution-plan.js");
 		const { executeFleetRun } = await import("../../src/domains/dispatch/fleet-run.js");

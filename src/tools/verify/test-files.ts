@@ -321,6 +321,60 @@ function unwrapRunner(argv: string[]): UnwrappedRunner {
 	}
 }
 
+const UV_RUN_VALUE_OPTIONS = new Set([
+	"--with",
+	"-w",
+	"--with-editable",
+	"--with-requirements",
+	"--python",
+	"-p",
+	"--package",
+	"--extra",
+	"--group",
+	"--only-group",
+	"--no-group",
+	"--env-file",
+	"--directory",
+	"--project",
+	"--index",
+	"--default-index",
+	"--index-url",
+	"--extra-index-url",
+]);
+const POETRY_RUN_VALUE_OPTIONS = new Set(["-P", "--project", "-C", "--directory"]);
+
+/**
+ * The commands a test command runs once the launchers that only set its environment or interpreter are peeled:
+ * leading `NAME=value` words, `uv run` and `poetry run` with their options (`uv run -m x` runs `python -m x`), and
+ * `sh -c` or `bash -c` over a script the shell reader can place, whose every `&&` part counts.
+ */
+function launchedCommands(argv: string[], depth = 0): string[][] {
+	let index = 0;
+	while (/^[A-Za-z_][A-Za-z0-9_]*=/u.test(argv[index] ?? "")) index += 1;
+	const words = argv.slice(index);
+	const executable = executableName(words[0] ?? "");
+	if (["sh", "bash", "dash", "zsh"].includes(executable) && words[1] === "-c" && depth < 3) {
+		const chain = shellLikeChain(words[2] ?? "", { allowAssignments: true });
+		return chain instanceof Error ? [] : chain.flatMap((segment) => launchedCommands(segment.argv, depth + 1));
+	}
+	const values = executable === "uv" ? UV_RUN_VALUE_OPTIONS : executable === "poetry" ? POETRY_RUN_VALUE_OPTIONS : null;
+	if (values !== null && words[1] === "run") {
+		let at = 2;
+		for (; (words[at] ?? "").startsWith("-"); at += 1) {
+			const option = words[at] ?? "";
+			if (option === "--") {
+				at += 1;
+				break;
+			}
+			if (executable === "uv" && (option === "-m" || option === "--module"))
+				return launchedCommands(["python", "-m", ...words.slice(at + 1)], depth);
+			if (values.has(option)) at += 1;
+		}
+		return at < words.length ? launchedCommands(words.slice(at), depth) : [];
+	}
+	return [words];
+}
+
 /**
  * Whether a test command could execute the test at `absolute` through its runner's own discovery or path filters:
  * `node --test` (or tsx) and jest or vitest, wrapped or not, pytest and unittest, `go test` and `cargo test`. A file
@@ -330,11 +384,17 @@ function unwrapRunner(argv: string[]): UnwrappedRunner {
 export function testRunExecutes(argv: ReadonlyArray<string>, cwd: string, absolute: string): boolean {
 	const relative = path.relative(cwd, absolute).split(path.sep).join("/");
 	if (relative === "" || relative.startsWith("../") || path.isAbsolute(relative)) return false;
-	const words = unwrapRunner([...argv]).argv;
+	return launchedCommands([...argv]).some((command) => runnerExecutes(command, cwd, absolute, relative));
+}
+
+function runnerExecutes(argv: string[], cwd: string, absolute: string, relative: string): boolean {
+	const words = unwrapRunner(argv).argv;
 	const runner = javascriptRunner(words);
 	if (runner !== null && !/\.[cm]?[jt]sx?$/u.test(relative)) return false;
 	if (runner === "node") {
-		if (!isTestFile(relative) && !isNodeTestDirectoryFile(relative)) return false;
+		// Node's own default names test.js, test-*.js and *-test.js are discovered too.
+		const nodeName = /(?:^|\/)(?:test|test-[^/]+|[^/]+-test)\.(?:[cm]?js|[cm]?ts)$/u.test(relative);
+		if (!isTestFile(relative) && !isNodeTestDirectoryFile(relative) && !nodeName) return false;
 		return nodeRunsFile(words, cwd, absolute) !== false;
 	}
 	if (runner !== null) {
