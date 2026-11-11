@@ -200,6 +200,8 @@ interface Wizard {
 	answer: (label: string, value: string) => void;
 	/** Save first sends one short test request; null when this run saves without one. */
 	sendTest: SendChatTest | null;
+	/** A refused-credential warning is up and asks for a credential; answering that question retires it. */
+	refusalShown: boolean;
 }
 
 interface Step {
@@ -296,7 +298,7 @@ function offeredRow(route: OfferedRoute): { label: string; hint: string } {
 		route.kind === "env-key"
 			? `${name}, with the key in ${route.source}`
 			: route.kind === "stored-login"
-				? `${name}, ${route.runtime.auth === "oauth" ? "signed in" : "stored key"}`
+				? `${name}, ${route.runtime.auth === "api-key" ? "stored key" : "signed in"}`
 				: route.kind === "configured-target"
 					? `${name}, saved in your settings`
 					: route.kind === "project"
@@ -859,7 +861,7 @@ async function reportReachability(
 				`${runtime.id === "alcf" ? "ALCF catalog reachable; inference URL not checked" : "reachable"}, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`,
 			);
 		} else if (refusedCredential(probe)) {
-			wizard.presenter.warn(refusedCredentialLine(answers));
+			warnRefused(wizard, answers);
 			return false;
 		} else if (isUntrustedCertificate(probe.error)) {
 			wizard.presenter.warn(
@@ -986,6 +988,12 @@ function refusedCredentialLine(answers: Answers): string {
 	if (answers.credential === "stored") return line("the server refused that key");
 	if (answers.credential === "keep") return line("the server refused the saved key");
 	return line("this server wants a key");
+}
+
+/** Say the credential was refused, and remember it so the next credential answer can take it down. */
+function warnRefused(wizard: Wizard, answers: Answers): void {
+	wizard.refusalShown = true;
+	wizard.presenter.warn(refusedCredentialLine(answers));
 }
 
 /**
@@ -1200,7 +1208,7 @@ const MODEL_STEP: Step = {
 			// A keyed llama.cpp or vLLM answers its health check and refuses only the model list.
 			answers.keyRequested = true;
 			answers.inventoryKey = undefined;
-			wizard.presenter.warn(refusedCredentialLine(answers));
+			warnRefused(wizard, answers);
 			return "credential";
 		}
 		if (inventory.models.length === 0) {
@@ -1726,6 +1734,7 @@ export async function runOnboardingWizard(
 				: options.verify === true
 					? sendChatTest
 					: options.verify,
+		refusalShown: false,
 	};
 
 	presenter.header(
@@ -1820,6 +1829,12 @@ export async function runOnboardingWizard(
 		wizard.goingBack = direction < 0;
 		const outcome = await step.run(wizard, answers);
 		if (outcome === "quit" || outcome === "cancel") return stop(outcome === "quit");
+		// A hosted wizard keeps its last message up under every later prompt, so an answered refusal
+		// read as a failure the new credential had not fixed. The terminal rail keeps it as history.
+		if (step === CREDENTIAL_STEP && outcome !== "back" && wizard.refusalShown) {
+			wizard.refusalShown = false;
+			host?.clearMessages();
+		}
 		if (outcome === "imported") {
 			presenter.done("Done");
 			return 0;

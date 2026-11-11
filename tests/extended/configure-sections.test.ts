@@ -4,11 +4,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { describe, it } from "node:test";
 import { parse } from "yaml";
 import type { SendChatTest } from "../../src/cli/chat-test.js";
 import { runConfigureCommand } from "../../src/cli/configure.js";
+import type { ConfigureWizardHost } from "../../src/cli/configure-host.js";
 import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
 import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -934,6 +935,90 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 			match(settings, /defaultModel: gateway-a/u, "the corrected credential retrieves the real catalog");
 			ok(!screen.includes("answered no model list"));
 		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("takes the hosted refusal warning down once a new credential is chosen", async () => {
+		const testEnv = unconfiguredEnv();
+		const key = "sk-hosted-refusal-key";
+		const server = await litellmServer(key);
+		const saved = new Map(Object.keys(testEnv.env).map((name) => [name, process.env[name]]));
+		for (const [name, value] of Object.entries(testEnv.env)) {
+			if (value === "") delete process.env[name];
+			else process.env[name] = value;
+		}
+		resetXdgCache();
+		registerBuiltinRuntimes(getRuntimeRegistry());
+		let messages: string[] = [];
+		const seen: string[] = [];
+		let credentialAsks = 0;
+		let shownAtModel: string[] | null = null;
+		const headingOf = (heading: unknown): string =>
+			plainText(Array.isArray(heading) ? heading.join("\n") : String(heading ?? ""));
+		const controller = new AbortController();
+		const host: ConfigureWizardHost = {
+			async select(options) {
+				const heading = headingOf(options.heading);
+				if (heading.includes("How should Clio get the API key?")) {
+					credentialAsks += 1;
+					const want = credentialAsks === 1 ? "skip" : "stored";
+					const choice = options.choices.find((entry) => entry.value === (want as unknown));
+					ok(choice, heading);
+					return { kind: "selected", value: choice.value };
+				}
+				if (heading.includes("Which model?")) shownAtModel = [...messages];
+				const choice = options.choices[options.initialIndex ?? 0] ?? options.choices[0];
+				ok(choice, heading);
+				return { kind: "selected", value: choice.value };
+			},
+			async text(options) {
+				const heading = headingOf(options.heading);
+				if (heading.includes("Paste the API key")) return { kind: "value", value: key };
+				if (heading.includes("Where is the server?")) return { kind: "value", value: server.url };
+				return { kind: "value", value: options.initial ?? "" };
+			},
+			report(line) {
+				messages.push(line);
+				seen.push(line);
+			},
+			clearMessages() {
+				messages = [];
+			},
+			cancelled: () => false,
+			signal: controller.signal,
+			dismissPrompt() {},
+		};
+		try {
+			const output = new Writable({
+				write(chunk, _encoding, done) {
+					for (const line of String(chunk).split("\n")) if (line.trim()) host.report(line.trim());
+					done();
+				},
+			});
+			Object.defineProperty(output, "columns", { value: 100_000 });
+			const code = await runOnboardingWizard(
+				{ in: new PassThrough(), out: output },
+				{ mode: "first", runtime: litellmRuntime() },
+				host,
+			);
+			strictEqual(code, 0, seen.join("\n"));
+			ok(
+				seen.some((line) => line.includes("Authentication failed")),
+				`the refusal must be said:\n${seen.join("\n")}`,
+			);
+			ok(shownAtModel, `the model step never asked:\n${seen.join("\n")}`);
+			ok(
+				!(shownAtModel as string[]).some((line) => line.includes("Authentication failed")),
+				`a refusal the new key fixed stayed up:\n${(shownAtModel as string[]).join("\n")}`,
+			);
+		} finally {
+			for (const [name, value] of saved) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			resetXdgCache();
 			await server.close();
 			testEnv.cleanup();
 		}
