@@ -788,6 +788,8 @@ describe("contracts/configure-onboarding", () => {
 		const stored = await run(true, [DOWN, ENTER]);
 		ok(stored.screen.includes("The desktop app cannot see this shell's key."), stored.screen);
 		ok(stored.credentials.includes("sk-ant-env-key"), `the key is stored for the app:\n${stored.credentials}`);
+		// The runtime's slot is shared by its other targets and by `auth login`; the copy is the variable's own.
+		deepStrictEqual(Object.keys(parse(stored.credentials).entries), ["env:ANTHROPIC_API_KEY"]);
 		match(stored.settings, /apiKeyEnvVar: ANTHROPIC_API_KEY/u, "the target still reads the variable first");
 
 		const declined = await run(true, [ENTER]);

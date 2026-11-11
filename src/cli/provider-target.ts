@@ -125,8 +125,10 @@ export interface LogoutChoice {
 	label: string;
 	group: ProviderSupportEntry["group"];
 	source: "stored-api-key" | "stored-oauth";
-	/** The credential removing this choice drops; `authTarget.providerId` is its storage key. */
+	/** The credential removing this choice drops. */
 	authTarget: AuthTarget;
+	/** The storage key that credential lives under: a stored copy of the target's key variable, else `authTarget.providerId`. */
+	entry: string;
 }
 
 /**
@@ -142,14 +144,16 @@ export function listLogoutChoices(): LogoutChoice[] {
 	const stored = (status: AuthStatus): LogoutChoice["source"] | null =>
 		status.available && (status.source === "stored-api-key" || status.source === "stored-oauth") ? status.source : null;
 	const byKey = new Map<string, { choice: LogoutChoice; sharedWith: string[] }>();
-	const add = (choice: Omit<LogoutChoice, "source">, status: AuthStatus): void => {
-		const existing = byKey.get(choice.authTarget.providerId);
+	// Rows are keyed by the entry logout would remove: a target's stored copy of its key variable is its own.
+	const add = (choice: Omit<LogoutChoice, "source" | "entry">, status: AuthStatus): void => {
+		const key = status.storedRef ?? choice.authTarget.providerId;
+		const existing = byKey.get(key);
 		if (existing) {
 			existing.sharedWith.push(choice.id);
 			return;
 		}
 		const source = stored(status);
-		if (source) byKey.set(choice.authTarget.providerId, { choice: { ...choice, source }, sharedWith: [] });
+		if (source) byKey.set(key, { choice: { ...choice, source, entry: key }, sharedWith: [] });
 	};
 	for (const entry of listProviderSupportEntries(getRuntimeRegistry().list())) {
 		if (!entry.connectable) continue;

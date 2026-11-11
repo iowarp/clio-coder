@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { readApiKey, runAuthCommand } from "../../src/cli/auth.js";
+import { listLogoutChoices } from "../../src/cli/provider-target.js";
 
 const LOGOUT_SETTINGS = [
 	"version: 2",
@@ -261,6 +262,80 @@ describe("contracts/auth logout when a target is named after its runtime", () =>
 			strictEqual(target.code, 0, target.stderr);
 			ok(!readFileSync(credentials, "utf8").includes("target:openai"));
 		} finally {
+			scratch.restore();
+		}
+	});
+});
+
+describe("contracts/auth logout of a key stored for the desktop app", () => {
+	it("lists the variable's stored copy apart from the runtime's key and removes each alone", async () => {
+		const scratch = await isolateClioEnv("clio-coder-auth-logout-envcopy-");
+		const saved = process.env.CLIO_TEST_LAB_KEY;
+		delete process.env.CLIO_TEST_LAB_KEY;
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(
+				join(configDir, "settings.yaml"),
+				[
+					"version: 2",
+					"targets:",
+					"  - id: lab",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyEnvVar: CLIO_TEST_LAB_KEY",
+					"",
+				].join("\n"),
+			);
+			const credentials = join(configDir, "credentials.yaml");
+			const storeBoth = (): void =>
+				writeFileSync(
+					credentials,
+					[
+						"version: 2",
+						"entries:",
+						"  openai:",
+						"    type: api_key",
+						'    key: "sk-runtime-not-real"',
+						"  env:CLIO_TEST_LAB_KEY:",
+						"    type: api_key",
+						`    key: "${STORED_KEY}"`,
+						"",
+					].join("\n"),
+					{ encoding: "utf8", mode: 0o600 },
+				);
+			const ids = (stdout: string): string[] =>
+				stdout
+					.split("\n")
+					.filter((line) => line.startsWith("  "))
+					.map((line) => line.trim().split(/\s+/u)[0] ?? "");
+
+			storeBoth();
+			strictEqual(ids((await captureAuth(["logout"])).stdout).join(","), "openai,lab");
+			strictEqual(
+				listLogoutChoices()
+					.map((choice) => `${choice.id}=${choice.entry}`)
+					.join(","),
+				"openai=openai,lab=env:CLIO_TEST_LAB_KEY",
+			);
+			const copyRemoved = await captureAuth(["logout", "lab"]);
+			strictEqual(copyRemoved.code, 0, copyRemoved.stderr);
+			ok(copyRemoved.stdout.includes("env:CLIO_TEST_LAB_KEY"), copyRemoved.stdout);
+			let left = readFileSync(credentials, "utf8");
+			ok(!left.includes("env:CLIO_TEST_LAB_KEY"), left);
+			ok(left.includes("sk-runtime-not-real"), left);
+
+			storeBoth();
+			const runtimeRemoved = await captureAuth(["logout", "openai"]);
+			strictEqual(runtimeRemoved.code, 0, runtimeRemoved.stderr);
+			left = readFileSync(credentials, "utf8");
+			ok(!left.includes("sk-runtime-not-real"), left);
+			ok(left.includes("env:CLIO_TEST_LAB_KEY"), left);
+			strictEqual(ids((await captureAuth(["logout"])).stdout).join(","), "lab");
+		} finally {
+			if (saved === undefined) delete process.env.CLIO_TEST_LAB_KEY;
+			else process.env.CLIO_TEST_LAB_KEY = saved;
 			scratch.restore();
 		}
 	});

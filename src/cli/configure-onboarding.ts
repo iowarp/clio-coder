@@ -2031,9 +2031,11 @@ async function finish(wizard: Wizard, answers: Answers): Promise<number> {
 		}
 
 		const appKey = answers.storeKeyForApp && answers.apiKeyEnv ? process.env[answers.apiKeyEnv] : undefined;
-		if (appKey) {
+		const appTarget = resolveAuthTarget(descriptor, runtime);
+		if (appKey && appTarget.targetEnvVar) {
 			const auth = openAuthStorage();
-			auth.setApiKey(resolveAuthTarget(descriptor, runtime).providerId, appKey);
+			// The copy is the variable's own entry, never the runtime's slot that other targets and `auth login` share.
+			auth.storeEnvKeyCopy(appTarget, appKey);
 			if (
 				wizard.host
 					? auth.damageReason() !== null

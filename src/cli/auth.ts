@@ -281,40 +281,37 @@ async function promptForLogoutChoice(choices: ReadonlyArray<LogoutChoice>): Prom
 	}
 }
 
-/** Remove the stored credential `providerId` names, refusing one the environment supplies. */
-function removeStoredCredential(
-	auth: ReturnType<typeof openAuthStorage>,
-	providerId: string,
-	status: AuthStatus,
-): number {
+/**
+ * Remove the stored credential under `entry`, refusing one the environment supplies. A target's stored copy of its
+ * key variable is its own entry, apart from the runtime's key.
+ */
+function removeStoredCredential(auth: ReturnType<typeof openAuthStorage>, entry: string, status: AuthStatus): number {
 	if (!status.available) {
 		// A damaged store reads as zero credentials, so "no stored credential"
 		// would be the same understatement the damage warning exists to remove.
 		printError(
 			auth.damageReason() === null
-				? `no stored credential for ${providerId}`
-				: `cannot tell whether ${providerId} is stored: the credentials file could not be fully read`,
+				? `no stored credential for ${entry}`
+				: `cannot tell whether ${entry} is stored: the credentials file could not be fully read`,
 		);
 		return 1;
 	}
 	if (status.source === "environment") {
-		printError(
-			`credential for ${providerId} comes from ${status.detail ?? "the environment"}; clear the env var to log out`,
-		);
+		printError(`credential for ${entry} comes from ${status.detail ?? "the environment"}; clear the env var to log out`);
 		return 1;
 	}
 	if (status.source !== "stored-api-key" && status.source !== "stored-oauth") {
-		printError(`cannot remove credential for ${providerId} from source ${status.source}`);
+		printError(`cannot remove credential for ${entry} from source ${status.source}`);
 		return 1;
 	}
 	try {
-		auth.logout(providerId);
+		auth.logout(entry);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : String(error));
 		return 1;
 	}
-	if (credentialWriteFailed(auth, `credential for ${providerId} was not removed`)) return 1;
-	printOk(`removed credential for ${providerId}`);
+	if (credentialWriteFailed(auth, `credential for ${entry} was not removed`)) return 1;
+	printOk(`removed credential for ${entry}`);
 	return 0;
 }
 
@@ -323,7 +320,7 @@ function logoutChoice(choice: LogoutChoice): number {
 	const auth = openAuthStorage();
 	warnIfCredentialsDamaged(auth);
 	const status = auth.statusForTarget(choice.authTarget, { includeFallback: false });
-	return removeStoredCredential(auth, choice.authTarget.providerId, status);
+	return removeStoredCredential(auth, choice.entry, status);
 }
 
 async function runLogin(args: ReadonlyArray<string>): Promise<number> {
@@ -659,7 +656,7 @@ function runLogout(args: ReadonlyArray<string>): Promise<number> | number {
 			return 1;
 		}
 	}
-	return removeStoredCredential(auth, resolved.authTarget.providerId, status);
+	return removeStoredCredential(auth, status.storedRef ?? resolved.authTarget.providerId, status);
 }
 
 /**

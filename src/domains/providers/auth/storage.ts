@@ -125,6 +125,8 @@ export interface AuthStatus {
 	detail: string | null;
 	/** Clio refuses every stored and environment credential for this target; `detail` says why. Never "no credential". */
 	refused?: true;
+	/** The credentials-file entry the key came from, when it is not the provider id's. */
+	storedRef?: string;
 }
 
 export interface AuthResolution extends AuthStatus {
@@ -295,6 +297,19 @@ function targetEnvApiKey(envVar: string | undefined): { envVar: string; apiKey: 
 	if (!envVar) return null;
 	const apiKey = process.env[envVar]?.trim();
 	return apiKey ? { envVar, apiKey } : null;
+}
+
+/**
+ * Where a copy of a key variable is stored for a process that cannot see the shell's environment (the desktop
+ * app's background service). Only a target naming that variable reads it, and only while the variable is unset,
+ * so the copy goes nowhere the variable itself would not.
+ */
+function envKeyCopyRef(envVar: string): string {
+	return `env:${envVar}`;
+}
+
+function envKeyCopyDetail(envVar: string): string {
+	return `${envVar} is not set; using its stored copy`;
 }
 
 function storedKeyDetail(providerId: string, targetEnvVar: string | undefined): string {
@@ -469,6 +484,24 @@ export class AuthStorage {
 		this.persist(providerId, undefined);
 	}
 
+	/**
+	 * Store a copy of the key variable the target names, for the desktop app. Returns the entry written, or null
+	 * when the target names no variable of its own (its key is then the provider id's and is left alone).
+	 */
+	storeEnvKeyCopy(target: AuthTarget, key: string): string | null {
+		if (!target.targetEnvVar) return null;
+		const ref = envKeyCopyRef(target.targetEnvVar);
+		this.setApiKey(ref, key);
+		return ref;
+	}
+
+	private envKeyCopy(envVar: string | undefined): { envVar: string; ref: string; key: string } | null {
+		if (!envVar) return null;
+		const ref = envKeyCopyRef(envVar);
+		const stored = this.data[ref];
+		return stored?.type === "api_key" ? { envVar, ref, key: stored.key } : null;
+	}
+
 	listStored(): ReadonlyArray<{ providerId: string; type: AuthCredential["type"]; updatedAt: string }> {
 		this.reload();
 		return Object.entries(this.data)
@@ -533,6 +566,18 @@ export class AuthStorage {
 				credentialType: "api_key",
 				source: "environment",
 				detail: targetEnv.envVar,
+			};
+		}
+
+		const copy = this.envKeyCopy(opts?.targetEnvVar);
+		if (copy) {
+			return {
+				providerId,
+				available: true,
+				credentialType: "api_key",
+				source: "stored-api-key",
+				detail: envKeyCopyDetail(copy.envVar),
+				storedRef: copy.ref,
 			};
 		}
 
@@ -834,6 +879,20 @@ export class AuthStorage {
 				source: "environment",
 				detail: targetEnv.envVar,
 				apiKey: targetEnv.apiKey,
+			};
+		}
+
+		const copy = this.envKeyCopy(opts?.targetEnvVar);
+		if (copy) {
+			const apiKey = resolveStoredApiKey(copy.key, providerId);
+			return {
+				providerId,
+				available: true,
+				credentialType: "api_key",
+				source: "stored-api-key",
+				detail: envKeyCopyDetail(copy.envVar),
+				storedRef: copy.ref,
+				...(apiKey ? { apiKey } : {}),
 			};
 		}
 
