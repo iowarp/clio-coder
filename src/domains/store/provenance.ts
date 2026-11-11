@@ -14,14 +14,7 @@ import {
 	runRecordsDir,
 	workspaceRelativePath,
 } from "../../core/run-records.js";
-import {
-	decodeTagSegment,
-	storeProjectKey,
-	storeProjectRoot,
-	validateBlobName,
-	validateTagName,
-} from "../../core/store-paths.js";
-import { clioCachePath } from "../../core/xdg.js";
+import { validateBlobName, validateTagName } from "../../core/store-paths.js";
 import { isSecretArgKey, redactSecretString } from "../safety/redaction.js";
 import type { StoreBackend } from "./backend.js";
 import {
@@ -81,33 +74,15 @@ function validRef(tag: string, blob: string): { tag: string; blob: string } | nu
 }
 
 /**
- * The blob of this project's store whose bytes a resolved local path holds, else null. Asks the backend first,
- * then reads the store cache's layout (`<cache>/store/<projectKey>/<encoded tag>/<blob>`), where every backend's
- * `get` leaves its read-only copy, so the path `store get` returned names its blob on any backend.
+ * The blob of this project's store whose bytes a resolved local path holds, else null. The backend maps both its
+ * stored files and the copy its `get` handed out, so the path `store get` returned names its blob.
  */
 export async function storeBlobRefOfPath(
 	backend: StoreBackend,
-	cwd: string,
 	realPath: string,
 ): Promise<{ tag: string; blob: string } | null> {
 	const ref = await backend.blobRefOfPath(realPath);
-	if (ref !== null) return validRef(ref.tag, ref.blob);
-	let cacheDir: string;
-	try {
-		cacheDir = realpathSync(path.join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd))));
-	} catch {
-		return null;
-	}
-	const relative = path.relative(cacheDir, realPath);
-	if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
-	const [encodedTag, ...blob] = relative.split(path.sep);
-	if (encodedTag === undefined || blob.length === 0) return null;
-	try {
-		return validRef(decodeTagSegment(encodedTag), blob.join("/"));
-	} catch {
-		// A malformed escape is no tag of ours.
-		return null;
-	}
+	return ref === null ? null : validRef(ref.tag, ref.blob);
 }
 
 /**
@@ -128,7 +103,7 @@ async function usedFrom(
 				: null;
 		if (ref === null) {
 			try {
-				ref = await storeBlobRefOfPath(backend, workspaceRoot, realpathSync(path.resolve(workspaceRoot, input.path)));
+				ref = await storeBlobRefOfPath(backend, realpathSync(path.resolve(workspaceRoot, input.path)));
 			} catch {
 				// A missing or unreadable input keeps its declared path.
 			}

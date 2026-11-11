@@ -726,7 +726,7 @@ async function resolveStoreInputs(
 		const store = input.store;
 		if (store === undefined) continue;
 		if (store.kind === "path") {
-			const ref = await storeBlobRefOfPath(backend, request.workspaceRoot, store.realPath).catch(() => null);
+			const ref = await storeBlobRefOfPath(backend, store.realPath).catch(() => null);
 			if (ref === null)
 				return `${input.location} '${input.declared}' is in the store's files but names no blob of this project`;
 			resolved[index] = { path: input.declared, ...ref };

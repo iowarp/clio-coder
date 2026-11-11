@@ -1,6 +1,6 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { runRecordsDir } from "../../src/core/run-records.js";
@@ -160,6 +160,54 @@ describe("store records", () => {
 				actor: "main",
 			});
 			deepStrictEqual(body.used, [{ tag: "inputs", blob: "sim.h5", bytes: 2, sha256: null }]);
+		}));
+
+	it("names a local input read through the copy get handed out by tag and blob", () =>
+		withBackend(async (backend, root) => {
+			await backend.getOrCreateTag("inputs");
+			writeFileSync(join(root, "source.h5"), "h5");
+			await backend.putBlobFromFile("inputs", "sim.h5", join(root, "source.h5"));
+			const got = await backend.getBlobAsPath("inputs", "sim.h5");
+			deepStrictEqual(await backend.blobRefOfPath(realpathSync(got.path)), { tag: "inputs", blob: "sim.h5" });
+			mkdirSync(join(root, "data"));
+			symlinkSync(got.path, join(root, "data", "sim.h5"));
+			writeFileSync(join(root, "out.json"), "{}");
+			const out = statSync(join(root, "out.json"));
+			const runId = "20261110T220000Z-abcdef";
+			mkdirSync(join(runRecordsDir(root), runId), { recursive: true });
+			writeFileSync(
+				join(runRecordsDir(root), runId, "run.json"),
+				JSON.stringify({
+					version: 1,
+					runId,
+					tool: "run_script",
+					finishedAt: "2026-11-10T22:00:01.000Z",
+					script: { path: "sum.py", sha256: null },
+					argv: ["python3", "sum.py"],
+					outcome: "succeeded",
+					inputs: [{ path: "data/sim.h5", exists: true, bytes: 2, sha256: null }],
+					outputs: [{ path: "out.json", exists: true, status: "created", bytes: 2, mtimeMs: out.mtimeMs }],
+				}),
+			);
+			const body = await buildPutRecord({
+				backend,
+				cwd: root,
+				tag: "results",
+				blob: "out.json",
+				sourceAbs: join(root, "out.json"),
+				stat: { bytes: 2, modifiedMs: 5, version: null },
+				hash: { sha256: null },
+				receipt: { backend: "local", key: "out.json", version: null },
+				actor: "main",
+			});
+			deepStrictEqual(body.used, [{ tag: "inputs", blob: "sim.h5", bytes: 2, sha256: null }]);
+
+			// A copy whose blob is gone, or a file in the cache that was never a blob, names nothing.
+			await backend.delBlob("inputs", "sim.h5");
+			strictEqual(await backend.blobRefOfPath(realpathSync(got.path)), null);
+			const stray = join(dirname(got.path), "stray.h5");
+			writeFileSync(stray, "x");
+			strictEqual(await backend.blobRefOfPath(realpathSync(stray)), null);
 		}));
 
 	it("keeps clio-core tag and blob names apart: tag a blob b/c is not tag a/b blob c", () =>

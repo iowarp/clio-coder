@@ -175,6 +175,7 @@ function walkKey(entry: Dirent): string {
 /** The local backend: one host, one directory tree, no tiers, no replication, no blob versions. */
 export function createLocalStoreBackend(cwd: string): StoreBackend {
 	const projectDir = storeProjectDir(cwd);
+	const cacheProjectDir = (): string => path.join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd)));
 	const tagsDir = path.join(projectDir, "tags");
 
 	async function assertUnderProject(target: string): Promise<void> {
@@ -415,7 +416,7 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 				if (!info.isFile()) throw new StoreRefusal("not-a-file", `Blob ${blob} in tag ${tag} is not a regular file.`);
 				// The stored file backs the records, so `get` hands out a read-only copy under the store cache
 				// (one of storeReadRoots) like the clio-core backend; a write to it cannot change the blob.
-				const tagCache = path.join(clioCachePath(), "store", storeProjectKey(storeProjectRoot(cwd)), encodeTagSegment(tag));
+				const tagCache = path.join(cacheProjectDir(), encodeTagSegment(tag));
 				const copy = path.join(tagCache, blob);
 				try {
 					await mkdir(path.dirname(copy), { recursive: true, mode: 0o700 });
@@ -531,11 +532,32 @@ export function createLocalStoreBackend(cwd: string): StoreBackend {
 			}),
 
 		blobRefOfPath: async (realPath) => {
-			const root = await realpath(projectDir).catch(() => null);
-			if (root === null) return null;
-			const [tags, encodedTag, blobs, ...rest] = path.relative(root, realPath).split(path.sep);
-			if (tags !== "tags" || encodedTag === undefined || blobs !== "blobs" || rest.length === 0) return null;
-			return { tag: decodeTagSegment(encodedTag), blob: rest.join("/") };
+			const segmentsUnder = async (root: string): Promise<string[] | null> => {
+				const resolved = await realpath(root).catch(() => null);
+				if (resolved === null) return null;
+				const relative = path.relative(resolved, realPath);
+				if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) return null;
+				return relative.split(path.sep);
+			};
+			const stored = await segmentsUnder(projectDir);
+			if (stored !== null) {
+				const [tags, encodedTag, blobs, ...rest] = stored;
+				if (tags !== "tags" || encodedTag === undefined || blobs !== "blobs" || rest.length === 0) return null;
+				return { tag: decodeTagSegment(encodedTag), blob: rest.join("/") };
+			}
+			// The copy `get` handed out sits at <cache>/store/<projectKey>/<encoded tag>/<blob> and names its blob
+			// while that blob is still stored.
+			const cached = await segmentsUnder(cacheProjectDir());
+			if (cached === null) return null;
+			const [encodedTag, ...rest] = cached;
+			if (encodedTag === undefined || rest.length === 0) return null;
+			try {
+				const ref = { tag: decodeTagSegment(encodedTag), blob: rest.join("/") };
+				return (await lstatOrNull(await blobTarget(ref.tag, ref.blob)))?.isFile() === true ? ref : null;
+			} catch {
+				// A malformed escape or a name the store refuses is no blob of ours.
+				return null;
+			}
 		},
 	};
 }
