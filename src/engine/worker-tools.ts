@@ -165,8 +165,7 @@ export function createWorkerSafety(options: WorkerSafetyOptions = {}): SafetyCon
 							workerReadOnlyTargetViolation(target, requiredArtifact) ?? policyEngine.writeTargetViolation(target),
 					}
 				: {}),
-			allowsObservationPath: (path) =>
-				policyEngine.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
+			allowsObservationPath: (path) => policyEngine.readablePath(path),
 		},
 		decisions: { recordToolCall: recordToolDecision },
 	};

@@ -103,8 +103,8 @@ export function createSafetyBundle(context: DomainContext): DomainBundle<SafetyC
 		isSubset,
 		policy: {
 			metadata: (posture) => activePolicyEngine().metadata(posture),
-			allowsObservationPath: (path) =>
-				activePolicyEngine().evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths",
+			// The zero-access test alone: a full admission per listed entry made a large `ls` take seconds.
+			allowsObservationPath: (path) => activePolicyEngine().readablePath(path),
 			informationFlow: () => activePolicyEngine().informationFlow(),
 			flowRestrictionsFor: (call) => activePolicyEngine().flowRestrictionsFor(call),
 			flowRestrictionsForPaths: (paths, cwd) =>
