@@ -20,7 +20,7 @@ const ENTRY: DecisionLedgerEntry = {
 	decisions: [{ key: "cache_key", value: "Full path", status: "active", decidedAt: "2026-11-10T00:01:00.000Z" }],
 };
 
-test("s asks once before it supersedes a decision; another key keeps it", () => {
+test("x asks once before it supersedes a decision; another key keeps it", () => {
 	const tui = {
 		terminal: { rows: 35, setTitle: () => {} },
 		requestRender: () => {},
@@ -36,12 +36,15 @@ test("s asks once before it supersedes a decision; another key keeps it", () => 
 	const rail = (): string =>
 		[...frame.renderDockBody(100, DOCK_BODY_ROWS_MAX), ...frame.render(100)].map(stripTerminalSequences).join("\n");
 	frame.handleInput?.("s");
+	deepStrictEqual(superseded, [], "s moved to x and does nothing");
+	match(rail(), /s is now x here/u);
+	frame.handleInput?.("x");
 	deepStrictEqual(superseded, [], "the first s only asks");
-	match(rail(), /s again/u);
+	match(rail(), /x again/u);
 	frame.handleInput?.("j");
-	frame.handleInput?.("s");
+	frame.handleInput?.("x");
 	deepStrictEqual(superseded, [], "another key kept it, so this s asks again");
-	frame.handleInput?.("s");
+	frame.handleInput?.("x");
 	deepStrictEqual(superseded.length, 1);
 	handle.hide();
 });

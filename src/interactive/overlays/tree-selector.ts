@@ -21,6 +21,7 @@ import {
 	showClioOverlayFrame,
 } from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, emptyState, GLYPH, positionRow, selectionRow } from "../theme/index.js";
+import { movedKeyNotice } from "./confirm-once.js";
 
 export const TREE_OVERLAY_WIDTH = 88;
 /** Rows the list shows while the frame has not said how many it has. */
@@ -416,7 +417,7 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 				{ key: "↑↓", verb: "select" },
 				{ key: "e", verb: "label" },
 				{ key: "p", verb: `folder: ${this.currentCwdOnly ? "this" : "all"}` },
-				{ key: "s", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
+				{ key: "o", verb: `order: ${this.sortOrder === "tree" ? "tree" : "newest"}` },
 				{ key: "Shift+T", verb: `times: ${this.showTimestamps ? "on" : "off"}` },
 				{ key: "Esc", verb: "close" },
 			],
@@ -451,6 +452,10 @@ export class TreeOverlayView implements Component, RowBudgetedBody {
 			return;
 		}
 		if (data === "s") {
+			this.setStatus(movedKeyNotice("s", "o"));
+			return;
+		}
+		if (data === "o") {
 			this.sortOrder = this.sortOrder === "tree" ? "recent" : "tree";
 			this.rebuildRows();
 			return;

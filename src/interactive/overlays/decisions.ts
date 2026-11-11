@@ -27,7 +27,7 @@ import {
 	statusChip,
 	toneRole,
 } from "../theme/index.js";
-import { confirmOnceRail } from "./confirm-once.js";
+import { confirmOnceRail, movedKeyNotice } from "./confirm-once.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
 
@@ -370,6 +370,11 @@ class DecisionsOverlayBody implements Component {
 			return;
 		}
 		if (matchesKey(data, "s")) {
+			this.status = { kind: "warning", text: movedKeyNotice("s", "x") };
+			this.requestRender();
+			return;
+		}
+		if (matchesKey(data, "x")) {
 			if (selected.decision.status !== "active") {
 				this.status = { kind: "warning", text: "Already superseded. c gives it a new direction." };
 				this.requestRender();
@@ -423,12 +428,12 @@ class DecisionsOverlayBody implements Component {
 		const selected = rows[this.selectedIndex];
 		if (selected === undefined) return [esc];
 		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
-		if (this.armedSupersede === rowKey) return confirmOnceRail("s", "supersede", selected.decision.key);
+		if (this.armedSupersede === rowKey) return confirmOnceRail("x", "supersede", selected.decision.key);
 		const drafted = keptCorrections.has(rowKey);
 		return [
 			...(rows.length > 1 ? [{ key: "↑↓", verb: "select" }] : []),
 			{ key: "Enter", verb: this.expandedKey === rowKey ? "fold" : "expand" },
-			...(selected.decision.status === "active" ? [{ key: "s", verb: "supersede" }] : []),
+			...(selected.decision.status === "active" ? [{ key: "x", verb: "supersede" }] : []),
 			{ key: "c", verb: drafted ? "resume draft" : "correct" },
 			esc,
 		];

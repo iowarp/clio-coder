@@ -95,7 +95,7 @@ it("toggles the cwd filter and can recover from an empty filtered list", () => {
 	match(stripTerminalSequences(f.view.getHint()), /folder: this/u);
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, []);
-	f.view.handleInput("s");
+	f.view.handleInput("o");
 	f.view.handleInput("p");
 	deepStrictEqual(f.order(), ["newest", "branch", "marker", "oldest"]);
 	f.view.handleInput("\r");
@@ -112,11 +112,14 @@ it("keeps nodes from a session whose normalized cwd matches", () => {
 it("cycles sort order with stable timestamp ties and preserves the selected turn", () => {
 	const f = fixture();
 	f.view.handleInput("\u001b[B");
-	f.view.handleInput("s");
+	f.view.handleInput("o");
 	deepStrictEqual(f.order(), ["newest", "branch", "marker", "oldest"]);
 	match(f.text(), /❯.*branch/u);
-	f.view.handleInput("s");
+	f.view.handleInput("o");
 	deepStrictEqual(f.order(), ["oldest", "branch", "marker", "newest"]);
+	f.view.handleInput("s");
+	deepStrictEqual(f.order(), ["oldest", "branch", "marker", "newest"], "s moved to o and does nothing");
+	match(f.text(), /s is now o here/u);
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, ["branch"]);
 });
@@ -124,7 +127,7 @@ it("cycles sort order with stable timestamp ties and preserves the selected turn
 it("treats p and s as label text while editing and retains filtering and sorting after refresh", () => {
 	const f = fixture();
 	f.view.handleInput("p");
-	f.view.handleInput("s");
+	f.view.handleInput("o");
 	f.view.handleInput("e");
 	f.view.handleInput("p");
 	f.view.handleInput("s");
@@ -137,7 +140,7 @@ it("treats p and s as label text while editing and retains filtering and sorting
 
 it("keeps structural rows inert after sorting", () => {
 	const f = fixture();
-	f.view.handleInput("s");
+	f.view.handleInput("o");
 	f.view.handleInput("\u001b[A");
 	f.view.handleInput("\r");
 	deepStrictEqual(f.switched, []);
