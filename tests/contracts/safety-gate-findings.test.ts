@@ -43,9 +43,18 @@ describe("safety gate findings", () => {
 	const kind = (call: ClassifierCall, posture?: "yolo") => policy.evaluate(call, posture).kind;
 
 	it("typed reads refuse every path the shell sandbox masks, and the process environment", () => {
-		for (const secret of [...workerSecretPaths(home), join(home, ".config", "gh", "hosts.yml"), "/proc/self/environ"]) {
+		for (const secret of [
+			...workerSecretPaths(home),
+			join(home, ".config", "gh", "hosts.yml"),
+			"/proc/self/environ",
+			`/proc/self/task/${process.pid}/environ`,
+		]) {
 			strictEqual(kind({ tool: ToolNames.Read, args: { path: secret } }), "block", secret);
 		}
+	});
+
+	it("a shell read of a thread's environ is refused", () => {
+		strictEqual(kind({ tool: ToolNames.Bash, args: { command: `cat /proc/self/task/${process.pid}/environ` } }), "block");
 	});
 
 	it("the exit-code presence exemption covers only the bare ^NAME= pattern", () => {

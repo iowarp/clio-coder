@@ -41,6 +41,7 @@ export const DEFAULT_DAMAGE_CONTROL_PATH_POLICY: PathPolicyInput = {
 		// Every process's environment holds the operator's exported tokens; the
 		// shell sandbox scrubs its own environment, the typed read refuses it.
 		"/proc/*/environ",
+		"/proc/*/task/*/environ",
 		// Remote URLs in the repo git config can embed access tokens, and .git
 		// is hidden from grep/find but not from direct reads without this entry.
 		// The shell sandbox keeps it readable and read-only, since git needs it.
