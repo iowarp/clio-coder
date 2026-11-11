@@ -27,6 +27,7 @@ import {
 	statusChip,
 	toneRole,
 } from "../theme/index.js";
+import { confirmOnceRail } from "./confirm-once.js";
 
 const DEFAULT_CONTENT_WIDTH = 88;
 
@@ -249,6 +250,8 @@ class DecisionsOverlayBody implements Component {
 	/** The decision the open correction field belongs to, whose kept draft is in the field rather than under the row. */
 	private correctionKey: string | null = null;
 	private status: { kind: "ok" | "warning"; text: string } | null = null;
+	/** The decision a first `s` asked about; a second `s` on it supersedes, any other key keeps it. */
+	private armedSupersede: string | null = null;
 	/** Rows the dock grants, or zero before the first dock render. */
 	private rows = 0;
 	private railRoom = 0;
@@ -337,6 +340,8 @@ class DecisionsOverlayBody implements Component {
 			return;
 		}
 		const rows = selectableRows(this.readInterviews());
+		const armed = this.armedSupersede;
+		this.armedSupersede = null;
 		if (matchesKey(data, "esc")) {
 			backOutOneLayer(this.escapeLayers());
 			this.requestRender();
@@ -367,6 +372,12 @@ class DecisionsOverlayBody implements Component {
 		if (matchesKey(data, "s")) {
 			if (selected.decision.status !== "active") {
 				this.status = { kind: "warning", text: "Already superseded. c gives it a new direction." };
+				this.requestRender();
+				return;
+			}
+			const armKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
+			if (armed !== armKey) {
+				this.armedSupersede = armKey;
 				this.requestRender();
 				return;
 			}
@@ -412,6 +423,7 @@ class DecisionsOverlayBody implements Component {
 		const selected = rows[this.selectedIndex];
 		if (selected === undefined) return [esc];
 		const rowKey = decisionRowKey(selected.interview.interviewId, selected.decision.key);
+		if (this.armedSupersede === rowKey) return confirmOnceRail("s", "supersede", selected.decision.key);
 		const drafted = keptCorrections.has(rowKey);
 		return [
 			...(rows.length > 1 ? [{ key: "↑↓", verb: "select" }] : []),
