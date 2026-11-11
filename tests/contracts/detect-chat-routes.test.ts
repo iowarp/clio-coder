@@ -176,3 +176,31 @@ test("a local server's first chat model is adopted, never an embedding model lis
 	const routes = await detectChatRoutes(readSettings(), readJson);
 	assert.equal(routes.find((route) => route.runtime.id === "ollama")?.model, "qwen3:8b");
 });
+
+test("headless borrowing never takes a saved copilot target, whatever memory points at", async (t) => {
+	const home = await isolateClioEnv("clio-route-headless-copilot-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const registry = getRuntimeRegistry();
+	registerBuiltinRuntimes(registry);
+	for (const runtime of registry.list()) if (runtime.credentialsEnvVar) delete process.env[runtime.credentialsEnvVar];
+	process.env.ROUTEFIX_LITELLM_KEY = "fake-key";
+	t.after(() => {
+		delete process.env.ROUTEFIX_LITELLM_KEY;
+	});
+	for (const memory of ["copilot", "litellm", "none"]) {
+		writeFileSync(
+			settingsPath(),
+			`version: 2\ntargets:\n  - { id: copilot, runtime: copilot-sdk, defaultModel: claude-opus-5.5 }\n  - { id: litellm, runtime: litellm, url: "http://127.0.0.1:9", defaultModel: m1, auth: { apiKeyEnvVar: ROUTEFIX_LITELLM_KEY } }\ncontext:\n  memory: { target: ${memory}, model: m1 }\n`,
+		);
+		const found = await headlessChatRoute(readSettings(), undefined, { model: "dynamo/x" });
+		const ids =
+			found.kind === "one"
+				? [found.route.target.id]
+				: found.kind === "several"
+					? found.routes.map((r) => r.target.id)
+					: [];
+		assert.ok(!ids.includes("copilot"), `memory ${memory}: ${found.kind} ${ids.join(",")}`);
+		if (memory !== "litellm") assert.equal(found.kind === "one" ? found.route.target.id : found.kind, "litellm");
+	}
+});

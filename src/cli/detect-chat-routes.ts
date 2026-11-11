@@ -125,6 +125,8 @@ export async function detectChatRoutes(
 	for (const target of settings.targets) {
 		const runtime = runtimes.find((entry) => entry.id === target.runtime);
 		if (!runtime) continue;
+		// A copilot-sdk target holds no key of its own: it rides the Copilot sign-in, which headless keeps closed.
+		if (headless && runtime.id === "copilot-sdk") continue;
 		if (
 			targetRequiresAuth(target, runtime) &&
 			!auth.statusForTarget(resolveAuthTarget(target, runtime), { includeFallback: false }).available
