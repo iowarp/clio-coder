@@ -617,7 +617,7 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
-	it("sends one test request before Save: a refused key saves nothing, a good key or Save anyway saves", async () => {
+	it("ends on the test request: a refused key saves nothing, a good key or Save anyway saves", async () => {
 		const checks = (root: string) =>
 			(readdirSync(root, { recursive: true }) as string[]).filter((file) => file.includes("provider-target-checks/"));
 		const fixed = unconfiguredEnv();
@@ -634,10 +634,8 @@ describe("contracts/configure-onboarding", () => {
 				[
 					{ waitFor: "What do you have?", keys: [ENTER] },
 					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 					{ waitFor: "The test request failed", keys: [DOWN, ENTER] },
 					{ waitFor: "Paste your API key", keys: [..."sk-ant-good-key".split(""), ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 				],
 				{ mode: "first", verify: refuseBad },
 			);
@@ -647,6 +645,7 @@ describe("contracts/configure-onboarding", () => {
 			ok(screen.includes("Anthropic refused the key (401)"), screen);
 			match(screen, /answered in 1\.2 s\./u);
 			ok(screen.includes("Saved. Chat and workers use this model."), screen);
+			ok(!screen.includes("Review what Clio could verify"), `the first run ends on the test, not a review:\n${screen}`);
 			deepStrictEqual(sent, ["sk-ant-bad-key", "sk-ant-good-key"]);
 			const credentials = readFileSync(join(fixed.settingsFile, "..", "credentials.yaml"), "utf8");
 			ok(credentials.includes("sk-ant-good-key") && !credentials.includes("sk-ant-bad-key"), credentials);
@@ -662,7 +661,6 @@ describe("contracts/configure-onboarding", () => {
 				[
 					{ waitFor: "What do you have?", keys: [ENTER] },
 					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 					{ waitFor: "The test request failed", keys: [DOWN, DOWN, ENTER] },
 				],
 				{ mode: "first", verify: refuseBad },
@@ -682,7 +680,6 @@ describe("contracts/configure-onboarding", () => {
 				[
 					{ waitFor: "What do you have?", keys: [ENTER] },
 					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
-					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
 					{ waitFor: "The test request failed", keys: [CTRL_C] },
 				],
 				{ mode: "first", verify: refuseBad },
@@ -694,6 +691,28 @@ describe("contracts/configure-onboarding", () => {
 			);
 		} finally {
 			refused.cleanup();
+		}
+
+		const reviewed = unconfiguredEnv();
+		const before = sent.length;
+		try {
+			const result = await runWizard(
+				reviewed.env,
+				[
+					{ waitFor: "What do you have?", keys: [ENTER] },
+					{ waitFor: "Paste your API key", keys: [..."sk-ant-bad-key".split(""), ENTER] },
+					// The old review sits behind "Connection and machine details"; its Save tests again.
+					{ waitFor: "The test request failed", keys: [DOWN, DOWN, DOWN, ENTER] },
+					{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					{ waitFor: "The test request failed", keys: [DOWN, DOWN, ENTER] },
+				],
+				{ mode: "first", verify: refuseBad },
+			);
+			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+			strictEqual(sent.length - before, 2, "Save on the review sends the test again");
+			match(readFileSync(reviewed.settingsFile, "utf8"), /runtime: anthropic/u);
+		} finally {
+			reviewed.cleanup();
 		}
 	});
 

@@ -167,6 +167,8 @@ interface Answers {
 	signInLater?: string | undefined;
 	/** The test request before Save: how long the model took to answer, or "skipped" when saved anyway. */
 	tested?: { latencyMs: number } | "skipped" | undefined;
+	/** The review was opened from the test screen, so the review step shows it instead of testing at once. */
+	reviewing?: boolean | undefined;
 }
 
 type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential" | "detected" | "model" | "imported" | "fix";
@@ -1477,6 +1479,12 @@ const REVIEW_STEP: Step = {
 	id: "review",
 	applies: () => true,
 	run: async (wizard, answers) => {
+		// With the test request on, setup ends on the test; the review sits behind "Connection and machine details".
+		if (wizard.sendTest && !answers.reviewing) {
+			const tested = await testBeforeSave(wizard, answers, wizard.sendTest);
+			if (tested !== "details") return tested;
+			answers.reviewing = true;
+		}
 		const facts = observeHostCapacityFacts();
 		const capacity = resolveLocalConcurrency("auto", facts);
 		// The dock has 16 body rows and may be only 40 columns wide. Keep the
@@ -1510,7 +1518,11 @@ const REVIEW_STEP: Step = {
 			});
 			if (result.kind !== "selected") return result.kind;
 			if (result.value === "model") return "model";
-			if (result.value === "save" && wizard.sendTest) return testBeforeSave(wizard, answers, wizard.sendTest);
+			if (result.value === "save" && wizard.sendTest) {
+				const tested = await testBeforeSave(wizard, answers, wizard.sendTest);
+				if (tested === "details") continue;
+				return tested;
+			}
 			if (result.value !== "details")
 				return result.value === "save" ? "next" : result.value === "back" ? "back" : "cancel";
 			const detailPages = [
@@ -1577,9 +1589,9 @@ const REVIEW_STEP: Step = {
 
 /**
  * Send the test request and stay on its screen until it answers or the person
- * chooses: try again, change the key or address, or save anyway.
+ * chooses: try again, change the key or address, save anyway, or open the review.
  */
-async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTest): Promise<StepOutcome> {
+async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTest): Promise<StepOutcome | "details"> {
 	const runtime = answers.runtime;
 	const model = answers.model;
 	if (!runtime || model === undefined) return "next";
@@ -1607,13 +1619,14 @@ async function testBeforeSave(wizard: Wizard, answers: Answers, send: SendChatTe
 			...(answers.url !== undefined ? { url: answers.url } : {}),
 		});
 		wizard.presenter.warn(`${label} did not answer: ${truncate(outcome.message, 200)}`);
-		const result = await wizard.select<"retry" | "fix" | "model" | "save" | "cancel">({
+		const result = await wizard.select<"retry" | "fix" | "model" | "save" | "details" | "cancel">({
 			heading: ["", chalk.bold("The test request failed"), fix],
 			choices: [
 				{ value: "retry", label: "Try again" },
 				{ value: "fix", label: "Change the key or address" },
 				...(outcome.httpStatus === 404 ? [{ value: "model" as const, label: "Choose a different model" }] : []),
 				{ value: "save", label: "Save anyway", hint: "saved as not checked" },
+				{ value: "details", label: "Connection and machine details" },
 				{ value: "cancel", label: "Cancel setup" },
 			],
 			railPrefix: wizard.rail,
@@ -1760,7 +1773,7 @@ export async function runOnboardingWizard(
 	// Under 20 rows the selector's own legend names Esc, so this sentence gives its rows to the header above.
 	if (rows >= 20)
 		presenter.note(
-			"Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only at the review, except a browser sign-in you complete.",
+			`Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings only ${wizard.sendTest ? "after the test message" : "at the review"}, except a browser sign-in you complete.`,
 		);
 
 	const existing = options.mode === "edit" ? options.target : undefined;

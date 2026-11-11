@@ -88,10 +88,11 @@ launch sets one up before anything else. Clio offers what it found first (a
 key in your environment, a stored sign-in, a model server on this machine);
 otherwise pick what you have: an API key, a subscription, a model server or
 gateway, or a setup file from your lab or team. A pasted key names its
-provider, and Clio picks that provider's recommended model; **Choose a
-different model** on the review screen changes it. A model server's address
-is checked and its model list read; for a key or a subscription the list is
-the provider's catalog, and nothing is sent to the model before you save.
+provider, and Clio picks that provider's recommended model. A model server's
+address is checked and its model list read; for a key or a subscription the
+list is the provider's catalog. Setup then sends the model one short test
+message and saves once it answers; if it fails, **Connection and machine
+details** opens the review, where **Choose a different model** changes it.
 Started in your home folder, Clio then suggests moving to a project first.
 Later, `/model` switches models and `/config` → **Guided setup** adds another.
 
