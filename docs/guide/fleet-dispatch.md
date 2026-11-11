@@ -650,7 +650,7 @@ task worktree (`worktree: true`) or run host verification checks (`intent.verifi
 | Topology | Invocation | Semantics |
 | --- | --- | --- |
 | Singular | `task: "..."` | One assignment, with optional separate `briefing`. |
-| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping or undeclared roots are refused as `parallel_writer_conflict`. |
+| Parallel (default) | `tasks: [...]` | Fan out, wait for all, one summary. Writers sharing a checkout need disjoint `write_roots`, `worktree: true` or `writers: 1`; overlapping or undeclared roots are refused as `parallel_writer_conflict`. Worktree tasks whose `intent.write_roots` overlap (equal, or one inside the other) still start, with one `write_roots_overlap` warning per call naming each pair and the roots they share; their merges may collide. |
 | Sequential | `mode: "sequential"` | One at a time in request order. A timeout or abort stops the remaining tasks and reports `stopped after N/M task(s)`. |
 | Pipeline | `mode: "pipeline"` | Each step receives the previous step's output as data. The chain halts at the first failed step, or at a step whose conforming report records `quality=fail`, and reports how many later steps were skipped. |
 | Detached | `detach: true` | Parallel mode only. Return logical assignment ids and a batch id immediately; collect later. |
@@ -796,8 +796,13 @@ A task with a task worktree runs its lint and format checks on the files it chan
 whole repository. A declared command check counts as lint or format when it runs biome, eslint,
 prettier, ruff, black or stylelint, directly or through `npx`, `bunx` or `pnpm|npm|yarn exec`,
 or when it is exactly `pnpm run <script>` or `npm run <script>` and that package.json script is
-one such command with no shell operators, quotes or globs (`biome check .` qualifies,
-`biome check . && tsc` does not). The declared id is not consulted. The changed files are the
+one such command with no shell operators, quotes or globs (`biome check .` qualifies). A
+script of `&&`-joined commands also qualifies when its first command is such a linter or
+formatter and no command has shell operators, quotes or globs: only that first command is
+scoped to the task's files, and each later command (for example
+`node --import tsx scripts/check-hygiene.ts`) runs as its own whole-repo check named
+`<check>: <command>`, compared with the base like any whole-repo check. The declared id is
+not consulted. The changed files are the
 task worktree's diff against its base plus untracked files, deleted files excluded, limited to
 the check's directory: bare `.` arguments are dropped, each file is appended as `./<path>`,
 and biome also gets `--no-errors-on-unmatched`. A task that changed no such file passes the
