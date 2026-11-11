@@ -57,6 +57,8 @@ export interface SessionPromptInputs {
 	/** Ready, model-visible skills. Undefined means the inventory is unknown. */
 	readySkillCount?: number;
 	demo?: boolean;
+	/** The session renders in the terminal UI, not ACP, the GUI or a headless run. */
+	terminal?: boolean;
 	provider?: string | null;
 	model?: string | null;
 	/** Live source of each active route, recomputed per compile so compaction cannot lose it (DF-7). */
@@ -687,6 +689,7 @@ function sessionFacts(inputs: SessionPromptInputs, autonomyLevel: string): Sessi
 		sandbox: inputs.sandbox === true,
 		autonomy: sessionAutonomyCondition(autonomyLevel, inputs.yoloConfinement),
 		demo: inputs.demo === true,
+		terminal: inputs.terminal === true,
 		peers: inputs.peers === true,
 	};
 }
@@ -703,6 +706,7 @@ function workerFacts(inputs: WorkerPromptInputs): SessionFacts {
 		sandbox: inputs.sandbox === true,
 		autonomy: inputs.permit?.allowance.executeAutonomy === "yolo" ? "yolo" : "default",
 		demo: false,
+		terminal: false,
 		peers: false,
 	};
 }

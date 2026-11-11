@@ -2928,6 +2928,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				...(standingConstraints ? { turnConstraints: standingConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
 				demo: deps.interactiveGuidance === true && settings.interface.demo,
+				...(deps.interactiveGuidance === true ? { terminal: true } : {}),
 				provider: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,
 				...(frozenRouteSources ? { routeSources: frozenRouteSources } : {}),

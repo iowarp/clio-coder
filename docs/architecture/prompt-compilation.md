@@ -12,7 +12,7 @@ This page owns which fragments each prompt carries and how they are selected. Th
 | Headless main | `clio-coder run` without `--agent` | `compile` | `headless: true` in the session inputs |
 | Worker | Every dispatched worker, including `clio-coder run --agent` and `clio-coder fleet` steps | `compileWorker` | A separate entry point with its own inputs |
 
-The orchestrator derives `headless` from whether the process was started as a headless run (`src/entry/orchestrator.ts`). The GUI and ACP are attended for the compiler. They differ from the TUI in two inputs: ACP and GUI sessions get no demo guidance, and they get the `ask_user` turn-ending contract only when the ACP client enables interviews in its handshake (see [ACP](acp.md)).
+The orchestrator derives `headless` from whether the process was started as a headless run (`src/entry/orchestrator.ts`). The GUI and ACP are attended for the compiler. They differ from the TUI in three inputs: ACP and GUI sessions get no demo guidance and, under `prompts.profile: v2`, no Mermaid drawing row (the `terminal` fact), and they get the `ask_user` turn-ending contract only when the ACP client enables interviews in its handshake (see [ACP](acp.md)).
 
 Operator-facing text has no reader in a run without an operator and would be resent on every request. The attended-only fragments below carry that text, so the shared fragments stay small and a headless prompt omits the rest.
 

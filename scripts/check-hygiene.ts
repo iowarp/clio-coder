@@ -1399,6 +1399,7 @@ async function checkPromptPreconditions(): Promise<void> {
 		sandbox: true,
 		autonomy: "default",
 		demo: true,
+		terminal: true,
 		peers: true,
 	});
 	const used = new Set<string>();

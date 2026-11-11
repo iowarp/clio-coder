@@ -99,7 +99,12 @@ describe("prompts.profile v2 (S-82)", () => {
 			readFileSync(join(dir, `${name === "acp" ? "attended-default" : name}.inputs.json`), "utf8"),
 		) as Tier;
 		if (tier.kind === "worker") return compileWorker(table, { ...tier.inputs, promptProfile: "v2" });
-		const { operatorInterviews: _interviews, ...sessionInputs } = tier.inputs.sessionInputs;
+		const {
+			operatorInterviews: _interviews,
+			demo: _demo,
+			terminal: _terminal,
+			...sessionInputs
+		} = tier.inputs.sessionInputs;
 		return compile(table, {
 			...tier.inputs,
 			sessionInputs: { ...(name === "acp" ? sessionInputs : tier.inputs.sessionInputs), promptProfile: "v2" },
@@ -139,6 +144,13 @@ describe("prompts.profile v2 (S-82)", () => {
 			ok(overBudget(bigger).length > 0, `${id} grew by 1,000 characters within every budget`);
 		}
 		ok(grown >= 5, `${grown} fragments checked`);
+	});
+
+	it("gives Mermaid drawing guidance only to a terminal session", () => {
+		const mermaid = "a Mermaid fence draws as a diagram only when it fits the screen width";
+		ok(session("attended-default", { terminal: true }).systemPrompt.includes(mermaid), "terminal");
+		ok(!session("attended-default", { terminal: false }).systemPrompt.includes(mermaid), "ACP or GUI");
+		ok(!session("headless-default").systemPrompt.includes(mermaid), "headless");
 	});
 
 	it("compact profile drops map examples under a 48k window (S-87)", () => {

@@ -33,10 +33,12 @@ export interface SessionFacts {
 	sandbox: boolean;
 	autonomy: AutonomyCondition;
 	demo: boolean;
+	/** True only in the terminal UI, where replies render through the TUI's Markdown. */
+	terminal: boolean;
 	peers: boolean;
 }
 
-const FACT_CONDITION_NAMES = ["sandbox", "demo", "peers"] as const;
+const FACT_CONDITION_NAMES = ["sandbox", "demo", "terminal", "peers"] as const;
 
 /** Every name a `{name}` row marker may use: a builtin capability, a surface, or a session fact. */
 export const ROW_CONDITION_NAMES: ReadonlySet<string> = new Set<string>([
@@ -110,6 +112,7 @@ function conditionHolds(name: string, facts: SessionFacts): boolean {
 	if ((PROMPT_SURFACES as ReadonlyArray<string>).includes(name)) return facts.surface === name;
 	if (name === "sandbox") return facts.sandbox;
 	if (name === "demo") return facts.demo;
+	if (name === "terminal") return facts.terminal;
 	if (name === "peers") return facts.peers;
 	return facts.capabilities.has(name);
 }

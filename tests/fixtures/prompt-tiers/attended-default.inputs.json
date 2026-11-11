@@ -7,6 +7,7 @@
 		"sessionInputs": {
 			"readySkillCount": 1,
 			"demo": true,
+			"terminal": true,
 			"provider": "mock-chat",
 			"model": "mock-model",
 			"routeSources": {
