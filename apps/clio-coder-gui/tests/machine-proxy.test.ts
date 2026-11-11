@@ -228,6 +228,10 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	assert.equal((await command("/m/blade/api/events/ticket", browser)).status, 404);
 	// Nor a sign-out, which would revoke this app's own credential at the node rather than the window's.
 	assert.equal((await command("/m/blade/api/auth/revoke", browser)).status, 404);
+	// Matched as the node routes it: decoded, so an encoded name or a trailing slash forwards nothing.
+	assert.equal((await command("/m/blade/api/auth/%72otate", browser)).status, 404);
+	assert.equal((await command("/m/blade/api/auth/rotate/", browser)).status, 404);
+	assert.equal((await command("/m/blade/api/auth/%E0", browser)).status, 400);
 	assert.equal(seen.length, guarded);
 
 	// A remote refusal is reported as the node being unavailable, never as this app's credential being refused.

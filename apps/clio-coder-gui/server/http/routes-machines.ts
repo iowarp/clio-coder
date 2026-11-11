@@ -5,7 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import { clientCredential, dropClientCredential, proxyRequest } from "../local-server.js";
 import type { EventHub } from "../services/event-hub.js";
 import type { MachinesService } from "../services/machines.js";
-import { AppProblem } from "../services/problem.js";
+import { AppProblem, decodeRequestPath } from "../services/problem.js";
 import { requestClient } from "./auth.js";
 import { idempotencyKey, register } from "./validate.js";
 
@@ -84,13 +84,15 @@ export function machinesRoutes(
 			);
 		const url = new URL(context.req.url);
 		const path = url.pathname.slice(`/m/${id}`.length);
+		// Compare the path the node routes, decoded and without a trailing slash, so an encoded name cannot pass.
+		const routed = decodeRequestPath(path).replace(/\/+$/u, "");
 		// A browser's credentials and tickets belong to this app; the node issues its own.
 		if (
-			path === routes.authClients.path ||
-			path === routes.authChallenge.path ||
-			path === routes.authRotate.path ||
-			path === routes.authRevoke.path ||
-			path === routes.eventTicket.path
+			routed === routes.authClients.path ||
+			routed === routes.authChallenge.path ||
+			routed === routes.authRotate.path ||
+			routed === routes.authRevoke.path ||
+			routed === routes.eventTicket.path
 		)
 			throw new AppProblem("not_found", "Credentials and stream tickets are issued by this app, not through it.");
 		const client = requestClient(context);
