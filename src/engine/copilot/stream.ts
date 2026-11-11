@@ -58,7 +58,7 @@ type ReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
 type ContextTier = "default" | "long_context";
 
 /** The tier a copilot-sdk target opted into (`contextTier: long_context`), stamped on its synthesized model. */
-export function copilotContextTierFor(model: Model<Api>): ContextTier {
+function copilotContextTierFor(model: Model<Api>): ContextTier {
 	return (model as { copilotContextTier?: unknown }).copilotContextTier === "long_context" ? "long_context" : "default";
 }
 
