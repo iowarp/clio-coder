@@ -380,3 +380,33 @@ it("backs off a subscription the server refuses instead of retrying at the initi
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+it("does not adopt a dock whose owning Clio is still running", async () => {
+	const dock = (paneId: string, pid: number) => ({
+		paneId,
+		tabId: "t1",
+		workspaceId: "w1",
+		tokens: { clio_coder_owner: "clio-coder:mux", role: "watch", dock: "workers", pid: String(pid) },
+	});
+	const client = {
+		async snapshot() {
+			// process.ppid is a live process other than this one; 2**31 - 2 is not running.
+			return { panes: [dock("live-peer", process.ppid), dock("orphan", 2 ** 31 - 2)] };
+		},
+		async paneClose() {},
+	} as unknown as MuxClient;
+	const runtime = createMuxRuntime({
+		client,
+		detection: {
+			mode: "guest",
+			socketPath: null,
+			server: { version: "0.8.2", protocol: 21 },
+			self: { paneId: "self", tabId: "t1", workspaceId: "w1" },
+			candidates: [],
+			reason: "fixture",
+			refused: false,
+		},
+	});
+	const adopted = await runtime.contract.adoptPane({ purpose: "watch", label: "watch" });
+	strictEqual(adopted?.paneId, "orphan");
+});

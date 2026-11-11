@@ -695,6 +695,10 @@ export function createMuxRuntime(options: MuxRuntimeOptions): MuxRuntime {
 						// Another workspace's pane belongs to another session's screen;
 						// adopting it would retarget a surface the operator cannot see.
 						if (detection.self.workspaceId !== null && pane.workspaceId !== detection.self.workspaceId) continue;
+						// A dock whose recorded owner still runs is that session's dock, not a survivor:
+						// adopting it would let this session close or hide it.
+						const owner = Number(pane.tokens.pid);
+						if (Number.isInteger(owner) && owner > 0 && owner !== process.pid && processIsAlive(owner)) continue;
 						const ref: MuxPaneRef = { paneId: pane.paneId, tabId: pane.tabId, workspaceId: pane.workspaceId };
 						registry.record(
 							paneRecord(ref, {
