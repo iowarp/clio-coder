@@ -180,7 +180,9 @@ export function parsePeerPromptRequest(path: string): PeerPromptRequest | null {
 		version: 1,
 		id: record.id,
 		text: record.text,
-		fromPaneId: typeof record.fromPaneId === "string" ? record.fromPaneId.slice(0, 64) : "",
+		// Rendered into the transcript as the sender's name: only the characters a pane id holds.
+		fromPaneId:
+			typeof record.fromPaneId === "string" ? record.fromPaneId.replace(/[^A-Za-z0-9_.:@%-]/g, "").slice(0, 64) : "",
 		createdAt: typeof record.createdAt === "string" ? record.createdAt.slice(0, 40) : "",
 	};
 }
