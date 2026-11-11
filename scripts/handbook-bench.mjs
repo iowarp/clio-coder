@@ -118,6 +118,21 @@ function resolves(tree, path, rule = "") {
 	return bases.some((dir) => existsSync(join(tree, dir, literal)));
 }
 
+/** A sentence that forbids, retires or bans what it cites names a path that is meant to be absent. */
+const PROHIBITION_RE =
+	/\b(?:must not|never|not exist|retired|banned|outside|except|excluding|do not (?:add|restore|create|recreate)|no longer)\b/i;
+
+/** Cited paths that do not resolve, less those a prohibiting or excluding sentence names. */
+function missingCitations(tree, rule) {
+	// A rule split on its colon still forbids the list after it, so the test is the sentence up to a period.
+	const sentences = rule.split(/(?<=\.)\s+/);
+	return citedPaths(rule).filter((path) => {
+		if (resolves(tree, path, rule)) return false;
+		const own = sentences.filter((sentence) => sentence.includes(`\`${path}\``));
+		return !own.some((sentence) => PROHIBITION_RE.test(sentence));
+	});
+}
+
 /** Checker ids and the text around each mention, from the tree's own checker. */
 function checkerVocabulary(tree) {
 	const path = join(tree, CHECKER);
@@ -156,16 +171,99 @@ function staleRuleId(rule, vocabulary) {
 	return best.id !== id && best.score >= 0.4 && best.score - cited >= 0.15 ? { id, current: best.id } : null;
 }
 
+/** Tree facts a rule may assert: package manager from the lockfile, package script names, formatter. */
+function treeFacts(tree) {
+	const read = (name) => (existsSync(join(tree, name)) ? readFileSync(join(tree, name), "utf8") : null);
+	const pkg = JSON.parse(read("package.json") ?? "{}");
+	const managers = [
+		["pnpm", "pnpm-lock.yaml"],
+		["npm", "package-lock.json"],
+		["yarn", "yarn.lock"],
+		["bun", "bun.lockb"],
+	].filter(([, lock]) => existsSync(join(tree, lock)));
+	const manager = managers.length === 1 ? managers[0][0] : String(pkg.packageManager ?? "").split("@")[0] || null;
+	const formatters = [
+		["biome", ["biome.json", "biome.jsonc"]],
+		["prettier", [".prettierrc", ".prettierrc.json", "prettier.config.js", ".prettierrc.yaml"]],
+	]
+		.filter(([, files]) => files.some((file) => existsSync(join(tree, file))))
+		.map(([name]) => name);
+	return {
+		manager,
+		scripts: new Set(Object.keys(pkg.scripts ?? {})),
+		formatters,
+		hasPackage: read("package.json") !== null,
+	};
+}
+
+/** What a rule asserts that the tree's facts deny; empty when it asserts nothing the table holds. */
+export function contradictions(rule, facts) {
+	const found = [];
+	for (const match of rule.matchAll(/`(pnpm|npm|yarn|bun)(?: run)? ([a-z][\w:.-]*)[^`]*`/g)) {
+		const [, manager, script] = match;
+		if (facts.manager && manager !== facts.manager && manager !== "npm")
+			found.push(`package manager is ${facts.manager}, not ${manager}`);
+		if (
+			facts.hasPackage &&
+			script &&
+			!["install", "add", "exec", "dlx", "test", "i", "x", "publish", "pack", "run"].includes(script) &&
+			!facts.scripts.has(script)
+		)
+			found.push(`no package script ${script}`);
+	}
+	for (const formatter of ["biome", "prettier"])
+		if (
+			facts.formatters.length > 0 &&
+			!facts.formatters.includes(formatter) &&
+			new RegExp(`\\b${formatter}\\b`, "i").test(rule) &&
+			!/\bnot\b|\bnever\b/i.test(rule)
+		)
+			found.push(`formatter is ${facts.formatters.join(", ")}, not ${formatter}`);
+	return [...new Set(found)];
+}
+
+/**
+ * Share of the reference rules a `coder` worker receives that it also receives from the handbook, through the
+ * real worker compile and its 6000-character budget. Null when the compile is unavailable (run under tsx).
+ */
+async function workerCoverage(handbook, reference, tree) {
+	if (reference === undefined) return null;
+	let units;
+	try {
+		units = await import("../src/domains/context/handbook-units.ts");
+	} catch {
+		return null;
+	}
+	const worker = (text) => {
+		const compiled = units.compileHandbook(text, "CLIO-CODER.md");
+		if (!compiled) return text.slice(0, 6000);
+		return units.selectWorkerHandbook([compiled], {
+			audience: units.workerHandbookAudience("coder", null),
+			cwd: tree,
+			workingPaths: [],
+			maxChars: 6000,
+		}).text;
+	};
+	const wanted = handbookRules(worker(reference));
+	const got = handbookRules(worker(handbook));
+	if (wanted.length === 0) return null;
+	return Number((wanted.filter((rule) => got.some((other) => restates(rule, other))).length / wanted.length).toFixed(3));
+}
+
 /** Score `handbook` against `reference` in `tree`. Pure: reads only the tree and the two texts. */
-export function scoreHandbook({ handbook, reference, tree }) {
+export async function scoreHandbook({ handbook, reference, tree }) {
 	const rules = handbookRules(handbook);
 	const vocabulary = checkerVocabulary(tree);
-	const invalid = rules.filter((rule) => citedPaths(rule).some((path) => !resolves(tree, path, rule)));
+	const invalid = rules.filter((rule) => missingCitations(tree, rule).length > 0);
 	const duplicates = [];
 	rules.forEach((rule, index) => {
 		for (const other of rules.slice(index + 1)) if (restates(rule, other)) duplicates.push([rule, other]);
 	});
 	const stale = rules.map((rule) => staleRuleId(rule, vocabulary)).filter((entry) => entry !== null);
+	const facts = treeFacts(tree);
+	const contradicted = rules
+		.map((rule) => ({ rule, facts: contradictions(rule, facts) }))
+		.filter((entry) => entry.facts.length > 0);
 	const referenceRules = reference === undefined ? [] : handbookRules(reference);
 	const covered = referenceRules.filter((wanted) =>
 		rules.some((rule) => {
@@ -180,6 +278,7 @@ export function scoreHandbook({ handbook, reference, tree }) {
 		recall: recall === null ? 0 : 100 * recall,
 		invalid: -5 * invalid.length,
 		stale: -5 * stale.length,
+		contradicted: -5 * contradicted.length,
 		duplicates: -2 * duplicates.length,
 		size: -Math.max(0, (chars - 12000) / 400),
 	};
@@ -193,12 +292,11 @@ export function scoreHandbook({ handbook, reference, tree }) {
 		recall,
 		rules: rules.length,
 		chars,
-		invalid: invalid.map((rule) => ({ rule, paths: citedPaths(rule).filter((path) => !resolves(tree, path, rule)) })),
+		invalid: invalid.map((rule) => ({ rule, paths: missingCitations(tree, rule) })),
 		duplicates,
 		staleRuleIds: stale,
-		// Not measured yet: tree-fact contradictions and the 6000-character worker compile.
-		contradicted: null,
-		workerCoverage: null,
+		contradicted,
+		workerCoverage: await workerCoverage(handbook, reference, tree),
 	};
 }
 
@@ -450,12 +548,12 @@ function flags(argv) {
 }
 
 const USAGE = `usage:
-  node scripts/handbook-bench.mjs score --handbook <file> [--reference <file>] [--tree <dir>]
+  node --import tsx scripts/handbook-bench.mjs score --handbook <file> [--reference <file>] [--tree <dir>]
   node scripts/handbook-bench.mjs replay --commits <sha,sha,...> [--out <dir>]
   node scripts/handbook-bench.mjs run --arm <name>=<file>|none ... --tasks <dir> [--rounds 2] [--max-runs 40]
       [--target <id>] [--model <id>] [--thinking <level>] [--config-dir <dir>] [--timeout 600] [--yes]`;
 
-function main(argv) {
+async function main(argv) {
 	const [command, ...rest] = argv;
 	const options = flags(rest);
 	if (command === "score") {
@@ -464,16 +562,16 @@ function main(argv) {
 		const reference = typeof options.reference === "string" ? readFileSync(options.reference, "utf8") : undefined;
 		if (reference !== undefined) {
 			// The reference is the answer key; one with stale citations would reward stale rules.
-			const own = scoreHandbook({ handbook: reference, tree });
-			if (own.invalid.length > 0 || own.staleRuleIds.length > 0) {
+			const own = await scoreHandbook({ handbook: reference, tree });
+			if (own.invalid.length > 0 || own.staleRuleIds.length > 0 || own.contradicted.length > 0) {
 				process.stdout.write(
-					`${JSON.stringify({ refused: "reference is stale", invalid: own.invalid, staleRuleIds: own.staleRuleIds })}\n`,
+					`${JSON.stringify({ refused: "reference is stale", invalid: own.invalid, staleRuleIds: own.staleRuleIds, contradicted: own.contradicted })}\n`,
 				);
 				return 2;
 			}
 		}
 		const handbook = readFileSync(options.handbook, "utf8");
-		process.stdout.write(`${JSON.stringify(scoreHandbook({ handbook, reference, tree }), null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify(await scoreHandbook({ handbook, reference, tree }), null, 2)}\n`);
 		return 0;
 	}
 	if (command === "replay") {
@@ -539,5 +637,5 @@ function main(argv) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	process.exitCode = main(process.argv.slice(2));
+	process.exitCode = await main(process.argv.slice(2));
 }
