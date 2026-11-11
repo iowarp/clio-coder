@@ -57,7 +57,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Setup sends the model one short test request before it saves a route and saves only after the model answers or you choose Save anyway; `--no-verify` skips it.
 - A task merge into a checkout with overlapping uncommitted work is refused even when `merge.autoStash` is set, instead of reporting merged and leaving that work conflicted.
 - Headless `run` prints one `observed:` line on stderr after the answer (tool calls, refusals, writes, standing checks) when the run called a tool; `--json-events terminal` carries it as `turn_end.observed`. Stdout and exit codes are unchanged.
-- More retired slash spellings answer in 0.8.0 only and name their replacement: `/doctor deep` → `/doctor --deep`, `/loop list` → `/loop`, `/loop cancel <id>` → `/loop stop <id> --now`, and `/delegate` → `/run`.
+- More retired slash spellings answer in 0.8.0 only and name their replacement: `/doctor deep` → `/doctor --deep`, `/loop list` → `/loop`, `/loop cancel <id>` → `/loop stop <id> --now`, and `/delegate` → `/run`. Every `/delegate` form says so, and `/delegate <recipe> <task>` naming a Clio recipe runs it through `/run`; `/delegate` keeps its own path only for external ACP agents.
 - `clio-coder` with a piped stdout (`clio-coder | tee log`) boots non-interactively instead of drawing the TUI into the pipe. `CLIO_CODER_INTERACTIVE=1` still forces the TUI.
 - `/settings` lists the settings people change. About 40 tuning rows (keybindings, memory and working-set tuning, route cooldown, model favorites, safety judge rules and others) left the menu; Advanced gains "Edit settings file" and "Check setup", and every key still works in `settings.yaml`.
 - Typed tools refuse the same home credential files the shell sandbox masks (`gh`, `hub` and `cargo` credentials, `~/.password-store`, keyrings) and every `/proc/*/environ`, so a typed read no longer returns what a contained `cat` cannot.
@@ -118,9 +118,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `/settings` has seven areas named for what they hold (Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, Advanced). Old area names still open them, typing always filters and `*` pins a row.
 - Alt+U opens a one-page dashboard and closes it on the next press; the machine readings moved to the Health tab of `/usage`.
 - Ctrl+C backs out one layer in every overlay, like Esc. List rails name filter, select, detail and back the same way everywhere, and PgUp, PgDn, Home and End move through `/tree`.
-- `x` in Tasks, the steering queue, Memory and Fleet Runs, and `s` in Decisions, ask once before they act.
+- List overlays share one set of action letters, and a destructive key asks once before it acts: `x` removes, cancels, declines or supersedes the selected row in Tasks, the steering queue, Memory, Fleet Runs, Decisions, the Library and Interop; `r` refreshes the Library and `R` restarts all extensions; `o` orders `/tree`; `m` steers a fleet run and `Enter` opens its detail; `s` switches Interop scope; `Tab` opens a Library review's paths. In this release an old letter only says which key it moved to, and Esc in Interop first leaves a pending plan.
 - `/config` opens Settings on Connections in place, also during a turn, instead of suspending the terminal UI; `clio-coder configure` is unchanged.
-- `/reload prompts` (and bare `/reload`) re-reads prompt fragments, agent recipes, the project handbook and project rules in a running session and says which fragments changed. The safety rule pack still needs a restart.
+- `/reload prompts` (and bare `/reload`) re-reads prompt fragments, agent recipes, the project handbook and project rules in a running session and says which fragments changed, or that agent recipes failed to reload. The safety rule pack still needs a restart.
 - `/restart` first checks that the build on disk can start and refuses, keeping the session, when it cannot. `/restart <text>` hands the text to the restarted session as its first turn. If the new build dies before resuming, the old process prints the exit code and how to `/resume` instead of exiting silently.
 - A running session warns once when the build it was started from is replaced on disk.
 - An old-school arcade cabinet is hiding in the composer; it only wakes up for the right two words.
@@ -151,6 +151,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - An OAuth refresh that fails on a network error says so and that the next call retries, instead of asking for a new login.
 - First launch no longer adopts a local server's embedding model as the chat model.
 - `clio-coder auth logout <runtime>` names the targets that hold their own stored key and how to drop one, instead of saying nothing is stored.
+- `clio-coder run --model` with a pattern that matches no model exits 2 with a `clio-coder run:` usage message, like other bad `run` input, instead of 1.
 
 ### Shared folders and sessions
 
@@ -378,6 +379,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A question report whose send timed out no longer posts a second discussion when retried right away.
 - A call journal whose first line is damaged is set aside and journaling continues, instead of failing as an unsupported header.
 - A poll job's deadline wake is announced once; cancelling or closing afterwards no longer records a second continuation.
+- `/doctor` no longer reads as reporting a missing pane host twice: the `panes binary` warning points at the `external tool herdr` row.
 
 ### Internal
 
