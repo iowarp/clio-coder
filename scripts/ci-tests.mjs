@@ -28,6 +28,7 @@ export const coreTests = [
 	"check-lane-selection",
 	"handbook-bench",
 	"dispatch-plan-preview-newlines",
+	"interactive-ticker-idle",
 	"reload-prompts",
 	"telemetry-share-linkability",
 	"mcp-extension-secret-mask",

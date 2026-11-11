@@ -51,6 +51,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	let dispatchBoardTicker: InteractiveTickerHandle | null = null;
 	let contextIslandTicker: InteractiveTickerHandle | null = null;
 	let contextIslandVisible = false;
+	let disposed = false;
 
 	let taskRowShown = false;
 
@@ -61,6 +62,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	 * stops showing.
 	 */
 	const renderTaskIsland = (): boolean => {
+		wakeContextIslandTicker();
 		const rows = deps.dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row));
 		const board = rows.length === 0 ? (deps.getTaskBoard?.() ?? null) : null;
 		const shown = board !== null && !deps.isFooterExpanded() && taskBoardCounts(board).open > 0;
@@ -72,6 +74,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	const renderContextIsland = (): void => {
 		// Progress is a dock component. Repaint it without allocating a
 		// transcript overlay or hiding the task board on a wide terminal.
+		wakeContextIslandTicker();
 		contextIslandVisible = deps.contextActivityStore.active();
 	};
 
@@ -85,7 +88,11 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		stopDispatchBoardTicker();
 		// The board renders statelessly; update its elapsed times once a second.
 		dispatchBoardTicker = scheduleInterval(() => {
-			if (deps.getOverlayState() !== "dispatch-board") return;
+			// Opening the board starts this ticker again, so a closed board needs none.
+			if (deps.getOverlayState() !== "dispatch-board") {
+				stopDispatchBoardTicker();
+				return;
+			}
 			deps.tui.requestRender();
 		}, 1_000);
 		// Process liveness belongs to the application controller's keepAlive
@@ -106,12 +113,22 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 			deps.dispatchBoardStore.reconcile();
 			const taskNeedsRender = renderTaskIsland();
 			const fleetActive = (deps.dispatchBoardStore.liveRows?.() ?? deps.dispatchBoardStore.activeRows()).length > 0;
-			if (!deps.contextActivityStore.active() && !contextIslandVisible && !fleetActive && !taskNeedsRender) return;
+			if (!deps.contextActivityStore.active() && !contextIslandVisible && !fleetActive && !taskNeedsRender) {
+				// Idle: reconciling copies every run and dispatch's whole snapshot, so the ticker sleeps.
+				// Every run event and context activity change repaints an island, and that wakes it. The
+				// reconcile this tick made still catches a retry dispatch scheduled as its run failed.
+				stopContextIslandTicker();
+				return;
+			}
 			renderContextIsland();
 			deps.tui.requestRender();
 		}, 1_000);
 		contextIslandTicker.unref?.();
 	};
+
+	function wakeContextIslandTicker(): void {
+		if (contextIslandTicker === null && !disposed) startContextIslandTicker();
+	}
 
 	const controller: InteractiveTickers = {
 		renderTaskIsland,
@@ -121,6 +138,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		startContextIslandTicker,
 		stopContextIslandTicker,
 		dispose: () => {
+			disposed = true;
 			stopDispatchBoardTicker();
 			stopContextIslandTicker();
 		},
