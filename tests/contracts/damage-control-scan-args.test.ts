@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -157,6 +157,8 @@ test("a built-in zero-access block is not attributed to a project policy that do
 	const root = mkdtempSync(join(tmpdir(), "clio-builtin-path-"));
 	try {
 		const bare = createSafetyPolicyEngine({ cwd: root });
+		// Creating a new .env.local is allowed; replacing an existing one stays refused.
+		writeFileSync(join(root, ".env.local"), "API_KEY=x\n");
 		for (const posture of ["default", "yolo"] as const) {
 			const decision = bare.evaluate({ tool: ToolNames.Bash, args: { command: "cp .env.example .env.local" } }, posture);
 			strictEqual(decision.kind, "block");

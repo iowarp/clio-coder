@@ -57,6 +57,17 @@ const SKIPPED_DIRS = new Set([
 	".nox",
 ]);
 const ENVIRONMENT_MARKERS = ["pyvenv.cfg", "conda-meta"] as const;
+
+/**
+ * The discovery bounds, shared with the safety rail that judges a recursive
+ * search's walk, so both stop at the same depth and budget.
+ */
+export const SECRET_SCAN_LIMITS = { depth: SCAN_DEPTH, entryBudget: WALK_ENTRY_BUDGET } as const;
+
+/** True for a generated or dependency tree the discovery walk never enters. */
+export function isSkippedSecretScanDirectory(name: string): boolean {
+	return SKIPPED_DIRS.has(name);
+}
 /** Templates that document a secret's shape (`.env.example`) hold none. */
 const EXAMPLE_FILE = /\.(?:example|sample|template)$/iu;
 /** A literal npm registry credential; `${NPM_TOKEN}` names a variable and stays readable. */

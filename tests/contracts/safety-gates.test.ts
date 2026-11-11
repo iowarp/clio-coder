@@ -111,6 +111,8 @@ describe("safety gate boundary", () => {
 
 	it("hard-blocks zero-access paths before confirmation or ordinary ask rails", () => {
 		const policy = engine();
+		// Truncating an existing secret is refused; creating a new one is not (see below).
+		writeFileSync(join(scratch, ".env"), "API_KEY=x\n");
 		for (const call of [
 			{ tool: ToolNames.Read, args: { path: ".env" } },
 			{ tool: ToolNames.Write, args: { path: "credentials.yaml", content: "secret" } },
@@ -130,6 +132,61 @@ describe("safety gate boundary", () => {
 		const secretRead = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cat ~/.ssh/id_rsa" } });
 		strictEqual(secretRead.kind, "block");
 		strictEqual(secretRead.reasonCode, "secret_path_bash");
+	});
+
+	it("judges bash copy and redirect destinations as writes, not reads", () => {
+		const policy = engine();
+		writeFileSync(join(scratch, ".env.example"), "API_KEY=\n");
+		writeFileSync(join(scratch, ".env"), "API_KEY=secret\n");
+		const kind = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind;
+		strictEqual(kind("cp .env.example .env.local"), "allow", "a new file under a zero-access name exposes nothing");
+		strictEqual(kind("cp -t pkg .env.example"), "allow");
+		strictEqual(kind("cp .env backup"), "block", "the source operand is still a read");
+		strictEqual(kind("cat .env.example > .env"), "block", "overwriting an existing secret stays refused");
+		strictEqual(kind("echo X=1 >> .env"), "block");
+		writeFileSync(join(scratch, ".env.local"), "API_KEY=other\n");
+		strictEqual(kind("cp .env.example .env.local"), "block", "replacing an existing secret stays refused");
+		strictEqual(kind('grep -sq "^API_KEY=" .env'), "allow", "the presence check keeps working");
+	});
+
+	it("refuses a recursive search whose walk reaches a zero-access file unless it excludes it", () => {
+		const policy = engine();
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "x.ts"), "const SECRET = 1;\n");
+		writeFileSync(join(scratch, ".env"), "SECRET=value\n");
+		const evaluate = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+		const grep = evaluate("grep -rn SECRET .");
+		strictEqual(grep.kind, "block");
+		strictEqual(grep.reasonCode, "secret_path_bash");
+		strictEqual(
+			grep.reasons?.some((reason) => reason.includes("--exclude=.env")),
+			true,
+		);
+		strictEqual(evaluate("grep -rn --exclude=.env SECRET .").kind === "block", false);
+		const rg = evaluate("rg SECRET");
+		strictEqual(rg.kind, "block");
+		strictEqual(
+			rg.reasons?.some((reason) => reason.includes("-g '!.env'")),
+			true,
+		);
+		strictEqual(evaluate("rg -g '!.env' SECRET .").kind === "block", false);
+		strictEqual(
+			evaluate("ag SECRET").reasons?.some((reason) => reason.includes("--ignore=.env")),
+			true,
+		);
+		strictEqual(evaluate("grep -rn SECRET src").kind === "block", false, "a tree with no protected file is untouched");
+		strictEqual(evaluate("grep -n SECRET src/x.ts").kind === "block", false);
+	});
+
+	it("does not judge a search pattern as a path", () => {
+		const policy = engine();
+		mkdirSync(join(scratch, "src"), { recursive: true });
+		writeFileSync(join(scratch, "src", "x.ts"), "foo\n");
+		const kind = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind;
+		strictEqual(kind('grep -n "foo\\|\\.env" src/x.ts') === "block", false);
+		strictEqual(kind("rg -n .env src/x.ts") === "block", false);
+		strictEqual(kind("grep -n foo .env"), "block", "a file operand is still a read");
+		strictEqual(kind("grep -e foo .env"), "block", "with -e every positional is a file");
 	});
 
 	it("admits only standalone git diff whitespace checks in default mode", () => {
@@ -157,6 +214,7 @@ describe("safety gate boundary", () => {
 		for (const command of ["git diff --check $(cat args)", "git diff --check `cat args`"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
 		}
+		writeFileSync(join(scratch, ".env"), "API_KEY=x\n");
 		for (const command of ["git diff --check > .env", "git diff --check && cat ~/.ssh/id_rsa"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
 		}
@@ -1396,21 +1454,25 @@ describe("safety gate boundary", () => {
 		mkdirSync(join(scratch, "certs", "deep"), { recursive: true });
 		writeFileSync(join(scratch, "certs", "deep", "server.pem"), "key\n");
 		const policy = engine();
-		const recognition = (command: string) => policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition;
+		const recognition = (command: string) => {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			// A walk that reaches a zero-access file is now refused outright.
+			return decision.kind === "block" ? "block" : decision.execRecognition;
+		};
 		strictEqual(recognition("rg x src"), "recognized");
-		strictEqual(recognition("rg x certs"), "unrecognized", "a nested *.pem is a zero-access file");
-		strictEqual(recognition("rg x ."), "unrecognized", "the walk from the root reaches certs/deep/server.pem");
+		strictEqual(recognition("rg x certs"), "block", "a nested *.pem is a zero-access file");
+		strictEqual(recognition("rg x ."), "block", "the walk from the root reaches certs/deep/server.pem");
 		// grep -r walks the same way and takes the same proof.
 		strictEqual(recognition("grep -rn x src"), "recognized");
-		strictEqual(recognition("grep -rn x certs"), "unrecognized");
-		strictEqual(recognition("grep -r API_KEY ."), "unrecognized");
-		strictEqual(recognition("grep -r API_KEY"), "unrecognized", "no operand searches the working directory");
+		strictEqual(recognition("grep -rn x certs"), "block");
+		strictEqual(recognition("grep -r API_KEY ."), "block");
+		strictEqual(recognition("grep -r API_KEY"), "block", "no operand searches the working directory");
 		// The bare kubeconfig entry protects the workspace root's own file.
 		rmSync(join(scratch, "certs"), { recursive: true });
 		strictEqual(recognition("rg x ."), "recognized");
 		strictEqual(recognition("grep -rn API_KEY ."), "recognized");
 		writeFileSync(join(scratch, "kubeconfig"), "k\n");
-		strictEqual(recognition("rg x ."), "unrecognized", "the root kubeconfig is zero-access");
+		strictEqual(recognition("rg x ."), "block", "the root kubeconfig is zero-access");
 	});
 
 	it("recognizes a * or ? glob only when every match passes the operand checks", () => {
