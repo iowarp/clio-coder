@@ -1,4 +1,5 @@
-import { posix } from "node:path";
+import { readFileSync } from "node:fs";
+import { isAbsolute, join, posix, relative, sep } from "node:path";
 import type { CommitAttributionEvidence } from "../../core/commit-attribution.js";
 import type { ExecutionPlan, ExecutionPlanCodeStep } from "./execution-plan.js";
 
@@ -60,29 +61,131 @@ export function deriveFleetCommitAttribution(input: {
 	};
 }
 
-const PACKAGE_CONFIG_FILES = new Set(["package.json", ".npmrc", "pnpm-workspace.yaml"]);
+/** Package manifests and package-manager configs: their scripts and settings decide what a check runs. */
+const PACKAGE_CONFIG_FILES = new Set([
+	"package.json",
+	".npmrc",
+	".yarnrc",
+	".yarnrc.yml",
+	"pnpm-workspace.yaml",
+	"bunfig.toml",
+	"deno.json",
+	"deno.jsonc",
+]);
+/** Test-runner, compiler and build configs a check reads without naming them, and Python and make equivalents. */
+const RUNNER_CONFIG_FILES = new Set([
+	"pytest.ini",
+	"conftest.py",
+	"tox.ini",
+	"pyproject.toml",
+	"setup.cfg",
+	"Makefile",
+	"makefile",
+	"GNUmakefile",
+]);
+const RUNNER_CONFIG_PATTERNS = [
+	/^(?:vitest|vite|jest|playwright|ava|cypress|karma|babel|mocha)\.(?:config|workspace|setup)(?:\.[\w-]+)?\.(?:[cm]?[jt]sx?|json)$/u,
+	/^tsconfig(?:\.[\w-]+)?\.json$/u,
+	/^\.(?:mocharc|babelrc|c8rc|nycrc)(?:\.[\w-]+)?$/u,
+];
+const PACKAGE_MANAGERS = new Set(["pnpm", "npm", "yarn", "bun"]);
+const SCRIPT_DEPTH = 4;
+
+function isCheckConfigFile(name: string): boolean {
+	return (
+		PACKAGE_CONFIG_FILES.has(name) ||
+		RUNNER_CONFIG_FILES.has(name) ||
+		RUNNER_CONFIG_PATTERNS.some((pattern) => pattern.test(name))
+	);
+}
+
+/** The script a package-manager argv runs (`pnpm test`, `npm run check`), or null for anything else. */
+function packageScriptName(argv: ReadonlyArray<string>): string | null {
+	const executable = posix.basename((argv[0] ?? "").replaceAll("\\", "/")).replace(/\.(?:cmd|exe)$/iu, "");
+	if (!PACKAGE_MANAGERS.has(executable)) return null;
+	const rest = argv.slice(1).filter((token) => !token.startsWith("-"));
+	const name = rest[0] === "run" || rest[0] === "run-script" ? rest[1] : rest[0];
+	return name === undefined || name === "" ? null : name;
+}
+
+function readPackageScripts(workspaceRoot: string, dir: string): Readonly<Record<string, unknown>> | undefined {
+	try {
+		const manifest = JSON.parse(readFileSync(join(workspaceRoot, dir, "package.json"), "utf8")) as { scripts?: unknown };
+		return typeof manifest.scripts === "object" && manifest.scripts !== null
+			? (manifest.scripts as Record<string, unknown>)
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
- * The check's own files among `changedPaths` (repository-relative): a package manifest or package-manager config,
- * whose scripts a check may run, or a file the check's argv names. A pass over files the worker wrote earns no
- * `Tested-by` trailer. Directories the argv names are the code under check, not the check, so they do not count.
+ * The repository-relative files a command names. With `workspaceRoot`, a package-manager command also names the
+ * files its package.json script (with its pre and post scripts, and scripts it runs in turn) names.
  */
-export function changedCheckFiles(
+function commandOperands(
 	command: { argv: ReadonlyArray<string>; cwd: string },
-	changedPaths: Iterable<string>,
-): string[] {
-	const operands = new Set<string>();
+	workspaceRoot: string | undefined,
+	operands: Set<string>,
+	depth: number,
+	seen: Set<string>,
+): void {
 	for (const [index, token] of command.argv.entries()) {
 		const value = token.startsWith("-") ? (token.includes("=") ? token.slice(token.indexOf("=") + 1) : "") : token;
 		if (value === "" || /\s/u.test(value) || (index === 0 && !value.includes("/"))) continue;
 		const resolved = posix.normalize(posix.join(command.cwd, value));
 		if (!resolved.startsWith("../") && !posix.isAbsolute(resolved)) operands.add(resolved);
 	}
+	if (workspaceRoot === undefined || depth >= SCRIPT_DEPTH) return;
+	const name = packageScriptName(command.argv);
+	if (name === null) return;
+	const scripts = readPackageScripts(workspaceRoot, command.cwd);
+	if (scripts === undefined) return;
+	for (const script of [`pre${name}`, name, `post${name}`]) {
+		const body = scripts[script];
+		const key = `${command.cwd}\0${script}`;
+		if (typeof body !== "string" || seen.has(key)) continue;
+		seen.add(key);
+		for (const segment of body.split(/&&|\|\||[;|]/u)) {
+			const argv = segment
+				.trim()
+				.split(/\s+/u)
+				.map((token) => token.replace(/^(["'])(.*)\1$/u, "$2"))
+				.filter((token) => token !== "");
+			if (argv.length > 0) commandOperands({ argv, cwd: command.cwd }, workspaceRoot, operands, depth + 1, seen);
+		}
+	}
+}
+
+/**
+ * The check's own files among `changedPaths` (repository-relative), over every command the check step ran: its
+ * registered command and each changed-test command a loop check added. They are any package manifest or
+ * package-manager config, any runner, compiler or build config (`isCheckConfigFile`), any file a command names, and,
+ * given `workspaceRoot`, any file named by the package.json script a package-manager command runs. A pass over files
+ * the worker wrote earns no `Tested-by` trailer. Directories a command names are the code under check, not the check,
+ * so they do not count. A command's `cwd` is repository-relative, or absolute under `workspaceRoot`.
+ */
+export function changedCheckFiles(
+	commands: ReadonlyArray<{ argv: ReadonlyArray<string>; cwd: string }>,
+	changedPaths: Iterable<string>,
+	workspaceRoot?: string,
+): string[] {
+	const operands = new Set<string>();
+	const seen = new Set<string>();
+	for (const command of commands) {
+		let cwd = command.cwd;
+		if (isAbsolute(cwd)) {
+			if (workspaceRoot === undefined) continue;
+			cwd = relative(workspaceRoot, cwd).split(sep).join("/");
+			if (cwd.startsWith("..") || isAbsolute(cwd)) continue;
+		}
+		commandOperands({ argv: command.argv, cwd }, workspaceRoot, operands, 0, seen);
+	}
 	const hits = new Set<string>();
 	for (const path of changedPaths) {
 		const segments = path.split("/");
 		if (segments.includes("node_modules")) continue;
-		if (PACKAGE_CONFIG_FILES.has(segments.at(-1) ?? "") || operands.has(path)) hits.add(path);
+		if (isCheckConfigFile(segments.at(-1) ?? "") || operands.has(path)) hits.add(path);
 	}
 	return [...hits].sort();
 }

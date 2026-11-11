@@ -608,26 +608,77 @@ describe("vacuous loop checks", () => {
 			"node_modules/y/package.json",
 			"README.md",
 		];
-		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "tests/a.test.ts"], cwd: "" }, changed), [
+		deepStrictEqual(changedCheckFiles([{ argv: ["node", "--test", "tests/a.test.ts"], cwd: "" }], changed), [
 			"packages/x/package.json",
 			"tests/a.test.ts",
 		]);
-		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "a.test.ts"], cwd: "tests" }, changed), [
+		deepStrictEqual(changedCheckFiles([{ argv: ["node", "--test", "a.test.ts"], cwd: "tests" }], changed), [
 			"packages/x/package.json",
 			"tests/a.test.ts",
 		]);
-		deepStrictEqual(changedCheckFiles({ argv: ["pnpm", "test"], cwd: "" }, ["package.json", ".npmrc"]), [
+		deepStrictEqual(changedCheckFiles([{ argv: ["pnpm", "test"], cwd: "" }], ["package.json", ".npmrc"]), [
 			".npmrc",
 			"package.json",
 		]);
-		deepStrictEqual(changedCheckFiles({ argv: ["bash", "./scripts/check.sh"], cwd: "" }, ["scripts/check.sh"]), [
+		deepStrictEqual(changedCheckFiles([{ argv: ["bash", "./scripts/check.sh"], cwd: "" }], ["scripts/check.sh"]), [
 			"scripts/check.sh",
 		]);
-		deepStrictEqual(changedCheckFiles({ argv: ["vitest", "--config=vitest.config.ts"], cwd: "" }, ["vitest.config.ts"]), [
-			"vitest.config.ts",
-		]);
+		deepStrictEqual(
+			changedCheckFiles([{ argv: ["vitest", "--config=vitest.config.ts"], cwd: "" }], ["vitest.config.ts"]),
+			["vitest.config.ts"],
+		);
 		// The code under check is not the check: directory operands and unrelated files do not count.
-		deepStrictEqual(changedCheckFiles({ argv: ["biome", "check", "src", "."], cwd: "" }, ["src/a.ts", "README.md"]), []);
-		deepStrictEqual(changedCheckFiles({ argv: ["node", "--test", "../outside.ts"], cwd: "" }, ["outside.ts"]), []);
+		deepStrictEqual(
+			changedCheckFiles([{ argv: ["biome", "check", "src", "."], cwd: "" }], ["src/a.ts", "README.md"]),
+			[],
+		);
+		deepStrictEqual(changedCheckFiles([{ argv: ["node", "--test", "../outside.ts"], cwd: "" }], ["outside.ts"]), []);
+	});
+
+	it("counts every command a loop check ran, runner configs, and the files a package script names", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-check-files-"));
+		try {
+			mkdirSync(join(root, "web"));
+			writeFileSync(
+				join(root, "package.json"),
+				JSON.stringify({
+					scripts: {
+						pretest: "bash ./scripts/prep.sh",
+						test: "node scripts/run-tests.mjs && pnpm run lint",
+						lint: "biome check src --config-path=tools/biome.json",
+					},
+				}),
+			);
+			// The registered command passed; the changed test the step also ran is what the worker wrote.
+			const ran = [
+				{ argv: ["pnpm", "test"], cwd: "" },
+				{ argv: ["node", "--test", "./tests/x.test.ts"], cwd: root },
+				{ argv: ["node", "--test", "./y.test.ts"], cwd: join(root, "web") },
+			];
+			const changed = [
+				"src/a.ts",
+				"tests/x.test.ts",
+				"web/y.test.ts",
+				"vitest.config.ts",
+				"web/tsconfig.build.json",
+				"scripts/prep.sh",
+				"scripts/run-tests.mjs",
+				"tools/biome.json",
+				"docs/guide.md",
+			];
+			deepStrictEqual(changedCheckFiles(ran, changed, root), [
+				"scripts/prep.sh",
+				"scripts/run-tests.mjs",
+				"tests/x.test.ts",
+				"tools/biome.json",
+				"vitest.config.ts",
+				"web/tsconfig.build.json",
+				"web/y.test.ts",
+			]);
+			// Without the workspace an absolute cwd and the scripts stay unread; configs still count.
+			deepStrictEqual(changedCheckFiles(ran, changed), ["vitest.config.ts", "web/tsconfig.build.json"]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });

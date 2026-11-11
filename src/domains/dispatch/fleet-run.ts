@@ -1231,10 +1231,11 @@ async function runFleetHoldingWorkspace(
 					const selfWritten: string[] = [];
 					const writers: string[] = [];
 					if (outcome.report.passed) {
+						const ran = [command, ...(outcome.record.commandRuns ?? [])];
 						for (const [stepId, receipt] of receiptsByStep) {
 							const source = livePlan.steps.find((candidate) => candidate.id === stepId);
 							if (source?.kind !== "agent" || source.scope !== "workspace") continue;
-							const files = changedCheckFiles(command, receipt.changedPaths);
+							const files = changedCheckFiles(ran, receipt.changedPaths, workspaceRoot);
 							if (files.length === 0) continue;
 							writers.push(stepId);
 							selfWritten.push(...files);
