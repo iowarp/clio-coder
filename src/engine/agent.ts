@@ -186,6 +186,8 @@ export async function compactEngineCodex(
 	const apiKey = await agent.getApiKey?.(agent.state.model.provider);
 	options.signal?.throwIfAborted();
 	const configuration = codexConfigurations.get(agent);
+	// Native compaction reads the turns' prompt prefix from cache, so it splits the prompt as they do (#423).
+	const pinned = pinnedPrefixes.get(agent);
 	return compactOpenAI({
 		...(options.callTelemetry ? { callTelemetry: options.callTelemetry } : {}),
 		stream: engineMainStreamSimple,
@@ -198,6 +200,7 @@ export async function compactEngineCodex(
 			...(apiKey === undefined ? {} : { apiKey }),
 			...(options.signal === undefined ? {} : { signal: options.signal }),
 			...(configuration ? { codexConfiguration: configuration } : {}),
+			...(pinned ? { clioCoderPinnedPrefix: pinned } : {}),
 			...(agent.state.thinkingLevel === "off" ? {} : { reasoning: agent.state.thinkingLevel }),
 			...((options.sessionId ?? agent.sessionId) === undefined ? {} : { sessionId: options.sessionId ?? agent.sessionId }),
 			...(agent.transport === undefined ? {} : { transport: agent.transport }),

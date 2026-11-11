@@ -28,7 +28,8 @@ const developerText = (text: string): Payload => ({
  * Measured on gpt-6-luna, 2026-11-11: with the whole prompt in one block, a changed tail after an unchanged
  * 4.6k-token prefix read 0 of 5,645 prompt tokens; split at the prefix it read 4,608 of 5,654. The backend rejects
  * `prompt_cache_breakpoint` on that model. Through Clio, a turn after a project handbook edit read 0 of 5,947 prompt
- * tokens before the split and 4,352 of 5,955 after it. Anything that does not match is returned unchanged.
+ * tokens before the split and 4,352 of 5,955 after it. Native compaction sends the same split, so it reads the
+ * prefix its session's turns cached (#423). Anything that does not match is returned unchanged.
  */
 export function splitCodexInstructions(payload: unknown, prefix: PinnedPromptPrefix): unknown {
 	if (!record(payload) || !Array.isArray(payload.input) || !Number.isSafeInteger(prefix.chars) || prefix.chars <= 0) {

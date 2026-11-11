@@ -13,6 +13,12 @@ import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { RuntimeDescriptor } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetCacheSettings } from "../../src/domains/providers/types/target-descriptor.js";
+import {
+	compactEngineCodex,
+	createEngineAgent,
+	setEngineProviderCompactionPolicy,
+	setEngineSystemPrompt,
+} from "../../src/engine/agent.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import { engineMainStreamSimple } from "../../src/engine/api-registry.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
@@ -183,6 +189,55 @@ test("the main thread's Codex request sends the pinned prompt layer as its own i
 			content: [{ type: "input_text", text: tail }],
 		});
 		strictEqual((await send("side", hash, "sse")).instructions, pinned + tail);
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("native compaction on Codex sends the pinned prompt layer as its own item, as the turns do", async () => {
+	const model = openaiCodex.synthesizeModel(
+		{ id: "fixture", runtime: "openai-codex", url: "http://127.0.0.1:9" },
+		"gpt-6-luna",
+		null,
+	);
+	const pinned = "Install-wide identity and harness.\n";
+	const tail = "Project handbook and runtime.\n";
+	const claims = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct" } }));
+	const apiKey = `e30.${claims.toString("base64url")}.signature`;
+	const dir = mkdtempSync(join(tmpdir(), "clio-codex-compact-split-"));
+	const path = join(dir, "dump.jsonl");
+	const previous = process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
+	process.env.CLIO_CODER_PROVIDER_DUMP_PATH = path;
+	const abort = new AbortController();
+	try {
+		const { agent } = createEngineAgent({
+			initialState: { model, systemPrompt: "" },
+			sessionId: "session",
+			getApiKey: () => apiKey,
+			onPayload: () => {
+				abort.abort();
+				return undefined;
+			},
+		});
+		setEngineSystemPrompt(agent, pinned + tail, {
+			chars: pinned.length,
+			hash: createHash("sha256").update(pinned).digest("hex"),
+		});
+		agent.state.messages = [...agent.state.messages, { role: "user", content: "Task", timestamp: 0 }];
+		setEngineProviderCompactionPolicy(agent, () => true);
+		await compactEngineCodex(agent, { signal: abort.signal }).catch(() => undefined);
+		const dump = JSON.parse(readFileSync(path, "utf8").trim()) as {
+			payloads: Array<{ input: Array<{ role?: string; type?: string; content?: Array<{ text: string }> }> }>;
+		};
+		const body = dump.payloads.at(-1);
+		const developer = (body?.input ?? [])
+			.filter((item) => item.role === "developer")
+			.map((item) => item.content?.[0]?.text);
+		ok(developer?.includes(pinned), JSON.stringify(developer));
+		strictEqual(developer[developer.indexOf(pinned) + 1], tail);
+		ok(body?.input.some((item) => item.type === "compaction_trigger"));
 	} finally {
 		if (previous === undefined) delete process.env.CLIO_CODER_PROVIDER_DUMP_PATH;
 		else process.env.CLIO_CODER_PROVIDER_DUMP_PATH = previous;
