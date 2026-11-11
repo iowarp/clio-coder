@@ -120,6 +120,7 @@ reference data, and review define the acceptance criteria for a change.
 | --- | --- |
 | Built-in worker agents, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
 | Playbooks, local and multi-node fleet execution, placement, gates, and run records | [Fleet Dispatch](guide/fleet-dispatch.md) |
+| The project store: tags and blobs, worker tag grants, and the local and clio-core backends | [Store](guide/store.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
 | Worker process protocol, watchdogs, exit mapping, the refusal limit and denial format, failure classification and retries, and route history labels | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
 | Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |
