@@ -7,6 +7,26 @@ const TIMEOUT_MS = 1000;
  * timed out and the launchpad said `No Git repository` for a real repository: a timeout is not an answer.
  */
 const GATE_RETRY_TIMEOUT_MS = 5000;
+/** The most room the polled `git status` grows to after it ran out of time. */
+const STATUS_MAX_TIMEOUT_MS = 8000;
+/**
+ * Room the polled `git status` gets, per workspace. In a large repository status can need more than a second; the
+ * footer polls every five seconds, so a fixed budget killed it and started it over on every tick and never learned
+ * the dirty state. Each timeout doubles the room up to the cap; an answer keeps the room it needed.
+ */
+const statusTimeouts = new Map<string, number>();
+
+/** The status budget after one probe: doubled, up to the cap, when it ran out of time; unchanged otherwise. */
+export function nextStatusTimeout(current: number, ranOut: boolean): number {
+	return ranOut ? Math.min(current * 2, STATUS_MAX_TIMEOUT_MS) : current;
+}
+
+async function statusAsync(cwd: string): Promise<string | null> {
+	const timeout = statusTimeouts.get(cwd) ?? TIMEOUT_MS;
+	const answer = await askGit(cwd, ["status", "--porcelain", "--", "."], timeout);
+	statusTimeouts.set(cwd, nextStatusTimeout(timeout, answer.timedOut));
+	return answer.out;
+}
 
 export interface GitProbeResult {
 	isGit: boolean;
@@ -261,7 +281,7 @@ export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeRe
 	if (ignored.out !== null) return EMPTY_STATUS_PROBE;
 	const [branch, status, remoteRaw] = await Promise.all([
 		gateAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
-		gitOkAsync(cwd, ["status", "--porcelain", "--", "."]),
+		statusAsync(cwd),
 		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
 	]);
 	if (branch.timedOut) return UNDETERMINED_STATUS_PROBE;

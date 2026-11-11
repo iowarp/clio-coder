@@ -1,6 +1,7 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SESSION_START_FACTS_MAX_CHARS, sessionStartFacts } from "../../src/domains/prompts/extension.js";
+import { nextStatusTimeout } from "../../src/domains/session/workspace/git-probe.js";
 import { emptyWorkspaceSnapshot } from "../../src/domains/session/workspace/index.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -30,5 +31,14 @@ describe("session-start facts", () => {
 		} finally {
 			env.restore();
 		}
+	});
+});
+
+describe("polled git status budget", () => {
+	it("doubles after a timeout up to a cap, and keeps the room an answer needed", () => {
+		strictEqual(nextStatusTimeout(1000, true), 2000);
+		strictEqual(nextStatusTimeout(4000, true), 8000);
+		strictEqual(nextStatusTimeout(8000, true), 8000);
+		strictEqual(nextStatusTimeout(2000, false), 2000);
 	});
 });
