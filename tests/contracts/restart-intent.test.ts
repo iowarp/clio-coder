@@ -3,12 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { restartFallbackAdvice } from "../../src/core/restart-handoff.js";
+import { armRestartHandoff, restartFallbackAdvice } from "../../src/core/restart-handoff.js";
 import {
 	consumeRestartContinuation,
 	consumeRestartIntent,
 	RESTART_CONTINUATION_MAX,
+	RESTART_EXEC_ENV,
+	restartContinuationMessage,
 	restartIntentPath,
+	restartWriterPid,
 	writeRestartContinuation,
 	writeRestartIntent,
 } from "../../src/core/restart-intent.js";
@@ -20,6 +23,36 @@ import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { validateBuiltinToolPolicy } from "../../src/tools/policy.js";
 import { createRestartSessionTool, restartSessionWorkspaceRefusal } from "../../src/tools/restart-session.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
+
+test("/restart replaces the process instead of nesting a child under it (Q-M5)", async () => {
+	let handoff: (() => Promise<number>) | undefined;
+	const termination = {
+		setExitHandoff(fn: () => Promise<number>) {
+			handoff = fn;
+		},
+	} as unknown as Parameters<typeof armRestartHandoff>[1];
+	const calls: { file: string; args: readonly string[]; env: NodeJS.ProcessEnv }[] = [];
+	const execve = ((file: string, args: readonly string[] = [], env: NodeJS.ProcessEnv = {}) => {
+		calls.push({ file, args, env });
+		return undefined as never;
+	}) as (file: string, args?: readonly string[], env?: NodeJS.ProcessEnv) => never;
+	armRestartHandoff("/nonexistent-state", termination, execve);
+	assert.ok(handoff);
+	if (process.platform === "win32") return;
+	assert.equal(await handoff(), 0);
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0]?.file, process.execPath);
+	assert.equal(calls[0]?.args[0], process.execPath);
+	assert.equal(calls[0]?.env[RESTART_EXEC_ENV], String(process.pid));
+	// The exec'd image keeps the pid, so it consumes the intent its own pid wrote.
+	assert.equal(restartWriterPid({ [RESTART_EXEC_ENV]: "41" }, 41, 7), 41);
+	assert.equal(restartWriterPid({}, 41, 7), 7);
+	assert.equal(restartWriterPid({ [RESTART_EXEC_ENV]: "41" }, 99, 7), 7);
+	assert.match(
+		restartContinuationMessage("run the tests", "abc"),
+		/after \/restart, which carried this task over.*: run the tests$/,
+	);
+});
 
 test("restart intent is preserved for the child of the process that wrote it (#420)", () => {
 	const home = makeScratchHome("clio-coder-restart-intent-");

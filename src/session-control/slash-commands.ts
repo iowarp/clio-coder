@@ -1622,7 +1622,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "restart",
 		rank: 3,
 		acp: false,
-		description: "Save and restart into this session and workspace",
+		description: "Save and restart into this session and workspace; text after /restart becomes its next message",
 		group: "Clio",
 		kinds: ["restart"],
 		args: { positionals: [{ name: "task", required: false, rest: true }] },

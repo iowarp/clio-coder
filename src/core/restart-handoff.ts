@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { relaunchScript } from "./relaunch-script.js";
-import { restartIntentPath } from "./restart-intent.js";
+import { RESTART_EXEC_ENV, restartIntentPath } from "./restart-intent.js";
 import { markRestartHandoff } from "./restart-status.js";
 import type { getTerminationCoordinator } from "./termination.js";
 
@@ -29,8 +29,42 @@ export function restartFallbackAdvice(
 	return `Restart failed: the new build exited with code ${code} before it resumed the session. Run clio-coder${resume}.\n`;
 }
 
-export function armRestartHandoff(stateDir: string, termination: ReturnType<typeof getTerminationCoordinator>): void {
+type Execve = (file: string, args?: readonly string[], env?: NodeJS.ProcessEnv) => never;
+
+/**
+ * Replaces this process with the restarted build, keeping its pid, process
+ * group and terminal, so the parent is gone instead of guarding a nested child
+ * (Q-M5). Returns false when exec is unavailable (Windows, a Node without
+ * process.execve) or fails before replacing the image; the caller then falls
+ * back to the spawned guardian.
+ */
+export function execRestart(
+	execve: Execve | undefined = (process as { execve?: Execve }).execve,
+	platform: NodeJS.Platform = process.platform,
+): boolean {
+	if (typeof execve !== "function" || platform === "win32") return false;
+	const [script, ...args] = process.argv.slice(1);
+	const argv = script === undefined ? [] : [relaunchScript(script), ...args];
+	const env = { ...process.env, [RESTART_EXEC_ENV]: String(process.pid) };
+	try {
+		markRestartHandoff();
+		execve(process.execPath, [process.execPath, ...process.execArgv, ...argv], env);
+		return true;
+	} catch (error) {
+		process.stderr.write(
+			`Restart could not replace this process (${error instanceof Error ? error.message : String(error)}); starting it as a child.\n`,
+		);
+		return false;
+	}
+}
+
+export function armRestartHandoff(
+	stateDir: string,
+	termination: ReturnType<typeof getTerminationCoordinator>,
+	execve?: Execve,
+): void {
 	termination.setExitHandoff(async () => {
+		if (execRestart(execve)) return 0;
 		try {
 			return await new Promise<number>((resolve, reject) => {
 				const [script, ...args] = process.argv.slice(1);

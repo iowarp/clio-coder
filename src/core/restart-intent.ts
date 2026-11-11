@@ -19,12 +19,20 @@ export function writeRestartIntent(stateDir: string, sessionId: string): void {
 	safeResourceWrite(restartIntentPath(stateDir), `${JSON.stringify(intent)}\n`, { mode: 0o600 });
 }
 
+/** Set by an exec restart: the new image keeps the writer's pid instead of being its child. */
+export const RESTART_EXEC_ENV = "CLIO_CODER_RESTART_EXEC_PID";
+
+/** The pid that wrote this boot's restart intent: this pid after an exec handoff, else the parent. */
+export function restartWriterPid(env: NodeJS.ProcessEnv = process.env, pid = process.pid, ppid = process.ppid): number {
+	return env[RESTART_EXEC_ENV] === String(pid) ? pid : ppid;
+}
+
 /** Called only after interactive boot has loaded the session domain, never by Stage 0. */
 export function consumeRestartIntent(
 	stateDir: string,
 	cwd: string,
 	now = Date.now(),
-	expectedParentPid = process.ppid,
+	expectedParentPid = restartWriterPid(),
 ): string | undefined {
 	const file = restartIntentPath(stateDir);
 	let raw: string;
@@ -60,6 +68,16 @@ export function consumeRestartIntent(
 	if (!valid || !intent?.createdAt) return undefined;
 	const age = now - Date.parse(intent.createdAt);
 	return age >= 0 && age < 60_000 ? intent.sessionId : undefined;
+}
+
+/**
+ * The first message a restarted session submits. It names /restart and says the
+ * text was carried over, so the resumed model does not read a bare
+ * "Restarted on build X." prefix as injected text.
+ */
+export function restartContinuationMessage(text: string, buildId: string | null): string {
+	const build = buildId ? `build ${buildId}` : "the source tree";
+	return `This session resumed on ${build} after /restart, which carried this task over from before the restart: ${text}`;
 }
 
 /** Longest task text `/restart <text>` carries into the restarted session. */
