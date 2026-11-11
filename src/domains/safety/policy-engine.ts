@@ -97,6 +97,12 @@ import {
 	shellScriptSources,
 } from "./protected-artifacts.js";
 import {
+	isOutboundWebTool,
+	isSecretBearingPath,
+	SECRET_READ_THEN_FETCH_RULE_ID,
+	urlCouldCarryLocalData,
+} from "./read-fetch-taint.js";
+import {
 	isReadScopeTool,
 	type ReadScopeExemptRoot,
 	readScopeEscape,
@@ -742,6 +748,17 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	// repository created after that.
 	let gitControls = resolveGitControls(cwd);
 	let gitControlsStale = false;
+	/** First secret-bearing path an admitted call read, or null; taints later outbound fetches. */
+	let secretRead: string | null = null;
+	const secretBearingReadOf = (rawCall: ClassifierCall): string | null => {
+		if (rawCall.tool === ToolNames.Read || rawCall.tool === ToolNames.Grep) {
+			const target = rawCall.args?.path;
+			return typeof target === "string" && isSecretBearingPath(target) ? target : null;
+		}
+		if (rawCall.tool !== ToolNames.Bash) return null;
+		const tokens = flowSourceCallFor(rawCall, cwd).readTokens ?? [];
+		return tokens.find((token) => isSecretBearingPath(token)) ?? null;
+	};
 	const gitControlHit = (call: ClassifierCall, candidates: ReturnType<typeof mutationCandidates>): string | null => {
 		if (!WRITE_ROOT_TOOLS.has(call.tool)) return null;
 		if (gitControlsStale) {
@@ -1907,6 +1924,23 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// A judge's allow runs the asked call without a second admission, so an
 			// ask counts as well as an allow; the refresh waits for the next typed write.
 			if (decision.kind !== "block" && mayRewriteGitConfig(rawCall, decision, cwd)) gitControlsStale = true;
+			if (
+				secretRead &&
+				decision.kind === "allow" &&
+				isOutboundWebTool(rawCall.tool) &&
+				urlCouldCarryLocalData(rawCall.args?.url)
+			) {
+				return askDecision(decision, {
+					ruleId: SECRET_READ_THEN_FETCH_RULE_ID,
+					reasonCode: SECRET_READ_THEN_FETCH_RULE_ID,
+					reasons: [
+						`a secret-bearing file (${secretRead}) was read earlier in this session, and this URL has a query, fragment, userinfo or opaque path segment that could carry its contents outward`,
+					],
+					policySource: "builtin-classifier",
+				});
+			}
+			// An ask counts: a judge's allow runs the read without a second admission.
+			if (decision.kind !== "block" && secretRead === null) secretRead = secretBearingReadOf(rawCall);
 			return decision;
 		},
 		writeTargetViolation(target) {
