@@ -237,6 +237,10 @@ function dispatchRequestFromArgs(
 	if (args.tags !== undefined) {
 		// Weak models send `tags` as a JSON array string or as one bare tag name.
 		let tags: unknown = args.tags;
+		// The schema validator coerces that string into a one-element array before it reaches here.
+		if (Array.isArray(tags) && tags.length === 1 && typeof tags[0] === "string" && tags[0].trim().startsWith("[")) {
+			tags = tags[0];
+		}
 		if (typeof tags === "string") {
 			const raw = tags.trim();
 			let parsed: unknown = [raw];

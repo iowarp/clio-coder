@@ -68,6 +68,8 @@ describe("store tag grants", () => {
 				tasks: [
 					{ agent: "coder", task: "t", tags: '["fleet"]' },
 					{ agent: "coder", task: "u", tags: "fleet" },
+					// The schema validator coerces the JSON string into a one-element array before parsing.
+					{ agent: "coder", task: "v", tags: ['["fleet", "notes"]'] },
 				],
 			},
 			options,
@@ -75,7 +77,7 @@ describe("store tag grants", () => {
 		ok(parsed.ok, JSON.stringify(parsed));
 		deepStrictEqual(
 			parsed.requests.map((request) => request.storeTags),
-			[["fleet"], ["fleet"]],
+			[["fleet"], ["fleet"], ["fleet", "notes"]],
 		);
 	});
 
