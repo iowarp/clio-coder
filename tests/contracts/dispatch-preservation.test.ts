@@ -1,5 +1,6 @@
 import { match, ok, strictEqual, throws } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import {
 	existsSync,
 	mkdirSync,
@@ -10,7 +11,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { processBirthToken } from "../../src/core/process-identity.js";
@@ -134,6 +135,49 @@ test("the writer lease refuses an overlapping writer from another dispatch call 
 		detached.release();
 		acquireCheckoutWriterLease({ checkout: root, holder: holder("call-2", null) }).release();
 	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+test("a writer lease held on another host, or by a zombie, is judged by host and reaping", async () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-writer-lease-")));
+	const holder = { group: "g", roots: null, isolated: false, agentId: "coder" };
+	const lease = acquireCheckoutWriterLease({ checkout: root, holder });
+	const path = lease.path;
+	lease.release();
+	const record = (host: string, pid: number) =>
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				checkout: root,
+				host,
+				pid,
+				processBirthToken: "1",
+				acquiredAt: new Date().toISOString(),
+			}),
+		);
+	const child = spawn("sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], { stdio: ["ignore", "pipe", "ignore"] });
+	try {
+		record("other-node.invalid", 999_999_999);
+		throws(() => acquireCheckoutWriterLease({ checkout: root, holder }), /held by pid 999999999 on host other-node/u);
+		const zombie = Number((await once(child.stdout, "data"))[0].toString().trim());
+		for (let i = 0; i < 200 && !readFileSync(`/proc/${zombie}/stat`, "utf8").includes(") Z"); i++) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				checkout: root,
+				host: hostname(),
+				pid: zombie,
+				processBirthToken: processBirthToken(zombie) ?? "x",
+				acquiredAt: new Date().toISOString(),
+			}),
+		);
+		acquireCheckoutWriterLease({ checkout: root, holder }).release();
+	} finally {
+		child.kill("SIGKILL");
 		rmSync(root, { recursive: true, force: true });
 	}
 });

@@ -52,6 +52,17 @@ export function processStartedAtMs(pid: number): number | null {
 	}
 }
 
+/** True when /proc shows `pid` exited and awaits reaping; such a process holds nothing. False where /proc is absent. */
+export function processIsZombie(pid: number): boolean {
+	try {
+		const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+		const state = stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+		return state === "Z" || state === "X";
+	} catch {
+		return false;
+	}
+}
+
 export function processAlive(pid: number): boolean {
 	if (!Number.isFinite(pid) || pid <= 0) return false;
 	try {

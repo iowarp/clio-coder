@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { BIRTH_TOKEN_SOURCE_AVAILABLE, processAlive, processBirthToken } from "../../core/process-identity.js";
+import {
+	BIRTH_TOKEN_SOURCE_AVAILABLE,
+	processAlive,
+	processBirthToken,
+	processIsZombie,
+} from "../../core/process-identity.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { atomicWrite } from "../../engine/session.js";
@@ -10,6 +16,8 @@ import { writeRootsOverlap } from "./parallel-writers.js";
 export interface CheckoutWriterLeaseRecord {
 	version: 1;
 	checkout: string;
+	/** Host of the holder; absent in records written before hosts were recorded, which read as this host. */
+	host?: string;
 	pid: number;
 	processBirthToken: string;
 	acquiredAt: string;
@@ -44,6 +52,10 @@ export interface CheckoutWriterLeaseProbe {
 	birthToken(pid: number): string | null;
 	tokenProvesDeath?: boolean;
 	alive?(pid: number): boolean;
+	/** True when the pid exited but was not reaped, so it holds nothing despite answering signals. */
+	zombie?(pid: number): boolean;
+	/** This host's name; defaults to os.hostname(). */
+	host?: string;
 }
 
 const held = new Map<string, { count: number; path: string; holders: Set<CheckoutWriterHolder> }>();
@@ -65,6 +77,7 @@ function validRecord(value: unknown): value is CheckoutWriterLeaseRecord {
 	return (
 		record.version === 1 &&
 		typeof record.checkout === "string" &&
+		(record.host === undefined || typeof record.host === "string") &&
 		Number.isSafeInteger(record.pid) &&
 		(record.pid ?? 0) > 0 &&
 		typeof record.processBirthToken === "string" &&
@@ -87,6 +100,9 @@ function readRecord(path: string): CheckoutWriterLeaseRecord | null {
 }
 
 function ownerAlive(record: CheckoutWriterLeaseRecord, probe: CheckoutWriterLeaseProbe): boolean {
+	// Another host's pid cannot be probed from here, so its holder stays live, as state-file-lock rules (#439).
+	if (record.host !== undefined && record.host !== (probe.host ?? hostname())) return true;
+	if (probe.zombie?.(record.pid) === true) return false;
 	const current = probe.birthToken(record.pid);
 	if (current === null || current !== record.processBirthToken) return false;
 	if (probe.tokenProvesDeath === false) return probe.alive?.(record.pid) ?? false;
@@ -97,6 +113,7 @@ const defaultProbe: CheckoutWriterLeaseProbe = {
 	birthToken: processBirthToken,
 	tokenProvesDeath: BIRTH_TOKEN_SOURCE_AVAILABLE,
 	alive: processAlive,
+	zombie: processIsZombie,
 };
 
 function releaseAllOnExit(): void {
@@ -191,11 +208,13 @@ export function acquireCheckoutWriterLease(input: {
 	withStateFileLockSync(path, () => {
 		const existing = readRecord(path);
 		if (existing !== null && ownerAlive(existing, input.probe ?? defaultProbe)) {
-			throw new Error(`checkout_writer_lease_held: checkout writer lease is held by pid ${existing.pid}`);
+			const where = existing.host !== undefined && existing.host !== hostname() ? ` on host ${existing.host}` : "";
+			throw new Error(`checkout_writer_lease_held: checkout writer lease is held by pid ${existing.pid}${where}`);
 		}
 		const record: CheckoutWriterLeaseRecord = {
 			version: 1,
 			checkout,
+			host: hostname(),
 			pid: ownerPid,
 			processBirthToken: token,
 			acquiredAt: new Date(input.nowMs ?? Date.now()).toISOString(),
