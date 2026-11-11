@@ -13,7 +13,10 @@ import type { ToolSpec } from "../../src/tools/registry.js";
 import { createTasksTool } from "../../src/tools/tasks.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
+import { isolateNpmCache } from "../harness/npm-scratch.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+isolateNpmCache();
 
 it("requires the owning project's check after a same-named examples check passes", async () => {
 	const scratch = await isolateClioEnv("finish-source-");

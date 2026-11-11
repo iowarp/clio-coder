@@ -20,6 +20,9 @@ import {
 	JUDGED_CHECK_MAX_OUTPUT_BYTES,
 	runProjectCheck,
 } from "../../src/tools/verify/scripts.js";
+import { isolateNpmCache } from "../harness/npm-scratch.js";
+
+isolateNpmCache();
 
 /** A report with its text provenance removed, for comparing verdicts judged from differently labeled inputs. */
 function verdictOf(report: unknown): unknown {

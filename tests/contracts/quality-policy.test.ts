@@ -20,7 +20,10 @@ import {
 	loadQualityPolicy,
 	QUALITY_POLICY_PATH,
 } from "../../src/tools/verify/quality-policy.js";
+import { isolateNpmCache } from "../harness/npm-scratch.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+isolateNpmCache();
 
 async function project(body: (root: string) => Promise<void>): Promise<void> {
 	const scratch = await isolateClioEnv("quality-policy-");
