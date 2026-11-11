@@ -11,6 +11,7 @@
 
 import { ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import { voteTally } from "../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../session-control/slash-commands.js";
 import type { ToolRegistry } from "../tools/registry.js";
 
@@ -36,17 +37,4 @@ export async function dispatchCouncilThroughRegistry(
 	return verdict.result.kind === "error"
 		? { status: "error", message: verdict.result.message, ...extra }
 		: { status: "ok", ...extra };
-}
-
-/** The vote tally a council result carries in `details.council.synthesis`, when it ran a vote. */
-function voteTally(details: Readonly<Record<string, unknown>> | undefined): Record<string, number> | undefined {
-	const council = details?.council;
-	if (council === null || typeof council !== "object") return undefined;
-	const synthesis = (council as { synthesis?: unknown }).synthesis;
-	if (synthesis === null || typeof synthesis !== "object") return undefined;
-	const tally = (synthesis as { tally?: unknown }).tally;
-	if (tally === null || typeof tally !== "object" || Array.isArray(tally)) return undefined;
-	const out: Record<string, number> = {};
-	for (const [verdict, count] of Object.entries(tally)) if (typeof count === "number") out[verdict] = count;
-	return out;
 }

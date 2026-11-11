@@ -28,6 +28,7 @@ import { proposeTaskBankPromotion, type TaskMemorySnapshot } from "../../domains
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { DecisionBoardStore } from "../../domains/session/decision-board.js";
 import { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
+import { voteTally } from "../../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
 import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
@@ -56,6 +57,12 @@ export function createHostToolEvents(): HostToolEvents {
 	};
 }
 
+/** A vote council's tally, so `/poll` over ACP prints the distribution the TUI prints. */
+function tallyOf(details: Readonly<Record<string, unknown>> | undefined): { tally?: Record<string, number> } {
+	const tally = voteTally(details);
+	return tally !== undefined ? { tally } : {};
+}
+
 /** One dispatch the operator asked for by command, announced, admitted and settled as a model's call is. */
 export async function runHostDispatch(
 	registry: Pick<ToolRegistry, "invoke">,
@@ -76,8 +83,8 @@ export async function runHostDispatch(
 			: verdict.kind === "not_visible"
 				? { status: "error", message: verdict.reason }
 				: verdict.result.kind === "error"
-					? { status: "error", message: verdict.result.message }
-					: { status: "ok" };
+					? { status: "error", message: verdict.result.message, ...tallyOf(verdict.result.details) }
+					: { status: "ok", ...tallyOf(verdict.result.details) };
 	const text =
 		verdict.kind === "ok" && verdict.result.kind === "ok"
 			? verdict.result.output

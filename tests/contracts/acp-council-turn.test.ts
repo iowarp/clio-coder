@@ -167,3 +167,22 @@ test("a denied council runs nothing and says so, and invoking it outside a promp
 		await peer.stop();
 	}
 });
+
+test("/poll over ACP gets the vote tally back from the host dispatch", async () => {
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: process.cwd() }), autonomy: () => "yolo" });
+	registry.register({
+		name: ToolNames.Dispatch,
+		description: "stub dispatch",
+		parameters: Type.Object({}, { additionalProperties: true }),
+		baseActionClass: "dispatch",
+		async run() {
+			return {
+				kind: "ok",
+				output: "council",
+				details: { council: { synthesis: { kind: "vote", verdict: "tabs", tally: { tabs: 2, spaces: 1 } } } },
+			};
+		},
+	});
+	const outcome = await runHostDispatch(registry, createHostToolEvents(), { mode: "council", synthesis: "vote" });
+	assert.deepEqual(outcome, { status: "ok", tally: { tabs: 2, spaces: 1 } });
+});
