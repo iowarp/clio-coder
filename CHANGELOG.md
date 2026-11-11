@@ -165,6 +165,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The `anthropic` and `anthropic-max` runtimes continue Anthropic message threads on api.anthropic.com, so a follow-up request sends only the new messages; a target with its own URL keeps sending full requests. After about 270 s without a reply, the next request starts a new thread instead of continuing one the server has already dropped, so a long tool wait no longer costs a rejected request.
 - A missing key, an unreachable model server or a missing model reads as one sentence that names the fix, the same in `doctor`, `run`, the TUI banner, a failed prompt and the desktop app.
 - First-run setup asks what you have (a key, a subscription or a model server), names the provider from a pasted key and picks the recommended model. Anything Clio Coder already found is offered first. When a model server refuses without a key, setup offers to store one and rechecks the same address, and long model names use the terminal's width.
+- A connection whose address the project chose says to define it in your user settings with its own key variable (`auth.apiKeyEnvVar`), in the terminal and the desktop app, and never suggests a well-known key variable for that address.
+- The desktop app's setup lists the routes Clio found, waits visibly on the test message, and offers the same fixes as the terminal when the model does not answer.
+- Setting up in the terminal with a key from an environment variable offers to store a copy for the desktop app, which cannot see your shell's environment; only connections that name that variable use the copy, and only while it is unset.
 - A lab or site can publish one setup file. `clio-coder configure --import <path-or-https-url>` shows where prompts will go, asks once and connects (without a terminal it prints the changes and asks for `--yes`); first-run setup offers the same as "A setup file from my lab or team". The file may name only targets, the variable or sign-in profile each reads its key from, and the chat and fleet routes; a literal key or any other setting is refused.
 - The first launch sets up a model before it asks about the folder. The installer ends with the next step for your machine (a key or model server it found) and, while the launcher is not on `PATH`, a command that runs as printed.
 - Setup and the `/model` picker no longer offer embedding or rerank models as chat models. A server's metadata (LiteLLM `mode`, LM Studio type) decides, and otherwise ids naming embed or rerank are left out; naming one explicitly still selects it.
@@ -194,6 +197,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 
 - `/loop --until-stopped`, the job tool's `until_stopped` and the `chat.loopsUntilStopped` setting run a loop until you stop it, with no run count, deadline or continuation cap. It backs off instead of pausing on repeated outages; the cost ceiling and the loop guard still apply (#450).
 - A command job can wait on several conditions at once: give it `also` with an argv and `until` per further condition, and Clio Coder runs each command and checks each condition itself every poll, matching only when all hold, so a wait on CI and a cluster run no longer ends when CI alone finishes. `/loop status` lists every condition, and a deadline wake names the ones still pending.
+- A scheduled job turn the loop guard stopped no longer counts as an infrastructure failure toward the job's pause.
 - A follow-up turn already running, or one queued after the loop's condition matched, is no longer killed or dropped by the loop's `--for` deadline, and a loop that uses up its runs before its `--until` condition matches says so instead of reporting finished (#450).
 - In yolo, a turn stopped by the hard per-turn tool-call ceiling continues like one that crossed the soft budget instead of ending as cancelled, and a waiting loop that reaches its deadline before its condition matches wakes the main turn once to report or continue instead of stopping silently (#450).
 - The job tool and yolo guidance tell the agent to wire every condition when asked to wait on several things (one job each or one combined `until`), and to use `until_stopped` for open-ended waits (#450).
@@ -267,6 +271,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Windows opened by `clio-coder gui` or reopened with a remembered credential no longer land on "Open your launch link", and the Reconnect field accepts the `#ticket=` link `clio-coder gui` prints.
 - The approval card shows why a call stopped (the safety-net rule or the autonomy level), the size and sha256 digest of a parked write or edit, and the recorded task, matching the terminal card.
 - The machine proxy refuses credential routes however the path is encoded, and a malformed percent-encoded path returns 400 instead of 500.
+- When the open desktop window belongs to a server that restarted, `clio-coder gui` opens a fresh window instead of focusing the dead one.
 
 ### Context and compaction
 
@@ -290,6 +295,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `context init` reports what happened to each absorbed sibling handbook rule (verified, dropped, contradicted or merged, with its source file and line) in the summary, in `--json` and beside the proposal, and states that the absorbed handbooks were not modified.
 - `clio-coder context init --accept [<proposal>]` writes a reviewed proposal to the handbook byte for byte, and refuses when the handbook changed since the proposal was written.
 - Generated handbooks are shaped for workers: generated invariants are capped at 16 rules and 3,000 characters, Tests and Gotchas come first, and generated Conventions, Tests, Gotchas, Git and Docs sections reach every worker; sections you wrote keep their place and scope.
+- `context init` also reads Cursor rules, GitHub Copilot instruction files, and Windsurf, Cline and Aider instruction sources, and Clio Coder does not write into their directories. The heuristic draft no longer adds rules about Clio Coder's own repository, and `--global` reads through the interop home, so `CLIO_CODER_INTEROP_HOME=none` disables it.
 
 ### Memory
 
@@ -304,6 +310,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Session start and `@file` completion no longer freeze on large repositories: indexed files skip per-file stats, the project type is refined in the background, and the `@` file list is cached until the Git index changes.
 - After `context init --adopt`, the footer no longer re-enumerates the whole workspace on every render.
 - Long sessions no longer slow down with each turn: the current position comes from memory instead of re-reading the whole session ledger on every append and submit, and `/tree` previews no longer scan large payloads.
+- A long session's live budget no longer re-serializes and re-hashes the whole conversation on every update: digests and token estimates fold only the messages added since the last one.
 - One huge or pathological source file no longer disables `code_nav`: files over 2 MiB are indexed without symbols, each parse is capped at one second with a fallback, and build failures name the file. An unchanged tree is fingerprinted without reading files, and an edit re-reads only that file.
 - `grep` over a file with a very long line (a minified bundle or single-line JSON) no longer crashes Clio Coder; matches in lines over 1 MiB are omitted with a note.
 - Sandboxed commands reuse the workspace secret scan for up to 60 s while the git index is unchanged, and renew it after any write, edit, bash or `run_script` call.
@@ -373,12 +380,12 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A council member's row and card show its answer in words instead of raw scout JSON, a council that only collected answers is labelled "council of N" instead of one member's model route, and a running council counts every member, including those already finished. A council where some members gave no answer heads its card `! partial` instead of `✓ done`. `/council` with one answer and a failed member then warns `/council partial` naming the failed members, as `/poll` does, instead of reporting a failed council. A `/poll` member's row reads its ballot as verdict and reason instead of raw JSON.
 - A vote or judge council's own card no longer shows one member's model in its header, and the exit summary no longer counts the council's report as an extra worker.
 - Clio Coder says when a worker's change merged onto your branch: the TUI shows a Fleet row `<agent> <run> merged <sha> onto <branch>`, headless `run` prints it to stderr, and `--json` and ACP carry it as a `worker_merged` notice, detached runs included.
-- A checkout writer lease records its host: a writer on another host sharing the state directory is no longer taken over, and a zombie holder no longer pins the lease. A lease left by a host that stopped is freed about two minutes after that host's last heartbeat; hosts sharing a state directory need roughly synchronized clocks.
+- A checkout writer lease records its host: a writer on another host sharing the state directory is no longer taken over, and a zombie holder no longer pins the lease. A lease left by a host that stopped is freed about two minutes after that host's last heartbeat; its age is measured on the shared filesystem's clock, so hosts with skewed clocks neither break a live lease nor keep a dead one.
 - Cancelling a dispatched worker stops a command it was running, even one that ignores SIGTERM.
 - Worker diagnostics can no longer be mistaken for control frames.
 - The wiki generation lock records host and process identity, so another node's run is respected and a reused pid no longer blocks generation; a codewiki lock left by a gone process on another host is reclaimed after a minute.
 - A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer. Nor does a check that ran a test, runner config or package script a worker in the run changed; the run says why.
-- `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer.
+- `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer. A participant whose answer is not one of the listed options, such as a copied "yes", is asked again with the options named instead of casting a spoiled vote, and `--options` refuses a choice the ballot could not carry verbatim (one containing ", ", over 64 bytes, or spanning lines).
 - A task that names its check as an exact command ("verify by running: <cmd>", a backticked command after "by running", or "run `<cmd>` to verify") withholds the merge when the worker never ran that command to a clean exit, through the shell or a passing `verify` check, even if its other calls succeeded. `npm test`, `pnpm test` and `npm run test` name the same script. Plain "by running the tests" names no command.
 - A task worktree outside the project also links the `node_modules` of each workspace package the project declares (such as `apps/*`), beside the root `node_modules` and `.venv`, so a check that builds or typechecks a workspace package passes in the worktree.
 - Checks you name in the turn that dispatches work (`pnpm run <id>`, a backticked `<id>` or `verify(check="<id>")`) are attached to every task from that turn, so the merge gate enforces them even when the coordinator does not pass them on. Only checks the project declares are taken.
@@ -404,6 +411,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A claims log line over 64 KiB is never written, and a damaged line is counted as unreadable instead of parsed.
 - A worker whose task names no source path is told to prefer `read` and `grep` over `code_nav`; its tool list stays the same whatever the task says.
 - On a shared state directory, a loopback endpoint on a named fleet node counts from every host, so hosts no longer overfill that node's server.
+- A running fleet plan keeps its reservation current on every member lease heartbeat, so another host no longer expires a plan whose member runs longer than about 30 minutes.
 
 ### Extensions and MCP
 
