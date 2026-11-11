@@ -78,7 +78,11 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const outcome = await tool.run(args, {});
 			equal(outcome.kind, "error");
 			match(JSON.stringify(outcome), /captured context worker/);
-			equal(captures, mode === "isolated" ? 0 : 1);
+			equal(
+				captures,
+				mode === "isolated" ? 1 : 2,
+				"the operator turn is read once, and an inheriting mode captures its seed once",
+			);
 			equal(capacityLeaseUsage().global, 0);
 			const spec = specs[0];
 			ok(spec);
