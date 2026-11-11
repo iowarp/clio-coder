@@ -69,6 +69,7 @@ import {
 	statePath as resolveStatePath,
 	writeClioState,
 } from "./state.js";
+import { contradictingFact, factClaims, treeFacts } from "./tree-facts.js";
 
 export interface BootstrapStructuredOutput {
 	projectName: string;
@@ -122,6 +123,20 @@ export interface BootstrapGenerateInput {
 	assessDraft?: (draft: BootstrapStructuredOutput) => string | null;
 	/** Sections the evidence supports that a draft omits, each with the evidence that supports it. */
 	missingSections?: (draft: BootstrapStructuredOutput) => ExpectedSection[];
+	/** Receives one entry per instruction unit the authored-rule pass judged; only the final pass passes one. */
+	handbookLedger?: HandbookLedgerEntry[];
+}
+
+/** One adopted instruction unit and the verdict that decided whether it entered CLIO-CODER.md. */
+export interface HandbookLedgerEntry {
+	id: string;
+	text: string;
+	origin: "adopted";
+	source: { file: string; line: number };
+	citations: string[];
+	verdict: "verified" | "stale" | "unverifiable" | "contradicted";
+	reason: string;
+	kept: boolean;
 }
 
 export type BootstrapGenerate = (
@@ -480,7 +495,12 @@ function inferConventions(cwd: string, files: ReadonlyArray<SiblingContextFile>,
 			"Commit subjects are imperative, lowercase, conventional, at most 72 characters, and end without a period.",
 		);
 	}
-	for (const bullet of harvestSiblingBullets(files)) pushUnique(conventions, bullet);
+	// An uncited sibling bullet is kept only when no tree fact contradicts it; a cited one is adopted
+	// only through the verified authored-rule pass, which checks its citations against the tree.
+	const facts = treeFacts(cwd);
+	for (const bullet of harvestSiblingBullets(files)) {
+		if (!/`[^`\n]+`/.test(bullet) && !contradictingFact(bullet, facts)) pushUnique(conventions, bullet);
+	}
 	return conventions.slice(0, 6);
 }
 
@@ -749,19 +769,14 @@ function repositoryGroundingText(cwd: string, paths: ReadonlyArray<string>): str
 const GENERATION_EXCLUDED_FILES: ReadonlySet<string> = new Set(["CLIO-CODER.md", "CLIO-DEV.md"]);
 
 /**
- * Everything Scout is allowed to cite: sibling agent-context prose, the existing
- * handbook, every indexed path, every indexed symbol, and every runnable package
- * script rendered the way this repository would type it.
+ * Everything Scout is allowed to cite: every indexed path, every indexed symbol,
+ * every runnable package script rendered the way this repository would type it,
+ * and the text of repository files. Sibling agent-context prose and the existing
+ * handbook are quoted to the model as input, never evidence: a rule stated only
+ * in a sibling handbook would otherwise ground the model line that copies it.
  */
 function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundingCorpus {
-	let siblingBudget = 64_000;
-	const siblingEvidence: string[] = [];
-	for (const file of input.siblingFiles) {
-		if (siblingBudget <= 0) break;
-		const chunk = file.content.slice(0, siblingBudget);
-		siblingEvidence.push(chunk);
-		siblingBudget -= chunk.length;
-	}
+	const siblingPaths = new Set(input.siblingFiles.map((file) => relative(input.cwd, file.path).split("\\").join("/")));
 	const indexedPaths = new Set(input.codewiki.files.map((file) => file.path));
 	const pathsById = new Map(input.codewiki.files.map((file) => [file.id, file.path]));
 	const symbolDefinitions = new Map<string, Set<string>>();
@@ -775,10 +790,10 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	const pm = packageManager(input.cwd);
 	const scripts = packageScripts(input.cwd);
 	const evidence = [
-		...(input.evidence?.files.map((file) => `${file.path}\n${file.excerpt}`) ?? []),
+		...(input.evidence?.files
+			.filter((file) => !siblingPaths.has(file.path))
+			.map((file) => `${file.path}\n${file.excerpt}`) ?? []),
 		...(input.enforcement ? [JSON.stringify(input.enforcement)] : []),
-		...siblingEvidence,
-		(input.existingClioMdText ?? "").slice(0, FULL_PROJECT_CONTEXT_MAX_CHARS),
 		input.expectedProjectName ?? "",
 		input.projectType,
 		[...indexedPaths].join("\n").slice(0, 64_000),
@@ -797,6 +812,7 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	}
 	let text: string | null = null;
 	const fileTexts = new Map<string, string | null>();
+	const textPaths = repositoryPaths.filter((path) => !siblingPaths.has(path));
 	return {
 		lower: evidence.toLowerCase(),
 		indexedPaths,
@@ -810,12 +826,12 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 			.map((command) => command.slice(0, SCRIPT_RECITAL_CHARS)),
 		repositoryPaths: new Set(repositoryPaths),
 		repositoryText: () => {
-			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
+			text ??= repositoryGroundingText(input.cwd, textPaths);
 			return text;
 		},
 		fileText: (path) => {
 			if (!fileTexts.has(path))
-				fileTexts.set(path, repositoryPaths.includes(path) ? repositoryGroundingText(input.cwd, [path]) || null : null);
+				fileTexts.set(path, textPaths.includes(path) ? repositoryGroundingText(input.cwd, [path]) || null : null);
 			return fileTexts.get(path) ?? null;
 		},
 	};
@@ -1390,60 +1406,177 @@ function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null):
 	return groundedModelBody(trimmed, evidence) || null;
 }
 
-/** Root handbooks are authored policy. A small model may summarize away a
- * prohibition, so retain uncovered explicit constraints directly from them. */
-function authoredProjectRules(input: BootstrapGenerateInput, output: BootstrapStructuredOutput): ClioMdSection[] {
+const RULE_LANGUAGE_RE = /\b(?:never|must|forbidden|required|do not|don't|preserve|only|ask the user before)\b/i;
+const MAX_UNVERIFIABLE_RULES = 6;
+
+/**
+ * Root handbooks are authored policy, but a sibling handbook may be stale or
+ * wrong about this tree. Every unit is verified before it is adopted: one whose
+ * citations all resolve is kept with its source line, one citing a path or
+ * script the tree lacks is stale, one asserting a tree fact the tree states
+ * otherwise is contradicted, and at most a few uncited rules survive, ranked by
+ * how many sources state them.
+ */
+function authoredProjectRules(
+	input: BootstrapGenerateInput,
+	output: BootstrapStructuredOutput,
+	corpus: ModelGroundingCorpus,
+): ClioMdSection[] {
 	const normalize = normalizeHandbookRule;
 	const generated = normalize(
 		[...output.invariants, ...output.conventions, ...(output.sections ?? []).map((section) => section.body)].join("\n"),
 	);
-	const rules: string[] = [];
-	const operating: string[] = [];
-	const seen = new Set<string>();
-	const candidates: Array<{ line: string; operating: boolean; emphasized: boolean; order: number }> = [];
+	const facts = treeFacts(input.cwd, input.enforcement?.ciCommands ?? []);
+	const units: Array<{ line: string; file: string; at: number; operating: boolean; key: string; order: number }> = [];
+	const sourcesByKey = new Map<string, Set<string>>();
 	for (const file of handbookInstructionFiles(input)) {
 		const source = relative(input.cwd, file.path).split("\\").join("/");
 		// Global preferences remain separate; only project-wide handbooks become
 		// unconditional project rules, and fenced examples supply no policy.
 		if (source.startsWith("../")) continue;
 		// Hard-wrapped handbooks emitted 30+ physical-line fragments; retain complete rules with their heading scope.
-		for (const unit of instructionUnits(file.content, 600)) {
-			const operatingSection = /\b(?:operating|development sessions|default scope|development checks)\b/i.test(
-				unit.heading,
-			);
+		for (const unit of instructionUnits(file.content, 600, source)) {
 			const line = unit.text.replace(/^Project rules:\s*/i, "").trim();
-			if (!/\b(?:never|must|forbidden|required|do not|don't|preserve|only|ask the user before)\b/i.test(line)) continue;
+			if (line.length === 0) continue;
 			const key = normalize(line);
-			const sentences = line.split(/(?<=[.!?])\s+(?=[A-Z])/).map(normalize);
-			if (seen.has(key) || sentences.every((sentence) => generated.includes(sentence))) continue;
-			seen.add(key);
-			// Fragment-heavy handbooks hid strong policy; prefer caps or bold rule language under the cap.
-			const emphasized =
-				/\b(?:NEVER|MUST|CRITICAL|IMPORTANT)\b/.test(line) ||
-				[...line.matchAll(/\*\*([^*]+)\*\*|__([^_]+)__/g)].some((match) =>
-					/\b(?:never|must|critical|important)\b/i.test(match[1] ?? match[2] ?? ""),
-				);
-			candidates.push({
-				line: `- ${line} (source: ${source})`,
-				operating: operatingSection,
-				emphasized,
-				order: candidates.length,
+			const stating = sourcesByKey.get(key) ?? new Set<string>();
+			stating.add(source);
+			sourcesByKey.set(key, stating);
+			units.push({
+				line,
+				file: unit.file,
+				at: unit.line,
+				operating: /\b(?:operating|development sessions|default scope|development checks)\b/i.test(unit.heading),
+				key,
+				order: units.length,
 			});
 		}
+	}
+	const ledger = input.handbookLedger;
+	const record = (
+		unit: (typeof units)[number],
+		citations: string[],
+		verdict: HandbookLedgerEntry["verdict"],
+		reason: string,
+		kept: boolean,
+	): void => {
+		ledger?.push({
+			id: createHash("sha256").update(`${unit.file}:${unit.at}:${unit.line}`).digest("hex").slice(0, 12),
+			text: unit.line,
+			origin: "adopted",
+			source: { file: unit.file, line: unit.at },
+			citations,
+			verdict,
+			reason,
+			kept,
+		});
+	};
+	const candidates: Array<{
+		unit: (typeof units)[number];
+		line: string;
+		citations: string[];
+		verified: boolean;
+		emphasized: boolean;
+	}> = [];
+	const seen = new Set<string>();
+	for (const unit of units) {
+		const citations = [...unit.line.matchAll(CODE_TOKEN_RE)].map((match) => match[1] ?? "").filter(Boolean);
+		const grounded = groundedModelBody(unit.line, corpus);
+		if (citations.length > 0 && grounded.length === 0) {
+			const unresolved = citations.filter((token) => !groundedToken(token, corpus));
+			record(
+				unit,
+				citations,
+				"stale",
+				unresolved.length > 0
+					? `does not resolve in this tree: ${unresolved.join(", ")}`
+					: "its citations do not pass the citation rule",
+				false,
+			);
+			continue;
+		}
+		const fact = contradictingFact(unit.line, facts);
+		if (fact) {
+			record(unit, citations, "contradicted", `${fact.source} states ${fact.key} ${fact.value}`, false);
+			continue;
+		}
+		const verified = grounded.length > 0;
+		const line = verified ? grounded.replace(/\s*\n\s*/g, " ") : unit.line;
+		const sentences = line.split(/(?<=[.!?])\s+(?=[A-Z])/).map(normalize);
+		if (seen.has(unit.key)) {
+			record(unit, citations, verified ? "verified" : "unverifiable", "an earlier unit states it", false);
+			continue;
+		}
+		if (sentences.every((sentence) => generated.includes(sentence))) {
+			seen.add(unit.key);
+			record(unit, citations, verified ? "verified" : "unverifiable", "the draft already states it", true);
+			continue;
+		}
+		seen.add(unit.key);
+		// Fragment-heavy handbooks hid strong policy; prefer caps or bold rule language under the cap.
+		const emphasized =
+			/\b(?:NEVER|MUST|CRITICAL|IMPORTANT)\b/.test(line) ||
+			[...line.matchAll(/\*\*([^*]+)\*\*|__([^_]+)__/g)].some((match) =>
+				/\b(?:never|must|critical|important)\b/i.test(match[1] ?? match[2] ?? ""),
+			);
+		candidates.push({ unit, line, citations, verified, emphasized });
+	}
+	// A rule nothing cites survives only as one of the few most-stated rules, and never against a kept rule.
+	const keptClaims = candidates.filter((candidate) => candidate.verified).flatMap((c) => factClaims(c.line));
+	const unverifiable = candidates
+		.filter((candidate) => !candidate.verified)
+		.sort(
+			(a, b) =>
+				(sourcesByKey.get(b.unit.key)?.size ?? 0) - (sourcesByKey.get(a.unit.key)?.size ?? 0) ||
+				a.unit.order - b.unit.order,
+		);
+	const admitted = new Set<(typeof candidates)[number]>(candidates.filter((candidate) => candidate.verified));
+	let uncited = 0;
+	for (const candidate of unverifiable) {
+		const against = factClaims(candidate.line).find((claim) =>
+			keptClaims.some((kept) => kept.key === claim.key && kept.value !== claim.value),
+		);
+		if (against) {
+			record(candidate.unit, candidate.citations, "contradicted", `a kept rule states another ${against.key}`, false);
+			continue;
+		}
+		if (!RULE_LANGUAGE_RE.test(candidate.line) || uncited >= MAX_UNVERIFIABLE_RULES) {
+			record(candidate.unit, candidate.citations, "unverifiable", "cites nothing the tree can check", false);
+			continue;
+		}
+		uncited += 1;
+		admitted.add(candidate);
 	}
 	// Bound both sections together so numerous authored rules cannot overwhelm the lean handbook.
 	const retained: typeof candidates = [];
 	let chars = 0;
-	for (const candidate of [...candidates].sort(
-		(a, b) => Number(b.emphasized) - Number(a.emphasized) || a.order - b.order,
+	const rendered = (candidate: (typeof candidates)[number]): string =>
+		`- ${candidate.line} (source: ${candidate.unit.file}:${candidate.unit.at})`;
+	for (const candidate of [...admitted].sort(
+		(a, b) => Number(b.emphasized) - Number(a.emphasized) || a.unit.order - b.unit.order,
 	)) {
-		if (retained.length >= 16 || chars + candidate.line.length + 1 > 5000) continue;
+		const length = rendered(candidate).length + 1;
+		const fits = retained.length < 16 && chars + length <= 5000;
+		record(
+			candidate.unit,
+			candidate.citations,
+			candidate.verified ? "verified" : "unverifiable",
+			fits
+				? candidate.verified
+					? "every citation resolves"
+					: "cites nothing, but sources state it and nothing contradicts it"
+				: "over the authored-rule budget",
+			fits,
+		);
+		if (!fits) continue;
 		retained.push(candidate);
-		chars += candidate.line.length + 1;
+		chars += length;
 	}
+	const rules: string[] = [];
+	const operating: string[] = [];
 	// Priority decides survival, while source order keeps the retained rules readable in their original context.
-	for (const candidate of retained.sort((a, b) => a.order - b.order))
-		(candidate.operating ? operating : rules).push(candidate.line);
+	for (const candidate of retained.sort((a, b) => a.unit.order - b.unit.order))
+		(candidate.unit.operating ? operating : rules).push(rendered(candidate));
 	return [
 		...(operating.length ? [{ title: "Operating instructions from project handbooks", body: operating.join("\n") }] : []),
 		...(rules.length ? [{ title: "Authored project rules", body: rules.join("\n") }] : []),
@@ -2061,7 +2194,7 @@ function stabilizeGeneratedOutput(
 		if (modelSection) modelSections.add(retained);
 		return true;
 	};
-	const authoredRules = authoredProjectRules(input, base);
+	const authoredRules = authoredProjectRules(input, base, groundingCorpus ?? createModelGroundingCorpus(input));
 	for (const section of authoredRules) addSection(section);
 	// Authored sections, then the model's grounded sections, then heuristics:
 	// the model reads the repository, the heuristics only read its metadata.
@@ -2424,6 +2557,21 @@ function serializeBootstrapOutput(output: BootstrapStructuredOutput): string {
 	return serialized;
 }
 
+/**
+ * Every adopted unit `context init` judged, with its verdict, so an operator can
+ * see why a sibling handbook rule did or did not reach CLIO-CODER.md.
+ */
+function writeHandbookLedger(cwd: string, entries: ReadonlyArray<HandbookLedgerEntry>): void {
+	const commit = gitOutput(cwd, ["rev-parse", "HEAD"])?.trim() || null;
+	const dir = join(cwd, ".clio-coder", "state");
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(
+		join(dir, "handbook-ledger.json"),
+		`${JSON.stringify({ version: 1, commit, entries: entries.map((entry) => ({ ...entry, commit })) }, null, 2)}\n`,
+		"utf8",
+	);
+}
+
 function writeClioMdFile(cwd: string, output: BootstrapStructuredOutput): string {
 	const clioMdPath = join(cwd, "CLIO-CODER.md");
 	mkdirSync(dirname(clioMdPath), { recursive: true });
@@ -2777,6 +2925,7 @@ async function runBootstrapWork(
 		if (reportedGeneration === undefined) reportedGeneration = reported;
 	};
 	let enforcementSeen: EnforcementInventory | undefined;
+	let handbookLedger: HandbookLedgerEntry[] | undefined;
 	if (shouldGenerate) {
 		const depth = input.depth ?? "standard";
 		// The handbook this run writes is its output, not repository evidence. A
@@ -2864,6 +3013,8 @@ async function runBootstrapWork(
 		input.signal?.throwIfAborted();
 		generation = reportedGeneration ?? generation;
 		let retainedModelSections = 0;
+		const ledgerEntries: HandbookLedgerEntry[] = [];
+		handbookLedger = ledgerEntries;
 		output = stabilizeGeneratedOutput(
 			{
 				cwd,
@@ -2876,6 +3027,7 @@ async function runBootstrapWork(
 				evidence,
 				enforcement,
 				repositoryFiles,
+				handbookLedger: ledgerEntries,
 				...(existingParsed ? { existingClioMd: existingParsed } : {}),
 				...(existingClioMdText ? { existingClioMdText } : {}),
 				...(previousInvariants.length > 0 ? { previousInvariants } : {}),
@@ -2992,6 +3144,7 @@ async function runBootstrapWork(
 		},
 		input.signal,
 	);
+	if (handbookLedger) writeHandbookLedger(cwd, handbookLedger);
 	progress(input, {
 		phase: "clio-md",
 		status: "completed",

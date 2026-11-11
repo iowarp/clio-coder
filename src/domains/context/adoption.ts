@@ -5,6 +5,8 @@ import { basename, dirname, extname, join, relative, resolve, sep } from "node:p
 import { enumerateWorkspaceFiles, enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { instructionUnits } from "./instruction-units.js";
+import type { TreeFact } from "./tree-facts.js";
+import { contradictingFact, factClaims, treeFacts } from "./tree-facts.js";
 
 export type AdoptionProvider = "claude-code" | "agents" | "codex" | "gemini" | "cursor" | "copilot" | "opencode";
 export type AdoptionScope = "project" | "global";
@@ -53,7 +55,10 @@ export interface AdoptedAgentRule {
 	sources: string[];
 	providers: string[];
 	directoryScopes?: string[];
+	/** The tree-fact key the rule states and the tree agrees with. */
 	conflictKey?: string;
+	/** Where each source states the rule, 1-based. */
+	origins?: Array<{ file: string; line: number }>;
 }
 
 export interface AdoptionConflict {
@@ -103,14 +108,15 @@ interface ExtractedRuleCandidate {
 	text: string;
 	source: AdoptionSource;
 	index: number;
-	conflict?: { key: string; value: string };
+	line: number;
 }
 
 const MAX_SOURCE_BYTES = 128 * 1024;
 const MAX_TOTAL_SOURCE_BYTES = 1024 * 1024;
 const MAX_RECURSIVE_FILES = 80;
-const MAX_RULES_PER_SOURCE = 4;
-const MAX_IMPORTED_RULES = 20;
+// Generous pre-merge caps: `context init` verifies every adopted unit and truncates only what survives.
+const MAX_RULES_PER_SOURCE = 40;
+const MAX_IMPORTED_RULES = 80;
 
 const PROVIDER_LABELS: Record<AdoptionProvider, string> = {
 	"claude-code": "Claude Code",
@@ -367,11 +373,14 @@ function discoverCandidateSpecs(
 	return specs.filter((spec) => existsSync(spec.path));
 }
 
-function stripFrontmatter(text: string): string {
-	if (!text.startsWith("---\n")) return text;
+function stripFrontmatter(text: string): { body: string; firstLine: number } {
+	if (!text.startsWith("---\n")) return { body: text, firstLine: 1 };
 	const end = text.indexOf("\n---", 4);
-	if (end === -1) return text;
-	return text.slice(end + "\n---".length).replace(/^\n+/, "");
+	if (end === -1) return { body: text, firstLine: 1 };
+	const rest = text.slice(end + "\n---".length);
+	const body = rest.replace(/^\n+/, "");
+	const skipped = text.slice(0, text.length - body.length);
+	return { body, firstLine: skipped.split("\n").length };
 }
 
 function isBarePathOrFileName(text: string): boolean {
@@ -399,12 +408,12 @@ function cleanRuleText(raw: string, wholeUnit = false): string | null {
 	return text;
 }
 
-function extractMarkdownRules(content: string): string[] {
-	const text = stripFrontmatter(content);
-	const rules: string[] = [];
+function extractMarkdownRules(content: string, file: string): Array<{ text: string; line: number }> {
+	const { body, firstLine } = stripFrontmatter(content);
+	const rules: Array<{ text: string; line: number }> = [];
 	const seen = new Set<string>();
 	// Hard-wrapped instructions imported as physical-line fragments; evaluate bullets and paragraphs as whole units.
-	for (const unit of instructionUnits(text, 260)) {
+	for (const unit of instructionUnits(body, 260, file, firstLine)) {
 		// The observed "**DO NOT add** without approval:" intro remains a rule after absorbing its list.
 		const candidate = unit.listItem || /^(?:\*\*|__)?[A-Z]/.test(unit.text) ? unit.text : null;
 		if (!candidate) continue;
@@ -413,7 +422,7 @@ function extractMarkdownRules(content: string): string[] {
 		const key = normalizeRuleKey(cleaned);
 		if (seen.has(key)) continue;
 		seen.add(key);
-		rules.push(cleaned);
+		rules.push({ text: cleaned, line: unit.line });
 		if (rules.length >= MAX_RULES_PER_SOURCE) break;
 	}
 	return rules;
@@ -471,9 +480,10 @@ function extractSettingsRules(provider: AdoptionProvider, content: string): stri
 	return rules.map((rule) => cleanRuleText(rule)).filter((rule): rule is string => Boolean(rule));
 }
 
-function extractRules(spec: CandidateSpec, content: string): string[] {
-	if (spec.kind === "settings" || jsonLike(spec.path)) return extractSettingsRules(spec.provider, content);
-	return extractMarkdownRules(content);
+function extractRules(spec: CandidateSpec, content: string, file: string): Array<{ text: string; line: number }> {
+	if (spec.kind === "settings" || jsonLike(spec.path))
+		return extractSettingsRules(spec.provider, content).map((text) => ({ text, line: 1 }));
+	return extractMarkdownRules(content, file);
 }
 
 function normalizeRuleKey(text: string): string {
@@ -484,21 +494,6 @@ function normalizeRuleKey(text: string): string {
 		.replace(/\s+/g, " ")
 		.trim()
 		.replace(/[.!?]+$/, "");
-}
-
-function classifyConflict(text: string): { key: string; value: string } | undefined {
-	const normalized = text.toLowerCase().replace(/`/g, "");
-	const packageManager =
-		/\b(?:always\s+|must\s+|should\s+|prefer\s+|use\s+|run\s+)*(?:use|prefer|run)\s+(pnpm|npm|yarn|bun)\b/.exec(
-			normalized,
-		);
-	if (packageManager?.[1]) return { key: "package-manager", value: packageManager[1] };
-	const testRunner =
-		/\b(?:always\s+|must\s+|should\s+|prefer\s+|use\s+|run\s+)*(?:use|prefer|run)\s+(node:test|vitest|jest|pytest|cargo test|go test)\b/.exec(
-			normalized,
-		);
-	if (testRunner?.[1]) return { key: "test-runner", value: testRunner[1] };
-	return undefined;
 }
 
 function sourcePriority(source: AdoptionSource): number {
@@ -514,7 +509,10 @@ function sourcePriority(source: AdoptionSource): number {
 	return (source.scope === "project" ? 0 : 10_000) + kindPriority[source.kind] + scopeDepth * 10 + source.order;
 }
 
-function buildImportPlan(sources: ReadonlyArray<AdoptionSource>): {
+function buildImportPlan(
+	sources: ReadonlyArray<AdoptionSource>,
+	facts: ReadonlyArray<TreeFact>,
+): {
 	importedRules: AdoptedAgentRule[];
 	conflicts: AdoptionConflict[];
 } {
@@ -523,10 +521,10 @@ function buildImportPlan(sources: ReadonlyArray<AdoptionSource>): {
 		const rules = extractRules(
 			{ path: source.path, scope: source.scope, provider: source.provider, kind: source.kind, order: 0 },
 			source.content,
+			source.displayPath,
 		);
-		rules.forEach((text, index) => {
-			const conflict = classifyConflict(text);
-			candidates.push({ text, source, index, ...(conflict ? { conflict } : {}) });
+		rules.forEach((rule, index) => {
+			candidates.push({ text: rule.text, source, index, line: rule.line });
 		});
 	}
 	candidates.sort((a, b) => {
@@ -536,11 +534,11 @@ function buildImportPlan(sources: ReadonlyArray<AdoptionSource>): {
 
 	const accepted: AdoptedAgentRule[] = [];
 	const byNormalizedText = new Map<string, AdoptedAgentRule>();
-	const byConflictKey = new Map<string, { value: string; rule: AdoptedAgentRule }>();
 	const conflicts = new Map<string, AdoptionConflict>();
 
 	for (const candidate of candidates) {
 		const normalized = normalizeRuleKey(candidate.text);
+		const origin = { file: candidate.source.displayPath, line: candidate.line };
 		const existing = byNormalizedText.get(normalized);
 		if (existing) {
 			if (!existing.sources.includes(candidate.source.displayPath)) existing.sources.push(candidate.source.displayPath);
@@ -552,41 +550,42 @@ function buildImportPlan(sources: ReadonlyArray<AdoptionSource>): {
 					existing.directoryScopes.push(candidate.source.directoryScope);
 				}
 			}
+			existing.origins?.push(origin);
 			continue;
 		}
 
-		if (candidate.conflict) {
-			const prior = byConflictKey.get(candidate.conflict.key);
-			if (prior && prior.value !== candidate.conflict.value) {
-				let conflict = conflicts.get(candidate.conflict.key);
-				if (!conflict) {
-					conflict = {
-						key: candidate.conflict.key,
-						kept: prior.rule.text,
-						keptSources: [...prior.rule.sources],
-						skipped: [],
-					};
-					conflicts.set(candidate.conflict.key, conflict);
-				}
-				conflict.skipped.push({
-					text: candidate.text,
-					source: candidate.source.displayPath,
-					provider: candidate.source.providerLabel,
-				});
-				continue;
+		// The tree, not the first source read, decides a package manager or test runner a rule names.
+		const contradicted = contradictingFact(candidate.text, facts);
+		if (contradicted) {
+			let conflict = conflicts.get(contradicted.key);
+			if (!conflict) {
+				conflict = {
+					key: contradicted.key,
+					kept: `${contradicted.value} (${contradicted.source})`,
+					keptSources: [contradicted.source],
+					skipped: [],
+				};
+				conflicts.set(contradicted.key, conflict);
 			}
+			conflict.skipped.push({
+				text: candidate.text,
+				source: candidate.source.displayPath,
+				provider: candidate.source.providerLabel,
+			});
+			continue;
 		}
+		const agreed = factClaims(candidate.text).find((claim) => facts.some((fact) => fact.key === claim.key));
 
 		const rule: AdoptedAgentRule = {
 			text: candidate.text,
 			sources: [candidate.source.displayPath],
 			providers: [candidate.source.providerLabel],
 			...(candidate.source.directoryScope ? { directoryScopes: [candidate.source.directoryScope] } : {}),
-			...(candidate.conflict ? { conflictKey: candidate.conflict.key } : {}),
+			...(agreed ? { conflictKey: agreed.key } : {}),
+			origins: [origin],
 		};
 		accepted.push(rule);
 		byNormalizedText.set(normalized, rule);
-		if (candidate.conflict) byConflictKey.set(candidate.conflict.key, { value: candidate.conflict.value, rule });
 		if (accepted.length >= MAX_IMPORTED_RULES) break;
 	}
 
@@ -647,7 +646,7 @@ function readCandidate(spec: CandidateSpec, cwd: string, home: string): Adoption
 	if (hasSecretLikeLine(content)) {
 		return rejectedCandidate(spec, shown, "secret-like content", content);
 	}
-	const rules = extractRules(spec, content);
+	const rules = extractRules(spec, content, shown);
 	return {
 		path: spec.path,
 		displayPath: shown,
@@ -736,7 +735,7 @@ export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResu
 		const scopeDelta = (a.scope === "project" ? 0 : 1) - (b.scope === "project" ? 0 : 1);
 		return scopeDelta !== 0 ? scopeDelta : a.order - b.order;
 	});
-	const plan = buildImportPlan(sources);
+	const plan = buildImportPlan(sources, treeFacts(cwd));
 	const sourceSnapshots = [...sources.map(sourceSnapshot), ...rejected.map(sourceSnapshot)];
 	return {
 		cwd,
@@ -758,7 +757,7 @@ export function scanAgentConfigs(options: AdoptionScanOptions): AdoptionScanResu
  */
 export function restrictAdoptionScan(scan: AdoptionScanResult, keep: (path: string) => boolean): AdoptionScanResult {
 	const sources = scan.sources.filter((source) => keep(source.path));
-	const plan = buildImportPlan(sources);
+	const plan = buildImportPlan(sources, treeFacts(scan.cwd));
 	return {
 		...scan,
 		sources,

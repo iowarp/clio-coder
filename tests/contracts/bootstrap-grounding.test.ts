@@ -1150,3 +1150,79 @@ it("merges same-section bullets that restate each other in other words, keeping 
 	ok(handbook.includes(distinct), handbook);
 	ok(stdout.includes("merged 2 restated rules"), stdout);
 });
+
+interface LedgerEntryShape {
+	text: string;
+	origin: string;
+	source: { file: string; line: number };
+	verdict: string;
+	kept: boolean;
+}
+
+function readHandbookLedger(): LedgerEntryShape[] {
+	return JSON.parse(readFileSync(join(cwd, ".clio-coder", "state", "handbook-ledger.json"), "utf8")).entries;
+}
+
+it("verifies sibling handbook rules against the tree before adopting them", async () => {
+	writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+	writeFileSync(
+		join(cwd, "CLAUDE.md"),
+		[
+			"# Rules",
+			"",
+			"- Always run `npm run test:unit` before pushing.",
+			"- Always use yarn for installs.",
+			"- Never import from `src/legacy/` in new code.",
+			"- Never edit `src/widgets/render.ts` without updating `src/index.ts`.",
+			"",
+		].join("\n"),
+	);
+	await runBootstrap({ cwd });
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	strictEqual(handbook.includes("test:unit"), false, handbook);
+	strictEqual(handbook.includes("use yarn"), false, handbook);
+	strictEqual(handbook.includes("src/legacy"), false, handbook);
+	ok(handbook.includes("without updating `src/index.ts`. (source: CLAUDE.md:6)"), handbook);
+	const ledger = readHandbookLedger();
+	const entry = (fragment: string): LedgerEntryShape | undefined =>
+		ledger.find((candidate) => candidate.text.includes(fragment));
+	deepStrictEqual(
+		[entry("test:unit"), entry("use yarn"), entry("src/legacy/")].map((found) => [
+			found?.verdict,
+			found?.source.file,
+			found?.source.line,
+		]),
+		[
+			["stale", "CLAUDE.md", 3],
+			["contradicted", "CLAUDE.md", 4],
+			["stale", "CLAUDE.md", 5],
+		],
+	);
+	const adopted = entry("src/widgets/render.ts");
+	deepStrictEqual(
+		[adopted?.verdict, adopted?.origin, adopted?.kept, adopted?.source.line],
+		["verified", "adopted", true, 6],
+	);
+});
+
+it("does not let a rule stated only in a sibling handbook ground a model line", async () => {
+	writeFileSync(join(cwd, "CLAUDE.md"), "# Rules\n\n- Never edit `vendor-cache` by hand.\n");
+	const sibling = "Never edit `vendor-cache` by hand.";
+	const grounded = "Every widget renders through `renderWidget()` in `src/widgets/render.ts`.";
+	await runBootstrap({
+		cwd,
+		generate: async (input) => {
+			input.reportGeneration?.({ mode: "model", parserOutcome: "parsed" });
+			return {
+				projectName: "harbor",
+				identity: "A widget renderer.",
+				invariants: [sibling, grounded],
+				conventions: [],
+			};
+		},
+	});
+	const handbook = readFileSync(join(cwd, "CLIO-CODER.md"), "utf8");
+	ok(handbook.includes(grounded), handbook);
+	strictEqual(handbook.includes("vendor-cache"), false, handbook);
+	strictEqual(readHandbookLedger().find((found) => found.text.includes("vendor-cache"))?.verdict, "stale");
+});

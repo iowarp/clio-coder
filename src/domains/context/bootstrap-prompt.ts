@@ -168,7 +168,7 @@ function boundedEnforcement(input: EnforcementInventory): EnforcementInventory {
 }
 
 function compactImportedRules(adoption: AdoptionScanResult): Array<Record<string, unknown>> {
-	return adoption.importedRules.slice(0, 12).map((rule) => ({
+	return adoption.importedRules.slice(0, 40).map((rule) => ({
 		text: truncate(rule.text, 240),
 		sources: rule.sources.slice(0, 2).map((source) => truncate(source, 160)),
 		providers: rule.providers.slice(0, 2).map((provider) => truncate(provider, 80)),

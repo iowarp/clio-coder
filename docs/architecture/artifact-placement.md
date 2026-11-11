@@ -36,6 +36,7 @@ Markdown.
 | Codebase maps: native `context map` HTML | `.clio-coder/artifacts/maps/` | Human transient |
 | Session exports from `/export` | `.clio-coder/exports/<sessionId>-<date>.html` unless a path is named | Human transient |
 | Session context state | `.clio-coder/state.json` | Agent-to-agent |
+| Handbook adoption ledger from `context init` | `.clio-coder/state/handbook-ledger.json`: every sibling handbook unit the generator judged, with its source file and line, citations, verdict (`verified`, `stale`, `unverifiable`, `contradicted`), reason and commit | Agent-to-agent and provenance |
 | Task-memory handoffs | `.clio-coder/handoffs/handoff-YYYY-MM-DD[-slug].md` | Agent-to-agent |
 | `CLIO-CODER.md` proposals from `context init` | `.clio-coder/proposals/CLIO-CODER-<timestamp>-<uuid>.md` with a `.json` provenance sidecar | Human transient |
 | Task worktrees | `.clio-coder/worktrees/<runId>/` by default; `fleet.worktrees.root` can move the working tree to tmpfs or another directory, except when fleet nodes are configured | Agent-to-agent |
