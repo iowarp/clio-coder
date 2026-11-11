@@ -139,7 +139,7 @@ function filtered(root: string, name: string): void {
 	utimesSync(join(root, "a.txt"), later, later);
 }
 
-test("a clean filter added after the baseline does not run in Clio's status probe, and a baseline lfs filter does", (t) => {
+test("a filter the repository's own config names does not run in Clio's status probe, even at session start, and a global one does", (t) => {
 	t.after(() => installInternalGitPolicy(null));
 	const planted = repository();
 	const late = join(planted.scratch, "planted-filter-ran");
@@ -152,17 +152,60 @@ test("a clean filter added after the baseline does not run in Clio's status prob
 	spawnSync("git", ["-C", planted.root, "status", "--porcelain"]);
 	ok(existsSync(late), "a plain git status runs it, so the fixture is live");
 
-	const baseline = repository();
-	const lfs = join(baseline.scratch, "lfs-filter-ran");
-	git(baseline.root, "config", "filter.lfs.clean", markerScript(join(baseline.scratch, "lfs.sh"), lfs, "cat\n"));
-	git(baseline.root, "config", "filter.lfs.required", "true");
-	const steady = session(baseline.root, baseline.scratch);
-	filtered(baseline.root, "lfs");
-	strictEqual(probeGit(baseline.root).isGit, true);
-	ok(existsSync(lfs), "the filter the session started with ran");
+	// A pre-seeded .git/config is no drift, and yolo trusts drift, but its filter still does not run.
+	const seeded = repository();
+	const early = join(seeded.scratch, "seeded-filter-ran");
+	git(seeded.root, "config", "filter.x.clean", markerScript(join(seeded.scratch, "clean.sh"), early, "cat\n"));
+	git(seeded.root, "config", "filter.x.required", "true");
+	const quiet = session(seeded.root, seeded.scratch, "yolo");
+	filtered(seeded.root, "x");
+	strictEqual(probeGit(seeded.root).isGit, true);
+	strictEqual(existsSync(early), false, "the filter the repository started with did not run");
+	deepStrictEqual(quiet.records, []);
+	spawnSync("git", ["-C", seeded.root, "status", "--porcelain"]);
+	ok(existsSync(early), "a plain git status runs it, so the fixture is live");
+
+	const global = repository();
+	const lfs = join(global.scratch, "lfs-filter-ran");
+	const globalConfig = join(global.scratch, "gitconfig");
+	writeFileSync(
+		globalConfig,
+		`[filter "lfs"]\n\tclean = ${markerScript(join(global.scratch, "lfs.sh"), lfs, "cat\n")}\n\trequired = true\n`,
+	);
+	process.env.GIT_CONFIG_GLOBAL = globalConfig;
+	const steady = session(global.root, global.scratch);
+	filtered(global.root, "lfs");
+	strictEqual(probeGit(global.root).isGit, true);
+	ok(existsSync(lfs), "the operator's global filter ran");
 	deepStrictEqual(steady.records, []);
 	rmSync(planted.scratch, { recursive: true, force: true });
-	rmSync(baseline.scratch, { recursive: true, force: true });
+	rmSync(seeded.scratch, { recursive: true, force: true });
+	rmSync(global.scratch, { recursive: true, force: true });
+});
+
+test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line does not", () => {
+	const { root, scratch } = repository();
+	const fingerprinter = createGitHooksFingerprinter(root);
+	const guard = createGitHookDriftGuard({
+		workspace: root,
+		fingerprint: () => fingerprinter.fingerprint(),
+		config: (dir) => fingerprinter.config(dir),
+	});
+	const policy = createInternalGitPolicy({
+		workspace: root,
+		guard,
+		// Yolo skips the drift check, so only the repository-filter rule speaks.
+		autonomy: () => "yolo",
+		emptyHooksDir: join(scratch, "no-hooks"),
+	});
+	const read = () => policy.read?.({ repository: root, operation: "status" }) ?? [];
+	git(root, "config", "filter.lfs.clean", "git-lfs clean -- %f");
+	git(root, "config", "filter.lfs.process", "git-lfs filter-process");
+	deepStrictEqual(read(), []);
+	git(root, "config", "filter.lfs.clean", "git-lfs clean -- %f\ntouch /tmp/x");
+	ok(read().includes("filter.lfs.clean="), "a stock-looking first line with more after it is off");
+	ok(!read().includes("filter.lfs.process="));
+	rmSync(scratch, { recursive: true, force: true });
 });
 
 test("Clio's internal git writers ignore a GIT_DIR a git-driven runner exported", () => {

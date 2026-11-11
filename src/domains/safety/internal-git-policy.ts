@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { InternalGitOperation, InternalGitPolicy } from "../../core/internal-git.js";
 import {
 	createGitHooksFingerprinter,
 	type GitHookChange,
+	type GitHookFile,
 	gitHookEntryId,
 } from "../../core/sandbox/git-hooks-fingerprint.js";
 import type { AutonomyLevel } from "./autonomy.js";
@@ -13,6 +15,26 @@ import {
 	type GitHookDriftGuard,
 	type GitHookDriftReport,
 } from "./hook-drift.js";
+
+/**
+ * The commands `git lfs install --local` writes, which run git-lfs from PATH
+ * rather than anything the repository names, by the hash a config entry
+ * carries: the whole value, so one with a second line never matches.
+ */
+const STOCK_LFS_FILTER = new Map(
+	Object.entries({
+		"filter.lfs.clean": "git-lfs clean -- %f",
+		"filter.lfs.smudge": "git-lfs smudge -- %f",
+		"filter.lfs.process": "git-lfs filter-process",
+	}).map(([key, value]) => [key, createHash("sha256").update(value).digest("hex")]),
+);
+
+/** A filter driver set in the repository's own config, local or worktree scope, other than stock git-lfs. */
+function repositoryFilter(entry: GitHookFile): boolean {
+	if (entry.key === undefined || !entry.key.startsWith("filter.")) return false;
+	if (entry.scope !== "local" && entry.scope !== "worktree") return false;
+	return STOCK_LFS_FILTER.get(entry.key) !== entry.hash;
+}
 
 /**
  * How git that Clio runs itself (src/core/internal-git.ts) meets hook drift.
@@ -64,7 +86,7 @@ export interface InternalGitDriftRecord {
 export interface InternalGitPolicyDeps {
 	/** The workspace the session guard fingerprints. */
 	workspace: string;
-	guard: Pick<GitHookDriftGuard, "check" | "configDrift">;
+	guard: Pick<GitHookDriftGuard, "check" | "configDrift" | "executableConfig">;
 	autonomy: () => AutonomyLevel;
 	/** Directory kept empty for core.hooksPath, under Clio's own state directory. */
 	emptyHooksDir: string;
@@ -263,7 +285,7 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 	};
 
 	/** The overrides for the changed config keys, and the keys no command-line value turns off. */
-	const neutralize = (changes: ReadonlyArray<GitHookChange>): { overrides: string[]; unneutralized: string[] } => {
+	const neutralize = (changes: ReadonlyArray<{ key?: string }>): { overrides: string[]; unneutralized: string[] } => {
 		const overrides: string[] = [];
 		const unneutralized: string[] = [];
 		for (const key of new Set(changes.flatMap((change) => (change.key === undefined ? [] : [change.key])))) {
@@ -320,12 +342,16 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 			return [...hooksOff(), ...overrides];
 		},
 		read(operation: InternalGitOperation) {
-			// Yolo trusts the run; a read's check is skipped outright, so the footer pays nothing.
-			if (deps.autonomy() === "yolo") return [];
 			const guard = outsideConfigGuard(operation.repository) ?? deps.guard;
+			// A status or diff passes any racily dirty file through its clean filter, so a driver the
+			// repository's own config names, there before the session or not, never runs from Clio's
+			// probes, at any autonomy.
+			const local = guard.executableConfig(operation.repository).filter(repositoryFilter);
+			// Yolo trusts the run otherwise; its drift check is skipped outright, so the footer pays nothing more.
+			if (deps.autonomy() === "yolo") return neutralize(local).overrides;
 			const changes = guard.configDrift(operation.repository);
-			if (changes.length === 0) return [];
-			const { overrides, unneutralized } = neutralize(changes);
+			if (changes.length === 0) return neutralize(local).overrides;
+			const { overrides, unneutralized } = neutralize([...local, ...changes]);
 			const record = { repository: operation.repository, operation: INTERNAL_GIT_READS, hardened: true, changes };
 			// A planted command no -c can reach must not run from Clio's own probes: the read is refused instead.
 			if (unneutralized.length > 0) {

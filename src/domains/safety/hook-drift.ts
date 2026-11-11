@@ -60,6 +60,8 @@ export interface GitHookDriftGuard {
 	 * than a fingerprint walk. Empty without a `config` dependency.
 	 */
 	configDrift(dir: string): GitHookChange[];
+	/** Every executable config value of the repository holding `dir`, read the same cheap way. Empty without `config`. */
+	executableConfig(dir: string): GitHookFile[];
 }
 
 export interface GitHookDriftDeps {
@@ -199,6 +201,9 @@ export function createGitHookDriftGuard(deps: GitHookDriftDeps): GitHookDriftGua
 				detected.set(id, change);
 			}
 			return changes.sort((a, b) => a.path.localeCompare(b.path) || (a.key ?? "").localeCompare(b.key ?? ""));
+		},
+		executableConfig(dir) {
+			return deps.config === undefined ? [] : [...deps.config(dir).values()];
 		},
 		sessionChanges() {
 			const changes = new Map(

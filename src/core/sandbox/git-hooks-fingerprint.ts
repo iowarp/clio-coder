@@ -49,6 +49,8 @@ export interface GitHookFile {
 	kind: "file" | "symlink" | "config";
 	/** The config key as git lists it (`core.fsmonitor`, `filter.lfs.clean`); absent for a hook file. */
 	key?: string;
+	/** For config, the scope git read it in: `system`, `global`, `local`, `worktree` or `command`. */
+	scope?: string;
 	/** Any execute bit on what git would open, the link's target for a link. */
 	executable: boolean;
 	/** Bytes git would read; -1 for a dangling link or an unreadable file. */
@@ -371,7 +373,7 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 	for (const name of REPOSITORY_ENV) Reflect.deleteProperty(env, name);
 	let output: string;
 	try {
-		output = execFileSync("git", ["config", "--list", "--show-origin", "-z"], {
+		output = execFileSync("git", ["config", "--list", "--show-scope", "--show-origin", "-z"], {
 			cwd: dir,
 			env,
 			encoding: "utf8",
@@ -382,13 +384,14 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 	} catch {
 		return null;
 	}
-	// `-z` prints `<origin>\0<key>\n<value>\0` per value, and only `<key>` for a key with no `=`.
+	// `-z` prints `<scope>\0<origin>\0<key>\n<value>\0` per value, and only `<key>` for a key with no `=`.
 	const fields = output.split("\0");
-	const groups = new Map<string, { path: string; key: string; values: string[] }>();
+	const groups = new Map<string, { path: string; scope: string; key: string; values: string[] }>();
 	const origins = new Set<string>();
-	for (let at = 0; at + 1 < fields.length; at += 2) {
-		const origin = fields[at] as string;
-		const pair = fields[at + 1] as string;
+	for (let at = 0; at + 2 < fields.length; at += 3) {
+		const scope = fields[at] as string;
+		const origin = fields[at + 1] as string;
+		const pair = fields[at + 2] as string;
 		const newline = pair.indexOf("\n");
 		const key = newline < 0 ? pair : pair.slice(0, newline);
 		const value = newline < 0 ? "" : pair.slice(newline + 1);
@@ -397,7 +400,7 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 		if (file !== null) origins.add(file);
 		const where = file ?? origin.replace(/:$/u, "");
 		const id = gitHookEntryId({ path: where, key });
-		const group = groups.get(id) ?? { path: where, key, values: [] };
+		const group = groups.get(id) ?? { path: where, scope, key, values: [] };
 		group.values.push(value);
 		groups.set(id, group);
 	}
@@ -409,6 +412,7 @@ function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>;
 			path: group.path,
 			kind: "config",
 			key: group.key,
+			scope: group.scope,
 			executable: true,
 			size: Buffer.byteLength(joined),
 			hash: createHash("sha256").update(joined).digest("hex"),

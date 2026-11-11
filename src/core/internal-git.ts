@@ -20,7 +20,8 @@ import path from "node:path";
  * changed (a filter driver a racily dirty file would pass through, a textconv
  * driver), the read carries the same per-key overrides a mutation gets, or is
  * refused with {@link InternalGitRefusedError} when a changed key cannot be
- * overridden from the command line.
+ * overridden from the command line. A filter driver the repository's own
+ * config names is turned off for every read, drift or not.
  *
  * An operation that runs hooks or other configured commands (worktree add,
  * checkout, merge, commit, ref updates, fetch, push) also asks the installed
