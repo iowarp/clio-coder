@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import {
 import { journalSourceFromRead, seal } from "../../src/domains/telemetry/read-model.js";
 import { readTelemetryScopeFiles } from "../../src/domains/telemetry/seal.js";
 import { telemetryView } from "../../src/domains/telemetry/telemetry-live.js";
+import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 async function flipByte(path: string, offset: number): Promise<Buffer> {
 	const original = await readFile(path);
@@ -177,4 +179,30 @@ test("a verified run cache follows a reopened and resealed journal", async () =>
 	} finally {
 		await reopened.close();
 	}
+});
+
+test("telemetry inspect shows a session seal that fails verification as failed", async () => {
+	const home = await mkdtemp(join(tmpdir(), "telemetry-seal-inspect-"));
+	const directory = telemetrySessionDirectory(join(home, "state"), "ses_inspect");
+	const context: TelemetryContext = { sessionId: "ses_inspect", agent: { role: "main", id: "ses_inspect" } };
+	const journal = await openCallJournal({
+		directory,
+		context,
+		writer: { clioCoderVersion: "0.0.0-test", piVersion: "test" },
+	});
+	journal.enqueue({
+		kind: "session.opened",
+		data: {},
+		ctx: context,
+		wallMs: Date.now(),
+		mono: performance.now(),
+	} as Parameters<typeof journal.enqueue>[0]);
+	ok(await journal.sealAndClose());
+	await flipByte(join(directory, "journal.jsonl"), 20);
+	const script = `const { runTelemetryReadCommand } = await import(${JSON.stringify(new URL("../../src/cli/telemetry-read.ts", import.meta.url).href)}); process.exitCode = await runTelemetryReadCommand(["inspect", ${JSON.stringify(directory)}]);`;
+	const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+		encoding: "utf8",
+		env: { ...process.env, ...scratchClioEnvVars(home) },
+	});
+	ok(/^seal {6}failed: /m.test(result.stdout), `${result.stdout}\n${result.stderr}`);
 });

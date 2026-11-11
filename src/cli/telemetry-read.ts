@@ -21,7 +21,11 @@ import {
 	loadRunTelemetrySource,
 	loadSessionTelemetrySource,
 } from "../domains/session/telemetry-source.js";
-import { TELEMETRY_INSTALL_ID, telemetryImportedStateDir } from "../domains/telemetry/paths.js";
+import {
+	TELEMETRY_INSTALL_ID,
+	telemetryImportedStateDir,
+	telemetrySessionDirectory,
+} from "../domains/telemetry/paths.js";
 import type { SessionSource } from "../domains/telemetry/read-model.js";
 import {
 	cacheReport,
@@ -36,7 +40,8 @@ import {
 	timeline,
 	whyStopped,
 } from "../domains/telemetry/read-model.js";
-import { describeSealMismatch } from "../domains/telemetry/seal.js";
+import type { SealVerdict } from "../domains/telemetry/seal.js";
+import { describeSealMismatch, readTelemetryScopeFilesSync, verifyTelemetryScope } from "../domains/telemetry/seal.js";
 import { explainRepoRef, isRepoRef, usageWindow } from "../domains/telemetry/usage-window.js";
 import { formatColumns, printError } from "./shared.js";
 import { resolveTelemetryTarget } from "./telemetry-target.js";
@@ -135,6 +140,29 @@ function loadSession(stateDir: string, target: string): SessionSource | null {
 	return loadSessionTelemetrySource(stateDir, resolved.id, resolved.kind === "directory" ? resolved.path : undefined);
 }
 
+/** The session scope's seal verdict, so a seal that fails reads as failed rather than as a healthy journal. */
+function sessionSeal(stateDir: string, target: string, sessionId: string): SealVerdict | null {
+	const resolved = resolveTelemetryTarget(stateDir, target);
+	const directory = resolved.kind === "directory" ? resolved.path : telemetrySessionDirectory(stateDir, sessionId);
+	try {
+		return verifyTelemetryScope(readTelemetryScopeFilesSync(directory));
+	} catch {
+		return null;
+	}
+}
+
+function sealLine(seal: SealVerdict | null): string {
+	return `seal      ${
+		seal === null
+			? "not read"
+			: seal.status === "verified"
+				? `verified at ${seal.sealedAt}`
+				: seal.status === "unsealed"
+					? `unsealed (${seal.reason})`
+					: `failed: ${describeSealMismatch(seal.mismatch)}`
+	}`;
+}
+
 const show = (quantity: Quantity) => quantity.display;
 
 /** A close only the ledger recorded has no reason, so none is printed (#434 §6.1). */
@@ -153,11 +181,12 @@ function lifetimeState(lifetime: SessionTelemetryV1["lifetime"]): string {
 	}
 }
 
-function printSession(dto: SessionTelemetryV1): string {
+function printSession(dto: SessionTelemetryV1, seal: SealVerdict | null = null): string {
 	const journal = dto.journal;
 	const lines = [
 		`session ${dto.sessionId}${dto.modes.length > 0 ? ` (${dto.modes.join(" → ")} mode)` : ""}`,
 		`journal   ${journal.present ? `${journal.records} records` : "none"} · ${journal.skipped} skipped · ${journal.damaged} damaged · ${journal.gapRecords} gaps (${journal.droppedRecords} dropped)`,
+		sealLine(seal),
 		`lifetime  ${dto.lifetime.firstRecordAt ?? "no records"} → ${dto.lifetime.lastRecordAt ?? "no records"} · ${lifetimeState(dto.lifetime)}`,
 	];
 	if (dto.lineage.parent)
@@ -216,15 +245,7 @@ function printRun(dto: RunTelemetryV1): string {
 					`outcome   ${dto.settled.outcome}${dto.settled.outcomeCode ? ` (${dto.settled.outcomeCode})` : ""} · ${dto.settled.agentId} on ${dto.settled.route.targetId}/${dto.settled.route.wireModelId}`,
 				]
 			: []),
-		`seal      ${
-			dto.seal === null
-				? "not read"
-				: dto.seal.status === "verified"
-					? `verified at ${dto.seal.sealedAt}`
-					: dto.seal.status === "unsealed"
-						? `unsealed (${dto.seal.reason})`
-						: `failed: ${describeSealMismatch(dto.seal.mismatch)}`
-		}`,
+		sealLine(dto.seal),
 	];
 	return `${lines.join("\n")}\n`;
 }
@@ -539,7 +560,9 @@ export async function runTelemetryReadCommand(argv: ReadonlyArray<string>): Prom
 		}
 		switch (args.command) {
 			case "inspect":
-				return emit(sessionTelemetry(session), args.json, printSession);
+				return emit(sessionTelemetry(session), args.json, (dto) =>
+					printSession(dto, sessionSeal(stateDir, target, session.sessionId)),
+				);
 			case "calls":
 				return emit(callsReport(session, filter), args.json, printCalls);
 			case "cost": {
