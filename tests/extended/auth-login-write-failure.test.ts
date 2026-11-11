@@ -442,4 +442,59 @@ describe("contracts/targets remove and the removed target's stored key", () => {
 			scratch.restore();
 		}
 	});
+
+	it("drops the desktop app's copy of a key variable once no target names that variable", async () => {
+		const scratch = await isolateClioEnv("clio-coder-target-remove-env-copy-");
+		try {
+			const configDir = join(scratch.dir, "config");
+			mkdirSync(configDir, { recursive: true, mode: 0o700 });
+			writeFileSync(
+				join(configDir, "settings.yaml"),
+				[
+					"version: 2",
+					"targets:",
+					"  - id: desk-a",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyEnvVar: WORK_OPENAI_KEY",
+					"  - id: desk-b",
+					"    runtime: openai",
+					"    defaultModel: gpt-5",
+					"    auth:",
+					"      apiKeyEnvVar: WORK_OPENAI_KEY",
+					"",
+				].join("\n"),
+			);
+			const credentials = join(configDir, "credentials.yaml");
+			writeFileSync(
+				credentials,
+				[
+					"version: 2",
+					"entries:",
+					"  openai:",
+					"    type: api_key",
+					'    key: "sk-runtime-not-real"',
+					"  env:WORK_OPENAI_KEY:",
+					"    type: api_key",
+					`    key: "${STORED_KEY}"`,
+					"",
+				].join("\n"),
+				{ encoding: "utf8", mode: 0o600 },
+			);
+			const first = await captureCli(() => runTargetRemove("desk-a"));
+			strictEqual(first.code, 0, first.stderr);
+			ok(first.stdout.includes("kept the stored key env:WORK_OPENAI_KEY: desk-b still uses it"), first.stdout);
+			ok(readFileSync(credentials, "utf8").includes("env:WORK_OPENAI_KEY"));
+
+			const last = await captureCli(() => runTargetRemove("desk-b"));
+			strictEqual(last.code, 0, last.stderr);
+			ok(last.stdout.includes("removed its stored key env:WORK_OPENAI_KEY"), last.stdout);
+			const left = readFileSync(credentials, "utf8");
+			ok(!left.includes("env:WORK_OPENAI_KEY"), left);
+			ok(/^\s+openai:/mu.test(left), left);
+		} finally {
+			scratch.restore();
+		}
+	});
 });

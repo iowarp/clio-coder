@@ -1,5 +1,5 @@
 import type { TargetDescriptor } from "../types/target-descriptor.js";
-import { type RuntimeAuthMetadata, targetCredentialKey, targetRequiresAuth } from "./storage.js";
+import { envKeyCopyRef, type RuntimeAuthMetadata, targetCredentialKey, targetRequiresAuth } from "./storage.js";
 
 /** What removing a target does to the credential it read. */
 export type TargetCredentialPlan =
@@ -12,12 +12,7 @@ function credentialKeyOf(target: TargetDescriptor, runtimes: ReadonlyArray<Runti
 	return target.auth?.oauthProfile?.trim() || target.auth?.apiKeyRef?.trim() || null;
 }
 
-/**
- * The credential a removed target owned goes with it: the entry under its own
- * key ref or profile. A runtime's own entry, or one another target still reads,
- * stays, so removing one target never signs out the runtime or a sibling.
- */
-export function planTargetCredentialRemoval(
+function ownKeyPlan(
 	removed: TargetDescriptor,
 	remaining: ReadonlyArray<TargetDescriptor>,
 	runtimes: ReadonlyArray<RuntimeAuthMetadata>,
@@ -33,6 +28,41 @@ export function planTargetCredentialRemoval(
 	return { action: "remove", key };
 }
 
+function keyVariableOf(target: TargetDescriptor): string | null {
+	return target.auth?.apiKeyEnvVar?.trim() || null;
+}
+
+/** The desktop app's stored copy of the key variable the target names (`env:<VAR>`), while no other target names it. */
+function envCopyPlan(
+	removed: TargetDescriptor,
+	remaining: ReadonlyArray<TargetDescriptor>,
+): TargetCredentialPlan | null {
+	const variable = keyVariableOf(removed);
+	if (variable === null) return null;
+	const key = envKeyCopyRef(variable);
+	const targets = remaining
+		.filter((target) => target.id !== removed.id && keyVariableOf(target) === variable)
+		.map((target) => target.id);
+	if (targets.length > 0) return { action: "keep", key, owner: { targets } };
+	return { action: "remove", key };
+}
+
+/**
+ * The credentials a removed target owned go with it: the entry under its own
+ * key ref or profile, and the stored copy of the key variable it names. A
+ * runtime's own entry, or one another target still reads, stays, so removing
+ * one target never signs out the runtime or a sibling.
+ */
+export function planTargetCredentialRemoval(
+	removed: TargetDescriptor,
+	remaining: ReadonlyArray<TargetDescriptor>,
+	runtimes: ReadonlyArray<RuntimeAuthMetadata>,
+): TargetCredentialPlan[] {
+	return [ownKeyPlan(removed, remaining, runtimes), envCopyPlan(removed, remaining)].filter(
+		(plan): plan is TargetCredentialPlan => plan !== null,
+	);
+}
+
 export interface TargetCredentialStore {
 	isStored(key: string): boolean;
 	remove(key: string): void;
@@ -41,14 +71,19 @@ export interface TargetCredentialStore {
 }
 
 /**
- * Carry out a plan and say what happened to the stored credential, or null when
- * nothing was stored under the key, so the removal line names only real keys.
+ * Carry out the plans and say what happened to each stored credential, or null
+ * when nothing was stored under any key, so the removal line names only real keys.
  */
 export function applyTargetCredentialPlan(
-	plan: TargetCredentialPlan | null,
+	plans: ReadonlyArray<TargetCredentialPlan>,
 	store: TargetCredentialStore,
 ): string | null {
-	if (plan === null || !store.isStored(plan.key)) return null;
+	const lines = plans.map((plan) => applyOne(plan, store)).filter((line): line is string => line !== null);
+	return lines.length > 0 ? lines.join("; ") : null;
+}
+
+function applyOne(plan: TargetCredentialPlan, store: TargetCredentialStore): string | null {
+	if (!store.isStored(plan.key)) return null;
 	if (plan.action === "keep") {
 		const owner =
 			"runtime" in plan.owner

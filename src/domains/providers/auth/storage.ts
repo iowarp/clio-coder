@@ -304,7 +304,7 @@ function targetEnvApiKey(envVar: string | undefined): { envVar: string; apiKey: 
  * app's background service). Only a target naming that variable reads it, and only while the variable is unset,
  * so the copy goes nowhere the variable itself would not.
  */
-function envKeyCopyRef(envVar: string): string {
+export function envKeyCopyRef(envVar: string): string {
 	return `env:${envVar}`;
 }
 
