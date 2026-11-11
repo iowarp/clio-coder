@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse } from "yaml";
 import { settingsPath, validateSettings, withSettingsLock } from "../core/config.js";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML, SETTINGS_FILE_MODE } from "../core/defaults.js";
@@ -98,6 +98,7 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 		return;
 	}
 	const before = check(scope, original);
+	let unpinned = false;
 	try {
 		withSettingsLock(() => {
 			const current = existsSync(file) ? readFileSync(file, "utf8") : null;
@@ -110,11 +111,25 @@ export function editSettingsFile(scope: SettingsFileScope, deps: SettingsFileEdi
 			if (trustBefore) {
 				const after = captureProjectSurface(deps.cwd, "settings");
 				if (!after.contentHash) throw new Error("project settings could not be read back after saving");
-				recordProjectSurfaceTrust(deps.cwd, "settings", after.contentHash);
+				// Re-pin only the bytes this edit wrote, beside an untouched other file.
+				const written = after.files.findIndex((entry) => resolve(entry.path) === resolve(file));
+				const matches =
+					written !== -1 &&
+					after.files[written]?.text === next &&
+					after.files.every((entry, index) => index === written || entry.hash === trustBefore.files[index]?.hash);
+				if (matches) recordProjectSurfaceTrust(deps.cwd, "settings", after.contentHash);
+				else unpinned = true;
 			}
 		});
 	} catch (error) {
 		deps.notice("error", `Settings file not saved: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
+	if (unpinned) {
+		deps.notice(
+			"warning",
+			`Saved ${file}, but the project settings on disk no longer match what was written, so trust was not carried forward. Review them before they apply.`,
+		);
 		return;
 	}
 	const diff = before.ok ? diffSettings(before.settings, checked.settings) : null;
