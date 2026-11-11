@@ -4,6 +4,7 @@ import {
 	appendFileSync,
 	chmodSync,
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	realpathSync,
 	rmSync,
@@ -328,6 +329,28 @@ test("a repository's stock git-lfs filter stays on for Clio's reads, and one wit
 		"a repository lfs extension refuses the read",
 	);
 	rmSync(scratch, { recursive: true, force: true });
+});
+
+test("a filter in a submodule's own config does not run from Clio's status probe of the superproject", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const top = repository();
+	const inner = repository();
+	git(top.root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", inner.root, "sub");
+	git(top.root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "sub");
+	const marker = join(top.scratch, "submodule-filter-ran");
+	session(top.root, top.scratch);
+	const modules = join(top.root, ".git", "modules", "sub");
+	git(join(top.root, "sub"), "config", "filter.x.clean", markerScript(join(top.scratch, "clean.sh"), marker, "cat\n"));
+	mkdirSync(join(modules, "info"), { recursive: true });
+	writeFileSync(join(modules, "info", "attributes"), "a.txt filter=x\n");
+	const later = new Date(Date.now() + 10_000);
+	utimesSync(join(top.root, "sub", "a.txt"), later, later);
+	strictEqual(probeGit(top.root).isGit, true);
+	strictEqual(existsSync(marker), false, "the submodule's filter did not run");
+	spawnSync("git", ["-C", top.root, "status", "--porcelain"]);
+	ok(existsSync(marker), "a plain git status in the superproject runs it, so the fixture is live");
+	rmSync(top.scratch, { recursive: true, force: true });
+	rmSync(inner.scratch, { recursive: true, force: true });
 });
 
 test("Clio's internal git writers ignore a GIT_DIR a git-driven runner exported", () => {

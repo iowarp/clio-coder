@@ -15,7 +15,9 @@ import path from "node:path";
  * log.showSignature, and no optional index write, which would fire the
  * post-index-change hook. `diff`, `log` and `show` also get `--no-ext-diff` and
  * `--no-textconv`, so diff.external, diff.<driver>.command and textconv
- * drivers never run. A read also asks the installed {@link InternalGitPolicy}
+ * drivers never run, and `status` and the `diff` family get
+ * `--ignore-submodules=dirty`, so no status runs inside a submodule's
+ * checkout under that submodule's own config. A read also asks the installed {@link InternalGitPolicy}
  * through its cheap config check: after executable config in the repository
  * changed (a filter driver a racily dirty file would pass through, a textconv
  * driver), the read carries the same per-key overrides a mutation gets, or is
@@ -42,6 +44,15 @@ export const INTERNAL_GIT_BASE_OPTIONS: ReadonlyArray<string> = Object.freeze([
 /** Subcommands that print patches through diff.external and textconv drivers. */
 const PATCH_SUBCOMMANDS: ReadonlySet<string> = new Set(["diff", "log", "show"]);
 const PATCH_FLAGS: ReadonlyArray<string> = ["--no-ext-diff", "--no-textconv"];
+
+/**
+ * Reads that look inside each submodule's checkout for changes by running a status there, under the submodule's
+ * own config: its filter drivers included, which the read check of the superproject never sees. On the command
+ * line, `dirty` beats any `submodule.<name>.ignore` a config or .gitmodules sets, and still reports a submodule
+ * whose checked-out commit moved.
+ */
+const SUBMODULE_SCANNING_READS: ReadonlySet<string> = new Set(["diff", "diff-files", "diff-index", "status"]);
+const SUBMODULE_FLAG = "--ignore-submodules=dirty";
 
 /** Global options before the subcommand that take the next word as their value. */
 const GLOBAL_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
@@ -250,7 +261,7 @@ function policyOverrides(operation: InternalGitOperation): ReadonlyArray<string>
  * The argv for an internal git call: `args` as the call site wrote it (global
  * options such as `-C`, then the subcommand and its words), with
  * {@link INTERNAL_GIT_BASE_OPTIONS} in front, the patch flags after a `diff`,
- * `log` or `show`, and the installed policy's overrides before a
+ * `log` or `show`, the submodule flag after a status or diff, and the installed policy's overrides before a
  * hook-running subcommand, or its read overrides before any other. `cwd` is
  * where the process starts (the call's own `cwd` option), for resolving which
  * repository git runs in. Throws {@link InternalGitRefusedError} when the
@@ -276,6 +287,7 @@ export function internalGitArgv(args: ReadonlyArray<string>, cwd?: string): stri
 		...overrides,
 		subcommand,
 		...(PATCH_SUBCOMMANDS.has(subcommand) ? PATCH_FLAGS : []),
+		...(SUBMODULE_SCANNING_READS.has(subcommand) ? [SUBMODULE_FLAG] : []),
 		...rest,
 	];
 }
