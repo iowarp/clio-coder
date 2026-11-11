@@ -329,6 +329,14 @@
 		justify-content: flex-end;
 	}
 }
+/* Placed early only for source order; the @layer order on line 1 still decides precedence. */
+@layer responsive {
+	@media (max-width: 600px) {
+		.stage-label > span:last-child {
+			display: none;
+		}
+	}
+}
 @layer components {
 	.btn {
 		display: inline-flex;
@@ -1270,9 +1278,6 @@
 			font-size: 0.55rem;
 			padding-block-end: 0.65rem;
 		}
-		.stage-label > span:last-child {
-			display: none;
-		}
 		.stage-caption {
 			font-size: 0.6rem;
 			align-items: start;
@@ -1513,11 +1518,6 @@
 	}
 	.nav-more[open] nav {
 		animation: clio-menu var(--motion-fast) var(--motion-ease) both;
-	}
-	.nav-more nav a:is(:hover, :focus-visible),
-	.doc-nav-group a:is(:hover, :focus-visible) {
-		background: var(--accent-soft);
-		color: var(--accent);
 	}
 	.hero-heading {
 		position: relative;
@@ -2281,6 +2281,12 @@
 	}
 	.guide-step:hover {
 		border-block-start-color: var(--line-control);
+	}
+	/* Kept after the less specific .guide-next link hover rule in the docs layer. */
+	.doc-nav-group a:is(:hover, :focus-visible),
+	.nav-more nav a:is(:hover, :focus-visible) {
+		background: var(--accent-soft);
+		color: var(--accent);
 	}
 }
 @layer responsive {

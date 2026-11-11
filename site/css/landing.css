@@ -28,6 +28,11 @@
 		position: relative;
 		z-index: 4;
 	}
+	/* The hero offers one command; every other method lives in the install chapter. */
+	.hero-try {
+		max-inline-size: 36rem;
+		margin-block-start: 2.5rem;
+	}
 	.hero-copy .hero-try {
 		grid-area: 3 / 1 / 4 / 7;
 		position: relative;
@@ -189,11 +194,6 @@
 	.installer-next .text-link {
 		font-size: 0.8rem;
 	}
-	/* The hero offers one command; every other method lives in the install chapter. */
-	.hero-try {
-		max-inline-size: 36rem;
-		margin-block-start: 2.5rem;
-	}
 	.hero-try .eyebrow {
 		margin-block-end: 0.75rem;
 	}
@@ -205,6 +205,22 @@
 	}
 	.install-steps .installer {
 		margin-block: 0.75rem 1rem;
+	}
+	.chapter-visual {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		min-inline-size: 0;
+	}
+	.scene-slot {
+		position: relative;
+		aspect-ratio: 4 / 3;
+		inline-size: 100%;
+	}
+	@media (max-width: 1000px), (max-height: 650px) {
+		.chapter-visual {
+			margin-block-end: 1.5rem;
+		}
 	}
 	.hero-portrait {
 		grid-area: 1 / 7 / 4 / -1;
@@ -425,17 +441,6 @@
 	.story-chapter h2 em {
 		color: var(--ink-soft);
 	}
-	.chapter-visual {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		min-inline-size: 0;
-	}
-	.scene-slot {
-		position: relative;
-		aspect-ratio: 4 / 3;
-		inline-size: 100%;
-	}
 	.scene-slot > .clio-scene {
 		position: absolute;
 		inset: 0;
@@ -455,6 +460,15 @@
 		min-block-size: 2.75rem;
 		margin-block-end: 1rem;
 		text-align: end;
+	}
+	.helper-briefs > p {
+		padding-block: 0.65rem;
+	}
+	.install-steps p + p {
+		margin-block-start: 0.75rem;
+	}
+	.finale-heading p:not(.eyebrow) {
+		color: var(--ink-soft);
 	}
 	.story-chapter .section-heading > p:not(.eyebrow) {
 		max-inline-size: 54ch;
@@ -489,9 +503,6 @@
 		margin-block: 2.5rem 1.5rem;
 		padding-block-start: 0.75rem;
 		border-block-start: 1px solid var(--line);
-	}
-	.helper-briefs > p {
-		padding-block: 0.65rem;
 	}
 	.helper-briefs .step-number {
 		margin-inline-end: 1rem;
@@ -541,9 +552,6 @@
 	.story-chapter .faq-items {
 		margin-block-start: 2.5rem;
 	}
-	.install-steps p + p {
-		margin-block-start: 0.75rem;
-	}
 	.landing .project-section {
 		grid-template-columns: 0.75fr 1.65fr;
 		gap: clamp(3rem, 7vw, 7rem);
@@ -558,9 +566,6 @@
 	.finale-heading h2 {
 		font-size: clamp(3rem, 5.5vw, 5rem);
 		margin-block: 1.5rem;
-	}
-	.finale-heading p:not(.eyebrow) {
-		color: var(--ink-soft);
 	}
 	.story-finale .clio-scene {
 		max-inline-size: 1000px;
@@ -585,9 +590,6 @@
 		.story-chapter.faq {
 			display: block;
 			padding-block: 1.5rem 3rem;
-		}
-		.chapter-visual {
-			margin-block-end: 1.5rem;
 		}
 		.chapter-visual .scene-slot {
 			position: relative;
