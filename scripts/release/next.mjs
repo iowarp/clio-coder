@@ -30,6 +30,7 @@ import { releaseVersionErrors } from "../release-version-policy.mjs";
 import {
 	alreadyPublished,
 	ciCandidateDirectory,
+	isVersionBranch,
 	latestJob,
 	nextStep,
 	postFailures,
@@ -78,7 +79,7 @@ function proven(mode, facts, receipt) {
 	const ci = facts.ci?.state === "success" && facts.ci.artifacts;
 	const r = receipt.rehearsal ?? {};
 	const tree = facts.tree;
-	const branchOk = mode === "rehearse" || /^v\d{3}$/u.test(tree.branch);
+	const branchOk = mode === "rehearse" || isVersionBranch(tree.branch);
 	const ready =
 		facts.pushed || (branchOk && tree.clean && tree.versionsAgree && tree.mainAncestor && !tree.readiness.length);
 	const local = !facts.local.wanted || facts.ci?.state === "success" || (facts.local.node22 && facts.local.node24);

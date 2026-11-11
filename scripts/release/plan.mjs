@@ -72,6 +72,9 @@ export function draftAction({ release, tagCommit }, commit) {
 	return { action: "publish" };
 }
 
+/** A version branch: `v` and three or more digits (`v071`, and `v0710` for 0.7.10). */
+export const isVersionBranch = (branch) => /^v\d{3,}$/u.test(String(branch));
+
 /** The version branch a version releases from: `0.7.1` and `0.7.1-rc.0` -> `v071`. */
 export function versionBranch(version) {
 	const [major, minor, patch] = version.split("-")[0].split(".");
@@ -172,7 +175,7 @@ export function nextStep(facts, receipt) {
 		const tree = facts.tree;
 		if (!tree.clean) return stop("commit the candidate first; the tree must be clean");
 		// A rehearsal pushes only a scratch branch, so it may start from any local branch.
-		if (facts.mode !== "rehearse" && !/^v\d{3}$/u.test(tree.branch))
+		if (facts.mode !== "rehearse" && !isVersionBranch(tree.branch))
 			return stop("start from the version branch, such as v071");
 		if (!tree.versionsAgree) return stop("package.json, the GUI manifest and the ACP registry versions must agree");
 		if (!tree.mainAncestor) return stop("origin/main is not an ancestor of the candidate");

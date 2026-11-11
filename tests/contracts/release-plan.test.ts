@@ -56,6 +56,15 @@ describe("release decisions", () => {
 		ok(!toolingOnly([]));
 	});
 
+	it("accepts the version branch of a two-digit patch or minor", async () => {
+		const { isVersionBranch, nextStep, versionBranch } = await import(planModule);
+		strictEqual(versionBranch("0.7.10"), "v0710");
+		ok(isVersionBranch("v071") && isVersionBranch("v0710") && isVersionBranch(versionBranch("0.10.0")));
+		ok(!isVersionBranch("v07") && !isVersionBranch("main") && !isVersionBranch("v071-x"));
+		const tree = { clean: true, branch: "v0710", versionsAgree: true, mainAncestor: true, readiness: [] };
+		strictEqual(nextStep(facts({ pushed: false, ci: null, local: { wanted: false }, tree }), {}).step, "push");
+	});
+
 	it("pins a stale draft to the candidate before publishing it", async () => {
 		const { draftAction } = await import(planModule);
 		strictEqual(draftAction({ release: null, tagCommit: null }, commit).action, "create");

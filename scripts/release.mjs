@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
-import { tmpdirProblem } from "./release/plan.mjs";
+import { isVersionBranch, tmpdirProblem } from "./release/plan.mjs";
 import { acquireLock, LockHeld } from "./release/receipt.mjs";
 import { git, releaseState, run, source, verifyCandidate } from "./release-candidate.mjs";
 import {
@@ -169,7 +169,7 @@ async function main() {
 		process.env.CLIO_RELEASE_LOCK_PID = String(process.pid);
 		const commit = source();
 		const branch = git("branch", "--show-current");
-		if (!/^v\d{3}$/u.test(branch)) throw new Error("Start from the clean version branch, such as v062.");
+		if (!isVersionBranch(branch)) throw new Error("Start from the clean version branch, such as v062.");
 		run("git", ["fetch", "origin"]);
 		run("git", ["merge-base", "--is-ancestor", "origin/main", commit], { stdio: "pipe" });
 		let qualification = await recentRun("ci.yml", undefined, commit);

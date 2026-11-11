@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { draftAction, toolingOnly } from "./release/plan.mjs";
+import { draftAction, isVersionBranch, toolingOnly } from "./release/plan.mjs";
 import { git, installers, root, run, verifyCandidate } from "./release-candidate.mjs";
 import { DEV_VERSION, publishTagErrors, releaseVersionErrors, snapshotVersion } from "./release-version-policy.mjs";
 
@@ -24,7 +24,7 @@ const repository = "iowarp/clio-coder";
 const RELEASE_BODY_LIMIT = 125_000;
 const NPM_WAIT_MINUTES = 40;
 export function publicationPlan(receipt, branch, mode = "release") {
-	if (!/^v\d{3}$/u.test(branch)) throw new Error("Public releases must come from a version branch such as v062.");
+	if (!isVersionBranch(branch)) throw new Error("Public releases must come from a version branch such as v062.");
 	const channel = mode === "dev" ? "dev" : receipt.version.includes("-") ? "beta" : "latest";
 	const errors = publishTagErrors({ version: receipt.version, tag: channel });
 	if (errors.length) throw new Error(errors.join("\n"));
