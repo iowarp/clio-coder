@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { runningBuildId } from "../core/build-info.js";
-import { resolvePackageRoot } from "../core/package-root.js";
 import { writeRestartIntent } from "../core/restart-intent.js";
 import { missingBuildFiles } from "../core/running-build.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
@@ -28,12 +27,12 @@ export interface InteractiveRestartDeps {
  * A source run (no build id) has no build to check.
  */
 export function restartPreflight(
-	root = resolvePackageRoot(),
+	root?: string,
 	launcher = process.argv[1],
 	built = runningBuildId !== null,
 ): string | null {
 	if (!built) return null;
-	const missing = missingBuildFiles(root);
+	const missing = root === undefined ? missingBuildFiles() : missingBuildFiles(root);
 	if (missing.length > 0) return `the build on disk is incomplete (${missing.slice(0, 3).join(", ")})`;
 	if (!launcher) return null;
 	const probe = spawnSync(process.execPath, [launcher, "--version"], {

@@ -69,7 +69,7 @@ export function pendingInstalledVersion(root = resolvePackageRoot()): string | n
 }
 
 /** An interrupted clean build either loses its completion record or one of the recorded outputs. */
-export function missingBuildFiles(root: string): string[] {
+export function missingBuildFiles(root = resolvePackageRoot()): string[] {
 	const build = diskBuild(root);
 	if (!build) return ["dist/build.json"];
 	return build.files.filter((file) => !existsSync(join(root, "dist", file))).map((file) => `dist/${file}`);
