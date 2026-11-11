@@ -743,11 +743,16 @@ transcript, headless `run` prints it to stderr as `clio-coder run: ...`, `run --
 preserved, conflicted, withheld or refused application, and a merge whose branch held no
 change, produce no notice.
 
-Four cases withhold the merge: a worker whose own report lists a failing validation,
+Five cases withhold the merge: a worker whose own report lists a failing validation,
 a worker whose task requested validation but which executed no check, a worker that
-names a check it did not run (`declaredChecks`) with no validation that passed, and a
-diff that removes existing test cases or deletes a test file. The first three yield
-to passing host verification. The fourth does not, because a passing suite says nothing
+names a check it did not run (`declaredChecks`) with no validation that passed, a task
+that names its check as an exact command the worker never ran to a clean exit, even when
+other shell calls succeeded, and a diff that removes existing test cases or deletes a test
+file. Only three spellings name a command: a backticked command after "by running"
+("verify by running `make check`"), the colon form "by running: <cmd>", and "run `<cmd>`
+to verify" (or validate, check, test). Plain "by running the tests" names nothing and falls
+under the requested-validation case. The first four yield to passing host verification.
+The fifth does not, because a passing suite says nothing
 about a test that is gone. A test that moves to another file or is only reformatted is
 not counted as removed. A run without a task worktree has no merge to withhold, so the same
 removal fails it as `worker_removed_tests` and leaves the edits in the checkout. In both
