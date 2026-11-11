@@ -1810,6 +1810,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		compactionFacts = [];
 		compactionTokens = undefined;
 		compactionConclusion = "No useful reduction available";
+		let recordOutcome = true;
 		compactionOperation = createContextOperation(
 			{
 				kind: "compaction",
@@ -1826,7 +1827,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				)
 					return;
 				deps.bus?.emit("context.activity_changed", event);
-				if (event.operation?.outcome && originSession && deps.session)
+				if (recordOutcome && event.operation?.outcome && originSession && deps.session)
 					deps.session.appendEntry({
 						kind: "custom",
 						customType: CONTEXT_OPERATION_CUSTOM_TYPE,
@@ -2071,11 +2072,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		}
 
 		if (summaryHeld(liveContextEstimate(agentRuntime, pendingUserText).tokens)) {
-			if (!preSummaryStageActed)
+			if (!preSummaryStageActed) {
 				compactionConclusion =
 					autoCompactFailures >= AUTO_COMPACT_FAILURE_LIMIT
 						? "automatic summaries paused after repeated failures"
 						: "summary held until context grows past the last summary";
+				// A held checkpoint that freed nothing settles the rail but writes no session entry;
+				// otherwise every checkpoint while paused or inside the band appends an "unchanged" record.
+				if (compactionFacts.length === 0) recordOutcome = false;
+			}
 			return preSummaryStageActed;
 		}
 		if (!deps.autoCompact) {

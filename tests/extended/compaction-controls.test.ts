@@ -953,8 +953,20 @@ describe("production compaction controls", () => {
 			strictEqual(compactionEnds.at(-1)?.outcome, "failed");
 		}
 		strictEqual(notices.filter((notice) => notice === paused).length, 1);
+		const operationRecords = () =>
+			f.entries().filter((entry) => entry.kind === "custom" && entry.customType === CONTEXT_OPERATION_CUSTOM_TYPE).length;
+		const recordsWhenPaused = operationRecords();
+		const pausedActivity: ContextActivityPayload[] = [];
+		const unsubscribe = bus.subscribe("context.activity_changed", (event) => {
+			pausedActivity.push(event);
+		});
 		strictEqual(await context.runAutoCompact(runtime, false), false);
+		strictEqual(await context.runAutoCompact(runtime, false), false);
+		unsubscribe();
 		strictEqual(attempts, 3, "a paused automatic attempt never reaches the summarizer");
+		strictEqual(operationRecords(), recordsWhenPaused, "a paused attempt that changed nothing writes no session entry");
+		ok(pausedActivity.every((event) => event.operation?.outcome !== "unchanged" || event.status === "completed"));
+		strictEqual(pausedActivity.at(-1)?.status ?? "completed", "completed", "the activity rail still settles");
 		failing = false;
 		strictEqual(await context.runAutoCompact(runtime, true), true, "/compact still runs while paused");
 		strictEqual(attempts, 4);
