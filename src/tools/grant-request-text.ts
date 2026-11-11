@@ -1,4 +1,5 @@
 import type { DispatchContract, WorkerGrantView } from "../domains/dispatch/contract.js";
+import { WRITE_ROOTS_GRANT_TOOL } from "../domains/dispatch/write-root-requests.js";
 
 /**
  * How a worker permission request routed to the main agent reads in dispatch
@@ -16,9 +17,14 @@ export function grantRequestLines(view: WorkerGrantView): string[] {
 					? "with the operator at your request; you may still deny"
 					: "you may decide"
 			: "operator authority: only the operator can approve; you may deny";
+	const decide = `Decide with steer(run_id="${view.runId}", action="approve" or "deny", request_id="${view.requestId}")`;
+	const effect =
+		view.tool === WRITE_ROOTS_GRANT_TOOL
+			? "approving continues this assignment as a new attempt with the wider write roots, and denying settles it as not done"
+			: "approving runs this one call once, and an identical later call asks again";
 	return [
 		`permission request ${view.requestId} from run ${view.runId} (agent ${view.agentId}, attempt ${view.attempt}): ${view.summary}${view.target !== undefined ? ` target: ${view.target}` : ""}`,
-		`  ${authority}${expires.length > 0 ? `; ${expires}` : ""}. Decide with steer(run_id="${view.runId}", action="approve" or "deny", request_id="${view.requestId}"); approving runs this one call once, and an identical later call asks again.`,
+		`  ${authority}${expires.length > 0 ? `; ${expires}` : ""}. ${decide}; ${effect}.`,
 	];
 }
 

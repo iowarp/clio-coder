@@ -11,7 +11,14 @@ import type { ToolResult, ToolSpec } from "./registry.js";
  * no shell, so the receipt itself is its whole effect.
  */
 
-export const LIMITATION_REASONS = ["no-runner", "blocked", "out-of-scope", "environment", "other"] as const;
+export const LIMITATION_REASONS = [
+	"no-runner",
+	"blocked",
+	"out-of-scope",
+	"environment",
+	"write-root",
+	"other",
+] as const;
 
 export type LimitationReason = (typeof LIMITATION_REASONS)[number];
 
@@ -51,9 +58,13 @@ export const limitationTool: ToolSpec = {
 		scope: Type.String({ description: "What could not be verified, in one sentence." }),
 		reason: StringEnum(LIMITATION_REASONS, {
 			description:
-				"no-runner: no runner exists; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; other.",
+				"no-runner: no runner exists; blocked: a gate or denial stopped the check; out-of-scope: the task excluded it; environment: it cannot run here; write-root: the change needs the listed paths, which lie outside your write roots, so stop before editing and the coordinator can widen the roots and continue; other.",
 		}),
-		paths: Type.Optional(Type.Array(Type.String(), { description: "Repository-relative paths left unverified." })),
+		paths: Type.Optional(
+			Type.Array(Type.String(), {
+				description: "Repository-relative paths left unverified, or for write-root the paths you need to write.",
+			}),
+		),
 	}),
 	baseActionClass: "read",
 	executionMode: "parallel",
