@@ -97,6 +97,7 @@ export const coreTests = [
 	"session-durability",
 	"project-settings-save",
 	"state-file-lock",
+	"verification-slot",
 	"symlink-escape",
 	"turn-outcome-settlement",
 	"worker-grant-broker",

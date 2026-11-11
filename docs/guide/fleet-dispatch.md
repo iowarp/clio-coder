@@ -812,7 +812,9 @@ absolute path, else in `$XDG_RUNTIME_DIR/clio-coder`, else in `clio-coder-<uid>`
 dir ([verification-slot.ts](../../src/domains/dispatch/verification-slot.ts)); a lint or format
 check scoped to the task's files and a check answered from the memo skip it. The slot is shared
 by every Clio Coder session on the machine, whatever its home, so parallel batches and parallel
-sessions queue their typechecks and test suites instead of running them all at once. While a run's check waits,
+sessions queue their typechecks and test suites instead of running them all at once. The
+directory must be a real directory of your own with mode 0700 (Clio creates it so); otherwise
+checks run without the slot and a dispatch diagnostic says why. While a run's check waits,
 the run's feed, its card in the workers dashboard, its worker card in the transcript and its
 Fleet Runs row say `waiting for a verification slot`, then `running host checks` once it holds
 the slot. A slot whose holder died is taken over; a

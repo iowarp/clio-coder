@@ -11,11 +11,13 @@
  * taken through the shared state-file lock, so a holder that dies frees it and
  * a waiter in the same process queues like one in another.
  *
- * A wait that outlasts {@link VERIFICATION_SLOT_WAIT_MS}, or a lock that cannot
- * be taken at all, runs the check without the slot and says so: the slot is
+ * A wait that outlasts {@link VERIFICATION_SLOT_WAIT_MS}, a lock that cannot
+ * be taken at all, or a slot directory this user does not hold alone (see
+ * {@link ownSlotDir}) runs the check without the slot and says so: the slot is
  * there to spread load, never to fail or hang a verification.
  */
 
+import { lstatSync, mkdirSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { withStateFileLock } from "../../core/state-file-lock.js";
@@ -56,8 +58,28 @@ function verificationSlotDir(env: NodeJS.ProcessEnv = process.env): string {
 	return join(tmpdir(), `clio-coder-${user}`);
 }
 
-function verificationSlotPath(): string {
-	return join(verificationSlotDir(), "dispatch-verification-slot");
+/**
+ * Creates the slot directory 0700 and throws unless it is a real directory
+ * this user owns with no group or other bits: in a shared temp dir another
+ * user could pre-create it, or a symlink in its place, and so hold or
+ * redirect the slot. The owner and mode test is skipped where there are no
+ * uids (Windows).
+ */
+function ownSlotDir(dir: string): void {
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const info = lstatSync(dir);
+	if (info.isSymbolicLink() || !info.isDirectory())
+		throw new Error(
+			`The verification slot directory ${dir} is not a directory (a symlink or other file is in its place).`,
+		);
+	const uid = process.getuid?.();
+	if (uid === undefined) return;
+	if (info.uid !== uid)
+		throw new Error(`The verification slot directory ${dir} is owned by uid ${info.uid}, not this user (uid ${uid}).`);
+	if ((info.mode & 0o077) !== 0)
+		throw new Error(
+			`The verification slot directory ${dir} has mode ${(info.mode & 0o777).toString(8).padStart(4, "0")}; it must be 0700.`,
+		);
 }
 
 /** Run `fn` holding the verification slot; see the module comment. */
@@ -75,7 +97,9 @@ export async function withVerificationSlot<T>(
 		return fn();
 	};
 	try {
-		return await withStateFileLock(verificationSlotPath(), enter, {
+		const dir = verificationSlotDir();
+		ownSlotDir(dir);
+		return await withStateFileLock(join(dir, "dispatch-verification-slot"), enter, {
 			timeoutMs: waitMs,
 			note,
 			onContended: () => {
