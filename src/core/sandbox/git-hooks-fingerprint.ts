@@ -363,6 +363,18 @@ function statStamp(files: ReadonlyArray<string>): string {
 const REPOSITORY_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"];
 
 /**
+ * The scope of a value listed without `--show-scope`, from where it was read: the system and global files by name,
+ * the command line by its label, and anything else, an included file too, as the repository's own (`local`), so a
+ * rule that distrusts the repository's config errs toward distrust.
+ */
+function scopeOfOrigin(origin: string, file: string | null): string {
+	if (origin.startsWith("command line:")) return "command";
+	if (file === null) return "local";
+	if (file === "/etc/gitconfig" || file === process.env.GIT_CONFIG_SYSTEM) return "system";
+	return gitConfigScopeFiles(null, null).includes(file) ? "global" : "local";
+}
+
+/**
  * Impure: the executable config values git reads in `dir`, every scope
  * included, as fingerprint entries, and the files they came from. Null when
  * git cannot list them. Listing config runs no hook and no configured
@@ -371,33 +383,41 @@ const REPOSITORY_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX
 function listExecutableConfig(dir: string): { entries: Map<string, GitHookFile>; origins: string[] } | null {
 	const env = { ...process.env };
 	for (const name of REPOSITORY_ENV) Reflect.deleteProperty(env, name);
-	let output: string;
-	try {
-		output = execFileSync("git", ["config", "--list", "--show-scope", "--show-origin", "-z"], {
-			cwd: dir,
-			env,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-			timeout: CONFIG_LIST_TIMEOUT_MS,
-			maxBuffer: CONFIG_LIST_MAX_BYTES,
-		});
-	} catch {
-		return null;
-	}
-	// `-z` prints `<scope>\0<origin>\0<key>\n<value>\0` per value, and only `<key>` for a key with no `=`.
+	const list = (args: string[]): string | null => {
+		try {
+			return execFileSync("git", ["config", "--list", ...args, "--show-origin", "-z"], {
+				cwd: dir,
+				env,
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: CONFIG_LIST_TIMEOUT_MS,
+				maxBuffer: CONFIG_LIST_MAX_BYTES,
+			});
+		} catch {
+			return null;
+		}
+	};
+	// `--show-scope` needs git 2.26; an older git lists without it, and the scope is read from the origin.
+	let output = list(["--show-scope"]);
+	const scoped = output !== null;
+	output ??= list([]);
+	if (output === null) return null;
+	// `-z` prints `<scope>\0<origin>\0<key>\n<value>\0` per value (no `<scope>` without `--show-scope`), and only
+	// `<key>` for a key with no `=`.
 	const fields = output.split("\0");
+	const width = scoped ? 3 : 2;
 	const groups = new Map<string, { path: string; scope: string; key: string; values: string[] }>();
 	const origins = new Set<string>();
-	for (let at = 0; at + 2 < fields.length; at += 3) {
-		const scope = fields[at] as string;
-		const origin = fields[at + 1] as string;
-		const pair = fields[at + 2] as string;
+	for (let at = 0; at + width - 1 < fields.length; at += width) {
+		const origin = fields[at + width - 2] as string;
+		const pair = fields[at + width - 1] as string;
 		const newline = pair.indexOf("\n");
 		const key = newline < 0 ? pair : pair.slice(0, newline);
 		const value = newline < 0 ? "" : pair.slice(newline + 1);
 		// Git prints a file below the work tree top relative to it, having moved there to read config.
 		const file = origin.startsWith("file:") ? path.resolve(dir, origin.slice("file:".length)) : null;
 		if (file !== null) origins.add(file);
+		const scope = scoped ? (fields[at] as string) : scopeOfOrigin(origin, file);
 		const where = file ?? origin.replace(/:$/u, "");
 		const id = gitHookEntryId({ path: where, key });
 		const group = groups.get(id) ?? { path: where, scope, key, values: [] };

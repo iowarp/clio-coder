@@ -183,6 +183,43 @@ test("a filter the repository's own config names does not run in Clio's status p
 	rmSync(global.scratch, { recursive: true, force: true });
 });
 
+/** Puts a `git` first on PATH that rejects `--show-scope` the way git before 2.26 does, and runs the real one otherwise. */
+function gitWithoutShowScope(t: { after: (fn: () => void) => void }, scratch: string): void {
+	const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+	const bin = join(scratch, "old-git");
+	execFileSync("mkdir", ["-p", bin]);
+	writeFileSync(
+		join(bin, "git"),
+		`#!/bin/sh\nfor a; do [ "$a" = --show-scope ] && { echo "error: unknown option \\\`show-scope'" >&2; exit 129; }; done\nexec '${real}' "$@"\n`,
+	);
+	chmodSync(join(bin, "git"), 0o755);
+	const prior = process.env.PATH;
+	process.env.PATH = `${bin}:${prior ?? ""}`;
+	t.after(() => {
+		process.env.PATH = prior;
+	});
+}
+
+test("on a git without --show-scope the drift guard still sees config and a repository's filter still does not run", (t) => {
+	t.after(() => installInternalGitPolicy(null));
+	const { root, scratch } = repository();
+	gitWithoutShowScope(t, scratch);
+	const marker = join(scratch, "old-git-filter-ran");
+	git(root, "config", "filter.x.clean", markerScript(join(scratch, "clean.sh"), marker, "cat\n"));
+	const { guard } = session(root, scratch);
+	filtered(root, "x");
+	strictEqual(probeGit(root).isGit, true);
+	strictEqual(existsSync(marker), false, "the repository's filter did not run");
+	git(root, "config", "core.sshCommand", "ssh -o ProxyCommand=evil");
+	deepStrictEqual(
+		guard.check()?.changes.map(({ kind, key }) => ({ kind, key })),
+		[{ kind: "added", key: "core.sshcommand" }],
+	);
+	spawnSync("git", ["-C", root, "status", "--porcelain"]);
+	ok(existsSync(marker), "a plain git status runs it, so the fixture is live");
+	rmSync(scratch, { recursive: true, force: true });
+});
+
 test("a repository's stock git-lfs filter stays on for Clio's reads, and one with a second line does not", () => {
 	const { root, scratch } = repository();
 	const fingerprinter = createGitHooksFingerprinter(root);
