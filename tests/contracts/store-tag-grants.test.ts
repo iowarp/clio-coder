@@ -7,6 +7,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { isDispatchIntent, normalizeDispatchIntent } from "../../src/domains/dispatch/intent.js";
 import { confineGrantOnlyWriters, writeRootsOverlap } from "../../src/domains/dispatch/parallel-writers.js";
 import { isSubset, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import { createStoreTool } from "../../src/tools/store/store-tool.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -56,6 +57,24 @@ describe("store tag grants", () => {
 			strictEqual(created.kind, "error");
 			match(String((created as { message?: unknown }).message), /can read the store but not write/);
 		}));
+
+	it("reads tags a model sent as a JSON array string (M-40 3e)", () => {
+		const options = { auto: { approvedAuthorities: ["read-only" as const], authorityBasis: "yolo-policy" as const } };
+		const parsed = dispatchRequestsFromArgs(
+			{
+				tasks: [
+					{ agent: "coder", task: "t", tags: '["fleet"]' },
+					{ agent: "coder", task: "u", tags: "fleet" },
+				],
+			},
+			options,
+		);
+		ok(parsed.ok, JSON.stringify(parsed));
+		deepStrictEqual(
+			parsed.requests.map((request) => request.storeTags),
+			[["fleet"], ["fleet"]],
+		);
+	});
 
 	it("parallel writers granted the same tag do not overlap", () =>
 		withWorkspace(async (root) => {

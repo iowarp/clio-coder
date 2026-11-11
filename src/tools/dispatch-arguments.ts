@@ -228,12 +228,26 @@ function dispatchRequestFromArgs(
 		request.worktree = true;
 	}
 	if (args.tags !== undefined) {
-		if (!Array.isArray(args.tags)) return { ok: false, message: "tags must be an array of store tag names" };
-		for (const tag of args.tags) {
+		// Weak models send `tags` as a JSON array string or as one bare tag name.
+		let tags: unknown = args.tags;
+		if (typeof tags === "string") {
+			const raw = tags.trim();
+			let parsed: unknown = [raw];
+			if (raw.startsWith("[")) {
+				try {
+					parsed = JSON.parse(raw) as unknown;
+				} catch {
+					// Left as the one-element list; validation names the bad tag.
+				}
+			}
+			tags = parsed;
+		}
+		if (!Array.isArray(tags)) return { ok: false, message: "tags must be an array of store tag names" };
+		for (const tag of tags) {
 			const problem = typeof tag === "string" ? validateTagName(tag) : "A tag name must be a string.";
 			if (problem !== null) return { ok: false, message: `tags: '${String(tag)}': ${problem}` };
 		}
-		if (args.tags.length > 0) request.storeTags = [...new Set(args.tags as string[])];
+		if (tags.length > 0) request.storeTags = [...new Set(tags as string[])];
 	}
 	if (args.apply !== undefined) {
 		if (args.apply !== "merge" && args.apply !== "preserve")
