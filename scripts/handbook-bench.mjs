@@ -444,8 +444,8 @@ function runOne({ arm, task, round, options, scratch }) {
 	const argv = [
 		options.clio,
 		"run",
-		"--json-events",
-		"terminal",
+		// `run --agent` accepts only --json; its stream is worker events ending in a `result` frame.
+		...(options.tier === "worker" ? ["--json"] : ["--json-events", "terminal"]),
 		"--cwd",
 		dir,
 		"--timeout",
@@ -453,7 +453,8 @@ function runOne({ arm, task, round, options, scratch }) {
 		...(options.target ? ["--target", options.target] : []),
 		...(options.model ? ["--model", options.model] : []),
 		...(options.thinking ? ["--thinking", options.thinking] : []),
-		...(task.mode === "read" ? ["--read-only"] : ["--autonomy", "yolo"]),
+		// --autonomy is refused with --agent; the coder recipe's own permits apply to a write task.
+		...(task.mode === "read" ? ["--read-only"] : options.tier === "worker" ? [] : ["--autonomy", "yolo"]),
 		// The worker tier runs a coder worker, whose handbook is the 6000-character compile for the declared paths.
 		...(options.tier === "worker" ? ["--agent", "coder"] : []),
 		"--",
@@ -475,6 +476,12 @@ function runOne({ arm, task, round, options, scratch }) {
 		})
 		.filter((frame) => frame !== null);
 	const end = frames.findLast((frame) => frame.type === "turn_end") ?? {};
+	const workerResult = frames.findLast((frame) => frame.type === "result")?.result;
+	const answer = options.tier === "worker" ? String(workerResult?.output?.text ?? "") : String(end.text ?? "");
+	const toolCalls =
+		options.tier === "worker"
+			? frames.filter((frame) => frame.type === "tool_execution_start").length
+			: frames.reduce((sum, frame) => sum + (frame.observed?.toolCalls ?? 0), 0);
 	// A run can leave its clone unreadable to git; that run scores on what can be listed instead of ending the batch.
 	const listErrors = [];
 	const list = (args) => {
@@ -495,8 +502,8 @@ function runOne({ arm, task, round, options, scratch }) {
 		task: task.id,
 		round,
 		exitCode: result.status,
-		score: scoreRun(task, String(end.text ?? ""), [...new Set(touched)]),
-		toolCalls: frames.reduce((sum, frame) => sum + (frame.observed?.toolCalls ?? 0), 0),
+		score: scoreRun(task, answer, [...new Set(touched)]),
+		toolCalls,
 		tokens: frames.reduce((sum, frame) => sum + tokenTotals(frame), 0),
 		seconds: Math.round((Date.now() - started) / 1000),
 		...(listErrors.length > 0 ? { listErrors } : {}),
