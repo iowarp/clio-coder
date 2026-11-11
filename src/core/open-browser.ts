@@ -1,6 +1,23 @@
-import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import path, { win32 } from "node:path";
+import { launchDetached } from "./safe-exec.js";
+
+/** What an opener needs from the session to reach the operator's desktop; provider keys stay behind. */
+const OPENER_SESSION_ENV = [
+	"DISPLAY",
+	"WAYLAND_DISPLAY",
+	"XAUTHORITY",
+	"DBUS_SESSION_BUS_ADDRESS",
+	"XDG_RUNTIME_DIR",
+	"XDG_SESSION_TYPE",
+	"XDG_CURRENT_DESKTOP",
+	"XDG_DATA_DIRS",
+	"XDG_CONFIG_DIRS",
+	"DESKTOP_SESSION",
+	"BROWSER",
+	"WSL_DISTRO_NAME",
+	"WSL_INTEROP",
+] as const;
 
 function onPath(command: string, env: NodeJS.ProcessEnv): boolean {
 	for (const dir of (env.PATH ?? "").split(path.delimiter)) {
@@ -85,15 +102,5 @@ export function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env): 
 					: ["xdg-open", [href]];
 	if (!opener) return false;
 	const [command, args] = opener;
-	try {
-		// Detached rather than through safe-exec: the opener may stay alive as the browser, and safe-exec tears its group down.
-		const child = spawn(command, args, { stdio: "ignore", detached: true });
-		child.on("error", () => {
-			// Best effort only: the URL is also printed.
-		});
-		child.unref();
-		return true;
-	} catch {
-		return false;
-	}
+	return launchDetached(command, args, { source: env, passThrough: OPENER_SESSION_ENV });
 }

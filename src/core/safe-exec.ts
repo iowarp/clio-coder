@@ -414,6 +414,43 @@ export function buildSafeToolEnv(
 	return env;
 }
 
+export interface LaunchDetachedOptions {
+	/** Environment the allowlist reads from (default `process.env`). */
+	source?: NodeJS.ProcessEnv;
+	/** Further variables passed by name, such as the display session a browser needs. */
+	passThrough?: ReadonlyArray<string>;
+}
+
+/**
+ * Starts a program meant to outlive this call, such as a browser opener: the
+ * allowlisted environment, no stdio, its own process group and no teardown.
+ * runCommandVector signals whatever a leader leaves in its group, and what an
+ * opener leaves there can be the browser. False when the spawn throws; a later
+ * spawn error is ignored.
+ */
+export function launchDetached(
+	file: string,
+	args: ReadonlyArray<string>,
+	options: LaunchDetachedOptions = {},
+): boolean {
+	const source = options.source ?? process.env;
+	const extra: Record<string, string> = {};
+	for (const key of options.passThrough ?? []) {
+		const value = source[key];
+		if (value !== undefined) extra[key] = value;
+	}
+	try {
+		const child = spawn(file, [...args], { env: buildSafeToolEnv(extra, source), stdio: "ignore", detached: true });
+		child.on("error", () => {
+			// Best effort only: the caller prints what it launched for.
+		});
+		child.unref();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export function resolveSafeCwd(cwd: string | undefined, workspaceRoot: string = process.cwd()): string {
 	const root = path.resolve(workspaceRoot);
 	const resolved = cwd === undefined ? root : path.isAbsolute(cwd) ? path.resolve(cwd) : path.resolve(root, cwd);
