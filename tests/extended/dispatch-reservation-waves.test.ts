@@ -5,9 +5,11 @@ import { createCapacityAdmissionController } from "../../src/domains/dispatch/ad
 import {
 	acquireCapacityLease,
 	type CapacityLimits,
+	capacityLeaseUsage,
 	capacityStateLockPath,
 	readCapacityStateUnsafe,
 	releaseCapacityLease,
+	writeCapacityStateUnsafe,
 } from "../../src/domains/dispatch/capacity-lease.js";
 import {
 	cleanupDispatchReservations,
@@ -302,4 +304,24 @@ it("keeps healthy collective reservations beyond their advisory lifetime", () =>
 	const first = transfer(reservation.ownerId, "task-1");
 	releaseCapacityLease(first.leaseId);
 	releaseDispatchReservation(reservation.ownerId);
+});
+
+it("counts another host's loopback endpoint lease only when it runs on a named node", () => {
+	const cap = { global: 4, nodes: { local: 4, gpu07: 4 }, endpoints: { [endpointKey]: 1 } };
+	const onNamed = acquireCapacityLease({ assignmentId: "named", nodeId: "gpu07", endpointKey, limits: cap });
+	const state = readCapacityStateUnsafe();
+	for (const lease of state.leases) lease.host = "other-host.example";
+	writeCapacityStateUnsafe(state);
+	strictEqual(capacityLeaseUsage().endpoints[endpointKey], 1);
+	throws(
+		() => acquireCapacityLease({ assignmentId: "here", nodeId: "gpu07", endpointKey, limits: cap }),
+		/endpoint .* capacity reached \(1\/1 slots\)/,
+	);
+	const moved = readCapacityStateUnsafe();
+	for (const lease of moved.leases) lease.nodeId = "local";
+	writeCapacityStateUnsafe(moved);
+	strictEqual(capacityLeaseUsage().endpoints[endpointKey], undefined);
+	const here = acquireCapacityLease({ assignmentId: "here", nodeId: "local", endpointKey, limits: cap });
+	releaseCapacityLease(here.leaseId);
+	releaseCapacityLease(onNamed.leaseId);
 });

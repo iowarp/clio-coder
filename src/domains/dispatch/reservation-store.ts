@@ -231,7 +231,9 @@ function heldAllocation(record: DispatchReservationRecord): ReservationAllocatio
 	const tasks = outstandingTasks(record);
 	const onNodes = reservationAllocation(tasks.filter((task) => countsOnThisNode(record.host, task.nodeId)));
 	const onEndpoints = reservationAllocation(
-		tasks.filter((task) => task.endpointKey !== undefined && countsOnThisEndpoint(record.host, task.endpointKey)),
+		tasks.filter(
+			(task) => task.endpointKey !== undefined && countsOnThisEndpoint(record.host, task.nodeId, task.endpointKey),
+		),
 	);
 	return { ...onNodes, endpointSlots: onEndpoints.endpointSlots };
 }

@@ -98,17 +98,18 @@ function isLoopbackEndpoint(endpointKey: string): boolean {
 /**
  * On a shared state dir the node `local` is a different machine on every host,
  * so its slots count only where they were taken. A named node is the same
- * machine from everywhere, and so is a shared provider endpoint, but a loopback
- * endpoint is each host's own server.
+ * machine from everywhere, and so is a shared provider endpoint. A loopback
+ * endpoint is the server on the machine that runs the worker: each host's own
+ * for `local`, the node itself for a named node.
  */
 export function countsOnThisNode(host: string | undefined, nodeId: string): boolean {
 	return nodeId !== LOCAL_NODE_ID || onThisHost(host);
 }
-export function countsOnThisEndpoint(host: string | undefined, endpointKey: string): boolean {
-	return !isLoopbackEndpoint(endpointKey) || onThisHost(host);
+export function countsOnThisEndpoint(host: string | undefined, nodeId: string, endpointKey: string): boolean {
+	return nodeId !== LOCAL_NODE_ID || !isLoopbackEndpoint(endpointKey) || onThisHost(host);
 }
 function leaseOnEndpoint(lease: CapacityLease, endpointKey: string): boolean {
-	return lease.endpointKey === endpointKey && countsOnThisEndpoint(lease.host, endpointKey);
+	return lease.endpointKey === endpointKey && countsOnThisEndpoint(lease.host, lease.nodeId, endpointKey);
 }
 
 function capacityStatePath(): string {
@@ -352,7 +353,7 @@ function heldReservationUsage(
 				nodeWaves.set(wave, (nodeWaves.get(wave) ?? 0) + 1);
 				byNodeWave.set(member.nodeId, nodeWaves);
 			}
-			if (typeof member.endpointKey === "string" && countsOnThisEndpoint(host, member.endpointKey)) {
+			if (typeof member.endpointKey === "string" && countsOnThisEndpoint(host, member.nodeId, member.endpointKey)) {
 				counted = true;
 				const endpointWaves = byEndpointWave.get(member.endpointKey) ?? new Map<number, number>();
 				endpointWaves.set(wave, (endpointWaves.get(wave) ?? 0) + 1);
@@ -688,7 +689,7 @@ export function capacityLeaseUsageUnsafe(options?: {
 			global += 1;
 			nodes[lease.nodeId] = (nodes[lease.nodeId] ?? 0) + 1;
 		}
-		if (lease.endpointKey !== undefined && countsOnThisEndpoint(lease.host, lease.endpointKey)) {
+		if (lease.endpointKey !== undefined && countsOnThisEndpoint(lease.host, lease.nodeId, lease.endpointKey)) {
 			endpoints[lease.endpointKey] = (endpoints[lease.endpointKey] ?? 0) + 1;
 			const holders = endpointHolders[lease.endpointKey] ?? { leases: 0, reservations: 0, foregroundStreams: 0 };
 			endpointHolders[lease.endpointKey] = { ...holders, leases: holders.leases + 1 };
