@@ -16,9 +16,11 @@ export type SandboxBackend = "bwrap" | "seatbelt";
  * `safety.sandboxUnixSockets` values. `block` refuses new Unix-domain sockets
  * inside the sandbox, because a socket visible in the filesystem view or the
  * shared network namespace (a terminal multiplexer, X11, a daemon's control
- * socket) runs commands outside it. `allow` leaves them reachable.
+ * socket) runs commands outside it. `owned` masks only the sockets the
+ * operator owns, so a system daemon's (MUNGE, SSSD) stays reachable; Seatbelt
+ * treats it as `block`. `allow` leaves them reachable.
  */
-export const UNIX_SOCKET_MODES = ["block", "allow"] as const;
+export const UNIX_SOCKET_MODES = ["block", "owned", "allow"] as const;
 export type UnixSocketMode = (typeof UNIX_SOCKET_MODES)[number];
 
 export const WORKER_SANDBOX_SPEC_VERSION = 1;
@@ -56,8 +58,8 @@ export interface WorkerSandboxSpec {
 	passEnv?: ReadonlyArray<string>;
 	/** Credential variables Clio's own targets read, scrubbed whatever their names. Absent when empty. */
 	secretEnv?: ReadonlyArray<string>;
-	/** `safety.sandboxUnixSockets: allow`. Absent blocks Unix-domain sockets (unix-sockets.ts). */
-	unixSockets?: "allow";
+	/** `safety.sandboxUnixSockets` other than `block`. Absent blocks Unix-domain sockets (unix-sockets.ts). */
+	unixSockets?: "owned" | "allow";
 	/** A target declares `auth.headers`, so the worker's sandbox masks Clio's settings.yaml as the main session's does. */
 	maskSettings?: true;
 	/**

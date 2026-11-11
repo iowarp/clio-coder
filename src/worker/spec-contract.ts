@@ -1018,7 +1018,7 @@ function validateWorkerSandbox(value: unknown): void {
 		if (sandbox[key] !== undefined) readStringArray(sandbox[key], `WorkerSpec.sandbox.${key}`);
 	}
 	if (sandbox.unixSockets !== undefined)
-		readEnum(sandbox.unixSockets, "WorkerSpec.sandbox.unixSockets", ["allow"] as const);
+		readEnum(sandbox.unixSockets, "WorkerSpec.sandbox.unixSockets", ["owned", "allow"] as const);
 	if (sandbox.maskSettings !== undefined && sandbox.maskSettings !== true)
 		throw new Error("WorkerSpec.sandbox.maskSettings must be true when present");
 	if (sandbox.backendExpected !== undefined && sandbox.backendExpected !== true)

@@ -539,7 +539,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"safety.autonomy": ["default", "yolo"],
 	"safety.yoloConfinement": ["contained", "unconfined"],
 	"safety.sandbox": ["auto", "required", "off"],
-	"safety.sandboxUnixSockets": ["block", "allow"],
+	"safety.sandboxUnixSockets": ["block", "owned", "allow"],
 	"safety.snapshots": ["auto", "off"],
 	"chat.thinkingLevel": THINKING_LEVELS,
 	"fleet.default.thinkingLevel": THINKING_LEVELS,
@@ -699,7 +699,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.sandboxUnixSockets": [
 		"Sandbox unix sockets",
-		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Allow leaves every socket reachable. User settings only.",
+		"Block stops sandboxed commands from opening Unix sockets, because a socket they can reach (tmux, an X11 display, a daemon's control socket) can run commands outside the sandbox. Database sockets, Docker and other local IPC then fail inside it, and a command that needs one runs unsandboxed after review. Owned hides only the sockets you own (tmux, an X11 socket file, your agents) and leaves other users' reachable, such as the MUNGE and SSSD sockets cluster commands need; abstract sockets stay reachable. Allow leaves every socket reachable. User settings only.",
 	],
 	"safety.scratchRoots": [
 		"Scratch roots",

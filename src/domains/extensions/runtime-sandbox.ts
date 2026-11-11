@@ -188,7 +188,7 @@ export function planExtensionLaunch(input: {
 				gitWritablePaths: [],
 				readableRoots: [workspace, path.dirname(roots.packageCopy), path.dirname(roots.bootstrap)],
 				network: net,
-				...(input.unixSockets === "allow" ? { unixSockets: "allow" as const } : {}),
+				...(input.unixSockets !== undefined && input.unixSockets !== "block" ? { unixSockets: input.unixSockets } : {}),
 			},
 			{ argv },
 			workspace,

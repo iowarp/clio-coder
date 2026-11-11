@@ -300,7 +300,8 @@ export function settingsFileMasks(): SandboxMaskedPath[] {
 
 /** Once per worker, on stderr like the missing-backend line: the filter could not load and masks stand in. */
 function reportSocketFallback(policy: WorkerSandboxSpec, availability: SandboxAvailability): void {
-	if (socketFallbackReported || policy.unixSockets === "allow" || availability.backend !== "bwrap") return;
+	// Owned masks by choice, so only a blocking policy reports the fallback.
+	if (socketFallbackReported || policy.unixSockets !== undefined || availability.backend !== "bwrap") return;
 	const state = unixSocketHostState("block", availability);
 	if (state.kind !== "masks") return;
 	socketFallbackReported = true;

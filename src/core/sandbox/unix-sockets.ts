@@ -425,6 +425,7 @@ export type UnixSocketState =
 	| { kind: "allowed" }
 	| { kind: "filter" }
 	| { kind: "profile" }
+	| { kind: "owned"; capped: boolean }
 	| { kind: "masks"; reason: string; capped: boolean };
 
 export interface UnixSocketLaunch {
@@ -437,9 +438,12 @@ export interface UnixSocketLaunch {
 
 /**
  * Impure: what one sandbox launch adds for Unix-domain sockets. `allow`
- * adds nothing. Seatbelt denies them in its profile. Bubblewrap loads the
- * filter when this host supports it, and otherwise masks the sockets
- * discovered under `roots`, skipping those `existing` masks already hide.
+ * adds nothing. Seatbelt denies them in its profile, under `owned` too.
+ * Under `owned` bubblewrap masks the operator's sockets discovered under
+ * `roots` and loads no filter, so another user's socket (a system daemon's)
+ * stays reachable. Under `block` it loads the filter when this host supports
+ * it, and otherwise masks the same discovered sockets. Discovery skips those
+ * `existing` masks already hide.
  */
 export function unixSocketLaunch(
 	mode: UnixSocketMode,
@@ -453,6 +457,10 @@ export function unixSocketLaunch(
 	}
 	if (availability.backend === "seatbelt")
 		return { fields: { denyUnixSockets: true }, masks: [], state: { kind: "profile" } };
+	if (mode === "owned") {
+		const scan = discoverUnixSocketMasks(roots, existing);
+		return { fields: {}, masks: scan.masks, state: { kind: "owned", capped: scan.capped } };
+	}
 	let reason: string;
 	const probed = support ?? unixSocketFilterSupport(availability.executable);
 	const program = probed.ok ? unixSocketFilterProgram() : null;
@@ -478,6 +486,8 @@ export function unixSocketStateLine(state: UnixSocketState): string {
 			return "unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works)";
 		case "profile":
 			return "unix sockets: the seatbelt profile denies connecting to and binding them (unverified on macOS)";
+		case "owned":
+			return `unix sockets: safety.sandboxUnixSockets is owned, so only your own sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; other users' sockets (system daemons such as MUNGE), abstract sockets and sockets created later stay reachable`;
 		case "masks":
 			return `unix sockets: the seccomp filter is unavailable (${state.reason}), so the user-owned sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; abstract sockets and sockets created later stay reachable`;
 	}
@@ -487,6 +497,7 @@ export function unixSocketStateLine(state: UnixSocketState): string {
 export function unixSocketHostState(mode: UnixSocketMode, availability: SandboxAvailability): UnixSocketState {
 	if (mode === "allow" || !availability.available || availability.executable === null) return { kind: "allowed" };
 	if (availability.backend === "seatbelt") return { kind: "profile" };
+	if (mode === "owned") return { kind: "owned", capped: false };
 	const support = unixSocketFilterSupport(availability.executable);
 	return support.ok ? { kind: "filter" } : { kind: "masks", reason: support.reason, capped: false };
 }

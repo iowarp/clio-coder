@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -208,6 +208,8 @@ test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies l
 	assert.equal(readSettings().safety.sandboxUnixSockets, "block");
 	writeFileSync(userFile, "version: 2\nsafety:\n  sandboxUnixSockets: allow\n");
 	assert.equal(readSettings().safety.sandboxUnixSockets, "allow");
+	writeFileSync(userFile, "version: 2\nsafety:\n  sandboxUnixSockets: owned\n");
+	assert.equal(readSettings().safety.sandboxUnixSockets, "owned");
 	writeFileSync(userFile, "version: 2\nsafety:\n  sandboxUnixSockets: maybe\n");
 	assert.throws(() => readSettings(), /safety\.sandboxUnixSockets/u);
 
@@ -220,7 +222,7 @@ test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies l
 	assert.match(issue?.message ?? "", /user settings/u);
 
 	assert.equal(settingsChangeKind("safety.sandboxUnixSockets"), "hotReload");
-	const spec = (unixSockets: "block" | "allow") =>
+	const spec = (unixSockets: "block" | "owned" | "allow") =>
 		resolveWorkerSandboxSpec({
 			mode: "auto",
 			readOnly: false,
@@ -231,6 +233,7 @@ test("safety.sandboxUnixSockets defaults to block, is user-layer only, applies l
 			unixSockets,
 		});
 	assert.equal(spec("allow")?.unixSockets, "allow");
+	assert.equal(spec("owned")?.unixSockets, "owned");
 	assert.equal(spec("block")?.unixSockets, undefined);
 });
 
@@ -344,4 +347,56 @@ test("under bwrap a contained command cannot open a unix socket but keeps socket
 	);
 	const output = await runProbe(masked.file, masked.args);
 	assert.match(output, /unix=ConnectionRefusedError:111 tcp=connected/u, output);
+});
+
+test("under bwrap owned masks the operator's own sockets and leaves a system daemon's reachable", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	if (spawnSync("python3", ["-c", "pass"]).status !== 0) {
+		t.skip("python3 is not installed");
+		return;
+	}
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "clio-unix-owned-")));
+	const workspace = join(scratch, "ws");
+	mkdirSync(workspace);
+	const own = join(scratch, "own.sock");
+	const server = createServer((socket) => socket.end());
+	const tcpServer = createServer((socket) => socket.end());
+	await listen(server, own);
+	await listen(tcpServer, { host: "127.0.0.1", port: 0 });
+	t.after(() => {
+		server.close();
+		tcpServer.close();
+	});
+	const address = tcpServer.address();
+	assert.ok(address !== null && typeof address === "object");
+	const policy = mainSandboxPolicy({ workspace, scratchRoots: [scratch], unixSockets: "owned" });
+	const probe = async (socketPath: string): Promise<string> => {
+		const plan = planMainSandboxSpawn(
+			policy,
+			{ argv: ["python3", "-c", PROBE, socketPath, String(address.port)] },
+			workspace,
+			availability,
+		);
+		assert.equal(plan.kind, "sandboxed");
+		return plan.kind === "sandboxed" ? runProbe(plan.file, plan.args) : "";
+	};
+	// The socket call itself works; the operator's listener is masked.
+	const mine = await probe(own);
+	assert.match(mine, /unix=ConnectionRefusedError:111 .*socketpair=pair-x/u, mine);
+	// The system bus stands in for MUNGE or SSSD: a daemon socket another user owns.
+	const daemon = "/run/dbus/system_bus_socket";
+	let foreign = false;
+	try {
+		foreign = lstatSync(daemon).isSocket() && lstatSync(daemon).uid !== process.getuid?.();
+	} catch {
+		// No system bus on this host.
+	}
+	if (foreign) {
+		const theirs = await probe(daemon);
+		assert.match(theirs, /unix=connected /u, theirs);
+	}
 });

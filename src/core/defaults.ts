@@ -1121,8 +1121,9 @@ safety:
   # passwords, URLs with a password). Names listed here are kept. Honored only
   # in this file.
   sandboxPassEnv: []
-  # Unix sockets inside the sandbox: block | allow. A socket a sandboxed
-  # command can reach (tmux, X11, a daemon) can run commands outside it.
+  # Unix sockets inside the sandbox: block | owned | allow. A socket a sandboxed
+  # command can reach (tmux, X11, a daemon) can run commands outside it. owned
+  # hides only your own, so system daemons (MUNGE, SSSD) stay reachable.
   # Honored only in this file.
   sandboxUnixSockets: block
   # Git snapshots before the agent changes files, restored with /rewind: auto | off.
