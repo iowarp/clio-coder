@@ -208,6 +208,19 @@ home is on.
   not cut short by Clio starting on another. Slots held by a host that died
   free up five minutes after they expire, or at once with
   `clio-coder session terminate --force`.
+- **Apptainer with its own pid namespace.** An instance started with `--pid`
+  or `--containall` keeps the host's name but numbers its processes on its
+  own. The lock Clio takes on its state files (`settings.yaml`,
+  `credentials.yaml`, the dispatch admission state) records the holder's pid
+  namespace and boot, so a Clio on the host never takes a container
+  holder's lock by mistaking it for a host process, and the reverse. A lock
+  left by a container that has exited is taken over once it is 30 seconds
+  old. Other records Clio keeps on the home (session ownership, worker slot
+  leases, the store lock, update and build locks) still compare plain pids,
+  so do not share one home between the host and such a container: give the
+  container its own `CLIO_CODER_HOME`, or run it without `--pid` and
+  `--containall` (the Apptainer default shares the host's pid namespace,
+  which needs nothing).
 
 ## Airgapped and mirrored sites
 
