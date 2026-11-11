@@ -51,6 +51,7 @@ import {
 	JUDGE_STREAK_REASON,
 } from "../../domains/safety/autonomy-window.js";
 import { CITATION_CHECK_PREFIX } from "../../domains/safety/citation-grounding.js";
+import { extractCommandWriteTargets } from "../../domains/safety/protected-artifacts.js";
 import { redactFinalUrlCredentials, redactUrlCredentials } from "../../domains/safety/redaction.js";
 import { SESSION_COST_CEILING_EXIT_CODE, SESSION_COST_CEILING_REASON } from "../../domains/scheduling/budget.js";
 import { formatStatedWait } from "../../domains/session/retry.js";
@@ -224,6 +225,8 @@ interface HeadlessMainAgentRunStats {
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
 	pendingVerifyCalls: Map<string, string | null>;
+	/** Bash calls in flight whose command names a write target. */
+	pendingShellWrites: Set<string>;
 	verifyCalls: VerifyCallOutcome[];
 	skillActivations: SkillActivation[];
 	/** Every call the run made, as its settlement states it; the run's spend folds these (#434). */
@@ -453,11 +456,15 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
 		if (call.toolName === ToolNames.Verify)
 			stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(call.args));
+		const command = call.toolName === ToolNames.Bash ? call.args?.command : undefined;
+		if (typeof command === "string" && extractCommandWriteTargets(command).length > 0)
+			stats.pendingShellWrites.add(event.toolCallId);
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
 	const tool = stats.pendingCapabilities.get(event.toolCallId) ?? event.toolName ?? "tool";
 	stats.pendingCapabilities.delete(event.toolCallId);
+	const shellWrite = stats.pendingShellWrites.delete(event.toolCallId);
 	// Fold completed child operations into accounting only. The provider and
 	// session history retain the real aggregate call/result pair.
 	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
@@ -593,6 +600,9 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 		}
 	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
+	// A clean shell redirect wrote its target as surely as an edit did (rcsmoke mini N2: an operator-named
+	// unsandboxed `echo > file` landed, yet a later refused command sealed the run as a no-op).
+	else if (outcome === "ok" && shellWrite) stats.mutatingSucceeded += 1;
 	if (outcome === "ok" && tool === ToolNames.Dispatch)
 		stats.mergedTaskWorktrees += mergedTaskWorktreeCount(event.result);
 	if (tool === ToolNames.Context) {
@@ -911,6 +921,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		toolStats: new Map<string, ToolCallStat>(),
 		pendingCapabilities: new Map(),
 		pendingVerifyCalls: new Map(),
+		pendingShellWrites: new Set(),
 		verifyCalls: [],
 		skillActivations: [],
 		calls: [],

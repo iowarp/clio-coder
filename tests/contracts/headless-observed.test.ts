@@ -46,7 +46,16 @@ test("the observed line omits a run with no tool calls and names a write with no
 	);
 });
 
-async function headlessRun(mode: "text" | "json"): Promise<{ code: number; stdout: string; stderr: string }> {
+type StubCall = readonly [string, string, string, string, Record<string, unknown>?];
+const WROTE_THEN_FAILED_CHECK: ReadonlyArray<StubCall> = [
+	["e1", "edit", "write", "ok"],
+	["b1", "bash", "execute", "error"],
+];
+
+async function headlessRun(
+	mode: "text" | "json",
+	calls: ReadonlyArray<StubCall> = WROTE_THEN_FAILED_CHECK,
+): Promise<{ code: number; stdout: string; stderr: string }> {
 	const entries: object[] = [{ kind: "message", role: "user", payload: {} }];
 	let handler: (event: unknown) => void = () => {};
 	const answer = {
@@ -63,11 +72,8 @@ async function headlessRun(mode: "text" | "json"): Promise<{ code: number; stdou
 		getSessionId: () => null,
 		submit: async () => {
 			handler({ type: "agent_start" });
-			for (const [id, tool, actionClass, outcome] of [
-				["e1", "edit", "write", "ok"],
-				["b1", "bash", "execute", "error"],
-			] as const) {
-				handler({ type: "tool_execution_start", toolCallId: id, toolName: tool, args: {} });
+			for (const [id, tool, actionClass, outcome, args] of calls) {
+				handler({ type: "tool_execution_start", toolCallId: id, toolName: tool, args: args ?? {} });
 				handler({ type: "tool_execution_end", toolCallId: id, toolName: tool, actionClass, outcome, result: {} });
 			}
 			entries.push(...edit, ...failingCheck);
@@ -146,4 +152,18 @@ test("a scoped unittest pass does not replace a full-suite unittest failure", ()
 			["python -m unittest test_stats", true],
 		],
 	);
+});
+
+test("a bash write that succeeded is a workspace change, so a later refused command does not make the run a no-op", async () => {
+	const env = await isolateClioEnv("headless-observed-");
+	try {
+		const text = await headlessRun("text", [
+			["b1", "bash", "execute", "ok", { command: "echo outside > ../outside/out.txt", unsandboxed: true }],
+			["b2", "bash", "execute", "blocked", { command: "cat ../outside/out.txt", unsandboxed: true }],
+			["r1", "read", "read", "ok", { path: "../outside/out.txt" }],
+		]);
+		strictEqual(text.code, 0, text.stderr);
+	} finally {
+		env.restore();
+	}
 });
