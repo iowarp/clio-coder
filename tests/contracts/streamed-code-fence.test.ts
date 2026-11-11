@@ -51,6 +51,41 @@ for (const bareCodeFences of [false, true]) {
 	});
 }
 
+// Lines a fence holds that look like fence markers: each piece the open fence draws on its own must read them as the
+// whole fence does.
+const MARKER_LINES = {
+	// A template literal ending in a lone backtick line, which Pi trims only as the last line of a code block.
+	template: "```js\nconst t = `\n  line one\n`\nconsole.log(t);\nconst u = `\nx\n`\n",
+	tildes: "~~~~\na\n~~\n~~~\nb\n",
+	// Closing lines that close the fence for Pi: extra marker characters, or a tab indent of three spaces.
+	"long closer": "```ts\nconst a = 1;\n```~~\nAfter the fence.\n",
+	"mixed closer": "~~~ts\na = 1\n~~~`\nAfter the fence.\n",
+	"tab closer": "```ts\na = 1\n\t```\nAfter the fence.\n",
+	"crlf closer": "```ts\nconst a = 1;\r\nconst b = 2;\r\n```\r\nAfter the fence.\r\n",
+	// A shorter fence line inside the fence ends inline math's own fence state, so `$a+b$` is set as math.
+	"nested fence math": "````markdown\n```python\nprint(1)\n$a+b$ here\nmore\n```\n````\nAfter $c$.\n",
+};
+
+for (const [name, fence] of Object.entries(MARKER_LINES)) {
+	test(`every frame of a streamed fence with ${name} lines matches the text drawn whole`, () => {
+		const text = `Intro.\n\n${fence}`;
+		for (const bareCodeFences of [false, true]) {
+			for (const width of [23, 80]) {
+				const streamed = panel(bareCodeFences);
+				for (let at = 0; at < text.length; at += 2) {
+					streamed.applyEvent({ type: "text_delta", delta: text.slice(at, at + 2) } as never);
+					const end = Math.min(at + 2, text.length);
+					deepStrictEqual(streamed.render(width), whole(text.slice(0, end), width, bareCodeFences), `at ${end}`);
+				}
+				const done = panel(bareCodeFences);
+				const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+				for (const view of [streamed, done]) view.applyEvent({ type: "message_end", message } as never);
+				deepStrictEqual(streamed.render(width), done.render(width), "finished");
+			}
+		}
+	});
+}
+
 test("a delta to a long open fence lexes only the line still open", () => {
 	const streamed = panel();
 	streamed.applyEvent({ type: "text_delta", delta: "Intro.\n\n```ts\n" } as never);

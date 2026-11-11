@@ -53,7 +53,7 @@ import { keepRows, keptPieceRows, keptRows, type RowPiece } from "./kept-rows.js
 import { editPreviewDiff } from "./mutation-preview.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { type CodeInkCarry, codeInk, codeInkLexer } from "./renderers/code-ink.js";
-import { holdInlineMath } from "./renderers/inline-math.js";
+import { holdInlineMath, mathFenceAfter } from "./renderers/inline-math.js";
 import { LiveToolView } from "./renderers/live-tool-view.js";
 import { settledMarkdownHead } from "./renderers/markdown-blocks.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
@@ -358,6 +358,13 @@ type OpenFence = {
 	scanned: number;
 	/** Code ink's lexer for the fence's language; null when it inks none. */
 	lexer: ReturnType<typeof codeInkLexer>;
+	/** The fence inline math reads after the opening line, which every piece drawn on its own starts from. */
+	mathFence: string | null;
+	/**
+	 * Whether a line inline math reads as closing that fence, where Pi does not, was searched: past it inline math
+	 * may set `$...$` in the whole fence and not in a piece, so a tail holding a `$` renders whole.
+	 */
+	mathDrift: boolean;
 	/** The complete lines' rows at one layout, how far into the tail they reach, and the lexer state there. */
 	layout?: {
 		width: number;
@@ -1443,6 +1450,8 @@ function openFence(settled: SettledBlocks, region: string): OpenFence | null {
 						marker: opener[1] ?? "```",
 						scanned: opener[0].length,
 						lexer: codeInkLexer(lang),
+						mathFence: mathFenceAfter(opener[0].slice(0, -1), null),
+						mathDrift: false,
 					};
 		found = { at: settled.length, open };
 		settled.fence = found;
@@ -1452,17 +1461,34 @@ function openFence(settled: SettledBlocks, region: string): OpenFence | null {
 	for (let end = region.indexOf("\n", open.scanned); end >= 0; end = region.indexOf("\n", open.scanned)) {
 		const line = region.slice(open.scanned, end);
 		open.scanned = end + 1;
-		if (closesFence(line, open.marker)) {
+		// Marked reads a carriage return as a line end of its own, which the pieces here do not cut at.
+		if (line.includes("\r") || closesFence(line, open.marker)) {
 			found.open = null;
 			return null;
 		}
+		if (mathFenceAfter(line, open.mathFence) !== open.mathFence) open.mathDrift = true;
+	}
+	if (open.mathDrift && region.includes("$")) {
+		found.open = null;
+		return null;
 	}
 	return open;
 }
 
+/**
+ * Whether `line` closes a fence opened with `marker`, as marked reads it once Pi turns each tab into three spaces:
+ * at most three spaces, the marker itself, any more marker characters of either kind, then spaces.
+ */
 function closesFence(line: string, marker: string): boolean {
-	const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(line)?.[1];
-	return close !== undefined && close[0] === marker[0] && close.length >= marker.length;
+	const plain = line.replaceAll("\t", "   ");
+	let at = 0;
+	while (at < 3 && plain.charCodeAt(at) === 32) at += 1;
+	return plain.startsWith(marker, at) && /^[`~]* *$/u.test(plain.slice(at + marker.length));
+}
+
+/** Whether Pi trims `line` as a closing fence still being typed when it ends a code block opened with `marker`. */
+function trimmedAsCloser(line: string, marker: string): boolean {
+	return line.length > 0 && line.length < marker.length && line === marker.charAt(0).repeat(line.length);
 }
 
 /** A fence's code drawn from `carry`: the lexer state the lines above it leave. */
@@ -1490,7 +1516,8 @@ function openFenceRows(
 ): string[] | null {
 	if (width < 8) return null;
 	const lineStart = region.lastIndexOf("\n") + 1;
-	if (/^ {0,3}[`~]/u.test(region.slice(lineStart))) return null;
+	const openLine = region.slice(lineStart);
+	if (openLine.includes("\r") || /^ {0,3}[`~]/u.test(openLine.replaceAll("\t", "   "))) return null;
 	let layout = open.layout;
 	if (layout?.width !== width || layout.bareFences !== bareFences || layout.epoch !== epoch) {
 		// The opening line and one short code line draw the opening line's rows and one more.
@@ -1500,9 +1527,15 @@ function openFenceRows(
 		layout = { width, bareFences, epoch, header, rows: rows.slice(0, header), through: start, carry: open.lexer?.start };
 		open.layout = layout;
 	}
-	// Lines settle through the last complete line that is not blank, since Pi drops a fence's trailing line end.
+	// Lines settle through the last complete line that is neither blank, since Pi drops a fence's trailing line end,
+	// nor trimmed as a closing fence being typed, which Pi does only to a code block's last line.
 	let settleTo = lineStart;
-	while (settleTo - 1 > layout.through && region.charCodeAt(settleTo - 2) === 10) settleTo -= 1;
+	while (settleTo - 1 > layout.through) {
+		const start = Math.max(layout.through, region.lastIndexOf("\n", settleTo - 2) + 1);
+		const line = region.slice(start, settleTo - 1);
+		if (line !== "" && !trimmedAsCloser(line, open.marker)) break;
+		settleTo = start;
+	}
 	if (settleTo - 1 > layout.through) {
 		const code = region.slice(layout.through, settleTo - 1);
 		const md = fenceMarkdown(`${open.opener}\n${code}`, bareFences, open, layout.carry);

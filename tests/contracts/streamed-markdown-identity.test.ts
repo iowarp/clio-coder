@@ -18,6 +18,14 @@ const texts = {
 	joined:
 		"Text.\n```ts\nconst a = 1;\n```\nAfter code.\n> quoted\n## H\n---\nRule above.\n1. one\n### Last\n    indented\n## Tail\n",
 };
+const finished = (text: string): string[] => {
+	const panel = createChatPanel({ now: () => 1_000 });
+	panel.appendUser("Q");
+	panel.applyEvent({ type: "agent_start" } as never);
+	const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+	panel.applyEvent({ type: "message_end", message } as never);
+	return panel.render(40);
+};
 const yieldToLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
 
 for (const [name, text] of Object.entries(texts)) {
@@ -30,7 +38,9 @@ for (const [name, text] of Object.entries(texts)) {
 		}
 		for (let at = 0; at < text.length; at += 2) {
 			streamed.applyEvent({ type: "text_delta", delta: text.slice(at, at + 2) } as never);
-			streamed.render(40);
+			// The stream holds its last character back until the next one shows how it joins.
+			const shown = text.slice(0, Math.min(at + 2, text.length) - 1);
+			deepStrictEqual(streamed.render(40), finished(shown), `at ${shown.length}`);
 			await yieldToLoop();
 		}
 		const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
