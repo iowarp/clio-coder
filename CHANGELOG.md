@@ -87,6 +87,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `run_script` takes a store blob as a declared input, as `<tag>:<blob>` or the path `store get` returned: the script reads it in place, nothing is copied into the workspace, and a later `put` of its result names the blob and its hash in `used`. Other absolute input paths are still refused. A put's `used` lists each input once, even when the script read it both as a declared input and through the copy `store get` handed out.
 - A blob-name pattern (`store ls`, `store verify` and the tool's `list`) is limited to 256 characters, with no backreferences and no quantified group that contains another quantifier, so a pattern cannot hang a listing.
 - The operator's approval line for a store put that replaces a blob names the blob and its size instead of a raw marker.
+- Listing one blob's records no longer reads the whole records tag on the local backend.
+- A `store get` result says its path is a read-only store copy the caller may read outside the workspace, so a worker in a task worktree reads it instead of treating it as out of bounds.
 
 ### Reports to the maintainers
 
@@ -110,6 +112,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder report` runs no `gh` command before you consent: the preview names the route from what is installed (`gh`, else a browser, else a file), and if `gh` turns out not to be signed in after you consent, the preview is shown again for the new route instead of sending without a review.
 - When the gist upload of `--share` fails, the report is still posted without a `bundle:` pointer and the output says why. Without a signed-in `gh`, `--share` seals the bundle the same way and writes it to `reports/bundles/<id>.box` in the state directory, naming the path so you can attach it to the issue by hand.
 - Over ACP, `/report bug --bundle mechanics --consent debug|dataset [--transcript [N]] <summary>` asks the client through a permission request before building a diagnostic bundle, showing the consent text. The preview names the bundle's size and what you agreed to, and the bundle is kept only when that draft is sent. A refusal, a cancel, no answer within 5 minutes or a client that cannot be asked attaches nothing.
+- The desktop app's report dialog labels the credit choice with what you chose instead of always reading "credit: yes".
 
 ### Commands and the TUI
 
@@ -171,6 +174,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - On the Copilot route, an autonomy or posture change no longer restarts the SDK session and re-sends the whole conversation; the change reaches the model as a host policy turn, so the cached prefix is kept.
 - A target priced with only input and output bills cached prompt tokens at its input price instead of $0.
 - An OpenRouter model missing from the catalog stops at the session cost ceiling.
+- Side calls (a side question, a handoff round) are checked against the session cost ceiling whatever their pricing, as compaction already was.
 - An OAuth refresh that fails on a network error says so and that the next call retries, instead of asking for a new login.
 - First launch no longer adopts a local server's embedding model as the chat model.
 - `clio-coder auth logout <runtime>` names the targets that hold their own stored key and how to drop one, instead of saying nothing is stored.
@@ -281,6 +285,11 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - When a handbook's invariants overflow a worker's budget, part of the budget stays reserved for the worker's own handbook sections and the omitted invariants are named.
 - A `copilot-sdk` target can opt into Copilot's long-context tier with `contextTier: long_context`: its sessions ask for that tier, compact against the tier's prompt budget and use its long-context prices, and the footer, `/model` and `doctor` show the tier. Without the key nothing is sent and the default tier applies.
 - A compaction summary checks the session cost ceiling on every route, priced or not, so a session already at its ceiling waits or stops instead of compacting past it.
+- `context init` checks each rule it adopts from another handbook against the tree before the rule enters `CLIO-CODER.md`, also on `--adopt`: every rule keeps its source file and line and is sorted as verified, stale, contradicted or unverifiable, with the verdicts in `.clio-coder/state/handbook-ledger.json`; instruction files no longer ground each other's citations.
+- `clio-coder context init --verify` rechecks the handbook against the tree without a model call, and `--apply` after it writes a proposal that removes or corrects only the flagged rules. The context status says when the handbook was last verified and how many rules need attention, and an attended session gets one hint when rules no longer match the code.
+- `context init` reports what happened to each absorbed sibling handbook rule (verified, dropped, contradicted or merged, with its source file and line) in the summary, in `--json` and beside the proposal, and states that the absorbed handbooks were not modified.
+- `clio-coder context init --accept [<proposal>]` writes a reviewed proposal to the handbook byte for byte, and refuses when the handbook changed since the proposal was written.
+- Generated handbooks are shaped for workers: generated invariants are capped at 16 rules and 3,000 characters, Tests and Gotchas come first, and generated Conventions, Tests, Gotchas, Git and Docs sections reach every worker; sections you wrote keep their place and scope.
 
 ### Memory
 
@@ -302,6 +311,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The footer's dirty-state probe gives a large repository more time instead of killing `git status` on every poll.
 - Resuming a long session reads its ledger one fewer time.
 - Very large tool results render faster: only the shown prefix is sanitized.
+- A long live turn no longer re-lays out its finished text and tools on every streamed update: the settled head of the turn renders once per width and style.
 
 ### Telemetry
 
@@ -375,6 +385,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Council and poll members, which answer in prose by design, are no longer marked "no tools" or unchecked, and the exit summary counts a worker that failed over to another attempt once.
 - Workers can use up to `fleet.limits.toolCallsPerRun` tool calls unless their recipe sets a lower maximum, instead of stopping at the recipe's estimate. The defaults rise to 300 tool calls and 45 minutes per run, the coder estimate to 150 and the tester estimate to 100, and the board's budget projection and the wiki repair cap follow the same ceiling.
 - A worker that hits its tool-call cap keeps its edits: they are committed to its task branch as a partial result to review or land.
+- A dispatched edit worker that changed files but reports it could not finish now fails as `worker_partial_work`: its task worktree is kept, not merged, under a `partial: <task>` subject. A worker that finished but could not verify its work ("unable to run the tests here; implemented X") is not partial.
 - A worker that reports it is blocked without changing anything settles as no work, not completed, and `monitor collect` names every run of a batch before the per-run detail.
 - Host verification runs lint and format checks on the files a task changed, and rejects a whole-repo check failure only when the task's base commit does not fail the same way. The base's replay of a check runs under that check's own timeout instead of five seconds and is kept per base commit, so tasks cut from one base pay for it once. A failure the base shares still rejects the task when the task's output has a line the base's does not, and the verification note quotes that line. The base replay gets the task's dependency view (the nearest `node_modules` from the check's directory, an enclosing checkout's for a nested task worktree, and each workspace package's own), and when the check's runner or a declared dependency does not resolve on the base, the check is reported as not compared instead of rejecting the task.
 - Host verification checks run one at a time per machine, across Clio homes (the slot lives in `$XDG_RUNTIME_DIR/clio-coder`, else a per-user directory in the temp dir, or in `CLIO_CODER_VERIFICATION_SLOT_DIR`), so parallel batches and sessions queue their typechecks and test suites instead of overloading the machine; the workers dashboard shows `waiting for a verification slot` while a check queues. The slot directory must be your own with mode 0700 (Clio Coder creates it so); otherwise checks run without the slot and a dispatch diagnostic says why.
