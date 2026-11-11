@@ -367,6 +367,7 @@ async function findFiled(
 	options: GhOptions,
 ): Promise<{ url: string; number: number } | null | undefined> {
 	if (route.name === "discussion") {
+		// The repository's newest discussions, not the search index: search lags filing, so a retry would post twice.
 		const result = await run(
 			gh,
 			[
@@ -375,11 +376,13 @@ async function findFiled(
 				"--hostname",
 				"github.com",
 				"-f",
-				`q=repo:${REPORT_REPOSITORY} "${id}" in:body`,
+				`owner=${REPOSITORY_OWNER}`,
 				"-f",
-				"query=query($q: String!) { search(query: $q, type: DISCUSSION, first: 1) { nodes { ... on Discussion { url number } } } }",
+				`name=${REPOSITORY_NAME}`,
+				"-f",
+				"query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { discussions(first: 30, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { url body } } } }",
 				"--jq",
-				".data.search.nodes[0].url // empty",
+				`.data.repository.discussions.nodes | map(select((.body // "") | contains("${id}"))) | .[0].url // empty`,
 			],
 			options,
 		);
