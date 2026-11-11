@@ -6180,6 +6180,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	options.transport.onRequest(ACP_SESSION_LABEL_METHOD, (params): AcpEmptyResult => {
 		requireInitialized();
+		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "label"]));
 		const id = sessionIdOf(request);
 		workspaceMeta(id);

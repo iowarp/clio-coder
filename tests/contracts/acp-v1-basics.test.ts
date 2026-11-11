@@ -97,6 +97,10 @@ test("ACP v1 negotiates the supported version and terminal auth only with client
 				return true;
 			});
 			deepStrictEqual(await peer.call("logout", { _meta: {} }), {});
+			await rejects(peer.call("_clio-coder/session/label", { sessionId: "session-1", label: "x" }), (error: unknown) => {
+				strictEqual((error as AcpRequestError).rpcCode, -32000);
+				return true;
+			});
 			await rejects(peer.call("session/new", { cwd: process.cwd(), mcpServers: [] }), (error: unknown) => {
 				strictEqual((error as AcpRequestError).rpcCode, -32000);
 				return true;
