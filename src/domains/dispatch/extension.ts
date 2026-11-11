@@ -380,7 +380,14 @@ import {
 	type MergeCardOutcome,
 	mergeCardCauseNote,
 } from "./merge-card.js";
-import { mergeGateVerdict, mergeWithheldDetail, removedTestCases, taskRequestsTestRemoval } from "./merge-gate.js";
+import {
+	mergeGateVerdict,
+	mergeWithheldDetail,
+	partialResultDetail,
+	preservesPartialResult,
+	removedTestCases,
+	taskRequestsTestRemoval,
+} from "./merge-gate.js";
 import { recoverAbandonedRuns } from "./orphan-recovery.js";
 import {
 	type ResolvedTerminalReason,
@@ -9191,6 +9198,9 @@ export function createDispatchBundle(
 				// for the operator's one merge command instead of left as loose edits.
 				const hostRejectedMerge =
 					req.taskWorktree !== undefined && (req.apply ?? "merge") === "merge" && hostRejection !== null && workerSucceeded;
+				// A worker stopped at its tool-call cap commits what it changed on its
+				// preserved branch as a partial result: never merged, never dropped.
+				const cappedPartial = !workerSucceeded && preservesPartialResult(outcomeCode, req.taskWorktree !== undefined);
 				let worktreeReceipt: RunResultDraft["worktree"];
 				// Set when the operator discarded the branch and worktree from the merge card.
 				let worktreeDiscarded = false;
@@ -9203,7 +9213,7 @@ export function createDispatchBundle(
 				// look for it. A discard that removed the worktree but not the branch
 				// releases the claim too: nothing of Clio's is left to guard.
 				let claimReleased = false;
-				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge)) {
+				if (req.taskWorktree !== undefined && (finalOutcome === "succeeded" || hostRejectedMerge || cappedPartial)) {
 					const authorship =
 						appliedResultContract !== null && resultValidation?.conformance === "pass"
 							? resultContractAuthorship(appliedResultContract, capturedOutput?.state === "final" ? capturedOutput.text : null)
@@ -9215,7 +9225,7 @@ export function createDispatchBundle(
 					const protectedPaths = getProtectedArtifactState().artifacts.map((artifact) => artifact.path);
 					worktreeReceipt = applyTaskWorktree({
 						worktree: req.taskWorktree,
-						apply: mergeWithheld || hostRejectedMerge ? "preserve" : (req.apply ?? "merge"),
+						apply: mergeWithheld || hostRejectedMerge || cappedPartial ? "preserve" : (req.apply ?? "merge"),
 						protectedPaths,
 						commitMessage: taskCommitMessage,
 						authoredPaths,
@@ -9224,10 +9234,16 @@ export function createDispatchBundle(
 					worktreeReceipt = withStrayWrites(worktreeReceipt, req.taskWorktree, observedRunEffects.mutatedPaths);
 					if (worktreeReceipt.reason !== undefined) {
 						finalOutcome = "failed";
-						finalDetail = hostRejectedMerge
-							? [finalDetail, worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
-							: (worktreeReceipt.detail ?? worktreeReceipt.reason);
+						finalDetail =
+							hostRejectedMerge || cappedPartial
+								? [finalDetail, worktreeReceipt.detail ?? worktreeReceipt.reason].filter(Boolean).join("; ")
+								: (worktreeReceipt.detail ?? worktreeReceipt.reason);
 						failureMessage = finalDetail;
+					} else if (cappedPartial) {
+						if (worktreeReceipt.commit !== undefined && (worktreeReceipt.changedPaths?.length ?? 0) > 0) {
+							finalDetail = [finalDetail, partialResultDetail(req.taskWorktree.branch)].filter(Boolean).join("; ");
+							failureMessage = finalDetail;
+						}
 					} else if (hostRejectedMerge) {
 						// Only a commit on the branch makes the command true; a worker that
 						// changed nothing leaves the branch at its base.

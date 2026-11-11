@@ -2,6 +2,22 @@ import { isTestFilePath } from "../../core/test-paths.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { mutationReportChecks, mutationReportFailures } from "../agents/result-contract.js";
 
+/**
+ * Whether a failed run's task worktree is committed to its branch as a partial
+ * result. A worker stopped at its tool-call cap often stops mid-change; its
+ * edits are neither merged (nothing checked them) nor left as loose files, so
+ * the host commits them on the preserved branch for the dispatcher to review,
+ * continue or land.
+ */
+export function preservesPartialResult(outcomeCode: string | null, hasTaskWorktree: boolean): boolean {
+	return hasTaskWorktree && outcomeCode === "worker_tool_call_cap_exhausted";
+}
+
+/** The failure detail suffix naming where a preserved partial result is and how to land it. */
+export function partialResultDetail(branch: string): string {
+	return `its partial work is committed on the preserved branch ${branch} and was not merged; review or continue it there, and \`clio-coder fleet land ${branch}\` applies it`;
+}
+
 const DECLARED_CHECK_DETAIL_MAX_CHARS = 120;
 
 export interface MergeGateInput {

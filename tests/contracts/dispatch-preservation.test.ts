@@ -327,3 +327,34 @@ test("worker stderr text cannot start a line with the control-frame marker", asy
 	strictEqual(neutralizeControlPrefix("@clio-con", true), " @clio-con");
 	strictEqual(neutralizeControlPrefix("@clio-control/1 x", false), "@clio-control/1 x");
 });
+
+test("a capped worker's dirty task worktree is committed on its preserved branch, not merged or dropped", async () => {
+	const root = repo();
+	const { applyTaskWorktree, createTaskWorktree, settleTaskWorktree } = await import("../../src/tools/task-worktree.js");
+	const { partialResultDetail, preservesPartialResult } = await import("../../src/domains/dispatch/merge-gate.js");
+	try {
+		const task = createTaskWorktree(root, "cappedrun");
+		// The faked run stopped at its tool-call cap with an edit and a new file uncommitted.
+		writeFileSync(join(task.path, "base.txt"), "half done");
+		writeFileSync(join(task.path, "new.txt"), "new");
+		strictEqual(preservesPartialResult("worker_tool_call_cap_exhausted", true), true);
+		strictEqual(preservesPartialResult("worker_tool_call_cap_exhausted", false), false);
+		strictEqual(preservesPartialResult("worker_turn_timeout", true), false);
+		const receipt = applyTaskWorktree({
+			worktree: task,
+			apply: "preserve",
+			authoredPaths: [join(task.path, "base.txt"), join(task.path, "new.txt")],
+		});
+		strictEqual(receipt.applied, false);
+		strictEqual(receipt.reason, undefined);
+		ok(receipt.commit !== undefined);
+		strictEqual(git(root, "show", `${task.branch}:base.txt`), "half done");
+		strictEqual(git(root, "show", `${task.branch}:new.txt`), "new");
+		strictEqual(readFileSync(join(root, "base.txt"), "utf8"), "base");
+		strictEqual(git(task.path, "status", "--porcelain"), "");
+		match(partialResultDetail(task.branch), /clio-coder fleet land clio-coder\/task\/cappedrun/u);
+		settleTaskWorktree(task);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
