@@ -293,7 +293,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `context init` checks each rule it adopts from another handbook against the tree before the rule enters `CLIO-CODER.md`, also on `--adopt`: every rule keeps its source file and line and is sorted as verified, stale, contradicted or unverifiable, with the verdicts in `.clio-coder/state/handbook-ledger.json`; instruction files no longer ground each other's citations.
 - `clio-coder context init --verify` rechecks the handbook against the tree without a model call, and `--apply` after it writes a proposal that removes or corrects only the flagged rules. The context status says when the handbook was last verified and how many rules need attention, and an attended session gets one hint when rules no longer match the code.
 - `context init` reports what happened to each absorbed sibling handbook rule (verified, dropped, contradicted or merged, with its source file and line) in the summary, in `--json` and beside the proposal, and states that the absorbed handbooks were not modified.
-- `clio-coder context init --accept [<proposal>]` writes a reviewed proposal to the handbook byte for byte, and refuses when the handbook changed since the proposal was written.
+- `clio-coder context init --accept [<proposal>]` writes a reviewed proposal to the handbook byte for byte, and refuses when the handbook changed since the proposal was written. The TUI accepts one too (`/context init --accept <id>`), and an accepted proposal clears the verify findings it resolved.
 - Generated handbooks are shaped for workers: generated invariants are capped at 16 rules and 3,000 characters, Tests and Gotchas come first, and generated Conventions, Tests, Gotchas, Git and Docs sections reach every worker; sections you wrote keep their place and scope.
 - `context init` also reads Cursor rules, GitHub Copilot instruction files, and Windsurf, Cline and Aider instruction sources, and Clio Coder does not write into their directories. The heuristic draft no longer adds rules about Clio Coder's own repository, and `--global` reads through the interop home, so `CLIO_CODER_INTEROP_HOME=none` disables it.
 
@@ -319,6 +319,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Resuming a long session reads its ledger one fewer time.
 - Very large tool results render faster: only the shown prefix is sanitized.
 - A long live turn no longer re-lays out its finished text and tools on every streamed update: the settled head of the turn renders once per width and style.
+- On the openai-codex route the main prompt's pinned layer goes out as its own instructions block and the rest of the system prompt as the first input item, so a change below the pinned layer (a handbook edit, a new turn context) no longer re-bills the whole prompt: measured on a changed tail with the real tool set, the cached share went from 0% to 73%. Workers and other routes keep their request shape.
 
 ### Telemetry
 
@@ -330,6 +331,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `clio-coder telemetry inspect` shows a session's seal verdict, including a seal that fails verification.
 - A telemetry share or diagnostic bundle re-keys each settings fingerprint under a random key minted for that share and carries no real process id or process start time, so two shares from one install cannot be linked by them. Local journals keep the real values.
 - Telemetry keeps a target's `auth.apiKeyEnvVar` readable when it holds a variable name; anything else in that field is still redacted.
+- A resumed session's replay cache breaks (calls whose cached prefix no longer matched) show in the exit summary and in ACP `usage_update`, counted the same way as `telemetry cache`.
 
 ### Install, upgrade and uninstall
 
@@ -384,7 +386,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Cancelling a dispatched worker stops a command it was running, even one that ignores SIGTERM.
 - Worker diagnostics can no longer be mistaken for control frames.
 - The wiki generation lock records host and process identity, so another node's run is respected and a reused pid no longer blocks generation; a codewiki lock left by a gone process on another host is reclaimed after a minute.
-- A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer. Nor does a check that ran a test, runner config or package script a worker in the run changed; the run says why.
+- A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer. Nor does a check that ran a test, runner config or package script a worker in the run changed; the run says why. A gated check whose own runner (for example `pnpm test` running node, jest, vitest, pytest, go or cargo tests) picks up a test a worker wrote earns none either.
 - `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer. A participant whose answer is not one of the listed options, such as a copied "yes", is asked again with the options named instead of casting a spoiled vote, and `--options` refuses a choice the ballot could not carry verbatim (one containing ", ", over 64 bytes, or spanning lines).
 - A task that names its check as an exact command ("verify by running: <cmd>", a backticked command after "by running", or "run `<cmd>` to verify") withholds the merge when the worker never ran that command to a clean exit, through the shell or a passing `verify` check, even if its other calls succeeded. `npm test`, `pnpm test` and `npm run test` name the same script. Plain "by running the tests" names no command.
 - A task worktree outside the project also links the `node_modules` of each workspace package the project declares (such as `apps/*`), beside the root `node_modules` and `.venv`, so a check that builds or typechecks a workspace package passes in the worktree.
@@ -409,7 +411,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Dispatch scope notices, such as overlapping write roots, are recorded in the session, not only shown live.
 - When the host refuses a worker's final result (a contract, grounding or schema refusal, or a refused plain answer), the run's feed keeps the reason and the submitted payload, secret-redacted and cut to 4 KiB, and fleet view and the workers dashboard show "result rejected: <reason>".
 - A claims log line over 64 KiB is never written, and a damaged line is counted as unreadable instead of parsed.
-- A worker whose task names no source path is told to prefer `read` and `grep` over `code_nav`; its tool list stays the same whatever the task says.
+- A worker whose task names no source path is told to prefer `read` and `grep` over `code_nav`; its tool list stays the same whatever the task says. Kotlin, Swift, PHP, C#, Scala and shell files count as source paths.
 - On a shared state directory, a loopback endpoint on a named fleet node counts from every host, so hosts no longer overfill that node's server.
 - A running fleet plan keeps its reservation current on every member lease heartbeat, so another host no longer expires a plan whose member runs longer than about 30 minutes.
 
