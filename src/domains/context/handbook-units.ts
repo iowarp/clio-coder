@@ -363,21 +363,38 @@ export function selectWorkerHandbook(
 		return blocks.join("\n\n");
 	};
 
-	// Invariants are a strict prefix: nothing of lower priority may take the room
-	// an invariant needed. Later tiers fill greedily around what does not fit.
-	let text = render();
-	packing: for (const [index, tier] of tiers.entries()) {
-		for (const unit of tier) {
-			chosen.add(unit);
-			const next = render();
-			if (next.length <= options.maxChars) {
-				text = next;
-				continue;
-			}
-			chosen.delete(unit);
-			if (index === 0) break packing;
-		}
+	// Invariants pack first. When they all fit they are a strict prefix, as
+	// before. When they overflow, the worker's own rules keep a reserve of
+	// min(40% of the budget, their rendered size); an invariant that does not
+	// fit is skipped, not terminal, and skipped invariants take leftover room
+	// last. Render keeps document order, so insertion order never reorders.
+	const invariants = tiers[0] ?? [];
+	for (const unit of invariants) chosen.add(unit);
+	const invariantsFit = render().length <= options.maxChars;
+	chosen.clear();
+	let reserve = 0;
+	if (!invariantsFit) {
+		const audienceSize = tiers
+			.slice(1)
+			.flat()
+			.reduce((sum, unit) => sum + unit.text.length + unit.section.length + 5, 0);
+		reserve = Math.min(Math.floor(0.4 * options.maxChars), audienceSize);
 	}
+	let text = render();
+	const tryAdd = (unit: HandbookUnit, limit: number): boolean => {
+		chosen.add(unit);
+		const next = render();
+		if (next.length <= limit) {
+			text = next;
+			return true;
+		}
+		chosen.delete(unit);
+		return false;
+	};
+	const skipped: HandbookUnit[] = [];
+	for (const unit of invariants) if (!tryAdd(unit, options.maxChars - reserve)) skipped.push(unit);
+	for (const tier of tiers.slice(1)) for (const unit of tier) tryAdd(unit, options.maxChars);
+	for (const unit of skipped) tryAdd(unit, options.maxChars);
 	const total = handbooks.reduce((sum, handbook) => sum + handbook.units.length, 0);
 	return { text: text.length <= options.maxChars ? text : "", selected: chosen.size, total };
 }

@@ -141,6 +141,54 @@ describe("worker handbook selection", () => {
 		});
 		ok(!starved.text.includes("Relative imports"));
 	});
+
+	it("keeps packing the worker's own sections after invariants that overflow the budget", () => {
+		const invariants = Array.from(
+			{ length: 20 },
+			(_, index) => `${index + 1}. Invariant ${index + 1}: ${"keep the boundary intact. ".repeat(15).trim()}`,
+		).join("\n");
+		const big = compileHandbook(
+			`# Big\n\n## Hard invariants\n\n${invariants}\n\n## Change recipes\n\n- New tool: register it in the tool table.\n\n## Tests\n\n- Add each new test file to the curated list.\n`,
+			PATH,
+		);
+		ok(big);
+		const selected = selectWorkerHandbook([big], {
+			audience: workerHandbookAudience("coder", "workspace-edit"),
+			cwd: "/repo",
+			workingPaths: [],
+			maxChars: 6000,
+		});
+		ok(selected.text.length > 0 && selected.text.length <= 6000);
+		ok(selected.text.includes("register it in the tool table"));
+		ok(selected.text.includes("curated list"));
+		const order = [...selected.text.matchAll(/Invariant (\d+):/g)].map((match) => Number(match[1]));
+		ok(order.length > 0);
+		deepStrictEqual(
+			order,
+			[...order].sort((a, b) => a - b),
+		);
+		ok(
+			/Rules not selected for this task, from: Hard invariants\. Read [^\n]+\n<\/project-handbook>$/.test(selected.text),
+		);
+	});
+
+	it("renders a handbook that fits whole in document order, unchanged", () => {
+		const small = compileHandbook(
+			"# Small\n\nSmall is a tool.\n\n## Hard invariants\n\n1. Never touch home.\n\n## Conventions\n\n- Imports end in `.js`.\n",
+			PATH,
+		);
+		ok(small);
+		const selected = selectWorkerHandbook([small], {
+			audience: workerHandbookAudience("coder", "workspace-edit"),
+			cwd: "/repo",
+			workingPaths: [],
+			maxChars: 6000,
+		});
+		strictEqual(
+			selected.text,
+			`<project-handbook path="${PATH}" rules="2/2">\n# Small\nSmall is a tool.\n\n## Hard invariants\n1. Never touch home.\n\n## Conventions\n- Imports end in \`.js\`.\n</project-handbook>`,
+		);
+	});
 });
 
 describe("dispatch project context", () => {
