@@ -760,6 +760,8 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 		"GIT_SSH_COMMAND=./x git push origin main",
 		"export BASH_ENV=./x; sbatch job.sh",
 		"env PYTHONPATH=. aws s3 cp a s3://b",
+		"GIT_CONFIG_SYSTEM=./x.cfg git push origin main",
+		"git -c core.sshCommand=./x push origin main",
 	]) {
 		strictEqual(engine.evaluate(bash(command), "yolo", refused).reasonCode, "yolo-sandbox-required", command);
 	}

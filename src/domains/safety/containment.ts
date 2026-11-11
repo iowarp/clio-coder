@@ -128,7 +128,11 @@ const PATH_ASSIGNMENT = /(?:^|[\s;&|(){}`"'])PATH\+?=/u;
  * outward CLI at workspace code, so the line stays contained.
  */
 const LOADER_ASSIGNMENT =
-	/(?:^|[\s;&|(){}`"'])(?:LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|NODE_OPTIONS|GIT_SSH_COMMAND|GIT_SSH|GIT_EXEC_PATH|GIT_CONFIG_GLOBAL|BASH_ENV|ENV|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|PERL5LIB|RUBYOPT)\+?=/u;
+	/(?:^|[\s;&|(){}`"'])(?:LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|NODE_OPTIONS|GIT_SSH_COMMAND|GIT_SSH|GIT_EXEC_PATH|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|BASH_ENV|ENV|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|PERL5LIB|RUBYOPT)\+?=/u;
+
+/** A git `-c` or `--config-env` override that names a program git runs (core.sshCommand and the like). */
+const GIT_COMMAND_CONFIG =
+	/(?:^|\s)(?:-c\s*|--config-env[=\s])["']?(?:core\.(?:sshcommand|fsmonitor|hookspath|pager|editor|askpass)|credential\.helper|gpg\.program)=/iu;
 
 /** curl options that send a body or upload a file. */
 const CURL_BODY = /^(?:-[A-Za-z]*[dFT]|--(?:data(?:-\w+)?|form(?:-string)?|upload-file|json)(?:=.*)?)$/u;
@@ -225,6 +229,7 @@ function reboundNames(command: string, steps: ReadonlyArray<ShellCommandStep>): 
 	if (
 		PATH_ASSIGNMENT.test(command) ||
 		LOADER_ASSIGNMENT.test(command) ||
+		GIT_COMMAND_CONFIG.test(command) ||
 		/\bcommand_not_found_handle\b/u.test(command) ||
 		steps.some((step) => step.executable === "source" || step.executable === ".")
 	) {
