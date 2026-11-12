@@ -50,8 +50,7 @@ The headline reads `majority` when one answer has more than half the votes, `plu
 A council needs a roster. Without one, `/council` stops and says where to add it:
 
 ```text
-/council needs a roster. Declare one under fleet.rosters in settings.yaml, for example fleet.rosters.default with two to five members, each with a
-label and a target, then run /council <task> or name another roster with --roster <name>.
+/council needs a roster. Declare one under fleet.rosters in settings.yaml, for example fleet.rosters.default with two to five members, each with a label and a target, then run /council <task> or name another roster with --roster <name>.
 ```
 
 Each member has a label and a target, and can name a model and an agent. This roster seats one plain reader and one `tester`:
@@ -96,7 +95,7 @@ The answers stay out of your main conversation. `/fleet share <runId>` brings on
 :::
 
 ::: next
-- [Workers and fleets: council](/docs/guide/fleet-dispatch.html)
+- [Workers and fleets](/docs/guide/fleet-dispatch.html)
 - [Commands and shortcuts](/docs/guide/commands-and-modes.html)
 - [Coordinate the coding agents you already use](/tutorials/coordinate-your-coding-agents.html)
 :::
