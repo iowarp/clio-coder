@@ -89,6 +89,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - The operator's approval line for a store put that replaces a blob names the blob and its size instead of a raw marker.
 - Listing one blob's records no longer reads the whole records tag on the local backend.
 - A `store get` result says its path is a read-only store copy the caller may read outside the workspace, so a worker in a task worktree reads it instead of treating it as out of bounds.
+- When the project's local store holds tags, the per-turn hint names them (up to five, then how many more), so a data question reaches the store.
 
 ### Reports to the maintainers
 
@@ -177,7 +178,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - On the Copilot route, an autonomy or posture change no longer restarts the SDK session and re-sends the whole conversation; the change reaches the model as a host policy turn, so the cached prefix is kept.
 - A target priced with only input and output bills cached prompt tokens at its input price instead of $0.
 - An OpenRouter model missing from the catalog stops at the session cost ceiling.
-- Side calls (a side question, a handoff round) are checked against the session cost ceiling whatever their pricing, as compaction already was.
+- Side calls (a side question, a handoff round) are checked against the session cost ceiling whatever their pricing, as compaction already was. A pre-warm round is gated like the turn it warms, so an unpriced route no longer holds it at the ceiling.
 - An OAuth refresh that fails on a network error says so and that the next call retries, instead of asking for a new login.
 - First launch no longer adopts a local server's embedding model as the chat model.
 - `clio-coder auth logout <runtime>` names the targets that hold their own stored key and how to drop one, instead of saying nothing is stored.
@@ -323,7 +324,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Very large tool results render faster: only the shown prefix is sanitized.
 - A long live turn no longer re-lays out its finished text and tools on every streamed update: the settled head of the turn renders once per width and style.
 - A streamed answer with headings, code fences or rules but no blank lines settles at those boundaries, so a long answer no longer re-lexes its whole text on every update; the fleet and board tickers sleep while nothing is live.
-- On the openai-codex route the main prompt's pinned layer goes out as its own instructions block and the rest of the system prompt as the first input item, so a change below the pinned layer (a handbook edit, a new turn context) no longer re-bills the whole prompt: measured on a changed tail with the real tool set, the cached share went from 0% to 73%. Workers and other routes keep their request shape.
+- On the openai-codex route the main prompt's pinned layer goes out as its own instructions block and the rest of the system prompt as the first input item, so a change below the pinned layer (a handbook edit, a new turn context) no longer re-bills the whole prompt: measured on a changed tail with the real tool set, the cached share went from 0% to 73%. Workers and other routes keep their request shape. Native compaction on that route sends the same split, so it reads the prefix its session cached.
 - Clio Coder draws its first frame before it recovers restart worktrees and abandoned runs, and dispatch waits until that recovery has finished: with one or two leased workers left from a previous session, startup to loaded domains went from about 1.0 s and 1.9 s to about 0.27 s and 0.21 s.
 
 ### Telemetry
@@ -376,7 +377,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Preflight refuses a second node entry for a machine another node already holds, and setup does not keep such an entry; a node that is the client's own machine passes with a note.
 - Node installs prune install directories older than a week beyond the newest three, and `fleet nodes discover` marks peers that are already registered nodes.
 - Running priced workers are stopped once session spend reaches `safety.limits.sessionCostUsd` in every mode; unpriced, zero-rate and delegated runs keep running.
-- Parallel workers that share a prompt prefix start after the first one streams, at most 15 s later, so they read its prompt cache instead of prefilling the prefix again; `fleet.staggerSharedPrefix` (on by default) turns it off. Every worker handle of the batch returns at once, only the worker's start waits, its run row names a live process meanwhile, and it joins the batch's agent board when it starts.
+- Parallel workers that share a prompt prefix start after the first one streams, at most 15 s later, so they read its prompt cache instead of prefilling the prefix again; `fleet.staggerSharedPrefix` (on by default) turns it off. Every worker handle of the batch returns at once, only the worker's start waits, its run row names a live process meanwhile, and it joins the batch's agent board when it starts. The batch's agent board now follows that prefix in each member's prompt, so members of a board batch share it and the stagger engages for them too.
 - A run on a node that lacks an optional SDK fails once instead of retrying and names `clio-coder fleet nodes tools install <node> copilot-sdk|claude-sdk`, which now installs those SDKs on the node.
 - A relayed worker frame from a fleet node words a missing-component remedy for that node, `clio-coder fleet nodes tools install <node> <component> --yes` run from the client, instead of the worker-local `tools install` command.
 - On a state directory shared by several hosts, starting Clio Coder on another host no longer expires a running fleet plan's reservation; another host's reservations expire only 15 minutes past their estimate. The `local` node and loopback endpoints are counted per host, a dead host's leases are reclaimed after five minutes, capacity denials name the holding host, and `session terminate --force` releases them.
@@ -391,7 +392,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Cancelling a dispatched worker stops a command it was running, even one that ignores SIGTERM.
 - Worker diagnostics can no longer be mistaken for control frames.
 - The wiki generation lock records host and process identity, so another node's run is respected and a reused pid no longer blocks generation; a codewiki lock left by a gone process on another host is reclaimed after a minute.
-- A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer. Nor does a check that ran a test, runner config or package script a worker in the run changed; the run says why. A gated check whose own runner (for example `pnpm test` running node, jest, vitest, pytest, go or cargo tests) picks up a test a worker wrote earns none either.
+- A fleet loop check that cannot fail (`true`, `:`) no longer earns a `Tested-by` trailer. Nor does a check that ran a test, runner config or package script a worker in the run changed; the run says why. A gated check whose own runner (for example `pnpm test` running node, jest, vitest, pytest, go or cargo tests) picks up a test a worker wrote earns none either. The runner is recognized behind environment prefixes, `uv run`, `poetry run` and `sh -c`.
 - `/poll <n> <question>` asks 2 to 5 independent agents the same question as a one-round vote council and shows the vote distribution, in the TUI and over ACP. `--options a|b|c` constrains the answer, `--models` spreads members over targets and models, and `--rationale` asks each for a short reason. With `--options`, the ballot shape shows a neutral `<one of: a|b|c>` verdict instead of an example answer. A participant whose answer is not one of the listed options, such as a copied "yes", is asked again with the options named instead of casting a spoiled vote, and `--options` refuses a choice the ballot could not carry verbatim (one containing ", ", over 64 bytes, or spanning lines).
 - A task that names its check as an exact command ("verify by running: <cmd>", a backticked command after "by running", or "run `<cmd>` to verify") withholds the merge when the worker never ran that command to a clean exit, through the shell or a passing `verify` check, even if its other calls succeeded. `npm test`, `pnpm test` and `npm run test` name the same script. Plain "by running the tests" names no command.
 - A task worktree outside the project also links the `node_modules` of each workspace package the project declares (such as `apps/*`), beside the root `node_modules` and `.venv`, so a check that builds or typechecks a workspace package passes in the worktree.
@@ -428,6 +429,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - `tool.decided` journal records include the confirmation rule that raised an ask (`confirmationRuleId`, optional).
 - Materio no longer draws its "Next: /materio:identify-research" band in repositories without a non-empty `.research/`; it appears once you enter the lab bench or open a research project.
 - Extension runtimes no longer leave empty declared write-root directories (such as `.research/`) in a repository: Clio Coder removes the ones it created, if still empty, when the runtime stops.
+- An extension runtime no longer sees Clio Coder's settings files, which can hold target auth headers: its sandbox masks the whole config directory, so a settings save cannot unmask them.
 
 ### Release
 
