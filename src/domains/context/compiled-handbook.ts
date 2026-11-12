@@ -14,13 +14,14 @@
  * handbook's path, so a read of an omitted line resolves.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { writeDiagnostic } from "../../core/diagnostics.js";
-import { clioProjectRoot } from "../../core/project-root.js";
+import { clioProjectRoot, ensureProjectIgnore } from "../../core/project-root.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ProjectPromptContext } from "./contract.js";
 import { renderPromptContext } from "./prompt-context.js";
 
@@ -56,10 +57,17 @@ export interface HandbookCompileWorkerData {
 	root: string;
 }
 
-/** `inputs` are absolute and end with the root itself, whose entry list changes when a file is added beside it. */
-export type HandbookCompileWorkerMessage = { ok: true; inputs: InputStamp[] } | { ok: false; error: string };
+/**
+ * `inputs` are absolute and end with the root itself, whose entry list changes when a file is added beside it.
+ * `inputKey` arrives first, once the tree is listed, and names the input set a later timeout is reported against.
+ */
+export type HandbookCompileWorkerMessage =
+	| { inputKey: string }
+	| { ok: true; inputs: InputStamp[] }
+	| { ok: false; error: string };
 
-const COMPILE_TIMEOUT_MS = 120_000;
+const DEFAULT_COMPILE_TIMEOUT_MS = 120_000;
+let compileTimeoutMs = DEFAULT_COMPILE_TIMEOUT_MS;
 const require = createRequire(import.meta.url);
 
 export function compiledHandbookPath(root: string): string {
@@ -68,6 +76,50 @@ export function compiledHandbookPath(root: string): string {
 
 export function compiledHandbookSidecarPath(root: string): string {
 	return join(root, ".clio-coder", "state", "compiled-handbook.json");
+}
+
+/** The input set whose compile last ran out of time; the same set timing out again is not reported again. */
+export function compileTimeoutMarkerPath(root: string): string {
+	return join(root, ".clio-coder", "state", "compiled-handbook-timeout.json");
+}
+
+export function setCompileTimeoutForTesting(ms: number | null): void {
+	compileTimeoutMs = ms ?? DEFAULT_COMPILE_TIMEOUT_MS;
+}
+
+class CompileTimeout extends Error {
+	constructor(readonly inputKey: string) {
+		super(`exceeded ${compileTimeoutMs} ms`);
+	}
+}
+
+/** Until the worker lists the tree, the root's own entries, less Clio's state directory, stand in for the input set. */
+function unlistedInputKey(root: string): string {
+	try {
+		const names = readdirSync(root)
+			.filter((name) => name !== ".clio-coder")
+			.sort();
+		return `unlisted:${createHash("sha256").update(names.join("\n")).digest("hex")}`;
+	} catch {
+		return "unlisted";
+	}
+}
+
+/** True the first time this input set times out; records it so later sessions and processes stay quiet. */
+function firstTimeoutFor(root: string, inputKey: string): boolean {
+	const path = compileTimeoutMarkerPath(root);
+	try {
+		if ((JSON.parse(readFileSync(path, "utf8")) as { inputKey?: unknown }).inputKey === inputKey) return false;
+	} catch {
+		// No marker, or a torn one: this timeout is news.
+	}
+	try {
+		ensureProjectIgnore(root);
+		safeResourceWrite(path, `${JSON.stringify({ inputKey })}\n`, { encoding: "utf8" });
+	} catch {
+		// Without the marker the next timeout warns again, which is the old behaviour.
+	}
+	return true;
 }
 
 export function stampOf(path: string): string {
@@ -185,6 +237,7 @@ function compileInWorker(root: string, refresh: Refresh): Promise<InputStamp[]> 
 			resourceLimits: { maxOldGenerationSizeMb: 512 },
 		});
 		refresh.worker = worker;
+		let inputKey = unlistedInputKey(root);
 		let settled = false;
 		const finish = (callback: () => void): void => {
 			if (settled) return;
@@ -193,13 +246,14 @@ function compileInWorker(root: string, refresh: Refresh): Promise<InputStamp[]> 
 			callback();
 		};
 		const timer = setTimeout(() => {
-			finish(() => reject(new Error(`exceeded ${COMPILE_TIMEOUT_MS} ms`)));
+			finish(() => reject(new CompileTimeout(inputKey)));
 			void worker.terminate();
-		}, COMPILE_TIMEOUT_MS);
+		}, compileTimeoutMs);
 		timer.unref();
-		worker.once("message", (message: HandbookCompileWorkerMessage) =>
-			finish(() => (message.ok ? resolve(message.inputs) : reject(new Error(message.error)))),
-		);
+		worker.on("message", (message: HandbookCompileWorkerMessage) => {
+			if ("inputKey" in message) inputKey = message.inputKey;
+			else finish(() => (message.ok ? resolve(message.inputs) : reject(new Error(message.error))));
+		});
 		worker.once("error", (error) => finish(() => reject(error)));
 		worker.once("exit", (code) => {
 			if (refresh.worker === worker) refresh.worker = null;
@@ -214,14 +268,16 @@ function startRefresh(root: string, refresh: Refresh): Promise<void> {
 		.then(
 			(inputs) => {
 				refresh.observed = inputs;
+				rmSync(compileTimeoutMarkerPath(root), { force: true });
 			},
 			(error: unknown) => {
 				// Failing again on every prompt helps nobody; the next session start tries again.
 				refresh.observed = null;
-				if (!refresh.closed)
-					writeDiagnostic(
-						`clio-coder: compiling the project handbook failed: ${error instanceof Error ? error.message : String(error)}`,
-					);
+				if (refresh.closed) return;
+				if (error instanceof CompileTimeout && !firstTimeoutFor(root, error.inputKey)) return;
+				writeDiagnostic(
+					`clio-coder: compiling the project handbook failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			},
 		)
 		.finally(() => {

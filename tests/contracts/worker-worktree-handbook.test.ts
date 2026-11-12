@@ -1,13 +1,21 @@
 import { deepEqual, deepStrictEqual, equal, ok, rejects } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { buildCustomizationGraph } from "../../src/cli/config-inspect.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { installDiagnosticSink } from "../../src/core/diagnostics.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core/workspace-trust.js";
-import { refreshCompiledHandbook, renderEffectivePromptContext } from "../../src/domains/context/compiled-handbook.js";
+import {
+	compileTimeoutMarkerPath,
+	refreshCompiledHandbook,
+	renderEffectivePromptContext,
+	setCompileTimeoutForTesting,
+	stopCompiledHandbookRefreshes,
+} from "../../src/domains/context/compiled-handbook.js";
 import type { ContextContract, StartupHint } from "../../src/domains/context/contract.js";
 import { createContextBundle, type StartupHintHost } from "../../src/domains/context/extension.js";
 import { HANDBOOK_ABSENT_FRAGMENT, renderPromptContext } from "../../src/domains/context/prompt-context.js";
@@ -247,6 +255,9 @@ test("a repository without a handbook gets one compiled off the prompt path from
 		ok(!main.text.includes(HANDBOOK_ABSENT_FRAGMENT));
 		deepStrictEqual(main.handbookFiles, []);
 		deepStrictEqual(main.compiledHandbook.sources, ["AGENTS.md", "tests/boundaries/check-imports.mjs"]);
+		// The main prompt takes a compiled handbook in at session start, so a new compile applies from the next session.
+		const inspected = buildCustomizationGraph(repo).entries.find(({ category }) => category === "clio-md");
+		equal(inspected?.reloadClass, "restart", JSON.stringify(inspected));
 
 		for (const peer of [false, true]) {
 			const worker = await capturedWorkerContext(repo, peer);
@@ -281,6 +292,38 @@ test("a repository without a handbook gets one compiled off the prompt path from
 			JSON.stringify(written),
 		);
 	} finally {
+		env.restore();
+	}
+});
+
+test("a handbook compile that runs out of time warns once per input set", async () => {
+	const env = await isolateClioEnv("clio-coder-compiled-handbook-timeout-");
+	const warnings: string[] = [];
+	const uninstall = installDiagnosticSink((text) => warnings.push(text));
+	try {
+		const repo = fixtureRepo(env.dir, { "AGENTS.md": agents, "src/core/index.ts": "export const core = 1;\n" });
+		setCompileTimeoutForTesting(1);
+		await refreshCompiledHandbook(repo);
+		await refreshCompiledHandbook(repo);
+		equal(warnings.length, 1, JSON.stringify(warnings));
+		ok(warnings[0]?.includes("compiling the project handbook failed: exceeded 1 ms"), warnings[0]);
+		// Another process starting on the same tree stays quiet too.
+		await stopCompiledHandbookRefreshes();
+		await refreshCompiledHandbook(repo);
+		equal(warnings.length, 1, JSON.stringify(warnings));
+
+		writeFileSync(join(repo, "NOTES.md"), "# Notes\n");
+		await refreshCompiledHandbook(repo);
+		equal(warnings.length, 2, "a changed tree is a new input set");
+
+		setCompileTimeoutForTesting(null);
+		await refreshCompiledHandbook(repo);
+		equal(warnings.length, 2, JSON.stringify(warnings));
+		ok(!existsSync(compileTimeoutMarkerPath(repo)), "a compile that lands clears the timeout record");
+	} finally {
+		setCompileTimeoutForTesting(null);
+		uninstall();
+		await stopCompiledHandbookRefreshes();
 		env.restore();
 	}
 });

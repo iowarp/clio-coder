@@ -8,7 +8,7 @@ const { root } = workerData as HandbookCompileWorkerData;
 
 let message: HandbookCompileWorkerMessage;
 try {
-	message = { ok: true, inputs: compileHandbookCache(root) };
+	message = { ok: true, inputs: compileHandbookCache(root, (inputKey) => port.postMessage({ inputKey })) };
 } catch (error) {
 	message = { ok: false, error: error instanceof Error ? error.message : String(error) };
 }

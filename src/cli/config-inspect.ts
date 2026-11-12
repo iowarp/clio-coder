@@ -52,7 +52,7 @@ export type CustomizationCategory =
 	| "safety"
 	| "memory";
 
-/** `reload` means an explicit `/reload extensions` (or a restart) publishes the change. */
+/** `reload` means an explicit `/reload extensions` (or a restart) publishes the change; `restart` means the next session. */
 export type ReloadClass = "hot" | "next-turn" | "reload" | "restart" | "n/a";
 
 export interface CustomizationEntry {
@@ -126,7 +126,8 @@ function inspectClioMd(cwd: string, graph: CustomizationGraph): void {
 				hash: shortHash(text),
 				trust: "trusted",
 				precedence: promptContext.handbookSources.length === 1 ? "single" : "layer",
-				reloadClass: "next-turn",
+				// The main prompt takes a compiled handbook in when the session starts, and a new compile from the next one.
+				reloadClass: compiled ? "restart" : "next-turn",
 				contextCostTokens: ceilChars(text.length),
 				detail: {
 					layer: index + 1,

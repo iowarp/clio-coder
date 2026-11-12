@@ -41,14 +41,15 @@ function writeSidecar(root: string, sidecar: CompiledHandbookSidecar): void {
 	safeResourceWrite(compiledHandbookSidecarPath(root), `${JSON.stringify(sidecar, null, 2)}\n`, { encoding: "utf8" });
 }
 
-/** Compile the handbook of the repository at `root` into its cache; returns the files it read, stamped. */
-export function compileHandbookCache(root: string): InputStamp[] {
+/** Compile the handbook of the repository at `root` into its cache; returns the files it read, stamped. `onListed` gets a key for the listed tree. */
+export function compileHandbookCache(root: string, onListed?: (inputKey: string) => void): InputStamp[] {
 	let files: string[];
 	try {
 		files = enumerateWorkspaceFiles(root);
 	} catch {
 		files = [];
 	}
+	onListed?.(createHash("sha256").update(files.join("\n")).digest("hex"));
 	const adoption = scanAgentConfigs({ cwd: root, includeGlobal: false, workspaceFiles: files });
 	const enforcement = collectEnforcementInventory(root, files);
 	const read = [
