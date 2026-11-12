@@ -53,7 +53,7 @@ clio-coder fleet run sdlc --var task="Add empty-input handling to the parser"
 
 The first line, on stderr, names the fleet root and plan hash. Each settled step prints one line. In another terminal, `clio-coder fleet status` shows the board and `clio-coder fleet events <root> --follow` follows the journal.
 
-The steps work in your checkout, one after another, not in separate worktrees. The `suite` loop runs your `test` command inside the sandbox, rooted at the checkout, and hands a failure back to the coder up to three times.
+The steps work in your checkout, one after another, not in separate worktrees. The `suite` loop runs your `test` command inside the sandbox, rooted at the checkout, up to three times, and hands each of the first two failures back to the coder.
 
 The command exits 0 only when every required step succeeded, no step was skipped, and every loop resolved. Any other finished run exits 1. A failed preflight, or an error in the scheduler itself, exits 2.
 
