@@ -4,6 +4,15 @@
 // the same player the site embeds. One command reruns any of them:
 //
 //   node site/capture/run.mjs --scratch <dir> [--only id,id] [--clio <path>] [--build-note <text>] [--publish]
+//   node site/capture/run.mjs --scratch <dir> --release <version> [--package <tarball>] [--publish]
+//
+// --release re-records every scenario from a release: it installs
+// @iowarp/clio-coder@<version> (or --package, a packed candidate of that version)
+// into <scratch>/npm-<version>, rewrites version literals in each alt and caption
+// to that version, holds the model lock for the whole recording phase (and stops
+// at once if another user holds it), runs quote-check.mjs at the end, and writes
+// wall and lock times per capture to <scratch>/timings.json. It lists Terminal
+// captures in content/captures.json that no scenario re-records.
 //
 // --clio names the build to record: a repository checkout with dist/ built, or a
 // prefix from `npm install -g --prefix <dir> @iowarp/clio-coder@beta` (or a packed
@@ -20,6 +29,7 @@
 // compacted losslessly before stills are rendered; compact.mjs says how.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, hostname, userInfo } from "node:os";
@@ -29,6 +39,7 @@ import { parseArgs } from "node:util";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
 import { compactEvents } from "./compact.mjs";
 import { plain, privacyHits, scanChunks } from "./privacy.mjs";
+import { quoteCheck } from "./quote-check.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = dirname(here);
@@ -37,7 +48,9 @@ const { values } = parseArgs({
 	options: {
 		scratch: { type: "string" },
 		only: { type: "string" },
-		clio: { type: "string", default: repo },
+		clio: { type: "string" },
+		release: { type: "string" },
+		package: { type: "string" },
 		// Where the build under capture came from, when it is not a release (published in each source line).
 		"build-note": { type: "string" },
 		publish: { type: "boolean", default: false },
@@ -57,9 +70,21 @@ const only = values.only ? new Set(values.only.split(",")) : null;
 const scenarios = spec.scenarios.filter((scenario) => !only || only.has(scenario.id));
 if (only && scenarios.length !== only.size) throw new Error(`Unknown scenario in --only: ${values.only}`);
 
+const startedAt = Date.now();
+if (values.release && values.clio) throw new Error("--release installs its own build; drop --clio.");
+if (values.package && !values.release) throw new Error("--package needs --release <version>.");
+const installMs = values.release ? installRelease(values.release, values.package) : 0;
+
 // The build under capture, bound read-only at /opt/clio-coder inside the sandbox.
-const clio = resolveClio(resolve(values.clio));
+const clio = resolveClio(values.release ? releasePrefix(values.release) : resolve(values.clio ?? repo));
 const clioVersion = JSON.parse(readFileSync(join(clio.root, clio.packageDir, "package.json"), "utf8")).version;
+if (values.release && clioVersion !== values.release)
+	throw new Error(`${values.package ?? "the npm package"} is ${clioVersion}, not ${values.release}.`);
+// A version literal after the product's name (x.y.z or x.y.z-pre.n) in alt,
+// caption and provenance text names the build recorded; other versions stay.
+const versionLiteral =
+	/(?<=(?:CLIO Coder|Clio Coder|clio-coder|@iowarp\/clio-coder@)\s?v?)\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?(?![\w-]|\.\d)/g;
+const versioned = (text) => (values.release && text ? text.replace(versionLiteral, clioVersion) : text);
 const installed =
 	clio.packageDir === "."
 		? "built from the repository,"
@@ -70,6 +95,31 @@ const nodePrefix = dirname(dirname(process.execPath));
 const node = `/opt/node/${relative(nodePrefix, process.execPath)}`;
 const uid = userInfo().uid;
 const gid = userInfo().gid;
+
+function releasePrefix(version) {
+	return join(scratch, `npm-${version}`);
+}
+
+function installRelease(version, tarball) {
+	const begin = Date.now();
+	const prefix = releasePrefix(version);
+	rmSync(prefix, { recursive: true, force: true });
+	console.log(`release ${version}: installing ${tarball ? resolve(tarball) : `@iowarp/clio-coder@${version}`}`);
+	execFileSync(
+		"npm",
+		[
+			"install",
+			"-g",
+			"--prefix",
+			prefix,
+			"--no-audit",
+			"--no-fund",
+			tarball ? resolve(tarball) : `@iowarp/clio-coder@${version}`,
+		],
+		{ stdio: ["ignore", "ignore", "inherit"] },
+	);
+	return Date.now() - begin;
+}
 
 function resolveClio(path) {
 	for (const packageDir of [".", "lib/node_modules/@iowarp/clio-coder", "node_modules/@iowarp/clio-coder"])
@@ -567,36 +617,56 @@ function pngSize(path) {
 }
 
 // Holds the model host lock until release(); resolves once it is acquired, so
-// waiting for another user of the model never shows in a recording.
-function holdLock(path) {
+// waiting for another user of the model never shows in a recording. With
+// wait false it fails at once when the lock is busy.
+function holdLock(path, { wait = true } = {}) {
 	return new Promise((done, fail) => {
-		const child = spawn("flock", [path, "sh", "-c", "echo locked; exec cat"], { stdio: ["pipe", "pipe", "inherit"] });
+		const child = spawn("flock", [...(wait ? [] : ["-n"]), path, "sh", "-c", "echo locked; exec cat"], {
+			stdio: ["pipe", "pipe", "inherit"],
+		});
 		child.on("error", fail);
-		child.on("exit", (code) => fail(new Error(`flock exited ${code} before taking the lock`)));
+		child.on("exit", (code) =>
+			fail(
+				new Error(
+					wait ? `flock exited ${code} before taking the lock` : `the model lock ${path} is busy; nothing was recorded`,
+				),
+			),
+		);
 		child.stdout.once("data", () => {
 			child.removeAllListeners("exit");
+			const heldAt = Date.now();
 			done(() => {
 				child.stdin.end();
+				return Date.now() - heldAt;
 			});
 		});
 	});
 }
 
-const today = new Date().toISOString().slice(0, 10);
-for (const scenario of scenarios) {
+function requireLiveEnv() {
+	if (!process.env.CLIO_CAPTURE_LOCK)
+		throw new Error("Live scenarios need CLIO_CAPTURE_LOCK, the model host lock file.");
+	if (!process.env.CLIO_CAPTURE_GATEWAY_URL) throw new Error("Live scenarios need CLIO_CAPTURE_GATEWAY_URL.");
+}
+
+// Records one scenario and scans it; rendering waits until the model lock is
+// free. timing gets recordMs and lockMs, also when recording fails.
+async function record(scenario, lockHeld, timing) {
 	let release = null;
 	let proxy = null;
+	const begin = Date.now();
+	timing.lockMs = 0;
 	try {
 		const dir = join(scratch, scenario.id);
 		const outDir = join(dir, "out");
 		prepareHome(dir, scenario);
 		mkdirSync(outDir, { recursive: true });
 		if (scenario.live) {
-			if (!process.env.CLIO_CAPTURE_LOCK)
-				throw new Error("Live scenarios need CLIO_CAPTURE_LOCK, the model host lock file.");
-			if (!process.env.CLIO_CAPTURE_GATEWAY_URL) throw new Error("Live scenarios need CLIO_CAPTURE_GATEWAY_URL.");
-			console.log(`${scenario.id}: waiting for the model lock`);
-			release = await holdLock(process.env.CLIO_CAPTURE_LOCK);
+			requireLiveEnv();
+			if (!lockHeld) {
+				console.log(`${scenario.id}: waiting for the model lock`);
+				release = await holdLock(process.env.CLIO_CAPTURE_LOCK);
+			}
 			proxy = await startAliasProxy({
 				gateway: process.env.CLIO_CAPTURE_GATEWAY_URL,
 				apiKey: process.env.LITELLM_API_KEY,
@@ -604,6 +674,7 @@ for (const scenario of scenarios) {
 				log: (line) => writeFileSync(join(scratch, "alias-proxy.log"), `${line}\n`, { flag: "a" }),
 			});
 		}
+		const recordAt = Date.now();
 		const session = new Session(dir, scenario);
 		console.log(`${scenario.id}: recording`);
 		session.start(sandboxScript(dir, scenario));
@@ -614,6 +685,7 @@ for (const scenario of scenarios) {
 			if (session.alive()) session.tmux("kill-server");
 			throw error;
 		}
+		if (scenario.live && lockHeld) timing.lockMs = Date.now() - recordAt;
 		const cast = finishCast(session, scenario.endAt);
 		const text = transcript(session, scenario);
 		// Stills are rendered from this cast alone, so scanning it covers them too.
@@ -636,75 +708,151 @@ for (const scenario of scenarios) {
 		writeFileSync(join(outDir, `${scenario.id}.cast`), cast.text);
 		writeFileSync(join(outDir, `${scenario.id}.txt`), text);
 		if (hits.length) throw new Error(`${scenario.id}: privacy scan failed: ${[...new Set(hits)].join("; ")}`);
-		const stills = cast.markers
-			.filter((marker) => marker.shot)
-			.map((marker) => ({ id: marker.shot, time: marker.time, crop: marker.crop, rows: session.rows }));
-		// A stills-only scenario publishes its stills; its cast stays in scratch for review.
-		const poster = scenario.stillsOnly ? null : cast.markers.find((marker) => marker.label === scenario.poster);
-		if (!scenario.stillsOnly && !poster)
-			throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached`);
-		if (poster) stills.push({ id: scenario.id, time: poster.time, rows: session.rows });
-		const rendered = await renderStills(cast.text, stills, outDir);
-		for (const still of rendered)
-			run("python3", [
-				"-c",
-				"import sys;from PIL import Image;Image.open(sys.argv[1]).save(sys.argv[2],'WEBP',quality=90,method=6)",
-				still.path,
-				still.path.replace(/\.png$/, ".webp"),
-			]);
-		const source = `CLIO Coder ${clioVersion}${values["build-note"] ? ` (${values["build-note"]})` : ""} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${
-			scenario.env
-				? ` Environment: ${Object.entries(scenario.env)
-						.map(([key, value]) => `${key}=${value}`)
-						.join(", ")}.`
-				: ""
-		}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
-			scenario.privateNet
-				? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
-				: ""
-		}`;
-		const entries = {};
-		for (const still of rendered) {
-			const isCast = still.id === scenario.id;
-			const meta = isCast ? scenario.capture : scenario.shots?.[still.id];
-			if (!meta) throw new Error(`${scenario.id}: still ${still.id} has no caption in scenarios.json`);
-			entries[still.id] = {
-				image: meta.image ?? `assets/guides/${still.id}.webp`,
-				original: (meta.image ?? `assets/guides/${still.id}.webp`).replace(/\.webp$/, ".png"),
-				...pngSize(still.path),
-				label: meta.label,
-				alt: meta.alt,
-				caption: meta.caption,
-				interface: "Terminal",
-				version: clioVersion,
-				capturedAt: today,
-				source: isCast
-					? source
-					: `${source} Still at the "${still.id}" marker${still.crop ? `, rows ${still.crop[0]}-${still.crop[1]}` : ""}, rendered by the site's player at 2x.`,
-				...(isCast
-					? {
-							cast: `assets/casts/${scenario.id}.cast`,
-							transcript: `assets/casts/${scenario.id}.txt`,
-							cols: session.cols,
-							rows: session.rows,
-							duration: Math.round(cast.duration * 10) / 10,
-							posterAt: poster.time,
-						}
-					: {}),
-			};
-		}
-		const registryHits = privacyHits(JSON.stringify(entries), secrets);
-		if (registryHits.length)
-			throw new Error(`${scenario.id}: privacy scan failed on the registry entry: ${registryHits.join("; ")}`);
-		writeFileSync(join(outDir, "captures.json"), `${JSON.stringify(entries, null, "\t")}\n`);
-		console.log(
-			`${scenario.id}: ${Math.round(cast.duration)}s, ${cast.text.length} B, stills ${rendered.map((still) => still.id).join(", ")}`,
-		);
-		if (values.publish) publish(scenario, outDir, entries);
+		return { scenario, outDir, session: { cols: session.cols, rows: session.rows }, cast, timing };
 	} finally {
 		if (proxy) await new Promise((done) => proxy.close(done));
-		release?.();
+		if (release) timing.lockMs = release();
+		timing.recordMs = Date.now() - begin;
 	}
+}
+
+async function render({ scenario, outDir, session, cast }) {
+	const stills = cast.markers
+		.filter((marker) => marker.shot)
+		.map((marker) => ({ id: marker.shot, time: marker.time, crop: marker.crop, rows: session.rows }));
+	// A stills-only scenario publishes its stills; its cast stays in scratch for review.
+	const poster = scenario.stillsOnly ? null : cast.markers.find((marker) => marker.label === scenario.poster);
+	if (!scenario.stillsOnly && !poster)
+		throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached`);
+	if (poster) stills.push({ id: scenario.id, time: poster.time, rows: session.rows });
+	const rendered = await renderStills(cast.text, stills, outDir);
+	for (const still of rendered)
+		run("python3", [
+			"-c",
+			"import sys;from PIL import Image;Image.open(sys.argv[1]).save(sys.argv[2],'WEBP',quality=90,method=6)",
+			still.path,
+			still.path.replace(/\.png$/, ".webp"),
+		]);
+	const source = `CLIO Coder ${clioVersion}${values["build-note"] ? ` (${values["build-note"]})` : ""} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${
+		scenario.env
+			? ` Environment: ${Object.entries(scenario.env)
+					.map(([key, value]) => `${key}=${value}`)
+					.join(", ")}.`
+			: ""
+	}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
+		scenario.privateNet
+			? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
+			: ""
+	}`;
+	const entries = {};
+	for (const still of rendered) {
+		const isCast = still.id === scenario.id;
+		const meta = isCast ? scenario.capture : scenario.shots?.[still.id];
+		if (!meta) throw new Error(`${scenario.id}: still ${still.id} has no caption in scenarios.json`);
+		entries[still.id] = {
+			image: meta.image ?? `assets/guides/${still.id}.webp`,
+			original: (meta.image ?? `assets/guides/${still.id}.webp`).replace(/\.webp$/, ".png"),
+			...pngSize(still.path),
+			label: meta.label,
+			alt: versioned(meta.alt),
+			caption: versioned(meta.caption),
+			interface: "Terminal",
+			version: clioVersion,
+			capturedAt: today,
+			source: isCast
+				? source
+				: `${source} Still at the "${still.id}" marker${still.crop ? `, rows ${still.crop[0]}-${still.crop[1]}` : ""}, rendered by the site's player at 2x.`,
+			...(isCast
+				? {
+						cast: `assets/casts/${scenario.id}.cast`,
+						transcript: `assets/casts/${scenario.id}.txt`,
+						cols: session.cols,
+						rows: session.rows,
+						duration: Math.round(cast.duration * 10) / 10,
+						posterAt: poster.time,
+					}
+				: {}),
+		};
+	}
+	const registryHits = privacyHits(JSON.stringify(entries), secrets);
+	if (registryHits.length)
+		throw new Error(`${scenario.id}: privacy scan failed on the registry entry: ${registryHits.join("; ")}`);
+	writeFileSync(join(outDir, "captures.json"), `${JSON.stringify(entries, null, "\t")}\n`);
+	console.log(
+		`${scenario.id}: ${Math.round(cast.duration)}s, ${cast.text.length} B, stills ${rendered.map((still) => still.id).join(", ")}`,
+	);
+	return entries;
+}
+
+const today = new Date().toISOString().slice(0, 10);
+const recorded = [];
+const timings = [];
+let lockTotalMs = 0;
+let releaseLock = null;
+if (values.release && scenarios.some((scenario) => scenario.live)) {
+	requireLiveEnv();
+	releaseLock = await holdLock(process.env.CLIO_CAPTURE_LOCK, { wait: false }).catch((error) => {
+		console.error(`release ${values.release}: ${error.message}`);
+		process.exit(1);
+	});
+	console.log(`release ${values.release}: holding the model lock for the recording phase`);
+}
+try {
+	for (const scenario of scenarios) {
+		const timing = {};
+		try {
+			recorded.push(await record(scenario, Boolean(releaseLock), timing));
+		} finally {
+			if (!releaseLock) lockTotalMs += timing.lockMs;
+		}
+	}
+} finally {
+	if (releaseLock) lockTotalMs = releaseLock();
+}
+for (const take of recorded) {
+	const begin = Date.now();
+	const entries = await render(take);
+	if (values.publish) publish(take.scenario, take.outDir, entries);
+	take.timing.renderMs = Date.now() - begin;
+	timings.push({ id: take.scenario.id, live: Boolean(take.scenario.live), ...take.timing });
+}
+
+const seconds = (ms) => Math.round(ms / 100) / 10;
+const report = {
+	version: clioVersion,
+	release: values.release ?? null,
+	installSeconds: seconds(installMs),
+	wallSeconds: seconds(Date.now() - startedAt),
+	lockSeconds: seconds(lockTotalMs),
+	captures: timings.map((timing) => ({
+		id: timing.id,
+		live: timing.live,
+		recordSeconds: seconds(timing.recordMs),
+		lockSeconds: seconds(timing.lockMs),
+		renderSeconds: seconds(timing.renderMs),
+	})),
+};
+writeFileSync(join(scratch, "timings.json"), `${JSON.stringify(report, null, "\t")}\n`);
+for (const capture of report.captures)
+	console.log(
+		`timing ${capture.id}: record ${capture.recordSeconds}s (model lock ${capture.lockSeconds}s), render ${capture.renderSeconds}s`,
+	);
+console.log(
+	`timing total: wall ${report.wallSeconds}s (install ${report.installSeconds}s), model lock held ${report.lockSeconds}s`,
+);
+
+if (values.release) {
+	const registry = JSON.parse(readFileSync(join(site, "content/captures.json"), "utf8")).captures;
+	const made = new Set(spec.scenarios.flatMap((scenario) => [scenario.id, ...Object.keys(scenario.shots ?? {})]));
+	const left = Object.entries(registry)
+		.filter(([id, entry]) => entry.interface === "Terminal" && !made.has(id))
+		.map(([id, entry]) => `${id} (${entry.version})`);
+	if (left.length) console.log(`release ${values.release}: no scenario re-records ${left.join(", ")}`);
+	const { checked, misses, notes } = quoteCheck({ scratch: values.publish ? undefined : scratch });
+	for (const line of [...notes, ...misses]) console.log(`quote-check: ${line}`);
+	console.log(`quote-check: ${checked} quoted lines, ${misses.length} not in their recording`);
+	if (misses.length) process.exitCode = 1;
+	if (values.publish) console.log("Next: python3 site/image-variants.py, then read every take before committing.");
 }
 
 function publish(scenario, outDir, entries) {
@@ -718,7 +866,30 @@ function publish(scenario, outDir, entries) {
 		copyFileSync(join(outDir, `${id}.png`), join(site, entry.original));
 		copyFileSync(join(outDir, `${id}.webp`), join(site, entry.image));
 		registry.captures[id] = entry;
+		syncManifest(entry);
 	}
 	writeFileSync(join(site, "content/captures.json"), `${JSON.stringify(registry, null, "\t")}\n`);
 	console.log(`${scenario.id}: published to site/assets and content/captures.json`);
+}
+
+// A still the repository also ships (assets/media-manifest.json lists the site
+// file as a delivery copy) is written to the canonical file too, byte-identical,
+// and its manifest entry takes the new hash, size and version.
+function syncManifest(entry) {
+	const path = join(repo, "assets/media-manifest.json");
+	const manifest = JSON.parse(readFileSync(path, "utf8"));
+	let changed = false;
+	for (const asset of manifest.assets) {
+		const file = [entry.original, entry.image].find((name) => asset.copies?.includes(`site/${name}`));
+		if (!file) continue;
+		copyFileSync(join(site, file), join(repo, asset.source));
+		const data = readFileSync(join(repo, asset.source));
+		asset.sha256 = createHash("sha256").update(data).digest("hex");
+		if (file.endsWith(".png")) asset.dimensions = pngSize(join(repo, asset.source));
+		else asset.dimensions = { width: entry.width, height: entry.height };
+		asset.capturedVersion = clioVersion;
+		asset.provenance = asset.provenance.replace(versionLiteral, clioVersion);
+		changed = true;
+	}
+	if (changed) writeFileSync(path, `${JSON.stringify(manifest, null, "\t")}\n`);
 }

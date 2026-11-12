@@ -161,7 +161,14 @@ the vendored asciinema player on request, and only pages with a recording allow
 <directory> --clio <build> [--only <ids>] [--publish]` reruns the recordings
 in `capture/scenarios.json` in a fresh sandboxed profile, renders their stills
 with the same player, and refuses to publish any that name a host, a user, a
-private address, a key or the model gateway. `python3 site/capture/cast-symbols.py` rebuilds the symbol
+private address, a key or the model gateway. `node site/capture/run.mjs
+--scratch <directory> --release <version> [--publish]` re-records every scenario
+from that npm release, holding the model lock for the whole recording phase,
+and writes wall and lock times to `<directory>/timings.json`. `node
+site/capture/quote-check.mjs [--scratch <directory>]` checks that each `text`
+fence a tutorial attributes to a recording (the line before it says recording
+or recorded) still appears in that recording's transcript; the release run
+ends with it. `python3 site/capture/cast-symbols.py` rebuilds the symbol
 font the player falls back to for glyphs IBM Plex Mono lacks.
 
 ## Review builds
