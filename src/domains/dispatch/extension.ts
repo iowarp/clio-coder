@@ -1760,6 +1760,20 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
 	return { bytes: Buffer.byteLength(req.briefing, "utf8"), contentHash: sha256(req.briefing) };
 }
 
+/** The harness's own name ("Claude Code", "Codex"), else the runtime's display name. */
+function harnessLabel(runtime: Pick<RuntimeDescriptor, "id" | "displayName">): string {
+	return INTEROP_AGENT_KINDS.find((kind) => kind.headlessRuntimeId === runtime.id)?.label ?? runtime.displayName;
+}
+
+/** Whether `fleet.keepPeerInstructionFiles` names this runtime by its id or an alias. */
+function keepsPeerInstructionFiles(
+	settings: Readonly<typeof DEFAULT_SETTINGS> | null | undefined,
+	runtime: Pick<RuntimeDescriptor, "id" | "aliases">,
+): boolean {
+	const kept = settings?.fleet.keepPeerInstructionFiles ?? [];
+	return kept.includes(runtime.id) || (runtime.aliases ?? []).some((alias) => kept.includes(alias));
+}
+
 /**
  * Receipt provenance for the effective project-context decision, computed
  * from the rendered dynamic messages so the recorded chars/contentHash can
@@ -1776,20 +1790,6 @@ function briefingProvenanceFor(req: DispatchRequest): RunBriefingProvenance | nu
  * handbook. Before that message existed, every receipt in a nine-turn live
  * drive read `bounded chars:0` while its worker hunted for the repository.
  */
-/** The harness's own name ("Claude Code", "Codex"), else the runtime's display name. */
-function harnessLabel(runtime: Pick<RuntimeDescriptor, "id" | "displayName">): string {
-	return INTEROP_AGENT_KINDS.find((kind) => kind.headlessRuntimeId === runtime.id)?.label ?? runtime.displayName;
-}
-
-/** Whether `fleet.keepPeerInstructionFiles` names this runtime by its id or an alias. */
-function keepsPeerInstructionFiles(
-	settings: Readonly<typeof DEFAULT_SETTINGS> | null | undefined,
-	runtime: Pick<RuntimeDescriptor, "id" | "aliases">,
-): boolean {
-	const kept = settings?.fleet.keepPeerInstructionFiles ?? [];
-	return kept.includes(runtime.id) || (runtime.aliases ?? []).some((alias) => kept.includes(alias));
-}
-
 function projectContextProvenanceFor(
 	tier: AgentProjectContextTier,
 	messages: ReadonlyArray<WorkerPromptMessage>,
@@ -6115,6 +6115,7 @@ export function createDispatchBundle(
 					? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap)
 					: null;
 		// A delegated harness also reads its own instruction files; it gets one rule set compiled from both.
+		// When that fails the run goes as it did before: the usual project message beside the harness's own files.
 		const peer =
 			tier === "bounded" && target.runtime.kind === "subprocess"
 				? await resolvePeerInstructions({
@@ -6134,6 +6135,9 @@ export function createDispatchBundle(
 							...pathScope.inferredOnlyPaths,
 						],
 						keepFiles: keepsPeerInstructionFiles(settings, target.runtime),
+					}).catch((error: unknown) => {
+						reportDispatchDiagnostic(`compile peer instructions for ${target.runtime.id}`, error);
+						return null;
 					})
 				: null;
 		const dynamicContext: WorkerDynamicContext = {

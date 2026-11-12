@@ -14,9 +14,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
 import { writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
-import type { HandbookLedgerEntry } from "../context/bootstrap.js";
-import { judgeInstructionFiles } from "../context/bootstrap.js";
 import { type CompiledHandbook, compileHandbook, type HandbookAudience } from "../context/handbook-units.js";
+import { type HandbookLedgerEntry, judgeInstructionFiles } from "../context/index.js";
 import { compilePeerHandbook } from "../context/peer-handbook.js";
 import { treeFacts } from "../context/tree-facts.js";
 import type { RepositoryInstructionFiles } from "../providers/types/runtime-descriptor.js";
@@ -103,11 +102,21 @@ async function headOf(root: string): Promise<string> {
 	return result.exitCode === 0 ? result.stdout.trim() : "";
 }
 
-/** Judging walks the tree, so a verdict is reused while the commit and the files are unchanged. */
+/**
+ * Judging walks the tree, so a verdict is reused while the commit and the files are unchanged. The key leaves out
+ * where the checkout is: each run's task worktree is a new directory on the same commit.
+ */
 async function judgePeerFiles(cwd: string, files: ReadonlyArray<PeerFile>): Promise<HandbookLedgerEntry[]> {
 	const root = repositoryRoot(cwd);
+	const head = await headOf(root);
 	const key = createHash("sha256")
-		.update([root, await headOf(root), ...files.flatMap((file) => [file.file, file.content])].join("\0"))
+		.update(
+			[
+				head.length > 0 ? head : root,
+				relative(root, resolve(cwd)),
+				...files.flatMap((file) => [file.file, file.content]),
+			].join("\0"),
+		)
 		.digest("hex");
 	const held = judged.get(key);
 	if (held !== undefined) return held;

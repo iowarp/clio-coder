@@ -20,6 +20,7 @@ export {
 	type BootstrapRunTelemetry,
 	type BootstrapStructuredOutput,
 	fallbackBootstrapOutput,
+	type HandbookLedgerEntry,
 	type HandbookVerification,
 	judgeInstructionFiles,
 	proposeHandbookVerification,
