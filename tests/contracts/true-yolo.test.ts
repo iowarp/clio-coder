@@ -1058,6 +1058,28 @@ test("the raw-text reading follows a literal cd, joins and decodes its words, an
 	);
 });
 
+test("the raw-text reading places every cd form, reads $$ as the PID, and charges cd fan-out to its budget", async (t) => {
+	const cwd = workspace("clio-yolo-floor-raw-cd-");
+	const home = await isolateClioEnv("clio-yolo-floor-raw-cd-home-");
+	t.after(() => home.restore());
+	const engine = engineFor(cwd);
+	const judge = (command: string) => engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO);
+	const heredoc = (step: string) => `: "$(cat <<'EOF'\nx\nEOF ${step})\nEOF\n)"`;
+	for (const command of [
+		"echo $$'a\\'$(wipefs -a /dev/sdz)''",
+		heredoc("cd -P / && rm -r usr"),
+		heredoc("cd -- /usr && rm -r lib"),
+		heredoc("builtin cd / && rm -r usr"),
+		heredoc("eval cd / && rm -r usr"),
+	]) {
+		strictEqual(judge(command).kind, "block", command);
+	}
+	const steps = Array.from({ length: 136 }, (_, n) => `rm g${n} rm h${n} rm k${n}; `).join("");
+	const fanned = judge(`: "$(cat <<X\nX\n)" cd a; cd b; cd c; cd d; cd e; ${steps}`);
+	strictEqual(fanned.kind, "block");
+	match(fanned.reasons.join("\n"), /too large to read that way/u);
+});
+
 test("the raw-text reading covers every line with a substitution the shell runs, not one in single quotes", async (t) => {
 	const cwd = workspace("clio-yolo-floor-raw-any-");
 	const home = await isolateClioEnv("clio-yolo-floor-raw-any-home-");

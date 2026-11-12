@@ -43,7 +43,7 @@ export const YOLO_FLOOR_RULE_IDS = {
 	settingsAuthority: "settings-authority",
 	/** A read of Clio's own provider credential store, at every autonomy level. */
 	clioCredentials: "yolo-floor-clio-credentials",
-	/** A line read as raw text that yields more pieces than the floor reads. */
+	/** A floor command found in a line read as raw text, or a line whose raw-text pieces hold more than the floor reads. */
 	rawText: "yolo-floor-raw-text",
 } as const;
 
@@ -119,6 +119,9 @@ const RAW_TEXT_START_WORD =
  */
 const MAX_RAW_TEXT_BYTES = 32 * 1024;
 
+/** What each raw-text candidate costs the budget beyond its text: the floor's judgments have a fixed cost per call. */
+const RAW_TEXT_CANDIDATE_BYTES = 64;
+
 const ANSI_C_ESCAPES: Readonly<Record<string, string>> = {
 	a: "\x07",
 	b: "\b",
@@ -164,7 +167,8 @@ function holdsSubstitution(command: string): boolean {
 	for (let index = 0; index < command.length; index += 1) {
 		const char = command[index];
 		const next = command[index + 1];
-		if (char === "\\") {
+		// `\x` is a literal character and `$$` the shell's PID, so neither starts a quote or a substitution.
+		if (char === "\\" || (char === "$" && next === "$")) {
 			index += 1;
 			continue;
 		}
@@ -186,16 +190,49 @@ function holdsSubstitution(command: string): boolean {
 	return false;
 }
 
+/** A cd operand the floor's walk cannot place, standing for a cd whose directory the raw text does not say. */
+const RAW_TEXT_UNPLACED_CD = "$UNPLACED_CD";
+
+/** Most directories the byte budget charges a raw-text candidate for; the floor's walk keeps no more. */
+const RAW_TEXT_MAX_FANOUT = 32;
+
+/** Most directories a line's cds may place a raw-text candidate in before its relative cds count as unplaced. */
+const RAW_TEXT_RELATIVE_FANOUT = 8;
+
+/**
+ * The directory operand of the `cd` or `pushd` at `at` in a raw-text piece, after its options; `~` when it names
+ * none. Null when the text does not say where it leaves the shell: run through `eval`, `cd -`, a `pushd` stack
+ * rotation or an option the floor does not know.
+ */
+function rawCdOperand(words: ReadonlyArray<string>, at: number): string | null {
+	if (words.slice(0, at).includes("eval")) return null;
+	const options = words[at] === "cd" ? /^-[LPe@]+$/u : /^-n$/u;
+	let index = at + 1;
+	while (index < words.length) {
+		const word = words[index] ?? "";
+		if (word === "--") {
+			index += 1;
+			break;
+		}
+		if (!options.test(word)) break;
+		index += 1;
+	}
+	const operand = words[index];
+	if (operand === undefined) return "~";
+	return operand === "-" || /^[-+]/u.test(operand) ? null : operand;
+}
+
 /**
  * The raw-text reading of a line the shared scanners may not follow into every command: one holding a command
  * substitution the shell runs, or any `$(` or backtick beside a here-document, a here-string or (for `$(`) a `#`,
- * where the quote context cannot be told from the text. The scanners place a here-document's end, a comment and a substitution's close by bash's rules,
- * and where they read a step as data the floor never judges it. This reading does not parse: it joins
- * backslash-newlines, decodes `$'...'` and `$"..."`, drops every quote, cuts the text at newlines, operators,
- * parentheses, braces and backticks, and yields each piece, the piece without its first word (a here-document
- * delimiter bash reads as the end), and the piece from every floor command word on, for the floor's judgments to
- * read like commands. Every literal `cd` piece of the line is put in front of each candidate, so a relative delete
- * is placed where such a cd can leave the shell. Fail-closed: a floor command quoted as data in such a line blocks
+ * where the quote context cannot be told from the text. The scanners place a here-document's end, a comment and a
+ * substitution's close by bash's rules, and where they read a step as data the floor never judges it. This reading
+ * does not parse: it joins backslash-newlines, decodes `$'...'` and `$"..."`, drops every quote, cuts the text at
+ * newlines, operators, parentheses, braces and backticks, and yields each piece, the piece without its first word (a
+ * here-document delimiter bash reads as the end), and the piece from every floor command word on, for the floor's
+ * judgments to read like commands. Every cd on the line is put in front of each candidate, so a relative delete is
+ * placed where such a cd can leave the shell; a cd whose directory the text does not say adds a variant judged from
+ * an unknown directory. Each candidate counts once per directory its cds can place it in. Fail-closed: a floor command quoted as data in such a line blocks
  * too. Null when the line has no such shape; `overflow` when its candidates hold more text than the floor reads.
  */
 export function yoloFloorRawCandidates(command: string): { candidates: string[]; overflow: boolean } | null {
@@ -205,8 +242,10 @@ export function yoloFloorRawCandidates(command: string): { candidates: string[];
 	if (!beside && !holdsSubstitution(command)) return null;
 	const decoded = command
 		.replace(/\\\r?\n/gu, "")
-		.replace(/\$'((?:[^'\\]|\\[\s\S])*)'/gu, (_all, body: string) => decodeAnsiCBody(body))
-		.replace(/\$"/gu, '"');
+		.replace(/\$\$|\$'((?:[^'\\]|\\[\s\S])*)'/gu, (all, body?: string) =>
+			body === undefined ? all : decodeAnsiCBody(body),
+		)
+		.replace(/\$\$|\$"/gu, (all) => (all === "$$" ? all : '"'));
 	const stripped = decoded.replace(/["']/gu, "");
 	const pieces = stripped.split(/[\n\r;&|(){}`]/u).map((piece) =>
 		piece
@@ -215,12 +254,27 @@ export function yoloFloorRawCandidates(command: string): { candidates: string[];
 			.filter((word) => word !== ""),
 	);
 	const cds = new Set<string>();
+	let unplacedCd = false;
 	for (const words of pieces) {
-		for (const at of [0, 1]) {
-			if (words[at] === "cd" || words[at] === "pushd") cds.add(`cd ${words[at + 1] ?? "~"}`);
-		}
+		words.forEach((word, at) => {
+			if (word !== "cd" && word !== "pushd") return;
+			const operand = rawCdOperand(words, at);
+			if (operand === null) unplacedCd = true;
+			else cds.add(`cd ${operand}`);
+		});
 	}
-	const prefix = cds.size === 0 ? "" : `${[...cds].join(" && ")} && `;
+	// A cd may or may not run: an absolute one adds a directory, a relative one doubles them. Past a few relative cds
+	// they are judged as one cd the text does not say, so the work stays linear in the line.
+	let placed = [...cds];
+	const fanoutOf = (list: ReadonlyArray<string>) =>
+		list.reduce((count, cd) => (/^cd [/~$]/u.test(cd) ? count + 1 : count * 2), 1);
+	if (fanoutOf(placed) > RAW_TEXT_RELATIVE_FANOUT) {
+		placed = placed.filter((cd) => /^cd [/~$]/u.test(cd));
+		unplacedCd = true;
+	}
+	const fanout = Math.min(fanoutOf(placed), RAW_TEXT_MAX_FANOUT);
+	const literal = placed.length === 0 ? "" : `${placed.join(" && ")} && `;
+	const prefixes = unplacedCd ? [literal, `${literal}cd ${RAW_TEXT_UNPLACED_CD} && `] : [literal];
 	const candidates = new Set<string>([stripped]);
 	let bytes = stripped.length;
 	for (const words of pieces) {
@@ -229,11 +283,13 @@ export function yoloFloorRawCandidates(command: string): { candidates: string[];
 		if (starts.length === 0 && !words.some((word) => /[/~$>]/u.test(word))) continue;
 		for (const start of new Set([0, 1, ...starts])) {
 			if (start >= words.length) continue;
-			const candidate = `${prefix}${words.slice(start).join(" ")}`;
-			if (candidates.has(candidate)) continue;
-			candidates.add(candidate);
-			bytes += candidate.length;
-			if (bytes > MAX_RAW_TEXT_BYTES) return { candidates: [], overflow: true };
+			for (const prefix of prefixes) {
+				const candidate = `${prefix}${words.slice(start).join(" ")}`;
+				if (candidates.has(candidate)) continue;
+				candidates.add(candidate);
+				bytes += (candidate.length + RAW_TEXT_CANDIDATE_BYTES) * fanout;
+				if (bytes > MAX_RAW_TEXT_BYTES) return { candidates: [], overflow: true };
+			}
 		}
 	}
 	return { candidates: [...candidates], overflow: false };
