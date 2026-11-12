@@ -727,6 +727,7 @@ export function planMainSandboxSpawn(
 	const baseMasks = [
 		...workerSandboxMasks(),
 		...mainSandboxAgentMasks(),
+		...mainSandboxKerberosMasks(process.env, ["/tmp", "/var/tmp", tmpdir(), ...policy.secretRoots.scratchRoots]),
 		...hookMasks,
 		...(configMask === null && policy.env.maskSettings === true ? settingsFileMasks() : []),
 	];
@@ -800,6 +801,76 @@ export function mainSandboxAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp:
 	const socket = env["SSH_AUTH_SOCK"]?.trim();
 	if (socket !== undefined && path.isAbsolute(socket) && pathExists(socket)) {
 		if (!masks.some((mask) => isInside(mask.path, socket))) masks.push({ path: socket, kind: "file" });
+	}
+	return masks;
+}
+
+/**
+ * The operator's Kerberos ticket caches. A worker's private /tmp hides them; a contained command sees the
+ * host's temp roots, where MIT Kerberos keeps `krb5cc_<uid>` and sshd's GSSAPI logins add `krb5cc_<uid>_*`.
+ * Each launch lists the temp roots' top level afresh, so a cache made since the last secret scan is still
+ * hidden, as is a `DIR:` collection named that way, and the cache `KRB5CCNAME` names wherever it lives.
+ * A file mask covers the cache present at launch: a `kinit` during a running command renames a new cache
+ * over the masked path, which drops the mask, and the command can read the new ticket. A `DIR:` collection
+ * is masked as a directory, which holds for every ticket written into it later. `KEYRING:`, `KCM:` and
+ * `MEMORY:` caches are not files and are not covered here.
+ */
+export function mainSandboxKerberosMasks(
+	env: NodeJS.ProcessEnv,
+	tempRoots: ReadonlyArray<string>,
+	uid: number | undefined = process.getuid?.(),
+): SandboxMaskedPath[] {
+	const masks: SandboxMaskedPath[] = [];
+	const add = (entry: string) => {
+		let stat: ReturnType<typeof lstatSync>;
+		try {
+			stat = lstatSync(entry);
+		} catch {
+			return;
+		}
+		if (uid !== undefined && stat.uid !== uid) return;
+		if (!stat.isFile() && !stat.isDirectory()) return;
+		if (masks.some((mask) => mask.path === entry || isInside(mask.path, entry))) return;
+		masks.push({ path: entry, kind: stat.isDirectory() ? "directory" : "file" });
+	};
+	const roots = new Set<string>();
+	for (const root of tempRoots) {
+		try {
+			roots.add(realpathSync(root));
+		} catch {
+			// A temp root that does not exist holds no cache.
+		}
+	}
+	for (const root of roots) {
+		try {
+			for (const name of readdirSync(root)) if (name.startsWith("krb5cc")) add(path.join(root, name));
+		} catch {
+			// An unreadable temp root has no cache this process could list.
+		}
+	}
+	const named = env["KRB5CCNAME"]?.trim();
+	if (named !== undefined && named !== "") {
+		const typed = /^([A-Za-z]+):(.*)$/su.exec(named);
+		const type = typed?.[1]?.toUpperCase();
+		const rest = typed?.[2] ?? named;
+		// `DIR::<file>` names one cache of a collection; the collection is its directory.
+		const target =
+			type === undefined || type === "FILE"
+				? rest
+				: type === "DIR"
+					? rest.startsWith(":")
+						? path.dirname(rest.slice(1))
+						: rest
+					: undefined;
+		if (target !== undefined && path.isAbsolute(target)) {
+			let real = target;
+			try {
+				real = realpathSync(target);
+			} catch {
+				// Gone: nothing to mask.
+			}
+			add(real);
+		}
 	}
 	return masks;
 }

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -316,4 +325,49 @@ test("under bwrap a yolo script runs in its own PID namespace and cannot reach a
 	for (const marker of ["own-pid-namespace", "tmp-agent-hidden", "auth-sock-hidden"]) {
 		assert.match(result.output, new RegExp(marker, "u"), result.output);
 	}
+});
+
+test("under bwrap a contained command reads no Kerberos ticket cache in a shared temp root or named by KRB5CCNAME", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-krb5-")));
+	const workspace = join(scratch, "workspace");
+	const shared = join(scratch, "tmp");
+	const outside = join(scratch, "outside");
+	for (const dir of [workspace, shared, outside]) mkdirSync(dir);
+	const saved = process.env.KRB5CCNAME;
+	t.after(() => {
+		if (saved === undefined) delete process.env.KRB5CCNAME;
+		else process.env.KRB5CCNAME = saved;
+		rmSync(scratch, { recursive: true, force: true });
+	});
+	const uid = process.getuid?.() ?? 0;
+	const ticket = Buffer.from([0x05, 0x04, ...Buffer.from("TICKET")]);
+	const policy = resolveMainSandboxPolicy({ workspace, scratchRoots: [shared], clioDirs: [] });
+	const runPlan = async (script: string) => {
+		const plan = planMainSandboxSpawn(policy, { argv: ["/bin/bash", "-c", script] }, workspace, availability);
+		assert.equal(plan.kind, "sandboxed");
+		if (plan.kind !== "sandboxed") return "";
+		const result = await run(plan.file, plan.args);
+		plan.afterExit();
+		return result.output;
+	};
+	// The temp root was scanned before any of these caches existed, as in a session that has run a command.
+	await runPlan("true");
+	const late = join(shared, `krb5cc_${uid}_sshdXYZ`);
+	const collection = join(shared, `krb5cc_${uid}_dir`);
+	const named = join(outside, "ticket-cache");
+	writeFileSync(late, ticket, { mode: 0o600 });
+	mkdirSync(collection, { mode: 0o700 });
+	writeFileSync(join(collection, "tkt"), ticket, { mode: 0o600 });
+	writeFileSync(named, ticket, { mode: 0o600 });
+	process.env.KRB5CCNAME = `FILE:${named}`;
+	const reads = [late, join(collection, "tkt"), named].map(
+		(file) => `grep -q TICKET ${file} 2>/dev/null && echo read:${file}`,
+	);
+	const output = await runPlan(`${reads.join("; ")}; true`);
+	assert.doesNotMatch(output, /read:/u, output);
 });
