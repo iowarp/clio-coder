@@ -1209,15 +1209,54 @@ const BOX_ROW = /^[\u2500-\u259F]/u;
 /** The letters Pi's wrap takes one at a time, so it can break between two of them with no space in the source. */
 const CJK_BREAK =
 	/[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
+/** Hangul separates words with spaces, so a break beside it says nothing about whether one sat there. */
+const HANGUL = /\p{Script_Extensions=Hangul}/u;
+/** CJK and fullwidth punctuation, which sits against the letters around it with no space. */
+const FULLWIDTH_PUNCTUATION = /[\u3000-\u303F\uFF00-\uFFEF]/u;
+const REGEXP_SYNTAX = /[\\^$.*+?()[\]{}|/]/gu;
+
+/** The text a run of rows was wrapped from, and how far the rows above have read into it. */
+interface WrapSource {
+	readonly text: string;
+	at: number;
+}
+
+/**
+ * Whether the source held whitespace where Pi broke between `aboveText` and `text`, read from the next place past the
+ * last break where the end of one meets the start of the other; undefined when the source does not hold them, as
+ * where inline Markdown sits at the break.
+ */
+function spacedInSource(source: WrapSource, aboveText: string, text: string): boolean | undefined {
+	const literal = (part: string): string => part.replace(REGEXP_SYNTAX, "\\$&");
+	const tail = Array.from(aboveText.trimEnd()).slice(-4).join("");
+	const head = Array.from(text).slice(0, 4).join("");
+	const seam = new RegExp(`${literal(tail)}(\\s*)${literal(head)}`, "gu");
+	seam.lastIndex = source.at;
+	const found = seam.exec(source.text);
+	if (found === null) return undefined;
+	source.at = found.index + tail.length;
+	return (found[1] ?? "").length > 0;
+}
+
+/** Pi's next token: one CJK letter, or the run up to a space or a CJK letter. */
+function firstToken(text: string): string {
+	let token = "";
+	for (const char of text) {
+		if (char === " " || (token.length > 0 && CJK_BREAK.test(char))) break;
+		token += char;
+		if (CJK_BREAK.test(char)) break;
+	}
+	return token;
+}
 
 /**
  * How a prose row joins the row above it when fullscreen copies a selection (#453): as a wrapped continuation of the
  * same paragraph or list item, as the rest of a word too long for one row, or not at all. `above` and `row` are plain
  * text. Pi wraps greedily, so a row continues the one above only when it starts at the column the text above starts
- * at, past a bullet, and its first word would not have fit on the row above. Pi breaks between two CJK letters as it
- * breaks between words, and that break joins tight.
+ * at, past a bullet, and its first word would not have fit on the row above. Pi also breaks beside any CJK letter with
+ * no space, and there the rows alone cannot tell whether the wrap consumed one, so `source` decides when it can.
  */
-function continuationMark(above: string | null, row: string, width: number): string {
+function continuationMark(above: string | null, row: string, width: number, source?: WrapSource): string {
 	if (above === null) return "";
 	const lead = row.length - row.trimStart().length;
 	const text = row.slice(lead);
@@ -1227,19 +1266,30 @@ function continuationMark(above: string | null, row: string, width: number): str
 	if (LIST_BULLET.test(text) || BOX_ROW.test(text) || BOX_ROW.test(aboveText)) return "";
 	const bullet = LIST_BULLET.exec(aboveText)?.[0].length ?? 0;
 	if (lead !== aboveLead + bullet) return "";
+	const fromSource = (): string | undefined => {
+		const spaced = source === undefined ? undefined : spacedInSource(source, aboveText, text);
+		return spaced === undefined ? undefined : spaced ? COPY_JOIN_MARK : COPY_TIGHT_MARK;
+	};
 	const aboveWidth = visibleWidth(above);
-	if (aboveWidth >= width && !/\s/u.test(aboveText.slice(bullet))) return COPY_TIGHT_MARK;
-	// Between two CJK letters the row above ends a cell short when the wide letter below did not fit.
+	if (aboveWidth >= width && !/\s/u.test(aboveText.slice(bullet))) return fromSource() ?? COPY_TIGHT_MARK;
+	// Beside a CJK letter the row above ends short of the width when the token below did not fit.
 	const last = Array.from(aboveText.trimEnd()).at(-1) ?? "";
 	const first = Array.from(text)[0] ?? "";
-	if (CJK_BREAK.test(last) && CJK_BREAK.test(first) && aboveWidth + visibleWidth(first) > width) return COPY_TIGHT_MARK;
+	if ((CJK_BREAK.test(last) || CJK_BREAK.test(first)) && aboveWidth + visibleWidth(firstToken(text)) > width) {
+		const decided = fromSource();
+		if (decided !== undefined) return decided;
+		const tight = (char: string): boolean =>
+			FULLWIDTH_PUNCTUATION.test(char) || (CJK_BREAK.test(char) && !HANGUL.test(char));
+		if (tight(last) && tight(first)) return COPY_TIGHT_MARK;
+	}
 	const word = text.split(" ", 1)[0] ?? "";
 	return aboveWidth + 1 + visibleWidth(word) > width ? COPY_JOIN_MARK : "";
 }
 
 /**
  * The transcript rows of a Markdown component. `exit`, when given, learns whether the rows end with a fence still
- * open, which a caller that renders a text in pieces needs: the fence state runs on into the next piece.
+ * open, which a caller that renders a text in pieces needs: the fence state runs on into the next piece. `source`,
+ * the Markdown the component holds, settles how copy marks join a row wrapped beside a CJK letter.
  */
 function markdownRows(
 	md: Markdown,
@@ -1248,8 +1298,10 @@ function markdownRows(
 	memo?: RowMemo,
 	exit?: { fenceOpen: boolean },
 	marks = false,
+	source?: string,
 ): string[] {
 	const padded = md.render(width);
+	const wrapSource = source === undefined ? undefined : { text: source, at: 0 };
 	const rows: string[] = [];
 	let fenceIndent: string | null = null;
 	// With copy marks, the plain text of the last prose row, which the next row may continue; null past code (#453).
@@ -1310,7 +1362,7 @@ function markdownRows(
 		}
 		for (const part of parts) {
 			const plain = parts.length === 1 ? plainRow(row).replace(/ +$/u, "") : stripTerminalSequences(part);
-			rows.push(continuationMark(above, plain, width) + part);
+			rows.push(continuationMark(above, plain, width, wrapSource) + part);
 			above = plain;
 		}
 	}
@@ -1379,7 +1431,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 			seg.markdown.view.setText(prose);
 			seg.markdown.source = prose;
 		}
-		rows = markdownRows(seg.markdown.view, width, bareFences, memo, undefined, marks);
+		rows = markdownRows(seg.markdown.view, width, bareFences, memo, undefined, marks, prose);
 	}
 	const lines = withoutLeadingBlanks(rows);
 	// Dropping the same leading blanks as last time keeps what the split vouched for, one row per blank fewer.
@@ -1465,7 +1517,7 @@ function renderSettledSplit(
 		const exit = { fenceOpen: false };
 		// A run that ends where the next block follows with no blank line draws the spacing row the whole would.
 		const run = settled.pieces.slice(runStart, index + 1).join("") + (settled.spacing[index] ? "\n" : "");
-		const rows = markdownRows(chatMarkdown(run, bareFences), width, bareFences, undefined, exit, marks);
+		const rows = markdownRows(chatMarkdown(run, bareFences), width, bareFences, undefined, exit, marks, run);
 		// The transcript's fence tracking misread a row as a fence and would carry it into the next run.
 		if (exit.fenceOpen) {
 			seg.settled = null;
@@ -1488,7 +1540,7 @@ function renderSettledSplit(
 			tail.view.setText(region);
 			tail.source = region;
 		}
-		rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo, undefined, marks));
+		rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo, undefined, marks, region));
 	}
 	// A layout's head rows only grow, and so do an open fence's settled rows, so every such row the last frame
 	// returned still leads in place.
@@ -1838,6 +1890,7 @@ function renderUserLines(
 	for (const sourceLine of sourceLines) {
 		// With copy marks, the bar is not copied and a wrapped prompt line copies as the one line it was typed as (#453).
 		let above: string | null = null;
+		const wrapSource = { text: stripTerminalSequences(sourceLine), at: 0 };
 		for (const row of wrapTextWithAnsi(sourceLine, contentWidth)) {
 			const line = `${prefix}${clioTheme().base("userProse", committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row)}`;
 			if (!marks) {
@@ -1846,7 +1899,11 @@ function renderUserLines(
 			}
 			const plain = stripTerminalSequences(row);
 			const kind =
-				above === null ? "row" : continuationMark(above, plain, contentWidth) === COPY_TIGHT_MARK ? "tight" : "join";
+				above === null
+					? "row"
+					: continuationMark(above, plain, contentWidth, wrapSource) === COPY_TIGHT_MARK
+						? "tight"
+						: "join";
 			rendered.push(`${copyMark(kind, PROSE_GUTTER_WIDTH)}${line}`);
 			above = plain;
 		}

@@ -1727,6 +1727,50 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("copies wrapped Chinese and Korean as their source, spaces and fullwidth commas alike", async () => {
+		const samples = [
+			"这是一个很长的中文段落，没有空格，用全角逗号分隔，目的是让它在终端里换行，然后检查复制出来的文本是否和原文完全一致，结束。",
+			"이것은 한국어로 된 긴 문단입니다 단어 사이에 공백이 있고 터미널 너비를 넘어 여러 줄로 나뉘어야 합니다 끝.",
+		];
+		for (const text of samples) {
+			for (const columns of [50, 51, 52, 54]) {
+				const copies: string[] = [];
+				const terminal = new RenderingTerminal();
+				terminal.columns = columns;
+				terminal.rows = 30;
+				const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+				const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+					copySelection: async (copied) => {
+						copies.push(copied);
+						return true;
+					},
+				});
+				const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, copyMarks: true });
+				const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+				panel.applyEvent({ type: "agent_start" } as never);
+				panel.applyEvent({ type: "message_end", message } as never);
+				panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+				const chrome = { banner: new Text("", 0, 0), editor: new Text("draft", 0, 0), footer: new Text("ready", 0, 0) };
+				tui.setLayoutRoot(buildLayout({ ...chrome, chat: panel }, { mode: "fullscreen" }));
+				tui.start();
+				try {
+					tui.renderNow(true);
+					const screen = tui.getScreenLines().map(stripTerminalSequences);
+					const first = screen.findIndex((row) => row.includes(text.slice(0, 3))) + 1;
+					const last = screen.length - [...screen].reverse().findIndex((row) => row.includes(text.slice(-1)));
+					ok(last > first, "the paragraph wraps");
+					terminal.input(`\x1b[<0;1;${first}M`);
+					terminal.input(`\x1b[<32;${columns};${last}M`);
+					terminal.input(`\x1b[<0;${columns};${last}m`);
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					strictEqual(copies.at(-1), text, `${columns} columns`);
+				} finally {
+					tui.stop();
+				}
+			}
+		}
+	});
+
 	it("copies wrapped prose beside the open search box as its source text", async () => {
 		const copies: string[] = [];
 		const terminal = new RenderingTerminal();
