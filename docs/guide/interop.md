@@ -10,7 +10,9 @@ and loadable by Codex without a converted copy. Inspection and adoption use
 zero model tokens. Gemini, Cursor, and the shared Agent Skills convention
 retain their existing presence detection; this inventory does not extend their
 capabilities. Windsurf, Cline and Aider are detected the same way and get a row
-on the Interop page; `context init --adopt` reads their instruction files
+on the Interop page. `context init` and `context init --adopt` read their
+instruction sources, along with Cursor rules and GitHub Copilot instruction
+files, and write nothing into those agents' directories
 ([context engine](../architecture/context-engine.md)). As for every registered
 agent, their directories (`.windsurf/`, `.clinerules/`, `~/.codeium/windsurf/`,
 `~/Documents/Cline/` and `~/.aider/`) are default no-write paths for Clio's tools.
