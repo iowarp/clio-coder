@@ -1,6 +1,16 @@
 # Contributing to Clio Coder
 
-Clio Coder welcomes contributions. Clio is pre-1.0 software; public interfaces may evolve between minor releases. User-visible changes belong in [CHANGELOG.md](CHANGELOG.md), participation follows the [Code of Conduct](CODE_OF_CONDUCT.md), and security disclosures follow [SECURITY.md](SECURITY.md).
+Thank you for helping. Clio Coder is an open-source coding agent for scientific software, and it improves fastest when the people who use it on real research code say what worked and what did not. You do not need to be an expert in the codebase to contribute.
+
+Clio Coder is pre-1.0, so public interfaces can change between minor releases. User-visible changes belong in [CHANGELOG.md](CHANGELOG.md), participation follows the [Code of Conduct](CODE_OF_CONDUCT.md), and security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+
+## Ways to contribute
+
+- **Report a problem or ask for a feature.** Inside Clio Coder, `/report bug`, `/report feature` or `/report question` drafts the report, masks paths, host names and secrets, and shows you the exact text before anything is sent. `clio-coder report` does the same from a shell. You can also open an [issue](https://github.com/iowarp/clio-coder/issues/new/choose) by hand.
+- **Ask a question.** Use [Discussions](https://github.com/iowarp/clio-coder/discussions/categories/help).
+- **Share how a model or machine worked.** Local models, cluster login nodes and unusual terminals are where reports help most. Post in [Model and hardware reports](https://github.com/iowarp/clio-coder/discussions/categories/model-and-hardware-reports).
+- **Fix the docs.** The guides under `docs/guide/` ship in the npm package and are what Clio Coder reads to answer questions about itself, so a correction there reaches every user.
+- **Change the code.** Start with the Quickstart below, keep the change focused, and open a pull request against the current version branch.
 
 ## Quickstart
 
@@ -23,6 +33,18 @@ pnpm run test
 ```
 
 `hooks:install` adds pre-commit and pre-push guards that refuse any path `.gitignore` excludes, including one staged with `git add -f`. Keep private plans, prompts and notes under the ignored `.mine/`; `pnpm run lint` fails if an ignored path is ever tracked.
+
+## Submitting Changes
+
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, which is `v` plus the digits of the `package.json` version, such as `v080` for 0.8.0. Open the pull request against that branch. `main` moves only when a release ships.
+2. Add focused contract tests exercising the changed behavior.
+3. Keep commit subjects concise conventional commits (max 72 characters):
+   ```text
+   fix(session): preserve branch selection on resume
+   docs: clarify worker permission scope
+   feat(cli): add target inspection option
+   ```
+4. Before requesting review, run `pnpm run typecheck`, `pnpm run lint`, focused `pnpm run test:file` runs for the behavior you changed and `pnpm run test` for the default contract list. `pnpm run ci` is release qualification, not a routine check.
 
 ## Validation Reference
 
@@ -97,19 +119,32 @@ The lint suite enforces the boundary rules `rule1` to `rule17` in `tests/boundar
 
 See [architecture invariants](docs/architecture/architecture.md#boundary-invariants) for details. Keep CLI subcommands dynamically imported to preserve fast `--help` and startup.
 
-## Submitting Changes
+## Library & Skills
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, which is `v` plus the digits of the `package.json` version, such as `v080` for 0.8.0. Open the pull request against that branch. `main` moves only when a release ships.
-2. Add focused contract tests exercising the changed behavior.
-3. Keep commit subjects concise conventional commits (max 72 characters):
-   ```text
-   fix(session): preserve branch selection on resume
-   docs: clarify worker permission scope
-   feat(cli): add target inspection option
-   ```
-4. Before requesting review, run `pnpm run typecheck`, `pnpm run lint`, focused `pnpm run test:file` runs for the behavior you changed and `pnpm run test` for the default contract list. `pnpm run ci` is release qualification, not a routine check.
+`library/` contains five package kinds: **skill, agent, prompt, fleet, and plugin** (see [library guide](library/README.md)).
 
-## Branches and Releases
+```bash
+clio-coder library validate <package-path> --json
+clio-coder library register <package-path> --project
+clio-coder library install <kind>:<name> --project
+```
+
+When modifying bundled packages or curated skills, verify and update pins:
+
+```bash
+pnpm run library:pin && pnpm run library:check
+pnpm run skills:pin && pnpm run skills:check
+```
+
+## Developing with Agents
+
+Source code, TypeScript types, and schemas are authoritative. Prefer `rg` and targeted source reads over lengthy prose documentation. Do not invent commands, configuration settings, or benchmark numbers.
+
+## For maintainers
+
+The rest of this page is the maintainers' reference for branches, releases and the README layout. A contributor opening a pull request does not need it.
+
+### Branches and Releases
 
 Development happens on the version branch, currently `v080`. Keep local
 and remote version branches synchronized with ordinary pushes. `main` moves
@@ -233,7 +268,7 @@ every rehearse and release position this way.
 interactive flow and use the same hardened publisher. Prove Windows changes on
 a native Windows clone with `core.autocrlf=false` before pushing them.
 
-### Owner configuration
+#### Owner configuration
 
 On npm, a GitHub Actions trusted publisher is configured for
 `iowarp/clio-coder`, workflow filename `release.yml`, environment `release`.
@@ -279,7 +314,11 @@ Workflow changes can be committed and rehearsed on the version branch without
 publishing. Decide the next release's product scope and version metadata when the
 owner asks to cut it.
 
-## README contract
+Manual qualification tests the actual archived package under isolated homes. Release
+publication consumes that artifact and its successful qualification record;
+there is no second build or test run in the publishing workflow.
+
+### README contract
 
 The README is the GitHub and npm landing page. Keep installation, capabilities,
 interface captures, model choices, and references easy to scan. Details belong
@@ -297,29 +336,3 @@ in the guides; command-heavy material and agent orientation use foldable blocks.
   installed-documentation lookup guidance.
 - Update this layout contract when changing the landing page structure.
   Routine hygiene checks installation correctness and links, not editorial layout.
-
-
-## Library & Skills
-
-`library/` contains five package kinds: **skill, agent, prompt, fleet, and plugin** (see [library guide](library/README.md)).
-
-```bash
-clio-coder library validate <package-path> --json
-clio-coder library register <package-path> --project
-clio-coder library install <kind>:<name> --project
-```
-
-When modifying bundled packages or curated skills, verify and update pins:
-
-```bash
-pnpm run library:pin && pnpm run library:check
-pnpm run skills:pin && pnpm run skills:check
-```
-
-## Developing with Agents
-
-Source code, TypeScript types, and schemas are authoritative. Prefer `rg` and targeted source reads over lengthy prose documentation. Do not invent commands, configuration settings, or benchmark numbers.
-
-Manual qualification tests the actual archived package under isolated homes. Release
-publication consumes that artifact and its successful qualification record;
-there is no second build or test run in the publishing workflow.
