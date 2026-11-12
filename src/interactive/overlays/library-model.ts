@@ -457,7 +457,7 @@ function actionKeyChips(theme: ClioTheme, actions: LibraryRowActions): string[] 
 		...(actions.install ? [["i", "install"] as [string, string]] : []),
 		...(actions.enable ? [["e", "enable/disable"] as [string, string]] : []),
 		...(actions.update ? [["u", "update"] as [string, string]] : []),
-		...(actions.remove ? [["r", "remove"] as [string, string]] : []),
+		...(actions.remove ? [["x", "remove"] as [string, string]] : []),
 	];
 	// "review" is said once ahead of the keys it covers, so three reviews fit on one row.
 	const reviewChips =
