@@ -7,6 +7,19 @@ reads, performs passive endpoint probes, and reports; plain `doctor` writes
 nothing and sends no model generation request. This page covers what the checks
 are, the deep checks, the in-session `/doctor`, and how to read the rows.
 
+## First run: three rows to read
+
+1. **`chat`** leads the report. It names the configured route and either
+   `endpoint reachable` or what is missing, with the command that fixes it.
+2. **`connection <id>`** appears once per target. It says whether a key is
+   available and whether the endpoint answered, with the error when it did not.
+3. **`shell sandbox`** is `OK` when shell commands run in an OS sandbox, and
+   `WARN` when they run uncontained and more of them ask first.
+
+Fix the `!!` rows first; a `WARN` row still lets CLIO Coder work. For the
+messages these rows print, see
+[First problems](troubleshooting.md#first-problems).
+
 ## Running it
 
 | Command | What it does |
