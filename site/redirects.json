@@ -41,6 +41,5 @@
 	"/docs/architecture/artifact-placement.html": "/docs/guide/environment-variables.html",
 	"/docs/guide/skills-marketplace.html": "/docs/guide/plugins.html",
 	"/docs/guide/authoring-plugins.html": "/docs/guide/plugins.html",
-	"/docs/guide/extensions-and-sharing.html": "/docs/guide/harness-extensions.html",
-	"/docs/guide/exit-codes-and-output.html": "/docs/guide/troubleshooting.html#exit-codes"
+	"/docs/guide/extensions-and-sharing.html": "/docs/guide/harness-extensions.html"
 }

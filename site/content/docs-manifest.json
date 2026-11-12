@@ -108,7 +108,7 @@
     {
       "path": "guide/troubleshooting.md",
       "source": "docs/guide/troubleshooting.md",
-      "sha256": "909d9ef1eef8eac9985aca55dc564bb1e9371058dba4bcd39d3a63ade3f3d2de",
+      "sha256": "09cf2fdf58404b1487b1ea4706392286a1fed1ffc212f3fdf901058906bc376a",
       "sourceSha256": "881fa0898ed39eb1e30a655559e80f2bd8c83e30460037791b9d25ad24ac2bb3"
     },
     {
@@ -122,6 +122,12 @@
       "source": "docs/guide/research-and-arena.md",
       "sha256": "c2282c070a50dbd13cecf25781344cf3e19d9b21801b853cf610ddcdfbfaa6a7",
       "sourceSha256": "595fe72065cb5be42e786e887697a0462d92c243d9634c2b38356ab4fb55f99f"
+    },
+    {
+      "path": "guide/exit-codes-and-output.md",
+      "source": "docs/guide/exit-codes-and-output.md",
+      "sha256": "bac65772283b7fb7a71d3a6c604fc3495e99a71497e9b138ef29107aac881d05",
+      "sourceSha256": "40128f88fa53d9b523aff8940976d3eece80888a5094e29370e35ba5b6b593ee"
     },
     {
       "path": "guide/configuration-reference.md",

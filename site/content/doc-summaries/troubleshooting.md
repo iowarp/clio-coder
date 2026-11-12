@@ -57,4 +57,4 @@ Every `clio-coder` command uses the same exit codes, so a script can tell why a 
 | `141` | The reader of a `clio-coder run` stdout closed, as in `clio-coder run ... \| head -1`. |
 | `129`, `130`, `143` | Stopped by SIGHUP, SIGINT, or SIGTERM. |
 
-A few commands, such as `fleet events`, `telemetry verify`, `research start`, and `arena run`, give small codes their own meaning; the full guide lists them. In a headless `clio-coder run`, the answer or JSON stream goes to stdout, while progress and diagnostics go to stderr. The [exit codes and output reference](exit-codes-and-output.md) has the details.
+A few commands, such as `fleet events`, `telemetry verify`, `research start`, and `arena run`, give small codes their own meaning; the full guide lists them. In a headless `clio-coder run`, the answer or JSON stream goes to stdout, while progress and diagnostics go to stderr. [Automate with clio-coder run](/docs/guide/exit-codes-and-output.html) has the details.
