@@ -67,7 +67,7 @@ The bundled index carries four science plugins. Like every other package, none i
 | Pack | Skills | MCP servers it declares | Needs |
 | --- | --- | --- | --- |
 | `plugin:hpc` (0.2.1) | `hpc-sweep`, `hpc-modules`, `hpc-parallel-io`, `hpc-darshan`, `hpc-chronolog`; requires `skill:slurm-jobs` | none | `clio-kit` for the Slurm server, which the operator declares; the cluster's Slurm, Lmod or Spack, Darshan, parallel HDF5 and MPI builds; Python 3.10+ for the bundled scripts |
-| `plugin:science-data` (0.1.1) | `science-data` | `parquet`, `pandas` (clio-kit), each with per-tool action classes | `clio-kit` on `PATH`; Clio Coder 0.7.0 or later |
+| `plugin:science-data` (0.2.1) | `science-data` | `parquet`, `pandas` (clio-kit), each with per-tool action classes | `clio-kit` on `PATH`; Clio Coder 0.8.0 or later |
 | `plugin:literature` (0.2.1) | `citation-check`, `hypothesis-workflow`; requires `skill:arxiv-literature` | `cite-nexus` (`cite-nexus-mcp` 0.2.2 through `uvx`), every tool classed `read` | `uvx` on `PATH`; network for every lookup; Clio Coder 0.7.0 or later |
 | `plugin:life-science` (0.1.0) | `pdb-structures`, `uniprot-proteins`, `pubchem-compounds` | none; the skills use `web_fetch` against the public, key-free RCSB PDB, UniProt and PubChem REST APIs | network for every lookup |
 
@@ -84,7 +84,7 @@ clio-coder mcp trust parquet         # likewise pandas and cite-nexus
 
 **HPC.** `slurm-jobs` submits a job or a job array through the clio-kit Slurm MCP server and reports each array task as `<array job id>_<task id>`. The pack does not declare that server: the operator declares it with the id `slurm` in the user `mcp.yaml`, as the [Slurm guide](slurm.md) shows. `hpc-sweep` plans a parameter sweep as a job array with the bundled `sweep.py`, shows a dry run, submits on the operator's word, judges each run with a declared `verify` check, and tabulates every run, failed and unverified ones included, from the claims Clio records. `hpc-modules` drives Lmod and Spack, `hpc-parallel-io` gives correctness and tuning rules for parallel HDF5 and MPI-IO, and `hpc-darshan` summarizes a Darshan log through the bundled `darshan_summary.py`. `hpc-chronolog` records run events in ChronoLog and reads them back through chrono-mcp, the MCP server of the released ChronoLog 3.x line; the operator declares it in the user `mcp.yaml`. Known limits: ChronoLog 4.0 is unreleased, so the guidance targets the released 3.x line and covers 4.0 only for source builds. The Slurm and Lmod parts of the pack were checked against stand-in binaries, not a live cluster, and the MPI-IO guidance is compile-checked only.
 
-**Science data.** The `science-data` skill answers with Clio's built-in `data` tool first and moves to the `parquet` and `pandas` servers only for analysis `data` does not do. Read tools run without asking; every `pandas` tool that writes a file (`save_data`, and the eight that write a CSV beside their input, such as `groupby_operations` and `pivot_table`) is classed `destructive` and asks at `default`. The clio-kit `hdf5` server is an operator entry in the user `mcp.yaml`, not a pack declaration, because it writes index files under its working directory.
+**Science data.** The `science-data` skill starts from the project [store](store.md): it lists the tags, reads a dataset a tag already holds from the path `get` returns, and keeps results with `put`. It answers with Clio's built-in `data` tool first and moves to the `parquet` and `pandas` servers only for analysis `data` does not do. Read tools run without asking; every `pandas` tool that writes a file (`save_data`, and the eight that write a CSV beside their input, such as `groupby_operations` and `pivot_table`) is classed `destructive` and asks at `default`. The clio-kit `hdf5` server is an operator entry in the user `mcp.yaml`, not a pack declaration, because it writes index files under its working directory.
 
 **Literature.** `citation-check` extracts BibTeX entries, DOIs and arXiv IDs offline with the bundled `extract_citations.py`, verifies each through CiteNexus (key-free Crossref, DataCite, Europe PMC and arXiv), falls back to `web_fetch` when the server is absent or untrusted, and reports VERIFIED, MISMATCH, NOT_FOUND, UNAVAILABLE or UNVERIFIABLE. It never edits a bibliography. With CiteNexus installed, `arxiv-literature` also exports BibTeX, RIS or CSL-JSON and verifies arXiv IDs. Known limit: a citation check covers existence and metadata only (identifier, title, year). It does not check that a source supports the claim it is cited for.
 
@@ -210,7 +210,7 @@ Private index repositories may opt into Git synchronization. Set `integrations.l
 
 ## Interactive library
 
-**Alt+L** (`clio-coder.library.toggle`) or `/library` opens the fullscreen Library, and Alt+L inside it closes it and returns to the composer draft. `/library skills`, `/library agents` and `/library prompts` (also `playbooks`, `plugins` and `extensions`) open the same browser on that category; bare `/library` opens on Plugins. The six tabs cover Skills, Agents, Prompts, Playbooks, Plugins, and Extensions. A typed reference such as `/library install extension:materio` opens the matching tab. Keybinding overrides and modal ownership are in [commands-and-modes.md](commands-and-modes.md).
+**Alt+L** (`clio-coder.library.toggle`) or `/library` opens the fullscreen Library, and Alt+L inside it closes it and returns to the composer draft. `/library skills`, `/library agents` and `/library prompts` (also `playbooks`, `plugins` and `extensions`) open the same browser on that category; bare `/library` opens on Plugins. `/library interop` opens local-agent discovery and reviewed adoption. The six tabs cover Skills, Agents, Prompts, Playbooks, Plugins, and Extensions. A typed reference such as `/library install extension:materio` opens the matching tab. Keybinding overrides and modal ownership are in [commands-and-modes.md](commands-and-modes.md).
 
 | Key | Action |
 | --- | --- |
@@ -238,7 +238,7 @@ Every managed change is reviewed before writing. The review shows dependencies, 
 
 ## Session reload and disable behavior
 
-`/reload library` refreshes installed components (skills, prompts, agents, playbooks) in the active session and reports `library: reloaded installed components (generation <N>)`. If an external CLI command or file edit changes installed components, `/reload library` picks them up without a restart. Headless `library reload` refreshes only its own process.
+`/reload library` refreshes installed components (skills, prompts, agents, playbooks) in the active session and prints a reload report whose `Library (generation <N>)` section counts the packages added, removed, modified and unchanged. Agent recipes are re-read only from changed packages, and `/reload prompts` rediscovers all of them. If an external CLI command or file edit changes installed components, `/reload library` picks them up without a restart. Headless `library reload` refreshes only its own process.
 
 Disabling a package, by `library disable <ref>` or `e` in the overlay, adds the package to the `disabled` list in `plugins/state.json` and deletes no files. Resource discovery rechecks installation state on the next read ([resources.ts](../../src/domains/plugins/resources.ts)), so disabling, removal and digest drift take effect before a manual reload, while additions and replacements need a reload. A CLI disable does not cancel an in-flight tool in another process or erase instructions already in model context. A disabled project copy suppresses the matching user copy, and `library enable <ref>` restores discovery. Extensions have their own lifecycle and reload (`/reload extensions`) and never load from `/reload library`; see [harness-extensions.md](harness-extensions.md).
 
@@ -259,5 +259,5 @@ Clio Coder reads the same inventory through `gateway(op="call", capability="clio
 ## Retired surfaces
 
 - `/plugins` and `/resources` slash commands: no longer recognized. Use `/library plugins` or `/library extensions` to browse and install, and `/extensions` to control the running ones.
-- `/skills`, `/prompts`, `/agents` and `/interop`: retired in 0.8.0 in favor of `/library skills|prompts|agents|interop`; they answer with a notice until 0.8.1.
+- `/skills`, `/prompts`, `/agents` and `/interop`: retired in 0.8.0 in favor of `/library skills|prompts|agents|interop`; they answer like any unknown command.
 - `/library reload` and `/extensions reload`: retired in 0.8.0 in favor of `/reload library` and `/reload extensions`.
