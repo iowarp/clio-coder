@@ -12,11 +12,13 @@ The `inception` runtime has shipped since v0.5.3 and this article describes 0.8.
 
 ## Connect Mercury
 
-Run guided setup, choose **A provider account or API**, then Inception:
+Run guided setup:
 
 ```sh
 clio-coder configure
 ```
+
+On a first run, choose **Guided setup**. If Clio lists routes it found, pick **Set up something else**. Choose **An API key** and type `$INCEPTION_API_KEY`; setup reads the provider from the variable name, picks `mercury-3`, and sends one short test message before saving. When you add Mercury to an existing setup instead, choose **A provider account or API**, then Inception.
 
 Or add the target directly:
 
