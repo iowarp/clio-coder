@@ -1,6 +1,6 @@
 {
 	"description": "Open-source coding agent for scientific software and HPC. Runs in the terminal, headless, in editors over ACP and in a desktop app (alpha), on the models you already have: local, lab gateway, cloud or subscription. Sandboxed commands, bounded workers, checks you can inspect.",
-	"homepage": "https://github.com/iowarp/clio-coder#readme",
+	"homepage": "https://coder.iowarp.ai",
 	"topics": [
 		"agent-client-protocol",
 		"agentic-ai",
