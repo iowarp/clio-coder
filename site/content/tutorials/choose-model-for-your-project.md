@@ -52,17 +52,17 @@ Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-co
 
 Answer what you have, then provide the key, sign-in, or server address it asks for. Setup takes the provider's recommended model, or the only model a server lists; otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
 
-### Review the connection, then save
+### Test the connection, then save
 
 Setup sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults, and `/model` changes the model later.
 :::
 
 ::: capture tui-configure-detected tui-configure-source tui-configure-saved
-Guided setup in the terminal, from the route to the review.
+Guided setup in the terminal: a model server it found, the routes it offers, and the saved connection.
 :::
 
 ::: result
-The model list says whether it is live, cached, or the provider's catalog. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
+When setup shows a model list, the list says whether it is live, cached, or the provider's catalog; a server that lists one model skips the list. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
 :::
 
 
