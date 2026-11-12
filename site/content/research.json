@@ -8,7 +8,7 @@
     "author": "The CLIO Coder team",
     "source": "system-one-decisions.md",
     "basis": "Small samples; first experiment not yet run",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "status": "Open question. System One is off by default.",
     "interfaces": [
       "Terminal"

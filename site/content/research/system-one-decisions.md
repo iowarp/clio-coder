@@ -2,7 +2,7 @@ Can a small, fast decision model make a coding agent's work better? System One i
 
 The plumbing has shipped. Whether it helps is still open, and the evidence so far is thin.
 
-::: note Open question, described for v0.6.8
+::: note Open question, described for 0.8.0
 System One is off until you name a route, and its keys and tool may change between releases. The team, students, and outside researchers are welcome to work on it. All samples below are small, and every experiment on this page is proposed and not yet run.
 :::
 
@@ -16,7 +16,7 @@ Three questions sit inside the big one, and each could come back negative.
 
 ## What is measured so far
 
-These were measured on the current design, on small samples. They show what the parts do. None of them shows that System One improves an agent's work.
+These were measured on the design 0.6.8 shipped, which 0.8.0 keeps, on small samples. They show what the parts do. None of them shows that System One improves an agent's work.
 
 ::: compare
 | Measurement | Result | Sample |
@@ -36,7 +36,7 @@ Precision is weak. Between a third and more than half of filter matches can be w
 
 ### Filter across routes
 
-These also ran on the current design. They are small samples, and the query sets were regression sets, so they were not independent of the work being tested.
+These also ran on the 0.6.8 design. They are small samples, and the query sets were regression sets, so they were not independent of the work being tested.
 
 ::: compare
 | Route | Recall | Precision | Median latency | Returns |
@@ -105,7 +105,7 @@ clio-coder systemone status
 clio-coder systemone check jev --live
 ```
 
-`status` says what each route reaches and sends. `check --live` sends one content-free decision and reports the build that answered, which shows the route works and says nothing about its quality. A choice takes effect on the next start. For one headless run, pass `--systemone`:
+`status` says what each route reaches and sends. `check --live` sends one content-free decision and reports the build that answered, which shows the route works and says nothing about its quality. In the terminal, `/usage health` shows the same state. A choice takes effect on the next start. For one headless run, pass `--systemone`:
 
 ```sh
 clio-coder run --systemone jev "<task>"
@@ -177,7 +177,7 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 :::
 
 ::: next
-- [The full System One guide](https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md)
+- [System One guide](/docs/guide/system-one.html)
 - [Can an agent run be a scientific record?](/research/sealed-run-records.html)
 - [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 :::
