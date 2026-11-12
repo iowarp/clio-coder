@@ -75,6 +75,7 @@
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
+      "What the sandbox hides",
       "Verify using your project's checks",
       "How tools reach the model"
     ]

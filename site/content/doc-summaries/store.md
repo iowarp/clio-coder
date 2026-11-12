@@ -19,7 +19,7 @@ clio-coder store stat results:summary.parquet
 
 > Run the analysis script on `data:measurements.h5`, put its summary into the `results` tag, and tell me whether the stored baseline has drifted.
 
-The agent reaches the store through its `store` tool. Reads run without asking. Creating a tag, a put and a note are judged as writes. Removing a blob, or a put that replaces one, asks first and names the blob and its size, because the store keeps no earlier versions.
+The agent reaches the store through its `store` tool. Reads run without asking. Creating a tag, a put and a note are judged as writes. Removing a blob, or a put that replaces one, asks first and names the blob; a replacing put also states its size. The store keeps no earlier versions.
 
 When a `run_script` run declares a store blob as an input and its output is put back, the record names the script and that input.
 
