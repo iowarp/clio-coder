@@ -43,7 +43,7 @@ The [panes guide](/tutorials/panes-and-docks.html) covers the pane host. Do not 
 Inspect the parser's handling of empty input. Identify the existing tests and propose a regression test. Do not edit files.
 :::
 
-That last sentence is a task instruction, not an enforced boundary. For an enforced one, add `--read-only` to `/run`. CLIO Coder admits a read-only run only on a peer whose own sandbox refuses every write, and refuses it before launch on every other peer, ACP peers included.
+That last sentence is a task instruction, not an enforced boundary. For an enforced one, put `--read-only` before the task, as in `/run --read-only <agent> <task>`; an option typed after the task text becomes part of the task. CLIO Coder admits a read-only run only on a peer whose own sandbox refuses every write, and refuses it before launch on every other peer, ACP peers included.
 
 ## Keep worker authority separate
 

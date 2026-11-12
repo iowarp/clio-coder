@@ -24,6 +24,7 @@
     "source": "desktop-and-terminal.md",
     "cover": "gui-task",
     "basis": "Product tour with 0.6.0 development captures",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/gui.md",
       "README.md"
@@ -97,6 +98,7 @@
     "source": "temperature-calibration.md",
     "cover": "tui-view-result",
     "basis": "Recorded session",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/quality-policy.md"
     ]

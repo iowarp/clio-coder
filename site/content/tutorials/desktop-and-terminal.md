@@ -35,7 +35,7 @@ The rail on the left groups tasks by workspace. The Session column on the right 
 
 You can keep any number of tasks open in one window. Launching again brings that window forward under WSL, when the app is installed through Chrome or Edge, and on a Linux desktop with `wmctrl`, `xdotool` or sway when the background app is running. Otherwise it opens a new browser tab.
 
-Up to four turns run at once by default, set by `interface.guiTurnCapacity` from 1 to 16, and later ones wait for a slot. A task nobody has looked at for five minutes is paused with its conversation kept; choose **Resume session** to continue it.
+Up to four turns run at once by default, set by `interface.guiTurnCapacity` from 1 to 16, and later ones wait for a slot. A task with no turn running and no window showing it for five minutes is paused with its conversation kept, and opening it again brings it back. A task you never typed into closes instead.
 
 With the default **Ask first** setting, CLIO Coder reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
 

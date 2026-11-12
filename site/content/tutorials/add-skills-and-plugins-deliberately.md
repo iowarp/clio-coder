@@ -11,6 +11,10 @@ This guide describes v0.8.0. Library recipes and extensions have different roles
 
 Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library page lists the catalog with an **Installed only** filter. In the terminal, **Browse** shows available content and **Installed** manages your copies.
 
+In v0.8.0 the terminal Library is one place. `/library skills` opens it on one kind, as do `prompts`, `agents`, `playbooks`, `plugins` and `extensions`; the old `/skills`, `/prompts` and `/agents` names are gone. `/library install <ref>` and the other verbs of `clio-coder library` open the review that command would apply. `/library interop` inspects the coding agents on your machine.
+
+Inside the Library, `b` switches between Browse and Installed and `s` between user and project scope. `i`, `u` and `x` open the review for installing, updating or removing the selected package; nothing is written until you apply it. `r` refreshes.
+
 ::: capture tui-library-skill-tdd
 :::
 

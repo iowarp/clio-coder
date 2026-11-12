@@ -74,7 +74,9 @@ Read the tool activity and compare the answer with the project. If it fails, che
 
 ## Separate conversation from worker models
 
-The model answering you need not handle every delegated task. The terminal `/settings` lists the conversation model under **Models** and worker defaults under **Workers**; `clio-coder configure --settings` opens the same menu from the shell. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
+The model answering you need not handle every delegated task. The terminal `/settings` groups its rows into seven areas below **Recent & Pinned**, with the conversation model under **Models** and worker defaults under **Workers**.
+
+`clio-coder configure --settings` opens the shell menu, which uses eight sections instead: the conversation model is under **Chat** and worker defaults under **Fleet**. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
 ::: capture tui-settings-models tui-settings-fleet
 Terminal settings keep the conversation model and the worker defaults apart.
