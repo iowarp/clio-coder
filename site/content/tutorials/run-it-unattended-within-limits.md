@@ -60,7 +60,7 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 
 Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
 
-In the recorded session behind this guide, Qwen 3.8 27B ran the first step on a repository with one failing parser test. It fixed the parser, ran the test, committed on the branch, and pushed nothing. Stderr read:
+In a separate run of the first step, made for this guide apart from the session at the top of the page, Qwen 3.8 27B worked on a repository with one failing parser test. It fixed the parser, ran the test, committed on the branch, and pushed nothing. Stderr read:
 
 ```text
 clio-coder run: --max-cost-usd does not bound unpriced routes: litellm/qwen3.8-27b; declare targets[].pricing to bound them
@@ -68,7 +68,7 @@ clio-coder run: session sjajclvyg6cw
 clio-coder run: observed: 10 tool calls, 0 refused · 1 write · checks passed: npm run test, git diff
 ```
 
-The `--json` run of the third step ended with this frame:
+A `--json` run of the third step from the same set ended with this frame:
 
 ```json
 {"type":"run_end","startedAt":"2026-11-12T19:02:57.365Z","endedAt":"2026-11-12T19:03:09.119Z","exitCode":0,"outcome":"succeeded","safety":{"decisions":{"allowed":3,"blocked":0,"permissionRequested":0},"blockedAttempts":[]}}
