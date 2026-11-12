@@ -296,6 +296,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - A dispatched worker in a task worktree no longer reads the secret files of the checkout the worktree was cut from: its sandbox's secret scan covers that checkout and every worktree linked to it.
 - Under `safety.sandbox: required`, `npm publish` and `pnpm publish` leave the sandbox only when the package directory holds no masked secret and its secret scan was not capped; otherwise the line stays inside and the refusal names the file.
 - The safety judge reads the ask reason, the policy reason and the consequence lines, `package.json` script bodies included, as redacted data inside the call's quoted block, so a repository's script text cannot pose as an operator message.
+- `clio-coder verifiers dry-run` and `author --dry-run`, which the arena runs in a contender's worktree, run in the sandbox host verification uses.
+- The workspace secret scan reads task worktrees under `.clio-coder/worktrees` as roots of their own and judges every listed entry before it walks an untracked directory, so a large checkout, or one holding task worktrees, keeps its own secret files masked.
+- A cached secret scan is reused only while every secret it found, and each directory above it, is still where the scan saw it, so a rename by a tool that does not refresh the scan cannot unmask a secret for the next command.
 
 ### Desktop app
 
@@ -564,6 +567,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - A `run_script` run links an input to the project store only when it gets the store reference (`<tag>:<name>`); a path taken from `store get` runs the same but records no store provenance.
 - Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, and then exits 1.
 - A fleet action step that is not a check, a gate or a commit runs as you outside the sandbox, even when it runs code a worker wrote.
+- A secret file inside a wholly untracked directory that the workspace secret scan reaches only after 20,000 entries stays readable in the sandbox; `clio-coder doctor` warns when the scan stopped at that limit, and a session does not.
 
 ## 0.7.0 - 2026-11-08
 
