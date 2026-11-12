@@ -1480,10 +1480,17 @@ describe("Pi TUI compatibility", () => {
 	it("keeps button-motion mouse tracking inside Herdr and any-motion outside a multiplexer", () => {
 		const keys = ["HERDR_ENV", "TMUX", "ZELLIJ", "STY", "TERM"] as const;
 		const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-		const anyMotion = (writes: string[]) => {
-			const out = writes.join("");
-			return out.lastIndexOf("\x1b[?1003h") > out.lastIndexOf("\x1b[?1003l");
+		// The tracking a terminal ends up in, read the way xterm reads it: setting 1000, 1002 or 1003 picks that mode,
+		// and resetting any of them turns mouse reporting off.
+		const tracking = (writes: string[]) => {
+			let mode = "none";
+			for (const match of writes
+				.join("")
+				.matchAll(new RegExp(`${String.fromCharCode(27)}\\[\\?(1000|1002|1003)([hl])`, "g")))
+				mode = match[2] === "l" ? "none" : match[1] === "1000" ? "click" : match[1] === "1002" ? "drag" : "any";
+			return mode;
 		};
+		const anyMotion = (writes: string[]) => tracking(writes) === "any";
 		const run = (herdr: boolean) => {
 			for (const key of keys) delete process.env[key];
 			process.env.TERM = "xterm-256color";
@@ -1494,6 +1501,7 @@ describe("Pi TUI compatibility", () => {
 			tui.start();
 			try {
 				const started = anyMotion(terminal.writes);
+				ok(tracking(terminal.writes) !== "none", "the started TUI still receives clicks, drags and selections");
 				ok(terminal.writes.join("").includes("\x1b[?1002h"), "button motion keeps drags and selections");
 				const release = tui.useTerminalSelection();
 				terminal.writes = [];

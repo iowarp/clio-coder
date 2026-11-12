@@ -333,7 +333,8 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	protected override beforeTerminalStart(): void {
 		super.beforeTerminalStart();
 		// pi-tui asks for every pointer movement unless it recognises the multiplexer; Herdr it does not.
-		if (this.capturesMouse && multiplexed()) this.terminal.write("\x1b[?1003l");
+		// Resetting any tracking mode turns mouse reporting off entirely, so button motion is asked for again.
+		if (this.capturesMouse && multiplexed()) this.terminal.write("\x1b[?1003l\x1b[?1002h");
 	}
 
 	protected override doRender(): void {
