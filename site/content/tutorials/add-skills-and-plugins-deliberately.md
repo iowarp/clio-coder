@@ -29,7 +29,7 @@ Start with a resource you can evaluate, such as the shipped test-driven-developm
 clio-coder library install skill:tdd --project --dry-run
 ```
 
-Check the destination, dependencies, scope, and package pin. The `--json` form carries the full plan.
+The plain output names the planned step and its scope. Add `--json` to see the rest of the plan: the destination, the version it writes, the source with its sha256, and the dependencies.
 
 ::: capture cli-library-dry-run
 :::
