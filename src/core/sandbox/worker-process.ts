@@ -1,4 +1,4 @@
-import { closeSync, constants, mkdirSync, openSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { workerSecretPaths } from "../../domains/safety/secret-paths.js";
 import { CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../artifact-paths.js";
@@ -289,13 +289,40 @@ export type SandboxedSpawnPlan =
  * The trees a worker's command can see that hold the run's own files: its
  * directory write roots and its readable roots (cwd, task worktree, parent
  * checkouts), minus Git metadata, which holds no secret file and is large.
+ * A task worktree's shared `.git` stands for the checkout that owns it and
+ * every worktree linked to it: none is bound, but the sandbox reads the whole
+ * filesystem, so their untracked secrets are scanned like the worktree's own.
+ * Each linked worktree is its own root, so the checkout's walk skips the ones
+ * under `.clio-coder/worktrees` instead of spending its budget on them.
  */
 function workerSecretRoots(policy: WorkerSandboxSpec): string[] {
+	const commonDirs = policy.readableRoots.filter((root) => path.basename(root) === ".git");
 	const roots = [
 		...policy.writableRoots.filter((root) => root.endsWith("/") || isDirectoryPath(root)),
 		...policy.readableRoots,
+		...commonDirs.flatMap((commonDir) => [path.dirname(commonDir), ...linkedWorktrees(commonDir)]),
 	];
 	return [...new Set(roots)].filter((root) => !root.split(path.sep).includes(".git"));
+}
+
+/** The work trees linked to a repository, read from each `<common>/worktrees/<id>/gitdir` without spawning Git. */
+function linkedWorktrees(commonDir: string): string[] {
+	let ids: string[];
+	try {
+		ids = readdirSync(path.join(commonDir, "worktrees"));
+	} catch {
+		return [];
+	}
+	const trees: string[] = [];
+	for (const id of ids) {
+		try {
+			const gitFile = readFileSync(path.join(commonDir, "worktrees", id, "gitdir"), "utf8").trim();
+			if (gitFile.length > 0) trees.push(path.dirname(path.resolve(commonDir, "worktrees", id, gitFile)));
+		} catch {
+			// A pruned or half-made entry names no tree to scan.
+		}
+	}
+	return trees;
 }
 
 function isDirectoryPath(entry: string): boolean {
