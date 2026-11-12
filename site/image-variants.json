@@ -675,27 +675,27 @@
     ]
   },
   "assets/guides/cli-slurm-doctor.webp": {
-    "width": 2154,
-    "height": 656,
-    "sha256": "1d24eaaf24c6c17a2ec1fa8f38667d5483b70ef1be60e2fcafceba991f151146",
+    "width": 2268,
+    "height": 824,
+    "sha256": "4cffb6529167d270f5c5d3e8ffec72c7d49845249fa9bb94f83fd48180e43685",
     "variants": [
       {
         "path": "assets/responsive/cli-slurm-doctor-640.webp",
         "width": 640,
-        "height": 195,
-        "sha256": "7ef77f74d73b233ef40c8be2460e65235db25cb4bc95302aa1e76769c6264d8d"
+        "height": 233,
+        "sha256": "747eb5661d6f88bd9b119fcac555453eb3932e33c64155de93aaf0cabb78d0b3"
       },
       {
         "path": "assets/responsive/cli-slurm-doctor-1024.webp",
         "width": 1024,
-        "height": 312,
-        "sha256": "ef3e845ed0576b58e203fe5e999cb40f53cc0a49fd2a665f3b92f95d8b2351aa"
+        "height": 372,
+        "sha256": "73ec8ec23572dd8beccb7f35997cb061074522842ebf54e6623e0ebdd7b5c0b2"
       },
       {
         "path": "assets/responsive/cli-slurm-doctor-1600.webp",
         "width": 1600,
-        "height": 487,
-        "sha256": "c30f0398a64ac2b7d26cb61bf7b49add053ef2a1fd675ed52c458ca1fc1ce6db"
+        "height": 581,
+        "sha256": "e15f76489027baf9b145254601f5075b58927f481b020982bf6d7012766e2936"
       }
     ]
   },

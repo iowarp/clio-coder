@@ -297,15 +297,15 @@
 		"cli-slurm-doctor": {
 			"image": "assets/guides/cli-slurm-doctor.webp",
 			"original": "assets/guides/cli-slurm-doctor.png",
-			"width": 2154,
-			"height": 656,
+			"width": 2268,
+			"height": 824,
 			"label": "No cluster yet",
-			"alt": "Terminal output: doctor --verbose reports clio-kit and the slurm MCP server as OK and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows five slurm tools; the skill install dry run plans skill:slurm-jobs.",
-			"caption": "The setup checks on a machine with no Slurm client: the server is declared, its tools are listed, and doctor says the scheduler is missing.",
+			"alt": "Terminal: doctor --verbose filtered to its Slurm rows reports sbatch not on PATH, clio-kit OK with the slurm server, the slurm MCP server OK as declared and trusted in the user mcp.yaml, and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows the server with no recorded tool catalog, and mcp list --refresh lists its five tools: submit and cancel as execute, list, describe and cluster as read.",
+			"caption": "The setup checks on a host with no scheduler: the server is declared and trusted, its tools are listed, and doctor reports sbatch and squeue missing.",
 			"interface": "Terminal",
-			"version": "0.6.8",
-			"capturedAt": "2026-11-04",
-			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model and no cluster: clio-kit 2.11.1 installed with uv tool install, mcp.yaml as the guide gives it, sbatch and squeue absent. No job was submitted. The full screen for the three commands."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-slurm) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Host tools (uv, uvx) bound read-only. clio-kit 2.12.3 installed from PyPI with uv tool install and prepared with clio-kit mcp-server slurm --prepare before the shown commands; mcp.yaml as the guide gives it; sbatch and squeue absent. No job was submitted. Still at the \"cli-slurm-doctor\" marker, rows 1-19, rendered by the site's player at 2x."
 		},
 		"cli-playbook-graph": {
 			"image": "assets/guides/cli-playbook-graph.webp",

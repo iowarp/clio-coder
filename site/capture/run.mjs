@@ -323,7 +323,11 @@ function sandboxScript(dir, scenario) {
 		clio.root,
 		"/opt/clio-coder",
 		...(scenario.privateNet ? ["--bind", join(dir, "net"), "/opt/net", "--unshare-net", "--unshare-pid"] : []),
-		...(scenario.peers ?? []).flatMap((name) => ["--ro-bind", peerPath(name), `/home/researcher/.local/bin/${name}`]),
+		...[...(scenario.peers ?? []), ...(scenario.hostTools ?? [])].flatMap((name) => [
+			"--ro-bind",
+			peerPath(name),
+			`/home/researcher/.local/bin/${name}`,
+		]),
 		"--unshare-uts",
 		"--unshare-ipc",
 		"--hostname",
@@ -360,10 +364,10 @@ function sandboxScript(dir, scenario) {
 	return script;
 }
 
-// A peer agent CLI from the host's PATH, bound read-only so interop can detect it.
+// A peer agent CLI or host tool from the host's PATH, bound read-only into ~/.local/bin.
 function peerPath(name) {
 	const found = spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
-	if (!found) throw new Error(`The peer CLI ${name} is not on this host's PATH.`);
+	if (!found) throw new Error(`${name} is not on this host's PATH.`);
 	return execFileSync("readlink", ["-f", found], { encoding: "utf8" }).trim();
 }
 
@@ -794,7 +798,9 @@ async function render({ scenario, outDir, session, cast }) {
 			: scenario.privateNet
 				? " The sandbox has its own network namespace with only a loopback interface."
 				: ""
-	}${scenario.peers ? ` Peer agent CLIs (${scenario.peers.join(", ")}) bound read-only, with no credentials.` : ""}`;
+	}${scenario.peers ? ` Peer agent CLIs (${scenario.peers.join(", ")}) bound read-only, with no credentials.` : ""}${
+		scenario.hostTools ? ` Host tools (${scenario.hostTools.join(", ")}) bound read-only.` : ""
+	}${scenario.sourceNote ? ` ${scenario.sourceNote}` : ""}`;
 	const entries = {};
 	for (const still of rendered) {
 		const isCast = still.id === scenario.id;

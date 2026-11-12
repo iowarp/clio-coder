@@ -1656,6 +1656,126 @@
 					"caption": "store put keeps a result under a tag; store stat shows its hash and whether it has drifted."
 				}
 			}
+		},
+		{
+			"id": "stills-slurm",
+			"summary": "doctor --verbose and mcp list with the clio-kit slurm server declared, on a host with no Slurm client",
+			"title": "Slurm setup checks",
+			"live": false,
+			"stillsOnly": true,
+			"hostTools": ["uv", "uvx"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-cli",
+			"cols": 120,
+			"rows": 120,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"homeFiles": {
+				".config/clio-coder/mcp.yaml": "version: 1\nservers:\n  - id: slurm\n    command: clio-kit\n    args: [mcp-server, slurm]\n    timeoutMs: 120000\n"
+			},
+			"sourceNote": "clio-kit 2.12.3 installed from PyPI with uv tool install and prepared with clio-kit mcp-server slurm --prepare before the shown commands; mcp.yaml as the guide gives it; sbatch and squeue absent. No job was submitted.",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"type": "uv tool install clio-kit==2.12.3",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Installed[\\s\\S]*\\$\\s*$",
+					"timeout": 240,
+					"pause": 1
+				},
+				{
+					"type": "clio-kit mcp-server slurm --prepare >/dev/null 2>&1; echo prepare exit $?",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "prepare exit 0\\s*\\n[\\s\\S]*\\$\\s*$",
+					"timeout": 240,
+					"pause": 1
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder doctor --verbose | grep -E 'slurm|sbatch'",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "slurm scheduler[\\s\\S]*\\$\\s*$",
+					"timeout": 120,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder mcp list",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 120,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder mcp list --refresh",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 180,
+					"pause": 1
+				},
+				{
+					"pause": 1
+				},
+				{
+					"shot": "cli-slurm-doctor",
+					"rows": [1, 19]
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-slurm-doctor": {
+					"label": "No cluster yet",
+					"alt": "Terminal: doctor --verbose filtered to its Slurm rows reports sbatch not on PATH, clio-kit OK with the slurm server, the slurm MCP server OK as declared and trusted in the user mcp.yaml, and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows the server with no recorded tool catalog, and mcp list --refresh lists its five tools: submit and cancel as execute, list, describe and cluster as read.",
+					"caption": "The setup checks on a host with no scheduler: the server is declared and trusted, its tools are listed, and doctor reports sbatch and squeue missing."
+				}
+			}
 		}
 	]
 }
