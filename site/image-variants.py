@@ -22,6 +22,7 @@ INPUTS = {
     "assets/guides/tui-settings-models.webp": [640, 1024, 1600],
     "assets/guides/tui-settings-fleet.webp": [640, 1024, 1600],
     "assets/guides/tui-verify-result.webp": [640, 1024, 1600],
+    "assets/guides/tui-verify-table.webp": [640, 1024, 1600],
     "assets/guides/tui-view-result.webp": [640, 1024, 1600],
     "assets/guides/tui-approval-effect.webp": [640, 1024, 1600],
     "assets/guides/tui-context.webp": [640, 1024, 1600],

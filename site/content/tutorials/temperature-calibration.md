@@ -36,7 +36,7 @@ The example’s private `package.json` declares its test command. With the archi
 
 If an approval card appears, read the command before allowing it. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
-![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
+![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/guides/tui-verify-table.webp)
 
 To run the same tests yourself from the repository root:
 

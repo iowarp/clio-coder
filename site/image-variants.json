@@ -199,6 +199,31 @@
       }
     ]
   },
+  "assets/guides/tui-verify-table.webp": {
+    "width": 2240,
+    "height": 1668,
+    "sha256": "e660ce2e61de35c3a9eb3389548591fa8895106a6e7207c0002564e674dff603",
+    "variants": [
+      {
+        "path": "assets/responsive/tui-verify-table-640.webp",
+        "width": 640,
+        "height": 477,
+        "sha256": "3d41c2954d27f52d436fe196c835b993bdaac9d42c5a9ba69b3ffbbda5c1467a"
+      },
+      {
+        "path": "assets/responsive/tui-verify-table-1024.webp",
+        "width": 1024,
+        "height": 763,
+        "sha256": "95fed57a38cdb7ec89f8ec609b5c9baf07fe4072e07d00a2aab3a7f8dec1db1a"
+      },
+      {
+        "path": "assets/responsive/tui-verify-table-1600.webp",
+        "width": 1600,
+        "height": 1191,
+        "sha256": "3c529200b0eb56869b5aaa2898602b6cdac457ece48377f66495c13059bdc296"
+      }
+    ]
+  },
   "assets/guides/tui-view-result.webp": {
     "width": 2240,
     "height": 832,

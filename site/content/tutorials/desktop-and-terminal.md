@@ -13,7 +13,7 @@ clio-coder
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
-![CLIO Coder in the terminal running a declared test check through verify, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
+![CLIO Coder in the terminal changing one line of temperature.mjs to fix a failing test, then running the declared test check through verify with exit 0](/assets/tui-verify.webp)
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 

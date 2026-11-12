@@ -447,6 +447,19 @@
 			"rows": 36,
 			"duration": 42.2,
 			"posterAt": 34.278
+		},
+		"tui-verify-table": {
+			"image": "assets/guides/tui-verify-table.webp",
+			"original": "assets/guides/tui-verify-table.png",
+			"width": 2240,
+			"height": 1668,
+			"label": "Verify",
+			"alt": "Terminal conversation in which CLIO Coder runs the declared test check through verify with exit 0, reads the test file, and shows the three reference temperatures as a table.",
+			"caption": "A declared test check through verify, then the reference temperatures from the test file.",
+			"interface": "Terminal",
+			"version": "0.6.0-dev",
+			"capturedAt": "2026-10-01",
+			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. Request typed in a new session; the full screen at the end of the turn."
 		}
 	}
 }
