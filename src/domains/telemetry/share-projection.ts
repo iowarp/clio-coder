@@ -745,6 +745,7 @@ export const BUILTIN_EVIDENCE: ReadonlySet<string> = new Set([
 	"observer:turn-outcome@turn",
 	"path:compacted-file@tool-args",
 	"path:protected-artifact@tool-args",
+	"path:sister-repository@session",
 	"rank:skills@task",
 	"regex:ANNOUNCED_WORK@assistant-text",
 	"regex:TOOL_CALL_PROSE@assistant-text",
