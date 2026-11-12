@@ -26,6 +26,15 @@ def encoded(value):
     return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
 
 
+def later_prerelease(candidate, version):
+    # Between releases a checkout carries the next version's pre-release
+    # (0.8.0-rc.1, 0.8.1-dev) while the site stays on the last stable release,
+    # which scripts/release-readiness.mjs requires.
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-(?:rc|dev|snapshot)(?:[.+].*)?", candidate)
+    core = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    return bool(match and core) and tuple(map(int, match.groups())) > tuple(map(int, core.groups()))
+
+
 def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
     product = json.loads((SITE / "product.json").read_text())
     version = product["version"]
@@ -79,8 +88,10 @@ def inputs(ref, worktree, source_ref=None, repository_snapshot=False):
     else:
         repo_version = json.loads(git("show", f"{commit}:package.json"))["version"]
     # A development tree carries the upcoming version with a -dev suffix. Only a
-    # release snapshot, taken at the tag, must match exactly.
-    if repo_version != version and not ((repository_snapshot or worktree) and repo_version == f"{version}-dev"):
+    # release snapshot, taken at the tag, must match exactly. A working-tree
+    # snapshot is a local preview that deployment and release checks reject, so
+    # it also accepts a later pre-release.
+    if repo_version != version and not ((repository_snapshot or worktree) and repo_version == f"{version}-dev") and not (worktree and later_prerelease(repo_version, version)):
         raise ValueError(f"repository version {repo_version} differs from site version {version}")
     manifest = {
         "schema": 2, "corpus": "public-guides", "corpusPolicy": "site/public-docs.json",
