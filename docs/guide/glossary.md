@@ -1,10 +1,46 @@
 # CLIO Coder Glossary
 
-This document defines the core architectural concepts and terminology used throughout CLIO Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the core architectural concepts and terminology used throughout CLIO Coder, mapped to their authoritative TypeScript type definitions in `src/`. Start with the plain-language terms below; the numbered definitions after them are the precise ones.
+
+## Plain-language terms
+
+The words you meet first, each in a sentence or two, with the guide that explains it.
+
+| Term | What it means |
+| --- | --- |
+| Session | One conversation with CLIO Coder in a project. It is saved, so you can resume it later. See [Commands and modes](commands-and-modes.md). |
+| Target (connection) | A place CLIO Coder sends prompts to: a provider account or a local model server, with its default model. Settings call it a connection. See [Configuration and targets](configuration-and-targets.md). |
+| Chat route | The target and model your main conversation uses right now. |
+| Autonomy level | How much CLIO Coder may do without you: `default` asks when something is risky, `yolo` never waits for you. See [Sandbox and safety](sandbox-and-safety.md). |
+| Sandbox | An operating-system wall around shell commands. Inside it a command can write only to the project and scratch folders and cannot read your credentials. |
+| Contained | A command that runs inside the sandbox. At `default` most contained work runs without asking. |
+| Safety judge | A model that checks a risky call against what you asked for, before you are asked. It allows it, refuses it, or passes it to you. |
+| Approval card | The question CLIO Coder shows when a call needs your answer. One nobody answers is denied after a timeout. |
+| Snapshot | A private copy of your files that CLIO Coder takes before it changes them. `/rewind` restores one. |
+| Worker | A separate agent that does one task for the main session, often on its own branch. See [Fleet dispatch](fleet-dispatch.md). |
+| Fleet | The workers available to you and the routes they run on. |
+| Dispatch | Handing a task to a worker, with `/run` in a session or `clio-coder run --agent` from a shell. |
+| Worktree | A separate checkout of your repository on its own branch, where a worker can change files without touching yours. |
+| Run record | The sealed record of a finished worker run: what it did, what it changed and which checks passed. `/view verify <runId>` checks it. |
+| Check (verifier) | A command in `.clio-coder/verifiers.yaml` that decides whether work is right, such as a test suite or a benchmark. |
+| Peer | Another coding agent, such as Claude Code, Codex or OpenCode, that CLIO Coder hands a task to. See [Coding agent interoperability](interop.md). |
+| Skill | Written instructions for a procedure, in a `SKILL.md` file, that the agent loads when the task needs it. See [Prompts, skills, and share archives](extensions-and-sharing.md). |
+| Prompt template | A saved prompt you run as a slash command, such as `/bugfix`. |
+| Library | The installable packages CLIO Coder knows about, browsed with `/library`. See [Library packages](resource-library.md). |
+| Plugin | A package of content only: skills, prompts, agents and playbooks. Installing one never runs code. See [Plugins](plugins.md). |
+| Extension | A package of code that changes CLIO Coder itself. It runs in its own process, after you review what it may do. See [Extensions](harness-extensions.md). |
+| Handbook | `CLIO-CODER.md` at the repository root: the project's name, conventions and rules, written by you and kept in Git. |
+| Memory | Notes CLIO Coder keeps while you work, such as your requirements and what failed, so it can remind the agent later. See [Proactive memory](proactive-memory.md). |
+| Compaction | Shortening a long conversation into a summary so it fits the model's context window. See [Context continuity](context-continuity.md). |
+| Store | A place outside your working tree for result files and datasets, shared by every checkout of the project. See [Store](store.md). |
+| Research campaign | A loop where workers try changes that improve one measured number while every check still passes. See [Research and arena](research-and-arena.md). |
+| Arena match | The same task given to several models and graded by the same check, so you can compare the results and vote blind. |
+| Sweep | A set of run directories for one experiment, each checked on its own. See [Parameter sweeps](slurm.md#parameter-sweeps). |
+| Doctor | `clio-coder doctor`, a read-only check of your install, connections and sandbox. See [Doctor](doctor.md). |
 
 ---
 
-## Terms & Concept Definitions
+## Precise definitions
 
 ### 1. Assignment
 - **Definition**: The logical unit of work dispatched to the fleet. An assignment encapsulates the requested task, briefing, authority boundaries, and retry history across one or more concrete run attempts.
