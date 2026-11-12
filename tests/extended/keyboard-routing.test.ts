@@ -9,6 +9,7 @@ import {
 	getKeybindings,
 	Input,
 	ScrollView,
+	SelectList,
 	setKeybindings,
 	stripTerminalSequences,
 	type Terminal,
@@ -22,7 +23,7 @@ import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js"
 import { dispatchInteractiveAction } from "../../src/interactive/interactive-application.js";
 import { createInteractiveInputRuntime } from "../../src/interactive/interactive-input-runtime.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
-import { FocusBox, showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
+import { DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import { openExtensionPanel } from "../../src/interactive/overlays/extension-panel.js";
@@ -999,4 +1000,56 @@ it("keeps pointer and focus reports out of key routing, at boot and after it", a
 	boot.terminal.input("\x03");
 	await new Promise((resolve) => setImmediate(resolve));
 	assert.equal(boot.counts.shutdowns, 1);
+});
+it("selects text past focused search and a modal overlay, and choices still move only on keys", () => {
+	const f = fixture();
+	f.active.streaming = false;
+	const cell = (text: string) => {
+		f.tui.renderNow();
+		const lines = f.tui.getScreenLines().map(stripTerminalSequences);
+		const row = lines.findIndex((line) => line.includes(text));
+		assert.ok(row >= 0, `${text} is on screen`);
+		return { x: (lines[row] ?? "").indexOf(text) + 1, y: row + 1 };
+	};
+	const press = (x: number, y: number, motion = false) => f.terminal.input(`\x1b[<${motion ? 32 : 0};${x};${y}M`);
+	const release = (x: number, y: number) => f.terminal.input(`\x1b[<0;${x};${y}m`);
+	const drag = (text: string) => {
+		const at = cell(text);
+		press(at.x, at.y);
+		press(at.x + text.length - 1, at.y, true);
+		release(at.x + text.length - 1, at.y);
+		f.tui.renderNow();
+	};
+	f.tui.toggleSearch();
+	assert.equal(f.tui.isSearchFocused, true);
+	drag("alpha two");
+	assert.equal(f.tui.hasActiveSelection(), true, "a drag selects while search is focused");
+	assert.equal(f.tui.isSearchFocused, true);
+	f.tui.closeSearch();
+	f.tui.resetTextSelection();
+	let confirmed = 0;
+	const list = new SelectList(
+		[
+			{ value: "a", label: "first choice" },
+			{ value: "b", label: "second choice" },
+		],
+		2,
+		DEFAULT_SELECT_THEME,
+	);
+	list.onSelect = () => {
+		confirmed++;
+	};
+	f.open("model", list);
+	const second = cell("second choice");
+	press(second.x, second.y);
+	release(second.x, second.y);
+	f.tui.renderNow();
+	assert.equal(list.getSelectedItem()?.value, "a", "a click does not move the choice");
+	assert.equal(confirmed, 0, "a click does not confirm a choice");
+	assert.equal(f.tui.hasActiveSelection(), false);
+	drag("second choice");
+	assert.equal(f.tui.hasActiveSelection(), true, "a drag over the overlay selects its screen rows");
+	assert.equal(list.getSelectedItem()?.value, "a");
+	assert.equal(confirmed, 0);
+	assert.equal(f.state(), "model");
 });

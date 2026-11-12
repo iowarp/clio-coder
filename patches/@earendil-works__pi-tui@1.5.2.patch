@@ -104,7 +104,7 @@ index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..889cd0d38278c2da96d3a626034212250cce35ce 100644
+index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd0e38e9ef 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
 @@ -109,11 +109,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
@@ -125,7 +125,33 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..889cd0d38278c2da96d3a62603421225
      private getSearchNavigationDirectionAt;
      private handleSearchMouseEvent;
      private refreshSearch;
-@@ -157,6 +159,12 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -133,7 +135,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+     private handleMouseEvent;
+     private parseWheelEvent;
+     private routeWheel;
+-    private parseSgrMouseEvent;
++    /** Parses one SGR mouse report into a zero-based cell and its button bits. */
++    protected parseSgrMouseEvent(data: string): {
++        button: number;
++        x: number;
++        y: number;
++        release: boolean;
++    } | undefined;
+     private handleRightClickPaste;
+     private handleScrollToEndIndicatorMouseEvent;
+     private getScrollbarTargetAt;
+@@ -153,10 +161,22 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+     private updateSelectionAutoScroll;
+     private autoScrollSelection;
+     private stopSelectionAutoScroll;
+-    private handleSelectionMouseEvent;
++    /** Runs only the text-selection path for one parsed report, skipping overlay and layout dispatch. */
++    protected handleSelectionMouseEvent(event: {
++        button: number;
++        x: number;
++        y: number;
++        release: boolean;
++    }): void;
      private getSelectionBounds;
      private getSelectionColumns;
      private getActiveSelectionText;

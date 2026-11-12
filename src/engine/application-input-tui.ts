@@ -107,6 +107,25 @@ export class ApplicationInputTuiAltScreen extends TuiAltScreen implements Applic
 		this.scrollBy(((button & 3) === 0 ? -1 : 1) * ((button & 8) !== 0 ? 5 : 1));
 		return true;
 	}
+
+	/**
+	 * Run one pointer report through Pi's text selection alone, for a modal
+	 * overlay that owns the keyboard. Pi's SelectList and SettingsList select
+	 * on press and confirm on click, so the report never reaches overlay
+	 * components; a drag still selects the screen rows under it and copies
+	 * them. Pi treats a release that selected nothing as a click and offers it
+	 * to the overlay, so that release is dropped, and a release that ends a
+	 * selection is preceded by a motion report so it never counts as a click.
+	 */
+	selectPastOverlay(data: string): void {
+		const event = this.parseSgrMouseEvent(data);
+		if (!event || (event.button & 64) !== 0) return;
+		if (event.release) {
+			if (!this.hasActiveSelection()) return;
+			this.handleSelectionMouseEvent({ ...event, button: event.button | 32, release: false });
+		}
+		this.handleSelectionMouseEvent(event);
+	}
 }
 
 export class ApplicationInputTuiMainScreen extends TuiMainScreen implements ApplicationInputHost {

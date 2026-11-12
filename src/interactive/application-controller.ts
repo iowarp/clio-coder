@@ -95,6 +95,8 @@ export interface ApplicationControllerDeps {
 	leaderKeys: LeaderKeyController;
 	isSearchFocused?: () => boolean;
 	closeSearch?: () => void;
+	/** Run a pointer report through the fullscreen text selection only, past a modal overlay. */
+	selectPastOverlay?: (data: string) => void;
 	forwardFocusedInput?: (data: string) => void;
 	cancelFocusedOwner?: () => void;
 	isAutocompleteVisible?: () => boolean;
@@ -433,12 +435,16 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	const routeInput = (data: string): ApplicationInputResult => {
 		if (isKeyRelease(data)) return { consume: true };
 		// Pointer and focus reports are not keys: they must not disarm the exit,
-		// close a glance or reach a key owner. Focus goes on to pi-tui's viewport
-		// handler; the pointer stays inert while a key owner holds input.
+		// close a glance or reach a key owner. Both go on to pi-tui's viewport
+		// handler, which also drives the search box's buttons and a selection
+		// while search is focused. Over a modal overlay only pi-tui's selection
+		// sees the pointer, so choices still move only on keys.
 		const report = terminalReportKind(data);
 		if (report === "focus") return undefined;
 		if (report === "pointer") {
-			return deps.isSearchFocused?.() || overlayOwnsInput(deps.getOverlayState()) ? { consume: true } : undefined;
+			if (!overlayOwnsInput(deps.getOverlayState())) return undefined;
+			deps.selectPastOverlay?.(data);
+			return { consume: true };
 		}
 		if (isKeyRepeat(data) && !(deps.matchesRepeatableInput?.(data) ?? false)) return { consume: true };
 		if (matchesKey(data, "ctrl+c")) {

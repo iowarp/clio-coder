@@ -2,7 +2,13 @@ import { getTerminationCoordinator } from "../core/termination.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import { CLIO_APP_KEYBINDING_IDS } from "../domains/config/keybindings.js";
 import type { Keybinding, TUI } from "../engine/tui.js";
-import { decodePrintableKey, isKeyRelease, matchesKey, TuiAltScreen } from "../engine/tui.js";
+import {
+	ApplicationInputTuiAltScreen,
+	decodePrintableKey,
+	isKeyRelease,
+	matchesKey,
+	TuiAltScreen,
+} from "../engine/tui.js";
 import type {
 	ApplicationClock,
 	ApplicationController,
@@ -416,6 +422,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		isSearchFocused: () => search() !== null,
 		closeSearch: () => search()?.closeSearch(),
+		selectPastOverlay: (data) => {
+			if (deps.tui instanceof ApplicationInputTuiAltScreen) deps.tui.selectPastOverlay(data);
+		},
 		isAutocompleteVisible: () => deps.editor.isShowingAutocomplete?.() ?? false,
 		hasQueuedMessages: () => deps.hasQueuedMessages?.() ?? false,
 		explainProtectedExit: () => deps.explainProtectedExit?.(),
