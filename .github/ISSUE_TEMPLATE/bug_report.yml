@@ -1,5 +1,5 @@
 name: Bug report
-description: Report something that went wrong in Clio Coder.
+description: Something went wrong in Clio Coder. Tell us what you saw.
 title: "fix: "
 labels: ["bug"]
 body:
@@ -7,7 +7,7 @@ body:
     id: problem
     attributes:
       label: What happened
-      description: Describe what went wrong. A few sentences are enough.
+      description: A few sentences are enough. `/report bug` inside Clio Coder, or `clio-coder report bug` in a shell, fills this form for you and masks private details first.
     validations:
       required: true
   - type: textarea
@@ -50,7 +50,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: "`clio-coder --version` and your target and model; `/report` fills this."
+      description: "`clio-coder --version`, how you installed it, and your target and model. `/report` fills this."
       render: text
     validations:
       required: false
@@ -58,7 +58,7 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Only the relevant log lines. Remove API keys, host names and private source.
+      description: Only the relevant lines. Remove API keys, host names and private source. Security problems go to a private advisory, not here.
       render: text
     validations:
       required: false

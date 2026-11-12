@@ -1,4 +1,5 @@
-<!-- Keep this PR focused. Split unrelated docs, runtime, CLI, and TUI work. -->
+<!-- Thank you for the pull request. Keep it focused: split unrelated docs, runtime, CLI and TUI work. -->
+<!-- Open it against the current version branch named in CONTRIBUTING.md, not main. -->
 
 ## Summary
 
@@ -10,29 +11,29 @@
 
 ## Verification
 
-- [ ] `pnpm run ci` is green locally.
-- [ ] Touched core release surfaces are covered by smoke/contracts when practical.
-- [ ] No exploratory probes left under `scripts/` or `tests/`. One-off probes go to `/tmp/` and get deleted.
+- [ ] `pnpm run typecheck` and `pnpm run lint` pass.
+- [ ] Focused `pnpm run test:file -- <test>` runs cover the changed behavior, and `pnpm run test` passes.
+- [ ] No exploratory probes left under `scripts/` or `tests/`.
 - [ ] No `// biome-ignore`, `ts-ignore`, or `any` added without a linked tracking issue.
 
 ## Architecture invariants
 
-The boundary checker enforces these. Confirm none are violated:
+The boundary checker in `pnpm run lint` enforces these. Confirm none are violated:
 
-- [ ] **Engine boundary.** Only `src/engine/**` value-imports `@earendil-works/pi-*`.
-- [ ] **Worker isolation.** `src/worker/**` does not import `src/domains/**` except `src/domains/providers`.
-- [ ] **Domain independence.** No `src/domains/<x>/**` imports another domain's `extension.ts`. Cross-domain traffic flows through `SafeEventBus`.
+- [ ] **Engine boundary.** Only `src/engine/**` imports `@earendil-works/pi-*`, type imports included.
+- [ ] **Worker isolation.** `src/worker/**` does not import `src/domains/**` except the declared provider seams.
+- [ ] **Domain independence.** No `src/domains/<x>/**` imports another domain's `extension.ts`.
 
-If any invariant is intentionally relaxed, link the design note that authorized it.
+If an invariant is intentionally relaxed, link the design note that authorized it.
 
 ## Voice
 
-- [ ] No em-dash clause separators in code, docs, comments, or commit messages. Hyphens in compound words and table separators are fine.
-- [ ] No emojis.
+- [ ] No dash used to splice a clause into a sentence, in code, docs, comments or commit messages. Hyphens in compound words and table separators are fine.
+- [ ] No emoji.
 
 ## Changelog
 
-<!-- One line per user-visible change, or "no changelog entry needed" with reason. -->
+<!-- One line per user-visible change, or "no changelog entry needed" with the reason. -->
 
 ## Related
 

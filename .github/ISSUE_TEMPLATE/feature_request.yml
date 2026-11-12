@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a focused capability or developer workflow.
+description: Propose a capability or a better workflow.
 title: "feat: "
 labels: ["enhancement"]
 body:
@@ -7,27 +7,27 @@ body:
     id: problem
     attributes:
       label: User problem
-      description: What concrete user or agent workflow is blocked or awkward today? Describe the problem before the solution.
+      description: What are you trying to do, and what is blocked or awkward today? Describe the problem before the solution. A real task from your own work is the best argument.
     validations:
       required: true
   - type: textarea
     id: shape
     attributes:
       label: Proposed shape
-      description: Which surface changes? CLI, TUI, runtime, provider, session, docs, or test surface. Sketch the command, flag, or tool name if you have one.
+      description: If you have an idea of the fix, sketch it. Which surface changes (terminal, headless run, ACP, desktop app, a provider, docs)? Name the command, flag or setting if you have one.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: Concrete checks a reviewer can apply.
+      description: How would you know it works? Concrete checks a reviewer can apply.
       placeholder: |
         - Command exits 0 on the documented happy path.
         - Existing settings.yaml continues to load without migration.
         - A unit or integration test covers the changed path.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: alternatives
     attributes:
