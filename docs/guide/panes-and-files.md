@@ -49,7 +49,7 @@ Clio acts only on panes it created, which carry a `clio_coder_owner` metadata to
 
 When an `@file` mention expands to an image and the routed model cannot accept images, Clio refuses to submit the turn and prints `IMAGE_INPUT_UNSUPPORTED` with the route and up to five known vision-capable `target/model` choices to pick in `/model`. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image instead and the turn proceeds.
 
-Outside herdr, `/files` still works when panes are enabled: the file view takes over the terminal
+Outside herdr, `/files` still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
 The logs and shell panes need a pane host and say so.
 

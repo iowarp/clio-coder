@@ -34,7 +34,7 @@ The first question is **What do you have?**: **An API key**, **A subscription** 
 
 1. Provide what the row asks for. A pasted API key names its provider from the key's prefix (`sk-ant-` is Anthropic, for example) and Clio asks which provider only when the prefix is shared or unknown. A subscription signs in: a browser opens on a desktop, and over SSH or without a display Clio prints a link and a code. A model server asks for its address.
 2. For a model server or gateway, Clio performs a passive reachability and model-list probe; this sends no generation request. A key or subscription provider gets no passive check.
-3. Clio picks the model: the provider's recommended model when its catalog lists one, otherwise the first model a server lists. If a discoverable endpoint returns no models, start the server or load a model and choose **Check again**. Typing an unverified wire id is an explicitly advanced fallback.
+3. Clio picks the model: the provider's recommended model when its catalog lists one, otherwise the only model a server lists; when a server lists several and none is recommended, you pick from the list. If a discoverable endpoint returns no models, start the server or load a model and choose **Check again**. Typing an unverified wire id is an explicitly advanced fallback.
 4. Test. Clio sends the model one short test request and saves when it answers: `Testing <target> / <model> ... answered in <t> s.`, then `Saved. Chat and workers use this model. Change it any time with /model or /config.` A failure shows the provider's message and one fix, with **Try again**, **Change the key or address**, **Save anyway** (saved as not checked) and **Connection and machine details**. That last row opens the review: reachable, live model discovery, catalog/cache fallback and facts not checked, **Choose a different model**, and usable CPUs, available memory and automatic local-worker sizing; its **Save target** sends the test again. With `--no-verify` setup ends on that review instead.
 5. The first connection becomes the chat and fleet model; shipped defaults handle the remaining settings.
 
@@ -96,7 +96,7 @@ The curated model of a route found through steps 1 to 3 is the runtime's `defaul
 
 ## Advanced settings
 
-Configure and GUI Settings use the same eight sections. TUI `/settings` groups its controls into the twelve areas described in [Settings Center](#settings-center). The GUI hides or identifies controls specific to terminal presentation. Configure and GUI sections are:
+Configure and GUI Settings use the same eight sections. TUI `/settings` groups its controls into the areas described in [Settings Center](#settings-center). The GUI hides or identifies controls specific to terminal presentation. Configure and GUI sections are:
 
 | Section | Owns |
 | --- | --- |

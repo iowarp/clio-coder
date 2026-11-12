@@ -99,6 +99,11 @@ allows it. The server's launch command still passes the shell safety rules,
 and `yolo` runs the call.
 See [MCP configuration](configuration-reference.md).
 
+Where this page says `yolo`, it means unconfined yolo
+(`safety.yoloConfinement: unconfined`). Contained yolo, the default, decides
+these calls as `default` does, with the safety judge, and refuses a call that
+would wait for the operator.
+
 For a trusted user-scope server declared with the id `slurm`, Clio Coder
 classifies tools by name before applying that default, unless
 `toolActionClasses` names the tool:
@@ -117,7 +122,8 @@ denied call never launches a job. In a headless `clio-coder run` at `default`
 the safety judge still reviews the call: when it allows the call, the
 submission or cancellation runs, and when it refuses or gives no verdict the
 call is denied, because nobody is there to answer. A headless
-`clio-coder run --autonomy yolo` runs them without asking. A read-only dispatched run denies
+`clio-coder run --autonomy yolo` decides them the same way while yolo is
+contained, and runs them without asking only at unconfined yolo. A read-only dispatched run denies
 both allocation tools outright and still allows the read tools. In a server
 with a different id the Slurm name rules do not apply: tools use the normal
 MCP classifier described above.
