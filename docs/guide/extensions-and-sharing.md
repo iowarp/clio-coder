@@ -256,14 +256,14 @@ Options:
 | `--prompts` | Include prompt templates. |
 | `--skills` | Include skills. |
 | `--settings` | Include non-secret settings fragment. |
-| `--extensions` | Include extension package files, excluding `state.json` files and hidden backup directories. |
+| `--extensions` | Include extension package files, excluding `state.json` files, hidden backup directories and dotenv files (`.env` and `.env.<name>`; a `.env.example`, `.env.sample` or `.env.template` stays in). |
 | `--agents` | Include agent files. |
 | `--playbooks` | Include playbook files. |
 | `--all` | Include every supported resource class. |
 | `--dry-run` | List the entries the archive would hold and write nothing. |
 | `--json` | Print the archive, or with `--dry-run` its manifest, as JSON. |
 
-If no include flags are supplied, export includes all supported classes for the selected scope. Naming any include flag makes every class opt-in. Each share command refuses, with exit 2, a flag it does not use: `export` takes no `--force`, `import` takes neither `--both`, `--out` nor include flags, and `inspect` takes only `--json`.
+If no include flags are supplied, export includes all supported classes for the selected scope. Naming any include flag makes every class opt-in. The archive file is written with mode 0600. Each share command refuses, with exit 2, a flag it does not use: `export` takes no `--force`, `import` takes neither `--both`, `--out` nor include flags, and `inspect` takes only `--json`.
 
 Settings fragments are version 2 documents containing only `chat.modelPicker.cycleSet`, `chat.retry`, `fleet.concurrency`, `context.compaction`, `safety.autonomy`, `safety.limits.sessionCostUsd`, and the `interface` settings block. Targets and credentials are not included.
 
@@ -281,7 +281,7 @@ Extension entries are grouped into complete packages, staged, strictly validated
 
 Archives accept `agent` and `playbook` file entry types alongside prompts and skills. Agent entries must pass the agent parser and policy checks. Playbook entries must pass the playbook parser before any write. An archive exported by an older Clio that says entry type `fleet` reads as a `playbook` entry; new archives write only `playbook`. Dry-run plans report both types by kind.
 
-When the model runs `clio-coder share import` without `--dry-run`, `clio-coder extensions test` or `clio-coder extensions validate` through its shell, the call asks for one-shot operator confirmation in `default`, because an import installs packages from an archive the model may have written and the other two run a package's own code. `extensions install` stays blocked for the model at `default`; at `yolo` only the yolo floor holds. The dispositions are in [skills-marketplace.md](skills-marketplace.md#operator-ownership-of-installed-skills). Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
+When the model runs `clio-coder share import` without `--dry-run`, `clio-coder extensions test` or `clio-coder extensions validate` through its shell, the call asks for one-shot operator confirmation in `default`, because an import installs packages from an archive the model may have written and the other two run a package's own code. `extensions install` stays blocked for the model at `default`. Contained `yolo`, the default, decides these calls as `default` does and refuses where `default` would ask the operator; at unconfined `yolo` only the yolo floor holds. The dispositions are in [skills-marketplace.md](skills-marketplace.md#operator-ownership-of-installed-skills). Share commands exit 0 on success, 1 when the plan carries an error or conflict diagnostic, and 2 for a usage error.
 
 ### Aliases and session commands
 

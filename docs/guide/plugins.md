@@ -2,7 +2,7 @@
 
 A plugin is an Agent Plugin: a complete, versioned package of content with a portable root `plugin.json` that follows [Agent Plugins 1.0.0](https://agent-plugins.org/). It is content only. Clio Coder reads its own prompts, agents, and playbooks from the Clio namespace of that manifest, `extensions["ai.iowarp.clio"]`, and from the `ai.iowarp.clio/` directory. Installing a plugin keeps its content and references together, pins the whole tree by SHA-256, and never runs code inside Clio Coder.
 
-This page is the concept map. Each contract is stated once, in the page named in the last table. A library plugin is unrelated to `integrations.runtimePlugins`, which lists pi-ai compatibility plugins loaded by the engine; see [pi-boundary.md](../architecture/pi-boundary.md).
+This page is the concept map. Each contract is stated once, in the page named in the last table. A library plugin is unrelated to `integrations.runtimePlugins`, which lists pi-ai compatibility plugins loaded by the engine; see [pi-boundary.md](../architecture/pi-boundary.md). A runtime plugin is imported into Clio's own process, so an entry must be a bare npm package name or an absolute path under `<configDir>/runtimes/`, and the list is read from user settings only: a project value is ignored with a warning.
 
 ## Package kinds
 
