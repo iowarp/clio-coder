@@ -554,6 +554,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Work in a sister repository that has no `CLIO-CODER.md` gets no compiled handbook for that repository.
 - Claude Code and OpenCode always read their own instruction files beside the rules Clio Coder compiles, so a stale rule in those files still reaches them; Clio Coder names the files and how many rules are stale.
 - A `run_script` run links an input to the project store only when it gets the store reference (`<tag>:<name>`); a path taken from `store get` runs the same but records no store provenance.
+- Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, and then exits 1.
 
 ## 0.7.0 - 2026-11-08
 
