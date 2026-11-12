@@ -24,6 +24,7 @@ import { routeOverlayKey } from "./overlay-lifecycle.js";
 import { permissionEscapeLayers } from "./permission-hint.js";
 import { createQuickHelp } from "./quick-help.js";
 import type { RenderInputAction } from "./render-trace.js";
+import { terminalReportKind } from "./terminal-reports.js";
 
 export interface InteractiveInputKeyActionDeps {
 	matches: (data: string, id: ClioKeybinding) => boolean;
@@ -683,6 +684,7 @@ function classifyInputAction(data: string, deps: InteractiveInputRuntimeDeps): R
 	) {
 		return "scroll";
 	}
+	if (terminalReportKind(data) !== undefined) return "no-visual-change";
 	if (deps.overlay.getState() !== "closed") return "overlay";
 	return "editor";
 }

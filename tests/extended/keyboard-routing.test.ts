@@ -979,3 +979,24 @@ it("scrolls the expanded footer with a draft while overlays and search retain ke
 		assert.match(content, new RegExp(label), "the shortest viewport leaves no dashboard row unreachable");
 	assert.equal(f.editor.getText(), "keep this draft");
 });
+it("keeps pointer and focus reports out of key routing, at boot and after it", async () => {
+	const motion = "\x1b[<35;10;5M";
+	const f = fixture();
+	f.active.streaming = false;
+	f.terminal.input("?");
+	assert.equal(f.tui.hasOverlay(), true);
+	for (const report of [motion, "\x1b[O", "\x1b[I"]) f.terminal.input(report);
+	assert.equal(f.tui.hasOverlay(), true, "quick help stays open");
+	f.terminal.input("\x1b");
+	f.terminal.input("\x03");
+	f.terminal.input(motion);
+	f.terminal.input("\x03");
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(f.counts.shutdown, 1, "a pointer nudge does not disarm the exit");
+	const boot = bootFixture();
+	boot.terminal.input("\x03");
+	boot.terminal.input(motion);
+	boot.terminal.input("\x03");
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(boot.counts.shutdowns, 1);
+});

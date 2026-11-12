@@ -34,6 +34,7 @@ import {
 	createKeybindingManager,
 	formatKeyLabel,
 } from "./keybinding-manager.js";
+import { terminalReportKind } from "./terminal-reports.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 import { createBootWelcome } from "./welcome-dashboard.js";
 
@@ -479,6 +480,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			handleStage0CtrlC();
 			return { consume: true };
 		}
+		// A pointer or focus report is not the operator going on working.
+		if (terminalReportKind(data) !== undefined) return undefined;
 		disarmShutdown();
 		if (keybindings.matches(data, "clio-coder.exit") && editor.getText().length === 0 && submissions.length === 0) {
 			requestShutdown();

@@ -3,6 +3,7 @@ import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
 import { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
 import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
+import { terminalReportKind } from "./terminal-reports.js";
 
 export { APPLICATION_DOUBLE_TAP_MS } from "./interrupt-window.js";
 
@@ -431,6 +432,14 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	};
 	const routeInput = (data: string): ApplicationInputResult => {
 		if (isKeyRelease(data)) return { consume: true };
+		// Pointer and focus reports are not keys: they must not disarm the exit,
+		// close a glance or reach a key owner. Focus goes on to pi-tui's viewport
+		// handler; the pointer stays inert while a key owner holds input.
+		const report = terminalReportKind(data);
+		if (report === "focus") return undefined;
+		if (report === "pointer") {
+			return deps.isSearchFocused?.() || overlayOwnsInput(deps.getOverlayState()) ? { consume: true } : undefined;
+		}
 		if (isKeyRepeat(data) && !(deps.matchesRepeatableInput?.(data) ?? false)) return { consume: true };
 		if (matchesKey(data, "ctrl+c")) {
 			handleCtrlC();
