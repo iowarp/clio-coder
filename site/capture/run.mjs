@@ -24,6 +24,8 @@
 // A scenario with privateNet runs in its own network namespace: the alias proxy
 // listens on a unix socket, and a forwarder inside the sandbox serves it on the
 // given port, so a default model port such as 4000 never opens on the host.
+// privateNet without a port isolates the sandbox to its own loopback. peers
+// lists host agent CLIs bound read-only into ~/.local/bin for interop screens.
 // A stillsOnly scenario publishes only its stills.
 // Without --publish, output stays in <scratch>/<id>/out for review. Casts are
 // compacted losslessly before stills are rendered; compact.mjs says how.
@@ -298,6 +300,7 @@ function sandboxScript(dir, scenario) {
 		clio.root,
 		"/opt/clio-coder",
 		...(scenario.privateNet ? ["--bind", join(dir, "net"), "/opt/net", "--unshare-net", "--unshare-pid"] : []),
+		...(scenario.peers ?? []).flatMap((name) => ["--ro-bind", peerPath(name), `/home/researcher/.local/bin/${name}`]),
 		"--unshare-uts",
 		"--unshare-ipc",
 		"--hostname",
@@ -313,7 +316,7 @@ function sandboxScript(dir, scenario) {
 		"/home/researcher/.bashrc",
 		"-i",
 	];
-	if (scenario.privateNet) {
+	if (scenario.privateNet?.port) {
 		// Inside the sandbox's own network namespace, the model port forwards to the
 		// alias proxy's socket; nothing listens on the host's loopback.
 		const forward = [
@@ -332,6 +335,13 @@ function sandboxScript(dir, scenario) {
 	const script = join(dir, "sandbox.sh");
 	writeFileSync(script, `#!/bin/sh\nexec ${args.map(quote).join(" ")}\n`, { mode: 0o700 });
 	return script;
+}
+
+// A peer agent CLI from the host's PATH, bound read-only so interop can detect it.
+function peerPath(name) {
+	const found = spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+	if (!found) throw new Error(`The peer CLI ${name} is not on this host's PATH.`);
+	return execFileSync("readlink", ["-f", found], { encoding: "utf8" }).trim();
 }
 
 class Session {
@@ -670,7 +680,7 @@ async function record(scenario, lockHeld, timing) {
 			proxy = await startAliasProxy({
 				gateway: process.env.CLIO_CAPTURE_GATEWAY_URL,
 				apiKey: process.env.LITELLM_API_KEY,
-				port: scenario.privateNet ? join(dir, "net/alias.sock") : (scenario.proxyPort ?? spec.proxyPort),
+				port: scenario.privateNet?.port ? join(dir, "net/alias.sock") : (scenario.proxyPort ?? spec.proxyPort),
 				log: (line) => writeFileSync(join(scratch, "alias-proxy.log"), `${line}\n`, { flag: "a" }),
 			});
 		}
@@ -740,10 +750,12 @@ async function render({ scenario, outDir, session, cast }) {
 					.join(", ")}.`
 			: ""
 	}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
-		scenario.privateNet
+		scenario.privateNet?.port
 			? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
-			: ""
-	}`;
+			: scenario.privateNet
+				? " The sandbox has its own network namespace with only a loopback interface."
+				: ""
+	}${scenario.peers ? ` Peer agent CLIs (${scenario.peers.join(", ")}) bound read-only, with no credentials.` : ""}`;
 	const entries = {};
 	for (const still of rendered) {
 		const isCast = still.id === scenario.id;
