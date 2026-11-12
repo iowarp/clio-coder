@@ -115,4 +115,4 @@ export {
 	type TuiRenderObserver,
 	type TuiRenderPhase,
 } from "./instrumented-tui.js";
-export { COPY_JOIN_MARK, COPY_ROW_MARK, COPY_TIGHT_MARK } from "./selection-text.js";
+export { COPY_JOIN_MARK, COPY_TIGHT_MARK, copyMark, leadingCopyMark } from "./selection-text.js";

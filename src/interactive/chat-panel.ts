@@ -25,9 +25,10 @@ import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
 	COPY_JOIN_MARK,
-	COPY_ROW_MARK,
 	COPY_TIGHT_MARK,
 	type Component,
+	copyMark,
+	leadingCopyMark,
 	Markdown,
 	Marked,
 	stripTerminalSequences,
@@ -1168,16 +1169,37 @@ function fenceLabelRow(plain: string, fenceEnd: number, indent: string): string 
  * into. A line that fits prints as it is; a longer one wraps once at its spaces,
  * and each wrapped piece keeps the block's indent behind a mark that says it
  * continues the line above, so it never reads as prose or a separate statement.
+ * With `marks`, each row opens with a copy mark (#453): the block's indent and
+ * the `↪` are decoration, and a wrapped piece joins the one above it with the
+ * space the wrap consumed, or with nothing when the wrap broke inside a token.
  */
-function fitCodeLine(line: string, fenceIndent: string, width: number, bareFences: boolean): string[] {
+function fitCodeLine(line: string, fenceIndent: string, width: number, bareFences: boolean, marks = false): string[] {
 	const theme = clioTheme();
 	const text = line.replace(CODE_LINE, " ").replaceAll(CODE_SPACE, " ").replace(/ +$/u, "");
-	if (visibleWidth(text) <= width) return [theme.base("assistantProse", text)];
 	const lead = `${fenceIndent}  `;
+	if (visibleWidth(text) <= width) {
+		const row = theme.base("assistantProse", text);
+		if (!marks) return [row];
+		const plain = stripTerminalSequences(text);
+		return [`${copyMark("row", Math.min(lead.length, plain.length - plain.trimStart().length))}${row}`];
+	}
 	const body = text.startsWith(lead) ? text.slice(lead.length) : text.replace(/^ +/u, "");
 	const mark = bareFences ? lead : `${lead}${theme.fg("annotation", GLYPH.codeWrap)} `;
 	const room = Math.max(1, width - visibleWidth(mark));
-	return wrapPaths(body, room).map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
+	const parts = wrapPaths(body, room);
+	const rows = parts.map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
+	if (!marks) return rows;
+	const source = stripTerminalSequences(body);
+	const markWidth = visibleWidth(mark);
+	let at = 0;
+	return rows.map((row, index) => {
+		const piece = stripTerminalSequences(parts[index] ?? "");
+		const found = source.indexOf(piece, at);
+		const spaced = found !== at;
+		at = found < 0 ? at : found + piece.length;
+		if (index === 0) return `${copyMark("row", visibleWidth(lead))}${row}`;
+		return `${copyMark(spaced ? "join" : "tight", markWidth)}${row}`;
+	});
 }
 
 /** A list bullet as Pi draws it at the start of an item's first row. */
@@ -1237,11 +1259,11 @@ function markdownRows(
 	};
 	const flushCode = (): void => {
 		if (code === null) return;
-		const key = `\0code\0${code}`;
+		const key = `\0code${marks ? "\0m" : ""}\0${code}`;
 		codeKeys.push(key);
 		let parts = memo?.rows.get(key);
 		if (parts === undefined) {
-			parts = fitCodeLine(code, fenceIndent ?? "", width, bareFences);
+			parts = fitCodeLine(code, fenceIndent ?? "", width, bareFences, marks);
 			memo?.rows.set(key, parts);
 		}
 		for (const part of parts) rows.push(part);
@@ -1681,6 +1703,8 @@ const USER_PENDING_TAIL = " · preparing";
 const USER_REFUSED_TAIL = " · not sent";
 const PROSE_GUTTER = "  ";
 const PROSE_GUTTER_WIDTH = 2;
+/** A fullscreen copy mark for a row whose gutter (a glyph and a space, or two spaces) is not copied (#453). */
+const GUTTER_ROW_MARK = copyMark("row", PROSE_GUTTER_WIDTH);
 
 /**
  * Give transcript prose a fixed two-cell ownership gutter. Callers render the
@@ -1715,12 +1739,10 @@ function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string
 		const line = lines[index] ?? "";
 		if (!marks) return `${prefix}${line}`;
 		// Every hung row is marked ahead of its gutter, so fullscreen copy drops the glyph and the gutter cells (#453).
-		const mark = line.startsWith(COPY_JOIN_MARK)
-			? COPY_JOIN_MARK
-			: line.startsWith(COPY_TIGHT_MARK)
-				? COPY_TIGHT_MARK
-				: "";
-		return mark === "" ? `${COPY_ROW_MARK}${prefix}${line}` : `${mark}${prefix}${line.slice(mark.length)}`;
+		const mark = leadingCopyMark(line);
+		return mark === undefined
+			? `${GUTTER_ROW_MARK}${prefix}${line}`
+			: `${copyMark(mark.kind, mark.cells + PROSE_GUTTER_WIDTH)}${prefix}${line.slice(mark.length)}`;
 	};
 	let output: string[];
 	if (same > 0 && memo !== undefined) {
@@ -1774,7 +1796,13 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
 const SKILL_INVOCATION = /^\/skill\s+\S+/u;
 const LOOP_LABEL_CHARS = 32;
 
-function renderUserLines(text: string, width: number, status: UserTurnStatus, origin?: string): string[] {
+function renderUserLines(
+	text: string,
+	width: number,
+	status: UserTurnStatus,
+	origin?: string,
+	marks = false,
+): string[] {
 	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
 	const scheduled = /^job (\S+) (\S+)$/u.exec(origin ?? "");
 	if (scheduled !== null) {
@@ -1800,10 +1828,19 @@ function renderUserLines(text: string, width: number, status: UserTurnStatus, or
 		sourceLines[0] = `${clioTheme().style("guidance", invocation[0], { bold: committed })}${committed ? SGR_BOLD : ""}${(sourceLines[0] ?? "").slice(invocation[0].length)}`;
 	}
 	for (const sourceLine of sourceLines) {
+		// With copy marks, the bar is not copied and a wrapped prompt line copies as the one line it was typed as (#453).
+		let above: string | null = null;
 		for (const row of wrapTextWithAnsi(sourceLine, contentWidth)) {
-			rendered.push(
-				`${prefix}${clioTheme().base("userProse", committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row)}`,
-			);
+			const line = `${prefix}${clioTheme().base("userProse", committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row)}`;
+			if (!marks) {
+				rendered.push(line);
+				continue;
+			}
+			const plain = stripTerminalSequences(row);
+			const kind =
+				above === null ? "row" : continuationMark(above, plain, contentWidth) === COPY_TIGHT_MARK ? "tight" : "join";
+			rendered.push(`${copyMark(kind, PROSE_GUTTER_WIDTH)}${line}`);
+			above = plain;
 		}
 	}
 	if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
@@ -2380,7 +2417,7 @@ function renderEntryLines(
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "user") {
-		return renderUserLines(entry.text, width, entry.status?.() ?? "committed", entry.origin);
+		return renderUserLines(entry.text, width, entry.status?.() ?? "committed", entry.origin, copyMarks);
 	}
 	if (entry.role === "retryStatus") {
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
@@ -2535,7 +2572,13 @@ function renderEntryLines(
 						width,
 						previewBudget(detail.invocationRows, terminalRows),
 					);
-					fold = { key: settledKey, lines, body: hasToolBody(lines), calls: grouped.length, revisions };
+					fold = {
+						key: settledKey,
+						lines: markActionLead(lines, copyMarks),
+						body: hasToolBody(lines),
+						calls: grouped.length,
+						revisions,
+					};
 					seg.settledFold = fold;
 				}
 				blocks.push({ kind: "tool", lines: fold.lines, body: fold.body });
@@ -2559,7 +2602,7 @@ function renderEntryLines(
 						seg.finished ? null : stopRequestedAt,
 						nameRequester,
 					);
-					rows = { key: settledKey, lines, body: hasToolBody(lines) };
+					rows = { key: settledKey, lines: markActionLead(lines, copyMarks), body: hasToolBody(lines) };
 					if (seg.finished) seg.settledRows = rows;
 				}
 				blocks.push({ kind: "tool", lines: rows.lines, body: rows.body });
@@ -2586,7 +2629,11 @@ function renderEntryLines(
 		const split = seg.kind === "text" ? skillSuggestionSplit(seg) : null;
 		if (split) {
 			flushReasoning("words");
-			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
+			blocks.push({
+				kind: "tool",
+				lines: markActionLead(renderSkillSuggestionRow(split.suggestion, width), copyMarks),
+				body: false,
+			});
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences, copyMarks);
 			if (answerLines.length > 0)
 				blocks.push({ kind: "prose", lines: hangSegmentLines(split.answer, answerLines, CLIO_PREFIX(), copyMarks) });
@@ -2598,7 +2645,10 @@ function renderEntryLines(
 			flushReasoning("words");
 			blocks.push({
 				kind: "tool",
-				lines: renderSkillSuggestionRow(seg.text.slice(suggestionOnly.start, suggestionOnly.end), width),
+				lines: markActionLead(
+					renderSkillSuggestionRow(seg.text.slice(suggestionOnly.start, suggestionOnly.end), width),
+					copyMarks,
+				),
 				body: false,
 			});
 			continue;
@@ -2657,6 +2707,18 @@ function renderEntryLines(
 		return joinTurnBlocks(blocks.slice(1), joined, head.last);
 	}
 	return joinTurnBlocks(blocks, joined);
+}
+
+/**
+ * An action row's glyph and the space after it sit in the gutter, so a fullscreen copy of the row starts at its words
+ * (#453). Rows that do not open with a one-cell glyph keep the stock copy.
+ */
+function markActionLead(lines: string[], marks: boolean): string[] {
+	const first = lines[0];
+	if (!marks || first === undefined) return lines;
+	const glyph = /^(\S) /u.exec(stripTerminalSequences(first))?.[1];
+	if (glyph === undefined || visibleWidth(glyph) !== 1) return lines;
+	return [`${GUTTER_ROW_MARK}${first}`, ...lines.slice(1)];
 }
 
 /** Two stretches of one run of reasoning, as one text. */

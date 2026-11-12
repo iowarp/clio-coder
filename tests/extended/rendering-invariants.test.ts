@@ -1312,8 +1312,72 @@ describe("Pi TUI compatibility", () => {
 			terminal.input(`\x1b[<32;72;${last}M`);
 			terminal.input(`\x1b[<0;72;${last}m`);
 			await new Promise((resolve) => setTimeout(resolve, 10));
-			strictEqual(copies.at(-1), `${paragraph}\n\nts\n  const result = await runTool(input);\n  return result;`);
+			strictEqual(copies.at(-1), `${paragraph}\n\nts\nconst result = await runTool(input);\nreturn result;`);
 			ok(!terminal.writes.join("").includes("\x1b_clio"), "copy marks never reach the terminal");
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("copies a fullscreen prompt, action row and wrapped code line as their source text", async () => {
+		const copies: string[] = [];
+		const terminal = new RenderingTerminal();
+		terminal.columns = 72;
+		terminal.rows = 30;
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async (text) => {
+				copies.push(text);
+				return true;
+			},
+		});
+		const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, copyMarks: true });
+		const prompt =
+			"Read the notes file and then summarise every section of it in two short sentences for the release log";
+		const code = `const target = "${"x".repeat(90)}";`;
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: `\`\`\`ts\n${code}\n\`\`\`` }],
+			stopReason: "stop",
+		};
+		panel.appendUser(prompt);
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "t1",
+			toolName: "read",
+			args: { path: "notes.txt" },
+		} as never);
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "t1",
+			toolName: "read",
+			result: { content: [{ type: "text", text: "one" }] },
+			isError: false,
+			durationMs: 5,
+		} as never);
+		panel.applyEvent({ type: "message_end", message } as never);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+		const chrome = { banner: new Text("", 0, 0), editor: new Text("draft", 0, 0), footer: new Text("ready", 0, 0) };
+		tui.setLayoutRoot(buildLayout({ ...chrome, chat: panel }, { mode: "fullscreen" }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			const first = screen.findIndex((row) => row.includes("Read the notes")) + 1;
+			const last = screen.findIndex((row) => row.includes('";')) + 1;
+			ok(screen.filter((row) => row.includes("↪")).length === 2, "the code line wraps at a space and inside a token");
+			terminal.input(`\x1b[<0;1;${first}M`);
+			terminal.input(`\x1b[<32;72;${last}M`);
+			terminal.input(`\x1b[<0;72;${last}m`);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			const lines = (copies.at(-1) ?? "").split("\n");
+			strictEqual(lines[0], prompt);
+			ok(
+				lines.some((line) => line.startsWith("read notes.txt")),
+				"the action row copies without its glyph",
+			);
+			strictEqual(lines.at(-1), code);
 		} finally {
 			tui.stop();
 		}
