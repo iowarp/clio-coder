@@ -99,6 +99,19 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 | Focus radio in a Herdr dock: `/music`, cliamp install, the `integrations.music.*` settings, and the opt-in `music` tool | [Music Pane](guide/music.md) |
 | The browser interface: starting it, the background app, the installer option, shell layout, approvals, and what the local server exposes | [Graphical Application](guide/gui.md) |
 
+### Extend CLIO Coder: which page
+
+| I want to | Read |
+| --- | --- |
+| Reuse a prompt I type often, or teach the agent a procedure as a skill | [Prompts, skills, and share archives](guide/extensions-and-sharing.md) |
+| Use the prompts and skills Claude Code, Codex or OpenCode already have | [Trust and compatibility roots](guide/extensions-and-sharing.md#trust-and-compatibility-roots), then [Adopt foreign resources](guide/interop.md#inbound-review-and-adopt-foreign-resources) to adopt them |
+| Find and install a skill, agent or plugin someone published | [Skills in the library](guide/skills-marketplace.md) and [Library packages](guide/resource-library.md) |
+| Package my skills, prompts and agents for others to install | [Authoring plugins](guide/authoring-plugins.md) |
+| Add code that changes CLIO Coder: hooks, tools, commands, a workspace | [Extensions](guide/harness-extensions.md) |
+| Hand a task to Claude Code, Codex or OpenCode | [Coding agent interoperability](guide/interop.md) |
+| Move my prompts, skills and settings to another machine | [Share archives](guide/extensions-and-sharing.md#share-archives) |
+| Tell a plugin from an extension, or find which page owns a contract | [Plugins](guide/plugins.md) |
+
 ## Safety, evidence, and reproducibility
 
 | Topic | Guide |
