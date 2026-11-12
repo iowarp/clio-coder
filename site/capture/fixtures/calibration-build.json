@@ -1,0 +1,18 @@
+{
+	"description": "The temperature-calibration project, correct, with a build script that writes dist/ and a committed .gitignore for it; dist/ is built before the recording.",
+	"archive": "assets/temperature-calibration.zip",
+	"root": "temperature-calibration",
+	"edits": [
+		{
+			"file": "package.json",
+			"find": "\"test\": ",
+			"replace": "\"build\": \"node build.mjs\",\n\t\t\"test\": "
+		}
+	],
+	"files": {
+		".gitignore": "dist/\n",
+		"build.mjs": "import { copyFileSync, mkdirSync, writeFileSync } from \"node:fs\";\n\nmkdirSync(\"dist\", { recursive: true });\ncopyFileSync(\"temperature.mjs\", \"dist/temperature.mjs\");\nwriteFileSync(\"dist/build.json\", `${JSON.stringify({ entry: \"temperature.mjs\" }, null, 2)}\\n`);\nconsole.log(\"built dist/temperature.mjs\");\n"
+	},
+	"run": ["node build.mjs"],
+	"commit": "Add temperature conversions with tests and a build"
+}

@@ -11,16 +11,18 @@
 // scenarios need CLIO_CAPTURE_GATEWAY_URL, LITELLM_API_KEY and CLIO_CAPTURE_LOCK
 // (the lock file that serializes use of the model host). The key stays in this
 // process; the recorded session sees only the loopback alias and a placeholder.
-// Without --publish, output stays in <scratch>/<id>/out for review.
+// Without --publish, output stays in <scratch>/<id>/out for review. Casts are
+// compacted losslessly before stills are rendered; compact.mjs says how.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, hostname, userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
+import { compactEvents } from "./compact.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = dirname(here);
@@ -139,11 +141,12 @@ function prepareHome(dir, scenario) {
 		`root:x:0:0:root:/root:/bin/sh\nresearcher:x:${uid}:${gid}:Researcher:/home/researcher:/bin/bash\n`,
 	);
 	writeFileSync(join(dir, "group"), `root:x:0:\nresearcher:x:${gid}:\n`);
+	if (scenario.repo) seedRepo(join(home, "projects", scenario.repo), scenario.fixture ?? scenario.repo, scenario);
+	// After the repository, so a file such as an untracked .env can sit inside it.
 	for (const [path, text] of Object.entries(scenario.homeFiles ?? {})) {
 		mkdirSync(dirname(join(home, path)), { recursive: true });
 		writeFileSync(join(home, path), text, { mode: 0o600 });
 	}
-	if (scenario.repo) seedRepo(join(home, "projects", scenario.repo), scenario.repo, scenario);
 	if (scenario.profile === "configured") {
 		writeFileSync(
 			join(home, ".config/clio-coder/settings.yaml"),
@@ -164,13 +167,18 @@ function seedRepo(path, name, scenario) {
 	const fixture = JSON.parse(readFileSync(join(here, "fixtures", `${name}.json`), "utf8"));
 	rmSync(path, { recursive: true, force: true });
 	run("unzip", ["-q", "-o", join(site, fixture.archive), "-d", dirname(path)]);
-	if (fixture.root !== name) run("mv", [join(dirname(path), fixture.root), path]);
+	if (fixture.root !== basename(path)) run("mv", [join(dirname(path), fixture.root), path]);
 	for (const edit of fixture.edits ?? []) {
 		const file = join(path, edit.file);
 		const text = readFileSync(file, "utf8");
 		if (!text.includes(edit.find)) throw new Error(`Fixture ${name}: ${edit.file} lacks ${edit.find}`);
 		writeFileSync(file, text.replace(edit.find, edit.replace));
 	}
+	for (const [file, text] of Object.entries(fixture.files ?? {})) {
+		mkdirSync(dirname(join(path, file)), { recursive: true });
+		writeFileSync(join(path, file), text);
+	}
+	for (const command of fixture.run ?? []) run("sh", ["-c", command], { cwd: path, env: gitEnv() });
 	const env = {
 		...gitEnv(),
 		GIT_AUTHOR_DATE: "2026-11-02T09:00:00Z",
@@ -180,9 +188,10 @@ function seedRepo(path, name, scenario) {
 	run("git", ["add", "-A"], { cwd: path, env });
 	run("git", ["commit", "-q", "-m", fixture.commit], { cwd: path, env });
 	if (scenario.remote) {
-		const bare = join(dirname(dirname(path)), "remotes", `${name}.git`);
+		const remote = basename(path);
+		const bare = join(dirname(dirname(path)), "remotes", `${remote}.git`);
 		run("git", ["init", "-q", "--bare", bare], { env });
-		run("git", ["remote", "add", "origin", `/home/researcher/remotes/${name}.git`], { cwd: path, env });
+		run("git", ["remote", "add", "origin", `/home/researcher/remotes/${remote}.git`], { cwd: path, env });
 		run("git", ["push", "-q", bare, "main"], { cwd: path, env });
 		// The remote URL is the sandbox path, so record the tracking state by hand.
 		run("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], { cwd: path, env });
@@ -225,6 +234,8 @@ function sandboxScript(dir, scenario) {
 		CLIO_CODER_INTEROP_HOME: "none",
 		// A placeholder: the alias proxy holds the gateway key, outside the sandbox.
 		LITELLM_API_KEY: "capture-placeholder",
+		NPM_CONFIG_UPDATE_NOTIFIER: "false",
+		NPM_CONFIG_FUND: "false",
 		GIT_CONFIG_NOSYSTEM: "1",
 		GIT_AUTHOR_NAME: "Researcher",
 		GIT_AUTHOR_EMAIL: "researcher@example.org",
@@ -355,6 +366,28 @@ class Session {
 				await sleep(150);
 			}
 		}
+		// A live turn asks for approval as often as the model decides to; `until`
+		// waits for the turn to end and allows each call that `approve` matches.
+		if (step.until !== undefined) {
+			const deadline = Date.now() + (step.timeout ?? 300) * 1000;
+			const done = new RegExp(step.until, "m");
+			const ask = step.approve && new RegExp(step.approve, "m");
+			for (;;) {
+				const screen = this.screen() ?? "";
+				if (done.test(screen)) break;
+				if (Date.now() > deadline || !this.alive())
+					throw new Error(`${this.id}: timed out waiting for /${step.until}/; screen:\n${screen || "(ended)"}`);
+				if (ask?.test(screen)) {
+					await sleep((step.read ?? 1.5) * 1000);
+					if (step.approveShot && !this.markers.some((marker) => marker.shot === step.approveShot))
+						await this.step({ shot: step.approveShot, rows: step.approveRows });
+					this.tmux("send-keys", "-t", "cap", step.answer ?? "Enter");
+					const left = Date.now() + 10000;
+					while (ask.test(this.screen() ?? "") && Date.now() < left) await sleep(150);
+				}
+				await sleep(150);
+			}
+		}
 		if (step.gone !== undefined) {
 			const deadline = Date.now() + (step.timeout ?? 60) * 1000;
 			const pattern = new RegExp(step.gone, "m");
@@ -367,7 +400,7 @@ class Session {
 		if (step.type !== undefined)
 			for (const char of step.type) {
 				this.firstKey ??= { time: this.now(), char };
-				this.tmux("send-keys", "-t", "cap", "-l", char);
+				this.tmux("send-keys", "-t", "cap", "-l", char === ";" ? "\\;" : char);
 				await sleep(step.delay ?? 45);
 			}
 		if (step.keys)
@@ -414,7 +447,9 @@ function finishCast(session) {
 		const time = Math.round(((events[index]?.[0] ?? 0) + 0.05) * 1000) / 1000;
 		return { ...marker, time };
 	});
-	const all = [...events, ...markers.map((marker) => [marker.time, "m", marker.label])].sort((a, b) => a[0] - b[0]);
+	const all = compactEvents(
+		[...events, ...markers.map((marker) => [marker.time, "m", marker.label])].sort((a, b) => a[0] - b[0]),
+	);
 	const header = { version: 2, width: session.cols, height: session.rows, theme: spec.theme };
 	const text = `${[JSON.stringify(header), ...all.map((event) => JSON.stringify(event))].join("\n")}\n`;
 	const duration = events.at(-1)?.[0] ?? 0;
@@ -587,7 +622,13 @@ for (const scenario of scenarios) {
 				still.path,
 				still.path.replace(/\.png$/, ".webp"),
 			]);
-		const source = `CLIO Coder ${clioVersion} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}`;
+		const source = `CLIO Coder ${clioVersion} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${
+			scenario.env
+				? ` Environment: ${Object.entries(scenario.env)
+						.map(([key, value]) => `${key}=${value}`)
+						.join(", ")}.`
+				: ""
+		}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}`;
 		const entries = {};
 		for (const still of rendered) {
 			const isCast = still.id === scenario.id;
