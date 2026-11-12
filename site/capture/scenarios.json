@@ -2,7 +2,7 @@
 	"cols": 100,
 	"rows": 30,
 	"idleCap": 1,
-	"proxyPort": 4313,
+	"proxyPort": 43130,
 	"theme": {
 		"fg": "#eeeae2",
 		"bg": "#1e1e1e",

@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 
 export const ALIAS = "qwen3.8-27b";
 export const UPSTREAM_MODEL = "mini/qwen3.8-27b-iq4r-v4";
-export const DEFAULT_PORT = 4313;
+export const DEFAULT_PORT = 43130;
 
 const CHAT_PATHS = new Set(["/v1/chat/completions", "/chat/completions"]);
 const LIST_PATHS = new Set(["/v1/models", "/models"]);
