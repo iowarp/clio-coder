@@ -139,7 +139,8 @@ export interface RunProjectContextProvenance {
 	 * was taken, `coexist` when it read the files unreconciled beside them. `stale` counts the files' rules the tree no longer supports;
 	 * `notCarried` the run's rules, of the handbook or those files, that hold but did not fit the bound. `reason` says why a harness that can take the rules in
 	 * place of its files read them beside the files instead: `setting` when `fleet.keepPeerInstructionFiles` names it,
-	 * `switch-unsupported` when the installed version lacks the switch that skips them (Pi before 0.67.4).
+	 * `switch-unsupported` when the installed version lacks the switch that skips them (Pi before 0.67.4),
+	 * `over-bound` when rules of the files that hold did not fit the bound, so only the files carry them.
 	 * `discarded` lists overlaid files the run changed: putting the originals back dropped those edits.
 	 */
 	peerInstructions?: {
@@ -147,7 +148,7 @@ export interface RunProjectContextProvenance {
 		files: string[];
 		stale: number;
 		notCarried: number;
-		reason?: "setting" | "switch-unsupported";
+		reason?: "setting" | "switch-unsupported" | "over-bound";
 		discarded?: string[];
 	};
 }

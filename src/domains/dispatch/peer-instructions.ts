@@ -29,7 +29,7 @@ export interface PeerInstructions {
 	/** The run's rules, of the handbook or those files, that hold but did not fit the bound. */
 	notCarried: number;
 	/** Why a harness that can take the rules in place of its files reads them beside the files. */
-	reason?: "setting" | "switch-unsupported";
+	reason?: "setting" | "switch-unsupported" | "over-bound";
 	/** Per file, in `files` order, the rules the tree no longer supports; files with none are left out. */
 	staleFiles?: Array<{ file: string; stale: number }>;
 	/** The compiled rules; absent when the handbook has no sections to compile, so the run keeps its usual message. */
@@ -188,7 +188,8 @@ interface PeerInstructionsInput {
  * of them, so the run is unchanged. Single source and overlay are used only
  * when the handbook compiled; a handbook of prose alone keeps its usual message
  * and the harness's files are read beside it. An overlay the run cannot take
- * falls back to coexist, and so does a harness the operator keeps on its files.
+ * falls back to coexist, and so does a harness the operator keeps on its files
+ * or one whose files hold rules the bound left out.
  */
 export async function resolvePeerInstructions(input: PeerInstructionsInput): Promise<PeerInstructions | null> {
 	if (input.declared === undefined) return null;
@@ -223,6 +224,9 @@ export async function resolvePeerInstructions(input: PeerInstructionsInput): Pro
 	if (input.keepFiles === true && input.declared.delivery !== "coexist") {
 		return { delivery: "coexist", ...result, reason: "setting" };
 	}
+	if (input.declared.delivery === "coexist") return { delivery: "coexist", ...result };
+	// Kept from its files, the harness would never read their holding rules the bound left out: it reads the files.
+	if (peer.ownNotCarried > 0) return { delivery: "coexist", ...result, reason: "over-bound" };
 	if (input.declared.delivery !== "overlay") return { delivery: input.declared.delivery, ...result };
 	if (!(await overlayAllowed(input, repositoryRoot(input.cwd), files))) return { delivery: "coexist", ...result };
 	// The harness reads every one of these files; the nearest holds the rules and the others are emptied for the run.

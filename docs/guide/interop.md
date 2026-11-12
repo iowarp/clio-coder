@@ -129,7 +129,10 @@ against the tree and sends the peer one compiled rule set in the project-context
 message: the handbook's sections, then the peer file's rules that still hold.
 The peer gets every invariant a native worker of the same role gets; the peer
 file's rules have a reserve of up to 40% of the bound, taken from the handbook's
-other rules only, and take whatever room the handbook leaves.
+other rules only, and take whatever room the handbook leaves. When rules of the
+peer's files that hold still do not fit, a harness that would skip or overlay its
+files reads them beside the compiled rules instead (coexist), and the run record
+says `reason: over-bound`.
 A stale command rule is replaced by the tree's value, such as the test command
 in `package.json`. When the runtime has a switch, Clio turns its own discovery
 off so the peer reads one source:
@@ -176,8 +179,9 @@ the files, the count of their rules the tree no longer supports (`stale`), and t
 count of the run's rules, from the handbook or those files, that hold but did not
 fit the bound (`notCarried`), `discarded` for an overlaid file the run changed,
 whose change the restore dropped, and `reason: setting`
-when the setting kept the files or `reason: switch-unsupported` when the
-installed peer has no switch to skip them. When a peer read its files as they are and they
+when the setting kept the files, `reason: switch-unsupported` when the
+installed peer has no switch to skip them, or `reason: over-bound` when its
+files' holding rules did not all fit the bound. When a peer read its files as they are and they
 hold rules the tree no longer supports, Clio raises a `peer_instructions_stale`
 notice once per process for those files and counts, such as `AGENTS.md has 1 rule
 that no longer matches the repository; Codex read it in this run.`

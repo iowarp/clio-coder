@@ -15,7 +15,7 @@ import { compilePeerHandbook } from "../../src/domains/context/peer-handbook.js"
 import { treeFacts } from "../../src/domains/context/tree-facts.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
 import { peerInstructionsStaleMessage, resolvePeerInstructions } from "../../src/domains/dispatch/peer-instructions.js";
-import { opencodeCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
+import { opencodeCliRuntime, piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 
 const PATH = "/repo/CLIO-CODER.md";
 const HANDBOOK = `# Demo
@@ -469,6 +469,36 @@ describe("peer handbook compile", () => {
 			rmSync(join(root, "sub"), { recursive: true });
 			execFileSync("git", ["-C", root, "add", "-A"]);
 			deepStrictEqual((await resolveIn(root))?.files, ["CONTEXT.md"]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("lets a harness read its own files when their holding rules do not all fit the bound, and says why", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-peer-over-bound-"));
+		const resolveWith = async (notes: number) => {
+			const lines = Array.from({ length: notes }, (_, n) => `- Peer note ${n}: widget ${n} stays aligned with its frame.`);
+			writeFileSync(join(root, "AGENTS.md"), ["# Notes", "", ...lines, ""].join("\n"));
+			return resolvePeerInstructions({
+				declared: piCliRuntime.repositoryInstructions,
+				cwd: root,
+				handbookSources: [{ source: HANDBOOK, path: join(root, "CLIO-CODER.md") }],
+				audience: workerHandbookAudience("coder", "workspace-edit"),
+				workingPaths: [],
+				maxChars: 1500,
+				clioNames: [],
+				declaredPaths: [],
+			});
+		};
+		try {
+			execFileSync("git", ["init", "-q", root]);
+			const fits = await resolveWith(2);
+			strictEqual(fits?.delivery, "single-source");
+			strictEqual(fits?.reason, undefined);
+			const over = await resolveWith(60);
+			strictEqual(over?.delivery, "coexist");
+			strictEqual(over?.reason, "over-bound");
+			ok((over?.notCarried ?? 0) > 0);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

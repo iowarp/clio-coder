@@ -41,6 +41,8 @@ export interface PeerHandbook {
 	facts: number;
 	/** Rules for this run, of the handbook or the peer's files, that hold but did not fit the bound. */
 	notCarried: number;
+	/** Of those, the rules of the peer's files: a harness kept from its files would never read them. */
+	ownNotCarried: number;
 }
 
 /** The share of the bound the peer's own rules may claim; the handbook, invariants first, keeps the rest. */
@@ -170,7 +172,7 @@ export function compilePeerHandbook(
 	while (kept > 0 && join(renderBlock(own.slice(0, kept))).length > options.maxChars) kept -= 1;
 	const lines = own.slice(0, kept);
 	const ownCarried = lines.filter((line) => !replacements.includes(line)).length;
-	let notCarried = verified.length + unverifiable.length - ownCarried;
+	let ownNotCarried = verified.length + unverifiable.length - ownCarried;
 	// A rule the handbook also states rides once: in the handbook when selected, else in the peer's block if it fits.
 	let carriedDuplicates = 0;
 	for (const duplicate of duplicates) {
@@ -181,16 +183,17 @@ export function compilePeerHandbook(
 		if (join(renderBlock([...lines, duplicate.text])).length <= options.maxChars) {
 			lines.push(duplicate.text);
 			carriedDuplicates += 1;
-		} else notCarried += 1;
+		} else ownNotCarried += 1;
 	}
 	// A dropped handbook rule the peer's files also state was settled above, carried or counted.
 	const duplicateUnitIds = new Set(duplicates.map((duplicate) => duplicate.unitId));
-	notCarried += new Set(selection.droppedIds.filter((id) => !duplicateUnitIds.has(id))).size;
+	const notCarried = ownNotCarried + new Set(selection.droppedIds.filter((id) => !duplicateUnitIds.has(id))).size;
 	return {
 		text: join(renderBlock(lines)),
 		carried: ownCarried + carriedDuplicates,
 		stale,
 		facts: lines.filter((line) => replacements.includes(line)).length,
 		notCarried,
+		ownNotCarried,
 	};
 }
