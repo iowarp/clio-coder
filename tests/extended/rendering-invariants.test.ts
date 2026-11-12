@@ -41,7 +41,7 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
-import { buildLayout, returnToLiveEdge } from "../../src/interactive/layout.js";
+import { buildLayout, releaseRegularDock, returnToLiveEdge } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import {
@@ -921,6 +921,39 @@ describe("streamed answers settle in place", () => {
 		style = "detailed";
 		panel.render(80);
 		strictEqual(liveCalls, settledLive + 1, "once settled, the formerly live block caches too");
+	});
+
+	it("drops the regular dock from the exit frame so the summary follows the transcript", () => {
+		const parts = {
+			banner: new Text("banner", 0, 0),
+			chat: new Text("reply", 0, 0),
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer\nCtrl+C again to quit (3s)", 0, 0),
+		};
+		const root = buildLayout(parts);
+		const terminal = new RenderingTerminal();
+		const tui = new TuiMainScreen(terminal);
+		tui.addChild(root);
+		tui.start();
+		try {
+			tui.renderNow();
+			const redraws = tui.fullRedraws;
+			strictEqual(releaseRegularDock(root), true);
+			terminal.writes = [];
+			tui.renderNow();
+			deepStrictEqual(
+				root
+					.render(terminal.columns)
+					.map((row) => stripTerminalSequences(row).trim())
+					.filter(Boolean),
+				["banner", "reply"],
+			);
+			strictEqual(tui.fullRedraws, redraws, "the transcript above is not rewritten");
+			strictEqual(terminal.writes.join("").split("\x1b[2K").length - 1, 3, "the dock's three rows are erased on screen");
+		} finally {
+			tui.stop();
+		}
+		strictEqual(releaseRegularDock(buildLayout(parts, { mode: "fullscreen" })), false, "fullscreen keeps its root");
 	});
 
 	it("never full-redraws the regular screen when an answer taller than it finalizes", () => {

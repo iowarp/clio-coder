@@ -253,6 +253,8 @@ class RegularRoot implements Component {
 	renderCount = 0;
 	/** How many leading rows the last `render` left as the very strings the render before it returned. */
 	keptRowCount = 0;
+	/** Set for the exit frame: the composer, rails and footer go so the exit summary follows the transcript. */
+	private dockReleased = false;
 
 	constructor(private readonly parts: LayoutParts) {}
 
@@ -320,17 +322,23 @@ class RegularRoot implements Component {
 				out[row++] = "";
 			}
 		}
-		if (this.parts.workspace) write(this.parts.workspace.render(width));
-		if (this.parts.pending) write(this.parts.pending.render(width));
-		if (this.parts.fleet) write(this.parts.fleet.render(width));
-		if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
-		write(this.parts.editor.render(width));
-		write(this.parts.footer.render(width));
+		if (!this.dockReleased) {
+			if (this.parts.workspace) write(this.parts.workspace.render(width));
+			if (this.parts.pending) write(this.parts.pending.render(width));
+			if (this.parts.fleet) write(this.parts.fleet.render(width));
+			if (this.parts.contextProgress) write(this.parts.contextProgress.render(width));
+			write(this.parts.editor.render(width));
+			write(this.parts.footer.render(width));
+		}
 		this.heldTail = tail;
 		if (tail === undefined) this.heldTailAt = -1;
 		out.length = row;
 		this.keptRowCount = Math.min(firstChanged < 0 ? row : firstChanged, previousLength);
 		return out;
+	}
+
+	releaseDock(): void {
+		this.dockReleased = true;
 	}
 
 	invalidate(): void {
@@ -350,6 +358,18 @@ class RegularRoot implements Component {
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
 	return new RegularRoot(parts);
+}
+
+/**
+ * Drop the regular screen's dock from the next frame. The main screen leaves its
+ * last frame in scrollback, so without this the exit summary printed after it
+ * sits below a dead composer, footer and double-tap hint. Fullscreen leaves the
+ * alternate screen on exit and keeps its root; returns whether the root changed.
+ */
+export function releaseRegularDock(root: Component): boolean {
+	if (!(root instanceof RegularRoot)) return false;
+	root.releaseDock();
+	return true;
 }
 
 /**

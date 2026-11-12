@@ -89,7 +89,7 @@ import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from ".
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
 import { actionKeyLabel, formatKeyLabel } from "./keybinding-manager.js";
-import { returnToLiveEdge } from "./layout.js";
+import { releaseRegularDock, returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
@@ -2349,7 +2349,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		beforeStopUi: (() => {
 			let settlement: Promise<void> | null = null;
 			return () => {
-				settlement ??= chatRenderer.flushAndCommit("teardown").finally(() => chatRenderer.dispose());
+				settlement ??= chatRenderer
+					.flushAndCommit("teardown")
+					.finally(() => chatRenderer.dispose())
+					.then(async () => {
+						// The regular screen's last frame stays in scrollback above the exit summary.
+						if (releaseRegularDock(presentation.root)) await shell.commitCurrentFrame(300);
+					});
 				return settlement;
 			};
 		})(),
