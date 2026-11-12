@@ -45,14 +45,14 @@
   },
   {
     "slug": "run-a-playbook-and-land-it",
-    "title": "Run a playbook and land the result",
-    "description": "Run the builtin sdlc playbook on one task, watch it work, and land the branch it keeps after you preview the change.",
+    "title": "Run a playbook from plan to commit",
+    "description": "Run the builtin sdlc playbook on one task, watch it work, and read the three commits it makes on your branch.",
     "category": "Workers and fleets",
     "time": "8 min",
     "author": "The CLIO Coder team",
     "source": "run-a-playbook-and-land-it.md",
     "basis": "Documented workflow with 0.6.8 captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/fleet-dispatch.md",
       "guide/built-in-agents.md"

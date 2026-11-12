@@ -1,7 +1,7 @@
-A playbook is a sequence of workers and code steps that the fleet runs for you. The builtin `sdlc` playbook plans, builds, tests with a bounded fix loop, reviews with a bounded revise loop, and documents, with three commits along the way. This guide runs it on one task and lands the result on your branch.
+A playbook is a sequence of workers and code steps that the fleet runs for you. The builtin `sdlc` playbook plans, builds, tests with a bounded fix loop, reviews with a bounded revise loop, and documents, with three commits along the way. This guide runs it on one task and reads what it committed on your branch.
 
 ::: note Version scope
-This guide describes v0.6.8. `fleet land` needs Git 2.38 or newer. Run time and cost depend on your repository and the model you connect, so start with a small task.
+This guide describes v0.8.0. Run time and cost depend on your repository and the model you connect, so start with a small task.
 :::
 
 ::: needs
@@ -51,24 +51,29 @@ clio-coder playbook graph sdlc --var task="Add empty-input handling to the parse
 clio-coder fleet run sdlc --var task="Add empty-input handling to the parser"
 ```
 
-The first line names the fleet root and plan hash. Each settled step prints one line. In another terminal, `clio-coder fleet status` shows the board and `clio-coder fleet events <root>` follows the journal.
+The first line, on stderr, names the fleet root and plan hash. Each settled step prints one line. In another terminal, `clio-coder fleet status` shows the board and `clio-coder fleet events <root> --follow` follows the journal.
 
-### Land what it kept
+The steps work in your checkout, one after another, not in separate worktrees. The `suite` loop runs your `test` command inside the sandbox, rooted at the checkout, and hands a failure back to the coder up to three times.
+
+The command exits 0 only when every required step succeeded, no step was skipped, and every loop resolved. Any other finished run exits 1. A failed preflight, or an error in the scheduler itself, exits 2.
+
+### Read what it committed
 
 ```sh
-clio-coder fleet land
-clio-coder fleet land <run id>
-clio-coder fleet land <run id> --yes --plan <id>
+git log --oneline -3
+git show --stat HEAD~2 HEAD~1 HEAD
 ```
 
-The first command lists the task branches finished runs kept. The second previews one: commits, changes, destination, whether it fast-forwards, and any conflict. It changes nothing. The third lands exactly that preview. Add `--squash` for one commit instead of the history.
+The three `commit` steps commit the plan, the code, and the docs on the branch you have checked out, so there is nothing to merge or land afterwards. If you do not want the result, reset the branch to where it was before the run.
+
+`clio-coder fleet land` is for something else: the task branch a worker dispatched with its own worktree keeps when its change was not merged.
 :::
 
 ::: capture cli-playbook-graph
 :::
 
 ::: result What you should see
-A summary with each loop's terminal reason and any steps that need your decision, then commits on your branch after you land. A finished run shows the playbook ran and its checks passed. It does not show the change is right, so read the diff.
+A summary with each loop's terminal reason and any steps that need your decision, and three new commits on your branch. A finished run shows the playbook ran and its checks passed. It does not show the change is right, so read the diff.
 :::
 
 ## Make it yours
