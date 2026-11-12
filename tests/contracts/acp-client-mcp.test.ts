@@ -123,17 +123,28 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 	}
 });
 
-test("a read-only ACP session registers client stdio MCP servers without starting them", async () => {
+test("a read-only or no-tools ACP session registers client stdio MCP servers without starting them", async () => {
 	const env = await isolateClioEnv("acp-client-mcp-ro-");
 	const cwd = process.cwd();
 	const fixture = resolve("tests/fixtures/mcp-fake-server.mjs");
 	const mcpServers = [{ name: "fixture", command: process.execPath, args: [fixture], env: [] }];
-	const sessions = [
-		{ operatorReadOnly: true, extra: {} },
-		{ operatorReadOnly: false, extra: { _meta: { "clio-coder/ceiling": { readOnly: true } } } },
+	const sessions: Array<{
+		name: string;
+		operatorToolLimits: { readOnly?: true; allowedTools?: [] } | undefined;
+		extra: Record<string, unknown>;
+		readOnly: boolean;
+	}> = [
+		{ name: "acp --read-only", operatorToolLimits: { readOnly: true }, extra: {}, readOnly: true },
+		{ name: "acp --allow-tools none", operatorToolLimits: { allowedTools: [] }, extra: {}, readOnly: false },
+		{
+			name: "client readOnly ceiling",
+			operatorToolLimits: undefined,
+			extra: { _meta: { "clio-coder/ceiling": { readOnly: true } } },
+			readOnly: true,
+		},
 	];
 	try {
-		for (const { operatorReadOnly, extra } of sessions) {
+		for (const { name, operatorToolLimits, extra, readOnly } of sessions) {
 			const registry = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "yolo" });
 			const source = createMcpCapabilitySource({ cwd, registry, configDir: env.dir, requestTimeoutMs: 5_000 });
 			const handlers = new Map<string, (params: unknown) => Promise<unknown> | unknown>();
@@ -173,7 +184,7 @@ test("a read-only ACP session registers client stdio MCP servers without startin
 				session,
 				toolRegistry: registry,
 				mcpCapabilities: source,
-				operatorReadOnly,
+				...(operatorToolLimits ? { operatorToolLimits } : {}),
 				readSessionEntries: () => [],
 				buildReplayMessages: () => [],
 				chat: {
@@ -183,13 +194,15 @@ test("a read-only ACP session registers client stdio MCP servers without startin
 					isStreaming: () => false,
 					getSessionId: () => current?.id ?? null,
 					resetForSession: () => {},
-					setToolCeiling: () => ({ readOnly: true }),
+					setToolCeiling: () => (readOnly ? { readOnly: true } : { allowedTools: [] }),
 				},
 			});
 			try {
 				await handlers.get("initialize")?.({ protocolVersion: 1 });
 				await handlers.get("session/new")?.({ cwd, mcpServers, ...extra });
-				deepStrictEqual(source.connectedIds(), [], `operatorReadOnly=${operatorReadOnly}`);
+				deepStrictEqual(source.connectedIds(), [], name);
+				deepStrictEqual(source.declaredIds(), ["acp_fixture"], name);
+				if (!readOnly) continue;
 				const ensured = await source.ensure("mcp_acp_fixture__echo", { readOnly: true });
 				strictEqual(ensured.spec, null);
 				ok(ensured.reason?.includes("a read-only turn starts only servers trusted as read"), ensured.reason);

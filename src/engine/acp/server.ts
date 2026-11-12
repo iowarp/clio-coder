@@ -593,8 +593,8 @@ export interface ClioAcpServerOptions {
 	 */
 	hostToolEvents?: { onEvent(handler: (event: AcpServerEvent) => void): () => void };
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
-	/** `acp --read-only`: every session is read-only, whatever ceiling its client sends. */
-	operatorReadOnly?: boolean;
+	/** The limits `acp --read-only` and `--allow-tools` set; every session is held within them. */
+	operatorToolLimits?: Pick<TurnConstraints, "readOnly" | "allowedTools">;
 	bus?: TelemetryHub;
 	autonomy?: () => AutonomyLevel;
 	/** Shared with the deferred front when the workspace binds after initialize. */
@@ -4885,10 +4885,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, "client MCP servers are unavailable in this host", { code: "invalid_params" });
 		}
 		try {
-			// A read-only session starts no client server: what one does is unknown until it runs.
-			await options.mcpCapabilities.attachClientServers(servers, {
-				readOnly: options.operatorReadOnly === true || ceiling?.readOnly === true,
-			});
+			// A read-only or no-tools session starts no client server: what one does is unknown until it runs.
+			const operator = options.operatorToolLimits;
+			const start = !(
+				operator?.readOnly === true ||
+				ceiling?.readOnly === true ||
+				operator?.allowedTools?.length === 0 ||
+				ceiling?.allowedTools?.length === 0
+			);
+			await options.mcpCapabilities.attachClientServers(servers, { start });
 		} catch (error) {
 			await options.mcpCapabilities.detachClientServers();
 			options.diagnostics?.(`client MCP launch failed: ${acpErrorMessage(error)}`);
