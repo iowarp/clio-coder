@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.webp" alt="Clio Coder, IOWarp's open-source coding agent for scientific computing and HPC" width="100%" />
+  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.webp" alt="CLIO Coder, IOWarp's open-source coding agent for scientific computing and HPC" width="100%" />
 </p>
 
-# Clio Coder
+# CLIO Coder
 
 **An open-source coding agent for scientific software and HPC, on the models you already have.**
 
@@ -11,7 +11,7 @@
   <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
 </p>
 
-Clio Coder is a coding agent that runs in your terminal, in scripts, in editors
+CLIO Coder is a coding agent that runs in your terminal, in scripts, in editors
 over ACP and in a desktop app (alpha), and works the same way on a local model,
 a lab gateway, a cloud API key or a ChatGPT, Claude or GitHub Copilot
 subscription. It is for researchers, research software engineers and developers
@@ -20,8 +20,8 @@ pipelines and HPC workflows, where a change is done only when the checks say so.
 
 - **Every model, one workflow.** Chat on one model and send workers to others:
   a local model for searches, a strong one for review. Your project guidance,
-  tools, safety rules and sessions stay the same. No Clio account.
-- **Checks you can inspect.** Clio runs your tests, compares numbers within a
+  tools, safety rules and sessions stay the same. No CLIO Coder account.
+- **Checks you can inspect.** CLIO Coder runs your tests, compares numbers within a
   stated tolerance, and reruns computations from pinned inputs. It records
   what passed, what failed, and what was never checked.
 - **Speaks science.** Reads HDF5, NetCDF and Parquet, keeps results in a
@@ -75,7 +75,7 @@ cd /path/to/your/project
 clio-coder
 ```
 
-The first launch sets up a model before anything else. Clio offers what it
+The first launch sets up a model before anything else. CLIO Coder offers what it
 found first (a key in your environment, a stored sign-in, a model server on
 this machine); otherwise pick what you have: an API key, a subscription, a
 model server or gateway, or a setup file from your lab or team. Setup sends the
@@ -92,7 +92,7 @@ Then a focused change with a clear finish line:
 > The test in tests/test_solver.py fails. Make the smallest fix, run the
 > tests, show me the diff, and tell me anything you could not verify.
 
-Clio asks before commands it cannot sandbox or recognize, and before outward
+CLIO Coder asks before commands it cannot sandbox or recognize, and before outward
 actions such as `git push`. Ask it about itself too, such as "how do I send
 workers to a different model?": it searches its own bundled documentation.
 `/help` lists commands, `clio-coder doctor` checks the installation, and
@@ -168,7 +168,7 @@ had before with `clio-coder upgrade --rollback`.
 | Turn off background updates | Install with `--no-auto-update`, or set `CLIO_CODER_AUTO_UPDATE=0` |
 | Clear sessions but keep settings | `clio-coder reset --state` |
 | Start model setup over | `clio-coder reset --settings` |
-| Remove Clio Coder, keeping settings and credentials | `clio-coder uninstall --keep-config` |
+| Remove CLIO Coder, keeping settings and credentials | `clio-coder uninstall --keep-config` |
 | Remove everything | `clio-coder uninstall` |
 | Remove an installer copy left behind after switching to npm, pnpm, or Bun | `clio-coder uninstall --inactive` |
 
@@ -178,7 +178,7 @@ next start; `/resume` picks your conversation back up. npm, pnpm, and Bun
 installs show a notice instead. Updates prune versions and runtimes nothing
 uses any more, keeping the current and previous version.
 Reset and uninstall preview what they remove and ask first, never delete a
-directory they cannot prove is Clio Coder's, and finish by saying what they
+directory they cannot prove is CLIO Coder's, and finish by saying what they
 removed and what they kept. See [installation and lifecycle](docs/guide/installation-and-lifecycle.md).
 
 </details>
@@ -186,11 +186,11 @@ removed and what they kept. See [installation and lifecycle](docs/guide/installa
 ## What you can do
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="Clio Coder terminal at start, with the project, its Git state, the selected model, and the composer" width="100%" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="CLIO Coder terminal at start, with the project, its Git state, the selected model, and the composer" width="100%" /></a>
 </p>
 
 **Change scientific code and prove it.** Say what "done" means: tests, a
-numerical comparison with a tolerance, a performance budget. Clio runs the
+numerical comparison with a tolerance, a performance budget. CLIO Coder runs the
 checks and keeps the results as evidence; `clio-coder evidence list` and
 `/view` show them. A `reproduce` check reruns an analysis from sha256-pinned
 inputs, and `clio-coder claims` lists what was supported or refuted.
@@ -221,7 +221,7 @@ what the host decided, `--max-cost-usd` and `--timeout` bound the run, and
 `--read-only` guarantees no file changes. See
 [exit codes and output](docs/guide/exit-codes-and-output.md).
 
-**Climb a metric, compare models.** `clio-coder research` runs Clio's agent
+**Climb a metric, compare models.** `clio-coder research` runs CLIO Coder's agent
 in worktrees to move one measured number, such as wall time, and keeps a change
 only when interleaved trials and a bootstrap interval show a real gain and every
 gate check passes. `clio-coder arena` runs one prompt on 2 to 4 models, shows
@@ -239,7 +239,7 @@ clio-coder library search slurm
 clio-coder library install plugin:hpc --with-requirements
 ```
 
-Clio also loads MCP servers, skills, agents, prompts, and its own
+CLIO Coder also loads MCP servers, skills, agents, prompts, and its own
 process-isolated extensions. See the [library](docs/guide/resource-library.md)
 and [extensions](docs/guide/harness-extensions.md).
 
@@ -290,18 +290,18 @@ See [commands and modes](docs/guide/commands-and-modes.md),
 
 ## Safety and control
 
-Clio edits files and runs commands with your permissions. You decide how much
+CLIO Coder edits files and runs commands with your permissions. You decide how much
 of that it may do on its own.
 
 | Control | What it does |
 | --- | --- |
 | **Approvals** | Reads, edits, and sandboxed or recognized commands run; other commands and outward actions such as `git push` ask first. |
-| **Read-only** | `--read-only` leaves every user file exactly as it was. Clio may still write its own logs and memory. |
-| **Sandbox** | Workers and the main session's shell commands run in an OS sandbox (bubblewrap on Linux) when one is available. It hides credential files, other agents' logins, shell histories, browser profiles, Clio's own config directory and your project's secret files, and contained commands write their own tool cache instead of yours. `safety.sandbox: required` refuses to run them without it. |
+| **Read-only** | `--read-only` leaves every user file exactly as it was. CLIO Coder may still write its own logs and memory. |
+| **Sandbox** | Workers and the main session's shell commands run in an OS sandbox (bubblewrap on Linux) when one is available. It hides credential files, other agents' logins, shell histories, browser profiles, CLIO Coder's own config directory and your project's secret files, and contained commands write their own tool cache instead of yours. `safety.sandbox: required` refuses to run them without it. |
 | **Yolo** | For work you leave running: nothing waits for you. It is contained by default, so the sandbox, snapshots and safety judge stay on, and a call that would have asked you is refused back to the agent. |
 | **Damage control** | Hard blocks and protected paths apply at every autonomy level. |
 | **Secrets** | Credentials are masked in command output and approval cards. |
-| **Project trust** | A repository's own Clio configuration waits for your approval on one card before it loads, and project settings can only tighten safety. |
+| **Project trust** | A repository's own CLIO Coder configuration waits for your approval on one card before it loads, and project settings can only tighten safety. |
 
 Command scanning is static and has limits; the sandbox is the real boundary
 where it applies, and each release lists its
@@ -312,7 +312,7 @@ vulnerability, follow [SECURITY.md](SECURITY.md).
 
 ## No call-home. Sharing is explicit.
 
-Clio Coder sends nothing home in the background, ever. Sessions, evidence and
+CLIO Coder sends nothing home in the background, ever. Sessions, evidence and
 telemetry stay on your machine, and the providers you configure receive only
 the requests you send them.
 
@@ -328,9 +328,9 @@ github.com; once it is 180 days old, your next `clio-coder report` or
 `clio-coder telemetry share` deletes it. Your agent never shares for you. See
 [Share with the maintainers](docs/guide/troubleshooting.md#share-with-the-maintainers).
 
-## For AI agents: installing Clio Coder
+## For AI agents: installing CLIO Coder
 
-If a user asked you to install, set up or drive Clio Coder, follow these
+If a user asked you to install, set up or drive CLIO Coder, follow these
 steps. Every command here is non-interactive; steps that need the human are
 listed at the end.
 
@@ -390,7 +390,7 @@ listed at the end.
    `clio-coder targets --probe` checks each connection. Add `--verify` to a
    `configure --id` line to send one test request and save only if the model
    answers. Never write a key into a file or onto a command line yourself:
-   `--api-key-env` names a variable, and Clio reads it at call time.
+   `--api-key-env` names a variable, and CLIO Coder reads it at call time.
 
 4. **Check the installation:** `clio-coder doctor` lists problems first, and
    `clio-coder doctor --fix` makes the repairs it can make safely. It exits 0
@@ -491,7 +491,7 @@ The same guides are on the [website](https://coder.iowarp.ai/docs.html).
 Questions are welcome in
 [Discussions](https://github.com/iowarp/clio-coder/discussions), and no
 question is too basic. To report a bug or ask for a feature, run `/report`
-inside Clio Coder or `clio-coder report` in a shell: it fills in your version
+inside CLIO Coder or `clio-coder report` in a shell: it fills in your version
 and setup, masks private details, and shows you the text before it is sent. You
 can also open an [issue](https://github.com/iowarp/clio-coder/issues) by hand.
 Experience reports from scientific projects, local models and clusters are
@@ -504,7 +504,7 @@ especially welcome.
 
 ## Acknowledgements
 
-Clio Coder is developed by the [Gnosis Research Center](https://grc.iit.edu) at
+CLIO Coder is developed by the [Gnosis Research Center](https://grc.iit.edu) at
 [Illinois Tech](https://www.iit.edu), in collaboration with the
 [University of Utah](https://www.utah.edu), as part of [IOWarp](https://iowarp.ai).
 The IOWarp CLIO architecture is supported by the National Science Foundation
@@ -512,10 +512,10 @@ under collaborative awards
 [OAC-2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318) and
 [OAC-2411319](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411319), 2024–2029.
 
-Clio builds on the [Pi agent framework](https://github.com/earendil-works/pi),
+CLIO Coder builds on the [Pi agent framework](https://github.com/earendil-works/pi),
 [ACP](https://agentclientprotocol.com), and [MCP](https://modelcontextprotocol.io).
 Its panes are powered by [herdr](https://github.com/herdrdev/herdr) (Apache-2.0),
-whose license ships beside the binary Clio installs.
+whose license ships beside the installed binary.
 Dependency and component notices are in [NOTICE](NOTICE).
 
 CLIO means **Context Layer for Input/Output**. Related IOWarp projects include
