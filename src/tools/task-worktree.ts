@@ -530,8 +530,9 @@ function restoreRecordedOverlay(claim: TaskClaim): void {
 		for (const file of files) {
 			if (typeof file !== "string") continue;
 			overlayTarget(claim.path, file);
+			// The content first, then the mark: a failed checkout leaves the compiled file hidden, never staged.
+			git(claim.path, ["checkout", "--ignore-skip-worktree-bits", "--", `:(top,literal)${file}`]);
 			git(claim.path, ["update-index", "--no-skip-worktree", "--", file]);
-			git(claim.path, ["checkout", "--", `:(top,literal)${file}`]);
 		}
 	}
 	const { overlay: _overlay, ...marker } = claim.marker;
