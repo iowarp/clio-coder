@@ -286,7 +286,7 @@ export class MemoryOverlayView implements Component {
 			default:
 				return this.getStatus().enabled
 					? "No saved lessons apply here yet. Clio proposes lessons from what worked or failed in earlier tasks, and they wait under Review until they are approved or kept. Opening this view changes nothing."
-					: "Background memory is off, so Clio saves no lessons. /settings, Context & Memory, turns it on.";
+					: "Background memory is off, so Clio saves no lessons. /settings, Context and memory, turns it on.";
 		}
 	}
 
