@@ -8127,8 +8127,9 @@ export function createDispatchBundle(
 			: undefined;
 		const heartbeatAt = worker.heartbeatAt;
 		const workerEvents = worker.events;
-		// Put the harness's files back before anything reads the worktree's change.
-		const workerDone = peerOverlay === null ? worker.promise : worker.promise.finally(restorePeerOverlay);
+		// Put the harness's files back before anything reads the worktree's change. A held follower writes its overlay
+		// only when it starts, after this line, so the restore is always chained; without an overlay it does nothing.
+		const workerDone = worker.promise.finally(restorePeerOverlay);
 		if (prefixLeader) {
 			const release = prefixLeader.release;
 			workerDone.then(release, release);
