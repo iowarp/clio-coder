@@ -20,7 +20,7 @@ clio-coder configure --interop
 The first command reports what CLIO Coder can find; the second configures interoperability. In a terminal conversation, `/library interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
 
 ::: capture tui-interop cli-interop-inspect
-What CLIO Coder detected on a machine with three peer CLIs installed but not signed in.
+What CLIO Coder detected on a machine with peer CLIs installed but not signed in.
 :::
 
 ## Choose managed work or an interactive handoff
