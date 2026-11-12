@@ -1,6 +1,6 @@
 Does memory make an agent better at the next task, or does it only add text to a prompt? CLIO Coder has a working memory system with an approval gate, and it can also approve some of its own lessons. Nobody has yet measured whether any of this changes outcomes.
 
-::: note Open question, described for v0.6.8
+::: note Open question, described for 0.8.0
 Proactive memory has shipped and is on by default. This page has no outcome numbers because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
 :::
 
@@ -20,6 +20,8 @@ Durable lessons are separate from those banks, and only eligible approved record
 
 Repository knowledge from a task-bank entry can also receive automatic approval once one session records that the lesson held, with no contradiction or recorded regression. It waits for a person if another approved or rejected lesson already carries the same command as evidence.
 
+In 0.8.0 the gate is narrower. Automatic approval needs a command that could have failed. A lesson backed only by a quote from a repository file waits for a person, and so does one whose only command cannot fail, such as `echo`, `ls` or `true`. Expect more pending lessons than 0.7.0 produced.
+
 CLIO Coder records two useful observations about an approved lesson: `delivered` when its reminder was submitted, and `held` when the recommended command then succeeds exactly. A held lesson did not necessarily cause that success, and the agent might have run the command anyway. That gap is the research problem in one sentence.
 
 ## Why it matters
@@ -32,7 +34,7 @@ Memory is the obvious fix, and also an easy way to pay for tokens that do nothin
 
 **Measure counterfactual effect.** Compare paired sessions on seeded tasks with memory on and off, and with a lesson present and absent. Count repeated failures, rounds, and cost, including memory's own calls.
 
-**Audit the approval gate.** Collect automatically approved lessons from real repositories and have a person grade them. A false-approval rate, even from a small sample, would be new evidence about whether one held session is enough.
+**Audit the approval gate.** Collect automatically approved lessons from real repositories and have a person grade them. A false-approval rate, even from a small sample, would be new evidence about whether one held session is enough. Lessons approved before and after the 0.8.0 change are separate samples, because the rule changed between them.
 
 **Study reminder timing.** Reminders can land at tool-batch boundaries, at turn end, or on the next prompt. Cadence is configurable, so whether frequent reminders help or distract can be tested.
 
@@ -43,11 +45,11 @@ Memory is the obvious fix, and also an easy way to pay for tokens that do nothin
 ::: steps
 ### Look at what memory is doing
 
-Open `/memory` in the terminal. Its tabs are **Lessons**, **This task**, **Review**, and **Diagnostics**. In **Review**, `a` approves a proposal and `x` rejects it. From the shell, `clio-coder memory` lists, approves, rejects, and prunes durable records.
+Open `/memory` in the terminal. Its tabs are **Lessons**, **This task**, **Review**, and **Diagnostics**. In **Review**, `a` approves a proposal and `x` rejects it after asking once. From the shell, `clio-coder memory` lists, approves, rejects, and prunes durable records.
 
 ### Control the conditions
 
-In `/settings`, **Memory connection** and **Memory model** choose the route. **Proactive memory** turns the whole system off, or set `context.memory.enabled: false` in project settings for one arm of a study. Cost appears in `/usage` and `clio-coder usage report`.
+In `/settings`, under **Context and memory**, then **Proactive memory**, **Memory connection** and **Memory model** choose the route. **Proactive memory** turns the whole system off, or set `context.memory.enabled: false` in project settings for one arm of a study. Cost appears in `/usage` and `clio-coder usage report`.
 
 ### Capture more when you need it
 
