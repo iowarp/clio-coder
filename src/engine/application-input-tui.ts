@@ -114,13 +114,16 @@ export class ApplicationInputTuiAltScreen extends TuiAltScreen implements Applic
 	 * SelectList and SettingsList turn the wheel into selection moves. Clio is
 	 * keyboard first: while an overlay is up the wheel scrolls the transcript
 	 * at the viewport's step (five times it with Alt), and choices move only
-	 * on keys.
+	 * on keys. A selection made on the overlay's cells holds screen rows, and
+	 * the transcript scrolling under it would leave it on other text, so the
+	 * scroll drops the selection; its copy was taken at release.
 	 */
 	private scrollTranscriptPastOverlay(data: string): boolean {
 		const button = Number(SGR_MOUSE.exec(data)?.[1] ?? Number.NaN);
 		if ((button & 64) === 0 || (button & 3) > 1 || !this.hasOverlay()) return false;
 		const direction = (button & 3) === 0 ? -1 : 1;
 		const lines = this.overlayWheel.next(direction, performance.now());
+		this.resetTextSelection();
 		this.scrollBy(direction * ((button & 8) !== 0 ? lines * 5 : lines));
 		return true;
 	}

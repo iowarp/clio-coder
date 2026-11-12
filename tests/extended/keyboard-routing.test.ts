@@ -1053,3 +1053,27 @@ it("selects text past focused search and a modal overlay, and choices still move
 	assert.equal(confirmed, 0);
 	assert.equal(f.state(), "model");
 });
+it("drops a screen selection when the wheel scrolls the transcript under a modal overlay", () => {
+	const f = fixture();
+	f.active.streaming = false;
+	const list = new SelectList(
+		[
+			{ value: "a", label: "first choice" },
+			{ value: "b", label: "second choice" },
+		],
+		2,
+		DEFAULT_SELECT_THEME,
+	);
+	f.open("model", list);
+	f.tui.renderNow();
+	const lines = f.tui.getScreenLines().map(stripTerminalSequences);
+	const y = lines.findIndex((line) => line.includes("second choice")) + 1;
+	const x = (lines[y - 1] ?? "").indexOf("second choice") + 1;
+	f.terminal.input(`\x1b[<0;${x};${y}M`);
+	f.terminal.input(`\x1b[<32;${x + 5};${y}M`);
+	f.terminal.input(`\x1b[<0;${x + 5};${y}m`);
+	assert.equal(f.tui.hasActiveSelection(), true, "a drag over the card selects its screen rows");
+	f.terminal.input(`\x1b[<64;${x};${y}M`);
+	assert.equal(f.tui.hasActiveSelection(), false, "the screen rows under the selection no longer hold what it selected");
+	assert.equal(list.getSelectedItem()?.value, "a", "the wheel does not move the choice");
+});
