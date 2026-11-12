@@ -99,8 +99,10 @@ directory, and `clio-coder upgrade` starts the installer or npm from the
 directory it installs into. A project `.npmrc` in the directory you run them
 from does not choose the registry; your user `~/.npmrc`, the global npmrc and
 `npm_config_registry` still do. A channel that resolves to a version older than
-the active one is refused before anything is installed. To move down, name the
-version with `--version`, or use `--rollback`.
+the active one is refused before anything is installed. The one exception is an
+explicit `--channel latest` that leaves a pre-release for the stable release,
+described below. To move down in any other case, name the version with
+`--version`, or use `--rollback`.
 
 Return to stable with `clio-coder upgrade --channel latest`,
 `curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel latest`, or:
@@ -139,7 +141,7 @@ for them.
 | `.../versions/<version>/lib/node_modules/@iowarp/clio-coder/` | One package prefix per installed version. The manifest names the current and previous ones, which always stay. See [Pruning](#pruning-versions-and-runtimes) for when the others go. |
 | `.../install.json` | Manifest naming the Node, the current and previous prefixes, the launcher, the channel, any version pin, whether background updates are on, whether a package manager wraps the install, and whether the installer added the launcher directory to `PATH`. Activating a version is one atomic write of this file. |
 | `.../launchers/`, `.../.active/` | The launcher's helper script, and one receipt per running session naming its version and Node, which pruning and `uninstall` check before they remove anything. Receipts whose local process is gone are removed. |
-| `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
+| `.../.installer-owner`, `.../.install-lock/` | The ownership marker that stops an installer from claiming a directory that already holds `runtime/` or `versions/`, and the lock held while an install, rollback or uninstall runs. Each installer reclaims a lock on its own when this machine wrote it, the owner pid is gone and the lock is older than 10 minutes, which covers a lock an interrupted `clio-coder uninstall` or prune left behind. A lock held by a live process, a foreign host or a recent crash stops the run with exit status 75, and deleting only that directory once its owner has exited clears it. |
 | `~/.local/bin/clio-coder` (`%USERPROFILE%\.local\bin\clio-coder.exe` and `clio-coder.launch` on Windows) | A small launcher that reads the manifest on each start and runs the managed Node on the current prefix. On Linux and macOS each activation points it at the current Node; on Windows it keeps the Node of the first install, because an install that started from an older `clio-coder.cmd` may still be running it and `cmd.exe` rereads a running `.cmd` file. |
 
 #### Pruning versions and runtimes
@@ -179,7 +181,8 @@ lifecycle operations.
 These are all the flags `install.sh` parses. Options that take a value also
 accept the `--flag=value` form, and flags pass through `curl ... | sh -s -- <flags>`.
 An unknown option stops the run with `[install] error: unknown option: <flag> (see --help)`
-and exit status 1, as does every other installer failure. `--help` exits 0.
+and exit status 1, as does every other installer failure except a held install
+lock, which exits 75. `--help` exits 0.
 
 | Flag | Environment | Effect |
 | --- | --- | --- |
@@ -231,7 +234,11 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 
 `install.cmd` has no options of its own. It passes its arguments to
 `install.ps1`, so a CMD user writes PowerShell parameter names such as
-`-Version 0.6.0`. Both installers end with `Run: clio-coder` and `Desktop app: clio-coder gui`.
+`-Version 0.6.0`. Both installers end with the next step for this home, then `Desktop app: clio-coder gui`.
+The next step is `Clio Coder <version> is installed.`, `Next:  cd <your project> && clio-coder` and one line
+about the first launch, such as `The first launch sets up a model. Found: ANTHROPIC_API_KEY.` or
+`Chat uses <target> / <model>.` A package older than 0.7.1 gets `Run: clio-coder` instead. While the launcher
+directory is not on `PATH`, a closing line names the launcher's full path to run until it is.
 
 An `install.ps1` failure writes one `[install] error: <message>` line to stderr; an exception that is not an installer refusal also gets the `[install] error:` prefix and appends the failing script position. Run with `-File` or through `install.cmd`, the process then exits 1. Under `irm | iex` the script never calls `exit`, so the caller's PowerShell session stays open and the error line is the only signal.
 
@@ -254,7 +261,7 @@ inputs preserves the recorded choice.
 | `CLIO_CODER_NODE_UNOFFICIAL_MIRROR` | `install.sh` | The same for `unofficial-builds.nodejs.org`. |
 | `CLIO_CODER_NODE_SHASUMS` | both | `SHASUMS256.txt` for a local Node tarball kept elsewhere. |
 | `CLIO_CODER_NODE_KEYRING` | both | A local copy of the Node.js release keyring. |
-| `CLIO_CODER_REQUIRE_SIGNATURE` | both | `1` fails the install unless an OpenPGP signature on `SHASUMS256.txt` verified. `install.ps1` verifies only when `gpgv` is on `PATH` and the release publishes `SHASUMS256.txt.asc`. Otherwise it states the reason before relying on the HTTPS checksum: `no gpgv on PATH`, `no SHASUMS256.txt.asc signature`, `the Node.js release keys could not be fetched` or `gpgv could not check the signature`, followed by `; verifying the checksum from SHASUMS256.txt over HTTPS`. |
+| `CLIO_CODER_REQUIRE_SIGNATURE` | both | `1` fails the install unless an OpenPGP signature on `SHASUMS256.txt` verified. Unset, both installers refuse a Node download in three cases: nodejs.org serves no `SHASUMS256.txt.asc`, a key outside the Node.js release keyring signed it, or the `SHASUMS256.txt.asc` nodejs.org served holds no signature the tool could verify. The error ends with `refusing to install. CLIO_CODER_REQUIRE_SIGNATURE=0 relies on the checksum alone.`, and `0` accepts those three cases and installs on the HTTPS checksum. A signature that verifies as bad stops the install at any value. `install.ps1` verifies only when `gpgv` is on `PATH`. In every other case it states the reason before relying on the HTTPS checksum: `no gpgv on PATH`, `no SHASUMS256.txt.asc signature` (a mirror or a local zip), `the Node.js release keys could not be fetched` or `gpgv could not check the signature`, followed by `; verifying the checksum from SHASUMS256.txt over HTTPS`. |
 | `CLIO_CODER_NODE_BUILD` | `install.sh` | Force a Node build: `linux-x64`, `linux-arm64`, `linux-x64-glibc-217`, `linux-x64-musl`, `linux-arm64-musl`, `darwin-x64` or `darwin-arm64`. |
 | `CLIO_CODER_INSTALL_MANAGER` | `native-install.cjs` | Records a wrapping package manager such as `winget` in the manifest. |
 | `npm_config_registry`, `https_proxy`, `http_proxy` | `npm`, `curl`, `wget` | A package registry mirror and proxies for the downloads. |
@@ -376,10 +383,15 @@ is to start model setup over, and `reset --state` to clear sessions. Project
 `.clio-coder/` directories survive these user-level operations.
 
 The installers prepare the launcher and directory structure, then end with
-`Run: clio-coder`. A new home starts `clio-coder configure` by itself on that
+`Next:  cd <your project> && clio-coder`. A new home starts `clio-coder configure` by itself on that
 first launch. Neither installer asks you to configure delegation peers
 before your primary model is set up. Upgrading preserves settings and
 credentials; reinstalling the package alone does not reset them.
+
+A launch never downloads the pane host into a home that never had it, which is
+what an npm, pnpm or Bun install sees on its first launch. Bare `clio-coder` prints
+``Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.``
+once and runs in the plain terminal until you run that command.
 
 A returning user whose home already exists but has no saved chat route is not
 sent back through configure when a route can be detected; the contract is in
@@ -529,7 +541,7 @@ clio-coder --version
 The script ends with `Verify the install you just made:` and the launcher it
 linked, named by path (`<link path> --version`), because a bare `clio-coder` can
 answer for an older install earlier on `PATH`. A `hash -r` or `rehash` hint
-follows, then the same two lines as `install.sh`: `Run: clio-coder` and
+follows, then two closing lines: `Run: clio-coder` and
 `Desktop app: clio-coder gui`.
 
 On a machine where Clio Coder has never run, plain `clio-coder doctor` prints one

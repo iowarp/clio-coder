@@ -32,6 +32,7 @@ current source.
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
 | Understand what Clio Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
+| Upgrade from 0.7: new `run` exit codes and the `run_end` frame, the required sandbox's outward-command rules, renamed slash commands, the `#ticket=` desktop launch link | [0.8.0 upgrade notes](../CHANGELOG.md#upgrade-notes) |
 | Upgrade from 0.6: removed runtime ids, retired settings keys, the `evals` manifest key and the retired `github-copilot` login | [Upgrading to 0.7.0](guide/installation-and-lifecycle.md#upgrading-to-070-removed-compatibility) |
 | Run the read-only install check: core install, targets, HPC toolchain, task worktrees, Slurm MCP and System One rows, and the deep checks | [Doctor](guide/doctor.md) |
 | Bring a decision model in one setting: the `consult` tool, the judge screen, steering triage and their limits | [System One](guide/system-one.md) |

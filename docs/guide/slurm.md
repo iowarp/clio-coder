@@ -29,8 +29,9 @@ servers:
 The id `slurm` is what the library skill expects, and it is also the id that
 switches on the per-tool classification and the allocation confirmation
 described below. A server entry takes `id`, `command`, `args`, `cwd`, `env`,
-`timeoutMs` (at most 900000, bounding one tool call), `actionClass`, and
-`toolActionClasses`. A user-scope `cwd` is absolute or relative to the Clio
+`timeoutMs` (at most 900000, bounding one tool call), `actionClass`,
+`toolActionClasses`, and `network`, which takes effect only in a user
+declaration. A user-scope `cwd` is absolute or relative to the Clio
 config directory, and a user server with no `cwd` runs from the config
 directory itself. A project-scope `cwd` must be repository-relative and stay
 inside the repository, symbolic links included; an absolute project `cwd` is

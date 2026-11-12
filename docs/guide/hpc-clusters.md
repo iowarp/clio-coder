@@ -60,10 +60,14 @@ Every Node download is checked against `SHASUMS256.txt` from the same release,
 and a mismatch stops the install. For official builds, the script also checks the
 OpenPGP signature on `SHASUMS256.txt.asc` against the Node.js release team's
 keys, fetched from the `nodejs/release-keys` repository rather than from the
-download host, when `gpgv` or `gpg` is present. A bad signature stops the
-install, and so does a signature from nodejs.org by a key outside that keyring
-or a `SHASUMS256.txt.asc` from nodejs.org that holds no valid signature, unless
-`CLIO_CODER_REQUIRE_SIGNATURE=0` is set. An unavailable keyring or missing `gpg` is reported, and the install
+download host, when `gpgv` or `gpg` is present. A bad signature always stops the
+install. The install also stops when nodejs.org serves no `SHASUMS256.txt.asc`,
+when a key outside that keyring signed the file, or when the
+`SHASUMS256.txt.asc` nodejs.org served holds no valid signature;
+`CLIO_CODER_REQUIRE_SIGNATURE=0` accepts these three cases and installs on the
+checksum. A mirror or local tarball without a signature file, an unavailable
+keyring, a missing `gpg`, or a `gpg` that cannot read the keyring (gpgv 1.x and
+gpg 2.0, as on CentOS 7) is reported, and the install
 continues on the checksum alone unless `CLIO_CODER_REQUIRE_SIGNATURE=1` is set.
 unofficial-builds.nodejs.org publishes no signatures, so the glibc-2.17 and musl
 arm64 builds are verified by checksum over HTTPS only.
@@ -88,10 +92,11 @@ refreshes and web fetches, and `clio-coder doctor` shows the proxy in effect.
 `localhost`, `127.0.0.1` and `[::1]` always go direct. A `NO_PROXY` entry
 matches a host by exact name or as a domain suffix (`example.com`,
 `.example.com` and `*.example.com` all cover `api.example.com`), optionally
-with `:port`, and `NO_PROXY=*` turns the proxy off. CIDR ranges such as
-`192.168.0.0/16` and wildcards such as `192.168.*` are ignored (a CIDR range
-gets one stderr line naming it), so a model server on a cluster or LAN address goes through the proxy
-unless `NO_PROXY` names its host or IP address exactly:
+with `:port`, and `NO_PROXY=*` turns the proxy off. A CIDR range such as
+`192.168.0.0/16` or an IPv4 wildcard such as `192.168.*` sends requests to IP
+addresses inside it direct. Host names are not resolved to match a range, so a
+model server you reach by host name goes through the proxy
+unless `NO_PROXY` names that host:
 
 ```bash
 export NO_PROXY=localhost,gpu-node-07,10.1.4.22
@@ -267,7 +272,10 @@ the `data` tool names the file to pre-seed; see
 
 An exact version such as `--version 0.6.0` pins the install: `clio-coder upgrade`
 and background updates leave it there, and `--version latest` (or `beta`, `dev`)
-releases the pin. `--rollback` moves a pin to the version it restores. The
+releases the pin. A channel that resolves to a version older than the installed
+one is refused before anything is installed, except an explicit
+`--channel latest` that leaves a pre-release for the stable release; in any
+other case name that version with `--version` or use `--rollback`. `--rollback` moves a pin to the version it restores. The
 [installation guide](installation-and-lifecycle.md) has the details.
 
 `clio-coder upgrade` installs the next version beside the current one and keeps
