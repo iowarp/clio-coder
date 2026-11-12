@@ -6,14 +6,14 @@
 			"image": "assets/tui-boot.webp",
 			"original": "assets/tui-boot.png",
 			"width": 2268,
-			"height": 722,
-			"label": "Setup",
-			"alt": "CLIO Coder setup on first launch: no model target is configured, so setup starts, explains that it sends one short test message before saving, and offers the model server it found at http://127.0.0.1:4000 (LiteLLM gateway, model qwen3.8-27b) or setting up something else.",
-			"caption": "On first launch with no model configured, setup offers the local model server it found.",
+			"height": 944,
+			"label": "Ready",
+			"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.",
+			"caption": "The terminal at start, with the project, its Git state, and the selected model.",
 			"interface": "Terminal",
 			"version": "0.8.0-rc.1",
 			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-launch) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-boot\" marker, rows 1-16, rendered by the site's player at 2x."
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: interface: { demo: true, outputDetail: detailed }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-boot\" marker, rows 3-24, rendered by the site's player at 2x."
 		},
 		"tui-verify": {
 			"image": "assets/tui-verify.webp",

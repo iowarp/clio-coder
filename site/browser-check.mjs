@@ -185,7 +185,7 @@ try {
 	const dialogAxe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
 	assert.deepEqual(dialogAxe.violations, [], "Accessible screenshot dialog");
 	await page.locator('[data-media="next"]').click();
-	assert.match(await page.locator("#media-caption").innerText(), /terminal for the first time/);
+	assert.match(await page.locator("#media-caption").innerText(), /terminal at start/);
 	await page.locator('[data-media="zoom"]').click();
 	await page.waitForFunction(() => {
 		const viewport = document.querySelector(".image-view");

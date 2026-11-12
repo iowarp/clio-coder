@@ -83,7 +83,7 @@
 			"repo": "calibration-lab",
 			"cols": 120,
 			"rows": 36,
-			"poster": "tui-boot",
+			"poster": "setup",
 			"steps": [
 				{
 					"wait": "\\$\\s*$",
@@ -105,8 +105,7 @@
 					"pause": 2.5
 				},
 				{
-					"shot": "tui-boot",
-					"rows": [1, 16]
+					"marker": "setup"
 				},
 				{
 					"keys": ["Enter"]
@@ -160,14 +159,6 @@
 				"label": "First launch",
 				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
 				"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt."
-			},
-			"shots": {
-				"tui-boot": {
-					"image": "assets/tui-boot.webp",
-					"label": "Setup",
-					"alt": "CLIO Coder setup on first launch: no model target is configured, so setup starts, explains that it sends one short test message before saving, and offers the model server it found at http://127.0.0.1:4000 (LiteLLM gateway, model qwen3.8-27b) or setting up something else.",
-					"caption": "On first launch with no model configured, setup offers the local model server it found."
-				}
 			},
 			"env": {
 				"CLIO_CODER_REDUCE_MOTION": "1"
@@ -568,6 +559,78 @@
 				"alt": "Terminal recording: clio-coder doctor's shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.",
 				"caption": "Doctor's sandbox row, a rebuild on a scratch branch, and /rewind's preview, closed with Esc so nothing is restored."
 			}
+		},
+		{
+			"id": "still-tui-boot",
+			"summary": "a fresh launch in a configured workspace: the welcome panel with the workspace, its Git state, the model, and the composer",
+			"title": "Terminal at start",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 44,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 30
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"shot": "tui-boot",
+					"rows": [3, 24]
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-boot": {
+					"image": "assets/tui-boot.webp",
+					"label": "Ready",
+					"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.",
+					"caption": "The terminal at start, with the project, its Git state, and the selected model."
+				}
+			},
+			"settings": ["interface: { demo: true, outputDetail: detailed }"]
 		}
 	]
 }

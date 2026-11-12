@@ -15,6 +15,7 @@
 // A scenario with privateNet runs in its own network namespace: the alias proxy
 // listens on a unix socket, and a forwarder inside the sandbox serves it on the
 // given port, so a default model port such as 4000 never opens on the host.
+// A stillsOnly scenario publishes only its stills.
 // Without --publish, output stays in <scratch>/<id>/out for review. Casts are
 // compacted losslessly before stills are rendered; compact.mjs says how.
 
@@ -526,19 +527,34 @@ body{margin:0;background:${spec.theme.bg}}
 		let clip = null;
 		if (still.crop) {
 			const box = await term.boundingBox();
-			const rows = still.rows;
-			const line = box.height / rows;
 			const [from, to] = still.crop;
+			// Measured per row: the player's line boxes, not the terminal height divided evenly.
+			const lines = await page.$$eval(".ap-term .ap-line", (els) =>
+				els.map((el) => {
+					const rect = el.getBoundingClientRect();
+					return [rect.top, rect.bottom];
+				}),
+			);
+			if (lines.length !== still.rows) throw new Error(`${still.id}: the player drew ${lines.length} rows`);
 			clip = {
 				x: box.x - 16,
-				y: box.y + (from - 1) * line - 16,
+				y: lines[from - 1][0] - 16,
 				width: box.width + 32,
-				height: (to - from + 1) * line + 32,
+				height: lines[to - 1][1] - lines[from - 1][0] + 32,
 			};
 		}
 		const path = join(outDir, `${still.id}.png`);
-		if (clip) await page.screenshot({ path, clip });
-		else await (await page.$("#host")).screenshot({ path });
+		if (clip) {
+			await page.screenshot({ path, clip });
+			// The margin above and below a crop shows parts of the neighbouring rows; paint it as background.
+			run("python3", [
+				"-c",
+				"import sys;from PIL import Image,ImageDraw;i=Image.open(sys.argv[1]).convert('RGB');d=ImageDraw.Draw(i);w,h=i.size;m=int(sys.argv[2]);d.rectangle([0,0,w,m-1],fill=sys.argv[3]);d.rectangle([0,h-m,w,h],fill=sys.argv[3]);i.save(sys.argv[1])",
+				path,
+				"32",
+				spec.theme.bg,
+			]);
+		} else await (await page.$("#host")).screenshot({ path });
 		results.push({ ...still, path });
 	}
 	await browser.close();
@@ -623,9 +639,11 @@ for (const scenario of scenarios) {
 		const stills = cast.markers
 			.filter((marker) => marker.shot)
 			.map((marker) => ({ id: marker.shot, time: marker.time, crop: marker.crop, rows: session.rows }));
-		const poster = cast.markers.find((marker) => marker.label === scenario.poster);
-		if (!poster) throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached`);
-		stills.push({ id: scenario.id, time: poster.time, rows: session.rows });
+		// A stills-only scenario publishes its stills; its cast stays in scratch for review.
+		const poster = scenario.stillsOnly ? null : cast.markers.find((marker) => marker.label === scenario.poster);
+		if (!scenario.stillsOnly && !poster)
+			throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached`);
+		if (poster) stills.push({ id: scenario.id, time: poster.time, rows: session.rows });
 		const rendered = await renderStills(cast.text, stills, outDir);
 		for (const still of rendered)
 			run("python3", [
@@ -640,7 +658,7 @@ for (const scenario of scenarios) {
 						.map(([key, value]) => `${key}=${value}`)
 						.join(", ")}.`
 				: ""
-		}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
+		}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
 			scenario.privateNet
 				? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
 				: ""
@@ -691,8 +709,9 @@ for (const scenario of scenarios) {
 
 function publish(scenario, outDir, entries) {
 	mkdirSync(join(site, "assets/casts"), { recursive: true });
-	for (const ext of ["cast", "txt"])
-		copyFileSync(join(outDir, `${scenario.id}.${ext}`), join(site, `assets/casts/${scenario.id}.${ext}`));
+	if (!scenario.stillsOnly)
+		for (const ext of ["cast", "txt"])
+			copyFileSync(join(outDir, `${scenario.id}.${ext}`), join(site, `assets/casts/${scenario.id}.${ext}`));
 	const registry = JSON.parse(readFileSync(join(site, "content/captures.json"), "utf8"));
 	for (const [id, entry] of Object.entries(entries)) {
 		mkdirSync(dirname(join(site, entry.image)), { recursive: true });
