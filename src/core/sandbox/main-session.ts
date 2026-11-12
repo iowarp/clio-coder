@@ -815,7 +815,7 @@ export function mainSandboxAgentMasks(env: NodeJS.ProcessEnv = process.env, tmp:
  * is masked as a directory, which holds for every ticket written into it later. `KEYRING:`, `KCM:` and
  * `MEMORY:` caches are not files and are not covered here.
  */
-export function mainSandboxKerberosMasks(
+function mainSandboxKerberosMasks(
 	env: NodeJS.ProcessEnv,
 	tempRoots: ReadonlyArray<string>,
 	uid: number | undefined = process.getuid?.(),
