@@ -36,8 +36,10 @@ Keep the id `slurm`. The `slurm-jobs` skill you install below expects it, and it
 
 ```sh
 clio-coder doctor --verbose
-clio-coder mcp list
+clio-coder mcp list --refresh
 ```
+
+Until the first refresh, plain `mcp list` shows the declaration with no recorded tool catalog. `--refresh` starts each trusted server, lists its tools live, and records the catalog.
 
 Plain `doctor` folds the Slurm checks into one row while none of them needs attention:
 
@@ -49,6 +51,8 @@ INFO scheduler commands     sbatch is on PATH: scheduler commands run outside th
 `doctor --verbose` prints the `slurm clio-kit`, `slurm mcp server` and `slurm scheduler` rows separately, and a row with a warning always keeps its own line.
 
 The server row names the `mcp.yaml` that declares it and its trust. The scheduler row means only that `sbatch` and `squeue` answered `--version`; it does not contact the controller. None of these rows fails the check.
+
+The host in the picture below has no Slurm client, so its scheduler row reads `INFO slurm scheduler        sbatch not on PATH; squeue not on PATH`. The two rows above are what a host with the clients prints.
 
 ::: capture cli-slurm-doctor
 :::
