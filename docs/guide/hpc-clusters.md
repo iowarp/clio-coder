@@ -273,9 +273,10 @@ the `data` tool names the file to pre-seed; see
 An exact version such as `--version 0.6.0` pins the install: `clio-coder upgrade`
 and background updates leave it there, and `--version latest` (or `beta`, `dev`)
 releases the pin. A channel that resolves to a version older than the installed
-one is refused before anything is installed, except an explicit
-`--channel latest` that leaves a pre-release for the stable release; in any
-other case name that version with `--version` or use `--rollback`. `--rollback` moves a pin to the version it restores. The
+one is refused before anything is installed. `clio-coder upgrade --channel latest`
+still leaves a pre-release for the stable release, and a direct run of a 0.8.0
+or newer installer does so with `--leave-prerelease`; in any other case name that version with
+`--version` or use `--rollback`. `--rollback` moves a pin to the version it restores. The
 [installation guide](installation-and-lifecycle.md) has the details.
 
 `clio-coder upgrade` installs the next version beside the current one and keeps

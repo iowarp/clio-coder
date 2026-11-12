@@ -99,20 +99,40 @@ directory, and `clio-coder upgrade` starts the installer or npm from the
 directory it installs into. A project `.npmrc` in the directory you run them
 from does not choose the registry; your user `~/.npmrc`, the global npmrc and
 `npm_config_registry` still do. A channel that resolves to a version older than
-the active one is refused before anything is installed. The one exception is an
-explicit `--channel latest` that leaves a pre-release for the stable release,
-described below. To move down in any other case, name the version with
-`--version`, or use `--rollback`.
+the active one is refused before anything is installed. The one exception is
+leaving a pre-release for the stable release, described below. To move down in
+any other case, name the version with `--version`, or use `--rollback`.
 
-Return to stable with `clio-coder upgrade --channel latest`,
-`curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel latest`, or:
+Return to stable with `clio-coder upgrade --channel latest`. From a pre-release
+that is newer than stable, such as a release candidate, `upgrade` installs the
+lower stable version with one notice: it runs the installer that shipped with
+the installed version and passes it `--leave-prerelease`.
 
-```powershell
-& ([scriptblock]::Create((irm https://coder.iowarp.ai/install.ps1))) -Channel latest
+Running a 0.8.0 or newer installer directly needs that flag for the same move
+(`-LeavePrerelease` in PowerShell):
+
+```bash
+sh install.sh --channel latest --leave-prerelease
 ```
 
-An explicit channel selection clears an installer's version pin. Returning from
-a pre-release installs stable even if its version is lower, with one notice.
+```powershell
+.\install.ps1 -Channel latest -LeavePrerelease
+```
+
+Without the flag the installer refuses and names it:
+`the latest channel resolved to <stable>, older than the active <version>; the installation was left unchanged. To leave the pre-release for stable <stable>, pass --leave-prerelease; to return to the previous install, use --rollback.`
+The flag applies to the `latest` channel only. A stable install, another
+channel, a recorded channel, background updates and a plain `clio-coder upgrade`
+keep the refusal.
+
+The hosted script at `https://coder.iowarp.ai/install.sh` downloads the
+installer of the release its channel names, and for `latest` that is the newest
+stable release's installer. An installer older than 0.8.0 does not know the
+flag and stops with `unknown option: --leave-prerelease (see --help)`, so to
+leave a 0.8.0 release candidate use `clio-coder upgrade --channel latest` or
+`clio-coder upgrade --rollback`.
+
+An explicit channel selection clears an installer's version pin.
 If the home has recorded dated lifecycle migrations, the notice lists them:
 changing the binary does not reverse them. Managed installs retain the previous
 binary for `clio-coder upgrade --rollback`; rollback turns background updates off.
@@ -191,6 +211,7 @@ lock, which exits 75. `--help` exits 0.
 | `--package <file.tgz>` | `CLIO_CODER_PACKAGE` | Install a local `npm pack` tarball instead of the registry package. This pins the install. |
 | `--node-version <v>` | `CLIO_CODER_NODE_VERSION` | Node.js major such as `24` (default, newest 24.x) or an exact version. A version below 22.19.0 is refused. |
 | `--node-tarball <file>` | `CLIO_CODER_NODE_TARBALL` | A local Node.js tarball for airgapped sites. It must keep its release name, `node-v<ver>-<build>.tar.xz` or `.tar.gz`, with `SHASUMS256.txt` beside it or named by `CLIO_CODER_NODE_SHASUMS`. |
+| `--leave-prerelease` | none | With the `latest` channel, move from an active pre-release to the stable release even when stable is older. Without it a channel that resolves below the active version is refused. With any other channel or version the run stops with `--leave-prerelease only moves to the latest channel, not <name>`. `clio-coder upgrade --channel latest` passes it when you leave a pre-release. |
 | `--refresh-runtime` | none | Download Node again even when the wanted one is already present. |
 | `--install-dir <dir>` | `CLIO_CODER_INSTALL_DIR` | The install root. Defaults: `$XDG_DATA_HOME/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `$CLIO_CODER_HOME/install` when `CLIO_CODER_HOME` is set. |
 | `--bin-dir <dir>` | `CLIO_CODER_BIN_DIR` | Where the `clio-coder` launcher goes. Default `~/.local/bin`. |
@@ -228,6 +249,7 @@ parameter, no workspace parameter, no unofficial Node mirror and no forced Node 
 | `-AutoUpdate`, `-NoAutoUpdate` | `CLIO_CODER_AUTO_UPDATE` | As the `install.sh` flags. |
 | `-Rollback` | none | Point the launcher at the previous version. Without `install.json` a real run fails before creating anything with `no installer manifest at <root>\install.json; nothing to roll back`. With `-DryRun` it prints `would point <launcher> back at the previous version recorded in <root>\install.json` and changes nothing. |
 | `-NoPostInstall` | none | Skip `clio-coder upgrade --post-install`. |
+| `-LeavePrerelease` | none | With the `latest` channel, move from an active pre-release to the stable release even when stable is older. With any other channel or version the run stops with `-LeavePrerelease only moves to the latest channel, not <name>`. |
 | `-RefreshRuntime` | none | Download Node again. |
 | `-Force` | none | Replace a launcher the installer did not write. |
 | `-DryRun` | none | Print the plan and change nothing. |
