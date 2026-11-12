@@ -1,10 +1,11 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { clioConfigPath } from "../../src/core/xdg.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import {
 	compareHostVerificationBase,
@@ -66,4 +67,41 @@ it("leaves the base not compared when the linked base tree cannot resolve the ch
 	ok(!/also fails on base/u.test(hostVerificationRejection(verification)?.detail ?? ""));
 	// A base that could not start is not a fact about the base, so it is never cached.
 	strictEqual(existsSync(join(stateDir, "dispatch-verification-base")), false);
+});
+
+it("masks the workspace's secret files and Clio's settings from the base replay", {
+	skip: !(sandboxAvailability().available && sandboxAvailability().backend === "bwrap"),
+}, async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-base-"));
+	scratches.push(root);
+	const project = join(root, "project");
+	const stateDir = join(root, "state");
+	mkdirSync(project, { recursive: true });
+	mkdirSync(clioConfigPath(), { recursive: true });
+	const settings = join(clioConfigPath(), "settings.yaml");
+	const env = join(project, ".env");
+	writeFileSync(
+		join(project, "check.js"),
+		`for (const file of ${JSON.stringify([settings, env])}) { try { console.log(require("node:fs").readFileSync(file, "utf8")); } catch {} }\nprocess.exit(1);\n`,
+	);
+	git(project, "init", "-q", "-b", "main");
+	git(project, "config", "user.name", "Host Verification Base");
+	git(project, "config", "user.email", "host-verification@example.invalid");
+	git(project, "add", "-A");
+	git(project, "commit", "-q", "-m", "baseline");
+	const base = git(project, "rev-parse", "HEAD").trim();
+	writeFileSync(settings, "settings-secret-marker\n");
+	writeFileSync(env, "env-secret-marker\n");
+	const request = {
+		resolvedVerification: [{ check: "probe", cwd: project, timeoutMs: 10_000, argv: [process.execPath, "check.js"] }],
+		taskWorktree: { root: project, path: project, runId: "masks", branch: "main", base, ownerToken: "fixture" },
+	};
+	const verification = await runHostVerification({ runId: "masks", request, workerSuccessful: true, stateDir });
+	ok(verification?.checks[0]);
+	await compareHostVerificationBase({ verification, request, stateDir });
+	strictEqual(verification.checks[0].baseComparison?.status, "failed");
+	const replays = join(stateDir, "dispatch-verification-base");
+	const stored = readdirSync(replays).map((name) => readFileSync(join(replays, name), "utf8"));
+	strictEqual(stored.length, 1);
+	ok(!/secret-marker/u.test(stored.join("\n")), stored.join("\n"));
 });

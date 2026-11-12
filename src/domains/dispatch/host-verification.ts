@@ -20,8 +20,11 @@ import { sandboxAvailability } from "../../core/sandbox/availability.js";
 import { sandboxEnvPolicy } from "../../core/sandbox/env-scrub.js";
 import { buildSandboxInvocation } from "../../core/sandbox/invocation.js";
 import { type MainSandboxPolicy, mainSandboxPolicy, mainShellContained } from "../../core/sandbox/main-session.js";
+import { withMountAliases } from "../../core/sandbox/mount-aliases.js";
+import { discoverSecretMasks } from "../../core/sandbox/secret-files.js";
 import type { SandboxMode } from "../../core/sandbox/types.js";
 import { unixSocketLaunch } from "../../core/sandbox/unix-sockets.js";
+import { settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker-process.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
@@ -363,7 +366,8 @@ interface BaseReplay {
 	/** The base run's output as {@link outputLines}. */
 	lines: string[];
 }
-const BASE_REPLAY_VERSION = 2;
+// Version 3 drops replays recorded before the base check ran under the secret masks.
+const BASE_REPLAY_VERSION = 3;
 const BASE_REPLAY_CACHE_MAX = 64;
 const BASE_REPLAY_LINES_MAX = 20_000;
 const baseReplayCache = new Map<string, Promise<BaseReplay>>();
@@ -613,8 +617,20 @@ export async function compareHostVerificationBase(input: {
 				'"$node_bin" -e "$preflight" "$base_dir" "$1" || exit $?',
 				'exec "$@"',
 			].join("\n");
-			// The base check runs repository code, so it gets the same socket refusal as a worker command.
-			const sockets = unixSocketLaunch("block", sandbox, { workspaceRoots: [worktree.path], privateTmp: true }, []);
+			// The base check runs repository code, so it gets a worker command's
+			// credential, settings, escape-socket and workspace secret masks too.
+			const baseMasks = [...workerSandboxMasks(), ...settingsFileMasks()];
+			const secretMasks = discoverSecretMasks(
+				{ workspaceRoots: [worktree.path, ...links.map((link) => dirname(link.target))] },
+				baseMasks,
+			).masks;
+			const sockets = unixSocketLaunch("block", sandbox, { workspaceRoots: [worktree.path], privateTmp: true }, [
+				...baseMasks,
+				...secretMasks,
+			]);
+			const masks = withMountAliases([...baseMasks, ...secretMasks, ...sockets.masks]);
+			// A sandbox that cannot see the mount aliases would leave secrets readable.
+			if (masks instanceof Error) return { exitCode: null, incomplete: true, lines: [] };
 			const invocation = buildSandboxInvocation(
 				{
 					command: {
@@ -639,7 +655,7 @@ export async function compareHostVerificationBase(input: {
 					cwd: worktree.path,
 					writableRoots: [],
 					network: false,
-					maskedPaths: sockets.masks,
+					maskedPaths: masks,
 					...sockets.fields,
 				},
 				backend,
