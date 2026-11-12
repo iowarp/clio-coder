@@ -103,20 +103,14 @@ async function headOf(root: string): Promise<string> {
 }
 
 /**
- * Judging walks the tree, so a verdict is reused while the commit and the files are unchanged. The key leaves out
- * where the checkout is: each run's task worktree is a new directory on the same commit.
+ * Judging walks the tree, so a verdict is reused while the checkout, its commit and the files are unchanged. The
+ * checkout is in the key: a dirty main checkout and a clean task worktree on the same commit judge differently.
  */
 async function judgePeerFiles(cwd: string, files: ReadonlyArray<PeerFile>): Promise<HandbookLedgerEntry[]> {
 	const root = repositoryRoot(cwd);
 	const head = await headOf(root);
 	const key = createHash("sha256")
-		.update(
-			[
-				head.length > 0 ? head : root,
-				relative(root, resolve(cwd)),
-				...files.flatMap((file) => [file.file, file.content]),
-			].join("\0"),
-		)
+		.update([root, head, relative(root, resolve(cwd)), ...files.flatMap((file) => [file.file, file.content])].join("\0"))
 		.digest("hex");
 	const held = judged.get(key);
 	if (held !== undefined) return held;
