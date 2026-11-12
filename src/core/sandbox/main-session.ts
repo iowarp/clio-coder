@@ -19,7 +19,7 @@ import type {
 } from "./types.js";
 import { unixSocketHostState, unixSocketLaunch, unixSocketStateLine } from "./unix-sockets.js";
 import { protectedInside } from "./worker-policy.js";
-import { physicalSandboxPath, settingsFileMasks, workerSandboxMasks } from "./worker-process.js";
+import { clioConfigDirMask, physicalSandboxPath, settingsFileMasks, workerSandboxMasks } from "./worker-process.js";
 
 /**
  * The main session's shell sandbox. At autonomy default every bash and
@@ -712,22 +712,35 @@ export function planMainSandboxSpawn(
 	const hookMasks: SandboxMaskedPath[] = policy.absentGitHooks
 		.filter((hooks) => !pathExists(hooks))
 		.map((hooks) => ({ path: hooks, kind: "directory" }));
+	const configMask =
+		availability.backend === "bwrap"
+			? clioConfigDirMask([
+					policy.secretRoots.workspace,
+					...policy.secretRoots.scratchRoots,
+					...policy.writableRoots,
+					...(policy.sandboxCache !== undefined ? [policy.sandboxCache] : []),
+				])
+			: null;
 	const baseMasks = [
 		...workerSandboxMasks(),
 		...mainSandboxAgentMasks(),
 		...hookMasks,
-		...(policy.env.maskSettings === true ? settingsFileMasks() : []),
+		...(configMask === null && policy.env.maskSettings === true ? settingsFileMasks() : []),
 	];
-	const secretMasks = discoverSecretMasks(
-		{
-			workspaceRoots: [
-				policy.secretRoots.workspace,
-				...(policy.secretRoots.sourceCheckout !== undefined ? [policy.secretRoots.sourceCheckout] : []),
-			],
-			scratchRoots: policy.secretRoots.scratchRoots,
-		},
-		baseMasks,
-	).masks;
+	// The config mask goes after the scan, which drops a find inside a masked directory, even a revealed one.
+	const secretMasks = [
+		...(configMask !== null ? [configMask] : []),
+		...discoverSecretMasks(
+			{
+				workspaceRoots: [
+					policy.secretRoots.workspace,
+					...(policy.secretRoots.sourceCheckout !== undefined ? [policy.secretRoots.sourceCheckout] : []),
+				],
+				scratchRoots: policy.secretRoots.scratchRoots,
+			},
+			baseMasks,
+		).masks,
+	];
 	// The command sees the host's network namespace, and outside a read-only
 	// run its /tmp, where a multiplexer, display or daemon socket runs code
 	// outside the sandbox.

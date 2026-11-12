@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -16,8 +16,7 @@ import {
 } from "../../src/core/sandbox/worker-process.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-// A scratch Clio home for the whole file: the credential masks are built once per process,
-// so the desktop app's launch token must exist before the first sandboxed spawn.
+// A scratch Clio home for the whole file, holding the desktop app's launch token.
 const clioHome = await isolateClioEnv("clio-worker-sandbox-");
 after(() => clioHome.restore());
 const appToken = join(clioHome.dir, "state", "gui", "background", "server.json");
@@ -185,4 +184,37 @@ test("under bwrap no contained command reads the desktop app's launch token", as
 		const result = await run(plan.file, plan.args);
 		assert.doesNotMatch(result.output, /GUI_LAUNCH_TOKEN/u, `${name}: ${result.output}`);
 	}
+});
+
+test("under bwrap a running command cannot read Clio's credential store after Clio rewrites it", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const config = join(clioHome.dir, "config");
+	const store = join(config, "credentials.yaml");
+	mkdirSync(join(config, "skills", "demo"), { recursive: true });
+	writeFileSync(join(config, "skills", "demo", "SKILL.md"), "SKILL_BODY\n");
+	writeFileSync(store, "token: STORE_BEFORE\n", { mode: 0o600 });
+	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-store-rename-")));
+	t.after(() => rmSync(workspace, { recursive: true, force: true }));
+	const shell = `cat ${join(config, "skills", "demo", "SKILL.md")}; for i in 1 2 3 4 5 6 7 8; do cat ${store} 2>&1; ls -a ${config}; sleep 0.25; done`;
+	const plan = planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), { shell }, workspace);
+	assert.equal(plan.kind, "sandboxed");
+	if (plan.kind !== "sandboxed") return;
+	const child = spawn(plan.file, plan.args, { stdio: ["ignore", "pipe", "pipe"] });
+	let output = "";
+	child.stdout.on("data", (chunk) => (output += chunk));
+	child.stderr.on("data", (chunk) => (output += chunk));
+	const exited = new Promise((resolve) => child.on("exit", resolve));
+	await new Promise((resolve) => setTimeout(resolve, 600));
+	// What safeResourceWrite does on a login or an OAuth refresh: a sibling temp file renamed over the store.
+	const temp = join(config, ".credentials.yaml.tmp-1-x");
+	writeFileSync(temp, "token: STORE_AFTER\n", { mode: 0o600 });
+	await new Promise((resolve) => setTimeout(resolve, 300));
+	renameSync(temp, store);
+	await exited;
+	assert.match(output, /^SKILL_BODY$/mu, "installed skills stay readable");
+	assert.doesNotMatch(output, /STORE_BEFORE|STORE_AFTER|credentials\.yaml\.tmp/u, output);
 });

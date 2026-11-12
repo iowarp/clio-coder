@@ -10,6 +10,7 @@ import { withMountAliases } from "./mount-aliases.js";
 import { discoverSecretMasks } from "./secret-files.js";
 import type {
 	SandboxAvailability,
+	SandboxBackend,
 	SandboxCommand,
 	SandboxEnvPolicy,
 	SandboxInvocation,
@@ -30,7 +31,6 @@ import { readTaskWorktreeGitLayout } from "./worktree-git.js";
 let active: WorkerSandboxSpec | null = null;
 let unavailableReported = false;
 let socketFallbackReported = false;
-let maskCache: ReadonlyArray<SandboxMaskedPath> | null = null;
 
 export function configureWorkerProcessSandbox(spec: WorkerSandboxSpec | undefined): void {
 	active = spec ?? null;
@@ -178,10 +178,49 @@ function workerSandboxMaskedPaths(candidates?: ReadonlyArray<string>): SandboxMa
 	return masks;
 }
 
-/** The worker sandbox's credential and escape masks, which the yolo script sandbox reuses as they are. */
+/**
+ * The worker sandbox's credential and escape masks, which the yolo script sandbox reuses as they are. Built at
+ * every launch, since a credential path that appears mid-session (`gh auth login`, an installed desktop app) has
+ * no mask in a list made earlier; it is a few dozen stat calls.
+ */
 export function workerSandboxMasks(): ReadonlyArray<SandboxMaskedPath> {
-	maskCache ??= workerSandboxMaskedPaths();
-	return maskCache;
+	return workerSandboxMaskedPaths();
+}
+
+/** The config subtrees Clio points the model at (read-scope.ts), readable inside a masked config directory. */
+const CONFIG_READ_SUBTREES = ["skills", "plugins", "extensions"] as const;
+
+/**
+ * Under bubblewrap, Clio's config directory as one empty tmpfs with the installed skills, plugins and extensions
+ * bound back read-only. Clio rewrites credentials.yaml and settings.yaml by renaming a new file over them, which
+ * detaches a mask mounted on the old file inside a running sandbox and shows the new one; a mount on the directory
+ * survives that and also hides mcp.yaml, the backups and every temp file a write leaves. Null when the directory is
+ * absent or holds one of the run's roots, whose files the command needs; the file masks stand then.
+ */
+export function clioConfigDirMask(roots: ReadonlyArray<string>): SandboxMaskedPath | null {
+	let config: string;
+	try {
+		config = realpathSync(clioConfigPath());
+		if (!statSync(config).isDirectory()) return null;
+	} catch {
+		return null;
+	}
+	const holdsRoot = roots.some((root) => {
+		const rel = path.relative(config, canonicalizePath(root) ?? path.resolve(root));
+		return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	});
+	if (holdsRoot) return null;
+	const reveal: Array<{ source: string; target: string }> = [];
+	for (const name of CONFIG_READ_SUBTREES) {
+		const target = path.join(config, name);
+		try {
+			const source = realpathSync(target);
+			if (statSync(source).isDirectory()) reveal.push({ source, target });
+		} catch {
+			// Nothing installed of this kind.
+		}
+	}
+	return { path: config, kind: "directory", ...(reveal.length > 0 ? { reveal } : {}) };
 }
 
 /**
@@ -380,9 +419,18 @@ function isDirectoryPath(entry: string): boolean {
 }
 
 /** Secret files under the worker's own trees, on top of the home credential masks. */
-function workerSpawnMasks(policy: WorkerSandboxSpec): SandboxMaskedPath[] {
-	const base = [...workerSandboxMasks(), ...(policy.maskSettings === true ? settingsFileMasks() : [])];
-	return [...base, ...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks];
+function workerSpawnMasks(policy: WorkerSandboxSpec, backend: SandboxBackend | null, cwd: string): SandboxMaskedPath[] {
+	const config = backend === "bwrap" ? clioConfigDirMask([cwd, ...policy.writableRoots, ...policy.readableRoots]) : null;
+	const base = [
+		...workerSandboxMasks(),
+		...(config === null && policy.maskSettings === true ? settingsFileMasks() : []),
+	];
+	// The config mask goes after the scan, which drops a find inside a masked directory, even a revealed one.
+	return [
+		...base,
+		...(config !== null ? [config] : []),
+		...discoverSecretMasks({ workspaceRoots: workerSecretRoots(policy) }, base).masks,
+	];
 }
 
 /**
@@ -460,7 +508,7 @@ export function planSandboxedSpawn(
 			command,
 			cwd,
 			availability,
-			availability.available ? workerSpawnMasks(policy) : workerSandboxMasks(),
+			availability.available ? workerSpawnMasks(policy, availability.backend, cwd) : workerSandboxMasks(),
 		);
 	} catch (error) {
 		return { kind: "refused", message: error instanceof Error ? error.message : String(error) };

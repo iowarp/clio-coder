@@ -87,6 +87,11 @@ export interface SandboxEnvPolicy {
 export interface SandboxMaskedPath {
 	path: string;
 	kind: "directory" | "file";
+	/**
+	 * Bubblewrap only: subtrees of a directory mask bound back read-only on top
+	 * of its empty tmpfs, each `source` (a physical path) at `target`.
+	 */
+	reveal?: ReadonlyArray<{ source: string; target: string }>;
 }
 
 export type SandboxCommand = { argv: ReadonlyArray<string> } | { shell: string };

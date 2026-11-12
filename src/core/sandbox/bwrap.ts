@@ -41,7 +41,7 @@ function uniquePaths(entries: ReadonlyArray<string> | undefined): string[] {
  * later mounts shadow earlier ones, so the sequence is read-only root, fresh
  * /dev, /proc and private /tmp (unless `privateTmp` is false), then writable roots, then read-only
  * re-protection inside them, then the Git metadata the run may write, then
- * masks over secrets.
+ * masks over secrets, each directory mask followed by the subtrees it reveals.
  *
  * `-try` binds skip a missing source instead of failing the whole command, so
  * a write root that does not exist yet stays unwritable rather than breaking
@@ -69,8 +69,10 @@ export function buildBwrapInvocation(
 	for (const entry of uniquePaths(spec.readOnlyPaths)) args.push("--ro-bind-try", entry, entry);
 	for (const entry of uniquePaths(spec.gitWritablePaths)) args.push("--bind-try", entry, entry);
 	for (const mask of spec.maskedPaths) {
-		if (mask.kind === "directory") args.push("--tmpfs", bindPath(mask.path));
-		else args.push("--ro-bind-try", "/dev/null", bindPath(mask.path));
+		if (mask.kind === "directory") {
+			args.push("--tmpfs", bindPath(mask.path));
+			for (const entry of mask.reveal ?? []) args.push("--ro-bind-try", entry.source, bindPath(entry.target));
+		} else args.push("--ro-bind-try", "/dev/null", bindPath(mask.path));
 	}
 	for (const [key, value] of Object.entries(spec.setEnv ?? {})) args.push("--setenv", key, value);
 	for (const key of spec.unsetEnv ?? []) args.push("--unsetenv", key);
