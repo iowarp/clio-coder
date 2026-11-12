@@ -56,7 +56,7 @@ An unapproved edit can only forbid more. The last approved snapshot retains its 
 
 ## What acquires a label
 
-Path-taking read-class tools such as `read`, `ls`, `grep`, `find` and `data` label matching sources. Directory-walking tools also label sources below the directory they walk. Named tool sources label that tool's results. Bash calls and operator `!` commands label source paths they name, directory operands and glob prefixes that may walk a source. Inlined `@file` references label the referenced content too.
+Path-taking read-class tools such as `read`, `ls`, `grep`, `find` and `data` label matching sources. Directory-walking tools also label sources below the directory they walk. Named tool sources label that tool's results. Bash calls and operator `!` commands label source paths they name, directory operands and glob prefixes that may walk a source. Inlined `@file` references label the referenced content too, and so does a file an ACP client attaches to a prompt as a `file://` resource.
 
 Shell observation is conservative: `git add .`, `find .` and `cat *.md` can label context when a source lies below the command's working directory, even if the output contains no source bytes. Clio Coder does not provide full shell coverage. Reads hidden in scripts, variables, command substitution, relative paths after `cd`, and searches with no path operand such as `rg x` are not reliably observed.
 

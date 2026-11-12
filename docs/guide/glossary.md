@@ -303,7 +303,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `YOLO_FLOOR_RULE_IDS` in [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts).
 
 ### 76. Containment
-- **Definition**: Running the main session's `bash`, `run_script` and command-running `verify` calls at autonomy `default` inside the main-session sandbox, which lets only the workspace, the scratch roots, the package caches and the repository's git dirs be written, hides credentials and the SSH agent, and keeps the network on. A contained call needs no approval for what Clio cannot read in its command text; a call with `unsandboxed: true` is not contained and asks, so the safety judge reviews it first, and one that reaches outward is not contained either.
+- **Definition**: Running the main session's `bash`, `run_script` and command-running `verify` calls at autonomy `default` inside the main-session sandbox, which lets only the workspace, the scratch roots, a private sandbox cache and the repository's git dirs be written, hides credentials and the SSH agent, and keeps the network on. A contained call needs no approval for what Clio cannot read in its command text; a call with `unsandboxed: true` is not contained and asks, so the safety judge reviews it first, and one that reaches outward is not contained either.
 - **Owning Type**: `mainShellContained` and `mainSandboxPolicy` in [main-session.ts](../../src/core/sandbox/main-session.ts); `outwardShellReason` in [containment.ts](../../src/domains/safety/containment.ts).
 
 ### 77. Workspace Snapshot
