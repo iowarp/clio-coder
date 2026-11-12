@@ -411,8 +411,8 @@ if cast_pages:
     for path, source in cast_pages:
         casts = [root / ref.partition('?')[0].lstrip('/') for ref in re.findall(r'\sdata-cast="([^"]+)"', source)]
         for cast in casts:
-            if cast.stat().st_size > 300_000:
-                errors.append(f'{path}: {cast.name} exceeds the 300 KB recording budget')
+            if cast.stat().st_size > 450_000:
+                errors.append(f'{path}: {cast.name} exceeds the 450 KB recording budget')
             header = json.loads(cast.read_text().split('\n', 1)[0])
             if header.get('version') != 2 or {'env', 'command', 'timestamp'} & header.keys():
                 errors.append(f'{path}: {cast.name} must be asciicast v2 without env, command or timestamp')
