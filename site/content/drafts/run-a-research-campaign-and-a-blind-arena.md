@@ -35,7 +35,7 @@ checks:
     timeoutMs: 60000
 ```
 
-Every check needs `id`, `description`, `command`, `cwd`, `timeoutMs` and `tags`; an empty `tags: []` is allowed. Commit the file. Each campaign worktree starts from `HEAD`, so an uncommitted catalog is not there.
+Every check needs `id`, `description`, `command`, `cwd`, `timeoutMs` and `tags`; an empty `tags: []` is allowed. Commit the catalog and every file the checks run or name. Each campaign worktree starts from `HEAD`, so an uncommitted `bench.py` or reference file is not there.
 
 The tolerance is your definition of the same answer. Here, a relative difference up to one part in a billion still passes.
 
@@ -67,7 +67,7 @@ stopped: max-iterations: ran 2 of 2 iterations
 
 ## Read the result line by line
 
-Start with the A/A line. Before any change, CLIO Coder timed the unchanged code against itself in five interleaved pairs. The medians moved 4.04%, and the 95% interval spans zero, so the noise stayed under the 5% threshold. If the base against itself already looked like a change, the campaign would have stopped there.
+Start with the A/A line. Before any change, CLIO Coder timed the unchanged code against itself in five interleaved pairs. The medians moved 4.04%, and the 95% interval spans zero, so the noise stayed under the 5% threshold. If the base against itself already looked like a change, the campaign would have stopped there unless you passed `--allow-noisy`.
 
 Each iteration counts as improved only when the median moves at least 5% the right way and the bootstrap interval excludes zero. The first iteration removed almost all the time. The second found a further 17.69%, a gain that would be invisible by eye. Both passed the `correct` gate.
 
