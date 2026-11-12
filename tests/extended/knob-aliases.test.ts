@@ -84,7 +84,7 @@ describe("removed knob spellings", () => {
 	it("rejects removed run aliases and accepts the canonical agent flags", () => {
 		for (const alias of ["--worker", "--worker-profile", "--worker-runtime", "--runtime"]) {
 			const parsed = parseRunCliArgs([alias, "value", "task"]);
-			assert.deepEqual(parsed.diagnostics, [{ type: "error", message: `unknown clio-coder run option: ${alias}` }]);
+			assert.deepEqual(parsed.diagnostics, [{ type: "error", message: `unknown option: ${alias}` }]);
 		}
 		const canonical = parseRunCliArgs(["--agent-profile", "code", "--agent-runtime", "llamacpp", "task"]);
 		assert.deepEqual(canonical.diagnostics, []);
