@@ -158,10 +158,152 @@ function decodeEntities(value: string): string {
 	});
 }
 
+// A fetched page is matched with forward scans, never with a lazy `[\s\S]*?` or a
+// `[^>]*` run from every opener: an opener with no closer would rescan to the end of
+// the page from each copy, quadratic in the body and synchronous on the event loop,
+// where the fetch timeout and the interrupt key wait behind it. Each scan below
+// matches what the regular expression it replaced matched.
+
+// Lowering ASCII letters alone keeps every index, which toLowerCase does not, and
+// folds exactly what a non-unicode `/i` pattern of ASCII literals folds.
+function asciiLower(value: string): string {
+	return value.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+}
+
+/** Whether `\b` holds after a name that ends in a word character. */
+function boundaryAt(value: string, index: number): boolean {
+	return index >= value.length || !/[A-Za-z0-9_]/.test(value.charAt(index));
+}
+
+/** The first `>` at or after `from`, remembering the last `>`-free stretch scanned. */
+function gtFinder(lower: string): (from: number) => number {
+	let scannedFrom = -1;
+	let found = -1;
+	return (from) => {
+		if (scannedFrom >= 0 && from >= scannedFrom && (found < 0 || from <= found)) return found;
+		scannedFrom = from;
+		found = lower.indexOf(">", from);
+		return found;
+	};
+}
+
+/** Every index of `text` in `lower`, ascending, and the first one at or after `from`. */
+function occurrences(lower: string, text: string): (from: number) => number {
+	const found: number[] = [];
+	for (let at = lower.indexOf(text); at >= 0; at = lower.indexOf(text, at + 1)) found.push(at);
+	return (from) => {
+		let lo = 0;
+		let hi = found.length;
+		while (lo < hi) {
+			const mid = (lo + hi) >>> 1;
+			if ((found[mid] ?? 0) < from) lo = mid + 1;
+			else hi = mid;
+		}
+		return found[lo] ?? -1;
+	};
+}
+
+interface TagPair {
+	start: number;
+	contentStart: number;
+	contentEnd: number;
+	end: number;
+}
+
+interface TagPairShape {
+	/** Finds an opener in the lowered page; group 1, when present, picks its closer. */
+	opener: RegExp;
+	/** The opener ends at a word boundary, as `<tag\b`. */
+	boundary: boolean;
+	/** The content starts after the opener's first `>`, as `<tag\b[^>]*>`, else right after the opener. */
+	toGt: boolean;
+	closer: (key: string) => string;
+	/** The closer runs on to its first `>` after a word boundary, as `<\/tag\b[^>]*>`. */
+	closerToGt: boolean;
+}
+
+/**
+ * The matches of `opener…closer` with a lazy body, left to right and not
+ * overlapping. An opener whose closer is missing has no closer after any later
+ * opener either, so its kind is dropped instead of rescanned.
+ */
+function* tagPairs(lower: string, shape: TagPairShape): Generator<TagPair> {
+	const opener = new RegExp(shape.opener.source, "g");
+	const dead = new Set<string>();
+	let from = 0;
+	for (;;) {
+		opener.lastIndex = from;
+		const open = opener.exec(lower);
+		if (open === null) return;
+		const start = open.index;
+		const key = open[1] ?? "";
+		let contentStart = start + open[0].length;
+		if (dead.has(key) || (shape.boundary && !boundaryAt(lower, contentStart))) {
+			from = start + 1;
+			continue;
+		}
+		if (shape.toGt) {
+			const gt = lower.indexOf(">", contentStart);
+			if (gt < 0) return;
+			contentStart = gt + 1;
+		}
+		const closer = shape.closer(key);
+		let end = -1;
+		let at = lower.indexOf(closer, contentStart);
+		while (at >= 0) {
+			const after = at + closer.length;
+			if (!shape.closerToGt) {
+				end = after;
+				break;
+			}
+			if (boundaryAt(lower, after)) {
+				end = lower.indexOf(">", after) + 1;
+				break;
+			}
+			at = lower.indexOf(closer, at + 1);
+		}
+		if (at < 0 || end <= 0) {
+			dead.add(key);
+			from = start + 1;
+			continue;
+		}
+		yield { start, contentStart, contentEnd: at, end };
+		from = end;
+	}
+}
+
+function pairedTag(name: string): TagPairShape {
+	return { opener: new RegExp(`<${name}`), boundary: true, toGt: true, closer: () => `</${name}>`, closerToGt: false };
+}
+
+function replaceTagPairs(page: string, shape: TagPairShape, replace: (content: string) => string): string {
+	let out = "";
+	let last = 0;
+	for (const pair of tagPairs(asciiLower(page), shape)) {
+		out += page.slice(last, pair.start) + replace(page.slice(pair.contentStart, pair.contentEnd));
+		last = pair.end;
+	}
+	return last === 0 ? page : out + page.slice(last);
+}
+
+function firstTagContent(page: string, shape: TagPairShape): string | undefined {
+	for (const pair of tagPairs(asciiLower(page), shape)) return page.slice(pair.contentStart, pair.contentEnd);
+	return undefined;
+}
+
+/**
+ * A global replace of a pattern that ends in `>` and cannot cross one, such as
+ * `<[^>]+>`: no match ends past the last `>`, and before it every attempt reaches
+ * a `>`, so the text after the last `>` is never scanned again and again.
+ */
+function replaceBeforeLastGt(value: string, regex: RegExp, replace: (tag: string) => string): string {
+	const end = value.lastIndexOf(">") + 1;
+	return end === 0 ? value : value.slice(0, end).replace(regex, replace) + value.slice(end);
+}
+
 function stripTags(value: string): string {
 	return decodeEntities(
-		value
-			.replace(/<[^>]+>/g, " ")
+		replaceBeforeLastGt(value, /<[^>]+>/g, () => " ")
 			.replace(/\s+/g, " ")
 			.trim(),
 	);
@@ -169,18 +311,47 @@ function stripTags(value: string): string {
 
 // Like stripTags but keeps newlines/indentation so fenced code blocks survive.
 function stripCodeTags(value: string): string {
-	return decodeEntities(value.replace(/<[^>]+>/g, ""));
+	return decodeEntities(replaceBeforeLastGt(value, /<[^>]+>/g, () => ""));
 }
 
-function firstMatch(html: string, regex: RegExp): string | undefined {
-	const match = regex.exec(html);
-	return match?.[1] ? stripTags(match[1]) : undefined;
+/** The first `<name\b[^>]*>` tag whose text holds `attribute`, as `<name\b[^>]*ATTR[^>]*>` matches it. */
+function firstTagWith(page: string, name: string, attribute: RegExp): string | undefined {
+	const lower = asciiLower(page);
+	const opener = new RegExp(`<${name}`, "g");
+	for (let open = opener.exec(lower); open !== null; open = opener.exec(lower)) {
+		const tagStart = open.index + open[0].length;
+		if (!boundaryAt(lower, tagStart)) {
+			opener.lastIndex = open.index + 1;
+			continue;
+		}
+		const gt = lower.indexOf(">", tagStart);
+		if (gt < 0) return undefined;
+		// A later opener before this `>` reads a tail of the same text, so it cannot match either.
+		if (attribute.test(lower.slice(tagStart, gt))) return page.slice(open.index, gt + 1);
+		opener.lastIndex = gt;
+	}
+	return undefined;
+}
+
+/** A quoted value's end, as `(.*?)\1` finds it: the same quote, before any line break. */
+function quotedValueEnd(lower: string, quote: string, valueStart: number): number {
+	const run = quote === '"' ? /[^"\n\r\u2028\u2029]*/y : /[^'\n\r\u2028\u2029]*/y;
+	run.lastIndex = valueStart;
+	run.exec(lower);
+	return lower.charAt(run.lastIndex) === quote ? run.lastIndex : -1;
 }
 
 function attrValue(tag: string, attr: string): string | undefined {
-	const regex = new RegExp(`${attr}\\s*=\\s*(["'])(.*?)\\1`, "i");
-	const match = regex.exec(tag);
-	return match?.[2] ? decodeEntities(match[2].trim()) : undefined;
+	const lower = asciiLower(tag);
+	const attribute = new RegExp(`${attr}\\s*=\\s*(["'])`, "g");
+	for (const found of lower.matchAll(attribute)) {
+		const valueStart = found.index + found[0].length;
+		const valueEnd = quotedValueEnd(lower, found[1] ?? '"', valueStart);
+		if (valueEnd < 0) continue;
+		const value = tag.slice(valueStart, valueEnd);
+		return value ? decodeEntities(value.trim()) : undefined;
+	}
+	return undefined;
 }
 
 function absolutizeUrl(href: string, baseUrl: string): string {
@@ -191,17 +362,75 @@ function absolutizeUrl(href: string, baseUrl: string): string {
 	}
 }
 
+const COMMENT_SHAPE: TagPairShape = {
+	opener: /<!--/,
+	boundary: false,
+	toGt: false,
+	closer: () => "-->",
+	closerToGt: false,
+};
+
+/** `<name\b[\s\S]*?<\/name\b[^>]*>` */
+function boilerplateTag(name: string): TagPairShape {
+	return { opener: new RegExp(`<${name}`), boundary: true, toGt: false, closer: () => `</${name}`, closerToGt: true };
+}
+
+const BOILERPLATE_SHAPES: readonly TagPairShape[] = [
+	COMMENT_SHAPE,
+	...["script", "style", "noscript", "template", "svg", "canvas", "iframe", "form"].map(boilerplateTag),
+];
+
 function removeBoilerplate(html: string): string {
-	return html
-		.replace(/<!--[\s\S]*?-->/g, " ")
-		.replace(/<script\b[\s\S]*?<\/script\b[^>]*>/gi, " ")
-		.replace(/<style\b[\s\S]*?<\/style\b[^>]*>/gi, " ")
-		.replace(/<noscript\b[\s\S]*?<\/noscript\b[^>]*>/gi, " ")
-		.replace(/<template\b[\s\S]*?<\/template\b[^>]*>/gi, " ")
-		.replace(/<svg\b[\s\S]*?<\/svg\b[^>]*>/gi, " ")
-		.replace(/<canvas\b[\s\S]*?<\/canvas\b[^>]*>/gi, " ")
-		.replace(/<iframe\b[\s\S]*?<\/iframe\b[^>]*>/gi, " ")
-		.replace(/<form\b[\s\S]*?<\/form\b[^>]*>/gi, " ");
+	let out = html;
+	for (const shape of BOILERPLATE_SHAPES) out = replaceTagPairs(out, shape, () => " ");
+	return out;
+}
+
+/**
+ * Element tags whose id or class names main content, with their contents, as
+ * `<div\b[^>]*(?:id|class)=["'][^"']*(?:WORD)[^"']*["'][^>]*>([\s\S]*?)<\/div>`
+ * matches them. The greedy `[^>]*` tries the rightmost such attribute first, and
+ * its quoted value may run past the tag's first `>`.
+ */
+function contentDivs(page: string): string[] {
+	const lower = asciiLower(page);
+	const nextGt = gtFinder(lower);
+	const nextClose = occurrences(lower, "</div>");
+	const contents: string[] = [];
+	const opener = /<div/g;
+	for (let open = opener.exec(lower); open !== null; open = opener.exec(lower)) {
+		const tagStart = open.index + open[0].length;
+		if (!boundaryAt(lower, tagStart)) {
+			opener.lastIndex = open.index + 1;
+			continue;
+		}
+		const gt = nextGt(tagStart);
+		if (gt < 0) break;
+		const attributes = Array.from(lower.slice(tagStart, gt).matchAll(/(?:id|class)=["']/g));
+		let matched = false;
+		for (let index = attributes.length - 1; index >= 0 && !matched; index--) {
+			const found = attributes[index];
+			if (found === undefined) continue;
+			const valueStart = tagStart + found.index + found[0].length;
+			const quoteRun = /[^"']*/y;
+			quoteRun.lastIndex = valueStart;
+			quoteRun.exec(lower);
+			const valueEnd = quoteRun.lastIndex;
+			if (valueEnd >= lower.length) continue;
+			if (!/content|main|post|article|entry|docs|markdown/.test(lower.slice(valueStart, valueEnd))) continue;
+			const tagEnd = valueEnd < gt ? gt : nextGt(valueEnd + 1);
+			if (tagEnd < 0) continue;
+			const close = nextClose(tagEnd + 1);
+			if (close < 0) continue;
+			contents.push(page.slice(tagEnd + 1, close));
+			opener.lastIndex = close + "</div>".length;
+			matched = true;
+		}
+		// What decides a match is the attribute's place, and a later opener before
+		// this `>` sees only some of the same attributes.
+		if (!matched) opener.lastIndex = gt;
+	}
+	return contents;
 }
 
 function scoreContent(fragment: string): number {
@@ -213,51 +442,97 @@ function scoreContent(fragment: string): number {
 
 function extractMainHtml(html: string): string {
 	const cleaned = removeBoilerplate(html);
+	const lower = asciiLower(cleaned);
 	const candidates: string[] = [];
-	for (const regex of [
-		/<main\b[^>]*>([\s\S]*?)<\/main>/gi,
-		/<article\b[^>]*>([\s\S]*?)<\/article>/gi,
-		/<div\b[^>]*(?:id|class)=["'][^"']*(?:content|main|post|article|entry|docs|markdown)[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi,
-	]) {
-		for (const match of cleaned.matchAll(regex)) {
-			if (match[1]) candidates.push(match[1]);
+	for (const shape of [pairedTag("main"), pairedTag("article")]) {
+		for (const pair of tagPairs(lower, shape)) {
+			if (pair.contentEnd > pair.contentStart) candidates.push(cleaned.slice(pair.contentStart, pair.contentEnd));
 		}
 	}
-	if (candidates.length === 0) {
-		const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(cleaned);
-		return body?.[1] ?? cleaned;
-	}
+	for (const content of contentDivs(cleaned)) if (content) candidates.push(content);
+	if (candidates.length === 0) return firstTagContent(cleaned, pairedTag("body")) ?? cleaned;
 	return candidates.sort((a, b) => scoreContent(b) - scoreContent(a))[0] ?? cleaned;
 }
+
+/**
+ * Links, as `<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>` replaces
+ * them: the rightmost href before the tag's first `>` that closes is tried first.
+ */
+function replaceLinks(page: string, replace: (href: string, text: string) => string): string {
+	const lower = asciiLower(page);
+	const nextGt = gtFinder(lower);
+	const nextClose = occurrences(lower, "</a>");
+	const opener = /<a/g;
+	let out = "";
+	let last = 0;
+	for (let open = opener.exec(lower); open !== null; open = opener.exec(lower)) {
+		const tagStart = open.index + open[0].length;
+		if (!boundaryAt(lower, tagStart)) {
+			opener.lastIndex = open.index + 1;
+			continue;
+		}
+		const gt = nextGt(tagStart);
+		if (gt < 0) break;
+		const hrefs = Array.from(lower.slice(tagStart, gt).matchAll(/href\s*=\s*(["'])/g));
+		let matched = false;
+		for (let index = hrefs.length - 1; index >= 0 && !matched; index--) {
+			const found = hrefs[index];
+			if (found === undefined) continue;
+			const valueStart = tagStart + found.index + found[0].length;
+			const valueEnd = quotedValueEnd(lower, found[1] ?? '"', valueStart);
+			if (valueEnd < 0) continue;
+			const tagEnd = valueEnd < gt ? gt : nextGt(valueEnd + 1);
+			if (tagEnd < 0) continue;
+			const close = nextClose(tagEnd + 1);
+			if (close < 0) continue;
+			out += page.slice(last, open.index) + replace(page.slice(valueStart, valueEnd), page.slice(tagEnd + 1, close));
+			last = close + "</a>".length;
+			opener.lastIndex = last;
+			matched = true;
+		}
+		if (!matched) opener.lastIndex = gt;
+	}
+	return last === 0 ? page : out + page.slice(last);
+}
+
+const HEADING_SHAPE: TagPairShape = {
+	opener: /<h([1-6])/,
+	boundary: true,
+	toGt: true,
+	closer: (level) => `</h${level}>`,
+	closerToGt: false,
+};
 
 function htmlToMarkdown(html: string, baseUrl: string): string {
 	let out = html;
 	const codeBlocks: string[] = [];
-	out = out.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code: string) => {
+	out = replaceTagPairs(out, pairedTag("pre"), (code: string) => {
 		const placeholder = `\n\n@@CLIO_CODE_${codeBlocks.length}@@\n\n`;
 		codeBlocks.push(`\n\n\`\`\`\n${stripCodeTags(code).replace(/^\n+|\n+$/g, "")}\n\`\`\`\n\n`);
 		return placeholder;
 	});
 	out = out.replace(/<br\s*\/?>/gi, "\n");
-	out = out.replace(
-		/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
-		(_, level: string, text: string) => `\n\n${"#".repeat(Number(level))} ${stripTags(text)}\n\n`,
-	);
-	out = out.replace(
-		/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi,
-		(_, text: string) => `\n\n> ${stripTags(text)}\n\n`,
-	);
-	out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_, text: string) => `\n- ${stripTags(text)}`);
-	out = out.replace(
-		/<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi,
-		(_, _q: string, href: string, text: string) => {
-			const label = stripTags(text);
-			if (!label) return "";
-			const url = absolutizeUrl(decodeEntities(href), baseUrl);
-			return label === url ? url : `[${label}](${url})`;
-		},
-	);
-	out = out.replace(/<img\b[^>]*>/gi, (tag: string) => {
+	{
+		// The level is needed per match, so the shared scan runs here with the original text at hand.
+		const lower = asciiLower(out);
+		let rebuilt = "";
+		let last = 0;
+		for (const pair of tagPairs(lower, HEADING_SHAPE)) {
+			const level = Number(lower.charAt(pair.start + 2));
+			rebuilt += `${out.slice(last, pair.start)}\n\n${"#".repeat(level)} ${stripTags(out.slice(pair.contentStart, pair.contentEnd))}\n\n`;
+			last = pair.end;
+		}
+		if (last > 0) out = rebuilt + out.slice(last);
+	}
+	out = replaceTagPairs(out, pairedTag("blockquote"), (text: string) => `\n\n> ${stripTags(text)}\n\n`);
+	out = replaceTagPairs(out, pairedTag("li"), (text: string) => `\n- ${stripTags(text)}`);
+	out = replaceLinks(out, (href: string, text: string) => {
+		const label = stripTags(text);
+		if (!label) return "";
+		const url = absolutizeUrl(decodeEntities(href), baseUrl);
+		return label === url ? url : `[${label}](${url})`;
+	});
+	out = replaceBeforeLastGt(out, /<img\b[^>]*>/gi, (tag: string) => {
 		const alt = attrValue(tag, "alt");
 		const src = attrValue(tag, "src");
 		if (!alt && !src) return " ";
@@ -266,13 +541,19 @@ function htmlToMarkdown(html: string, baseUrl: string): string {
 	});
 	out = out.replace(/<\/(p|div|section|article|main|tr|table|ul|ol)>/gi, "\n\n");
 	out = out.replace(/<\/(td|th)>/gi, " | ");
-	out = out.replace(/<[^>]+>/g, " ");
+	out = replaceBeforeLastGt(out, /<[^>]+>/g, () => " ");
 	out = decodeEntities(out);
-	for (const [index, block] of codeBlocks.entries()) {
-		// Function replacer: block is page-derived and may contain $&, $1, ... which a
-		// string replacement would interpret and corrupt.
-		out = out.replace(`@@CLIO_CODE_${index}@@`, () => block);
-	}
+	// One pass restores every block at the first copy of its placeholder; a replace
+	// per block would rescan the page once per block. The replacer is a function
+	// because a block is page-derived and may contain $&, $1, ...
+	const restored = new Set<number>();
+	out = out.replace(/@@CLIO_CODE_(\d+)@@/g, (placeholder: string, digits: string) => {
+		const index = Number(digits);
+		const block = codeBlocks[index];
+		if (block === undefined || restored.has(index) || String(index) !== digits) return placeholder;
+		restored.add(index);
+		return block;
+	});
 	return out
 		.split("\n")
 		.map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
@@ -294,11 +575,10 @@ function extractWebFetchContent(
 		return { format: wantsRaw ? "raw" : "text", content: rawText.trim() };
 	}
 
-	const title = firstMatch(rawText, /<title\b[^>]*>([\s\S]*?)<\/title>/i);
-	const descriptionTag = /<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*>/i.exec(
-		rawText,
-	)?.[0];
-	const canonicalTag = /<link\b[^>]*rel=["']canonical["'][^>]*>/i.exec(rawText)?.[0];
+	const titleText = firstTagContent(rawText, pairedTag("title"));
+	const title = titleText ? stripTags(titleText) : undefined;
+	const descriptionTag = firstTagWith(rawText, "meta", /(?:name|property)=["'](?:description|og:description)["']/);
+	const canonicalTag = firstTagWith(rawText, "link", /rel=["']canonical["']/);
 	const description = descriptionTag ? attrValue(descriptionTag, "content") : undefined;
 	const canonical = canonicalTag ? attrValue(canonicalTag, "href") : undefined;
 	const extracted: ExtractedContent = {

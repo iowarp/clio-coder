@@ -269,3 +269,34 @@ test("server status text and content type follow the untrusted banner, and a hug
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
+
+test("a page of unclosed openers is cleaned in linear time, so the fetch timeout and Esc stay live", async () => {
+	const { createServer } = await import("node:http");
+	const fill = (unit: string) =>
+		`<html><body><p>kept</p>${unit.repeat(Math.floor(600_000 / unit.length))}</body></html>`;
+	const units = ["<!--", "<div ", '<a href="x">', "<x", "<title>", "<h1>"];
+	let body = "";
+	const server = createServer((_request, response) => {
+		response.writeHead(200, { "content-type": "text/html" });
+		response.end(body);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const previous = process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+	process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = "1";
+	try {
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("missing address");
+		for (const unit of units) {
+			body = fill(unit);
+			const started = performance.now();
+			const result = await webFetchTool.run({ url: `http://127.0.0.1:${address.port}/` });
+			const elapsed = performance.now() - started;
+			strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "");
+			strictEqual(elapsed < 1_500, true, `a page of ${unit} took ${Math.round(elapsed)}ms`);
+		}
+	} finally {
+		if (previous === undefined) delete process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
+		else process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = previous;
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
