@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +14,8 @@ import {
 import { compilePeerHandbook } from "../../src/domains/context/peer-handbook.js";
 import { treeFacts } from "../../src/domains/context/tree-facts.js";
 import { buildDynamicPromptMessages } from "../../src/domains/dispatch/extension.js";
-import { peerInstructionsStaleMessage } from "../../src/domains/dispatch/peer-instructions.js";
+import { peerInstructionsStaleMessage, resolvePeerInstructions } from "../../src/domains/dispatch/peer-instructions.js";
+import { opencodeCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 
 const PATH = "/repo/CLIO-CODER.md";
 const HANDBOOK = `# Demo
@@ -379,6 +381,44 @@ describe("peer handbook compile", () => {
 			strictEqual(peer.notCarried, notes.length - carriedNotes + conventions.length - carriedConventions);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("overlays the files OpenCode reads: the first name found from the run's directory up, in every directory", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-opencode-files-"));
+		const resolveIn = async (cwd: string) =>
+			resolvePeerInstructions({
+				declared: opencodeCliRuntime.repositoryInstructions,
+				cwd,
+				handbookSources: [{ source: HANDBOOK, path: join(root, "CLIO-CODER.md") }],
+				audience: workerHandbookAudience("coder", "workspace-edit"),
+				workingPaths: [],
+				maxChars: 6000,
+				clioNames: [],
+				taskWorktree: root,
+				declaredPaths: [],
+			});
+		try {
+			execFileSync("git", ["init", "-q", root]);
+			mkdirSync(join(root, "sub"));
+			writeFileSync(join(root, "CONTEXT.md"), "# Context\n\n- Prices are integer cents.\n");
+			writeFileSync(join(root, "sub", "CLAUDE.md"), "# Sub\n\n- Keep the API stable.\n");
+			execFileSync("git", ["-C", root, "add", "."]);
+			// OpenCode takes AGENTS.md, else CLAUDE.md, else CONTEXT.md: one name for the whole walk, not one per directory.
+			const claude = await resolveIn(join(root, "sub"));
+			deepStrictEqual(claude?.files, ["sub/CLAUDE.md"]);
+			writeFileSync(join(root, "AGENTS.md"), "# Notes\n\n- Money is integer cents.\n");
+			execFileSync("git", ["-C", root, "add", "."]);
+			const agents = await resolveIn(join(root, "sub"));
+			deepStrictEqual(agents?.files, ["AGENTS.md"]);
+			strictEqual(agents?.delivery, "overlay");
+			ok(agents?.overlay?.[0]?.content.includes("Never write to the operator's real home from tests."));
+			rmSync(join(root, "AGENTS.md"));
+			rmSync(join(root, "sub"), { recursive: true });
+			execFileSync("git", ["-C", root, "add", "-A"]);
+			deepStrictEqual((await resolveIn(root))?.files, ["CONTEXT.md"]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 

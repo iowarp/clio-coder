@@ -22,6 +22,12 @@ export const opencodeCliRuntime = createExternalCliRuntime({
 	outputParser: "opencode-run-jsonl",
 	authNotice: "Uses the installed `opencode` command and its own configured provider login.",
 	provider: "opencode-cli",
-	// OpenCode run has no switch that skips them.
-	repositoryInstructions: { files: ["AGENTS.md"], fallback: ["CLAUDE.md"], delivery: "overlay" },
+	// OpenCode run has no switch that skips them. It reads the first of these names found from its directory up,
+	// in every directory that has it (opencode 1.18 `Instruction.systemPaths`).
+	repositoryInstructions: {
+		files: ["AGENTS.md"],
+		fallback: ["CLAUDE.md", "CONTEXT.md"],
+		oneName: true,
+		delivery: "overlay",
+	},
 });

@@ -138,7 +138,7 @@ off so the peer reads one source:
 | `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | coexist | none |
 | `codex-cli` | `AGENTS.override.md`, else `AGENTS.md` | single source | `-c project_doc_max_bytes=0` |
 | `pi-cli` | `AGENTS.md`, else `CLAUDE.md` | single source | `--no-context-files` |
-| `opencode-cli` | `AGENTS.md`, else `CLAUDE.md` | overlay in a task worktree, else coexist | none |
+| `opencode-cli` | the first of `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` present in any of them, in each directory that has it | overlay in a task worktree, else coexist | none |
 
 Claude Code reads its files beside the compiled rules: its only switch,
 `--setting-sources user`, would also skip the project's `.claude/settings.json`
@@ -153,8 +153,14 @@ skipped when the task names one of those files or declares a directory that
 covers one (a write root of `.` covers them all), when one is not a regular file
 Git tracks, or when the run is on a remote host, and it is dropped when Clio
 cannot write a file at spawn. OpenCode then reads its files beside the compiled
-rules in the message (coexist). A peer also reads them beside the usual
-project message when a handbook is prose without sections, because there is
+rules in the message (coexist). OpenCode also reads such a file in a
+directory below its own when it opens a file there; those files are read as
+they are. An operator who sets `OPENCODE_DISABLE_PROJECT_CONFIG` or
+`OPENCODE_DISABLE_CLAUDE_CODE` changes which files OpenCode reads, so the
+overlay may not reach it: list `opencode-cli` in
+`fleet.keepPeerInstructionFiles` to send the rules in the message instead.
+A peer also reads its files beside the usual project message when a
+handbook is prose without sections, because there is
 nothing to compile it into. A runtime id listed in `fleet.keepPeerInstructionFiles`
 always reads its files beside the compiled rules, with no switch and no overlay, for
 a file whose guidance Clio cannot extract as rules. Antigravity, ACP peers, and tier

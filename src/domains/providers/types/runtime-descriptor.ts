@@ -187,7 +187,9 @@ export interface DecisionAlias {
 /**
  * The repository instruction files a delegated harness loads on its own, and how a dispatched run's rules reach it.
  * In each directory from the repository root down to the run's directory the harness reads every name in `files`
- * that is present there, or, when none is, the first present name in `fallback`. With "single-source" the adapter
+ * that is present there, or, when none is, the first present name in `fallback`. With `oneName` the harness instead
+ * takes the first name in `files` then `fallback` present in any of those directories and reads it in each of them.
+ * With "single-source" the adapter
  * starts the harness with its documented switch that skips those files, so the rules compiled for the run are the
  * only project rules it reads. A harness without such a switch declares "overlay": when the run has its own task
  * worktree the compiled rules are written over those files there for the run and put back before its change is
@@ -196,6 +198,7 @@ export interface DecisionAlias {
 export interface RepositoryInstructionFiles {
 	files: ReadonlyArray<string>;
 	fallback?: ReadonlyArray<string>;
+	oneName?: true;
 	delivery: "single-source" | "overlay" | "coexist";
 }
 

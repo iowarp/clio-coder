@@ -64,7 +64,7 @@ function readFile(path: string): string | null {
 	}
 }
 
-/** The instruction files the harness reads in each directory from the repository root down to `cwd`. */
+/** The instruction files the harness reads in the directories from the repository root down to `cwd`. */
 function findPeerInstructionFiles(cwd: string, declared: RepositoryInstructionFiles): PeerFile[] {
 	const root = repositoryRoot(cwd);
 	const below = relative(root, resolve(cwd));
@@ -80,6 +80,13 @@ function findPeerInstructionFiles(cwd: string, declared: RepositoryInstructionFi
 		found.push({ file: relative(root, path).split(sep).join("/"), path, content });
 		return true;
 	};
+	if (declared.oneName === true) {
+		for (const name of [...declared.files, ...(declared.fallback ?? [])]) {
+			for (const directory of directories) take(directory, name);
+			if (found.length > 0) break;
+		}
+		return found;
+	}
 	for (const directory of directories) {
 		let any = false;
 		for (const name of declared.files) any = take(directory, name) || any;
