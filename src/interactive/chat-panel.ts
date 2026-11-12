@@ -24,6 +24,9 @@ import type { ViewArtifact } from "../domains/session/view-artifacts.js";
 import type { TelemetryView } from "../domains/telemetry/contract.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
+	COPY_JOIN_MARK,
+	COPY_ROW_MARK,
+	COPY_TIGHT_MARK,
 	type Component,
 	Markdown,
 	Marked,
@@ -684,6 +687,14 @@ export interface ChatPanelOptions {
 	 */
 	bareCodeFences?: boolean;
 	/**
+	 * Mark each answer row with an invisible copy mark that says whether it
+	 * continues the row above, so a fullscreen selection copies a wrapped
+	 * paragraph as one line without the turn glyph or the gutter (#453). Only the
+	 * fullscreen renderer reads and strips the marks; the regular screen, where
+	 * the terminal owns selection, never gets them.
+	 */
+	copyMarks?: boolean;
+	/**
 	 * Run `step` when the process is otherwise idle, again after each call that
 	 * returns true. The panel uses it to render settled entries in the two
 	 * output styles it is not showing, a few milliseconds at a time, so the
@@ -1169,6 +1180,33 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 	return wrapPaths(body, room).map((part, index) => theme.base("assistantProse", `${index === 0 ? lead : mark}${part}`));
 }
 
+/** A list bullet as Pi draws it at the start of an item's first row. */
+const LIST_BULLET = /^(?:[-*+]|\d{1,9}[.)]) /u;
+/** Table, quote and rule rows start with box drawing, and their rows never join. */
+const BOX_ROW = /^[\u2500-\u259F]/u;
+
+/**
+ * How a prose row joins the row above it when fullscreen copies a selection (#453): as a wrapped continuation of the
+ * same paragraph or list item, as the rest of a word too long for one row, or not at all. `above` and `row` are plain
+ * text. Pi wraps greedily, so a row continues the one above only when it starts at the column the text above starts
+ * at, past a bullet, and its first word would not have fit on the row above.
+ */
+function continuationMark(above: string | null, row: string, width: number): string {
+	if (above === null) return "";
+	const lead = row.length - row.trimStart().length;
+	const text = row.slice(lead);
+	const aboveLead = above.length - above.trimStart().length;
+	const aboveText = above.slice(aboveLead);
+	if (text.length === 0 || aboveText.length === 0) return "";
+	if (LIST_BULLET.test(text) || BOX_ROW.test(text) || BOX_ROW.test(aboveText)) return "";
+	const bullet = LIST_BULLET.exec(aboveText)?.[0].length ?? 0;
+	if (lead !== aboveLead + bullet) return "";
+	const aboveWidth = visibleWidth(above);
+	if (aboveWidth >= width && !/\s/u.test(aboveText.slice(bullet))) return COPY_TIGHT_MARK;
+	const word = text.split(" ", 1)[0] ?? "";
+	return aboveWidth + 1 + visibleWidth(word) > width ? COPY_JOIN_MARK : "";
+}
+
 /**
  * The transcript rows of a Markdown component. `exit`, when given, learns whether the rows end with a fence still
  * open, which a caller that renders a text in pieces needs: the fence state runs on into the next piece.
@@ -1179,10 +1217,13 @@ function markdownRows(
 	bareFences: boolean,
 	memo?: RowMemo,
 	exit?: { fenceOpen: boolean },
+	marks = false,
 ): string[] {
 	const padded = md.render(width);
 	const rows: string[] = [];
 	let fenceIndent: string | null = null;
+	// With copy marks, the plain text of the last prose row, which the next row may continue; null past code (#453).
+	let above: string | null = null;
 	// The code line being rejoined: its first row from Pi, then each piece Pi cut off it.
 	let code: string | null = null;
 	const codeKeys: string[] = [];
@@ -1208,6 +1249,7 @@ function markdownRows(
 	};
 	for (const row of padded) {
 		const fence = row.includes("```") ? FENCE_ROW.exec(plainRow(row)) : null;
+		if (fence !== null || fenceIndent !== null) above = null;
 		if (fence !== null) {
 			flushCode();
 			fenceIndent = fenceIndent === null ? (fence[1] ?? "") : null;
@@ -1232,7 +1274,15 @@ function markdownRows(
 			parts = fitMarkdownRow(row, width, bareFences);
 			memo?.rows.set(row, parts);
 		}
-		for (const part of parts) rows.push(part);
+		if (!marks) {
+			for (const part of parts) rows.push(part);
+			continue;
+		}
+		for (const part of parts) {
+			const plain = parts.length === 1 ? plainRow(row).replace(/ +$/u, "") : stripTerminalSequences(part);
+			rows.push(continuationMark(above, plain, width) + part);
+			above = plain;
+		}
 	}
 	flushCode();
 	if (exit !== undefined) exit.fenceOpen = fenceIndent !== null;
@@ -1263,7 +1313,7 @@ function markdownRows(
  * settled head and open tail apart (`renderSettledSplit`), which yields the
  * same rows.
  */
-function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boolean): string[] {
+function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boolean, marks = false): string[] {
 	if (!seg.finalized && seg.diffusion) {
 		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
 	}
@@ -1288,7 +1338,8 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 		memo = seg.finalized ? undefined : { width, bareFences, epoch, rows: new Map(), plain: new Map() };
 	// A settled segment can last the whole session, so it keeps only its layouts.
 	seg.rowMemo = seg.finalized ? undefined : memo;
-	let rows = seg.settled !== undefined || !seg.finalized ? renderSettledSplit(seg, width, bareFences, memo) : null;
+	let rows =
+		seg.settled !== undefined || !seg.finalized ? renderSettledSplit(seg, width, bareFences, memo, marks) : null;
 	if (seg.finalized) delete seg.settled;
 	if (rows === null) {
 		const prose = seg.secrets.textFrom(0);
@@ -1298,7 +1349,7 @@ function renderTextSegmentLines(seg: TextSegment, width: number, bareFences: boo
 			seg.markdown.view.setText(prose);
 			seg.markdown.source = prose;
 		}
-		rows = markdownRows(seg.markdown.view, width, bareFences, memo);
+		rows = markdownRows(seg.markdown.view, width, bareFences, memo, undefined, marks);
 	}
 	const lines = withoutLeadingBlanks(rows);
 	// Dropping the same leading blanks as last time keeps what the split vouched for, one row per blank fewer.
@@ -1334,6 +1385,7 @@ function renderSettledSplit(
 	width: number,
 	bareFences: boolean,
 	memo: RowMemo | undefined,
+	marks: boolean,
 ): string[] | null {
 	const secrets = seg.secrets;
 	if (seg.settled === null || secrets === undefined) return null;
@@ -1383,7 +1435,7 @@ function renderSettledSplit(
 		const exit = { fenceOpen: false };
 		// A run that ends where the next block follows with no blank line draws the spacing row the whole would.
 		const run = settled.pieces.slice(runStart, index + 1).join("") + (settled.spacing[index] ? "\n" : "");
-		const rows = markdownRows(chatMarkdown(run, bareFences), width, bareFences, undefined, exit);
+		const rows = markdownRows(chatMarkdown(run, bareFences), width, bareFences, undefined, exit, marks);
 		// The transcript's fence tracking misread a row as a fence and would carry it into the next run.
 		if (exit.fenceOpen) {
 			seg.settled = null;
@@ -1406,7 +1458,7 @@ function renderSettledSplit(
 			tail.view.setText(region);
 			tail.source = region;
 		}
-		rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo));
+		rows = layout.rows.concat(markdownRows(tail.view, width, bareFences, memo, undefined, marks));
 	}
 	// A layout's head rows only grow, and so do an open fence's settled rows, so every such row the last frame
 	// returned still leads in place.
@@ -1647,7 +1699,7 @@ function hangProseLines(lines: string[], firstPrefix?: string): string[] {
  * string for each of them cost more than rendering the tail, then cost the
  * terminal renderer again to flatten and compare them.
  */
-function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string): string[] {
+function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string, marks: boolean): string[] {
 	const memo = seg.hung;
 	if (memo?.input === lines && memo.prefix === firstPrefix) return memo.output;
 	// The unchanged rows lead: find where they end, copy their hung rows in one native slice, and hang the rest.
@@ -1658,7 +1710,18 @@ function hangSegmentLines(seg: TextSegment, lines: string[], firstPrefix: string
 		same = keptRows(lines, memo.input);
 		while (same < limit && memo.input[same] === lines[same]) same += 1;
 	}
-	const hung = (index: number): string => `${index === 0 ? firstPrefix : PROSE_GUTTER}${lines[index] ?? ""}`;
+	const hung = (index: number): string => {
+		const prefix = index === 0 ? firstPrefix : PROSE_GUTTER;
+		const line = lines[index] ?? "";
+		if (!marks) return `${prefix}${line}`;
+		// Every hung row is marked ahead of its gutter, so fullscreen copy drops the glyph and the gutter cells (#453).
+		const mark = line.startsWith(COPY_JOIN_MARK)
+			? COPY_JOIN_MARK
+			: line.startsWith(COPY_TIGHT_MARK)
+				? COPY_TIGHT_MARK
+				: "";
+		return mark === "" ? `${COPY_ROW_MARK}${prefix}${line}` : `${mark}${prefix}${line.slice(mark.length)}`;
+	};
 	let output: string[];
 	if (same > 0 && memo !== undefined) {
 		// One exact-size copy: a reply's rows are a large array, and a slice grown by a push allocated it twice.
@@ -2304,6 +2367,7 @@ function renderEntryLines(
 	nowMs: number,
 	unboundedToolBodies: boolean,
 	bareFences: boolean,
+	copyMarks: boolean,
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
 	previous?: TranscriptEntry,
@@ -2523,9 +2587,9 @@ function renderEntryLines(
 		if (split) {
 			flushReasoning("words");
 			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
-			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences);
+			const answerLines = renderTextSegmentLines(split.answer, proseWidth, bareFences, copyMarks);
 			if (answerLines.length > 0)
-				blocks.push({ kind: "prose", lines: hangSegmentLines(split.answer, answerLines, CLIO_PREFIX()) });
+				blocks.push({ kind: "prose", lines: hangSegmentLines(split.answer, answerLines, CLIO_PREFIX(), copyMarks) });
 			if (headable) cut = { through: segIndex + 1, blocks: blocks.length, reasoningIndex };
 			continue;
 		}
@@ -2541,7 +2605,7 @@ function renderEntryLines(
 		}
 		let rendered =
 			seg.kind === "text"
-				? renderTextSegmentLines(seg, proseWidth, bareFences)
+				? renderTextSegmentLines(seg, proseWidth, bareFences, copyMarks)
 				: renderErrorSegmentLines(seg, proseWidth, unboundedToolBodies);
 		if (seg.kind === "error" && !unboundedToolBodies) {
 			rendered = previewRows(rendered, previewBudget(detail.errorRows, terminalRows), proseWidth);
@@ -2549,7 +2613,7 @@ function renderEntryLines(
 		if (rendered.length === 0) continue;
 		flushReasoning("words");
 		if (seg.kind === "error") blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR()) });
-		else blocks.push({ kind: "prose", lines: hangSegmentLines(seg, rendered, CLIO_PREFIX()) });
+		else blocks.push({ kind: "prose", lines: hangSegmentLines(seg, rendered, CLIO_PREFIX(), copyMarks) });
 		if (headable) cut = { through: segIndex + 1, blocks: blocks.length, reasoningIndex };
 	}
 	if (headKey !== undefined && cut !== undefined && cut.through > (head?.marks.length ?? 0)) {
@@ -2797,6 +2861,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	} | null = null;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
 	const bareFences = options.bareCodeFences === true;
+	const copyMarks = options.copyMarks === true && !bareFences;
 	/**
 	 * Settled entries are rendered ahead, in idle time, in the styles Alt+O
 	 * cycles to, into the same per-entry cache a revisit reads. A first visit to
@@ -3628,6 +3693,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					nowMs,
 					unboundedToolBodies,
 					bareFences,
+					copyMarks,
 					detail,
 					terminalRows,
 					previous,
@@ -3739,6 +3805,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					now(),
 					unboundedToolBodies,
 					bareFences,
+					copyMarks,
 					transcriptDetail(style),
 					job.terminalRows,
 					transcript[index - 1],

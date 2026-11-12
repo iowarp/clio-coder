@@ -10,6 +10,7 @@
 
 import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
 import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
+import { hasCopyMark, type SelectedRow, selectedRowsText, stripCopyMarks } from "./selection-text.js";
 
 export type TuiRenderPhase = "overlay" | "normalization" | "cursor";
 
@@ -307,8 +308,20 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 		return this.measure("overlay", () => super.compositeOverlays(lines, termWidth, termHeight));
 	}
 
+	/** Copy marks (#453) are for selection only; the painted rows and the screen pi diffs against never hold them. */
 	protected override applyLineResets(lines: string[]): string[] {
-		return this.measure("normalization", () => super.applyLineResets(lines));
+		return this.measure("normalization", () => {
+			for (let row = 0; row < lines.length; row++) {
+				const line = lines[row];
+				if (line !== undefined && hasCopyMark(line)) lines[row] = stripCopyMarks(line);
+			}
+			return super.applyLineResets(lines);
+		});
+	}
+
+	/** Fullscreen copy of a wrapped paragraph is one line without the glyph or gutter (#453). */
+	protected override selectionText(rows: readonly SelectedRow[]): string {
+		return selectedRowsText(rows);
 	}
 
 	protected override extractCursorPosition(lines: string[], height: number): { row: number; col: number } | null {

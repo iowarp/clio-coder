@@ -1273,6 +1273,52 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("copies a wrapped fullscreen paragraph as one line without the turn glyph or the gutter (#453)", async () => {
+		const copies: string[] = [];
+		const terminal = new RenderingTerminal();
+		terminal.columns = 72;
+		terminal.rows = 30;
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async (text) => {
+				copies.push(text);
+				return true;
+			},
+		});
+		const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, copyMarks: true });
+		const paragraph =
+			"Each graph shows two GPU memory pools of fixed size: the KV pool (attention key/value cache) and the recurrent pool (Mamba/SSM state). On every logged row, each pool's capacity is split into three bands.";
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "text", text: `${paragraph}\n\n\`\`\`ts\nconst result = await runTool(input);\nreturn result;\n\`\`\`` },
+			],
+			stopReason: "stop",
+		};
+		panel.appendUser("Explain the graphs");
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "message_end", message } as never);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+		const chrome = { banner: new Text("", 0, 0), editor: new Text("draft", 0, 0), footer: new Text("ready", 0, 0) };
+		tui.setLayoutRoot(buildLayout({ ...chrome, chat: panel }, { mode: "fullscreen" }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			const first = screen.findIndex((row) => row.includes("Each graph")) + 1;
+			const last = screen.findIndex((row) => row.includes("return result")) + 1;
+			ok(screen.findIndex((row) => row.includes("three bands")) > first, "the paragraph wraps");
+			terminal.input(`\x1b[<0;1;${first}M`);
+			terminal.input(`\x1b[<32;72;${last}M`);
+			terminal.input(`\x1b[<0;72;${last}m`);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			strictEqual(copies.at(-1), `${paragraph}\n\nts\n  const result = await runTool(input);\n  return result;`);
+			ok(!terminal.writes.join("").includes("\x1b_clio"), "copy marks never reach the terminal");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("preserves themed scrollbars, wheel scrolling, follow-end, and the fixed dock", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

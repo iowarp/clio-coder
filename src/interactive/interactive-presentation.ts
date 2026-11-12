@@ -486,6 +486,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getRunTarget: () => deps.chat.lastRunSnapshot?.()?.targetId ?? null,
 		...(deps.telemetry.read ? { getTelemetry: () => deps.telemetry.read?.live() ?? null } : {}),
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
+		// The TUI mode needs a restart to change, so the boot settings name the renderer for the panel's life (#453).
+		copyMarks: settings.interface.mode === "fullscreen",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		getStopRequestedAt: () => {
 			const status = statusController.current();

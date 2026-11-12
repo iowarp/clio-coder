@@ -104,7 +104,7 @@ index a27023e070788d2f143b77743eef1c8a5ad0de58..1c8341115ccc621b5a916bf2bb96da1a
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..2592daf00852afb9a57d2fa78e84c3377d8b7bbe 100644
+index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..889cd0d38278c2da96d3a626034212250cce35ce 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
 @@ -109,11 +109,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
@@ -125,8 +125,21 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..2592daf00852afb9a57d2fa78e84c337
      private getSearchNavigationDirectionAt;
      private handleSearchMouseEvent;
      private refreshSearch;
+@@ -157,6 +159,12 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+     private getSelectionBounds;
+     private getSelectionColumns;
+     private getActiveSelectionText;
++    /** Joins the selected cells of each source row into clipboard text; subclasses may override it to rejoin wrapped rows. */
++    protected selectionText(rows: readonly {
++        line: string;
++        start: number;
++        end: number;
++    }[]): string;
+     private copySelectionToClipboard;
+     private copyTextToClipboard;
+     private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..71481437b5d5ca786243a2ed67030fb5d84e7aff 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..080f9696aab14df0bd51f56a19cf0c70887684ad 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
@@ -143,6 +156,28 @@ index 3567a4350ab0da56276289d422b58d46e4882949..71481437b5d5ca786243a2ed67030fb5
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
+@@ -1222,15 +1229,18 @@ export class TuiAltScreen extends TuiBase {
+                 return undefined;
+             sourceLines = box.scrollContentLines;
+         }
+-        const lines = [];
++        const rows = [];
+         for (let row = selection.start.row; row <= selection.end.row; row++) {
+             const line = sourceLines[row] ?? "";
+             const columns = this.getSelectionColumns(line, row, selection);
+-            lines.push(stripTerminalSequences(sliceByColumn(line, columns.start, Math.max(0, columns.end - columns.start), true)).trimEnd());
++            rows.push({ line, start: columns.start, end: columns.end });
+         }
+-        const text = lines.join("\n");
++        const text = this.selectionText(rows);
+         return text.length === 0 ? undefined : text;
+     }
++    selectionText(rows) {
++        return rows.map(({ line, start, end }) => stripTerminalSequences(sliceByColumn(line, start, Math.max(0, end - start), true)).trimEnd()).join("\n");
++    }
+     async copySelectionToClipboard() {
+         const text = this.getActiveSelectionText();
+         if (!text)
 diff --git a/dist/tui-main-screen.d.ts b/dist/tui-main-screen.d.ts
 index 6ab7f63586dfa034ec6c30a40d475909d2d950e2..e7141bd93604bab7db31fcd7dfd0a4603ef9f34d 100644
 --- a/dist/tui-main-screen.d.ts

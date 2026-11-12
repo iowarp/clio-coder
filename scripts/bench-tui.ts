@@ -226,6 +226,7 @@ async function sample(
 		getTerminalRows: () => terminal.rows,
 		getTelemetry: () => view,
 		...(outputStyle ? { getOutputStyle: () => outputStyle } : {}),
+		copyMarks: mode === "fullscreen",
 	};
 	// Under --verify every transcript call is kept, so a fresh panel can replay it with no render cache.
 	const calls: Array<(target: ChatPanel) => void> = [];
