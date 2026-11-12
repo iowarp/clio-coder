@@ -152,7 +152,7 @@ export function startSshForward(
 		env,
 		shell: false,
 		detached: process.platform !== "win32",
-		stdio: ["ignore", "ignore", "pipe"],
+		stdio: ["ignore", "pipe", "pipe"],
 	});
 	return { child, birthToken: child.pid ? processBirthToken(child.pid) : "" };
 }

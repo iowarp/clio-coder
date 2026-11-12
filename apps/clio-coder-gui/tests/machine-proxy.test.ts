@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createAdaptorServer } from "@hono/node-server";
 import { Hono } from "hono";
@@ -252,4 +256,105 @@ test("the node proxy rewrites Host, Origin and bearer, strips browser credential
 	}
 	assert.equal(seen.length, unrouted);
 	assert.ok(before > 0);
+});
+
+test("an attach whose SSH forward exits never turns ready over another listener on its port", {
+	timeout: 60_000,
+}, async (t) => {
+	const bin = await mkdtemp(join(tmpdir(), "clio-fake-ssh-"));
+	t.after(() => rm(bin, { recursive: true, force: true }));
+	// The node's own GUI, with the real auth, for the token the command channel hands it on stdin.
+	const nodeClients = new ClientRegistry(),
+		nodeHub = new EventHub();
+	const node = new Hono();
+	node.onError(problemResponse);
+	const server = createAdaptorServer({ fetch: node.fetch, hostname: "127.0.0.1" });
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+	const nodePort = (server.address() as AddressInfo).port;
+	node.use(
+		"*",
+		auth(() => `http://127.0.0.1:${nodePort}`, nodeClients),
+	);
+	authRoutes(node, nodeHub, nodeClients, new SessionControls(nodeClients, nodeHub), {
+		get token() {
+			return readFileSync(join(bin, "token"), "utf8").trim();
+		},
+		origin: () => `http://127.0.0.1:${nodePort}`,
+	});
+	node.get("/api/meta", (context) => context.json({ apiVersion: 1, clio: "test", build: "test", host: "node" }));
+	// A relay to the node's GUI on the forward's local port: another account's listener in the squatted
+	// mode, the forward's own in the honest one. The squatted forward then exits as ExitOnForwardFailure makes
+	// it; the honest one prints what its LocalCommand prints once ssh holds the port.
+	const relay = `const net=require("node:net");net.createServer((s)=>{const u=net.connect(${nodePort},"127.0.0.1");s.pipe(u);u.pipe(s);s.on("error",()=>u.destroy());u.on("error",()=>s.destroy())}).listen(Number(process.argv[1]),"127.0.0.1",()=>process.send?.("up"))`;
+	await writeFile(
+		join(bin, "ssh"),
+		`#!${process.execPath}
+const { appendFileSync, readFileSync, writeFileSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const bin = ${JSON.stringify(bin)};
+const forward = process.argv.indexOf("-L");
+if (forward === -1) {
+	process.stdin.once("data", (chunk) => {
+		writeFileSync(bin + "/token", String(chunk).split("\\n")[0]);
+		process.stdout.write("[clio-coder:gui] http://127.0.0.1:${nodePort}/\\n");
+	});
+	process.stdin.on("end", () => process.exit(0));
+} else {
+	const local = process.argv[forward + 1].split(":")[1];
+	const squatted = readFileSync(bin + "/mode", "utf8") === "squatted";
+	const child = spawn(process.execPath, ["-e", ${JSON.stringify(relay)}, local], { detached: squatted, stdio: ["ignore", "ignore", "ignore", "ipc"] });
+	appendFileSync(bin + "/pids", child.pid + "\\n");
+	child.once("message", () => {
+		// ssh exits on the taken port only after it authenticates; until then the squatter answers alone.
+		if (squatted) { child.disconnect(); child.unref(); setTimeout(() => process.exit(255), 300); }
+		else process.stdout.write("clio-coder-forward-held\\n");
+	});
+	process.on("SIGTERM", () => { child.kill(); process.exit(0); });
+}
+`,
+		{ mode: 0o700 },
+	);
+	t.after(async () => {
+		for (const pid of (await readFile(join(bin, "pids"), "utf8").catch(() => "")).split("\n").filter(Boolean))
+			try {
+				process.kill(Number(pid), "SIGKILL");
+			} catch {}
+	});
+	const endpoint: MachineEndpoint = {
+		id: "node",
+		host: "node.example",
+		user: null,
+		port: null,
+		identityFile: null,
+		connectTimeoutSec: null,
+		clioCoderEntry: null,
+	};
+	const hub = new EventHub();
+	const attachments = new MachineAttachments({
+		endpoints: async () => [endpoint],
+		local: () => ({ clio: "test", build: "test" }),
+		hub,
+		env: { ...process.env, PATH: bin },
+		metaTimeoutMs: 5_000,
+	});
+	t.after(() => attachments.stopAll());
+	const settled = async () => {
+		for (let i = 0; i < 200; i++) {
+			const [state] = (await attachments.list()).map((attachment) => attachment.state);
+			if (state !== "connecting") return state;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		return "connecting";
+	};
+	await writeFile(join(bin, "mode"), "squatted");
+	await attachments.attach("node");
+	assert.equal(await settled(), "failed", "a forward that exited never carries the attach to ready");
+	assert.equal(attachments.route("node")?.kind, "pending");
+	attachments.forget("node");
+	// The honest forward: the same node attaches as before.
+	await writeFile(join(bin, "mode"), "honest");
+	await attachments.attach("node");
+	assert.equal(await settled(), "ready");
+	assert.equal(attachments.route("node")?.kind, "ready");
 });

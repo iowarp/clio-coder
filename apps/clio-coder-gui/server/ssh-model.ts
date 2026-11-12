@@ -61,9 +61,12 @@ export function sshCommandArgs(endpoint: SshEndpoint, remoteCommand: string): st
 	return [...session(endpoint), "-T", ...destination(endpoint), endpoint.host, "--", remoteCommand];
 }
 
+/** What the forward prints once ssh holds its local port; ssh runs LocalCommand only after its forwards are set up. */
+export const FORWARD_HELD_LINE = "clio-coder-forward-held";
 /**
  * The forward that carries the proxied traffic. It runs no remote command and never rides on or
- * outlives an operator's multiplexed master, so stopping it stops exactly this forward.
+ * outlives an operator's multiplexed master, so stopping it stops exactly this forward. Its one
+ * stdout line says ssh, not some other listener, holds the local port.
  */
 export function sshForwardArgs(endpoint: SshEndpoint, localPort: number, remotePort: number): string[] {
 	return [
@@ -75,6 +78,10 @@ export function sshForwardArgs(endpoint: SshEndpoint, localPort: number, remoteP
 		"ControlMaster=no",
 		"-o",
 		"ControlPath=none",
+		"-o",
+		"PermitLocalCommand=yes",
+		"-o",
+		`LocalCommand=echo ${FORWARD_HELD_LINE}`,
 		"-L",
 		`127.0.0.1:${port(localPort, "Local forward port")}:127.0.0.1:${port(remotePort, "Remote GUI port")}`,
 		...destination(endpoint),

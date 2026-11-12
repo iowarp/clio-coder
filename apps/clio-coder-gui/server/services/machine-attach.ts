@@ -7,6 +7,7 @@ import { type RemoteServerMeta, remoteServerMeta } from "../local-server.js";
 import { startSshCommand, startSshForward, stopClioCommand } from "../process-policy.js";
 import {
 	type BuildIdentity,
+	FORWARD_HELD_LINE,
 	parseReadyLine,
 	REMOTE_GUI_IDLE_MS,
 	reconnectDelayMs,
@@ -111,6 +112,51 @@ function readyPort(child: ChildProcess, timeoutMs: number): Promise<number> {
 		child.once("error", onError);
 	});
 }
+
+/**
+ * Resolves once ssh says it holds the forward's local port. Until then whatever answers on that port
+ * may be another account's listener, which must never see this app's proof or the node's credential.
+ */
+function forwardHeld(child: ChildProcess, timeoutMs: number): Promise<void> {
+	return new Promise((resolve, reject) => {
+		let stdout = "";
+		let stderr = "";
+		const finish = (error?: Error) => {
+			clearTimeout(timer);
+			child.stdout?.removeListener("data", onData);
+			child.removeListener("exit", onExit);
+			child.removeListener("error", onError);
+			if (error) reject(error);
+			else resolve();
+		};
+		const timer = setTimeout(
+			() => finish(new Error(`The SSH forward did not take its local port within ${Math.round(timeoutMs / 1000)} s.`)),
+			timeoutMs,
+		);
+		timer.unref();
+		const onData = (chunk: Buffer) => {
+			stdout = (stdout + chunk.toString("utf8")).slice(-4096);
+			if (stdout.split(/\r?\n/).includes(FORWARD_HELD_LINE)) finish();
+		};
+		const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+			const last = stderr.trim().split("\n").at(-1) ?? "";
+			finish(
+				new Error(
+					`The SSH forward ended (${code ?? signal ?? "unknown"}) before it held its local port${last ? `: ${last}` : "."}`,
+				),
+			);
+		};
+		const onError = (error: Error) => finish(new Error(`ssh could not start: ${error.message}`));
+		child.stdout?.on("data", onData);
+		child.stderr?.on("data", (chunk: Buffer) => {
+			stderr = (stderr + chunk.toString("utf8")).slice(-4096);
+		});
+		child.once("exit", onExit);
+		child.once("error", onError);
+	});
+}
+
+const running = (child: ChildProcess) => child.exitCode === null && child.signalCode === null;
 
 function exited(child: ChildProcess): Promise<void> {
 	if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
@@ -274,10 +320,16 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		live.localPort = localPort;
 		const forward = startSshForward(live.endpoint, localPort, remotePort, env);
 		live.forward = forward;
+		const held = forwardHeld(forward.child, this.deps.readyTimeoutMs ?? 30_000);
+		forward.child.stdout?.on("data", () => {});
 		forward.child.stderr?.on("data", () => {});
 		forward.child.once("exit", (code) => this.channelExited(entry, "forward", code));
-		const remote = await this.waitForMeta(entry, localPort, remotePort, live.token);
+		await held;
 		if (!this.current(entry)) return;
+		const remote = await this.waitForMeta(entry, localPort, remotePort, live.token, forward.child);
+		if (!this.current(entry)) return;
+		// A forward gone meanwhile left the port to whoever takes it, so no answer there counts.
+		if (!running(forward.child)) throw new Error("The SSH forward ended before the node's GUI answered through it.");
 		if (!remote) throw new Error("The node's GUI did not answer through the SSH forward.");
 		const gate = versionGate(entry.attachment.id, this.deps.local(), remote);
 		if (!gate.ok) {
@@ -312,9 +364,10 @@ export class MachineAttachments implements MachineAttachmentsApi {
 		port: number,
 		listenerPort: number,
 		token: string,
+		forward: ChildProcess,
 	): Promise<RemoteServerMeta | null> {
 		const deadline = performance.now() + (this.deps.metaTimeoutMs ?? 10_000);
-		while (performance.now() < deadline && this.current(entry)) {
+		while (performance.now() < deadline && this.current(entry) && running(forward)) {
 			const meta = await remoteServerMeta(port, listenerPort, token);
 			if (meta) return meta;
 			await sleep(200);
