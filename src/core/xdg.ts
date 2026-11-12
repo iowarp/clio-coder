@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -158,6 +158,55 @@ const ROLE_OWNERSHIP_FILE: Record<ClioDirRole, string> = {
 };
 
 /**
+ * Top-level names Clio creates in a data or cache root, taken from the code that
+ * creates them (and, for data, `evals` and `evidence` from releases before 0.6.8).
+ * A `fleet-install-` or `update-` entry carries a generated suffix.
+ */
+const CLIO_ROOT_ENTRIES: Record<"data" | "cache", { names: ReadonlySet<string>; prefixes: ReadonlyArray<string> }> = {
+	data: { names: new Set(["memory", "tools", "components", "store", "evidence", "evals"]), prefixes: [] },
+	cache: {
+		names: new Set([
+			"semantic",
+			"grammars",
+			"data-readers",
+			"system-one",
+			"codewiki-digests",
+			"copilot-sdk",
+			"run",
+			"yazi",
+			"mcp-catalogs",
+			"skill-frontmatter.json",
+			"provider-target-models",
+			"provider-target-checks",
+			"store",
+			"sandbox-cache",
+			"v8-compile-cache",
+			"update-logs",
+		]),
+		prefixes: ["fleet-install-", "update-"],
+	},
+};
+
+/** The first entry of an unmarked data or cache root that Clio does not create there, or null. */
+function foreignRootEntry(role: "data" | "cache", path: string): string | null {
+	const { names, prefixes } = CLIO_ROOT_ENTRIES[role];
+	const clios = (name: string): boolean =>
+		name === CLIO_ROOT_MARKER || names.has(name) || prefixes.some((prefix) => name.startsWith(prefix));
+	let entries: string[];
+	try {
+		entries = readdirSync(path);
+	} catch {
+		return "(unreadable)";
+	}
+	for (const entry of entries) {
+		// A lock or an interrupted atomic write sits beside the file it guards.
+		const guarded = entry.replace(/(?:\.lock)+(?:\.reclaim\.lock)?$/u, "").replace(/^\.(.+)\.tmp-.*$/u, "$1");
+		if (!clios(guarded)) return entry;
+	}
+	return null;
+}
+
+/**
  * Why a root must not be removed recursively, or null when it is Clio's own.
  *
  * Only reset and uninstall ask. The layout check proves the four roots are
@@ -186,8 +235,10 @@ export function removableClioRootProblem(role: ClioDirRole, path: string): strin
 	if (physical === physicalPath(platformDefaults()[role])) return null;
 	if (basename(physical).toLowerCase() === "clio-coder") return null;
 	if (existsSync(join(path, ROLE_OWNERSHIP_FILE[role]))) return null;
-	// Before 0.8.0 a CLIO_CODER_HOME home got no marker in its data and cache roots; its
-	// own config or state file vouches for the role directory it resolved.
+	// Before 0.8.0 a CLIO_CODER_HOME home got no marker in its data and cache roots, and
+	// one that already held a `data` or `cache` of its own still gets none. Clio's config
+	// or state file beside it proves only that Clio used the home, so the directory
+	// itself must hold nothing but what Clio creates there.
 	const clioHome = clioHomeOrNull();
 	if (
 		clioHome !== null &&
@@ -195,8 +246,12 @@ export function removableClioRootProblem(role: ClioDirRole, path: string): strin
 		!atOrAbove(physicalPath(clioHome), home) &&
 		physical === physicalPath(join(clioHome, role)) &&
 		(existsSync(join(clioHome, "config", "settings.yaml")) || existsSync(join(clioHome, "state", "home.json")))
-	)
-		return null;
+	) {
+		if (role === "config" || role === "state") return null;
+		const foreign = foreignRootEntry(role, path);
+		if (foreign === null) return null;
+		return `no ${CLIO_ROOT_MARKER} inside and it holds ${foreign}, which Clio does not create there`;
+	}
 	return `no ${ROLE_OWNERSHIP_FILE[role]} inside and not named clio-coder`;
 }
 

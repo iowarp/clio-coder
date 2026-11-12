@@ -1146,6 +1146,13 @@ qualify. A root that fails the rule, for example `CLIO_CODER_CONFIG_DIR=~/.confi
 touched: `uninstall` lists it under `Kept, and why` and `reset` reports it as a failure, and
 both exit 1. `uninstall --dry-run` shows the same kept rows.
 
+A `data` or `cache` root under `CLIO_CODER_HOME` that has no marker, as one created before
+0.8.0 or one that already existed when Clio Coder first used the home (a scratch
+allocation such as `/scratch/<user>/data`), counts as Clio Coder's only while every entry
+in it is one Clio Coder creates there (`memory`, `tools`, `components` and `store` in data;
+its own cache directories and files in cache). Anything else keeps the root, with the first
+foreign entry named.
+
 The launcher is removed only when it resolves
 to *this* installation's own entry, `dist/cli/index.js` or the `bin/clio-coder.cjs`
 guard that package managers link. The spelling of the target never qualifies it, so a

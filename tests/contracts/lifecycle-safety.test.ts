@@ -91,6 +91,37 @@ test("an unmarked data or cache root of a CLIO_CODER_HOME home is removable only
 	ok(removableClioRootProblem("data", join(home, "data")) !== null);
 });
 
+test("a CLIO_CODER_HOME data or cache root that already held the operator's files is kept", async (t) => {
+	const home = await mkdtemp(join(tmpdir(), "clio-home-foreign-"));
+	const names = ["CLIO_CODER_HOME", "CLIO_CODER_DATA_DIR", "CLIO_CODER_CACHE_DIR"] as const;
+	const saved = names.map((name) => process.env[name]);
+	t.after(async () => {
+		names.forEach((name, index) => {
+			const value = saved[index];
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		});
+		await import("node:fs/promises").then(({ rm }) => rm(home, { recursive: true, force: true }));
+	});
+	process.env.CLIO_CODER_HOME = home;
+	delete process.env.CLIO_CODER_DATA_DIR;
+	delete process.env.CLIO_CODER_CACHE_DIR;
+	await mkdir(join(home, "state"));
+	await writeFile(join(home, "state", "home.json"), "{}\n");
+	await mkdir(join(home, "data", "memory"), { recursive: true });
+	await mkdir(join(home, "data", "tools"));
+	await mkdir(join(home, "cache", "semantic"), { recursive: true });
+	await writeFile(join(home, "cache", "skill-frontmatter.json.lock"), "");
+	await mkdir(join(home, "cache", "fleet-install-a1b2c3"));
+	strictEqual(removableClioRootProblem("data", join(home, "data")), null);
+	strictEqual(removableClioRootProblem("cache", join(home, "cache")), null);
+	// A scratch allocation such as /scratch/<user> often holds a data directory before Clio arrives.
+	await mkdir(join(home, "data", "experiment-42"));
+	await writeFile(join(home, "cache", "operator.bin"), "x");
+	match(removableClioRootProblem("data", join(home, "data")) ?? "", /holds experiment-42/u);
+	match(removableClioRootProblem("cache", join(home, "cache")) ?? "", /holds operator\.bin/u);
+});
+
 test("an empty or relative XDG base directory reads as unset", () => {
 	strictEqual(xdgBaseDir(undefined, "/home/me/.local/state"), "/home/me/.local/state");
 	strictEqual(xdgBaseDir("", "/home/me/.local/state"), "/home/me/.local/state");
