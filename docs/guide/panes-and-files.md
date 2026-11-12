@@ -77,7 +77,7 @@ through the explicit install commands:
 ```bash
 npm install -g @iowarp/clio-coder
 clio-coder configure
-clio-coder tools install herdr     # the installers and the first bare launch do this for you
+clio-coder tools install herdr     # the installers and `clio-coder panes install` do this for you
 clio-coder tools install yazi
 ```
 
@@ -95,13 +95,18 @@ The vendored programs live under the data root (`clio-coder paths`), so
 Panes are always on. Bare `clio-coder` in an interactive terminal opens Clio
 Coder's own private pane host: it starts its pinned herdr, runs the session in
 one of its panes and hands the terminal back when you quit. Each project gets
-its own host. There is no question to answer and no setting to change. When
-the pinned herdr is missing, the launch prints `Clio Coder: setting up terminal
-panes (one time)...` and downloads it, waiting at most 30 seconds. If that
-fails, it prints ``Clio Coder: terminal panes unavailable (<reason>). Continuing
-in this terminal; run `clio-coder panes install` to retry.`` and the session
-runs in the plain terminal. Later launches skip the download for a day, or until
-the pinned version changes, and stay quiet. On a platform with no pinned herdr
+its own host. There is no question to answer and no setting to change. A
+missing herdr is not downloaded at launch in a home that never had panes: the
+launch prints ``Clio Coder: terminal panes are not installed. Install them with
+`clio-coder panes install`.`` once per pinned version and the session runs in
+the plain terminal; `clio-coder panes install` adds them. A home that already
+has panes updates them when the pinned version moves: the launch prints `Clio
+Coder: setting up terminal panes (one time)...` and downloads the new pin,
+waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal
+panes unavailable (<reason>). Continuing in this terminal; run `clio-coder
+panes install` to retry.`` and the session runs in the plain terminal. Later
+launches skip that update for a day, or until the pinned version changes, and
+stay quiet. On a platform with no pinned herdr
 build the session simply runs in the plain terminal. The installers
 (`install.sh`, `install.ps1`) provision the same copy, and `clio-coder panes
 install` installs it ahead of time; both always retry.
