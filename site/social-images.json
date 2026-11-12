@@ -1,6 +1,13 @@
 {
 	"default": "gui-task",
 	"images": {
+		"cast-first-launch": {
+			"source": "assets/guides/cast-first-launch.png",
+			"path": "assets/social/cast-first-launch.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "162942eaa41c422b521dbeddb312b252bb4848b90ee7483110cef0d70c19cc7c"
+		},
 		"cast-headless-run": {
 			"source": "assets/guides/cast-headless-run.png",
 			"path": "assets/social/cast-headless-run.png",

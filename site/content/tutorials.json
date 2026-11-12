@@ -7,8 +7,9 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "first-session.md",
-    "cover": "tui-boot",
-    "basis": "Documented workflow",
+    "cover": "cast-first-launch",
+    "basis": "Recorded session",
+    "versionScope": "0.8.0",
     "guides": [
       "README.md",
       "guide/commands-and-modes.md"
