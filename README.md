@@ -62,12 +62,6 @@ With Node.js 22.19 or newer already installed, npm works too:
 npm install -g @iowarp/clio-coder
 ```
 
-> **0.8.0 is a release candidate.** This page describes 0.8.0. The two commands
-> above install the stable release, 0.7.0. To try the candidate, add the `beta`
-> channel: `curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta`
-> or `npm install -g @iowarp/clio-coder@beta`. `clio-coder upgrade --channel latest`
-> returns to stable.
-
 **2. Start it in a project.**
 
 ```bash
@@ -132,7 +126,7 @@ See the [contributor guide](CONTRIBUTING.md) for development on the version bran
 </details>
 
 <details>
-<summary><strong>HPC login nodes, native Windows, and pre-releases</strong></summary>
+<summary><strong>HPC login nodes, native Windows, and rollback</strong></summary>
 
 The native installer supports x64 Linux with glibc 2.17 or newer, including
 HPC login nodes, and leaves system Node unchanged. It installs under
@@ -150,11 +144,8 @@ PowerShell. It needs no administrator rights and writes the launcher to
 `%USERPROFILE%\.local\bin\clio-coder.exe`. Release checks only boot the
 package on Windows, so interactive use there is best effort.
 
-Release candidates ship on the `beta` channel:
-`curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel beta`,
-`npm install -g @iowarp/clio-coder@beta`, or `clio-coder upgrade --channel beta`.
-Return with `clio-coder upgrade --channel latest`, or restore the version you
-had before with `clio-coder upgrade --rollback`.
+`clio-coder upgrade --rollback` restores the version you had before the last
+upgrade.
 
 </details>
 
@@ -342,8 +333,6 @@ listed at the end.
 
    With Node.js 22.19 or newer on `PATH`, `npm install -g @iowarp/clio-coder`
    also works. On native Windows: `irm https://coder.iowarp.ai/install.ps1 | iex`.
-   Add `--channel beta` (npm: `@iowarp/clio-coder@beta`) only when the user
-   asked for a release candidate.
 
 2. **Verify** the launcher the installer wrote:
 
