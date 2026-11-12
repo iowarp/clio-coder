@@ -179,7 +179,7 @@ describe("contracts/install-script", () => {
 		}
 	});
 
-	it("resolves the channel without a project .npmrc and refuses a channel older than the active install", {
+	it("resolves the channel without a project .npmrc and refuses a channel older than the active install unless told to leave a pre-release", {
 		skip:
 			process.platform === "win32" || !existsSync(join(dirname(process.execPath), "..", "lib", "node_modules", "npm")),
 	}, async () => {
@@ -226,7 +226,7 @@ describe("contracts/install-script", () => {
 			writeFileSync(join(home, ".npmrc"), `registry=${user.url}\n`);
 			writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 22\n");
 			chmodSync(join(bin, "curl"), 0o755);
-			const install = () =>
+			const install = (...extra: string[]) =>
 				new Promise<string>((resolve) => {
 					const child = spawn(
 						"sh",
@@ -239,6 +239,7 @@ describe("contracts/install-script", () => {
 							"--bin-dir",
 							join(root, "launchers"),
 							"--no-post-install",
+							...extra,
 						],
 						{
 							cwd: repo,
@@ -258,16 +259,26 @@ describe("contracts/install-script", () => {
 			const fresh = await install();
 			match(fresh, /resolved latest to 0\.8\.0/u, fresh);
 			ok(!requests.some((line) => line.startsWith("project")), requests.join("\n"));
-			const active = join(installRoot, "versions", "0.9.0");
-			mkdirSync(join(active, "lib", "node_modules", "@iowarp", "clio-coder"), { recursive: true });
-			writeFileSync(
-				join(active, "lib", "node_modules", "@iowarp", "clio-coder", "package.json"),
-				'{"name":"@iowarp/clio-coder","version":"0.9.0"}',
-			);
-			writeFileSync(join(installRoot, "install.json"), `{\n  "current": "${active}"\n}\n`);
+			const activate = (version: string) => {
+				const active = join(installRoot, "versions", version);
+				mkdirSync(join(active, "lib", "node_modules", "@iowarp", "clio-coder"), { recursive: true });
+				writeFileSync(
+					join(active, "lib", "node_modules", "@iowarp", "clio-coder", "package.json"),
+					`{"name":"@iowarp/clio-coder","version":"${version}"}`,
+				);
+				writeFileSync(join(installRoot, "install.json"), `{\n  "current": "${active}"\n}\n`);
+			};
+			activate("0.9.0");
 			const older = await install();
 			match(older, /latest channel resolved to 0\.8\.0, older than the active 0\.9\.0/u, older);
 			ok(!/installing @iowarp/u.test(older), older);
+			// The flag leaves only a pre-release; a stable active install is still protected.
+			match(await install("--leave-prerelease"), /older than the active 0\.9\.0/u);
+			activate("0.9.0-rc.1");
+			match(await install(), /older than the active 0\.9\.0-rc\.1/u);
+			const leaving = await install("--leave-prerelease");
+			match(leaving, /leaving the pre-release 0\.9\.0-rc\.1 for stable 0\.8\.0/u, leaving);
+			match(leaving, /installing @iowarp\/clio-coder@0\.8\.0 /u, leaving);
 		} finally {
 			project.server.close();
 			user.server.close();

@@ -41,6 +41,7 @@ param(
 	[switch]$NoAutoUpdate,
 	[switch]$AutoUpdate,
 	[switch]$Rollback,
+	[switch]$LeavePrerelease,
 	[switch]$NoPostInstall,
 	[switch]$RefreshRuntime,
 	[switch]$Force,
@@ -85,6 +86,7 @@ function Install-ClioCoder {
 	}
 
 	if ($spec -in @("latest", "beta", "dev")) { $Options.Channel = $spec }
+	if ($Options.LeavePrerelease -and $spec -ne "latest") { Fail "-LeavePrerelease only moves to the latest channel, not $spec" }
 
 	$arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 	$build = switch ($arch) {
@@ -318,8 +320,15 @@ function Install-ClioCoder {
 				$activeVersion = $null
 				try { $activeVersion = [string](Get-Content -LiteralPath (Join-Path $previous "lib\node_modules\@iowarp\clio-coder\package.json") -Raw | ConvertFrom-Json).version } catch { $activeVersion = $null }
 				if ($activeVersion) {
-					& $node -e 'const s=require(process.argv[1]+"/node_modules/semver");process.exit(s.valid(process.argv[3])&&s.lt(process.argv[2],process.argv[3])?0:1)' (Join-Path $runtimeDir "node_modules\npm") $resolved $activeVersion
-					if ($LASTEXITCODE -eq 0) { Fail "the $spec channel resolved to $resolved, older than the active $activeVersion; the installation was left unchanged. To install $resolved, pass -Version $resolved; to return to the previous install, use -Rollback." }
+					# "older", or "prerelease" when a stable release is older than an active pre-release.
+					$downgrade = & $node -e 'const s=require(process.argv[1]+"/node_modules/semver"),r=process.argv[2],a=process.argv[3];process.stdout.write(s.valid(a)&&s.lt(r,a)?(s.prerelease(a)&&!s.prerelease(r)?"prerelease":"older"):"")' (Join-Path $runtimeDir "node_modules\npm") $resolved $activeVersion
+					if ($LASTEXITCODE -ne 0) { $downgrade = "" }
+					# Only an explicit request (`clio-coder upgrade --channel latest` passes -LeavePrerelease)
+					# moves down; a recorded channel or a registry the operator did not choose never does.
+					if ($downgrade -eq "prerelease" -and $spec -eq "latest") {
+						if (-not $Options.LeavePrerelease) { Fail "the $spec channel resolved to $resolved, older than the active $activeVersion; the installation was left unchanged. To leave the pre-release for stable $resolved, pass -LeavePrerelease; to return to the previous install, use -Rollback." }
+						Say "leaving the pre-release $activeVersion for stable $resolved"
+					} elseif ($downgrade) { Fail "the $spec channel resolved to $resolved, older than the active $activeVersion; the installation was left unchanged. To install $resolved, pass -Version $resolved; to return to the previous install, use -Rollback." }
 				}
 			}
 			$installSpec = "$PackageName@$resolved"
@@ -471,7 +480,7 @@ try {
 		Version = $Version; Channel = $Channel; Package = $Package; NodeVersion = $NodeVersion; NodeZip = $NodeZip
 		InstallDir = $InstallDir; BinDir = $BinDir; IncludeClaudeSdk = [bool]$IncludeClaudeSdk; AddToPath = [bool]$AddToPath
 		NoModifyPath = [bool]$NoModifyPath; NoAutoUpdate = [bool]$NoAutoUpdate; AutoUpdate = [bool]$AutoUpdate; Rollback = [bool]$Rollback
-		NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
+		LeavePrerelease = [bool]$LeavePrerelease; NoPostInstall = [bool]$NoPostInstall; RefreshRuntime = [bool]$RefreshRuntime; Force = [bool]$Force; DryRun = [bool]$DryRun
 	})
 } catch {
 	# An installer refusal is one line with its fix, as on Linux; anything else keeps its position for a bug report.

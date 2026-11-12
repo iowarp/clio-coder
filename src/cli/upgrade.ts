@@ -843,7 +843,12 @@ export async function runUpgradeCommand(
 	const prepareInstall = async (): Promise<{ invocation: UpgradeInvocation; version: string | null }> => {
 		let invocation: UpgradeInvocation;
 		let version: string | null = null;
-		if (method === "installer") invocation = installerUpgradeInvocation(installation, opts, process.platform === "win32");
+		if (method === "installer")
+			invocation = installerUpgradeInvocation(
+				installation,
+				{ ...opts, leavePrerelease: leavingPrerelease },
+				process.platform === "win32",
+			);
 		else {
 			version = availableVersion ?? (await fetchReleaseVersion(opts.channel));
 			if (version === null)

@@ -292,7 +292,7 @@ export function npmUpgradeInvocation(
  */
 export function installerUpgradeInvocation(
 	installation: Installation,
-	opts: { channel: string; channelExplicit: boolean; refreshRuntime: boolean },
+	opts: { channel: string; channelExplicit: boolean; refreshRuntime: boolean; leavePrerelease?: boolean },
 	windows: boolean,
 ): UpgradeInvocation {
 	const record = installation.installer;
@@ -324,6 +324,9 @@ export function installerUpgradeInvocation(
 				"--no-post-install",
 			];
 	if (record.versionPin && !opts.channelExplicit) args.push(windows ? "-Version" : "--version", record.versionPin);
+	// The installers refuse a channel older than the active version unless the
+	// operator asked to leave a pre-release for stable (`--channel latest`).
+	if (opts.leavePrerelease) args.push(windows ? "-LeavePrerelease" : "--leave-prerelease");
 	const env: UpgradeInvocation["env"] = {};
 	if (opts.refreshRuntime) {
 		env.CLIO_CODER_NODE_VERSION = undefined;

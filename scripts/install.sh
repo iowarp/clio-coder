@@ -62,6 +62,9 @@ Options:
   --version <spec>      Clio Coder version: an exact version such as 0.6.0 or a
                         dist-tag. Default: the --channel. Env: CLIO_CODER_VERSION
   --channel <name>      latest (default), beta or dev. Env: CLIO_CODER_CHANNEL
+  --leave-prerelease    With the latest channel, move from an active pre-release
+                        to stable even when stable is older. Without it, a
+                        channel older than the active version is refused.
   --package <file.tgz>  Install a local `npm pack` tarball instead of the
                         registry package. Env: CLIO_CODER_PACKAGE
   --node-version <v>    Node.js major (24) or exact version (24.11.1).
@@ -801,6 +804,7 @@ main() {
 	auto_update="${CLIO_CODER_AUTO_UPDATE:-preserve}"
 	lock_owned=0
 	rollback=0
+	leave_prerelease=0
 	post_install=1
 	install_gui="${CLIO_CODER_INSTALL_GUI:-ask}"
 	refresh_runtime=0
@@ -837,6 +841,7 @@ main() {
 			--no-auto-update) auto_update=0 ;;
 			--auto-update) auto_update=1 ;;
 			--rollback) rollback=1 ;;
+			--leave-prerelease) leave_prerelease=1 ;;
 			--no-post-install) post_install=0 ;;
 			--gui) install_gui=1 ;;
 			--no-gui) install_gui=0 ;;
@@ -867,6 +872,9 @@ main() {
 		version="$channel"
 	fi
 	case "$version" in latest | beta | dev) channel="$version" ;; esac
+	if [ "$leave_prerelease" = 1 ] && [ "$version" != latest ]; then
+		fail "--leave-prerelease only moves to the latest channel, not $version"
+	fi
 
 	refuse_sudo
 	[ -n "${HOME:-}" ] || fail "HOME is not set"
@@ -992,10 +1000,22 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 ' "$runtime_dir/lib/node_modules/npm" "$work/dist-tags.json" "$version")" || fail "no published version on $channel or its stable fallback"
 				require_supported_version "$resolved"
 				current_prefix="$(manifest_field current)"
-				if [ -n "$current_prefix" ] && active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$current_prefix/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" &&
-					"$node_bin" -e 'const s=require(process.argv[1]+"/node_modules/semver");process.exit(s.valid(process.argv[3])&&s.lt(process.argv[2],process.argv[3])?0:1)' "$runtime_dir/lib/node_modules/npm" "$resolved" "$active_version"; then
-					fail "the $channel channel resolved to $resolved, older than the active $active_version; the installation was left unchanged. To install $resolved, pass --version $resolved; to return to the previous install, use --rollback."
+				downgrade=""
+				if [ -n "$current_prefix" ] && active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$current_prefix/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)"; then
+					# "older", or "prerelease" when a stable release is older than an active pre-release.
+					downgrade="$("$node_bin" -e 'const s=require(process.argv[1]+"/node_modules/semver"),r=process.argv[2],a=process.argv[3];process.stdout.write(s.valid(a)&&s.lt(r,a)?(s.prerelease(a)&&!s.prerelease(r)?"prerelease":"older"):"")' "$runtime_dir/lib/node_modules/npm" "$resolved" "$active_version")" || downgrade=""
 				fi
+				# Only an explicit request (`clio-coder upgrade --channel latest` passes --leave-prerelease)
+				# moves down; a recorded channel or a registry the operator did not choose never does.
+				case "$downgrade:$version" in
+					prerelease:latest)
+						[ "$leave_prerelease" = 1 ] || fail "the $channel channel resolved to $resolved, older than the active $active_version; the installation was left unchanged. To leave the pre-release for stable $resolved, pass --leave-prerelease; to return to the previous install, use --rollback."
+						log "leaving the pre-release $active_version for stable $resolved"
+						;;
+					prerelease:* | older:*)
+						fail "the $channel channel resolved to $resolved, older than the active $active_version; the installation was left unchanged. To install $resolved, pass --version $resolved; to return to the previous install, use --rollback."
+						;;
+				esac
 				spec="$PACKAGE@$resolved"
 				log "resolved $channel to $resolved"
 				;;
