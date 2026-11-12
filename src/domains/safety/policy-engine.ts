@@ -13,7 +13,11 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
-import { mainSandboxGitControlPaths, type YoloScriptSandboxState } from "../../core/sandbox/main-session.js";
+import {
+	mainSandboxGitControlPaths,
+	mainSandboxWritableRoots,
+	type YoloScriptSandboxState,
+} from "../../core/sandbox/main-session.js";
 import { isSkippedSecretScanDirectory, SECRET_SCAN_LIMITS } from "../../core/sandbox/secret-files.js";
 import { isSessionAuthoredFile } from "../../core/session-authored-files.js";
 import { storeBookkeepingPaths, storeGrantProbes, storeWriteSet } from "../../core/store-paths.js";
@@ -38,6 +42,8 @@ import {
 	cleansIgnoredFiles,
 	GIT_CONTROL_FILE_RULE_ID,
 	gitControlFileReason,
+	type OutwardPlaces,
+	outwardLineLeaves,
 	outwardShellReason,
 	SNAPSHOT_RECOVERABLE_GIT_PATTERNS,
 	SNAPSHOT_RECOVERABLE_GIT_RULE_IDS,
@@ -1786,6 +1792,19 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	};
 
 	/**
+	 * Where an outward line of a call run from `callCwd` would run, and every tree the main-session sandbox
+	 * lets a contained command write, as written and with links resolved.
+	 */
+	const outwardPlaces = (scope: OperatorYoloScope, callCwd: string): OutwardPlaces => {
+		const workspace = canonicalizePath(cwd) ?? cwd;
+		const roots = mainSandboxWritableRoots(workspace, effectiveScratchRoots(scope.scratchRoots, cwd));
+		return {
+			fileRoots: [...new Set(roots.flatMap((root) => [root, canonicalizePath(root) ?? root]))],
+			cwd: canonicalizePath(callCwd) ?? callCwd,
+		};
+	};
+
+	/**
 	 * A call under the operator's yolo, judged the skip-permissions way (#407).
 	 * What holds: the run's ceilings (write roots, an invalid approved policy,
 	 * a required sandbox the host lacks), the yolo floor and operator-authored
@@ -1802,7 +1821,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
 		const floor = floorBlock(call, callCwd, judgedCommand);
 		if (floor !== null) return blockDecision(base, floor);
-		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope);
+		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope, () =>
+			outwardPlaces(scope, callCwd),
+		);
 		if (required === "refused" || required === "unsandboxed") {
 			return blockDecision(base, {
 				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
@@ -1867,8 +1888,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		// runs in the main-session sandbox, whatever stage allowed it (#419, #407).
 		if (decision.kind !== "allow" || scope?.scriptSandbox !== "sandboxed") return decision;
 		const call = normalizeCallPaths(rawCall);
-		const { judgedCommand } = commandUnderJudgment(call);
-		if (yoloRequiredSandbox(rawCall, call, classify(call), judgedCommand, scope) !== "sandboxed") return decision;
+		const { callCwd, judgedCommand } = commandUnderJudgment(call);
+		const places = () => outwardPlaces(scope, callCwd);
+		if (yoloRequiredSandbox(rawCall, call, classify(call), judgedCommand, scope, places) !== "sandboxed") return decision;
 		const shellSandbox = {
 			workspace: canonicalizePath(cwd) ?? cwd,
 			scratchRoots: effectiveScratchRoots(scope.scratchRoots, cwd),
@@ -3809,9 +3831,10 @@ function containedShellCall(
  * script, and every call the default would contain, runs `sandboxed`, or is
  * `refused` when the host has no backend; such a call that asks to leave the
  * sandbox with `unsandboxed: true` is refused as `unsandboxed`. An outward call
- * that names no script keeps the credentials it needs and runs `free`, as it
- * would at default; so does every call when the operator did not require the
- * sandbox.
+ * that names no script keeps the credentials it needs and runs `free` only when
+ * its line is one simple command with literal arguments ({@link outwardLineLeaves});
+ * any other outward line is held like a call that reaches nowhere. Every call
+ * runs `free` when the operator did not require the sandbox.
  */
 function yoloRequiredSandbox(
 	rawCall: ClassifierCall,
@@ -3819,6 +3842,7 @@ function yoloRequiredSandbox(
 	classification: Classification,
 	verifyCommand: string | null,
 	scope: OperatorYoloScope,
+	places: () => OutwardPlaces,
 ): "sandboxed" | "refused" | "unsandboxed" | "free" {
 	const state = scope.scriptSandbox;
 	if (state !== "sandboxed" && state !== "refused") return "free";
@@ -3827,7 +3851,10 @@ function yoloRequiredSandbox(
 	if (call.projection === "typed-git" || call.projection === "mcp-server" || !runsProjectCommand(call, verifyCommand))
 		return "free";
 	const script = runsScriptFile(rawCall);
-	if (!script && reachesOutward(call, classification, verifyCommand)) return "free";
+	if (!script && reachesOutward(call, classification, verifyCommand)) {
+		const command = call.tool === ToolNames.Verify ? verifyCommand : commandArg(call.args);
+		if (command === null || outwardLineLeaves(command, places())) return "free";
+	}
 	if (call.args?.unsandboxed === true) return "unsandboxed";
 	return state;
 }

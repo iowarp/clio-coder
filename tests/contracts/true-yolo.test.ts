@@ -1,7 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
@@ -772,6 +772,217 @@ test("only safety.sandbox required sandboxes yolo commands, and without a backen
 	strictEqual(job !== undefined && engine.evaluate(job, "yolo", sandboxed).reasonCode, "yolo-sandbox-required");
 	strictEqual(job !== undefined && engine.evaluate(job, "yolo", OPERATOR_YOLO).kind, "allow");
 	strictEqual(engine.evaluate(bash("bash clean.sh"), "yolo").kind, "ask");
+});
+
+/** An engine for a fresh workspace repository whose process cwd is that workspace for the test. */
+function requiredWorkspace(t: { after: (fn: () => void) => void }, prefix: string) {
+	const cwd = workspace(prefix);
+	const savedCwd = process.cwd();
+	process.chdir(cwd);
+	t.after(() => process.chdir(savedCwd));
+	mkdirSync(join(cwd, ".git"));
+	const engine = engineFor(cwd);
+	const sandboxed: OperatorYoloScope = { scratchRoots: [], scriptSandbox: "sandboxed" };
+	const sandboxOf = (command: string) =>
+		engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", sandboxed).shellSandbox?.workspace;
+	return { cwd, sandboxOf };
+}
+
+/** Wrappers the scanners read specially; a line that wraps an outward CLI in one is not a simple command. */
+const SCANNER_WRAPPERS: ReadonlyArray<(run: string) => string> = [
+	(run) => `( : )# x\n${run}`,
+	(run) => `: $(echo a)#b; ${run}`,
+	(run) => `: "$(echo $(echo a)#b)"; ${run}`,
+	(run) => `: $(# )\n${run}\n)`,
+	(run) => `( : # $(cat <<'EOF'\n${run}\nEOF\n)`,
+	(run) => `( : $(cat <<'EOF'\nx\nEOF)\n${run}\nEOF\n)`,
+	(run) => `: $(cat <<'EOF'\nx\nEOF)\n${run}\nEOF\n)`,
+	(run) => `: "$(cat <<'EOF'\nx\nEOF\n)"; ${run}`,
+	(run) => `: '$(cat <<"EOF"\n'; ${run}; : '\nEOF\n)'`,
+	(run) => `: <<< x; ${run}`,
+	(run) => `cat <<'EOF'\nx\nEOF\n${run}`,
+	(run) => `( ${run} )`,
+	(run) => `{ ${run}; }`,
+	(run) => `: $( ${run} )`,
+	(run) => `( : ) && ${run}`,
+];
+
+test("under a required sandbox an outward command leaves it only as one simple command with literal arguments", (t) => {
+	const { cwd, sandboxOf } = requiredWorkspace(t, "clio-yolo-outward-allowlist-");
+	for (const command of [
+		"gh pr list",
+		"  gh pr list\t",
+		"gh pr create --title 'Fix the cache' --body-file body.md",
+		'gh pr create --title "Fix the cache" --body-file body.md',
+		"gh issue comment 12 --body 'costs $5, see `x` and a\\b'",
+		"gh api repos/o/r/pulls -f title=x -f head=feat:main",
+		"gh pr view 12 --json title,body",
+		"git push origin main",
+		"git push -u origin HEAD",
+		'git push origin "main"',
+		"sbatch job.sh",
+		"sbatch --partition=gpu -N 2 job.sh",
+		"ssh host uptime",
+		"ssh -o StrictHostKeyChecking=no host uptime",
+		"scp a.txt user@host:/tmp/a.txt",
+		"kubectl get pods -n prod",
+		"curl -X POST https://example.com/hook",
+		"npm publish --access public",
+	]) {
+		strictEqual(sandboxOf(command), undefined, command);
+	}
+	for (const command of [
+		// Operators, redirects, comments and more than one line.
+		"gh pr list | head",
+		"gh pr list > out.txt",
+		"gh pr list 2>&1",
+		"gh pr view 12 < in.txt",
+		"gh pr list; ls",
+		"gh pr list && ls",
+		"gh pr list || true",
+		"gh pr list &",
+		"(gh pr list)",
+		"{ gh pr list; }",
+		"gh pr list # mine",
+		"gh pr list\n",
+		"gh pr list\nls",
+		"gh pr view 'a\nb'",
+		// Expansions, globs and escapes.
+		'gh pr view "$PR"',
+		"gh pr view $PR",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: the shell expansion is the case under test
+		"gh pr view ${PR}",
+		"gh pr view `x`",
+		"gh pr view $(x)",
+		"gh pr view $((1+2))",
+		"gh pr view <(x)",
+		"gh pr view *",
+		"gh pr view ?",
+		"gh pr view [ab]",
+		"gh pr view {a,b}",
+		"gh pr view ~/x",
+		"gh pr view a\\ b",
+		'gh pr create --body "line\\nline"',
+		"gh pr create --body $'a'",
+		"gh pr view 'unclosed",
+		// Here-documents and here-strings.
+		"gh pr create --body \"$(cat <<'EOF'\nx\nEOF\n)\"",
+		"gh pr create --body-file - <<< x",
+		"gh pr create --body-file - <<'EOF'\nx\nEOF",
+		// Assignments, wrappers and a CLI named by a path or in quotes.
+		"GH_TOKEN=x gh pr list",
+		"SLURM_CONF=./slurm.conf sbatch job.sh",
+		"KUBECONFIG=./k kubectl get pods",
+		"env gh pr list",
+		"sudo gh pr list",
+		"time gh pr list",
+		"nice gh pr list",
+		"command gh pr list",
+		"builtin gh pr list",
+		"exec gh pr list",
+		"timeout 5 gh pr list",
+		"nohup gh pr list",
+		"xargs gh pr view",
+		"/usr/bin/gh pr list",
+		"./gh pr list",
+		"'gh' pr list",
+		"\\gh pr list",
+		"cd sub && git push origin main",
+		// An outward CLI beside workspace code in every wrapper the scanners read specially.
+		...SCANNER_WRAPPERS.map((wrap) => `gh pr list; ${wrap("./evil")}`),
+		...SCANNER_WRAPPERS.map((wrap) => wrap("gh pr list")),
+	]) {
+		strictEqual(sandboxOf(command), cwd, command);
+	}
+});
+
+test("under a required sandbox a simple outward command whose argv names a planted program, config or repository stays inside", (t) => {
+	const { cwd, sandboxOf } = requiredWorkspace(t, "clio-yolo-outward-argv-");
+	const planted = workspace("clio-yolo-outward-argv-planted-");
+	mkdirSync(join(planted, ".git"));
+	for (const command of [
+		`git -C ${planted} push origin main`,
+		`git --git-dir=${planted}/.git push origin main`,
+		`git --git-dir ${planted}/.git push origin main`,
+		`git --work-tree=${planted} push origin main`,
+		`git --exec-path=${planted} push origin main`,
+		`git push ${planted} main`,
+		`git push file://${planted} main`,
+		`git push --repo=${planted} main`,
+		`git push --repo ${planted} main`,
+		"git push --receive-pack=./x origin main",
+		"git push --exec=./x origin main",
+		"git push origin main --receive-pack ./x",
+		"git -c core.sshCommand=./x push origin main",
+		"git -c credential.helper=./x push origin main",
+		"git -c url.ext::./x.insteadOf=https://h/ push https://h/r main",
+		"git --config-env=core.pager=X push origin main",
+		"git push 'ext::./x %S' main",
+		"ssh -E /etc/ssh.log host",
+		"ssh -o ProxyCommand=./x host",
+		"ssh -oProxyCommand=./x host",
+		"ssh -o LocalCommand=./x -o PermitLocalCommand=yes host",
+		"ssh -F ./ssh.cfg host",
+		"scp -S ./x a.txt host:b",
+		"scp -F ./ssh.cfg a.txt host:b",
+		"sftp -S ./x host",
+		"rsync -e ./x a host:b",
+		"rsync --rsh=./x a host:b",
+		"kubectl --kubeconfig ./k get pods",
+		"kubectl --kubeconfig=./k get pods",
+		`helm --kubeconfig=${planted}/k list`,
+	]) {
+		strictEqual(sandboxOf(command), cwd, command);
+	}
+	for (const command of [
+		`git -C ${cwd} push origin main`,
+		"git push --repo=origin main",
+		"git push origin main",
+		"git push git@github.com:o/r.git main",
+		"kubectl --kubeconfig /etc/kubernetes/admin.conf get pods",
+		"ssh -o StrictHostKeyChecking=no host",
+	]) {
+		strictEqual(sandboxOf(command), undefined, command);
+	}
+});
+
+test("under a required sandbox a simple outward command whose name PATH finds in a writable tree stays inside", (t) => {
+	const { cwd, sandboxOf } = requiredWorkspace(t, "clio-yolo-outward-path-");
+	const savedPath = process.env.PATH;
+	t.after(() => {
+		process.env.PATH = savedPath;
+	});
+	mkdirSync(join(cwd, "bin"));
+	writeFileSync(join(cwd, "bin", "gh"), "#!/bin/sh\n");
+	chmodSync(join(cwd, "bin", "gh"), 0o755);
+	process.env.PATH = `${join(cwd, "bin")}:${savedPath ?? ""}`;
+	strictEqual(sandboxOf("gh pr list"), cwd);
+	// A writable directory on PATH may get the CLI while the line runs, wherever the CLI is now.
+	strictEqual(sandboxOf("sbatch job.sh"), cwd);
+	process.env.PATH = `.:${savedPath ?? ""}`;
+	strictEqual(sandboxOf("sbatch job.sh"), cwd);
+	process.env.PATH = `${savedPath ?? ""}:`;
+	strictEqual(sandboxOf("sbatch job.sh"), cwd);
+	process.env.PATH = savedPath;
+	strictEqual(sandboxOf("sbatch job.sh"), undefined);
+});
+
+test("the yolo floor blocks a destructive command in every wrapper the outward rule touched, as on v080", async (t) => {
+	const cwd = workspace("clio-yolo-floor-corpus-");
+	const home = await isolateClioEnv("clio-yolo-floor-corpus-home-");
+	t.after(() => home.restore());
+	const engine = engineFor(cwd);
+	const config = join(home.dir, "config");
+	for (const wrap of SCANNER_WRAPPERS) {
+		for (const run of ["wipefs -a /dev/sdz", "shred -u /etc/passwd", "rm -rf /usr/lib", `tar cf - ${config}`]) {
+			const command = wrap(run);
+			strictEqual(
+				engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO).kind,
+				"block",
+				command,
+			);
+		}
+	}
 });
 
 // #419: an admitted yolo script commits through git, fills its own package cache,

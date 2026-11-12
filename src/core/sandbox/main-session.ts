@@ -552,6 +552,26 @@ export function mainSandboxPolicy(roots: {
 	});
 }
 
+/**
+ * Impure: every tree the main-session sandbox lets a contained command write,
+ * the writable roots {@link mainSandboxPolicy} binds: the workspace, the
+ * scratch roots, the sandbox cache and the workspace repository's git dirs.
+ * A program or config in one of them may be a file a contained command planted.
+ */
+export function mainSandboxWritableRoots(
+	workspace: string,
+	scratchRoots: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+	const git = mainSandboxGitLayout(workspace);
+	return resolveMainSandboxPolicy({
+		workspace,
+		scratchRoots,
+		sandboxCache: mainSandboxCacheDir(),
+		clioDirs: [],
+		...(git !== undefined ? { git } : {}),
+	}).writableRoots;
+}
+
 /** The one directory a read-only session's contained commands may write, under Clio's state root. */
 export function readOnlyScratchDir(sessionId: string | undefined, stateDir: string = clioStatePath()): string {
 	const id = sessionId !== undefined && /^[A-Za-z0-9._-]+$/u.test(sessionId) ? sessionId : `pid-${process.pid}`;
