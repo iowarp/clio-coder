@@ -1415,6 +1415,247 @@
 					"caption": "With the safety judge off, an outward command such as git push comes to you; the effect row says what it would change."
 				}
 			}
+		},
+		{
+			"id": "stills-cli",
+			"summary": "terminal stills without a model: extension scaffold and validate, playbook validate and graph, library dry run, interop inspect, project store",
+			"title": "Terminal command-line stills",
+			"live": false,
+			"stillsOnly": true,
+			"peers": ["claude", "codex", "opencode", "copilot"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-cli",
+			"cols": 120,
+			"rows": 120,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder extensions init lint-status --template status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder extensions validate .clio-coder/dev/extensions/lint-status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Registration check[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder extensions test .clio-coder/dev/extensions/lint-status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "duration_ms[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-extension-validate",
+					"rows": [1, 53]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder playbook validate sdlc --var task=\"Add empty-input handling to the parser\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "compiled 14 plan steps[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder playbook graph sdlc --var task=\"Add empty-input handling to the parser\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "loop review[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-playbook-graph",
+					"rows": [1, 46]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project --dry-run",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "planned install[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project --dry-run --json",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\n\\}\\s*\\n[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-library-dry-run",
+					"rows": [1, 61]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder interop inspect",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 90,
+					"pause": 1
+				},
+				{
+					"pause": 1
+				},
+				{
+					"shot": "cli-interop-inspect",
+					"rows": [1, 31]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder store put results run-042.csv --note \"baseline, 64 ranks\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "stored results[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder store stat results:run-042.csv",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "backend[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-store-stat",
+					"rows": [1, 12]
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-extension-validate": {
+					"label": "Validate",
+					"alt": "Terminal output: extensions init creates lint-status from the status template under .clio-coder/dev/extensions, validate prints its capability envelope with the status command, exec and net false, its SHA-256, and a passed registration check, and test reports one test passed and none failed.",
+					"caption": "Scaffold, validate and test an extension; validate prints the capability envelope you consent to."
+				},
+				"cli-playbook-graph": {
+					"label": "Graph",
+					"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps with the plan hash; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
+					"caption": "validate runs the preflight and graph prints the compiled waves and loops, both without side effects."
+				},
+				"cli-library-dry-run": {
+					"label": "Dry run",
+					"alt": "Terminal: the tdd skill install as a dry run prints one planned-install line; the --json form then shows the full plan with the project destination under .clio-coder/plugins, the bundled source with its sha256, valid content, and no required, missing or inactive dependencies.",
+					"caption": "A dry run plans the install without writing; the --json form carries the full plan."
+				},
+				"cli-interop-inspect": {
+					"label": "Inspect",
+					"alt": "Terminal interop inspect report: Claude Code, Codex, OpenCode and GitHub Copilot present with ACP not configured, each with its ACP, headless and pane status and the next step, no inventory found, and Antigravity CLI absent.",
+					"caption": "interop inspect: each coding agent CLIO Coder detected, how far it is wired, and the next step."
+				},
+				"cli-store-stat": {
+					"label": "Store",
+					"alt": "Terminal: store put saves run-042.csv under the results tag with a note, then store stat shows its ref, path in the store, size in bytes, modification time, drift none, its sha256, no producing run on record, and the local backend.",
+					"caption": "store put keeps a result under a tag; store stat shows its hash and whether it has drifted."
+				}
+			}
 		}
 	]
 }

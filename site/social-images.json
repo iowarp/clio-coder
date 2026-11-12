@@ -22,6 +22,13 @@
 			"height": 630,
 			"sha256": "1039e1741d6e998039a8741d2d37aba77ab7173b14649ff119a8ffa42a715a8b"
 		},
+		"cli-store-stat": {
+			"source": "assets/guides/cli-store-stat.png",
+			"path": "assets/social/cli-store-stat.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "4ec4f2dc8faef89fad9658fe9fa61ad5970dc7ada533f9d64a21d5555df49293"
+		},
 		"gui-task": {
 			"source": "assets/gui-task.png",
 			"path": "assets/social/gui-task.png",

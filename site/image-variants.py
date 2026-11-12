@@ -45,6 +45,7 @@ INPUTS = {
     "assets/guides/cli-playbook-graph.webp": [640, 1024, 1600],
     "assets/guides/cli-telemetry-session.webp": [640, 1024, 1600],
     "assets/guides/cli-extension-validate.webp": [640, 1024, 1600],
+    "assets/guides/cli-store-stat.webp": [640, 1024, 1600],
     "assets/gui-task.webp": [640, 960, 1280],
     "assets/guides/gui-home.webp": [640, 1024, 1600],
     "assets/guides/gui-approval.webp": [640, 1024, 1600],

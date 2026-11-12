@@ -375,27 +375,27 @@
     ]
   },
   "assets/guides/cli-library-dry-run.webp": {
-    "width": 2240,
-    "height": 1212,
-    "sha256": "41fc54f61e2853b54345b6a7e99b525199f0a21d1598828d3d94c27a75a3d690",
+    "width": 2268,
+    "height": 2504,
+    "sha256": "1d8ef1b63b05f694064cd0537f0197d96e0b17a694d5476db140bd3681cafbba",
     "variants": [
       {
         "path": "assets/responsive/cli-library-dry-run-640.webp",
         "width": 640,
-        "height": 346,
-        "sha256": "377209cd82b792878ed603e45b4e47b62bb5128bac7a01febfc7c4226a44dece"
+        "height": 707,
+        "sha256": "da030934e4e871731ccf8d76722e9b59a6fde9cf904879701e33210db4f590e2"
       },
       {
         "path": "assets/responsive/cli-library-dry-run-1024.webp",
         "width": 1024,
-        "height": 554,
-        "sha256": "811cf0b4b642eae97ca878fc2ffeb32648a2a1368cb6499a34cf9f66ac8866d5"
+        "height": 1131,
+        "sha256": "7bf7d189cb3d609d3daefd48c3c11326df14d71f6dde37d146edfbb3a945af86"
       },
       {
         "path": "assets/responsive/cli-library-dry-run-1600.webp",
         "width": 1600,
-        "height": 866,
-        "sha256": "ee186bd7c6b3e6b13f19161e94c9ab71f9eb11b5b1b219079c86ce9204408fe6"
+        "height": 1766,
+        "sha256": "68bedaa55227fd1b4fdbac918b7fed9b7992da66bae1c93e8b9f085bd92217aa"
       }
     ]
   },
@@ -475,27 +475,27 @@
     ]
   },
   "assets/guides/cli-interop-inspect.webp": {
-    "width": 2782,
-    "height": 1136,
-    "sha256": "7a746ca3b4317ff2ef3eac9d543ae693919c0ea294d78a9977f25ef97e0c84a8",
+    "width": 2268,
+    "height": 1304,
+    "sha256": "0be14f019fb4b4caf8b02e5e195e69083de2b7a62f30cc5c035bcd8a2c0e591e",
     "variants": [
       {
         "path": "assets/responsive/cli-interop-inspect-640.webp",
         "width": 640,
-        "height": 261,
-        "sha256": "bf113ec01d74f5ba1f94643e37409a7b49208414d8323e9344f6b6f3a6281915"
+        "height": 368,
+        "sha256": "4211589d3c6d810a0eaff8673b9ee2b43ff4de89cf0c389491239020b101697a"
       },
       {
         "path": "assets/responsive/cli-interop-inspect-1024.webp",
         "width": 1024,
-        "height": 418,
-        "sha256": "4d99f8317c0cdd7c8b55c2bcd483bcc676202f839e859af90a23db856f2dd65a"
+        "height": 589,
+        "sha256": "abfd6d7930ce1602c646d6afdd5160b048adada055d4787cd4db69294c425741"
       },
       {
         "path": "assets/responsive/cli-interop-inspect-1600.webp",
         "width": 1600,
-        "height": 653,
-        "sha256": "bb6d554c01c442755a409a24d80d520b963b38e15ce94fb948dc4d010256de4e"
+        "height": 920,
+        "sha256": "ee40d329d03b5b435879002fdc13deacd91f78bafada6b2214a47925cc01c1a9"
       }
     ]
   },
@@ -700,27 +700,27 @@
     ]
   },
   "assets/guides/cli-playbook-graph.webp": {
-    "width": 2154,
-    "height": 1728,
-    "sha256": "0110407b2b181c1fa1c9508b139fcdd69a969d50836fffc3fb77a3f74cb93bc1",
+    "width": 2268,
+    "height": 1904,
+    "sha256": "1f9aed53370491f2bcc296a079408b81478d2bda617f85748ceb2c83024204ed",
     "variants": [
       {
         "path": "assets/responsive/cli-playbook-graph-640.webp",
         "width": 640,
-        "height": 513,
-        "sha256": "75750f1a88416574e0bb2bdbf05cac72d3025bd908ffd179be438ef517801d9f"
+        "height": 537,
+        "sha256": "f97135d25a40c578c69815f22f5b85576a582bd8e9aac8c104ba71595d248d9c"
       },
       {
         "path": "assets/responsive/cli-playbook-graph-1024.webp",
         "width": 1024,
-        "height": 821,
-        "sha256": "bdffe7622b76d9eb49d21e767ec610cabb1027e6dd68dc989109a24707b22c49"
+        "height": 860,
+        "sha256": "4f3ec9b8dc0a6e40011b55769b426bef3585a8f172378632a21b5edb1254addb"
       },
       {
         "path": "assets/responsive/cli-playbook-graph-1600.webp",
         "width": 1600,
-        "height": 1284,
-        "sha256": "bcbd19cd23f6037a7c6abe7cec300567448ee397fa825938e14cefecf28e49a0"
+        "height": 1343,
+        "sha256": "cdb9439c5b69d58efb0b1abea7d8e1c8a3c3aa12e61a97bb301d9c07d220e8b3"
       }
     ]
   },
@@ -750,27 +750,52 @@
     ]
   },
   "assets/guides/cli-extension-validate.webp": {
-    "width": 2154,
-    "height": 1988,
-    "sha256": "7b42e28f3a87e0d629cd70f2a6a22e40ea24cd77105d129a2f28dea2fc9f01f1",
+    "width": 2268,
+    "height": 2184,
+    "sha256": "56ab461e33acbfcf19b573edf78714497d534342f9f753e49f962805544e3732",
     "variants": [
       {
         "path": "assets/responsive/cli-extension-validate-640.webp",
         "width": 640,
-        "height": 591,
-        "sha256": "d13245d9c123ff958628d207e1322b33f0abcf5bc42e7d138cd94922d6b79bfe"
+        "height": 616,
+        "sha256": "c28606d0331265271b1f9365f188e26a8c52281476557692e399328c802cc857"
       },
       {
         "path": "assets/responsive/cli-extension-validate-1024.webp",
         "width": 1024,
-        "height": 945,
-        "sha256": "114579f79d1c1d076eea855f60a1b9ccf93ab87ee08a815d746e65bade306648"
+        "height": 986,
+        "sha256": "ee3db6153e0434a7476d2785f7ea78823af8821b36c1cdd707771c1134b2d4e7"
       },
       {
         "path": "assets/responsive/cli-extension-validate-1600.webp",
         "width": 1600,
-        "height": 1477,
-        "sha256": "ff952eda60fa365ca5e316a7ce4ba2d55b7af060573a493828627734b69e9aed"
+        "height": 1541,
+        "sha256": "3bb373d98f9ec18fe79bda076829fea6b4d48b559d5d2010ae12315cc9ada74d"
+      }
+    ]
+  },
+  "assets/guides/cli-store-stat.webp": {
+    "width": 2268,
+    "height": 544,
+    "sha256": "f3041e15cfa4e9927598532c7b3780278a260e2c8eacd1d595dd799f0f269223",
+    "variants": [
+      {
+        "path": "assets/responsive/cli-store-stat-640.webp",
+        "width": 640,
+        "height": 154,
+        "sha256": "68efa47491b112f0124cbe2d6dcac799e250ac9705e4e7fb9f51df568905a104"
+      },
+      {
+        "path": "assets/responsive/cli-store-stat-1024.webp",
+        "width": 1024,
+        "height": 246,
+        "sha256": "0ab2fda4dfb9b55bade4611001c965dbe883e72dcd511833e81979f703f79119"
+      },
+      {
+        "path": "assets/responsive/cli-store-stat-1600.webp",
+        "width": 1600,
+        "height": 384,
+        "sha256": "b5e6599636f3413e9aae480433f95e5e0e831d09a80ba3d54e5e06189c3c138a"
       }
     ]
   },

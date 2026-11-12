@@ -148,15 +148,15 @@
 		"cli-library-dry-run": {
 			"image": "assets/guides/cli-library-dry-run.webp",
 			"original": "assets/guides/cli-library-dry-run.png",
-			"width": 2240,
-			"height": 1212,
+			"width": 2268,
+			"height": 2504,
 			"label": "Dry run",
-			"alt": "Terminal running the tdd skill install as a dry run, then the JSON plan showing its project destination, bundled source with sha256, valid content, and no dependencies.",
-			"caption": "A dry run plans the project install; the JSON plan shows the destination, source, and package hash.",
+			"alt": "Terminal: the tdd skill install as a dry run prints one planned-install line; the --json form then shows the full plan with the project destination under .clio-coder/plugins, the bundled source with its sha256, valid content, and no required, missing or inactive dependencies.",
+			"caption": "A dry run plans the install without writing; the --json form carries the full plan.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. bash: clio-coder library install skill:tdd --project --dry-run, then the same with --json piped to jq '.plan.steps[0] | {destination, source, content, dependencies}'."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-library-dry-run\" marker, rows 1-61, rendered by the site's player at 2x."
 		},
 		"tui-library-installed": {
 			"image": "assets/guides/tui-library-installed.webp",
@@ -200,15 +200,15 @@
 		"cli-interop-inspect": {
 			"image": "assets/guides/cli-interop-inspect.webp",
 			"original": "assets/guides/cli-interop-inspect.png",
-			"width": 2782,
-			"height": 1136,
+			"width": 2268,
+			"height": 1304,
 			"label": "Inspect",
-			"alt": "Terminal interop inspect report giving each detected peer its ACP, headless, and pane status and the next step for each.",
-			"caption": "interop inspect reports each peer's managed, headless, and pane modes and the next step for each.",
+			"alt": "Terminal interop inspect report: Claude Code, Codex, OpenCode and GitHub Copilot present with ACP not configured, each with its ACP, headless and pane status and the next step, no inventory found, and Antigravity CLI absent.",
+			"caption": "interop inspect: each coding agent CLIO Coder detected, how far it is wired, and the next step.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Same peers; bash at 150 columns: clio-coder interop inspect."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-interop-inspect\" marker, rows 1-31, rendered by the site's player at 2x."
 		},
 		"cli-doctor": {
 			"image": "assets/guides/cli-doctor.webp",
@@ -310,15 +310,15 @@
 		"cli-playbook-graph": {
 			"image": "assets/guides/cli-playbook-graph.webp",
 			"original": "assets/guides/cli-playbook-graph.png",
-			"width": 2154,
-			"height": 1728,
-			"label": "Waves",
-			"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
-			"caption": "Validate and graph print the compiled plan for the built-in sdlc playbook without running a step.",
+			"width": 2268,
+			"height": 1904,
+			"label": "Graph",
+			"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps with the plan hash; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
+			"caption": "validate runs the preflight and graph prints the compiled waves and loops, both without side effects.",
 			"interface": "Terminal",
-			"version": "0.6.8",
-			"capturedAt": "2026-11-04",
-			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model: the guide's commands.yaml in a fixture Node project. The full screen for the two commands."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-playbook-graph\" marker, rows 1-46, rendered by the site's player at 2x."
 		},
 		"cli-telemetry-session": {
 			"image": "assets/guides/cli-telemetry-session.webp",
@@ -336,15 +336,15 @@
 		"cli-extension-validate": {
 			"image": "assets/guides/cli-extension-validate.webp",
 			"original": "assets/guides/cli-extension-validate.png",
-			"width": 2154,
-			"height": 1988,
-			"label": "Envelope",
-			"alt": "Terminal output: extensions init creates lint-status, validate prints its capability envelope with exec and net false, its SHA-256, and a passed registration check, and test reports one test passed.",
-			"caption": "Validate prints the capability envelope you are consenting to, before anything is installed.",
+			"width": 2268,
+			"height": 2184,
+			"label": "Validate",
+			"alt": "Terminal output: extensions init creates lint-status from the status template under .clio-coder/dev/extensions, validate prints its capability envelope with the status command, exec and net false, its SHA-256, and a passed registration check, and test reports one test passed and none failed.",
+			"caption": "Scaffold, validate and test an extension; validate prints the capability envelope you consent to.",
 			"interface": "Terminal",
-			"version": "0.6.8",
-			"capturedAt": "2026-11-04",
-			"source": "clio-coder 0.6.8 installed from npm as @iowarp/clio-coder@0.6.8, in an isolated profile (user researcher) under bubblewrap. Terminal in a Herdr pane; ANSI read with herdr pane read and rendered with xterm.js. No model: the status template in a fixture project. The full screen for the three commands, ending at the test summary."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-extension-validate\" marker, rows 1-53, rendered by the site's player at 2x."
 		},
 		"cast-first-task": {
 			"image": "assets/guides/cast-first-task.webp",
@@ -492,6 +492,19 @@
 			"version": "0.8.0-rc.1",
 			"capturedAt": "2026-11-12",
 			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-saved\" marker, rows 1-31, rendered by the site's player at 2x."
+		},
+		"cli-store-stat": {
+			"image": "assets/guides/cli-store-stat.webp",
+			"original": "assets/guides/cli-store-stat.png",
+			"width": 2268,
+			"height": 544,
+			"label": "Store",
+			"alt": "Terminal: store put saves run-042.csv under the results tag with a note, then store stat shows its ref, path in the store, size in bytes, modification time, drift none, its sha256, no producing run on record, and the local backend.",
+			"caption": "store put keeps a result under a tag; store stat shows its hash and whether it has drifted.",
+			"interface": "Terminal",
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-store-stat\" marker, rows 1-12, rendered by the site's player at 2x."
 		}
 	}
 }

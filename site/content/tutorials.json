@@ -349,6 +349,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "keep-results-in-the-project-store.md",
+    "cover": "cli-store-stat",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
