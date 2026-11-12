@@ -3,7 +3,7 @@
 // recording, a plain-text transcript, and stills rendered from the recording by
 // the same player the site embeds. One command reruns any of them:
 //
-//   node site/capture/run.mjs --scratch <dir> [--only id,id] [--clio <path>] [--build-note <text>] [--publish]
+//   node site/capture/run.mjs --scratch <dir> [--only id,id] [--clio <path>] [--build-note <text>] [--publish --shots id,id]
 //   node site/capture/run.mjs --scratch <dir> --release <version> [--package <tarball>] [--publish]
 //
 // --release re-records every scenario from a release: it installs
@@ -27,7 +27,13 @@
 // privateNet without a port isolates the sandbox to its own loopback. peers
 // lists host agent CLIs bound read-only into ~/.local/bin for interop screens.
 // A stillsOnly scenario publishes only its stills.
-// Without --publish, output stays in <scratch>/<id>/out for review. Casts are
+// Without --publish, output stays in <scratch>/<id>/out for review. --publish
+// writes only the captures named in --shots (stills, or a scenario id for its
+// cast); the other stills of a scenario stay in scratch, so a re-take made for one
+// screen does not replace the others. --release publishes every capture it makes.
+// Every capture rendered goes through alt-check.mjs: figures in its alt and
+// caption must appear in the recording, and the run lists each for a human read.
+// Casts are
 // compacted losslessly before stills are rendered; compact.mjs says how.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -39,6 +45,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
+import { altCheck, printAltCheck } from "./alt-check.mjs";
 import { compactEvents } from "./compact.mjs";
 import { plain, privacyHits, scanChunks } from "./privacy.mjs";
 import { quoteCheck } from "./quote-check.mjs";
@@ -56,6 +63,7 @@ const { values } = parseArgs({
 		// Where the build under capture came from, when it is not a release (published in each source line).
 		"build-note": { type: "string" },
 		publish: { type: "boolean", default: false },
+		shots: { type: "string" },
 		list: { type: "boolean", default: false },
 		chrome: { type: "string", default: process.env.CLIO_CODER_CHROME ?? "/usr/bin/google-chrome" },
 	},
@@ -75,6 +83,21 @@ if (only && scenarios.length !== only.size) throw new Error(`Unknown scenario in
 const startedAt = Date.now();
 if (values.release && values.clio) throw new Error("--release installs its own build; drop --clio.");
 if (values.package && !values.release) throw new Error("--package needs --release <version>.");
+if (values.publish && !values.release && !values.shots)
+	throw new Error("--publish needs --shots id,id: the captures to replace (--release publishes all).");
+if (values.shots && (values.release || !values.publish))
+	throw new Error("--shots goes with --publish, without --release.");
+const shots = values.shots ? new Set(values.shots.split(",")) : null;
+if (shots) {
+	const makes = new Set(
+		scenarios.flatMap((scenario) => [
+			...(scenario.stillsOnly ? [] : [scenario.id]),
+			...Object.keys(scenario.shots ?? {}),
+		]),
+	);
+	const unknown = [...shots].filter((id) => !makes.has(id));
+	if (unknown.length) throw new Error(`--shots names captures this run does not make: ${unknown.join(", ")}`);
+}
 const installMs = values.release ? installRelease(values.release, values.package) : 0;
 
 // The build under capture, bound read-only at /opt/clio-coder inside the sandbox.
@@ -831,13 +854,24 @@ try {
 } finally {
 	if (releaseLock) lockTotalMs = releaseLock();
 }
+const rendered = {};
+const scopes = [];
 for (const take of recorded) {
 	const begin = Date.now();
 	const entries = await render(take);
-	if (values.publish) publish(take.scenario, take.outDir, entries);
+	const scoped = Object.fromEntries(Object.entries(entries).filter(([id]) => !shots || shots.has(id)));
+	Object.assign(rendered, values.publish ? scoped : entries);
+	scopes.push([take, scoped]);
 	take.timing.renderMs = Date.now() - begin;
 	timings.push({ id: take.scenario.id, live: Boolean(take.scenario.live), ...take.timing });
 }
+// Checked before anything is published: a figure the take does not show stops the run.
+const alts = altCheck({ scratch, ids: Object.keys(rendered), entries: rendered });
+printAltCheck(alts);
+if (alts.misses.length) {
+	process.exitCode = 1;
+	if (values.publish) console.log("alt-check: nothing published; fix the alt or caption in scenarios.json and rerun.");
+} else if (values.publish) for (const [take, scoped] of scopes) publish(take.scenario, take.outDir, scoped);
 
 const seconds = (ms) => Math.round(ms / 100) / 10;
 const report = {
@@ -874,12 +908,14 @@ if (values.release) {
 	for (const line of [...notes, ...misses]) console.log(`quote-check: ${line}`);
 	console.log(`quote-check: ${checked} quoted lines, ${misses.length} not in their recording`);
 	if (misses.length) process.exitCode = 1;
-	if (values.publish) console.log("Next: python3 site/image-variants.py, then read every take before committing.");
+	if (values.publish)
+		console.log("Next: python3 site/image-variants.py, then read every take (alt-check list above) before committing.");
 }
 
 function publish(scenario, outDir, entries) {
 	mkdirSync(join(site, "assets/casts"), { recursive: true });
-	if (!scenario.stillsOnly)
+	if (!Object.keys(entries).length) return;
+	if (entries[scenario.id])
 		for (const ext of ["cast", "txt"])
 			copyFileSync(join(outDir, `${scenario.id}.${ext}`), join(site, `assets/casts/${scenario.id}.${ext}`));
 	const registry = JSON.parse(readFileSync(join(site, "content/captures.json"), "utf8"));

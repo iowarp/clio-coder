@@ -1019,7 +1019,7 @@
 				},
 				"tui-context": {
 					"label": "/context",
-					"alt": "Terminal Context Window dock after one short turn: a usage bar with 13,737 of 200,000 tokens in use, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
+					"alt": "Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 200,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
 					"caption": "/context: the probed window, tokens in use, and what fills them."
 				},
 				"tui-settings-models": {
