@@ -181,6 +181,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - In regular mode a finished turn no longer measures every transcript row again, which cost a long session tens of milliseconds per turn.
 - With an overlay open, a fullscreen selection in the transcript beside it copies as written too, and the `↓ latest` marker still returns to the live edge.
 - A frame with `/settings` open takes a few milliseconds instead of more than 100, so the wheel and keys stay smooth there.
+- Wrapped Chinese, Japanese and Korean text copies back as written in fullscreen, with no space added at a wrap and none lost between Korean words.
 
 ### Sign-in, setup and providers
 
@@ -323,6 +324,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Typed reads refuse `settings.yaml` while it names a target that authenticates with `auth.headers`, and `mcp.yaml` while it gives a server an `env` map, matching what the sandbox already hides.
 - When the Copilot route rebuilds its session, text a tool returned earlier can no longer close its frame in the replayed transcript or pose as host policy or your own turn.
 - ACP: a prompt made only of an attached file no longer counts as your words for the safety judge and the approval card, and an attached file's body cannot open or close its own block.
+- ACP: under `acp --read-only`, `acp --allow-tools none`, or a client ceiling that is read-only or allows no tools, the stdio MCP servers a client supplies are registered but not started.
 
 ### Desktop app
 
@@ -599,6 +601,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - A secret file inside a wholly untracked directory that the workspace secret scan reaches only after 20,000 entries stays readable in the sandbox; `clio-coder doctor` warns when the scan stopped at that limit, and a session does not.
 - The main session's sandbox shares the host's `/tmp`. It hides the secrets Clio Coder knows to look for there, such as Kerberos ticket caches, but other files in `/tmp` stay readable and writable to a contained command, including files that programs on the host later load.
 - On macOS, whether renaming a writable parent directory gets past the sandbox's path masks has not been tested.
+- The stdio MCP servers an ACP client supplies start outside the sandbox, as you, unless the session is read-only or allows no tools.
+- A fullscreen copy of Korean text wrapped within a few characters of bold or code markup can gain a space inside a word.
 
 ## 0.7.0 - 2026-11-08
 
