@@ -10,7 +10,7 @@ Clio Coder is a coding harness for terminal and browser sessions, with provider 
 src/
 ├── cli/             # clio-coder subcommands, argument parsing, headless run modes
 ├── core/            # config/state paths, event bus, defaults, domain loader, shared primitives
-├── domains/         # 32 feature-domain directories, loaded through manifests or imported as libraries
+├── domains/         # 36 feature-domain directories, loaded through manifests or imported as libraries
 ├── engine/          # Pi (pi-ai, pi-agent-core, pi-tui) boundary, runtime adapters, ACP, worker runtime
 ├── entry/           # orchestrator bootstrap wiring (bootOrchestrator)
 ├── interactive/     # TUI panels, overlays, key routing, dashboard
@@ -28,13 +28,14 @@ tests/
 
 ## Domains
 
-`src/domains/` holds 32 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
+`src/domains/` holds 36 directories. Not every one is a loaded `DomainModule`. The orchestrator loads config, extensions, plugins, interop, resources, share, context, providers, safety, prompts, agents, middleware, memory, session, telemetry, scheduling, and dispatch, plus mux when the pane tier is active. Each of those except memory has a `manifest.ts` naming its `dependsOn` list. Memory is declared inline in [orchestrator.ts](../../src/entry/orchestrator.ts) with no dependencies: its module wraps the composition root's `MemoryRuntime`, publishes that runtime's contract and disposes it on stop. The plugins domain publishes no contract; it stays loaded so teardown drops cached plugin snapshots. The `evolution` directory also has a `manifest.ts`, but it is the change-manifest schema for `clio-coder evolve`, not a domain manifest.
 
-System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are claims, components, evidence, evolution, gateway, lifecycle, quota, semantic, semantic-app, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
+System One is not a loaded domain. The orchestrator builds it with `createSystemOne` and hands it to the callers that ask it: the `consult` tool, the safety judge and the chat loop ([orchestrator.ts](../../src/entry/orchestrator.ts)). The remaining directories, which are arena, claims, components, evidence, evolution, gateway, lifecycle, quota, report, research, semantic, semantic-app, store, system-one, toolchain, turn-control, user-tasks, and workspace-snapshots, are libraries or CLI-owned feature areas whose module functions callers import directly. Memory's own files are also imported as a library beside its loaded contract. Of the libraries, gateway (`src/domains/gateway/mcp/`) and user-tasks have no domain-level `index.ts`, so callers import their files.
 
 | Domain | Primary source | Public surface |
 | --- | --- | --- |
 | agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes, playbooks, and result contracts. |
+| arena | `src/domains/arena/**` | Blind head-to-head matches between contenders: the match runner, the contender environment, votes and standings behind `clio-coder arena`. |
 | claims | `src/domains/claims/**` | The project-scoped, append-only claims log: capture of judged `verify` verdicts and hypotheses, derived contradiction and supersede edges, memory regressions, and the claims reminders offered to the main agent. See [Artifact placement](artifact-placement.md#state-root-machine-produced-state). |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
 | config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, effect-timing classification, hot reload. |
@@ -54,6 +55,8 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt compiler, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials, pricing resolution. |
 | quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |
+| report | `src/domains/report/**` | Reports to the maintainers: scrubbed drafts, the review plan, diagnostic bundles, the duplicate search, encrypted shares and their receipts, and the report offer watcher. Nothing is sent without the operator's review. |
+| research | `src/domains/research/**` | Research campaigns behind `clio-coder research`: the iteration loop, measurement, grading, budgets and the campaign journal. |
 | resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
 | safety | `src/domains/safety/**` | Ordered policy engine, path policy, zero-access rails, journaled decisions. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, local capacity, batch capacity checks. |
@@ -61,6 +64,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | semantic-app | `src/domains/semantic-app/**` | The application boundary of the semantic index: the embedding service, search for the `context` tool and CLI, the extension embedding capability, and the session-scoped background refresh. No model is contacted at startup. |
 | session | `src/domains/session/**` | Append-only JSONL transcripts, tree navigation, compaction, handoff, `/view` artifact providers. |
 | share | `src/domains/share/**` | Portable workspace and resource archive export/import. |
+| store | `src/domains/store/**` | The project store behind the `store` tool and `clio-coder store`: tags and blobs outside the working tree, their records and provenance, cross-process locks, and the local and clio-core backends. See [the store guide](../guide/store.md). |
 | system-one | `src/domains/system-one/**` | The opt-in decision layer: typed questions about one object, pluggable engines and the runner. See [System One](system-one.md). |
 | toolchain | `src/domains/toolchain/**` | Pinned external-tool discovery, installation, and resolution (`asciinema`, `herdr`, `yazi`, `croc`, `cliamp`). |
 | turn-control | `src/domains/turn-control/**` | Pure turn facts, the detached-collection decision and turn outcome reduction. |
@@ -223,13 +227,13 @@ must go through the coordinator.
 ## Lazy built-in tool boundary
 
 The registry always owns one complete, immutable `ToolSpec` surface before a
-model turn starts. Fourteen tools register through `lazyTool` and keep their
+model turn starts. Sixteen tools register through `lazyTool` and keep their
 name, description, TypeBox schema, action class, execution mode, synchronous
 argument hooks, source provenance, and policy metadata in lightweight surface
 modules. [core-bootstrap.ts](../../src/tools/core-bootstrap.ts) registers `context`, `code_nav`,
-`verify`, `data`, `web_fetch`, `web_read`, `run_script`, `clio_docs`, and
+`verify`, `data`, `store`, `web_fetch`, `web_read`, `run_script`, `clio_docs`, and
 `clio_library`. [bootstrap.ts](../../src/tools/bootstrap.ts) registers `ledger`, `monitor`,
-`steer`, `panes`, and `music`. `registerAllTools` registers those surfaces in
+`steer`, `panes`, `report`, and `music`. `registerAllTools` registers those surfaces in
 the same order as every other built-in; capability discovery, worker
 attestation, provider schema serialization, safety classification, autonomy and
 permission admission, and `before_tool` middleware therefore run without
@@ -238,7 +242,7 @@ evaluating the implementation. The worker composition root imports
 built entry never evaluates the orchestrator-only dispatch, monitor, or steer
 runners. The orchestrator-side registration adds `dispatch` after the core
 tools, `ledger`, `monitor`, and `steer` when dispatch is composed, `panes` when
-a pane host exists, and `music` when `integrations.music.agentControl` is on and
+a pane host exists, `report` when the session's report host is bound, and `music` when `integrations.music.agentControl` is on and
 the music pane could play at startup (`integrations.music.enabled`, a live pane
 host, and a resolved cliamp).
 
@@ -324,7 +328,7 @@ Neither `src/session-control/**` nor `src/engine/**` may import `src/interactive
 
 ## The graphical application boundary
 
-The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that requires a bearer token, random per launch unless the background app supplies one. The guide to using it is [the GUI guide](../guide/gui.md).
+The graphical application is a separate workspace package, `@iowarp/clio-coder-gui`, under `apps/clio-coder-gui`. It has its own `package.json`, TypeScript configs, test suite, and lint step, and its server is a Hono process bound to `127.0.0.1` that serves only clients holding a credential. A launcher gets a credential by proving it holds the launch token over a single-use challenge, a browser opens through a single-use launch ticket, and the launch token is new on every start, the background app's included. The guide to using it is [the GUI guide](../guide/gui.md).
 
 The root checker in `tests/boundaries/check-boundaries.ts` does not scan it. Its own `apps/clio-coder-gui/tests/boundaries.test.ts` allows exactly four ways to reach root `src/`:
 
@@ -365,7 +369,7 @@ graph TD
 
 Core data paths:
 
-1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY.
+1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY. When a newer Clio Coder last used the home, the terminal asks before continuing (default no), and `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set.
 2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned runs, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
 3. The shared chat loop in `src/session-control/` resolves model/runtime state. `resolveSessionTools` in [agent-tools.ts](../../src/tools/agent-tools.ts) supplies the full resolved tool surface when the runtime supports tools, subject to explicit turn constraints. Task-ranked skills and capability advice enter reminder text; the task does not select a different session schema set.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
@@ -380,7 +384,7 @@ Clio Coder uses one in-process telemetry hub for status and accountability surfa
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
-- The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default` the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots and `safety.scratchRoots`. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
+- The OS sandbox (`safety.sandbox`, `src/core/sandbox/`) contains shell commands in two places. A dispatched worker's own `bash`, `run_script` and verification commands run in the worker sandbox, bound to its write roots. At autonomy `default`, and at contained `yolo`, the main session's `bash` and `run_script` also run contained in the main-session sandbox, which writes the workspace, the temp roots, `safety.scratchRoots` and its own `sandbox-cache` under the cache root. Credential variables and secret files are hidden inside either sandbox, and `safety.sandboxUnixSockets: block` refuses new Unix-domain sockets.
 - [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
 - [seal.ts](../../src/domains/telemetry/seal.ts) seals the run journals whose `run.settled` records the evidence and cost surfaces read.
 

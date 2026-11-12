@@ -22,7 +22,8 @@ Sessions are persisted durably on disk under the platform state root (`clioState
 - `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of the absolute resolved working-directory path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
 - `<sessionId>`: UUIDv7 generated at session initialization.
 - Per-turn token accounting and prompt compiles are not session files. Each turn's context snapshot is a `context.snapshotted` record and each prompt compile a `prompt.compiled` record in the session's telemetry journal, `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` ([Telemetry](telemetry.md#journals), [Context Engine](context-engine.md#token-accounting--ledger-snapshots)). A prompt compile records prompt hashes, section token estimates, fragment content hashes and the thinking level ([prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts)), never prompt text.
-- Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted.
+- Session directories are created mode `0700` and `meta.json`, `current.jsonl` and `tree.json` mode `0600`, whatever the umask. Boot also closes Clio Coder's existing state subdirectories that are open to group or other users.
+- Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted. A delete takes the same lock on `meta.json` that a resume takes, and refuses a session that has not ended or whose owner process is still alive; ACP `session/delete` reports that refusal as `session_open`.
 
 `openSession` and `resumeSession` locate a session by id under any `<cwdHash>` bucket, after rejecting ids that could traverse out of the sessions root.
 
@@ -46,8 +47,11 @@ export interface ClioSessionMeta {
   platform: string;
   nodeVersion: string;
   sessionFormatVersion?: number; // CURRENT_SESSION_FORMAT_VERSION = 6
+  owner?: { pid: number; host: string; birth: string | null };
 }
 ```
+
+`owner` names the process that last opened the ledger for writing, stamped on create and on every resume. With `endedAt` null it tells a session still open in another terminal from one whose process is gone. `resumeSessionState` checks the owner and publishes the new one under one cross-process lock on `meta.json`, so a resume of a session that is open in another process is refused with `session <id> is open in another process (pid <n> on <host>)`. An owner on another host cannot be probed and reads as live; the refusal then points at `clio-coder session terminate <id>`, with `--force` when its heartbeat is stale ([live-owner.ts](../../src/domains/session/live-owner.ts)).
 
 The session domain extends the same file with `parentSessionId` and `parentTurnId` (set on forks), `lastCheckpointAt` and `lastCheckpointReason`, `pinnedLeafTurnId`, the workspace snapshot captured at session start, and the ordered `skillActivations`. The picker fields `name`, `labels`, `firstMessagePreview`, `messageCount`, `hasModelTurn` and `lastActivityAt` are derived from the ledger when sessions are listed ([history.ts](../../src/domains/session/history.ts)) and are not authoritative on disk.
 
@@ -75,7 +79,7 @@ a refused candidate leaves the current session usable. Reopening a closed sessio
 
 ### Recovery on open
 
-The ledger is authoritative and `tree.json` is a derived index. When `tree.json` is missing, unreadable, or differs from the `message` entries in `current.jsonl`, opening the session rebuilds the tree from the ledger. A torn trailing ledger line is skipped with one warning. A host killed before it wrote `endedAt` leaves an unended record; `endAbandonedSession` dates the end by the transcript's last write once the caller has proof that the host process is dead.
+The ledger is authoritative and `tree.json` is a derived index. When `tree.json` is missing, unreadable, or differs from the `message` entries in `current.jsonl`, opening the session rebuilds the tree from the ledger. A torn trailing ledger line is skipped with one warning. A host killed before it wrote `endedAt` leaves an unended record; `endAbandonedSession` dates the end by the transcript's last write once the caller has proof that the host process is dead. It names the dead owner and runs under the lock a resume takes, so it never ends a session another process has reopened since.
 
 ---
 
@@ -133,7 +137,7 @@ export interface MessageEntry {
 - Appends hold an open `O_APPEND` file descriptor across the writer lifetime (`src/engine/session.ts:openSync`).
 - A complete UTF-8 line is written before its entry or tree node is acknowledged. Legal short writes continue from the remaining byte offset. Zero progress or a write error fails the append and attempts to truncate its partial bytes back to the previous length; rollback and cleanup failures retain their causes.
 - `fsyncSync` is debounced by 500 ms (`APPEND_FSYNC_DEBOUNCE_MS`) during high-frequency streaming turns and forced for pending ledger writes on checkpoint (`persistTree`), explicit flush and session shutdown (`close`). A failed append retains the flush obligation for previously accepted bytes and rollback changes even when its descriptor is retired. Explicit flush failures remain visible and retryable.
-- Atomic ledger replacements complete, flush and close their temporary file before publication. An incomplete replacement leaves the previous canonical ledger in place. These guarantees retain the existing single-owner assumption; they do not introduce cross-process locking or a transaction across all session files.
+- Atomic ledger replacements complete, flush and close their temporary file before publication. An incomplete replacement leaves the previous canonical ledger in place. These guarantees assume one writer per ledger. The lock on `meta.json` decides which process that writer is; no lock covers an individual append, and no transaction spans all session files.
 - Torn last lines resulting from abrupt system crashes or power losses are tolerated by the ledger reader (`src/engine/session.ts:readSessionFileEntries`), which logs a warning and skips the incomplete trailing record. The same damaged line is reported once per process.
 
 ---
@@ -234,7 +238,7 @@ When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming,
 | `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--continue` takes the most recent session for the working directory. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. Neither uses the picker filter. |
 | `clio-coder --resume`, `--continue`, `-r`, `-c` | Refused as unknown global options with exit code 2 (#191) by `src/cli/argv.ts`. The error names `/resume` inside the app. Sessions resume from inside the app, or through `run` for headless work. |
 
-On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
+On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. `clio-coder --session-file <path>` keeps a live JSON record of the interactive session at `<path>`: it is rewritten at every turn boundary and on every move into or out of a wait (`working`, `idle`, `awaiting-approval`, `awaiting-answer`), and the exit record (`state: "ended"`, with the outcome, exit code, usage and models) replaces it when the session ends ([session-file.ts](../../src/interactive/session-file.ts)). The flag is refused with a subcommand. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
 
 When resuming a session via `/resume` or a headless `clio-coder run --session <id>` / `--continue`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.

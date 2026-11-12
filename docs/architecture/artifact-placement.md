@@ -95,27 +95,27 @@ problem.
 | --- | --- |
 | `memory/records.json` | Reviewed long-term memory; see [evidence-and-memory.md](evidence-and-memory.md) |
 | `evidence/session-<sessionId>/` | Session evidence bundles |
-| `store/projects/<key>/` | The project store behind the `store` tool, keyed by the first 16 hex of the SHA-256 of the main checkout's real path: `tags/<tag>/` with each tag's `blobs/` and records, and `locks/`, the cross-process lock files (`<sha256 prefix>.lock`, created exclusively) that hold one blob or tag record across a write; a lock whose owner died on this host, or older than ten minutes, is taken over ([lock.ts](../../src/domains/store/lock.ts)) |
+| `store/backend.json`, `store/projects/<key>/` | `backend.json` records a selected clio-core backend; without it the store is local. `projects/<key>/` is the project store behind the `store` tool, written owner-only (`0600` files, `0700` directories) and keyed by the first 16 hex of the SHA-256 of the main checkout's real path: `tags/<tag>/` with each tag's `blobs/` and records, and `locks/`, the cross-process lock files (`<sha256 prefix>.lock`, created exclusively) that hold one blob or tag record across a write; a lock whose owner died on this host, or older than ten minutes, is taken over ([lock.ts](../../src/domains/store/lock.ts)) |
 | `tools/<id>/<version>/<binary>` | Pinned external programs installed by `clio-coder tools install`, such as `cliamp`. The version is part of the path, so a pin bump installs beside the old copy. |
 
 ### State root: machine-produced state
 
 | Path | Contents |
 | --- | --- |
-| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl` and `tree.json`. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
-| `telemetry/` | Every telemetry journal, object, seal and bundle, plus `consent.json`, `install.json` and `imported/`; see [telemetry.md](telemetry.md#layout) |
-| `runs.json`, `fleet-runs/<runId>.json`, `assignments.json`, `batches.json`, `agent-ledgers.json` | The run ledger, fleet run records and the durable dispatch stores |
+| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl` and `tree.json`, in `0700` directories with `0600` files. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
+| `telemetry/` | Every telemetry journal, object, seal and bundle, plus `consent.json`, `install.json`, `prune.stamp` and `imported/`; see [telemetry.md](telemetry.md#layout) |
+| `runs.json`, `fleet-runs/<runId>.json`, `assignments.json`, `batches.json`, `agent-ledgers.json` | The run ledger (written mode `0600`), fleet run records and the durable dispatch stores |
 | `gate-decisions/<id>.json` | Review and compete gate decisions; undecided ones sit in `gate-decisions/pending/` |
 | `dispatch-admission.json`, `checkout-writer-leases/`, `cancel-requests/`, `code-steps/`, `write-boundaries/`, `runs/` | Capacity leases, writer leases, cancel requests, code-step output logs, write-boundary records and run recordings |
 | `dispatch-verification-memo.json`, `artifacts/<runId>/verification/` | Host verification memo and its captured artifacts |
 | `dispatch-verification-base/<key>.json` | Host verification's base replays of failing whole-repo checks, one per base commit and check (newest 64) |
-| `dispatch-verification-slot.lock` | The verification slot: present only while a host-verification check or base replay runs, so one runs at a time per state root |
 | `settings-changes.jsonl` | One line per settings change `configure_clio` saved after operator approval: time, session, path and the changed `path: old → new` lines; never a secret ([configure-clio.ts](../../src/tools/configure-clio.ts)) |
 | `handbooks/<key>/` | The handbook compile of another repository a run worked in (`<hash>.json`, one per input set) and its verification `ledger.json`. `<key>` is the first 16 hex characters of the SHA-256 of that repository's real path, so nothing is written into it ([sister-repository.ts](../../src/domains/context/sister-repository.ts)) |
 | `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. A line over 64 KiB is never written, and on read it counts as unreadable without being parsed. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
 | `memory/recall-use-v1.json` | Per-record recall and use counts that demote memory a session keeps carrying unused ([recall-use.ts](../../src/domains/memory/recall-use.ts)) |
-| `scratch/<sessionId>/` | Offloaded tool output and harness scratch |
+| `scratch/<sessionId>/` | Offloaded tool output and harness scratch; tool offloads are `0600` files in `0700` directories |
+| `reports/` | Reports to the maintainers: `drafts/<id>.json` with the rendered Markdown beside it, `bundles/` for kept diagnostic bundles, `crashes/` for crash records, `shares.json` for share receipts, and the `offers.json`, `reply-check.json` and `outbox.json` ledgers. Drafts are written mode `0600`. |
 | `interviews/` | Interview transcripts |
 | `tui/` | The terminal renderer's crash dump `pi-tui-crash.log` (every rendered row, so the transcript), in a directory created mode `0700` |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
@@ -129,6 +129,13 @@ problem.
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v9/`, `git-hooks/v9-shim/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hooks and git shim, and the request and tap files shared with the workers dashboard |
+
+The verification slot is not under the state root. `dispatch-verification-slot.lock`
+lives in `CLIO_CODER_VERIFICATION_SLOT_DIR` when that is an absolute path, else in
+`$XDG_RUNTIME_DIR/clio-coder`, else in a per-user `clio-coder-<uid>` directory in the
+OS temp dir, so one host-verification check or base replay runs at a time per machine,
+across Clio homes. The directory must be the user's own with mode `0700`; otherwise
+checks run without the slot (`src/domains/dispatch/verification-slot.ts`).
 
 The clean-exit session summary is built from an in-memory snapshot and is not
 persisted. Route history is a fold over `run.settled` records in the run journals
@@ -149,6 +156,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `grammars/<package>@<version>/` | The Ruby and C# tree-sitter grammars for the code index, downloaded on first use and pinned by SHA-256. A failed download is recorded beside the cache path, and no process retries it for 10 minutes while that record exists; an unwritable cache directory lets the next process try again ([fetched-grammars.ts](../../src/domains/context/codewiki/fetched-grammars.ts)). |
 | `codewiki-digests/<hash>.json` | Per-file content digests for the code index fingerprint, one file per workspace keyed by a hash of its path, reused while a file's size, times and inode are unchanged so an unchanged tree is checked without reading files ([fingerprint.ts](../../src/domains/context/fingerprint.ts)). Deleting it only makes the next check read every file. |
 | `data-readers/<package>@<version>/` | The HDF5, NetCDF and Parquet readers of the `data` tool, fetched as pinned npm tarballs on first use, with the same 10-minute retry window after a failure ([reader-assets.ts](../../src/tools/data/reader-assets.ts)) |
+| `sandbox-cache/` | The persistent cache of contained commands: the sandbox points `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` here, so a contained command does not write the operator's `~/.cache` or `~/.npm` |
 | `run/` | The pane host's socket directory when neither the runtime directory, `$TMPDIR` nor the state root's `mux/run/` can hold it (see `mux/<hash>/` above) |
 | `skill-frontmatter.json` | Parsed `SKILL.md` frontmatter keyed by file path, mtime and size; dropped whole when the Clio version changes ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)) |
 | `update-<fingerprint>.json` | Update-check state |

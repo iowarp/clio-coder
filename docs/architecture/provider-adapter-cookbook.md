@@ -135,7 +135,7 @@ The `synthesizeModel` method acts as the factory that creates the `pi-ai` compat
 * **Tasks:**
   1. Combine target, catalog, probe, and capability metadata into a `pi-ai` model descriptor.
   2. Select the API family, endpoint, pricing, token limits, and Clio Coder runtime metadata required by the streaming adapter.
-  3. Leave secrets and request-time authentication to `providers.auth.resolveForTarget` at the call site. Optional FIM support belongs to the descriptor's separate `infill` method rather than to prompt binding in `synthesizeModel`.
+  3. Leave secrets and request-time authentication to `providers.auth.resolveForTarget` at the call site. A turn uses only the key resolved for its target: the variable the target names in `auth.apiKeyEnvVar` first, then the stored key, then the runtime's `credentialsEnvVar`. An OAuth runtime ignores `auth.apiKeyEnvVar` and keeps its login. A target that project settings point at a URL is refused your stored and environment credentials, unless the URL is loopback and the runtime needs none ([storage.ts](../../src/domains/providers/auth/storage.ts)). Optional FIM support belongs to the descriptor's separate `infill` method rather than to prompt binding in `synthesizeModel`.
 
 
 ### 3.1 Stream Filters and Sentinel Stripping
@@ -242,8 +242,8 @@ Add a matching row to `BUILTIN_RUNTIME_BOOT_MANIFEST` in [boot-manifest.ts](../.
 ### 5.2 Dynamic Plugin Loading
 Clio Coder's `RuntimeRegistry` can load custom runtimes dynamically at startup:
 * **Directories:** Place compiled JavaScript files (`.js`) inside the `runtimes/` folder of Clio Coder's config directory (`~/.config/clio-coder/runtimes/` by default; `CLIO_CODER_HOME` and `CLIO_CODER_CONFIG_DIR` move it). Each file's default export must be a valid descriptor.
-* **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `integrations.runtimePlugins` in your configuration settings. That setting needs a restart.
+* **Package exports:** Publish an npm package that exports a `clioRuntimes` array containing your runtime descriptors, then list the package name under `integrations.runtimePlugins` in your user settings. An entry must be a bare npm package name or an absolute path under the config `runtimes/` directory; anything else is refused, and a project settings value is ignored. That setting needs a restart.
 
-Before it imports the first plugin file or package, Clio Coder activates a lazy bridge to Pi's compat provider registry, so plugin code can register an API provider. The bridge is never loaded when no plugin file exists and `integrations.runtimePlugins` is empty.
+Before it imports the first plugin file or package, Clio Coder activates a lazy bridge to Pi's compat provider registry, so plugin code can register an API provider. The bridge is never loaded when no plugin file exists and `integrations.runtimePlugins` is empty. A plugin runtime reads a key only from the variable its descriptor declares in `credentialsEnvVar` or from a target's `auth.apiKeyEnvVar`; the environment fallback that maps a well-known provider id to its variable applies to built-in runtimes only ([plugin-provider-ids.ts](../../src/domains/providers/plugin-provider-ids.ts)).
 
 Invalid descriptors, import failures and id conflicts are written to stderr as `[providers]` diagnostics and never stop startup. A plugin runtime is not in the boot manifest, and `classifyDefaultTarget` reads only that manifest, so a saved chat target on a plugin runtime classifies as `ineligible-runtime` at interactive startup.

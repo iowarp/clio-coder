@@ -24,16 +24,18 @@ Fragments are Markdown files under `src/domains/prompts/fragments/`, loaded by `
 - `version` must be exactly `1`.
 - `description` must be a non-empty string.
 - `dynamic` is optional and must be a boolean when present. It sets the `dynamic` flag recorded in the manifest.
+- `requires`, `surfaces` and `when` are optional preconditions ([preconditions.ts](../../src/domains/prompts/preconditions.ts)). `requires` lists capabilities that must be reachable, directly or through the gateway. `surfaces` lists the tiers the fragment renders on (`attended`, `headless`, `worker`); without it the fragment renders on every tier. `when` takes `sandbox: active|absent` and `autonomy: default|yolo|yolo-unconfined`. An unknown name fails the load. The preconditions that held for a compile are recorded on the fragment's manifest entry.
+- A body row can carry its own condition as a `{name}` marker, where the name is a builtin tool, a tier, or one of `sandbox`, `demo`, `terminal` and `peers`. A list item that opens with a marker is kept or dropped whole, and an inline marker keeps or drops the text up to the end of its sentence. A marker with an unknown name fails the load.
 - A file name does not have to match its id. `identity/clio-worker.md` carries `identity.clio-coder-worker`.
 - A missing or malformed frontmatter block fails the whole load with a path-qualified error, so the compiler never sees a partial table. If the first load fails, the domain starts with an empty table and every compile throws `prompts: no fragments loaded`; the chat reports `prompt compile failed; using fallback identity`.
 - Fragments are read at runtime from the package's own `src/` directory, resolved through `resolvePackageRoot`. The npm package ships `src/**` for this reason, and fragment text is not bundled into `dist/`.
 - `contentHash` is the SHA-256 of the raw file text, frontmatter included. It feeds the fragment manifest.
-- The table reloads on a plugin reload and when a config hot-reload diff names a path containing `prompt` or `fragment`. Each reload advances the fragment epoch inside `inputEpoch()`.
+- The table reloads on a plugin reload, on `/reload prompts`, and when a config hot-reload diff names a path containing `prompt` or `fragment`. Each reload advances the fragment epoch inside `inputEpoch()`.
 - A fragment that teaches a tool renders only when that tool is reachable. Guidance for an operator belongs in an attended-only fragment, never in a shared one.
 
 ## Fragment inventory by tier
 
-There are 28 fragments. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, and the one-line header of the safety section) are rendered inline from typed inputs. The current task scope is not a compiled section at all; it rides in the turn's reminder, as described under [Task scope](#task-scope).
+There are 40 fragment files. Five of them (`identity.clio-v2`, `operating.work`, `operating.harness`, `operating.delegating` and `operating.attended`) render only under `prompts.profile: v2`, described under [Prompt profile v2](#prompt-profile-v2); the table below is the default `v1` profile. Sections that are not fragments (`tool-contract`, `retrieval-hints`, `runtime`, `project-context`, `memory`, and the one-line header of the safety section) are rendered inline from typed inputs. The current task scope is not a compiled section at all; it rides in the turn's reminder, as described under [Task scope](#task-scope).
 
 | Fragment | Attended main | Headless main | Worker | Renders when |
 | --- | --- | --- | --- | --- |
@@ -41,14 +43,16 @@ There are 28 fragments. Sections that are not fragments (`tool-contract`, `retri
 | `identity.clio-attended` | yes | no | no | Attended and the identity is `identity.clio`. |
 | `identity.clio-coder-worker` | no | no | yes | Always. |
 | `identity.self-awareness` | yes | yes | no | The identity is `identity.clio`. Rendered inside the harness-awareness section. |
-| `identity.self-awareness-attended` | yes | no | no | Attended and `identity.self-awareness` rendered. |
-| `identity.docs-lookup` | yes | yes | no | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. Rendered inside the harness-awareness section. |
-| `identity.docs-routing` | yes | no | no | See [Attended-only fragments](#attended-only-fragments). |
-| `identity.settings-routing` | yes | no | no | See [Attended-only fragments](#attended-only-fragments). |
-| `operating.memory-guidance`, `operating.support-guidance` | yes, inline in the identity section | no | no | Attended, identity `identity.clio`, and `identity.docs-routing` did not render. |
+| `identity.self-awareness-attended` | yes | no | no | Attended, `identity.self-awareness` rendered, and the `clio_docs` routing row did not replace it. See [Attended-only fragments](#attended-only-fragments). |
+| `identity.docs-lookup` | no, one routing row stands in | only with `clio_docs` attached directly | no | Headless, `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` and `clio_docs` are both attached schemas, `clio_docs` is a registered builtin, and the turn constraints admit `clio_docs`. Rendered inside the harness-awareness section. An attended session that meets the same conditions through the gateway carries one routing row instead. |
+| `identity.docs-routing`, `identity.settings-routing` | no | no | no | Never part of a system prompt. Tool results carry them as guidance; see [Attended-only fragments](#attended-only-fragments). |
+| `operating.memory-guidance`, `operating.support-guidance` | yes, inline in the identity section | no | no | Attended, identity `identity.clio`, and the `clio_docs` routing row did not render. Otherwise `clio_docs` results carry them as guidance. |
 | `operating.contract` | yes | yes | yes | Always. |
+| `operating.decisions` | yes | no | when the worker admits `decide` | `decide` is on the session's capability map, or among the worker's admitted tools. Appended to the operating contract. |
 | `operating.contract-attended` | yes | no | no | Attended. |
 | `operating.contract-headless` | no | yes | no | Headless main only. |
+| `operating.report-guidance` | yes | no | no | Attended and `report` is on the session's capability map. |
+| `operating.report` | at `yolo` only | yes | no | Headless, or autonomy `yolo`. |
 | `operating.user-control` | yes | no | no | Attended. |
 | `operating.steering` | yes | only with a steer channel | yes | `liveSteering` is not `false`. |
 | `operating.coordinator` | yes | yes | no | The provider does not lack tool support, `dispatch` is on the attached surface and admitted by the session's standing tool limits, and a standing mode is not `answer`. |
@@ -61,25 +65,28 @@ There are 28 fragments. Sections that are not fragments (`tool-contract`, `retri
 | `model.anthropic-5-5` | yes, in the runtime section | yes, in the runtime section | no | The provider supports tools and the wire model id names a Claude 5.5 model (`modelGuidanceFragmentId` in `src/domains/prompts/model-guidance.ts`). |
 | `wiki.page`, `wiki.plan`, `wiki.repair` | no | no | no | Never part of a system prompt. See [Wiki generation fragments](#wiki-generation-fragments). |
 
-For a given autonomy level the safety body is shared by all three tiers; only the lines above it differ.
+For a given autonomy level and sandbox state the attended and headless tiers read the same safety fragment; the lines above it and the rows its conditions keep differ. A worker reads its own.
 
 ## Attended-only fragments
 
-These seven fragments render only when `headless` is unset. A headless run never carries them.
+These six fragments render only when `headless` is unset; each declares `surfaces: [attended]` in its frontmatter. A headless run never carries them.
 
 | Fragment | Section | What it carries | Condition beyond attended |
 | --- | --- | --- | --- |
 | `identity.clio-attended` | identity | Guidance for replies to the operator: answer first, register matching, the in-chat "Remember: <value>" rule, and the rule that Clio Coder cannot inspect how its replies render. | The identity is `identity.clio`. |
-| `identity.self-awareness-attended` | harness-awareness | How Clio answers questions about the software from the bundled docs and source, including `code_nav(source="clio")`. | `identity.self-awareness` rendered. |
-| `identity.docs-routing` | harness-awareness | Catalog, playbook and memory routing for questions about Clio Coder, plus the `clio_library` sentence when that capability is admitted. | `identity.docs-lookup` rendered. |
-| `identity.settings-routing` | harness-awareness | Routes questions about Clio Coder's settings to `context(scope="settings")`, written in its gateway call form, and states how a setting change is made. | `identity.self-awareness` rendered and `context` is reachable, directly or through an admitted gateway. |
-| `operating.contract-attended` | operating-contract | Asking before acting on a path outside the workspace, and the rule that a repeated operator request after settled dispatches is not a loop block. | None. |
+| `identity.self-awareness-attended` | harness-awareness | How Clio answers questions about the software from the bundled docs and source, including `code_nav(source="clio")`. | `identity.self-awareness` rendered and the `clio_docs` routing row did not render. |
+| `operating.contract-attended` | operating-contract | Asking before acting on a path outside the workspace, the rule that a repeated operator request after settled dispatches is not a loop block, and a one-line reason before a call the model expects to need approval. | None. |
+| `operating.report-guidance` | operating-contract | Drafting a report about a problem in Clio Coder itself through `report`, offering one only for Clio Coder's own failures, and never filing an issue with `gh`. | `report` is on the session's capability map. |
 | `operating.user-control` | operating-contract | Operator agency and understanding: state assumptions in time to steer, explain outcomes in proportion, do not present untested results as validated conclusions. | None. |
 | `operating.skill-installs` | skills | Skill installation etiquette: install only when requested or approved, honor a marketplace reminder's interview options, do not bypass integrity checks. | `operating.discovered-skills` rendered. |
 
-When `identity.docs-routing` does not render, an attended `identity.clio` prompt inlines `operating.memory-guidance` and `operating.support-guidance` into the identity section instead. When it renders, those two procedures are retrieved on demand: every `clio_docs` result carries `operating.support-guidance` under `guidance`, and `operating.memory-guidance` when the query matches memory vocabulary (`src/domains/prompts/runtime-guidance.ts`).
+An attended session whose provider supports tools, with `gateway` attached and `clio_docs` registered and admitted, carries one routing row in the harness-awareness section in place of `identity.self-awareness-attended` and `identity.docs-lookup`. The row sends a question about Clio Coder to `clio_docs` first, live values to `context(scope="settings")` and changes to `configure_clio`. The procedures arrive in those tools' results under `Guidance` (`src/domains/prompts/runtime-guidance.ts`):
 
-`identity.docs-routing` needs no `context` access, and `identity.settings-routing` needs no `clio_docs`. Each renders on its own conditions.
+- Every `clio_docs` result carries `operating.support-guidance`, `operating.memory-guidance` when the query matches memory vocabulary, and `identity.docs-routing` when it names playbooks, fleets, workflows or profiles.
+- A `clio_library` read of `kind=playbook` or `kind=agent` carries `identity.docs-routing`.
+- A `context(scope="settings")` read and a `configure_clio` preview carry `identity.settings-routing`.
+
+When the routing row does not render, an attended `identity.clio` prompt inlines `operating.memory-guidance` and `operating.support-guidance` into the identity section, keeps `identity.self-awareness-attended`, and adds a one-line settings row when `context` is an attached schema. `identity.docs-routing` and `identity.settings-routing` never enter a compiled prompt.
 
 Demo guidance is appended to the operating contract only for the TUI, when `interface.demo` is on. ACP, the GUI and headless runs never carry it.
 
@@ -89,14 +96,16 @@ These fragments are not attended-only. Their tiers are in the inventory above.
 
 - `identity.clio` holds Clio Coder's identity, the rule that claims about the workspace come from files or tools, and the two-state turn ending: done with no closing offer, or waiting on a decision only the operator can make.
 - `identity.docs-lookup` routes a question about Clio Coder's documented commands, configuration or behavior to `clio_docs` before any workspace search, follows a hit's ready-to-use read call for detail, names the docs pages the answer rests on, and keeps workspace questions away from `clio_docs`.
-- `operating.contract` is the constitutional posture shared by all three tiers: plain prose, honoring no-tools and no-delegation instructions, batching independent reads, treating safety policy as authoritative, and recording consequential design choices before implementing.
+- `operating.contract` is the constitutional posture shared by all three tiers: plain prose, honoring no-tools and no-delegation instructions, batching independent reads, and treating safety policy as authoritative.
+- `operating.decisions` closes the operating contract where `decide` is reachable: record a consequential design choice before implementing it, and check the implementation against active decisions before committing.
+- `operating.report` shapes a final reply nobody watched being produced. Its first line says where the task stands against the request (done, partly done or not done) and names any unmet clause.
 - `operating.steering` tells the model that a user message arriving between tool results steers the current run, and that a later message wins over an earlier one.
 - `operating.coordinator` routes intent and delegation. An exact operator assignment goes into `task` verbatim without the delegation wording around it. A suspicion goes into `task` or `briefing` as a question to test, never as a finding, and the coordinator does not certify two implementations equivalent until every path that changes the compared state is traced in each. When the operator names a target or model for one dispatch, the coordinator pins it with dispatch's `target` and `model` fields and never edits routing settings for a one-off request. Several independent reviews or investigations go out in one parallel dispatch whose tasks name their files, rather than being done in turn or read first. Without an OS sandbox, workers confined by `write_roots` cannot run `bash` or `verify`.
 - `operating.fleet` states that workers run locally unless a pin or preference selects an SSH node, and how the model asks once per session for a node.
 - `operating.discovered-skills` teaches progressive skill discovery through `context(scope="skills")` and carries `{SKILL_ACTIVATION_POLICY}`.
 - `operating.worker` is the assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself.
 - `dispatch.read-only` tells a read-only worker that it must leave every user file unchanged: inspection inside the workspace, shell commands only inside its sandbox, and read-only workers of its own.
-- The `safety.default` bodies (`safety.default-sandboxed`, `safety.default-unsandboxed`) and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. The default bodies describe containment, workspace snapshots and the safety judge; `safety.yolo` says the operator is away by contract, names the floor, and tells the model to take reasonable defaults and state its assumptions. `safety.yolo-worker` is the worker form of the yolo statement, and `safety.worker` and `safety.worker-no-shell` state what a worker's own commands may do, or that it runs none. They are the model-facing mirror of the enforced admission and grant nothing themselves.
+- The `safety.default` bodies (`safety.default-sandboxed`, `safety.default-unsandboxed`) and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. The default bodies describe containment, workspace snapshots and the safety judge; `safety.yolo` says the operator is away by contract, names the floor, and tells the model to take reasonable defaults and state its assumptions. `safety.yolo-worker` is the worker form of the yolo statement, and `safety.worker` and `safety.worker-no-shell` state what a worker's own commands may do, or that it runs none. They are the model-facing mirror of the enforced admission and grant nothing themselves. Each body describes only the reading session's own situation. Row conditions drop the lines a session cannot use, such as `/rewind` in a headless run, and an attended `yolo` session with `ask_user` attached reads that an operator may be present in place of the sentences saying nobody will answer (`sessionSafetyBody` in `src/domains/prompts/compiler.ts`).
 
 The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. At `yolo` nothing parks, so the section carries no approval sentence. A worker has no autonomy level, so its section opens with a line naming its permit and, unless the permit inherited yolo, ends the line with its `onPermission` routing:
 
@@ -108,7 +117,7 @@ The safety section opens with `Autonomy: <level>.` and a one-line directive, the
 
 ## Headless main prompt
 
-A headless main prompt carries `identity.clio`, `identity.self-awareness`, `identity.docs-lookup` when `clio_docs` is reachable through gateway, `operating.contract`, `operating.contract-headless`, `operating.steering` only when a steer channel exists, `operating.coordinator` when dispatch is reachable, `operating.fleet` too when the session has SSH nodes, `operating.discovered-skills` without `operating.skill-installs`, and `safety.<level>`.
+A headless main prompt carries `identity.clio`, `identity.self-awareness`, `identity.docs-lookup` only when `clio_docs` is an attached schema, `operating.contract`, `operating.contract-headless`, `operating.report`, `operating.steering` only when a steer channel exists, `operating.coordinator` when dispatch is reachable, `operating.fleet` too when the session has SSH nodes, `operating.discovered-skills` without `operating.skill-installs`, and `safety.<level>`.
 
 `operating.contract-headless` is the only fragment that renders for headless main alone. It carries the unattended finishing rule: restate the task as separate clauses, check whether existing tests cover each clause, write a focused reproduction test only when no existing test covers the clause and the task and project instructions allow tests, make the reproduction fail on untouched code first, and map each clause to evidence in the diff or a check that ran before the final report. A clause without evidence is unfinished.
 
@@ -116,24 +125,24 @@ The safety section swaps the attended approval sentence for this one: "No operat
 
 Other differences from the attended tier:
 
-- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence` and `tasks` unless a schema is attached directly. `identity.docs-lookup` still names the `clio_docs` call, because a headless question about Clio Coder without it listed and grepped the docs tree for several turns (measured with `pnpm run eval:onboarding`). Each stays reachable through `gateway(op="find")`, and a find that names the capability exactly also returns its schema, so the call needs no `describe` round trip ([gateway/index.ts](../../src/tools/gateway/index.ts)).
+- The capability map and usage notes leave out `artifact`, `clio_docs`, `clio_library`, `credential_present`, `decide`, `evidence`, `job` and `tasks` unless a schema is attached directly (`HEADLESS_UNMAPPED_CAPABILITIES`). A fragment or row that requires one of them does not render either, so `operating.decisions` is absent and `identity.docs-lookup` renders only when `clio_docs` is attached directly: the prompt never names a capability its map leaves out. Each stays reachable through `gateway(op="find")`, and a find that names the capability exactly also returns its schema, so the call needs no `describe` round trip ([gateway/index.ts](../../src/tools/gateway/index.ts)).
 - The `ask_user` turn-ending contract never renders, because no operator can answer an interview.
 - No `Routes:` line appears in the runtime block, because the orchestrator passes route sources to attended sessions only.
 - The orchestrator registers task-ranked skills and capability advice for headless main turns as well as attended turns. The advice rides model-only reminder text in the message tail, alongside the system prompt's conditional skills guidance; it does not alter tool schemas ([skills-reminder.ts](../../src/domains/middleware/skills-reminder.ts)).
-- On Clio Coder's own repository the self-development note tells the run that `clio-coder-dev` and `clio-coder-test` are not loaded. See [Self-development skills](#self-development-skills).
+- On Clio Coder's own repository the self-development note tells the run to load `clio-coder-dev` before the first edit and `clio-coder-test` before choosing checks. See [Self-development skills](#self-development-skills).
 
 ## Worker prompt
 
 `compileWorker` builds the worker's stable system prompt in this order:
 
 1. `identity.clio-coder-worker`.
-2. The operating-contract section: `operating.contract`, `operating.worker`, then a fixed sentence forbidding claims of completions, validations or file changes that no tool call in the run supports.
+2. The operating-contract section: `operating.contract`, with `operating.decisions` appended when the worker admits `decide`, then `operating.worker`, then a fixed sentence forbidding claims of completions, validations or file changes that no tool call in the run supports.
 3. `operating.steering`, unless `liveSteering === false`.
-4. The tool contract, rendered inline from the final admitted tool names plus one registry-owned hint per admitted tool.
+4. The tool contract, rendered inline from the final admitted tool names, one line naming the admitted capabilities reached through `gateway`, and one registry-owned hint per attached tool.
 5. The safety section: a line naming the run's permit, the `onPermission` sentence, then the `safety.worker` body, or `safety.worker-no-shell` for a worker holding none of `bash`, `run_script` and `verify`. When the worker's permit inherited the operator's yolo, the section carries the permit line and the `safety.yolo-worker` body, and no `onPermission` sentence.
 6. `dispatch.read-only`, when the dispatch is read-only.
 7. The persona: the recipe body or a bounded request override, with bound-skill mechanics. The manifest records it as `persona.<recipe id>`.
-8. Additional fragments: project rules scoped to the run's working-context paths, then the operator profile.
+8. Additional fragments: the `context.clio-repo-awareness` note when the run's working directory is inside Clio Coder's own source tree, then project rules scoped to the run's working-context paths, then the operator profile.
 
 The turn's scope reaches a worker as a separate `dispatch-turn-scope` task message, so the compiled worker prompt does not vary with it.
 
@@ -141,7 +150,7 @@ The turn's scope reaches a worker as a separate `dispatch-turn-scope` task messa
 
 `liveSteering === false` drops `operating.steering`; an undefined value reads as true. The flag is false when nothing can steer the worker. Dispatch sets it through `workerSteering`, and `workerSteering` is false in the headless orchestrator, in `clio-coder fleet`, and in `clio-coder run --agent` without `--steer-channel`. A headless main run without a steer channel sets `liveSteering: false` for its own prompt as well.
 
-A worker never receives `operating.coordinator`, `operating.fleet`, `operating.discovered-skills`, `operating.user-control`, `operating.contract-attended`, `operating.contract-headless`, any attended-only identity fragment, or the docs and settings routing. Its reply goes to the orchestrator, so conversational and operator-facing guidance has no reader. The constitutional contract and the safety body stay shared. Project context, memory, the briefing, pipeline input and the task are separate dynamic messages; see [Prompt Envelope and Tools](prompt-envelope-and-tools.md).
+A worker never receives `operating.coordinator`, `operating.fleet`, `operating.discovered-skills`, `operating.user-control`, `operating.contract-attended`, `operating.contract-headless`, `operating.report`, `operating.report-guidance`, any attended-only identity fragment, or the `clio_docs` routing row. Its reply goes to the orchestrator, so conversational and operator-facing guidance has no reader. The constitutional contract and the safety body stay shared. Project context, memory, the briefing, pipeline input and the task are separate dynamic messages; see [Prompt Envelope and Tools](prompt-envelope-and-tools.md).
 
 ## Rules that cross tiers
 
@@ -150,12 +159,27 @@ A worker never receives `operating.coordinator`, `operating.fleet`, `operating.d
 - Neighboring-test guidance for reproduction tests appears in the same two places.
 - The completion-claim sentence is added to every worker prompt by the compiler. It is not a fragment.
 
+## Prompt profile v2
+
+`prompts.profile` selects the main prompt's text: `v1` (the default) or `v2`. `v2` is experimental. The setting is restart-required, because the profile is fixed when a session compiles its prefix. Everything else on this page describes `v1`. Under `v2` the compiler makes these swaps:
+
+- `identity.clio-v2` replaces `identity.clio`, and `operating.work` replaces `operating.contract`. A worker keeps its own identity and gets `operating.work` in place of `operating.contract`; the rest of its prompt is unchanged.
+- `operating.harness` renders as its own `harness` section: one row per mechanism (code navigation, skills, `verify`, `tasks`, `dispatch`, `monitor`, `job`, `panes`, peers, memory, `decide`, recall, `clio_docs`), each kept only when its capability is reachable. It replaces `operating.discovered-skills`, `operating.decisions` and the `clio_docs` lookup.
+- `operating.delegating` replaces `operating.coordinator` in the delegation section. `operating.fleet` still follows it when the session has SSH nodes.
+- `operating.attended` renders as its own `operator` section in attended sessions. It replaces `identity.clio-attended`, `operating.contract-attended`, `operating.user-control`, attended steering guidance, the turn-ending contract and the demo guidance. Its Mermaid row renders only in the terminal UI.
+- A headless prompt keeps `operating.contract-headless` and `operating.steering`, and the operating contract states that a call needing approval is denied, so the safety section carries no approval sentence.
+- The harness-awareness section is empty. The two lines of `identity.self-awareness` naming the docs and source paths and the settings path move to the runtime section.
+- The section order is identity, operating-contract, harness, delegation, tool-contract, safety, operator, harness-awareness, retrieval-hints, project-context and runtime, then additional fragments and memory as in `v1`.
+- When the chat model's context window is under 48,000 tokens, the capability map drops its examples.
+
+`PROMPT_BUDGET_CHARS` in `src/domains/prompts/compiler.ts` holds the `v2` size budgets a contract test enforces on a reference fixture: 26,000 characters attended, 25,000 for ACP, 19,000 headless, 21,000 headless at `yolo` and 11,500 for a worker.
+
 ## Self-development skills
 
 When the session's working directory is inside Clio Coder's own source tree, the prompts extension adds the dynamic fragment `context.clio-repo-awareness` and, when skills are usable and the turn mode is not `proposal`, `context.self-development-skills`.
 
 - Attended sessions are told to load `clio-coder-dev` once they have read the code and are about to make the first edit, and `clio-coder-test` once the change exists and they are choosing validation. Each loads at its step, never both up front, because a loaded skill is resent on every later request.
-- Headless runs are told that conventions, test conventions included, come from the code and neighboring tests, and that the two skills are not loaded. They stay discoverable in the catalog.
+- Headless runs are told to load `clio-coder-dev` before the first edit and `clio-coder-test` before choosing checks for a task that changes the repository, and to skip both for a question or a read-only task.
 
 ## Substitutions
 
@@ -168,8 +192,6 @@ The compiler fills these tokens by plain string replacement, one occurrence per 
 | `{CLIO_SRC_PACKED_NOTE}` | `identity.self-awareness` | In an installed package whose `.ts` source ships in `dist/assets/source.pack`, a sentence saying `read` and `code_nav` open the packed source but `grep`, `find` and `bash` do not see it; in a checkout, the empty string (`sourceIsPacked` in `src/core/source-pack.ts`) |
 | `{CLIO_SETTINGS_PATH}` | `identity.self-awareness` | `settings.yaml` inside the live config directory, so an isolated `CLIO_CODER_HOME` or config override moves it |
 | `{CLIO_STATE_PATH}` | `identity.self-awareness` | The live state directory |
-| `{LIBRARY_ROUTING}` | `identity.docs-routing` | The `clio_library` routing sentence when that capability is registered and admitted, otherwise the empty string |
-| `{SETTINGS_CHANGE_POLICY}` | `identity.settings-routing` | The `configure_clio` preview and apply instruction where that capability is registered and the session is attended at `default`, the preview-only instruction (show the operator the diff and steps) for headless, read-only and `yolo` sessions, otherwise a sentence handing the change to `/settings` or `clio-coder configure` |
 | `{SKILL_ACTIVATION_POLICY}` | `operating.discovered-skills` | Instructions to load a matching ready skill through the gateway, or to suggest `/skill <name>` when the model may not activate skills |
 
 `wiki.page`, `wiki.plan` and `wiki.repair` use a different placeholder family, double-brace tokens such as `{{pagePath}}`. They are filled by the wiki generator, not the compiler.
@@ -180,7 +202,7 @@ The compiler fills these tokens by plain string replacement, one occurrence per 
 
 ## Dynamic sections
 
-The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_ORDER`): identity, operating-contract, delegation, skills, safety, tool-contract, harness-awareness, retrieval-hints, project-context, memory, runtime. Additional fragments follow, then a context-operation update that summarizes the operator's recent context operations (initialize, refresh, reset and the like) in this session. The compiler records `pinnedPrefix` (a character count and SHA-256) at the end of harness-awareness, so a provider that splits its system prompt for caching can place a breakpoint where the install-wide bytes end. The main thread splits there on Anthropic Messages (a second system block with its own breakpoint) and on `openai-codex` (the rest follows the head as its own item: a second developer item when the prompt travels as developer items, the first input item after `instructions` on SSE; see [Context engine](context-engine.md)). Each section belongs to a cache layer in `PROMPT_SECTION_LAYER`:
+The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_ORDER`): identity, operating-contract, delegation, skills, safety, tool-contract, harness-awareness, retrieval-hints, project-context, runtime. Additional fragments follow, then a context-operation update that summarizes the operator's recent context operations (initialize, refresh, reset and the like) in this session, then memory. Memory can change between turns, so it renders last and a memory change resends only itself. The compiler records `pinnedPrefix` (a character count and SHA-256) at the end of harness-awareness, so a provider that splits its system prompt for caching can place a breakpoint where the install-wide bytes end. The main thread splits there on Anthropic Messages (a second system block with its own breakpoint) and on `openai-codex` (the rest follows the head as its own item: a second developer item when the prompt travels as developer items, the first input item after `instructions` on SSE; see [Context engine](context-engine.md)). Each section belongs to a cache layer in `PROMPT_SECTION_LAYER`:
 
 - Pinned: fixed by the install, the autonomy level and the admitted tool surface. Every session on the install shares these bytes. Covers identity through harness-awareness.
 - Session: captured once per session and stable across its turns. Covers project context, runtime and the dynamic fragments below that are marked session.
@@ -188,16 +210,20 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 
 | Section or fragment id | Content | Layer | Source and caching |
 | --- | --- | --- | --- |
-| `project-context` | The project handbook text under a `# Project` heading. | session | Captured in the session source snapshot and sized by `selectProjectPreload`. |
+| `project-context` | Under a `# Project` heading, a `Declared checks (verify):` line naming up to 12 of the project's declared check ids when `verify` is reachable, then the project handbook text. | session | Captured in the session source snapshot and sized by `selectProjectPreload`. |
 | `memory` | The task-scored memory section. | turn | Selected at each prepared turn but frozen into the compiled prompt until a completed compaction, a session switch or a recompile that another input forces. Later changes arrive as a `# Memory update` block in the turn's reminder. See [Memory in the prompt](#memory-in-the-prompt). |
 | `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. |
-| `context.workspace-root` | Absolute workspace root, local OS account, hostname, and session-start facts. | session | Snapshot. The workspace facts stay pinned for the session while the process lives, even when another source is recaptured. They include the session-start facts: git branch and tree state, the last commit, the last recorded session in this workspace, and the declared rigor. |
+| `context.workspace-root` | Absolute workspace root, local OS account and hostname. | session | Snapshot. The workspace facts stay pinned for the session while the process lives, even when another source is recaptured. Per-session facts are not in this fragment; see [Session context](#session-context). |
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
-| `context.clio-repo-awareness` | The note that the workspace is Clio Coder's own source tree. | session | Snapshot. |
+| `context.clio-repo-awareness` | The note that the workspace is Clio Coder's own source tree, and whether the running build came from that tree or from another one. | session | Snapshot. |
 | `context.self-development-skills` | The skill-loading note above. | session | Built per compile from session inputs. |
 | `context.catalogs` | Installed skills, agents and playbooks by name and a short purpose, plus user-scope MCP server ids. Each list is capped at 60 entries. A Peers group lists each installed coding agent whose pane handoff is ready (its CLI is on the recorded interop report and the session carries `panes`), with any configured headless target for `dispatch`; it also turns on the harness's peers row. | session | Snapshot. Grants nothing. |
 | `context.project-rules` | Unconditional `.clio-coder/rules` plus path-scoped rules matching the working context. | turn | Rules load into the snapshot. Selection re-runs against the working-context paths. |
 | `context.operator-profile` | The capped operator profile. | session | Snapshot. |
+
+### Session context
+
+Facts that differ between two sessions on an unchanged tree are not compiled into the system prompt, so two sessions in one workspace share the whole prompt as a cache prefix. The prompts extension renders them as a `<session-context>` block (`renderSessionContext` in `src/domains/prompts/extension.ts`), bounded at 400 characters before the orientation line: git branch and tree state, the last recorded session in this workspace, the last commit, a `Rigor: high` line when the project or `CLIO_CODER_RIGOR` declares it, and the time the project orientation snapshot was recorded. The block rides in the reminder of the session's first user message, beside the task scope. It is sent again only when no message still in context carries it, as after a compaction that summarized the first turn away. It is captured once per session and pinned with the workspace facts.
 
 ### Route provenance
 
@@ -229,6 +255,6 @@ Operator notes are not part of the compiled system prompt. They live in the comp
 - `stablePrefix` is the byte count and SHA-256 of the trimmed identity section and operating-contract section plus their separators. Workers expose the same measurement over their own identity and contract.
 - The chat reuses the compiled prompt byte-for-byte while `mainPromptCacheIdentity` is unchanged. That identity is version 2 and hashes the target, runtime and wire model ids, autonomy, session id, working directory, sorted working-context paths, the context-window source, `inputEpoch()`, the full session inputs (which include route sources, the session's standing tool limits, ready-skill count, the frozen memory section, `headless` and `liveSteering`), and the exact attached tool-schema bytes.
 - `inputEpoch()` joins the fragment epoch, the agent-catalog revision, the session-source epoch and the hash of the fleet inventory.
-- The session source snapshot freezes project context, rules, the operator profile, the workspace facts, repo awareness and catalogs. A context operation in the workspace or an ancestor, and a config hot-reload, invalidate it, and the next compile captures them again. The workspace root, its git facts and the capture time are carried over from the invalidated snapshot, so git state that changed mid-session does not rewrite the prompt. A new session captures its own. The first prompt of a fresh session compiles before the session exists, under an empty id; that capture is parked and adopted by the session created after it, so turns one and two stay byte-identical.
+- The session source snapshot freezes project context, rules, the operator profile, the workspace facts, repo awareness and catalogs. A context operation in the workspace or an ancestor, and a config hot-reload, invalidate it, and the next compile captures them again. The workspace root, the session-context block and the capture time are carried over from the invalidated snapshot, so git state that changed mid-session rewrites neither. A new session captures its own. The first prompt of a fresh session compiles before the session exists, under an empty id; that capture is parked and adopted by the session created after it, so turns one and two stay byte-identical.
 - A recompile that changes the text appends a `promptRecompiled` ledger entry (previous hash, new hash, token estimate). Each distinct prompt structure is journaled once as a `prompt.compiled` record whose `prompt-structure` object holds the section and fragment breakdown.
 - Workers have no snapshot. `compileWorkerPrompt` loads rules and the operator profile for the run's working-context paths on each compile and returns `rulesApplied` and `operatorProfileApplied` for the run's provenance.

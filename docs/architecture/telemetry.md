@@ -49,6 +49,7 @@ The read-model contract tests run the lie detectors of #434 over every DTO: L1 (
 | Output | The provider's `output` count, which includes reasoning when the provider bundles it. `reasoning` is a sub-field and is never added twice. |
 | TTFT | `stages.firstToken` minus the end of `stages.send`, on the monotonic clock of the process that sent the request. |
 | Re-prefilled tokens | `max(0, min(uncachedPrefill, previousPromptTokensOnSameKey - cacheRead))`: the already-seen prefix that was charged again. |
+| Cached share | Cache read as a percentage of prompt tokens, over the calls that reported their read. `clio-coder telemetry cache`, the exit report's `Cache` row and ACP `usage_update` show it for the session and for its last turn. |
 | Cache break | A call that prefilled again more than 1,024 tokens and more than a tenth of the prefix the previous request sent. One band in [cache-break.ts](../../src/core/telemetry/cache-break.ts) decides it for the read model and `clio-coder doctor`; [Context Engine](context-engine.md#breaks-and-the-cache-report) gives the rules. |
 | Cache-break bill | Re-prefilled tokens priced at the input rate minus the cache-read rate, recorded as `cache.bill` and shown as `breakUsd`. |
 | Disposition | How a call ended, from the closed set in [Honest values](#honest-values). |
@@ -142,6 +143,7 @@ The three scopes open differently.
   <scope>/bundle.json                   only while the scope is sealed
   consent.json                          research content consent, per workspace
   install.json                          this installation's random id, minted by its first share
+  prune.stamp                           the day's claim on the daily retention sweep
   imported/<installId>/telemetry/       scopes `telemetry import` placed, laid out as this root is
 ```
 
@@ -149,7 +151,7 @@ The session ledger (`<stateDir>/sessions/<cwdHash>/<sessionId>/current.jsonl`) i
 
 ## Objects
 
-`objects/` in a scope directory holds `obj_<sha256>.json` files: canonical sorted JSON, redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/telemetry/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas`, `config`, `briefing`, `steering` and `run-result`; a `config` object keeps the names of every `headers` and `env` map but withholds their values. The content subjects are `prompt-text`, `request`, `memory-trace` and `observation-trace`. Objects are stored through the scope's writer, behind any seal in progress. A reader that finds a missing object reports it as missing, and an object whose bytes do not match its id is an error.
+`objects/` in a scope directory holds `obj_<sha256>.json` files: canonical sorted JSON, redacted of secrets before hashing, written atomically and never overwritten with different bytes ([objects.ts](../../src/domains/telemetry/objects.ts)). The structural subjects are `prompt-structure`, `tool-schemas`, `config`, `briefing`, `steering` and `run-result`; a `config` object keeps the names of every `headers` and `env` map but withholds their values, and a target's `auth.apiKeyEnvVar` stays readable when it holds a variable name. The content subjects are `prompt-text`, `request`, `memory-trace` and `observation-trace`. Objects are stored through the scope's writer, behind any seal in progress. A reader that finds a missing object reports it as missing, and an object whose bytes do not match its id is an error.
 
 ## Seals and bundles
 
@@ -261,7 +263,7 @@ Every usage and cost field everywhere is a `Fact<number>`: on `call.settled`, on
 
 Cost is a `Pricing`: `usd` is a `Fact<number>`, `pricedBy` says where the rates came from, and an optional `freeRule` (`declared`, `zero-rates` or `local-native`) says which rule made a `free` amount free. A sum keeps `freeRule` only when every part states the same one. `resolveEffectivePricing` ([catalog.ts](../../src/domains/providers/catalog.ts)) resolves the rates and `pricedBy` together, in this order:
 
-1. A target's declared `pricing` rate map gives `target-rates`, or `free` (`zero-rates`) when every declared rate is 0. An omitted `cacheRead` or `cacheWrite` counts as 0.
+1. A target's declared `pricing` rate map gives `target-rates`, or `free` (`zero-rates`) when every declared rate is 0. An omitted `cacheRead` takes the `input` rate, so a target priced with only input and output bills cached prompt tokens at its input price, and an omitted `cacheWrite` counts as 0.
 2. `pricing: free` gives `free` (`declared`).
 3. A runtime whose tier is `local-native` (`llamacpp` and its variants, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`) gives `free` (`local-native`).
 4. A Clio catalog row for the runtime and wire model, or else a Pi catalog entry for the runtime's catalog provider and wire model, gives `catalog`, with an estimated amount.
@@ -282,7 +284,7 @@ A failed call records a content-free `failure` ([call-failure.ts](../../src/core
 
 The model that answered a call is a fact the provider reports, not the route Clio dispatched on. `call.settled` carries `target.reportedModel` from the response's `responseModelIdObservation` ([response-model-id.ts](../../src/core/response-model-id.ts)): `reported` with the id, `not-reported` when the response carried none, or `not-observed` when Clio captured no response object. The Responses family reads `response.model` from the `response.created` and `response.completed` events ([responses-model-id.ts](../../src/engine/apis/responses-model-id.ts)), the Anthropic Messages API reads `message.model` from `message_start` ([anthropic-response.ts](../../src/engine/apis/anthropic-response.ts)), and the OpenAI-compatible completions path reads it from the streamed chunks. The read model groups a call under its target and the reported model, or the requested model when none was reported.
 
-Subscription quota is a separate source with separate meaning: what each connected provider account reports about its own rate-limit windows and credits, account-wide and shared across sessions ([registry.ts](../../src/domains/quota/registry.ts)). Adapters read Clio's own logins or the sibling CLIs' credential files without writing them, and ask the provider's usage endpoint; this is the only telemetry read that leaves the machine. Inference responses also carry quota ([observed.ts](../../src/domains/quota/observed.ts)): Anthropic's `anthropic-ratelimit-unified-*` response headers and Codex's `codex.rate_limits` stream event. Each reading is journaled as `quota.read` in the process journal at a turn's first reading and whenever it changes. A reading taken from a call carries `account`, 16 hex characters of a sha256 over the runtime's hashed account scope, so the fold compares readings only within one account and two accounts on one target never subtract from each other; a share reports it as `user` ([reading.ts](../../src/domains/quota/reading.ts)). The read model's quota fold, `timeline`, `why-stopped`, `/usage` and the GUI read it. Recorded tokens never convert into a share of a provider's plan.
+Subscription quota is a separate source with separate meaning: what each connected provider account reports about its own rate-limit windows and credits, account-wide and shared across sessions ([registry.ts](../../src/domains/quota/registry.ts)). Adapters read Clio's own logins or the sibling CLIs' credential files without writing them, and ask the provider's usage endpoint; this is the only telemetry read that leaves the machine. Inference responses also carry quota ([observed.ts](../../src/domains/quota/observed.ts)): Anthropic's `anthropic-ratelimit-unified-*` response headers and Codex's `codex.rate_limits` stream event. Each reading is journaled as `quota.read` in the process journal at a turn's first reading and whenever it changes. A reading taken from a call carries `account`, 16 hex characters of a sha256 over the runtime's hashed account scope, so the fold compares readings only within one account and two accounts on one target never subtract from each other; a share below the `research` profile leaves it out ([reading.ts](../../src/domains/quota/reading.ts)). The read model's quota fold, `timeline`, `why-stopped`, `/usage` and the GUI read it. Recorded tokens never convert into a share of a provider's plan.
 
 ## Evidence
 
