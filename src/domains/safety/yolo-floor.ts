@@ -43,6 +43,8 @@ export const YOLO_FLOOR_RULE_IDS = {
 	settingsAuthority: "settings-authority",
 	/** A read of Clio's own provider credential store, at every autonomy level. */
 	clioCredentials: "yolo-floor-clio-credentials",
+	/** A line read as raw text that yields more pieces than the floor reads. */
+	rawText: "yolo-floor-raw-text",
 } as const;
 
 /** Every reason code a floor block carries starts with this. */
@@ -105,6 +107,43 @@ export function yoloFloorExecutableHit(command: string): YoloFloorHit | null {
 		}
 	}
 	return null;
+}
+
+/** Words a raw-text candidate starts at: the floor's executables and the commands that delete, overwrite or archive. */
+const RAW_TEXT_START_WORD =
+	/^(?:rm|rmdir|unlink|shred|find|rsync|dd|tee|tar|cp|mv|ln|install|truncate|wipefs|mkfs(?:\.[\w.-]+)?|mke2fs|newfs(?:_\w+)?)$/u;
+
+/** Most raw-text candidates the floor reads; a line that yields more is blocked. */
+const MAX_RAW_TEXT_CANDIDATES = 16_384;
+
+/**
+ * The raw-text reading of a line the shared scanners may not follow into every command (A-M54): one holding a
+ * command substitution beside a here-document, a here-string or a `#`. The scanners place a here-document's end,
+ * a comment and a substitution's close by bash's rules, and where they read a step as data the floor never judges
+ * it. This reading does not parse: it drops every quote, cuts the text at newlines, operators, parentheses, braces
+ * and backticks, and yields each piece, the piece without its first word (a here-document delimiter bash reads as
+ * the end), and the piece from every floor command word on, for the floor's judgments to read like commands.
+ * Fail-closed: a floor command quoted as data in such a line blocks too. Null when the line has no such shape;
+ * `overflow` when it yields more than the floor reads.
+ */
+export function yoloFloorRawCandidates(command: string): { candidates: string[]; overflow: boolean } | null {
+	if (!/\$\(|`/u.test(command) || !/<<|#/u.test(command)) return null;
+	const stripped = command.replace(/["']/gu, "");
+	const candidates = new Set<string>([stripped]);
+	for (const piece of stripped.split(/[\n\r;&|(){}`]/u)) {
+		const words = piece
+			.trim()
+			.split(/\s+/u)
+			.filter((word) => word !== "");
+		if (words.length === 0) continue;
+		const starts = words.flatMap((word, index) => (RAW_TEXT_START_WORD.test(word) ? [index] : []));
+		if (starts.length === 0 && !/[/~$>]/u.test(piece)) continue;
+		for (const start of new Set([0, 1, ...starts])) {
+			if (start < words.length) candidates.add(words.slice(start).join(" "));
+		}
+		if (candidates.size > MAX_RAW_TEXT_CANDIDATES) return { candidates: [], overflow: true };
+	}
+	return { candidates: [...candidates], overflow: false };
 }
 
 /**

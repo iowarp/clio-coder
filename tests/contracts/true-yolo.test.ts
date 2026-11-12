@@ -985,6 +985,46 @@ test("the yolo floor blocks a destructive command in every wrapper the outward r
 	}
 });
 
+// Shapes whose substitution the shared scanners do not follow into every command (A-M54).
+const RAW_TEXT_SHAPES: ReadonlyArray<(run: string) => string> = [
+	(run) => `: "$(cat <<'EOF'\nx\nEOF ${run})\nEOF\n)"`,
+	(run) => `: "$(cat <<'EOF'\nx\nEOF2>&1; ${run})\nEOF\n)"`,
+	(run) => `: "$(cat <<-'EOF'\nx\n\tEOF; ${run})\nEOF\n)"`,
+	(run) => `: "$(cat <<EOF\nx\nEOF ${run})\nEOF\n)"`,
+	(run) => `: "$( (:)# )\n${run}\n)"`,
+	(run) => `cat <<< "$(${run})"`,
+	(run) => `cat <<EOF\n$(${run})\nEOF`,
+	(run) => `: "$(cat <<X\nx\nX\n${run}\n)"`,
+];
+
+test("the yolo floor reads a line with a here-document or here-string and a substitution as raw text, fail-closed", async (t) => {
+	const cwd = workspace("clio-yolo-floor-raw-");
+	const home = await isolateClioEnv("clio-yolo-floor-raw-home-");
+	t.after(() => home.restore());
+	const engine = engineFor(cwd);
+	const config = join(home.dir, "config");
+	const judge = (command: string) => engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO);
+	for (const shape of RAW_TEXT_SHAPES) {
+		for (const run of ["wipefs -a /dev/sdz", "shred -u /etc/passwd", "rm -rf /usr/lib", `tar cf - ${config}`]) {
+			const command = shape(run);
+			strictEqual(judge(command).kind, "block", command);
+		}
+	}
+	// Data that names a floor command but no floor target still runs.
+	for (const command of [
+		"gh pr create --body \"$(cat <<'EOF'\nfix the rm -rf note\nEOF\n)\"",
+		"git commit -m \"$(cat <<'EOF'\nfeat: drop wipefs-free path\n\n# not a comment to bash\nEOF\n)\"",
+		'cat <<< "$(git log -1)"',
+	]) {
+		strictEqual(judge(command).kind, "allow", command);
+	}
+	// A destructive phrase quoted as data in such a line blocks by design, and the reason says why.
+	const quoted = judge("gh pr create --body \"$(cat <<'EOF'\nnever run rm -rf /usr/lib here\nEOF\n)\"");
+	strictEqual(quoted.kind, "block");
+	match(quoted.reasons.join("\n"), /raw text/u);
+	match(quoted.reasons.join("\n"), /even if it is only quoted data \(fail-closed\)/u);
+});
+
 // #419: an admitted yolo script commits through git, fills its own package cache,
 // and leaves no commondir behind to redirect the host's next git command.
 test("a yolo script run through bash commits in the workspace repository and its planted commondir is swept", async (t) => {

@@ -154,6 +154,7 @@ import {
 	type YoloFloorHit,
 	yoloFloorDeleteHit,
 	yoloFloorExecutableHit,
+	yoloFloorRawCandidates,
 } from "./yolo-floor.js";
 
 export type SafetyPolicySource =
@@ -1173,6 +1174,25 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		}
 		const credentials = credentialReadHit(call, callCwd, command);
 		if (credentials !== null) return held(floorMatch(credentials, "read"));
+		const raw = command === null ? null : yoloFloorRawCandidates(command);
+		if (raw?.overflow === true) {
+			return held(
+				floorMatch({
+					ruleId: YOLO_FLOOR_RULE_IDS.rawText,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}, and this one is too large to read that way; split it, or write the here-document's text with the write tool first`,
+				}),
+			);
+		}
+		for (const candidate of raw?.candidates ?? []) {
+			const read = credentialReadHit({ tool: ToolNames.Bash, args: { command: candidate } }, callCwd, candidate);
+			const hit =
+				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
+			if (hit !== null) {
+				return held(hit, [
+					`${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file first and pass the file`,
+				]);
+			}
+		}
 		const line = floorLine(trees);
 		const scriptHit = (scan: ScriptHit | null) =>
 			scan === null ? null : held(scan, [`script ${scan.file} line ${scan.line}: ${scan.text.slice(0, 200)}`]);
@@ -3415,6 +3435,10 @@ function blockDecision(
 	const rejection = formatRejection(rejectionInput);
 	return { ...base, ...input, kind: "block", rejection };
 }
+
+/** Why the floor reads a line as raw text (A-M54). */
+const RAW_TEXT_REASON =
+	"a line holding a command substitution beside a here-document, a here-string or a # is also read as raw text, quotes dropped";
 
 /** Most of a script the floor reads before the call runs (#419, #407). */
 const FLOOR_SCRIPT_SCAN_BYTES = 256 * 1024;
