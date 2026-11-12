@@ -350,7 +350,13 @@ function scanRoot(root: string, exclude: ReadonlySet<string>): RootScan {
 	// holds one is therefore masked file by file, never whole, or a contained
 	// `git add -A` would stage the deletion of everything tracked inside it.
 	const cleanTracked = new Map<string, SecretCandidate>();
+	// Every listed entry is judged before any untracked directory is walked,
+	// so a large one can cost the tail of the walk but never a `.env` beside
+	// the project. Each walk fills its own slot, keeping the listing's order.
+	const slots: SecretCandidate[][] = [[]];
+	const pending: Array<{ relative: string; depth: number; slot: SecretCandidate[] }> = [];
 	for (const { path: raw, clean } of listing) {
+		const current = slots[slots.length - 1] ?? [];
 		const directory = raw.endsWith("/");
 		const relative = directory ? raw.slice(0, -1) : raw;
 		const absolute = path.join(root, relative);
@@ -361,19 +367,27 @@ function scanRoot(root: string, exclude: ReadonlySet<string>): RootScan {
 			if (kind === null) continue;
 			const candidate = { path: absolute, kind, anyKind };
 			if (clean) cleanTracked.set(relative, candidate);
-			else candidates.push(candidate);
+			else current.push(candidate);
 			continue;
 		}
 		// A wholly untracked directory: hidden whole when it is or sits in a secret directory, else walked.
 		const name = relative.slice(relative.lastIndexOf("/") + 1);
 		if (inSecretDirectory || secretPathKind(relative, true) !== null) {
-			candidates.push({ path: absolute, kind: "secret", anyKind: true });
+			current.push({ path: absolute, kind: "secret", anyKind: true });
 		} else if (!SKIPPED_DIRS.has(name) && !exclude.has(absolute)) {
 			const depth = relative.split("/").length;
-			if (depth < SCAN_DEPTH) walk(root, relative, depth, state, candidates);
+			if (depth < SCAN_DEPTH) {
+				const slot: SecretCandidate[] = [];
+				pending.push({ relative, depth, slot });
+				slots.push(slot, []);
+			}
 		}
+	}
+	for (const { relative, depth, slot } of pending) {
+		walk(root, relative, depth, state, slot);
 		if (state.capped) break;
 	}
+	candidates.push(...slots.flat());
 	if (cleanTracked.size > 0) {
 		// Unknown modification state hides them all rather than none.
 		const modified = git(root, ["ls-files", "-z", "--modified", "--", ...cleanTracked.keys()]) ?? [
@@ -447,6 +461,56 @@ export function invalidateWorkspaceSecretScans(): void {
 	for (const [key, cached] of scanCache) if (cached.workspace) scanCache.delete(key);
 }
 
+/** The repository's common git directory for a work tree root, read from `.git` without spawning Git. */
+function gitCommonDir(root: string): string | null {
+	const dotGit = path.join(root, ".git");
+	try {
+		let gitDir = dotGit;
+		if (!statSync(dotGit).isDirectory()) {
+			const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf8"));
+			if (match?.[1] === undefined) return null;
+			gitDir = path.resolve(root, match[1]);
+		}
+		try {
+			const common = readFileSync(path.join(gitDir, "commondir"), "utf8").trim();
+			if (common.length > 0) return path.resolve(gitDir, common);
+		} catch {
+			// No `commondir`: the git directory is the common one.
+		}
+		return gitDir;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The work trees linked to `root`'s repository that lie inside it (Clio's
+ * task worktrees under `.clio-coder/worktrees` by default), read from each
+ * `<common>/worktrees/<id>/gitdir`. None inside a `.git` directory.
+ */
+function nestedLinkedWorktrees(root: string): string[] {
+	const commonDir = gitCommonDir(root);
+	if (commonDir === null) return [];
+	let ids: string[];
+	try {
+		ids = readdirSync(path.join(commonDir, "worktrees"));
+	} catch {
+		return [];
+	}
+	const trees: string[] = [];
+	for (const id of ids) {
+		try {
+			const gitFile = readFileSync(path.join(commonDir, "worktrees", id, "gitdir"), "utf8").trim();
+			if (gitFile.length === 0) continue;
+			const tree = realpathSync(path.dirname(path.resolve(commonDir, "worktrees", id, gitFile)));
+			if (isInside(root, tree) && !path.relative(root, tree).split(path.sep).includes(".git")) trees.push(tree);
+		} catch {
+			// A pruned or half-made entry names no tree to scan.
+		}
+	}
+	return trees;
+}
+
 export interface SecretMaskScan {
 	masks: SandboxMaskedPath[];
 	/** True when a walk ran out of budget or more than {@link SECRET_MASK_LIMIT} secrets were found. */
@@ -482,6 +546,12 @@ export function discoverSecretMasks(
 	};
 	const workspaceRoots = [...new Set(roots.workspaceRoots.map(physical).filter((root) => root !== null))];
 	const scratchRoots = [...new Set((roots.scratchRoots ?? []).map(physical).filter((root) => root !== null))];
+	// Task worktrees nested in a workspace are full checkouts: walked as part
+	// of it they use up its budget before its own secrets, so each is a root
+	// of its own, where the git listing is cheap.
+	for (const root of [...workspaceRoots]) {
+		for (const tree of nestedLinkedWorktrees(root)) if (!workspaceRoots.includes(tree)) workspaceRoots.push(tree);
+	}
 	let capped = false;
 	const candidates: SecretCandidate[] = [];
 	for (const [index, root] of [...workspaceRoots, ...scratchRoots].entries()) {

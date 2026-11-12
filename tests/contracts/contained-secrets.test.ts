@@ -132,6 +132,31 @@ test("secret discovery masks an ignored .env and a private key, not templates, p
 	]);
 });
 
+test("task worktrees nested in a checkout past the walk budget leave its .env and their own secrets masked", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-worktrees-")));
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "ignore" });
+	git("init", "-q");
+	for (let dir = 0; dir < 105; dir++) {
+		mkdirSync(join(root, "src", `d${dir}`), { recursive: true });
+		for (let file = 0; file < 100; file++) writeFileSync(join(root, "src", `d${dir}`, `f${file}.txt`), "x\n");
+	}
+	writeFileSync(join(root, ".gitignore"), ".env\n.clio-coder/\n");
+	git("add", "-A");
+	git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "base");
+	// Two checkouts of 10,500 files under `.clio-coder/` sort before `.env` and exceed one root's 20,000-entry walk.
+	for (const run of ["run-a", "run-b"])
+		git("worktree", "add", "-q", join(root, ".clio-coder", "worktrees", run), "HEAD");
+	writeFileSync(join(root, ".env"), "API=fake\n");
+	writeFileSync(join(root, ".clio-coder", "worktrees", "run-b", ".env"), "API=fake\n");
+
+	const scan = discoverSecretMasks({ workspaceRoots: [root] });
+	strictEqual(scan.capped, false);
+	deepStrictEqual(scan.masks.map((mask) => mask.path.slice(root.length + 1)).sort(), [
+		".clio-coder/worktrees/run-b/.env",
+		".env",
+	]);
+});
+
 test("a workspace scan is reused past 10 s while the git index is unchanged, and redone once it changes", () => {
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-index-")));
 	execFileSync("git", ["init", "-q"], { cwd: root });
