@@ -14,7 +14,7 @@ Compaction has shipped and is on by default. Semantic context is a beta feature 
 
 These are facts about the design at this version. They are not study results.
 
-Automatic reduction normally starts at 80% of the effective window, or earlier at a 400,000-token ceiling. Working-set eviction runs first, then summarization if that is not enough. The default eviction policy is `structural-v2`. Summaries follow a fixed checkpoint shape: goal, constraints and preferences, progress, key decisions, next steps, and critical context.
+Automatic reduction normally starts at 80% of the effective window, or earlier at a 400,000-token ceiling, the default of `context.compaction.maxTokens`, which applies even when the model has a larger window. Working-set eviction runs first, then summarization if that is not enough. The default eviction policy is `structural-v2`. Summaries follow a fixed checkpoint shape: goal, constraints and preferences, progress, key decisions, next steps, and critical context.
 
 CLIO Coder records whether a reduction gained anything. A summary that would not shrink the context is discarded, its cost stays in the totals, and an identical later automatic request makes no call. The journals also separate what a call read from cache and what it had to send again, so the cost side can be measured precisely.
 

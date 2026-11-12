@@ -142,7 +142,7 @@
     "source": "keep-long-coding-tasks-on-track.md",
     "cover": "tui-context",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/context-continuity.md"
     ]
@@ -157,7 +157,7 @@
     "source": "check-a-change-against-your-repository.md",
     "cover": "tui-verify-result",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/quality-policy.md",
       "guide/tool-usage.md"

@@ -1,6 +1,6 @@
 What would it take to treat an agent run as a scientific record that someone else can check? CLIO Coder already writes a sealed record of each run. Nobody has yet studied what those records can support as evidence, how much two runs of one task differ, or what a reader in another lab would still need.
 
-::: note Open question, described for v0.6.8
+::: note Open question, described for v0.8.0
 The records and commands on this page have shipped. The research use of them is new. No reproducibility study exists yet, so this page has no outcome numbers, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
 :::
 
@@ -24,7 +24,7 @@ Other parts of the design matter to a researcher:
 
 - Unknowns stay unknown. A missing token count reads as not recorded instead of zero, and a dropped or refused record leaves a gap record behind.
 - An assessment keeps trust states separately, including whether a run's claims were grounded in commands that actually ran.
-- Sharing has three profiles. `content-free` is the default, `structural` adds structure such as prompt and tool-schema manifests, and `research` adds content captured under consent.
+- Sharing has four profiles. `content-free` is the default, `structural` adds structure such as prompt and tool-schema manifests, `report` is structural with target ids anonymized too, for an archive linked from a public issue, and `research` adds content captured under consent.
 - A share re-applies secret redaction, and below `research` it keeps only allowlisted fields and anonymizes identities. Redaction is best effort.
 
 ## Why it matters

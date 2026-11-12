@@ -26,7 +26,7 @@
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The records have shipped; no study exists yet.",
     "author": "The CLIO Coder team",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],

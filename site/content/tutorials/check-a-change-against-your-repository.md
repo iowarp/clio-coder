@@ -1,4 +1,4 @@
-A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. CLIO Coder v0.6.8 can use your repository's declared checks and a project quality policy to make those questions explicit.
+A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. CLIO Coder v0.8.0 can use your repository's declared checks and a project quality policy to make those questions explicit.
 
 ::: note What this establishes
 Recorded verification is evidence about named checks and named inputs. It is not proof of correctness; your tests still need to cover the behavior that matters.
@@ -52,7 +52,7 @@ rules:
 
 ### List every input the result depends on
 
-`inputs` feeds freshness. Include fixtures, configuration, helper files, and lockfiles; this example assumes the root package declares a `test` script and uses that lockfile.
+`inputs` feeds freshness. Include fixtures, configuration, helper files, and lockfiles; this example assumes the root package declares a `test` script and keeps npm's lockfile. A pnpm or Yarn project lists `pnpm-lock.yaml` or `yarn.lock` instead. `verify` runs a package script as `npm run <id>` either way.
 
 ### Name existing checks, not commands
 
