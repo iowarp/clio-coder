@@ -311,10 +311,31 @@ function announceOverlappingWriteRoots(
  * Text of the operator's latest message in the model-visible history, the
  * turn issuing this dispatch. Empty when no parent conversation is available.
  */
-function operatorTurnText(deps: DispatchToolDeps): string {
-	let snapshot: ReturnType<NonNullable<DispatchToolDeps["captureWorkerContext"]>> | undefined;
+type WorkerContextSnapshot = ReturnType<NonNullable<DispatchToolDeps["captureWorkerContext"]>>;
+
+/**
+ * One parent-history capture per preparation: the capture copies and hashes
+ * the whole conversation, so the operator-turn scan and the context seeds share it.
+ */
+function memoizedWorkerContext(deps: DispatchToolDeps): () => WorkerContextSnapshot | undefined {
+	let captured: { ok: true; value: WorkerContextSnapshot | undefined } | { ok: false; error: unknown } | undefined;
+	return () => {
+		if (captured === undefined) {
+			try {
+				captured = { ok: true, value: deps.captureWorkerContext?.() };
+			} catch (error) {
+				captured = { ok: false, error };
+			}
+		}
+		if (!captured.ok) throw captured.error;
+		return captured.value;
+	};
+}
+
+function operatorTurnText(capture: () => WorkerContextSnapshot | undefined): string {
+	let snapshot: WorkerContextSnapshot | undefined;
 	try {
-		snapshot = deps.captureWorkerContext?.();
+		snapshot = capture();
 	} catch {
 		return "";
 	}
@@ -361,13 +382,14 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		}
 	};
 
-	const parseRequests = (args: Record<string, unknown>) => {
+	const parseRequests = (args: Record<string, unknown>, capture: () => WorkerContextSnapshot | undefined) => {
 		// A task cwd cannot supply its own approval boundary; only the host chooses the workspace (#433).
 		const sessionWorkspace = deps.getWorkspaceRoot?.() ?? deps.dispatch.owner?.().cwd ?? process.cwd();
-		const turnText = operatorTurnText(deps);
+		let turnText: string | undefined;
 		return dispatchRequestsFromArgs(args, {
 			workspaceRoot: sessionWorkspace,
 			operatorNamedChecks(cwd) {
+				turnText ??= operatorTurnText(capture);
 				if (turnText.length === 0) return [];
 				const discovery = discoverDeclaredChecksAtRoot(sessionWorkspace, cwd);
 				if (!discovery.ok) return [];
@@ -704,12 +726,13 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				return preparationFailure(args, error);
 			}
 		}
-		const parsed = parseRequests(args);
+		const captureWorkerContext = memoizedWorkerContext(deps);
+		const parsed = parseRequests(args, captureWorkerContext);
 		if (!parsed.ok) return shapeRejection(args, parsed.message);
 		try {
 			const inheriting = parsed.requests.filter((request) => request.context && request.context.mode !== "isolated");
 			if (inheriting.length > 0) {
-				const source = deps.captureWorkerContext?.();
+				const source = captureWorkerContext();
 				if (!source) throw new Error("worker context: no active parent conversation is available");
 				for (const request of inheriting) {
 					const policy = request.context;
