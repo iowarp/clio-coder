@@ -2,7 +2,9 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## 0.8.0-rc.1 - 2026-11-12
+## 0.8.0 - 2026-11-12
+
+0.8.0 is the stable release of 0.8.0-rc.1, with the same product code; the notes below are the 0.8.0 notes.
 
 CLIO Coder 0.8.0 is for people who run a coding agent beside other people, other agents and other tools, and for anyone who automates one: researchers on shared login nodes, teams in one repository, and scripts that drive headless `run`. Shared folders, the sandbox, headless `run`, setup and installs behave more strictly and more predictably. A per-project store keeps results outside the working tree, reports are reviewed before they leave the machine, and long sessions, large repositories and streamed answers stay fast. Several exit codes, defaults and permissions change, so read the Upgrade notes first. This is a release candidate on the npm `beta` tag; 0.7.0 remains the stable release.
 
@@ -337,14 +339,14 @@ The [fleet dispatch guide][fleet] is the full reference.
 - On Windows, npm and pnpm global installs still launch through npm's `clio-coder.cmd` shim, where cmd.exe interprets `&` and `%NAME%` in arguments; the installer's native launcher does not. The arm64 Windows launchers are built and pinned but have not run on arm64 hardware.
 - Pruning and uninstall on macOS are verified by unit tests only, and process discovery there reads command lines without working directories.
 
-[safety]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/architecture/safety-model.md
-[store]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/store.md
-[report]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/troubleshooting.md#report-a-problem-to-the-maintainers
-[commands]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/commands-and-modes.md
-[context]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/context-continuity.md
-[install]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/installation-and-lifecycle.md
-[hpc]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/hpc-clusters.md
-[fleet]: https://github.com/iowarp/clio-coder/blob/v0.8.0-rc.1/docs/guide/fleet-dispatch.md
+[safety]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/architecture/safety-model.md
+[store]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/store.md
+[report]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/troubleshooting.md#report-a-problem-to-the-maintainers
+[commands]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/commands-and-modes.md
+[context]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/context-continuity.md
+[install]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/installation-and-lifecycle.md
+[hpc]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/hpc-clusters.md
+[fleet]: https://github.com/iowarp/clio-coder/blob/v0.8.0/docs/guide/fleet-dispatch.md
 
 ## 0.7.0 - 2026-11-08
 

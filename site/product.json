@@ -1,8 +1,8 @@
 {
 	"name": "CLIO Coder",
 	"description": "CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"origin": "https://coder.iowarp.ai",
 	"repository": "https://github.com/iowarp/clio-coder",
-	"publishedVersion": "0.7.0"
+	"publishedVersion": "0.8.0"
 }
