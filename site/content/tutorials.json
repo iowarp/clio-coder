@@ -255,8 +255,8 @@
     "author": "The CLIO Coder team",
     "source": "information-flow-rules.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.8",
-    "status": "Advanced, opt-in, new in 0.6.0",
+    "versionScope": "0.8.0",
+    "status": "Advanced, opt-in",
     "interfaces": [
       "Terminal"
     ],

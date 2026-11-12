@@ -1,6 +1,6 @@
-Some files should reach only a model you chose. An information-flow rule names a source, such as everything under `secrets/`, and the destinations its content may go to. Once a session has read that source, CLIO Coder refuses to send the conversation anywhere else, in every permission mode.
+Some files should reach only a model you chose. An information-flow rule names a source, such as everything under `secrets/`, and the destinations its content may go to. Once a session has read that source, CLIO Coder refuses to send the conversation to any other model, in every permission mode.
 
-::: note Advanced, described for v0.6.8
+::: note Advanced, described for 0.8.0
 Information flow does nothing until a project declares source rules and you approve them. The policy format is new and may change. It tracks what a session has read; it is not an operating-system sandbox.
 :::
 
@@ -67,6 +67,8 @@ Native workers check each model request. Coding agents that make their own model
 - Labels apply to the whole session, not to individual passages.
 - Shell commands are observed conservatively and incompletely. A read hidden in a script, a variable, or a `cd` is not reliably seen.
 - A rule controls where content may go. Whether a file may be read at all is still decided by permissions.
+- At `yolo`, `web_fetch`, `web_read` and MCP tool calls are not refused on a label. Model requests are still checked.
+- Writes carry no label. A file a restricted session writes can later be read and sent anywhere.
 :::
 
 ::: next
