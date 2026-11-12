@@ -430,5 +430,23 @@
       "guide/troubleshooting.md",
       "guide/exit-codes-and-output.md"
     ]
+  },
+  {
+    "slug": "ask-several-agents-at-once",
+    "title": "Ask several agents at once",
+    "description": "Poll two to five agents on one question and read the vote, or give a council roster one task and let a judge write a single answer.",
+    "category": "Agent coordination",
+    "time": "5 min",
+    "author": "The CLIO Coder team",
+    "source": "ask-several-agents-at-once.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/fleet-dispatch.md",
+      "guide/commands-and-modes.md"
+    ]
   }
 ]
