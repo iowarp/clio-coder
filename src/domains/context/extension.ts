@@ -34,6 +34,7 @@ import {
 } from "./operation-result.js";
 import { renderPromptContext } from "./prompt-context.js";
 import { runContextRefresh } from "./refresh.js";
+import { stopSisterRepositoryRefreshes } from "./sister-repository.js";
 import { type ClioProjectState, readClioState, writeClioState } from "./state.js";
 
 /**
@@ -309,7 +310,7 @@ export function createContextBundle(
 		},
 		async stop() {
 			stopping = true;
-			await Promise.all([semanticBackground.stop(), stopCompiledHandbookRefreshes()]);
+			await Promise.all([semanticBackground.stop(), stopCompiledHandbookRefreshes(), stopSisterRepositoryRefreshes()]);
 			unsubscribeSessionStart?.();
 			unsubscribeSessionStart = null;
 			// Everything the session changed already went through noteFileChanges,

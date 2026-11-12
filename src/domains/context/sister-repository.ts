@@ -13,17 +13,24 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Worker } from "node:worker_threads";
 import { repositoryIdentity, repositoryRoot } from "../../core/project-root.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import { enumerateWorkspaceFilesAsync } from "../../core/workspace-files.js";
 import { captureProjectSurface } from "../../core/workspace-trust.js";
 import { resolveClioDirs } from "../../core/xdg.js";
-import { type HandbookLedgerEntry, verifyHandbookRules } from "./bootstrap.js";
+import type { HandbookLedgerEntry } from "./bootstrap.js";
 import { loadProjectClioMd } from "./clio-md.js";
 import { compileHandbook } from "./handbook-units.js";
-import { instructionUnits } from "./instruction-units.js";
+import type {
+	SisterCompileInput,
+	SisterCompileResult,
+	SisterCompileWorkerMessage,
+} from "./sister-repository-compile.js";
 
 /** The handbook text a sister-repository run receives, and how it was chosen. */
 export interface SisterRepositoryRules {
@@ -133,42 +140,21 @@ function headStamp(root: string): string {
 }
 
 /** The commit at `root`, through safe-exec off the caller's thread, and asked again only after HEAD or its ref changes. */
-async function headCommit(root: string): Promise<string> {
+async function headCommit(root: string, signal: AbortSignal): Promise<string> {
 	const stamp = headStamp(root);
 	const known = heads.get(root);
 	if (known?.stamp === stamp) return known.head;
 	const result = await runCommandVector("git", ["-C", root, "rev-parse", "HEAD"], {
 		cwd: root,
 		workspaceRoot: root,
-		timeoutMs: 5_000,
+		timeoutMs: HEAD_TIMEOUT_MS,
 		maxOutputBytes: 4_096,
+		signal,
 	});
+	signal.throwIfAborted();
 	const head = result.exitCode === 0 ? result.stdout.trim() || "uncommitted" : "uncommitted";
 	heads.set(root, { stamp, head });
 	return head;
-}
-
-/** The units of `content` the tree verified, under their own headings, as a handbook the worker compile can route. */
-function verifiedHandbook(
-	title: string,
-	file: string,
-	content: string,
-	verified: ReadonlySet<string>,
-	checks: ReadonlyArray<string>,
-): string {
-	const sections = new Map<string, string[]>();
-	for (const unit of instructionUnits(content, 600, file)) {
-		if (!verified.has(`${unit.file}:${unit.line}`)) continue;
-		const heading = unit.heading.trim() || "Rules";
-		sections.set(heading, [...(sections.get(heading) ?? []), `- ${unit.text}`]);
-	}
-	if (checks.length > 0)
-		sections.set(
-			"Checks",
-			checks.map((rule) => `- ${rule}`),
-		);
-	if (sections.size === 0) return "";
-	return [`# ${title}`, ...[...sections].flatMap(([heading, lines]) => ["", `## ${heading}`, "", ...lines])].join("\n");
 }
 
 interface CompileInputs {
@@ -195,7 +181,6 @@ function compileInputs(cwd: string, root: string): CompileInputs {
 		JSON.stringify([
 			CACHE_VERSION,
 			physical(root),
-			physical(cwd),
 			trusted ? snapshot.contentHash : null,
 			loaded.files.map((file) => [file.path, sha256(file.source)]),
 		]),
@@ -208,50 +193,6 @@ function trustedRules(inputs: CompileInputs): SisterRepositoryRules {
 	const { root, name, files, loaded } = inputs;
 	const sources = loaded.files.map((file) => ({ path: file.path, source: file.source }));
 	return { root, name, trusted: true, files, sources, withheld: 0, hash: sha256(JSON.stringify(sources)) };
-}
-
-/**
- * The untrusted compile: the rules the tree verifies and the checker rules.
- * A repository with no handbook gets nothing yet; a checker-only compile for
- * it belongs with the store's handbook compile and is not built here.
- */
-function compileUntrusted(
-	inputs: CompileInputs,
-	repositoryFiles: ReadonlyArray<string>,
-): { rules: SisterRepositoryRules; ledger: HandbookLedgerEntry[] } {
-	const { root, name, files, loaded } = inputs;
-	const title = `Rules of ${name}, compiled from ${files.join(", ")}`;
-	const handbooks = loaded.files.map((file, index) => ({
-		file: files[index] ?? file.path,
-		path: file.path,
-		content: file.source,
-	}));
-	const { entries, checkerRules } =
-		handbooks.length > 0 ? verifyHandbookRules(root, handbooks, { repositoryFiles }) : { entries: [], checkerRules: [] };
-	const verified = new Set(
-		entries
-			.filter((entry) => entry.verdict === "verified")
-			.map((entry) => `${entry.source?.file ?? ""}:${entry.source?.line ?? 0}`),
-	);
-	const sources = handbooks
-		.map((handbook, index) => ({
-			path: handbook.path,
-			// The checker rules are the repository's, not one file's: they ride with the first.
-			source: verifiedHandbook(title, handbook.file, handbook.content, verified, index === 0 ? checkerRules : []),
-		}))
-		.filter((source) => source.source.length > 0);
-	return {
-		ledger: entries,
-		rules: {
-			root,
-			name,
-			trusted: false,
-			files,
-			sources,
-			withheld: entries.filter((entry) => entry.verdict !== "verified").length,
-			hash: sha256(JSON.stringify(sources)),
-		},
-	};
 }
 
 function cachePathFor(inputs: CompileInputs): string {
@@ -273,21 +214,119 @@ function readCache(inputs: CompileInputs): CachedCompile | null {
 	}
 }
 
+/** A compile that runs longer fails; the next read asks again. */
+const COMPILE_TIMEOUT_MS = 120_000;
+const LISTING_TIMEOUT_MS = 30_000;
+const HEAD_TIMEOUT_MS = 5_000;
+/** Sister compiles running at once; more wait their turn, so many dispatches never start many tree walks. */
+const MAX_CONCURRENT_COMPILES = 2;
+const require = createRequire(import.meta.url);
+
+let running = 0;
+const waiting: Array<() => void> = [];
+const workers = new Set<Worker>();
+/** Aborted by `stopSisterRepositoryRefreshes`; refreshes started after a stop take a fresh one. */
+let stopping = new AbortController();
+
+async function withCompileSlot<T>(work: () => Promise<T>): Promise<T> {
+	if (running >= MAX_CONCURRENT_COMPILES) await new Promise<void>((resolve) => waiting.push(resolve));
+	running += 1;
+	try {
+		return await work();
+	} finally {
+		running -= 1;
+		waiting.shift()?.();
+	}
+}
+
+function buildWorkerUrl(): URL {
+	if (!import.meta.url.endsWith(".ts")) return new URL("./context/sister-compile-worker.js", import.meta.url);
+	// Source execution: the same absolute-loader bootstrap as the handbook compile worker.
+	const loaderApi = pathToFileURL(require.resolve("tsx/esm/api")).href;
+	const source = new URL("./sister-compile-worker.ts", import.meta.url).href;
+	return new URL(
+		`data:text/javascript,${encodeURIComponent(`const { tsImport } = await import(${JSON.stringify(loaderApi)}); await tsImport(${JSON.stringify(source)}, import.meta.url);`)}`,
+	);
+}
+
+/** Verify on a worker thread, so the walk over every rule never blocks the prompt, dispatch or tool path. */
+function compileInWorker(input: SisterCompileInput, signal: AbortSignal): Promise<SisterCompileResult> {
+	return new Promise((resolve, reject) => {
+		signal.throwIfAborted();
+		const worker = new Worker(buildWorkerUrl(), {
+			workerData: input,
+			execArgv: [],
+			resourceLimits: { maxOldGenerationSizeMb: 512 },
+		});
+		// A compile still running never holds the process open on exit.
+		worker.unref();
+		workers.add(worker);
+		let settled = false;
+		const finish = (callback: () => void): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			signal.removeEventListener("abort", onAbort);
+			callback();
+		};
+		const onAbort = (): void => {
+			finish(() => reject(signal.reason));
+			void worker.terminate();
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+		const timer = setTimeout(() => {
+			finish(() => reject(new Error(`exceeded ${COMPILE_TIMEOUT_MS} ms`)));
+			void worker.terminate();
+		}, COMPILE_TIMEOUT_MS);
+		timer.unref();
+		worker.once("message", (message: SisterCompileWorkerMessage) =>
+			finish(() => (message.ok ? resolve(message.result) : reject(new Error(message.error)))),
+		);
+		worker.once("error", (error) => finish(() => reject(error)));
+		worker.once("exit", (code) => {
+			workers.delete(worker);
+			finish(() => reject(new Error(`worker exited with code ${code} before returning a result`)));
+		});
+	});
+}
+
 const HANDBOOK_FILES: ReadonlySet<string> = new Set(["CLIO-CODER.md", "CLIO-DEV.md"]);
 
 function refresh(inputs: CompileInputs): Promise<SisterRepositoryRules | null> {
 	const stamp = headStamp(inputs.root);
-	const running = inflight.get(inputs.key);
-	if (running?.stamp === stamp) return running.run;
+	const current = inflight.get(inputs.key);
+	if (current?.stamp === stamp) return current.run;
 	// A refresh that started before HEAD moved would answer for the old commit: run again once it settles.
-	const previous = running?.run.catch(() => null) ?? Promise.resolve(null);
+	const previous = current?.run.catch(() => null) ?? Promise.resolve(null);
+	const { signal } = stopping;
 	const run = (async (): Promise<SisterRepositoryRules | null> => {
 		await previous;
-		const head = await headCommit(inputs.root);
+		signal.throwIfAborted();
+		const head = await headCommit(inputs.root, signal);
 		const cached = readCache(inputs);
 		if (cached?.head === head) return cached.rules;
-		const repositoryFiles = (await enumerateWorkspaceFilesAsync(inputs.root)).filter((path) => !HANDBOOK_FILES.has(path));
-		const { rules, ledger } = compileUntrusted(inputs, repositoryFiles);
+		const result = await withCompileSlot(async () => {
+			signal.throwIfAborted();
+			const listed = await enumerateWorkspaceFilesAsync(inputs.root, undefined, undefined, undefined, {
+				timeoutMs: LISTING_TIMEOUT_MS,
+				signal,
+			});
+			return compileInWorker(
+				{
+					root: inputs.root,
+					name: inputs.name,
+					files: inputs.files,
+					handbooks: inputs.loaded.files.map((file, index) => ({
+						file: inputs.files[index] ?? file.path,
+						path: file.path,
+						content: file.source,
+					})),
+					repositoryFiles: listed.filter((path) => !HANDBOOK_FILES.has(path)),
+				},
+				signal,
+			);
+		});
+		const { rules, ledger } = result;
 		const record: CachedCompile = { version: CACHE_VERSION, key: inputs.key, head, rules, ledger };
 		memo.set(inputs.key, record);
 		try {
@@ -305,6 +344,19 @@ function refresh(inputs: CompileInputs): Promise<SisterRepositoryRules | null> {
 	});
 	inflight.set(inputs.key, { stamp, run });
 	return run;
+}
+
+/**
+ * Stop every sister refresh this process started: the Git calls are killed,
+ * the compile workers terminated, and the last cached compile stays. Later
+ * reads start new refreshes.
+ */
+export async function stopSisterRepositoryRefreshes(): Promise<void> {
+	const pending = [...inflight.values()].map(({ run }) => run.catch(() => null));
+	stopping.abort(new Error("sister repository refresh stopped"));
+	stopping = new AbortController();
+	for (const worker of workers) void worker.terminate();
+	await Promise.all(pending);
 }
 
 /**

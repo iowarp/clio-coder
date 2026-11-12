@@ -11,7 +11,11 @@ import { refreshCompiledHandbook, renderEffectivePromptContext } from "../../src
 import type { ContextContract, StartupHint } from "../../src/domains/context/contract.js";
 import { createContextBundle, type StartupHintHost } from "../../src/domains/context/extension.js";
 import { HANDBOOK_ABSENT_FRAGMENT, renderPromptContext } from "../../src/domains/context/prompt-context.js";
-import { refreshSisterRepositoryRules } from "../../src/domains/context/sister-repository.js";
+import {
+	refreshSisterRepositoryRules,
+	sisterRepositoryRules,
+	stopSisterRepositoryRefreshes,
+} from "../../src/domains/context/sister-repository.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
 import { createSisterRepositoryReminderRegistration } from "../../src/domains/middleware/sister-repository-reminder.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
@@ -500,6 +504,25 @@ test("the repository owning a run's cwd decides sister rules: a nested clone is 
 	} finally {
 		process.chdir(previous);
 		await harness.stop();
+		env.restore();
+	}
+});
+
+test("a sister compile is shared by every directory of the repository and stops with the session", async () => {
+	const env = await isolateClioEnv("clio-coder-sister-shared-");
+	try {
+		const two = join(env.dir, "two");
+		fixtureRepository(two, "two", "test:two");
+		// A stop cuts the running refresh off; nothing is cached and the next read starts again.
+		const cut = refreshSisterRepositoryRules(two);
+		await stopSisterRepositoryRefreshes();
+		await rejects(cut, /stopped/);
+		equal(sisterRepositoryRules(two)?.rules, null);
+		await refreshSisterRepositoryRules(two);
+		// A dispatch from a subdirectory reads the compile its root's refresh left.
+		ok(sisterRepositoryRules(join(two, "src"))?.rules?.sources.some(({ source }) => source.includes("test:two")));
+	} finally {
+		await stopSisterRepositoryRefreshes();
 		env.restore();
 	}
 });

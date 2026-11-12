@@ -237,6 +237,7 @@ const entries = {
 	"worker/entry": "src/worker/entry.ts",
 	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
 	"context/handbook-compile-worker": "src/domains/context/handbook-compile-worker.ts",
+	"context/sister-compile-worker": "src/domains/context/sister-compile-worker.ts",
 	"data/scientific-worker": "src/tools/data/scientific-worker.ts",
 };
 

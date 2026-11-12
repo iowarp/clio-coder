@@ -261,7 +261,17 @@ function gitVisibleFiles(cwd: string, candidates?: ReadonlyArray<string>): GitLi
 	return splitGitPathOutput(output.toString("utf8"));
 }
 
-function gitVisibleFilesAsync(cwd: string, candidates?: ReadonlyArray<string>): Promise<GitListing | null> {
+/** Bounds on the async listing's `git ls-files`: a deadline, and a signal that stops it. */
+export interface WorkspaceGitListingOptions {
+	timeoutMs?: number;
+	signal?: AbortSignal;
+}
+
+function gitVisibleFilesAsync(
+	cwd: string,
+	candidates?: ReadonlyArray<string>,
+	options: WorkspaceGitListingOptions = {},
+): Promise<GitListing | null> {
 	return new Promise((resolve) => {
 		let argv: string[];
 		try {
@@ -271,9 +281,20 @@ function gitVisibleFilesAsync(cwd: string, candidates?: ReadonlyArray<string>): 
 			resolve(null);
 			return;
 		}
-		execFile("git", argv, { cwd, env: withoutRepositoryEnv(), maxBuffer: GIT_OUTPUT_LIMIT_BYTES }, (error, stdout) => {
-			resolve(error ? null : splitGitPathOutput(stdout));
-		});
+		execFile(
+			"git",
+			argv,
+			{
+				cwd,
+				env: withoutRepositoryEnv(),
+				maxBuffer: GIT_OUTPUT_LIMIT_BYTES,
+				...(options.timeoutMs !== undefined ? { timeout: options.timeoutMs, killSignal: "SIGKILL" as const } : {}),
+				...(options.signal ? { signal: options.signal } : {}),
+			},
+			(error, stdout) => {
+				resolve(error ? null : splitGitPathOutput(stdout));
+			},
+		);
 	});
 }
 
@@ -521,8 +542,11 @@ export async function enumerateWorkspaceFilesAsync(
 	excludedDirs: ReadonlySet<string> = WORKSPACE_EXCLUDED_DIRS,
 	fallbackLimits?: Partial<WorkspaceFallbackLimits>,
 	cooperate: WorkspaceEnumerationTick = createDefaultTick(),
+	git: WorkspaceGitListingOptions = {},
 ): Promise<string[]> {
-	const gitFiles = await gitVisibleFilesAsync(cwd);
+	const gitFiles = await gitVisibleFilesAsync(cwd, undefined, git);
+	// A stopped listing is not a reason to walk the tree instead.
+	git.signal?.throwIfAborted();
 	if (gitFiles)
 		return normalizeVisibleFilesAsync(cwd, gitFiles.paths, excludedDirs, false, cooperate, gitFiles.indexedFiles);
 	const walked = await fallbackFilesAsync(cwd, excludedDirs, fallbackLimits, cooperate);
