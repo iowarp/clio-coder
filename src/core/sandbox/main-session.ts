@@ -117,6 +117,8 @@ export interface MainSandboxPolicyInput {
 	env?: SandboxEnvPolicy;
 	/** `safety.sandboxUnixSockets`. Absent blocks them. */
 	unixSockets?: UnixSocketMode;
+	/** The checkout a task worktree was cut from, when the workspace is one. Its secret files are masked too. */
+	sourceCheckout?: string;
 }
 
 /** No pass list and no target credential names: the scrub's name and value rules alone. */
@@ -137,8 +139,11 @@ export interface MainSandboxPolicy {
 	 */
 	clioDirs: ReadonlyArray<string>;
 	network: true;
-	/** Where each launch looks for secret files to mask: the workspace, then the scratch roots. */
-	secretRoots: { workspace: string; scratchRoots: ReadonlyArray<string> };
+	/**
+	 * Where each launch looks for secret files to mask: the workspace, the
+	 * source checkout of a task worktree, then the scratch roots.
+	 */
+	secretRoots: { workspace: string; scratchRoots: ReadonlyArray<string>; sourceCheckout?: string };
 	env: SandboxEnvPolicy;
 	/** Whether a contained command may create Unix-domain sockets (unix-sockets.ts). */
 	unixSockets: UnixSocketMode;
@@ -503,7 +508,11 @@ export function resolveMainSandboxPolicy(input: MainSandboxPolicyInput): MainSan
 		absentGitFiles: git?.absentFiles ?? [],
 		clioDirs: [...input.clioDirs],
 		network: true,
-		secretRoots: { workspace: input.workspace, scratchRoots: input.scratchRoots },
+		secretRoots: {
+			workspace: input.workspace,
+			scratchRoots: input.scratchRoots,
+			...(input.sourceCheckout !== undefined ? { sourceCheckout: input.sourceCheckout } : {}),
+		},
 		env: input.env ?? DEFAULT_SANDBOX_ENV_POLICY,
 		unixSockets: input.unixSockets ?? "block",
 		...(input.sandboxCache !== undefined ? { sandboxCache: input.sandboxCache } : {}),
@@ -541,6 +550,7 @@ export function mainSandboxPolicy(roots: {
 	scratchRoots: ReadonlyArray<string>;
 	env?: SandboxEnvPolicy;
 	unixSockets?: UnixSocketMode;
+	sourceCheckout?: string;
 }): MainSandboxPolicy {
 	const git = mainSandboxGitLayout(roots.workspace);
 	assertClioDirLayout();
@@ -709,7 +719,13 @@ export function planMainSandboxSpawn(
 		...(policy.env.maskSettings === true ? settingsFileMasks() : []),
 	];
 	const secretMasks = discoverSecretMasks(
-		{ workspaceRoots: [policy.secretRoots.workspace], scratchRoots: policy.secretRoots.scratchRoots },
+		{
+			workspaceRoots: [
+				policy.secretRoots.workspace,
+				...(policy.secretRoots.sourceCheckout !== undefined ? [policy.secretRoots.sourceCheckout] : []),
+			],
+			scratchRoots: policy.secretRoots.scratchRoots,
+		},
 		baseMasks,
 	).masks;
 	// The command sees the host's network namespace, and outside a read-only

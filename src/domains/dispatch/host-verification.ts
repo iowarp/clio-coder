@@ -618,10 +618,11 @@ export async function compareHostVerificationBase(input: {
 				'exec "$@"',
 			].join("\n");
 			// The base check runs repository code, so it gets a worker command's
-			// credential, settings, escape-socket and workspace secret masks too.
+			// credential, settings, escape-socket and workspace secret masks too,
+			// over the worktree and the source checkout it was cut from.
 			const baseMasks = [...workerSandboxMasks(), ...settingsFileMasks()];
 			const secretMasks = discoverSecretMasks(
-				{ workspaceRoots: [worktree.path, ...links.map((link) => dirname(link.target))] },
+				{ workspaceRoots: [worktree.path, worktree.root, ...links.map((link) => dirname(link.target))] },
 				baseMasks,
 			).masks;
 			const sockets = unixSocketLaunch("block", sandbox, { workspaceRoots: [worktree.path], privateTmp: true }, [
@@ -1061,20 +1062,25 @@ async function spawnResolvedCheck(
  * The sandbox host verification runs a run's declared checks in. A worker
  * may have written the test files and helpers a check executes, so the host
  * runs them where the main session's own bash would: the main-session
- * sandbox rooted at the run's workspace. `off` runs them bare, as does `auto`
+ * sandbox rooted at the run's workspace. A task worktree's checks also get
+ * the secret masks of the checkout it was cut from, whose untracked secret
+ * files the worktree's own scan never sees. `off` runs them bare, as does `auto`
  * on a host with no backend, where the worker itself ran unsandboxed; under
  * `required` a missing backend refuses each check rather than running it bare.
  */
 export function hostVerificationSandbox(
 	settings: Readonly<Pick<ClioSettings, "safety" | "targets">> | undefined,
-	workspace: string,
+	workspace: string | Pick<NonNullable<DispatchRequest["taskWorktree"]>, "path" | "root">,
 	availability = sandboxAvailability(),
 ): MainSandboxPolicy | undefined {
 	const mode: SandboxMode = settings?.safety.sandbox ?? "auto";
 	if (mode === "off" || (mode === "auto" && !mainShellContained(mode, availability))) return undefined;
+	const root = typeof workspace === "string" ? workspace : workspace.path;
+	const source = typeof workspace === "string" || workspace.root === workspace.path ? undefined : workspace.root;
 	return mainSandboxPolicy({
-		workspace,
-		scratchRoots: effectiveScratchRoots(settings?.safety.scratchRoots ?? [], workspace),
+		workspace: root,
+		scratchRoots: effectiveScratchRoots(settings?.safety.scratchRoots ?? [], root),
+		...(source !== undefined ? { sourceCheckout: source } : {}),
 		...(settings !== undefined
 			? { env: sandboxEnvPolicy(settings), unixSockets: settings.safety.sandboxUnixSockets }
 			: {}),

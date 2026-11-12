@@ -10,6 +10,7 @@ import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import {
 	compareHostVerificationBase,
 	hostVerificationRejection,
+	hostVerificationSandbox,
 	runHostVerification,
 } from "../../src/domains/dispatch/host-verification.js";
 
@@ -69,20 +70,21 @@ it("leaves the base not compared when the linked base tree cannot resolve the ch
 	strictEqual(existsSync(join(stateDir, "dispatch-verification-base")), false);
 });
 
-it("masks the workspace's secret files and Clio's settings from the base replay", {
+it("masks the source checkout's and the worktree's secret files and Clio's settings from the check and its base replay", {
 	skip: !(sandboxAvailability().available && sandboxAvailability().backend === "bwrap"),
 }, async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-base-"));
 	scratches.push(root);
 	const project = join(root, "project");
+	const worktree = join(project, ".clio-coder", "worktrees", "masks");
 	const stateDir = join(root, "state");
 	mkdirSync(project, { recursive: true });
 	mkdirSync(clioConfigPath(), { recursive: true });
 	const settings = join(clioConfigPath(), "settings.yaml");
-	const env = join(project, ".env");
+	const secrets = [settings, join(project, ".env"), join(project, "svc", ".env"), join(worktree, ".env")];
 	writeFileSync(
 		join(project, "check.js"),
-		`for (const file of ${JSON.stringify([settings, env])}) { try { console.log(require("node:fs").readFileSync(file, "utf8")); } catch {} }\nprocess.exit(1);\n`,
+		`for (const file of ${JSON.stringify(secrets)}) { try { console.log(require("node:fs").readFileSync(file, "utf8")); } catch {} }\nprocess.exit(1);\n`,
 	);
 	git(project, "init", "-q", "-b", "main");
 	git(project, "config", "user.name", "Host Verification Base");
@@ -90,14 +92,31 @@ it("masks the workspace's secret files and Clio's settings from the base replay"
 	git(project, "add", "-A");
 	git(project, "commit", "-q", "-m", "baseline");
 	const base = git(project, "rev-parse", "HEAD").trim();
-	writeFileSync(settings, "settings-secret-marker\n");
-	writeFileSync(env, "env-secret-marker\n");
+	git(project, "worktree", "add", "-q", "-b", "task", worktree, base);
+	mkdirSync(join(project, "svc"));
+	for (const [index, file] of secrets.entries()) writeFileSync(file, `secret-marker-${"sabc"[index]}\n`);
+	const taskWorktree = { root: project, path: worktree, runId: "masks", branch: "task", base, ownerToken: "fixture" };
 	const request = {
-		resolvedVerification: [{ check: "probe", cwd: project, timeoutMs: 10_000, argv: [process.execPath, "check.js"] }],
-		taskWorktree: { root: project, path: project, runId: "masks", branch: "main", base, ownerToken: "fixture" },
+		resolvedVerification: [{ check: "probe", cwd: worktree, timeoutMs: 10_000, argv: [process.execPath, "check.js"] }],
+		taskWorktree,
 	};
-	const verification = await runHostVerification({ runId: "masks", request, workerSuccessful: true, stateDir });
+	// Scratch roots get their own secret scan; keep the source checkout out of them, as a real project is.
+	const inherited = process.env.TMPDIR;
+	process.env.TMPDIR = join(root, "tmp");
+	mkdirSync(process.env.TMPDIR);
+	const shellSandbox = hostVerificationSandbox(undefined, taskWorktree);
+	process.env.TMPDIR = inherited;
+	ok(shellSandbox);
+	const verification = await runHostVerification({
+		runId: "masks",
+		request,
+		workerSuccessful: true,
+		stateDir,
+		shellSandbox,
+	});
 	ok(verification?.checks[0]);
+	// The task side masks Clio's settings only when a target declares auth headers.
+	ok(!/secret-marker-[abc]/u.test(verification.checks[0].outputTail), verification.checks[0].outputTail);
 	await compareHostVerificationBase({ verification, request, stateDir });
 	strictEqual(verification.checks[0].baseComparison?.status, "failed");
 	const replays = join(stateDir, "dispatch-verification-base");
