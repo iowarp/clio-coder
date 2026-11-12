@@ -19,7 +19,7 @@ Keep the id `slurm`; the skill and the approval rules below expect it. Run `clio
 
 ## Check with doctor
 
-`clio-coder doctor --verbose` prints three Slurm rows, none of which fails doctor.
+`clio-coder doctor --verbose` prints one Slurm row when nothing is set up and three once anything is, none of which fails doctor.
 
 | Row | What it reports |
 | --- | --- |

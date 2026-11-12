@@ -15,7 +15,7 @@ Nobody is there to approve anything, so a request that would ask you is denied, 
 | --- | --- |
 | `0` | The run finished. |
 | `1` | The task failed, including a run that changed nothing because its actions were refused. |
-| `2` | A usage error: an unknown flag, target or agent, or a refused request. |
+| `2` | A usage error: an unknown flag, target or agent, or a refused admission or capability request. |
 | `3` | A worker was stopped by permission refusals, or the safety judge kept blocking. |
 | `4` | A spend ceiling stopped the run. |
 | `124` | `--timeout` ran out. |

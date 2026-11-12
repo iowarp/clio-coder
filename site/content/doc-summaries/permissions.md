@@ -20,7 +20,7 @@ Asking for a plan or saying “do not edit” guides the task; it does not estab
 
 ## What the sandbox hides
 
-A sandboxed command writes only to your project, the temp directories and your scratch roots. It cannot read your SSH keys, cloud and code-host logins, registry tokens or the project's `.env` and key files, and credential variables are removed. A push, a publish or a cluster scheduler command needs those credentials, so it leaves the sandbox only once the safety judge or you allow it.
+A sandboxed command writes only to your project, the temp directories, your scratch roots, a private tool cache and the repository's Git data. It cannot read your SSH keys, cloud and code-host logins, registry tokens or the project's `.env` and key files, and credential variables are removed. A push, a publish or a cluster scheduler command needs those credentials, so it leaves the sandbox only once the safety judge or you allow it.
 
 ## Verify using your project's checks
 
