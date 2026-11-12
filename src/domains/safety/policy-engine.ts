@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { bashSearchPath, probeToolEnv } from "../../core/bash-exec.js";
+import { internalGitArgv } from "../../core/internal-git.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
@@ -2823,10 +2824,20 @@ function protectedEntriesUnder(root: string, policy: CompiledPathPolicy): Protec
 	return entries;
 }
 
-/** The subset of `entries` git tracks in `cwd`'s work tree; all of them when git cannot tell. */
+/**
+ * The subset of `entries` git tracks in `cwd`'s work tree; all of them when git cannot tell. This runs on the host
+ * while a command is judged, in whatever repository `cwd` is in, so it is internal git: ls-files would otherwise run
+ * that repository's core.fsmonitor program, which a contained command can write into a repository it creates.
+ */
 function trackedEntries(entries: ReadonlyArray<ProtectedTreeEntry>, cwd: string): ProtectedTreeEntry[] {
 	if (entries.length === 0) return [];
-	const result = spawnSync("git", ["ls-files", "-z", "--", ...entries.map((entry) => entry.absolute)], {
+	let argv: string[];
+	try {
+		argv = internalGitArgv(["ls-files", "-z", "--", ...entries.map((entry) => entry.absolute)], cwd);
+	} catch {
+		return [...entries];
+	}
+	const result = spawnSync("git", argv, {
 		cwd,
 		encoding: "utf8",
 		timeout: 2_000,

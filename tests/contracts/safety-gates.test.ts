@@ -182,6 +182,35 @@ describe("safety gate boundary", () => {
 		strictEqual(evaluate("grep -n SECRET src/x.ts").kind === "block", false);
 	});
 
+	it("judges a git grep without running the fsmonitor program of a repository a contained command made", (t) => {
+		if (spawnSync("git", ["--version"]).status !== 0) {
+			t.skip("git is not installed");
+			return;
+		}
+		// The operator's git environment must not be what turns fsmonitor off.
+		const saved = Object.entries(process.env).filter(([name]) => /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/u.test(name));
+		for (const [name] of saved) Reflect.deleteProperty(process.env, name);
+		t.after(() => {
+			for (const [name, value] of saved) process.env[name] = value;
+		});
+		const sub = join(scratch, "sub");
+		mkdirSync(sub, { recursive: true });
+		strictEqual(spawnSync("git", ["init", "-q"], { cwd: sub }).status, 0);
+		const marker = join(scratch, "fsmonitor-ran");
+		const program = join(sub, "fsmonitor.sh");
+		writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
+		strictEqual(spawnSync("git", ["config", "core.fsmonitor", program], { cwd: sub }).status, 0);
+		writeFileSync(join(sub, ".env"), "SECRET=value\n");
+		writeFileSync(join(sub, "a.txt"), "SECRET\n");
+		const decision = engine().evaluate({ tool: ToolNames.Bash, args: { command: "git grep SECRET", cwd: "sub" } });
+		strictEqual(
+			existsSync(marker),
+			false,
+			"the repository's fsmonitor program ran on the host while the command was judged",
+		);
+		strictEqual(decision.kind === "block", false, "an untracked .env is outside git grep's walk");
+	});
+
 	it("does not judge a search pattern as a path", () => {
 		const policy = engine();
 		mkdirSync(join(scratch, "src"), { recursive: true });
