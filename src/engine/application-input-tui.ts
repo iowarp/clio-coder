@@ -129,10 +129,11 @@ export class ApplicationInputTuiAltScreen extends TuiAltScreen implements Applic
 	 * Run one pointer report through Pi's text selection alone, for a modal
 	 * overlay that owns the keyboard. Pi's SelectList and SettingsList select
 	 * on press and confirm on click, so the report never reaches overlay
-	 * components; a drag still selects the screen rows under it and copies
-	 * them. Pi treats a release that selected nothing as a click and offers it
-	 * to the overlay, so that release is dropped, and a release that ends a
-	 * selection is preceded by a motion report so it never counts as a click.
+	 * components; a drag still selects and copies the transcript beside the
+	 * overlay, or the screen rows of the overlay itself. Pi treats a release
+	 * that selected nothing as a click and offers it to the overlay, so that
+	 * release is dropped, and a release that ends a selection is preceded by a
+	 * motion report so it never counts as a click.
 	 */
 	selectPastOverlay(data: string): void {
 		const event = this.parseSgrMouseEvent(data);

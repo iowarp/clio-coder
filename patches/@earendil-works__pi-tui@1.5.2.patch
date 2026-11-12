@@ -165,7 +165,7 @@ index 0c95f39781c7962df89b9c7f97db6fc00fa3e123..afb8bdc52e3ca93cbd00033837c910cd
      private copyTextToClipboard;
      private applySearchTextHighlight;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 3567a4350ab0da56276289d422b58d46e4882949..080f9696aab14df0bd51f56a19cf0c70887684ad 100644
+index 3567a4350ab0da56276289d422b58d46e4882949..f60a8e43fe4e88e14dc38782ff9c24a294bfea75 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
 @@ -325,6 +325,13 @@ export class TuiAltScreen extends TuiBase {
@@ -182,7 +182,22 @@ index 3567a4350ab0da56276289d422b58d46e4882949..080f9696aab14df0bd51f56a19cf0c70
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
-@@ -1222,15 +1229,18 @@ export class TuiAltScreen extends TuiBase {
+@@ -1163,7 +1170,13 @@ export class TuiAltScreen extends TuiBase {
+         }
+         this.stopSelectionAutoScroll();
+         this.selectionPressActive = true;
+-        const scrollView = !this.hasOverlay() && this.currentLayout
++        // A press beside an overlay still selects the scroll view's content; only a press on an overlay's cells
++        // selects screen rows.
++        const onOverlay = this.renderedOverlayLayouts.some((layout) => event.x >= layout.col &&
++            event.x < layout.col + layout.width &&
++            event.y >= layout.row &&
++            event.y < layout.row + layout.height);
++        const scrollView = !onOverlay && this.currentLayout
+             ? getScrollViewsAt(this.currentLayout, event.x, event.y)[0]
+             : undefined;
+         const anchor = this.getSelectionPoint(event, scrollView);
+@@ -1222,15 +1235,18 @@ export class TuiAltScreen extends TuiBase {
                  return undefined;
              sourceLines = box.scrollContentLines;
          }
