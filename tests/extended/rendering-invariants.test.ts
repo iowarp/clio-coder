@@ -1353,6 +1353,43 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps one neutral copy flash over SSH however many selections land", async () => {
+		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
+		process.env.SSH_CONNECTION = "client 0 server 0";
+		delete process.env.DISPLAY;
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, fullscreenTuiOptions(terminal));
+		const text = Array.from({ length: 40 }, (_, row) => `row ${row} alpha beta`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true, follow: "end" }));
+		tui.start();
+		const osc52 = () => terminal.writes.filter((write) => write.includes("\x1b]52;c;")).length;
+		try {
+			tui.renderNow(true);
+			for (const row of [3, 5, 7]) {
+				const sent = osc52();
+				terminal.input(`\x1b[<0;1;${row}M`);
+				terminal.input(`\x1b[<32;12;${row}M`);
+				terminal.input(`\x1b[<0;12;${row}m`);
+				for (let wait = 0; wait < 200 && osc52() === sent; wait++) await new Promise((resolve) => setTimeout(resolve, 10));
+				await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+			strictEqual(osc52(), 3, "every selection still goes out as OSC 52");
+			terminal.writes = [];
+			tui.renderNow(true);
+			const screen = stripTerminalSequences(terminal.writes.join(""));
+			strictEqual(screen.split("Sent to terminal clipboard (OSC 52)").length - 1, 1, "one flash row, not one per copy");
+			ok(!screen.includes("Copy unconfirmed"), "over SSH the terminal is the expected path, not a failure");
+			ok(!screen.includes("Copied!"), "#437: OSC 52 is never reported as a confirmed copy");
+		} finally {
+			tui.stop();
+			for (const [key, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
 	it("copies a wrapped fullscreen paragraph as one line without the turn glyph or the gutter (#453)", async () => {
 		const copies: string[] = [];
 		const terminal = new RenderingTerminal();

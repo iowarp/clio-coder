@@ -29,6 +29,8 @@ interface ClipboardPlan {
 	missing: string[];
 	/** Display environment the platform needs and does not have, for the failure flash. */
 	missingDisplay?: string;
+	/** OSC 52 is the only path by design, so a copy that reaches it has nothing to diagnose. */
+	terminalOnly?: boolean;
 }
 
 const TOOL_TIMEOUT_MS = 2_000;
@@ -115,10 +117,9 @@ function resolvePlan(): ClipboardPlan {
 	// would confirm a copy the operator never receives. Only a forwarded X11
 	// display reaches the operator's side.
 	if (isSsh()) {
-		if (hasForwardedX11()) {
-			add("xclip", which("xclip"), { args: ["-selection", "clipboard", "-in"], timeoutMs: TOOL_TIMEOUT_MS, encode: utf8 });
-			add("xsel", which("xsel"), { args: ["--clipboard", "--input"], timeoutMs: TOOL_TIMEOUT_MS, encode: utf8 });
-		}
+		if (!hasForwardedX11()) return { tools, missing, terminalOnly: true };
+		add("xclip", which("xclip"), { args: ["-selection", "clipboard", "-in"], timeoutMs: TOOL_TIMEOUT_MS, encode: utf8 });
+		add("xsel", which("xsel"), { args: ["--clipboard", "--input"], timeoutMs: TOOL_TIMEOUT_MS, encode: utf8 });
 		return { tools, missing, missingDisplay: "SSH session, local tools skipped" };
 	}
 	const wsl = isWsl();
@@ -247,6 +248,8 @@ async function copyInOrder(
 	// A tool may appear or a display come back; resolve again on the next copy.
 	plan = undefined;
 	writeOsc52(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
+	// Still not "Copied!" (#437): no terminal acknowledges OSC 52.
+	if (current.terminalOnly) return "Sent to terminal clipboard (OSC 52)";
 	if (current.missing.length > 0) failures.push(`not found: ${current.missing.join(", ")}`);
 	if (current.missingDisplay !== undefined) failures.push(current.missingDisplay);
 	if (failures.length === 0) failures.push("no clipboard tool");

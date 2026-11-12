@@ -8,9 +8,12 @@
  * write) can belong to that frame.
  */
 
-import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
+import type { Terminal, TuiAltScreenOptions, TuiStopOptions } from "@earendil-works/pi-tui";
 import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 import { hasCopyMark, type SelectedRow, selectedRowsText, stripCopyMarks } from "./selection-text.js";
+
+/** pi-tui's flash duration when the caller passes none (`components/alt-screen-flash.js`). */
+const DEFAULT_FLASH_MS = 1000;
 
 export type TuiRenderPhase = "overlay" | "normalization" | "cursor";
 
@@ -267,6 +270,8 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	}
 	private currentFrame: unknown | undefined;
 	private paintedColumns: number | undefined;
+	/** When each flashed message leaves the stack; pi-tui appends a repeat as another row. */
+	private readonly flashShownUntil = new Map<string, number>();
 
 	constructor(
 		terminal: Terminal,
@@ -283,6 +288,26 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 
 	override requestRender(force = false): void {
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
+	}
+
+	/** A message identical to one still showing is not stacked again, so repeated copies keep one row. */
+	override flash(message: string, durationMs?: number): void {
+		const now = performance.now();
+		for (const [shown, until] of this.flashShownUntil) if (until <= now) this.flashShownUntil.delete(shown);
+		if (this.flashShownUntil.has(message)) return;
+		this.flashShownUntil.set(message, now + (durationMs ?? DEFAULT_FLASH_MS));
+		super.flash(message, durationMs);
+	}
+
+	// pi-tui drops every flash when the terminal starts or stops.
+	protected override beforeTerminalStart(): void {
+		this.flashShownUntil.clear();
+		super.beforeTerminalStart();
+	}
+
+	protected override beforeTerminalStop(options: TuiStopOptions): void {
+		this.flashShownUntil.clear();
+		super.beforeTerminalStop(options);
 	}
 
 	protected override doRender(): void {
