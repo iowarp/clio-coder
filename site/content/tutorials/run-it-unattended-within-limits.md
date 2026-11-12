@@ -66,7 +66,8 @@ Stderr names the session and ends with an `observed:` line that counts tool call
 | `0` | The run settled and succeeded |
 | `1` | It failed: the model was unreachable, a worker did not deliver, or a refused call left the task undone |
 | `2` | A usage error, including `--autonomy yolo` as root outside a container |
-| `4` | A cost ceiling, or at `yolo` the tool-call budget, stopped it; `--continue` resumes |
+| `3` | At `yolo`, the safety judge blocked too many calls in a row; review the run, then `--continue` |
+| `4` | A cost ceiling, or at `yolo` an autonomous cap on tool calls, minutes, or tokens, stopped it; `--continue` resumes |
 | `124` | `--timeout` expired; the run still settled and sealed |
 | `130`, `143` | Ctrl+C or a SIGTERM stopped it |
 :::
