@@ -49,6 +49,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Approving project hooks now also pins the repository scripts they name, so a project whose hooks run repository scripts asks for approval once more after the upgrade, and again whenever one of those scripts changes.
 - A task merge into a checkout with overlapping uncommitted work is refused even when `merge.autoStash` is set, instead of reporting merged and leaving that work conflicted.
 - Arena contenders get an allowlisted environment: the base variables, `safety.sandboxPassEnv` and their own target's credentials. Other targets' keys, other secret-shaped variables, `HERDR_*`, `SSH_AUTH_SOCK` and display variables no longer reach them, so a check that reads another variable needs it in `safety.sandboxPassEnv`.
+- Fleet loop checks, gates and gate baselines, and research objectives and gates, now run in the main-session sandbox that host verification's checks use, because they run what workers wrote: a check that writes outside the workspace, the scratch roots and the package caches, or reads a masked secret, now fails there as a host verification check already did. `safety.sandbox: off` runs them bare, as does `auto` on a host with no sandbox backend; `required` without one refuses them.
 
 #### Removed and renamed
 
@@ -292,6 +293,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - An api 2 extension runtime's OS sandbox masks the secret files in the workspace and in every directory its manifest declares readable, as a dispatched worker's sandbox does.
 - `run_script` refuses a declared `BASH_ENV`, `CDPATH`, `CLIO_CODER_INTERACTIVE` or autonomy key, and its safety check reads the variables a call declares. Every subprocess Clio Coder starts (`run_script`, verify, hooks, MCP servers) carries the session's autonomy ceiling and contained-yolo pin, which a caller can tighten but not lift.
 - Under `safety.sandbox: required`, an outward `gh` input file or `rsync` source that is a secret file (by name, by content or through a link), or a directory that holds one, keeps the line in the sandbox and the refusal names it; outward `curl` no longer follows redirects.
+- A dispatched worker in a task worktree no longer reads the secret files of the checkout the worktree was cut from: its sandbox's secret scan covers that checkout and every worktree linked to it.
+- Under `safety.sandbox: required`, `npm publish` and `pnpm publish` leave the sandbox only when the package directory holds no masked secret and its secret scan was not capped; otherwise the line stays inside and the refusal names the file.
+- The safety judge reads the ask reason, the policy reason and the consequence lines, `package.json` script bodies included, as redacted data inside the call's quoted block, so a repository's script text cannot pose as an operator message.
 
 ### Desktop app
 
@@ -559,6 +563,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Claude Code and OpenCode always read their own instruction files beside the rules Clio Coder compiles, so a stale rule in those files still reaches them; Clio Coder names the files and how many rules are stale.
 - A `run_script` run links an input to the project store only when it gets the store reference (`<tag>:<name>`); a path taken from `store get` runs the same but records no store provenance.
 - Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, and then exits 1.
+- A fleet action step that is not a check, a gate or a commit runs as you outside the sandbox, even when it runs code a worker wrote.
 
 ## 0.7.0 - 2026-11-08
 
