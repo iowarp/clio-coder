@@ -24,7 +24,7 @@ For clusters, CLIO Coder installs without root on a login node. The agent can ru
 
 The clio-kit MCP server is another route to Slurm. CLIO Coder does not submit its own workers through a scheduler.
 
-Results can live outside the repository in the project store, under named tags. Each stored file keeps a write-once record of where it came from, including the hash and inputs of the script that produced it. `clio-coder store verify` reports any file whose bytes have changed since.
+Results can live outside the repository in the project store, under named tags. Each stored file keeps a write-once record of where it came from and its hash, and a result written by a `run_script` step also names the script and its inputs. `clio-coder store verify` reports any file whose bytes have changed since.
 
 A `research` campaign can optimize one run of a parameter sweep, or gate every candidate on each run of it. A campaign that was stopped or ran out of wall time picks up with `research resume`, within the budget it started with.
 
