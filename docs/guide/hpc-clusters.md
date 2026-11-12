@@ -61,7 +61,9 @@ and a mismatch stops the install. For official builds, the script also checks th
 OpenPGP signature on `SHASUMS256.txt.asc` against the Node.js release team's
 keys, fetched from the `nodejs/release-keys` repository rather than from the
 download host, when `gpgv` or `gpg` is present. A bad signature stops the
-install. An unavailable keyring or missing `gpg` is reported, and the install
+install, and so does a signature from nodejs.org by a key outside that keyring
+or a `SHASUMS256.txt.asc` from nodejs.org that holds no valid signature, unless
+`CLIO_CODER_REQUIRE_SIGNATURE=0` is set. An unavailable keyring or missing `gpg` is reported, and the install
 continues on the checksum alone unless `CLIO_CODER_REQUIRE_SIGNATURE=1` is set.
 unofficial-builds.nodejs.org publishes no signatures, so the glibc-2.17 and musl
 arm64 builds are verified by checksum over HTTPS only.

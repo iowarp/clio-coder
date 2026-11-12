@@ -373,11 +373,25 @@ verify_signature() {
 		return 0
 	fi
 	# A key outside the Node release keyring is definitive; a tool that cannot read the keyring (gpgv 1.x
-	# and gpg 2.0 cannot read .kbx, as on CentOS 7) is not, and keeps the checksum-only warning.
-	if grep -q '^\[GNUPG:\] NO_PUBKEY' "$work/gpg.status" &&
-		! grep -Eqi 'keyblock resource|keyring|unsupported|invalid packet' "$work/gpg.err"; then
-		# Runs in a command substitution, so the reason goes through a file.
+	# and gpg 2.0 cannot read .kbx, as on CentOS 7) is not, and keeps the checksum-only warning. That
+	# tool still reads the signature packet (ERRSIG, NO_PUBKEY) and reports no NODATA, and its error
+	# is about the keyring, not on a line checking the signature.
+	tool_error=0
+	if grep -Eq '^\[GNUPG:\] (ERRSIG|NO_PUBKEY)' "$work/gpg.status" &&
+		! grep -q '^\[GNUPG:\] NODATA' "$work/gpg.status" &&
+		grep -vi 'signature' "$work/gpg.err" | grep -Eqi 'keyblock resource|keyring|unsupported|invalid packet'; then
+		tool_error=1
+	fi
+	# Runs in a command substitution, so a definitive reason goes through a file.
+	if [ "$tool_error" = 0 ] && grep -q '^\[GNUPG:\] NO_PUBKEY' "$work/gpg.status"; then
 		printf 'SHASUMS256.txt is signed by a key outside the Node.js release keyring\n' >"$work/unsigned"
+		return 0
+	fi
+	# From nodejs.org itself, anything else (no OpenPGP data, no signature packet, an unreadable one) is
+	# as definitive as no signature at all.
+	if [ "$tool_error" = 0 ] && [ -z "${CLIO_CODER_NODE_TARBALL:-}" ] && [ "$node_base" = "$NODE_OFFICIAL_BASE" ]; then
+		printf 'the SHASUMS256.txt.asc nodejs.org served is not a signature %s could verify (%s)\n' "$gpg_tool" \
+			"$(head -n 1 "$work/gpg.err" 2>/dev/null)" >"$work/unsigned"
 		return 0
 	fi
 	warn "could not check the SHASUMS256.txt signature with $gpg_tool ($(head -n 1 "$work/gpg.err" 2>/dev/null)); relying on the checksum file fetched over HTTPS"
@@ -432,8 +446,8 @@ install_node_runtime() {
 	if [ "$signed" = 0 ] && [ "${CLIO_CODER_REQUIRE_SIGNATURE:-}" = 1 ]; then
 		fail "CLIO_CODER_REQUIRE_SIGNATURE=1, but no verified signature covers SHASUMS256.txt"
 	fi
-	# A definitive failure (no signature from nodejs.org, or a key outside the release keyring) fails
-	# closed; only an explicit CLIO_CODER_REQUIRE_SIGNATURE=0 installs on the HTTPS checksum alone.
+	# A definitive failure (no signature from nodejs.org, one that is not a valid signature, or a key
+	# outside the release keyring) fails closed; only an explicit CLIO_CODER_REQUIRE_SIGNATURE=0 installs on the HTTPS checksum alone.
 	if [ -n "$unsigned_reason" ]; then
 		[ "${CLIO_CODER_REQUIRE_SIGNATURE:-}" = 0 ] ||
 			fail "$unsigned_reason; refusing to install. CLIO_CODER_REQUIRE_SIGNATURE=0 relies on the checksum alone."

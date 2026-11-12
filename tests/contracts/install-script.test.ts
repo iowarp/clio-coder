@@ -109,6 +109,66 @@ describe("contracts/install-script", () => {
 		}
 	});
 
+	it("refuses a nodejs.org signature file that holds no valid signature, keeping the old-gpg warning", () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-install-nodata-"));
+		try {
+			const release = join(root, "dist", "v24.11.1");
+			mkdirSync(release, { recursive: true });
+			const tarball = "node-v24.11.1-linux-x64.tar.gz";
+			writeFileSync(join(release, tarball), "not a node tarball");
+			const sum = createHash("sha256").update("not a node tarball").digest("hex");
+			writeFileSync(join(release, "SHASUMS256.txt"), `${sum}  ${tarball}\n`);
+			writeFileSync(join(release, "SHASUMS256.txt.asc"), "not a signature");
+			const bin = join(root, "bin");
+			mkdirSync(bin);
+			// A curl that serves https://nodejs.org/dist from the release directory above, so the signature is official.
+			writeFileSync(
+				join(bin, "curl"),
+				[
+					"#!/bin/sh",
+					'out=""; url=""',
+					'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; --proto|--retry|--connect-timeout) shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done',
+					'case "$url" in https://nodejs.org/dist/*) f="$FAKE_DIST/$(printf %s "$url" | cut -c25-)"; [ -f "$f" ] && cp "$f" "$out" && exit 0 ;; esac',
+					"exit 22",
+					"",
+				].join("\n"),
+			);
+			// gpgv's output for junk (NODATA, a CRC and packet error) and for a gpgv that cannot read the .kbx keyring.
+			writeFileSync(
+				join(bin, "gpgv"),
+				[
+					"#!/bin/sh",
+					'case "$FAKE_GPG" in',
+					"nodata) echo '[GNUPG:] NODATA 3'; echo \"gpgv: [don't know]: invalid packet (ctb=66)\" >&2; echo 'gpgv: no signature found' >&2 ;;",
+					"toolerror) echo '[GNUPG:] NO_PUBKEY 0'; echo 'gpgv: keyblock resource `pubring.kbx: invalid keyring' >&2 ;;",
+					"esac",
+					"",
+				].join("\n"),
+			);
+			chmodSync(join(bin, "curl"), 0o755);
+			chmodSync(join(bin, "gpgv"), 0o755);
+			writeFileSync(join(root, "pubring.kbx"), "");
+			const install = (env: Record<string, string>) =>
+				run(["--version", "v0.6.0", "--node-version", "24.11.1"], {
+					PATH: `${bin}:/usr/bin:/bin`,
+					TMPDIR: root,
+					FAKE_DIST: join(root, "dist"),
+					CLIO_CODER_NODE_BUILD: "linux-x64",
+					CLIO_CODER_NODE_KEYRING: join(root, "pubring.kbx"),
+					...env,
+				});
+			const junk = install({ FAKE_GPG: "nodata" });
+			strictEqual(junk.code, 1, junk.stderr);
+			match(junk.stderr, /nodejs\.org served is not a signature gpgv could verify .*refusing to install/u);
+			ok(!/checksum verified/u.test(`${junk.stdout}${junk.stderr}`), junk.stderr);
+			const oldTool = install({ FAKE_GPG: "toolerror" });
+			match(oldTool.stderr, /could not check the SHASUMS256\.txt signature/u);
+			match(`${oldTool.stdout}${oldTool.stderr}`, /checksum verified for node-v24\.11\.1-linux-x64\.tar\.gz/u);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects version specs that could reach a different package or a shell", () => {
 		for (const spec of ["latest; id", "npm:evil@1.0.0", "../evil", ">=0.4.0", "file:/x", "0.4", "Latest", "$(id)"]) {
 			const r = run(["--dry-run", "--version", spec]);
