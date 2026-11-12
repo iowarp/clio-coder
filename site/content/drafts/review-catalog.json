@@ -1,5 +1,42 @@
 {
   "schema": 1,
   "publication": "Not registered in content/tutorials.json; excluded from normal public output",
-  "articles": []
+  "articles": [
+    {
+      "slug": "keep-results-in-the-project-store",
+      "title": "Keep results outside the tree with the project store",
+      "description": "Store a result with a note, check it for drift, read it from a script, and let a worker write into one granted tag.",
+      "category": "Scientific software",
+      "time": "7 min",
+      "author": "The CLIO Coder team",
+      "source": "keep-results-in-the-project-store.md",
+      "basis": "Documented workflow",
+      "versionScope": "0.8.0",
+      "interfaces": [
+        "Terminal"
+      ],
+      "guides": [
+        "guide/tool-usage.md",
+        "guide/fleet-dispatch.md"
+      ]
+    },
+    {
+      "slug": "set-up-a-lab-from-one-setup-file",
+      "title": "Set up a lab from one setup file",
+      "description": "Write one YAML file that connects every lab member to your model gateway, check what it may carry, and test the route.",
+      "category": "Models",
+      "time": "8 min",
+      "author": "The CLIO Coder team",
+      "source": "set-up-a-lab-from-one-setup-file.md",
+      "basis": "Documented workflow",
+      "versionScope": "0.8.0",
+      "interfaces": [
+        "Terminal"
+      ],
+      "guides": [
+        "guide/configuration-and-targets.md",
+        "guide/hpc-clusters.md"
+      ]
+    }
+  ]
 }
