@@ -1919,6 +1919,36 @@
 		margin-block-start: var(--space-1);
 		color: var(--ink);
 	}
+	/* Learning path strip: one row per path the tutorial belongs to. */
+	.path-strip {
+		margin-block-end: var(--space-8);
+		border-block: 1px solid var(--line);
+	}
+	.path-strip ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.path-strip li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--space-1) var(--space-6);
+		padding-block: var(--space-3);
+		color: var(--ink-soft);
+	}
+	.path-strip li + li {
+		border-block-start: 1px solid var(--line);
+	}
+	.path-strip li > span {
+		padding-block: var(--space-1);
+	}
+	.path-strip-path {
+		font: 0.7rem / 1.5 var(--font-mono);
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--secondary);
+	}
 	.guide-cover {
 		margin-block-end: var(--space-8);
 	}

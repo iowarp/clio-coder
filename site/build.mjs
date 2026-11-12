@@ -927,11 +927,29 @@ for (const item of articles) {
 		: item.image
 			? `<img class="cover" src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}" />`
 			: "";
+	// One row per learning path this tutorial is a step of, from paths.json.
+	const pathRows =
+		item.collection.id === "tutorials"
+			? paths
+					.filter((path) => path.steps.includes(item.slug))
+					.map((path) => {
+						const step = path.steps.indexOf(item.slug);
+						const link = (slug, label) => {
+							const target = articles.find((article) => article.collection === item.collection && article.slug === slug);
+							return `<span>${label}: <a href="${target.url}">${escapeHtml(target.title)}</a></span>`;
+						};
+						return `<li><a class="path-strip-path" href="/learn.html#${path.id}">${escapeHtml(path.label)} · step ${step + 1} of ${path.steps.length}</a>${step > 0 ? link(path.steps[step - 1], "Previous") : ""}${step < path.steps.length - 1 ? link(path.steps[step + 1], "Next") : `<span>Last step, <a href="/learn.html#learning-paths">back to the paths</a></span>`}</li>`;
+					})
+			: [];
+	const pathStrip = pathRows.length
+		? `<nav class="path-strip" aria-label="Learning path"><ul>${pathRows.join("")}</ul></nav>`
+		: "";
 	let html = tutorialTemplate
 		.replace("<!-- collection-url -->", item.collection.listing)
 		.replace("<!-- collection-label -->", item.collection.label.toLowerCase());
 	const slots = {
 		"tutorial-description": escapeHtml(item.description),
+		"tutorial-path": pathStrip,
 		"tutorial-facts": facts,
 		"tutorial-cover": cover,
 		"tutorial-toc": toc ? `<h2>On this page</h2>${toc}` : "",
@@ -975,7 +993,7 @@ for (const collection of collections) {
 		.join("\n");
 	const learningPaths =
 		collection.id === "tutorials"
-			? `<div class="learning-paths">${paths
+			? `<div class="learning-paths" id="learning-paths">${paths
 					.map((path, number) => {
 						const steps = path.steps
 							.map((slug, step) => {
