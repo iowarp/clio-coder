@@ -1,0 +1,76 @@
+{
+	"cols": 100,
+	"rows": 30,
+	"idleCap": 1,
+	"proxyPort": 4313,
+	"theme": {
+		"fg": "#eeeae2",
+		"bg": "#1e1e1e",
+		"palette": "#000000:#cd0000:#00cd00:#cdcd00:#0000ee:#cd00cd:#00cdcd:#e5e5e5:#7f7f7f:#ff0000:#00ff00:#ffff00:#5c5cff:#ff00ff:#00ffff:#ffffff"
+	},
+	"liveSource": "Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias",
+	"scenarios": [
+		{
+			"id": "cli-doctor",
+			"summary": "doctor --fix creates a fresh install's state, then doctor reports each check",
+			"title": "CLIO Coder doctor on a fresh install",
+			"live": false,
+			"rows": 50,
+			"poster": "healthy",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"type": "clio-coder doctor --fix"
+				},
+				{
+					"pause": 0.4,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.2
+				},
+				{
+					"marker": "repaired"
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"type": "clio-coder doctor"
+				},
+				{
+					"pause": 0.4,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "healthy"
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Doctor",
+				"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
+				"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each."
+			},
+			"cols": 120
+		}
+	]
+}

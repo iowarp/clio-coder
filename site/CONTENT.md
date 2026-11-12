@@ -150,7 +150,11 @@ A terminal capture can carry its recording: `cast` (an asciicast v2 file in
 `rows`, `duration` in seconds, and `posterAt`, the time the still shows. The
 page keeps the still, a download link and the transcript; a Play button loads
 the vendored asciinema player on request, and only pages with a recording allow
-`'wasm-unsafe-eval'` in their policy. `python3 site/capture/cast-symbols.py` rebuilds the symbol
+`'wasm-unsafe-eval'` in their policy. `node site/capture/run.mjs --scratch
+<directory> --clio <build> [--only <ids>] [--publish]` reruns the recordings
+in `capture/scenarios.json` in a fresh sandboxed profile, renders their stills
+with the same player, and refuses to publish any that name a host, a user, a
+private address, a key or the model gateway. `python3 site/capture/cast-symbols.py` rebuilds the symbol
 font the player falls back to for glyphs IBM Plex Mono lacks.
 
 ## Review builds

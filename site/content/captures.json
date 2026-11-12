@@ -239,15 +239,21 @@
 		"cli-doctor": {
 			"image": "assets/guides/cli-doctor.webp",
 			"original": "assets/guides/cli-doctor.png",
-			"width": 2782,
-			"height": 832,
+			"width": 2268,
+			"height": 2108,
 			"label": "Doctor",
-			"alt": "Terminal doctor report with OK rows for the version, the installer install with its private Node.js runtime, directories, credentials, migrations, sessions, and local worker capacity.",
-			"caption": "doctor on an installer install: version, install method and runtime, directories, and local worker capacity.",
+			"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
+			"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. bash at 150 columns: clio-coder doctor. Cropped to rows 1-20, before the connection rows, which name a private endpoint."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cli-doctor) in a fresh profile: home /home/researcher, host lab, 120x50 terminal, asciinema v2, idle capped at 1s. No model.",
+			"cast": "assets/casts/cli-doctor.cast",
+			"transcript": "assets/casts/cli-doctor.txt",
+			"cols": 120,
+			"rows": 50,
+			"duration": 7.5,
+			"posterAt": 6.357
 		},
 		"gui-task": {
 			"image": "assets/gui-task.webp",

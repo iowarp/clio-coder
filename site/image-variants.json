@@ -450,27 +450,27 @@
     ]
   },
   "assets/guides/cli-doctor.webp": {
-    "width": 2782,
-    "height": 832,
-    "sha256": "b50a4927f314b6dccd67567b3a6ab945ff8f3f846d084cab9d5f912e10c5e1ab",
+    "width": 2268,
+    "height": 2108,
+    "sha256": "895e93f2e7d59e90f42efcec95f61110c7dc0d4d9c3c0b4d9a2f5396ba0b9691",
     "variants": [
       {
         "path": "assets/responsive/cli-doctor-640.webp",
         "width": 640,
-        "height": 191,
-        "sha256": "5de99b5e9e9562e2f3aeda4caeee5cc7c1dedeef774ac9866777973521d06b30"
+        "height": 595,
+        "sha256": "c36bb6e5786447342233e4410e73ba73cbfc4b04a8594af36142d93d353d5f74"
       },
       {
         "path": "assets/responsive/cli-doctor-1024.webp",
         "width": 1024,
-        "height": 306,
-        "sha256": "5171da73142108dcc5b9c6a68f885cf397a8743c31b48ddaf0a60660b1610afe"
+        "height": 952,
+        "sha256": "fffa08978b53f52a48201c65813b2b754b46f6fd0443381490519d87a490ffa5"
       },
       {
         "path": "assets/responsive/cli-doctor-1600.webp",
         "width": 1600,
-        "height": 479,
-        "sha256": "0e7283bffd0e8f4b7c81584e50adba0f374df93457dadc5ef9451eeff39f1a2e"
+        "height": 1487,
+        "sha256": "2a068903ffe0f4b24663f98b644ab7548ffff4f50ff57ab0a7342138a68c513f"
       }
     ]
   },
