@@ -111,7 +111,8 @@ tracker or an unsupported adoption claim.
 Tutorials and draft guides render through `tutorial.html` as field guides. The
 heading states the answer (the catalog `description`), the version it was
 written for, the interfaces it uses, and its basis: "Recorded session" only
-when the workflow ran as described; otherwise "Documented workflow". The cover
+when the workflow ran as described; otherwise "Documented workflow". The basis
+names no version; each figure carries its own. The cover
 is a capture id from `content/captures.json`, chosen for the task, never a
 generic screen reused across guides.
 

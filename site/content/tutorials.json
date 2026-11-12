@@ -24,7 +24,7 @@
     "author": "The CLIO Coder team",
     "source": "desktop-and-terminal.md",
     "cover": "gui-task",
-    "basis": "Product tour with 0.6.0 development captures",
+    "basis": "Product tour",
     "versionScope": "0.8.0",
     "guides": [
       "guide/gui.md",
@@ -54,7 +54,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "run-a-playbook-and-land-it.md",
-    "basis": "Documented workflow with 0.6.8 captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/fleet-dispatch.md",
@@ -85,7 +85,7 @@
     "time": "4 min",
     "author": "The CLIO Coder team",
     "source": "see-what-a-session-cost-and-what-a-run-did.md",
-    "basis": "Documented workflow with 0.6.8 captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/doctor.md"
@@ -115,7 +115,7 @@
     "author": "The CLIO Coder team",
     "source": "choose-model-for-your-project.md",
     "cover": "tui-configure-review",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/configuration-and-targets.md"
@@ -130,7 +130,7 @@
     "author": "The CLIO Coder team",
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/interop.md",
@@ -146,7 +146,7 @@
     "author": "The CLIO Coder team",
     "source": "keep-long-coding-tasks-on-track.md",
     "cover": "tui-context",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/context-continuity.md"
@@ -161,7 +161,7 @@
     "author": "The CLIO Coder team",
     "source": "check-a-change-against-your-repository.md",
     "cover": "tui-verify-result",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/quality-policy.md",
@@ -177,7 +177,7 @@
     "author": "The CLIO Coder team",
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/resource-library.md",
@@ -193,7 +193,7 @@
     "author": "The CLIO Coder team",
     "source": "work-from-a-laptop-with-remote-workers.md",
     "cover": "tui-settings-fleet",
-    "basis": "Documented workflow with 0.6.0 development captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/fleet-dispatch.md",
@@ -208,7 +208,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "write-an-extension-with-declared-capabilities.md",
-    "basis": "Documented workflow with 0.6.8 captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
       "guide/harness-extensions.md",
@@ -312,7 +312,7 @@
     "time": "5 min",
     "source": "submit-a-slurm-job.md",
     "author": "The CLIO Coder team",
-    "basis": "Documented workflow with 0.6.8 captures",
+    "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
