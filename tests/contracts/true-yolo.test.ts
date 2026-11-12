@@ -1079,6 +1079,23 @@ test("the raw-text reading covers every line with a substitution the shell runs,
 	}
 });
 
+test("the yolo floor places a top-level delete after a literal cd, and judges one after any other cd as unplaced", async (t) => {
+	const cwd = workspace("clio-yolo-floor-cd-");
+	const home = await isolateClioEnv("clio-yolo-floor-cd-home-");
+	t.after(() => home.restore());
+	mkdirSync(join(cwd, "build"));
+	const engine = engineFor(cwd);
+	const judge = (command: string) => engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO);
+	for (const command of ["cd /etc && shred -u passwd", 'cd "$X" && rm -rf lib', "cd /us* && rm -rf lib"]) {
+		const decision = judge(command);
+		strictEqual(decision.kind, "block", command);
+		strictEqual(decision.ruleId, "yolo-floor-delete-target", command);
+	}
+	for (const command of ["cd build && rm -rf out", 'cd "$X" && rm -rf build']) {
+		strictEqual(judge(command).kind, "allow", command);
+	}
+});
+
 // #419: an admitted yolo script commits through git, fills its own package cache,
 // and leaves no commondir behind to redirect the host's next git command.
 test("a yolo script run through bash commits in the workspace repository and its planted commondir is swept", async (t) => {

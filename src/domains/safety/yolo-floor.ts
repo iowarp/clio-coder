@@ -326,6 +326,13 @@ function expandHomeWord(word: string): string | null {
 	return /[$`]/u.test(expanded) ? null : expanded;
 }
 
+/** A directory and every directory above it, the root excluded. */
+function ancestors(dir: string): string[] {
+	const found: string[] = [];
+	for (let at = dir; at !== path.dirname(at); at = path.dirname(at)) found.push(at);
+	return found;
+}
+
 /** Most directories one walk keeps for its relative deletes. */
 const MAX_FLOOR_BASES = 32;
 
@@ -335,8 +342,12 @@ const MAX_FLOOR_BASES = 32;
  * however wrapped, `find -delete` and `find -exec rm` by their roots,
  * `rsync --delete` by its operands, and shred. A glob is judged by the
  * directory it expands in. A relative target resolves from the call's cwd
- * and every directory a literal cd can leave the shell in; a target or cd
- * named only at run time is not placed and is not a floor hit.
+ * and every directory a literal cd can leave the shell in, shred's from every
+ * directory any cd of the command can. After a cd the floor cannot place (one
+ * naming a variable, a substitution, `~user` or a glob, or one in a loop) a
+ * relative target is a hit when it could name a protected root from some
+ * directory: `.`, `..`, `*`, `lib`, `etc` or the home directory's own name. A
+ * target named only at run time is not placed and is not a floor hit.
  */
 export function yoloFloorDeleteHit(command: string, cwd: string, workspace: string): YoloFloorHit | null {
 	const homes = homeForms();
@@ -354,6 +365,20 @@ export function yoloFloorDeleteHit(command: string, cwd: string, workspace: stri
 			return real === null || real === lexical ? [lexical] : [lexical, real];
 		});
 	};
+	const roots = [...homes.flatMap(ancestors), ...SYSTEM_TREES];
+	/** Why a relative target is a hit from a directory the floor cannot place: it may name a protected root. */
+	const unplaced = (target: string): string | null => {
+		const rest = path.posix
+			.normalize(target)
+			.split("/")
+			.filter((part) => part !== "" && part !== "." && part !== "..")
+			.join("/");
+		if (rest === "") return `${target} from a directory the floor cannot place, which may be the filesystem root`;
+		const named = hit(`/${rest}`) ?? (roots.some((root) => root.endsWith(`/${rest}`)) ? rest : null);
+		return named === null
+			? null
+			: `${target} from a directory the floor cannot place, which may name a protected root (${named})`;
+	};
 	const judge = (raw: string, bases: ReadonlyArray<string> | null): string | null => {
 		const expanded = expandHomeWord(raw);
 		if (expanded === null) return null;
@@ -364,12 +389,15 @@ export function yoloFloorDeleteHit(command: string, cwd: string, workspace: stri
 			const slash = target.lastIndexOf("/", wildcard);
 			target = slash < 0 ? "." : slash === 0 ? "/" : target.slice(0, slash);
 		}
+		if (bases === null && !path.isAbsolute(target)) return unplaced(target);
 		for (const abs of place(target, bases)) {
 			const reason = hit(abs);
 			if (reason !== null) return reason;
 		}
 		return null;
 	};
+	const reached = new Set<string>([cwd]);
+	let unknown = false;
 	for (const walk of extractCommandPathWalks(command)) {
 		let bases: string[] | null = [cwd];
 		const saved: Array<string[] | null> = [];
@@ -381,8 +409,9 @@ export function yoloFloorDeleteHit(command: string, cwd: string, workspace: stri
 			}
 			if (event.kind === "cd") {
 				const target = expandHomeWord(event.target);
-				if (target === null || event.unmodeled) {
+				if (target === null || event.unmodeled || target.startsWith("~") || /[*?[{]/u.test(target)) {
 					bases = null;
+					unknown = true;
 					continue;
 				}
 				// A cd may fail, so the shell may still be where it was.
@@ -390,6 +419,8 @@ export function yoloFloorDeleteHit(command: string, cwd: string, workspace: stri
 				if (!path.isAbsolute(target) && bases === null) continue;
 				const merged = [...new Set([...(bases ?? []), ...landed])];
 				bases = merged.length > MAX_FLOOR_BASES ? null : merged;
+				if (bases === null) unknown = true;
+				else for (const base of bases) reached.add(base);
 				continue;
 			}
 			if (event.kind !== "delete" || event.scope === "input" || event.scope === "remote") continue;
@@ -400,7 +431,7 @@ export function yoloFloorDeleteHit(command: string, cwd: string, workspace: stri
 	for (const step of shellCommandSteps(command, homedir())) {
 		if (step.executable !== "shred") continue;
 		for (const operand of step.args.filter((arg) => !arg.startsWith("-"))) {
-			const reason = judge(operand, [cwd]);
+			const reason = judge(operand, [...reached]) ?? (unknown ? judge(operand, null) : null);
 			if (reason !== null) return deleteHit(operand, reason);
 		}
 	}
