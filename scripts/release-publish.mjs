@@ -437,7 +437,7 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 		else if (tag !== null || (plan.tag !== null && existingRelease(plan.tag)))
 			throw new Error("An existing GitHub release has no matching npm version; resolve it explicitly.");
 	}
-	const summary = `Clio Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${totals.join(" on Node 22, ")} on Node 24, plus runtime/platform boot checks\n\n${plan.channel === "dev" ? "Approval verifies the owner-published npm dev snapshot only; no git tag, GitHub release, website or branch writes." : plan.channel === "beta" ? "Approval authorizes GitHub prerelease/tag creation for the owner-published npm beta version." : "Approval authorizes GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup for the owner-published npm version."}\n`;
+	const summary = `CLIO Coder ${plan.version}\nSource: ${commit}\nQualification: https://github.com/${repository}/actions/runs/${runId}\nPackage: ${plan.tarball}\nSHA-256: ${plan.sha256}\nTests: ${totals.join(" on Node 22, ")} on Node 24, plus runtime/platform boot checks\n\n${plan.channel === "dev" ? "Approval verifies the owner-published npm dev snapshot only; no git tag, GitHub release, website or branch writes." : plan.channel === "beta" ? "Approval authorizes GitHub prerelease/tag creation for the owner-published npm beta version." : "Approval authorizes GitHub release/tag creation, main fast-forward, gh-pages deployment, and version-branch cleanup for the owner-published npm version."}\n`;
 	console.log(summary);
 	if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 	if (check && mode !== "dev") finishCheck(directory, publishedReceipt, plan, head);
@@ -483,7 +483,7 @@ function publishWebsite(directory, receipt, { push = true } = {}) {
 				`user.email=${user.id}+${slug}[bot]@users.noreply.github.com`,
 				"commit",
 				"-m",
-				`deploy: Clio Coder ${receipt.version} from ${receipt.commit.slice(0, 12)}`,
+				`deploy: CLIO Coder ${receipt.version} from ${receipt.commit.slice(0, 12)}`,
 			]);
 			run("git", ["-C", checkout, "push", "origin", "HEAD:refs/heads/gh-pages"]);
 		}
@@ -571,7 +571,7 @@ export async function publish(directory, commit, runId, branch) {
 			"--target",
 			commit,
 			"--title",
-			`Clio Coder ${receipt.version}`,
+			`CLIO Coder ${receipt.version}`,
 			"--notes-file",
 			join(directory, "release-notes.md"),
 			...assets,
