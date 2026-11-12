@@ -252,6 +252,15 @@ test("the unconfined prompt body appears only at effective unconfined yolo", () 
 	doesNotMatch(unconfined, /Yolo is contained/u);
 });
 
+test("the unconfined prompt says how an outward command leaves a required sandbox", () => {
+	const unconfined = renderSessionPostureUpdate(loadFragments(), "yolo", {
+		coordinatorCapabilities: [],
+		yoloConfinement: "unconfined",
+	});
+	match(unconfined, /outward command[^.]*leaves it only on a line of its own with literal arguments/u);
+	match(unconfined, /--body-file/u);
+});
+
 test("choosing unconfined yolo asks its own card and records the acceptance only on accept", async (t) => {
 	const home = await isolateClioEnv("clio-yolo-unconfined-accept-");
 	t.after(() => home.restore());
