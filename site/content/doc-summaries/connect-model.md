@@ -11,6 +11,10 @@ The test request shows that the model answers. It does not establish model quali
 
 Already know the URL? Use `clio-coder configure --quick` for endpoint-first setup. A lab or team can publish one setup file: `clio-coder configure --import <path-or-https-url>` reads it, prints where prompts will go, and asks once before saving.
 
+## Use a local model server
+
+Start LM Studio, Ollama, llama.cpp, vLLM, SGLang or Lemonade with a model that can call tools, then run `clio-coder`. It finds a server on its default port, such as Ollama on 11434, and offers it. On another address, run `clio-coder configure` and choose **A model server or gateway**. `clio-coder targets --probe --tools --target <id>` checks that the model really calls tools.
+
 ## Settings Center
 
 Run `clio-coder configure --settings` or choose **Settings** on the desktop. Both use these sections:

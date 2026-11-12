@@ -1,3 +1,14 @@
+## First problems
+
+| You see | Do this |
+| --- | --- |
+| `clio-coder: command not found` after installing | Open a new shell, or run the `export PATH=...` line the installer printed last. |
+| `<target> at <url> did not answer (...)` | Start the model server, or change the address with `/config`. |
+| `<provider> has no key or sign-in stored.` or HTTP 401 | Run the `clio-coder auth login` command it names, or fix the key in `/config`. |
+| `... reports no tool support` | Pick a model that calls tools with `/model`. |
+| `shell sandbox` is `WARN` in doctor | On Linux, install `bubblewrap`. CLIO Coder still works; more commands ask first. |
+| A call was denied because nobody answered | Name the action in your request, or set `safety.unattendedAfterSeconds: 0` to wait for you. |
+
 ## A connection is unavailable
 
 Start with these diagnostics:

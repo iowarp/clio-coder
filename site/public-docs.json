@@ -43,6 +43,15 @@
 		"summary": "permissions.md"
 	},
 	{
+		"path": "guide/sandbox-and-safety.md",
+		"source": "docs/guide/sandbox-and-safety.md",
+		"title": "Sandbox and safety",
+		"group": "Everyday use",
+		"excerpt": "What a sandboxed command may do, what it hides, and when CLIO Coder asks you.",
+		"description": "What CLIO Coder's sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change.",
+		"summary": "sandbox.md"
+	},
+	{
 		"path": "guide/context-continuity.md",
 		"source": "docs/guide/context-continuity.md",
 		"title": "Save and resume work",
@@ -161,6 +170,15 @@
 		"summary": "research-and-arena.md"
 	},
 	{
+		"path": "guide/store.md",
+		"source": "docs/guide/store.md",
+		"title": "Keep results in the store",
+		"group": "Everyday use",
+		"excerpt": "Keep datasets and results outside the working tree, with a record of where each came from.",
+		"description": "Keep datasets and results outside the working tree with clio-coder store, with a record of where each file came from and whether it changed.",
+		"summary": "store.md"
+	},
+	{
 		"path": "guide/exit-codes-and-output.md",
 		"source": "docs/guide/exit-codes-and-output.md",
 		"title": "Automate with clio-coder run",
@@ -201,6 +219,15 @@
 		"excerpt": "Keep named files away from destinations you did not choose.",
 		"description": "Keep named files away from model targets you did not choose: declare sources and recipients, approve the policy, and read a refusal.",
 		"summary": "information-flow.md"
+	},
+	{
+		"path": "guide/glossary.md",
+		"source": "docs/guide/glossary.md",
+		"title": "Glossary",
+		"group": "Reference",
+		"excerpt": "Plain-language meanings of the words CLIO Coder uses, from target to worktree.",
+		"description": "Plain-language meanings of the terms CLIO Coder uses, such as target, sandbox, worker, worktree and run record, with the guide for each.",
+		"summary": "glossary.md"
 	},
 	{
 		"path": "guide/semantic-context.md",

@@ -10,6 +10,19 @@ clio-coder doctor
 
 It needs `curl` or `wget`, `tar` with `xz` or `gzip`, and a SHA-256 tool. The runtime and package go under `~/.local/share/clio-coder-install` and the launcher under `~/.local/bin`. Compute nodes that mount the same home directory run the same launcher.
 
+## Work on the cluster
+
+Ask for scheduler work in words, such as "submit job.sh and tell me when it starts". `sbatch`, `squeue` and the other Slurm, PBS, LSF and Flux clients run outside the sandbox with the same review as `ssh`: the safety judge decides first and asks you when it has no verdict, so name the action you want. Run them directly, not from a wrapper script, which stays inside the sandbox and fails.
+
+Shell commands write to the project and temp folders without asking. Add scratch space with an absolute path:
+
+```yaml
+safety:
+  scratchRoots: [/scratch/alice]
+```
+
+Keep results out of Git with `clio-coder store put results run-042.h5`; every checkout of the project on this host sees them.
+
 ## Old glibc, proxies, and quotas
 
 The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. An unofficial build covers x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.

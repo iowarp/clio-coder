@@ -7,7 +7,9 @@ clio-coder agents
 clio-coder run "Inspect the parser's test coverage and report gaps. Do not edit files." --agent verifier
 ```
 
-Use an agent ID from your installed catalog. In the terminal, `/run <agent-id> <task>` starts a worker. The same command with a configured ACP peer's id, or `acp:<id>`, delegates to that peer. **Fleet** in Settings chooses worker defaults without changing the chat model.
+Use an agent ID from your installed catalog: `coder` makes changes, `tester` adds tests, and `debugger` and `verifier` only check. Add `--worktree` to `/run` to give an editing worker its own branch, or `--read-only` to make sure it changes nothing. A worker's answer stays out of the conversation until you run `/fleet share <runId>`, or start it with `--share`.
+
+In the terminal, `/run <agent-id> <task>` starts a worker. The same command with a configured ACP peer's id, or `acp:<id>`, delegates to that peer. The **Workers** area of `/settings` chooses worker defaults without changing the chat model.
 
 ## Follow the work
 
@@ -41,7 +43,9 @@ A playbook combines workers into a workflow such as a review gate, competing sol
 
 A recipe names exact `mcp_<id>__<tool>` capabilities, and admission refuses an untrusted or stale server. Check a server with `clio-coder mcp test <id>` and grant one project server with `clio-coder mcp trust <id>`. Add `--network` to allow it network inside the worker sandbox.
 
-Remote native workers use SSH and need the same CLIO Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`.
+## Run workers on another machine
+
+Remote native workers use SSH and need the same CLIO Coder version and the project at the same absolute path on each node. Add a node with `clio-coder fleet nodes add`, or in the terminal under `/settings fleet`, which opens the Workers area.
 
 A node receives work only after `clio-coder fleet nodes test <id> --record` passes for this project; the record lasts one day. Adding a node moves nothing by itself: unpinned work stays local.
 

@@ -8,6 +8,8 @@ clio-coder doctor
 
 It checks the installation, configured connections, model-list evidence, local worker capacity, and relevant tools. Standard doctor is read-only, uses passive probes, and sends no model generation request. In the terminal, `/doctor` shows the findings in your session.
 
+Read three rows first: `chat` names your route and what is missing, each `connection <id>` row says whether the key is there and the endpoint answered, and `shell sandbox` says whether commands run in an OS sandbox. Fix `!!` rows first; a `WARN` row still lets CLIO Coder work.
+
 | Flag | Effect |
 | --- | --- |
 | `--verbose` | Print every row instead of folding quiet families |

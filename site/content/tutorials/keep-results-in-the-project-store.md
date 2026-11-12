@@ -80,6 +80,7 @@ When the agent would replace a blob or remove one, it asks you first and names t
 :::
 
 ::: next
+- [Keep results in the store](/docs/guide/store.html)
 - [The store tool and its limits](/docs/guide/tool-usage.html)
 - [Workers and fleets](/docs/guide/fleet-dispatch.html)
 - [Submit a Slurm job](/tutorials/submit-a-slurm-job.html)

@@ -20,7 +20,7 @@ Asking for a plan or saying “do not edit” guides the task; it does not estab
 
 ## What the sandbox hides
 
-A sandboxed command writes only to your project, the temp directories, your scratch roots, a private tool cache and the repository's Git data. It cannot read your SSH keys, cloud and code-host logins, registry tokens or the project's `.env` and key files, and credential variables are removed. A push, a publish or a cluster scheduler command needs those credentials, so it leaves the sandbox only once the safety judge or you allow it.
+A sandboxed command writes only to your project, the temp directories, your scratch roots, a private tool cache and the repository's Git data. It cannot read your SSH keys, cloud and code-host logins, registry tokens or the project's `.env` and key files, and credential variables are removed. A push or a publish needs those credentials, and a cluster scheduler command needs a host daemon the sandbox blocks, so each leaves the sandbox only once the safety judge or you allow it.
 
 ## Verify using your project's checks
 
@@ -37,5 +37,9 @@ For checks that must accompany specific changes, add a [project quality policy](
 A main session starts with a small set of tools attached: `read`, `bash`, `edit`, `write`, `verify`, `ask_user`, and `gateway`, plus `dispatch` when workers are available and `consult` when a decision model is configured. The model finds every other capability through `gateway`, which can search the catalog, describe a tool's arguments, and call it. This keeps the request small while search, Git, web reading, data inspection, and MCP server tools stay one call away. Workers instead receive the tools their agent recipe admits.
 
 Tool results are bounded. Each reading tool has a size cap per call, and all of them share a budget per turn that grows with the model's context window. A cut result ends with one notice line that says how much was shown and gives the exact argument for the next page. When the cap cut content that was already collected, the notice also names a read-only overflow copy in CLIO Coder's state directory, outside your workspace. The permission rules above apply to every tool, whether it is attached or reached through `gateway`.
+
+## Limit what the agent may use
+
+Run `clio-coder --allow-tools read,grep,find,ls` to limit the main agent to those tools, and `--delegate-tools` to limit its workers. Both take a comma-separated list or `none`. A prompt, skill or worker recipe can narrow these limits but never widen them. `/view` shows what the tools produced, a cut result in full included.
 
 The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](../architecture/prompt-envelope-and-tools.md).
