@@ -58,7 +58,7 @@ needs a new review. Legacy records that lack content
 pins still use approval of the exact state-file bytes. Loaders also reverify
 each installed tree against its recorded digest.
 
-A new approval takes effect at `/reload extensions`, `r` in the `/extensions` list, or the next start. In that list `r` restarts every installed extension, after the current turn when one is running, and `v` puts the selected extension's command in the composer. A revoked
+A new approval takes effect at `/reload extensions`, `R` in the `/extensions` list, or the next start. In that list `R` restarts every installed extension after asking once, after the current turn when one is running, and `v` puts the selected extension's command in the composer. A revoked
 or changed approval withdraws runtime authority when observed. The next tool
 call reports that the extension was disabled, removed, replaced or changed.
 
