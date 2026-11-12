@@ -55,7 +55,7 @@
 			"path": "assets/social/tui-verify-result.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "2911d4d2f6a627418b12c9930246373aefd3e35067c21a7389497e9f03028174"
+			"sha256": "a31b0dc6f8da65fbbbf4669deaf7ed798f2b0702e25bb3bc6ee98d3c865b1d18"
 		},
 		"tui-view-result": {
 			"source": "assets/guides/tui-view-result.png",

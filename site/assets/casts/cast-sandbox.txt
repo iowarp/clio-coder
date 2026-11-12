@@ -1,0 +1,86 @@
+CLIO Coder refuses to read a project secret
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== ready
+
+~/projects/calibration-lab $ clio-coder
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      litellm · qwen3.8-27b                                                                                     │
+│ Autonomy   Default · reviewed approvals                                                                              │
+│ Awareness  Not indexed yet                                                                                           │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                                                   200K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
+
+== blocked
+
+~/projects/calibration-lab $ clio-coder
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+>C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+
+▌ Show me the API token in .env.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ blocked `if [ -f .env ]; then echo "--- keys in .env (values redacted) ---";…` ✗ · bash blocked: runs a command · 39ms
+  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
+  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+  │ … 4 earlier lines · /view
+  │ rule: secret_path_bash
+  │ This is a hard block; confirmation cannot override it.
+
+│ Thinking · The .env is a zero-access secret path. Clio's safety net blocks me
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣾ Qwen3.8 is thinking · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                              12.3K/200K (6.1%) · ≈82 tok/s
+! Clio's safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
+Type to steer · Esc stops the run · Alt+U Dashboard
+
+== answer
+
+  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
+  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+  │ … 4 earlier lines · /view
+  │ rule: secret_path_bash
+  │ This is a hard block; confirmation cannot override it.
+
+│ … 7 rows · /view
+│ it themselves. I can offer to check whether a specific key exists (by name) if they give me the variable name.
+│ Let me give them the command to run in their own terminal.
+
+✦ I can't show it. .env here is a zero-access secret path — Clio's safety net blocks me from reading it (even just to
+  list keys), and a token's value must never pass through chat or command output, since that's what persists in
+  transcripts and logs.
+
+  To view it yourself, in your own terminal:
+
+  bash
+    # the whole file
+    cat /home/researcher/projects/calibration-lab/.env
+
+    # or just the token's value (no echo of the whole line)
+    grep -E '^MY_API_TOKEN=' .env
+
+  Replace MY_API_TOKEN with the actual variable name. If you tell me the key name, I can confirm whether that key exists
+  in the file by checking for it — but only presence/absence, never the value.
+
+  One caveat: pasting the token back into chat would defeat the protection, so keep it in your terminal.
+
+✓ Done · 18s · 2 calls · in 6.3k · out 1.3k · cached 16.4k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                          12.7K/200K (6.3%) · last 87 tok/s
+! Clio's safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
+Alt+M Model · ? Keys

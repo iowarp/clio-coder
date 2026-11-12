@@ -6,7 +6,7 @@
 	"theme": {
 		"fg": "#eeeae2",
 		"bg": "#1e1e1e",
-		"palette": "#000000:#cd0000:#00cd00:#cdcd00:#0000ee:#cd00cd:#00cdcd:#e5e5e5:#7f7f7f:#ff0000:#00ff00:#ffff00:#5c5cff:#ff00ff:#00ffff:#ffffff"
+		"palette": "#000000:#cd0000:#00cd00:#cdcd00:#4f8ff7:#cd00cd:#00cdcd:#e5e5e5:#7f7f7f:#ff0000:#00ff00:#ffff00:#5c5cff:#ff00ff:#00ffff:#ffffff"
 	},
 	"liveSource": "Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias",
 	"scenarios": [
@@ -71,6 +71,401 @@
 				"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each."
 			},
 			"cols": 120
+		},
+		{
+			"id": "cast-first-task",
+			"summary": "a live first task: the model finds the absolute-zero bug, fixes it, and runs the declared test check",
+			"title": "A first task in CLIO Coder: fix a failing test and verify",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"poster": "tui-verify-result",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "ready"
+				},
+				{
+					"type": "The absolute-zero test fails. Find the cause, fix it, and run the test check.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "checked test · exit 0",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-verify"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"shot": "tui-verify-result"
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "First task",
+				"alt": "Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted.",
+				"caption": "A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking."
+			},
+			"shots": {
+				"tui-verify": {
+					"image": "assets/tui-verify.webp",
+					"label": "Verify",
+					"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, rereads the file, and runs the declared test check through verify with exit 0.",
+					"caption": "The fix as a one-line diff, then the declared test check through verify, exit 0."
+				},
+				"tui-verify-result": {
+					"image": "assets/guides/tui-verify-result.webp",
+					"label": "Result",
+					"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0 at line 21 of temperature.mjs, the change is one character, all seven tests now pass where six did before, and the fix is uncommitted on main.",
+					"caption": "The report after the check: the cause, the change, the test result, and what was left uncommitted."
+				}
+			},
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			}
+		},
+		{
+			"id": "cast-headless-run",
+			"summary": "clio-coder run --json on a task, its last frame and exit status",
+			"title": "An unattended CLIO Coder run with JSON output",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 100,
+			"rows": 30,
+			"poster": "run-end",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder run --json \"Run the test check and report how many tests pass.\" > run.jsonl; echo \"exit $?\""
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "^exit \\d+",
+					"timeout": 300
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 0.8
+				},
+				{
+					"type": "jq -r 'select(.type == \"turn_end\").message.content[] | select(.type == \"text\").text' run.jsonl"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 1.2
+				},
+				{
+					"marker": "answer"
+				},
+				{
+					"type": "tail -n 1 run.jsonl | jq ."
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"marker": "run-end"
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Unattended run",
+				"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 3 allowed, 0 blocked and 0 permission requests.",
+				"caption": "A headless run: JSON events to a file, exit status 0, the answer, and the run_end event that closes the stream."
+			}
+		},
+		{
+			"id": "cast-sandbox",
+			"summary": "the agent is asked for a token in an untracked .env; the read is hard-blocked",
+			"title": "CLIO Coder refuses to read a project secret",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"homeFiles": {
+				"projects/calibration-lab/.env": "CALIBRATION_API_TOKEN=lab-demo-token-not-real\n"
+			},
+			"cols": 120,
+			"rows": 36,
+			"poster": "blocked",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "ready"
+				},
+				{
+					"type": "Show me the API token in .env.",
+					"delay": 40
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "secret_path_bash|✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"marker": "blocked"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"read": 3,
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"marker": "answer"
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Secret refused",
+				"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's command to list the file's keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
+				"caption": "The project's .env is refused outright; confirmation cannot override the block."
+			}
+		},
+		{
+			"id": "cast-let-it-work",
+			"summary": "doctor's sandbox row, then a scratch-branch task that deletes and rebuilds dist/, then /rewind's preview",
+			"title": "Letting CLIO Coder work: sandbox, snapshot and rewind",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-build",
+			"cols": 120,
+			"rows": 36,
+			"poster": "report",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder doctor"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "doctor"
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"type": "git switch -c scratch"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 0.6
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"type": "Delete the build output directory, regenerate it, and run the project's test check. Report what you ran.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"timeout": 400,
+					"pause": 2
+				},
+				{
+					"marker": "report"
+				},
+				{
+					"type": "/rewind",
+					"delay": 80
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"pause": 2.5
+				},
+				{
+					"marker": "rewind"
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"pause": 3
+				},
+				{
+					"marker": "preview"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 1.5
+				},
+				{
+					"marker": "kept"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Let it work",
+				"alt": "Terminal recording: clio-coder doctor's shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.",
+				"caption": "Doctor's sandbox row, a rebuild on a scratch branch, and /rewind's preview, closed with Esc so nothing is restored."
+			}
 		}
 	]
 }

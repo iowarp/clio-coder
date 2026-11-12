@@ -1,26 +1,26 @@
 {
   "assets/tui-verify.webp": {
-    "width": 2240,
-    "height": 1668,
-    "sha256": "e660ce2e61de35c3a9eb3389548591fa8895106a6e7207c0002564e674dff603",
+    "width": 2268,
+    "height": 1548,
+    "sha256": "4858d2791097545c4fa961f656d5e4fed1fa71f4ad66b7a400e44edc186ec43f",
     "variants": [
       {
         "path": "assets/responsive/tui-verify-640.webp",
         "width": 640,
-        "height": 477,
-        "sha256": "3d41c2954d27f52d436fe196c835b993bdaac9d42c5a9ba69b3ffbbda5c1467a"
+        "height": 437,
+        "sha256": "c1e1bd85016ff3069a857c500134cb48f5ce8bcd7f592acb4c738accfee15c2c"
       },
       {
         "path": "assets/responsive/tui-verify-960.webp",
         "width": 960,
-        "height": 715,
-        "sha256": "aa3df3d871bb4c02dc516070f68b96ac07fb7d56bb747513995695bf452875fe"
+        "height": 655,
+        "sha256": "f5955998c7ae7ebdbb32bf93e3cff488c7f048047e9ab4ac7a7363a326fd0dbc"
       },
       {
         "path": "assets/responsive/tui-verify-1280.webp",
         "width": 1280,
-        "height": 953,
-        "sha256": "a4dcc63d713292b02393e414a888841defa401d2e63e1c162561c2a3fb62d046"
+        "height": 874,
+        "sha256": "ada8fdaf7710cffbdb47309170f425dd43db7f74d0a7f2ffd22b05e6e9a8cd65"
       }
     ]
   },
@@ -175,27 +175,27 @@
     ]
   },
   "assets/guides/tui-verify-result.webp": {
-    "width": 2240,
-    "height": 1744,
-    "sha256": "454de7119d9f38bf95e0ffa24cfd5f7e70a074d6add87f4239bc07f7b52a3d64",
+    "width": 2268,
+    "height": 1548,
+    "sha256": "b2dcaa7c667858d610de3f7c775b74fc5f2da850a69a8ae0437ca40e1b455a4e",
     "variants": [
       {
         "path": "assets/responsive/tui-verify-result-640.webp",
         "width": 640,
-        "height": 498,
-        "sha256": "693388d8b884be4de4f6edfae8ac96173503f0506cd7a7729d618598faf1051a"
+        "height": 437,
+        "sha256": "dcdb2b1a1e55da17d1338f90f48683b040a64f46f03cee7908edd54bb37c8564"
       },
       {
         "path": "assets/responsive/tui-verify-result-1024.webp",
         "width": 1024,
-        "height": 797,
-        "sha256": "9bec4aef9b24ce07fe35ba1246cc80504d9ce6eb5f7a98fedb1c46faf347e03b"
+        "height": 699,
+        "sha256": "4fa88a8adc853ed4cc2ba92419ff235d1223ac55abe75c300d36ee4a8174f08b"
       },
       {
         "path": "assets/responsive/tui-verify-result-1600.webp",
         "width": 1600,
-        "height": 1246,
-        "sha256": "646b683a2c524abe9c0405f48eadea6ab2c812189c17418c25fa09fa23a414ed"
+        "height": 1092,
+        "sha256": "48a2a0009ee769189e083f6de9ff26d97144e43fe0a7dc7cfcdf97bb6b698b0c"
       }
     ]
   },
@@ -471,6 +471,106 @@
         "width": 1600,
         "height": 1487,
         "sha256": "2a068903ffe0f4b24663f98b644ab7548ffff4f50ff57ab0a7342138a68c513f"
+      }
+    ]
+  },
+  "assets/guides/cast-first-task.webp": {
+    "width": 2268,
+    "height": 1548,
+    "sha256": "b2dcaa7c667858d610de3f7c775b74fc5f2da850a69a8ae0437ca40e1b455a4e",
+    "variants": [
+      {
+        "path": "assets/responsive/cast-first-task-640.webp",
+        "width": 640,
+        "height": 437,
+        "sha256": "dcdb2b1a1e55da17d1338f90f48683b040a64f46f03cee7908edd54bb37c8564"
+      },
+      {
+        "path": "assets/responsive/cast-first-task-1024.webp",
+        "width": 1024,
+        "height": 699,
+        "sha256": "4fa88a8adc853ed4cc2ba92419ff235d1223ac55abe75c300d36ee4a8174f08b"
+      },
+      {
+        "path": "assets/responsive/cast-first-task-1600.webp",
+        "width": 1600,
+        "height": 1092,
+        "sha256": "48a2a0009ee769189e083f6de9ff26d97144e43fe0a7dc7cfcdf97bb6b698b0c"
+      }
+    ]
+  },
+  "assets/guides/cast-headless-run.webp": {
+    "width": 1908,
+    "height": 1308,
+    "sha256": "1cb74f305d5da7c384890c0aefac575ed5e126f3a827e8f565af93edfc041ce4",
+    "variants": [
+      {
+        "path": "assets/responsive/cast-headless-run-640.webp",
+        "width": 640,
+        "height": 439,
+        "sha256": "b02abbf0ec09421ec54e81fac240ddfd199179c8046a642a070dfe2b1b96a792"
+      },
+      {
+        "path": "assets/responsive/cast-headless-run-1024.webp",
+        "width": 1024,
+        "height": 702,
+        "sha256": "fffa60f0b027c27bc6695aed7690ca10ab64bb134557e2d9b340fdbdeec23d22"
+      },
+      {
+        "path": "assets/responsive/cast-headless-run-1600.webp",
+        "width": 1600,
+        "height": 1097,
+        "sha256": "45fbde2ec7b6d626ac991e89bd12baeb5d813a4e3c13e27cfdcd11db1de506b4"
+      }
+    ]
+  },
+  "assets/guides/cast-sandbox.webp": {
+    "width": 2268,
+    "height": 1548,
+    "sha256": "71dba056c71c4b52d8846ca25336f2987e2f0e2eee32596dbf320a90b3727e4d",
+    "variants": [
+      {
+        "path": "assets/responsive/cast-sandbox-640.webp",
+        "width": 640,
+        "height": 437,
+        "sha256": "2f212f765a223c55e08b498fa8d4c470057e1991897de5e736c46031fb4ae04f"
+      },
+      {
+        "path": "assets/responsive/cast-sandbox-1024.webp",
+        "width": 1024,
+        "height": 699,
+        "sha256": "c2cb622f33547de6fa306f2d3bf4c5728eb170c6c6edd37922f599dd42918c47"
+      },
+      {
+        "path": "assets/responsive/cast-sandbox-1600.webp",
+        "width": 1600,
+        "height": 1092,
+        "sha256": "8eefdef6acb9a9f1eda78e5a0cf04a880ee928521a5c4b2d7db40e45be2bc8e9"
+      }
+    ]
+  },
+  "assets/guides/cast-let-it-work.webp": {
+    "width": 2268,
+    "height": 1548,
+    "sha256": "879caa350b4940b5ac3e65955f6f4be8e8fa1257a9324fb38553764f26495452",
+    "variants": [
+      {
+        "path": "assets/responsive/cast-let-it-work-640.webp",
+        "width": 640,
+        "height": 437,
+        "sha256": "d4f71281208b2d10b366fd86d8432a91f6bd9b7410e78d8365ee2a9a91c228df"
+      },
+      {
+        "path": "assets/responsive/cast-let-it-work-1024.webp",
+        "width": 1024,
+        "height": 699,
+        "sha256": "cf70d002324f0053c90a28a2491aff532adf17bd1f0a9a7bd56377630e2e2277"
+      },
+      {
+        "path": "assets/responsive/cast-let-it-work-1600.webp",
+        "width": 1600,
+        "height": 1092,
+        "sha256": "13e37043f7fe1b531b890543fdc09cb2b57efa38ff8c73c9540c633170a91970"
       }
     ]
   },
