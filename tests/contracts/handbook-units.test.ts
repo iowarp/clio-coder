@@ -384,6 +384,58 @@ describe("peer handbook compile", () => {
 		}
 	});
 
+	it("gives a peer every invariant a native worker gets when the invariants overflow, the peer's rules taking audience room", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "clio-peer-handbook-"));
+		try {
+			const invariants = Array.from(
+				{ length: 14 },
+				(_, index) => `${index + 1}. Invariant ${index + 1}: ${"keep the boundary intact. ".repeat(17).trim()}`,
+			);
+			const recipes = Array.from({ length: 30 }, (_, n) => `- Recipe ${n}: register tool ${n} in the tool table.`);
+			const handbook = [
+				"# Demo",
+				"",
+				"## Hard invariants",
+				"",
+				...invariants,
+				"",
+				"## Change recipes",
+				"",
+				...recipes,
+				"",
+			];
+			const compiled = compileHandbook(handbook.join("\n"), join(cwd, "CLIO-CODER.md"));
+			ok(compiled);
+			const audience = workerHandbookAudience("coder", "workspace-edit");
+			const native = selectWorkerHandbook([compiled], { audience, cwd, workingPaths: [], maxChars: 6000 });
+			const carried = (text: string): number[] => [
+				...new Set([...text.matchAll(/Invariant (\d+):/g)].map((match) => Number(match[1]))),
+			];
+			const nativeInvariants = carried(native.text);
+			ok(nativeInvariants.length > 0 && nativeInvariants.length < invariants.length, native.text);
+			const notes = Array.from({ length: 40 }, (_, n) => `- Peer note ${n}: widget ${n} stays aligned with its frame.`);
+			const peerRules = await judgeInstructionFiles(
+				cwd,
+				[{ file: "AGENTS.md", path: join(cwd, "AGENTS.md"), content: ["# Notes", "", ...notes, ""].join("\n") }],
+				"adopted",
+			);
+			const peer = compilePeerHandbook([compiled], {
+				audience,
+				cwd,
+				workingPaths: [],
+				maxChars: 6000,
+				peerRules,
+				facts: treeFacts(cwd),
+				clioNames: [],
+			});
+			ok(peer.text.length <= 6000, String(peer.text.length));
+			deepStrictEqual(carried(peer.text), nativeInvariants);
+			ok(/Peer note \d+:/.test(peer.text), peer.text);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("overlays the files OpenCode reads: the first name found from the run's directory up, in every directory", async () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-opencode-files-"));
 		const resolveIn = async (cwd: string) =>

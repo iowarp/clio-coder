@@ -153,8 +153,8 @@ export function compilePeerHandbook(
 		else (rule.verdict === "verified" ? verified : unverifiable).push(rule.text);
 	}
 
-	// The handbook keeps its room first, invariants leading, less a reserve for the peer's own rules; those then
-	// take whatever room the selection left.
+	// The handbook keeps every invariant a native worker's selection carries; the reserve for the peer's own rules
+	// comes out of the handbook's audience rules only. The peer's rules then take whatever room the selection left.
 	const own = [...verified, ...replacements, ...unverifiable];
 	const reserved =
 		own.length > 0 ? Math.min(Math.floor(PEER_RULES_SHARE * options.maxChars), renderBlock(own).length + 2) : 0;
@@ -162,7 +162,8 @@ export function compilePeerHandbook(
 		audience: options.audience.filter((entry) => entry !== "orchestrator"),
 		cwd: options.cwd,
 		workingPaths: options.workingPaths,
-		maxChars: Math.max(0, options.maxChars - reserved),
+		maxChars: options.maxChars,
+		holdBack: reserved,
 	});
 	const join = (block: string): string => [selection.text, block].filter((part) => part.length > 0).join("\n\n");
 	let kept = own.length;

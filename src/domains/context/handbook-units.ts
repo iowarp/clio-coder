@@ -306,6 +306,11 @@ export function selectWorkerHandbook(
 		cwd: string;
 		workingPaths: ReadonlyArray<string>;
 		maxChars: number;
+		/**
+		 * Room the caller keeps after the handbook for its own text. It comes out of the audience rules' room only:
+		 * the invariants are the ones the selection without it carries.
+		 */
+		holdBack?: number;
 	},
 ): WorkerHandbookSelection {
 	const workingPaths = relativeWorkingPaths(options.cwd, options.workingPaths);
@@ -400,6 +405,16 @@ export function selectWorkerHandbook(
 	for (const unit of invariants) if (!tryAdd(unit, options.maxChars - reserve)) skipped.push(unit);
 	for (const tier of tiers.slice(1)) for (const unit of tier) tryAdd(unit, options.maxChars);
 	for (const unit of skipped) tryAdd(unit, options.maxChars);
+	const holdBack = options.holdBack ?? 0;
+	if (holdBack > 0 && text.length <= options.maxChars) {
+		const kept = invariants.filter((unit) => chosen.has(unit));
+		chosen.clear();
+		for (const unit of kept) chosen.add(unit);
+		text = render();
+		const limit = options.maxChars - holdBack;
+		for (const tier of tiers.slice(1)) for (const unit of tier) tryAdd(unit, limit);
+		for (const unit of invariants) if (!chosen.has(unit)) tryAdd(unit, limit);
+	}
 	const total = handbooks.reduce((sum, handbook) => sum + handbook.units.length, 0);
 	const fits = text.length <= options.maxChars;
 	const unitIds = fits

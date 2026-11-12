@@ -127,8 +127,9 @@ Each headless peer also reads its own instruction files from the repository.
 At project-context tier `bounded`, Clio Coder judges the rules in those files
 against the tree and sends the peer one compiled rule set in the project-context
 message: the handbook's sections, then the peer file's rules that still hold.
-The handbook keeps its summary and invariants first; the peer file's rules have
-a reserve of up to 40% of the bound and take whatever room the handbook leaves.
+The peer gets every invariant a native worker of the same role gets; the peer
+file's rules have a reserve of up to 40% of the bound, taken from the handbook's
+other rules only, and take whatever room the handbook leaves.
 A stale command rule is replaced by the tree's value, such as the test command
 in `package.json`. When the runtime has a switch, Clio turns its own discovery
 off so the peer reads one source:
