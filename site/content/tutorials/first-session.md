@@ -57,11 +57,16 @@ Follow the tool activity as CLIO Coder reads the repository. If an approval card
 
 ## 5. Make the next task specific
 
-Once you understand the project, ask for a check you recognize:
+Once you understand the project, ask for one change you can check. Name the problem, what to do and how to verify it. The recording below gave this request in a small project with one failing test:
 
-> Run the existing parser tests and report the results. Do not edit files.
+> The absolute-zero test fails. Find the cause, fix it, and run the test check.
 
-Use your project's real test name. Read the command and its output before deciding on a change. If you later ask CLIO Coder to edit code, inspect the diff and rerun the relevant checks.
+::: capture cast-first-task
+:::
+
+The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests now pass (previously 6/7).` and `The fix is in the working tree on main, uncommitted.`
+
+Use your project's real test name. Read the diff and the check output yourself before you commit the change.
 
 ## Keep going
 

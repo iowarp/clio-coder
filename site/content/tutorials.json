@@ -38,6 +38,7 @@
     "time": "7 min",
     "author": "The CLIO Coder team",
     "source": "let-it-work-with-containment-and-rewind.md",
+    "cover": "cast-let-it-work",
     "basis": "Recorded session",
     "versionScope": "0.8.0",
     "guides": [
@@ -67,6 +68,7 @@
     "time": "6 min",
     "author": "The CLIO Coder team",
     "source": "run-it-unattended-within-limits.md",
+    "cover": "cast-headless-run",
     "basis": "Recorded session",
     "versionScope": "0.8.0",
     "guides": [

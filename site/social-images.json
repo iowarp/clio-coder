@@ -1,6 +1,20 @@
 {
 	"default": "gui-task",
 	"images": {
+		"cast-headless-run": {
+			"source": "assets/guides/cast-headless-run.png",
+			"path": "assets/social/cast-headless-run.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "218d79e820e7e2563e69220b7e625078d71a3a72c55b280b38450bb76de01481"
+		},
+		"cast-let-it-work": {
+			"source": "assets/guides/cast-let-it-work.png",
+			"path": "assets/social/cast-let-it-work.png",
+			"width": 1200,
+			"height": 630,
+			"sha256": "1039e1741d6e998039a8741d2d37aba77ab7173b14649ff119a8ffa42a715a8b"
+		},
 		"gui-task": {
 			"source": "assets/gui-task.png",
 			"path": "assets/social/gui-task.png",

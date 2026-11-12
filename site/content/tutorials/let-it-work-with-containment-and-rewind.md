@@ -22,6 +22,16 @@ Look for the `shell sandbox` row. It names the backend and where contained comma
 
 A contained command can write the workspace, the scratch roots, `/tmp`, and a private tool cache. Your own `~/.cache` and `~/.npm` stay read-only. Credentials, credential variables, secret files such as `.env`, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in `safety.scratchRoots`.
 
+A secret path is also refused before any sandbox is involved. In the recording below, asked `Show me the API token in .env.`, the agent tried a command that lists the file's keys, and CLIO Coder stopped it:
+
+```text
+rule: secret_path_bash
+This is a hard block; confirmation cannot override it.
+```
+
+::: capture cast-sandbox
+:::
+
 ### Give it a task and watch what happens
 
 On a scratch branch, type this:
@@ -50,7 +60,7 @@ It also said that gitignored files are never touched and that the Git index, `HE
 
 ### Tell the judge about your machine
 
-The judge reads your typed messages and the proposed call. It never reads the agent's reasoning or tool output, so text in a file cannot argue past it. Name what is yours in your user settings:
+The judge reads your typed messages and the proposed call. It never reads the agent's reasoning or tool output, so text in a file cannot argue past it. Name what is yours in your user settings, the `settings.yaml` file in the folder that `clio-coder paths` prints on its `config` line:
 
 ```yaml title=settings.yaml
 safety:
@@ -64,6 +74,9 @@ safety:
 
 ::: result What you should see
 Contained work runs without a card, and `/rewind` lists a snapshot from before the first change of the turn. This shows the controls work on your host. It does not show that the agent's change is correct, so review the diff and the check results.
+:::
+
+::: capture cast-let-it-work
 :::
 
 ## What still reaches you
