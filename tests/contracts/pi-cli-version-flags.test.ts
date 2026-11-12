@@ -77,8 +77,8 @@ function input(root: string, patch: Partial<WorkerRunInput> = {}): WorkerRunInpu
 	};
 }
 
-function start(root: string, binary: string, patch: Partial<WorkerRunInput> = {}) {
-	return startPiCliWorkerRun(input(root, patch), () => undefined, {
+function start(root: string, binary: string, patch: Partial<WorkerRunInput> = {}, events: unknown[] = []) {
+	return startPiCliWorkerRun(input(root, patch), (event) => events.push(event), {
 		binary,
 		workspaceRoot: root,
 		environment: { PATH: process.env.PATH, HOME: root },
@@ -133,5 +133,34 @@ describe("Pi CLI launcher flags", { skip: process.platform === "win32" }, () => 
 		const launched = launches(root);
 		equal(launched.length, 2, "the cancelled caller launched no worker");
 		for (const args of launched) ok(args.join(" ").includes(BUILTIN), "the cancelled caller left the probe intact");
+	});
+	it("leaves out --no-context-files on a Pi older than 0.67.4 and tells the host the files were read", async () => {
+		const rows: Array<[version: string, kept: boolean]> = [
+			["0.66.1", false],
+			["0.67.4", true],
+			["pi built from source", true],
+		];
+		await Promise.all(
+			rows.map(async ([version, kept]) => {
+				const { root, binary } = fakePi(version);
+				const events: unknown[] = [];
+				const result = await start(root, binary, { skipRepositoryInstructions: true }, events).promise;
+				equal(result.exitCode, 0, version);
+				const [args] = launches(root);
+				equal(args?.includes("--no-context-files"), kept, version);
+				deepStrictEqual(
+					events.filter((event) => (event as { type: string }).type === "clio_coder_repository_instructions"),
+					kept
+						? []
+						: [
+								{
+									type: "clio_coder_repository_instructions",
+									payload: { reason: "switch-unsupported", detail: `Pi ${version} has no --no-context-files` },
+								},
+							],
+					version,
+				);
+			}),
+		);
 	});
 });

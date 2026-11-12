@@ -998,6 +998,7 @@ const RECEIPT_BEARING_BULK_TYPES = new Set([
 	"clio_coder_permission_resolved",
 	"clio_coder_permission_grant_execution",
 	"clio_coder_steer_received",
+	"clio_coder_repository_instructions",
 	"clio_coder_tool_start",
 	"clio_coder_tool_finish",
 	"clio_coder_tool_observation",

@@ -29,7 +29,7 @@ export interface PeerInstructions {
 	/** The run's rules, of the handbook or those files, that hold but did not fit the bound. */
 	notCarried: number;
 	/** Why a harness that can take the rules in place of its files reads them beside the files. */
-	reason?: "setting";
+	reason?: "setting" | "switch-unsupported";
 	/** Per file, in `files` order, the rules the tree no longer supports; files with none are left out. */
 	staleFiles?: Array<{ file: string; stale: number }>;
 	/** The compiled rules; absent when the handbook has no sections to compile, so the run keeps its usual message. */

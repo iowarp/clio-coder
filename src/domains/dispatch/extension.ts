@@ -8300,6 +8300,16 @@ export function createDispatchBundle(
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
 			}
 			if (event.type === "clio_coder_steer_received") acknowledgeSteer(event.payload?.sequence);
+			if (event.type === "clio_coder_repository_instructions") {
+				// The harness lacked the switch that skips its files, so it read them; any runtime may only lower the claim.
+				const context = lifecycle.projectContext;
+				if (context?.peerInstructions?.delivery === "single-source") {
+					lifecycle.projectContext = {
+						...context,
+						peerInstructions: { ...context.peerInstructions, delivery: "coexist", reason: "switch-unsupported" },
+					};
+				}
+			}
 			if (event.type === "clio_coder_flow_restrictions" && acceptsOutcomeCodeEvents) {
 				const reported = (event.payload as { set?: unknown } | undefined)?.set;
 				if (isFlowRestrictionSet(reported)) trustedFlow = mergeFlowRestrictions(trustedFlow, reported);

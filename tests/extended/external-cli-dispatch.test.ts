@@ -505,6 +505,85 @@ for (const event of [
 	}
 });
 
+test("a Pi too old to skip its AGENTS.md reads it beside the compiled rules, and the receipt says why", {
+	timeout: 30_000,
+}, async () => {
+	execFileSync("git", ["init", "-q", root]);
+	// The session runs from the fixture repository, so its handbook is the session's and not a sister's.
+	process.chdir(root);
+	writeFileSync(
+		join(root, "bin", "pi"),
+		`#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+if (process.argv[2] === "--version") {
+  process.stdout.write("0.66.1\\n");
+} else {
+  for await (const chunk of process.stdin) {}
+  writeFileSync(join(process.cwd(), "seen.json"), JSON.stringify(process.argv.slice(2)));
+  const answer = JSON.stringify({ mutatedPaths: [], validations: [{ name: "fixture", passed: true, evidence: "PONG" }], summary: "PONG" });
+  for (const event of [
+    { type: "session", id: "pi-session" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: answer }], stopReason: "stop", usage: { input: 2, output: 1 } } },
+    { type: "agent_settled" },
+  ]) process.stdout.write(JSON.stringify(event) + "\\n");
+}
+`,
+	);
+	chmodSync(join(root, "bin", "pi"), 0o755);
+	writeFileSync(join(root, "package.json"), JSON.stringify({ name: "demo", scripts: { test: "node --test" } }));
+	writeFileSync(
+		join(root, "CLIO-CODER.md"),
+		"# Demo\n\nDemo prices carts.\n\n## Hard invariants\n\n1. Never write to the operator's real home from tests.\n",
+	);
+	writeFileSync(join(root, "AGENTS.md"), "# Notes\n\n- Run `pnpm run test:all` before committing.\n");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.targets = [{ id: "pi-test", runtime: "pi-cli", defaultModel: "pi-cli-default", trustedUnmediated: true }];
+	settings.fleet.default.target = "pi-test";
+	settings.fleet.default.model = "pi-cli-default";
+	settings.fleet.retry.maxRetries = 0;
+	settings.safety.autonomy = "default";
+	const base = dispatchStubContext({ settings, runtime: piCliRuntime, agentTools: ["read", "write"] });
+	const notices: Array<{ code: string; message: string }> = [];
+	const unsubscribe = base.bus.subscribe("run.scope_notice_raised", (payload) => {
+		if ((payload as { code: string }).code === "peer_instructions_stale") notices.push(payload as never);
+	});
+	const bundle = makeDispatchBundle({
+		...base,
+		getContract: ((name: DomainName) =>
+			name === "context" ? { renderPromptContext } : base.getContract(name)) as typeof base.getContract,
+	});
+	await bundle.extension.start();
+	try {
+		const dispatched = await bundle.contract.dispatch({
+			agentId: "coder",
+			target: "pi-test",
+			task: "Reply PONG",
+			executionRole: "researcher",
+			requestOrigin: "user",
+			cwd: root,
+		});
+		const receipt = await dispatched.finalPromise;
+		equal(receipt.outcome, "succeeded", receipt.failureMessage);
+		const argv = JSON.parse(readFileSync(join(root, "seen.json"), "utf8")) as string[];
+		ok(!argv.includes("--no-context-files"), argv.join(" "));
+		deepStrictEqual(receipt.projectContext?.peerInstructions, {
+			delivery: "coexist",
+			files: ["AGENTS.md"],
+			stale: 1,
+			notCarried: 0,
+			reason: "switch-unsupported",
+		});
+		deepStrictEqual(
+			notices.map((notice) => notice.message),
+			["AGENTS.md has 1 rule that no longer matches the repository; Pi CLI read it in this run."],
+		);
+	} finally {
+		unsubscribe();
+		await bundle.extension.stop?.();
+	}
+});
+
 test("external edits distinguish current checkout, preserved worktree, and failed partial work", {
 	timeout: 30_000,
 }, async () => {

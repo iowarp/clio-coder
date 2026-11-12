@@ -160,6 +160,11 @@ they are. An operator who sets `OPENCODE_DISABLE_PROJECT_CONFIG` or
 `OPENCODE_DISABLE_CLAUDE_CODE` changes which files OpenCode reads, so the
 overlay may not reach it: list `opencode-cli` in
 `fleet.keepPeerInstructionFiles` to send the rules in the message instead.
+Pi gained `--no-context-files` in 0.67.4 and rejects it before then, so Clio
+asks `pi --version` once per binary and leaves the switch out on an older Pi;
+that Pi reads its files beside the compiled rules, and the run record says
+`reason: switch-unsupported`. A Pi whose version Clio cannot read keeps the
+switch. Codex accepts any `-c` key, so its switch is never rejected.
 A peer also reads its files beside the usual project message when a
 handbook is prose without sections, because there is
 nothing to compile it into. A runtime id listed in `fleet.keepPeerInstructionFiles`
@@ -170,7 +175,8 @@ the files, the count of their rules the tree no longer supports (`stale`), and t
 count of the run's rules, from the handbook or those files, that hold but did not
 fit the bound (`notCarried`), `discarded` for an overlaid file the run changed,
 whose change the restore dropped, and `reason: setting`
-when the setting kept the files. When a peer read its files as they are and they
+when the setting kept the files or `reason: switch-unsupported` when the
+installed peer has no switch to skip them. When a peer read its files as they are and they
 hold rules the tree no longer supports, Clio raises a `peer_instructions_stale`
 notice once per process for those files and counts, such as `AGENTS.md has 1 rule
 that no longer matches the repository; Codex read it in this run.`

@@ -177,6 +177,15 @@ export interface ClioHelperResultRejectedEvent {
 	payload: { reason: string; submitted: string };
 }
 
+/**
+ * A delegated harness was started with its repository instruction files after all, because its installed version
+ * lacks the switch that skips them: the host records the run's rules as read beside those files.
+ */
+export interface ClioRepositoryInstructionsEvent {
+	type: "clio_coder_repository_instructions";
+	payload: { reason: "switch-unsupported"; detail: string };
+}
+
 export type ClioWorkerEvent =
 	| WorkerTelemetryFrame
 	| ClioToolStartEvent
@@ -190,4 +199,5 @@ export type ClioWorkerEvent =
 	| ClioRunOutcomeEvent
 	| ClioFlowRestrictionsEvent
 	| ClioHelperResultEvent
-	| ClioHelperResultRejectedEvent;
+	| ClioHelperResultRejectedEvent
+	| ClioRepositoryInstructionsEvent;

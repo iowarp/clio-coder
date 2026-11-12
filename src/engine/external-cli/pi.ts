@@ -12,11 +12,12 @@ export const PI_CLI_DEFAULT_MODEL = "pi-cli-default";
 
 export { piCliMode } from "../../domains/providers/runtimes/external-cli-policy.js";
 
-export function buildPiCliArgs(input: WorkerRunInput, builtinLlamaCpp = false): string[] {
+/** `noContextFiles` is false only for a Pi known to predate `--no-context-files` (0.67.4), which rejects it. */
+export function buildPiCliArgs(input: WorkerRunInput, builtinLlamaCpp = false, noContextFiles = true): string[] {
 	assertToolProfileEnforceable(input.toolProfile, "pi-cli");
 	const mode = piCliMode(input.readOnly === true);
 	const args = ["--print", "--mode", "json", "--no-session", "--no-extensions", "--no-approve"];
-	if (input.skipRepositoryInstructions === true) args.push("--no-context-files");
+	if (input.skipRepositoryInstructions === true && noContextFiles) args.push("--no-context-files");
 	if (builtinLlamaCpp) args.push("-e", "builtin:llama.cpp");
 	if (mode === "read-only") args.push("--tools", "read,grep,find,ls");
 	if (input.wireModelId.trim() && input.wireModelId !== PI_CLI_DEFAULT_MODEL) {
@@ -25,7 +26,21 @@ export function buildPiCliArgs(input: WorkerRunInput, builtinLlamaCpp = false): 
 	return args;
 }
 
-const builtinProviderProbes = new Map<string, Promise<boolean>>();
+const versionProbes = new Map<string, Promise<PiVersion | null>>();
+
+interface PiVersion {
+	text: string;
+	parts: [number, number, number];
+}
+
+function atLeast(version: PiVersion, minimum: [number, number, number]): boolean {
+	for (let index = 0; index < 3; index++) {
+		const part = version.parts[index] ?? 0;
+		const floor = minimum[index] ?? 0;
+		if (part !== floor) return part > floor;
+	}
+	return true;
+}
 
 function resolvePiBinary(binary: string, cwd: string, env: NodeJS.ProcessEnv): string | null {
 	const names =
@@ -47,11 +62,11 @@ function resolvePiBinary(binary: string, cwd: string, env: NodeJS.ProcessEnv): s
 	return null;
 }
 
-function hasBuiltinLlamaCpp(binary: string, cwd: string, sourceEnv: NodeJS.ProcessEnv): Promise<boolean> {
-	const held = builtinProviderProbes.get(binary);
+function probePiVersion(binary: string, cwd: string, sourceEnv: NodeJS.ProcessEnv): Promise<PiVersion | null> {
+	const held = versionProbes.get(binary);
 	if (held !== undefined) return held;
 	// Unknown versions retain the established flags, so a failed probe cannot prevent a worker from starting.
-	const probe = (async () => {
+	const probe = (async (): Promise<PiVersion | null> => {
 		const env: Record<string, string> = {};
 		for (const [key, value] of Object.entries(buildSafeToolEnv({}, sourceEnv))) {
 			if (value !== undefined) env[key] = value;
@@ -64,11 +79,13 @@ function hasBuiltinLlamaCpp(binary: string, cwd: string, sourceEnv: NodeJS.Proce
 			maxOutputBytes: 4_096,
 			killGraceMs: 0,
 		});
-		if (result.exitCode !== 0 || result.aborted || result.timedOut || result.outputCapped) return false;
-		const version = /^(?:pi\s+(?:version\s+)?)?v?(\d+)\.(\d+)\.\d+(?:[-+][\w.-]+)?$/iu.exec(result.stdout.trim());
-		return version !== null && (Number(version[1]) > 0 || Number(version[2]) >= 99);
-	})().catch(() => false);
-	builtinProviderProbes.set(binary, probe);
+		if (result.exitCode !== 0 || result.aborted || result.timedOut || result.outputCapped) return null;
+		const version = /^(?:pi\s+(?:version\s+)?)?v?((\d+)\.(\d+)\.(\d+)(?:[-+][\w.-]+)?)$/iu.exec(result.stdout.trim());
+		return version === null
+			? null
+			: { text: version[1] ?? "", parts: [Number(version[2]), Number(version[3]), Number(version[4])] };
+	})().catch(() => null);
+	versionProbes.set(binary, probe);
 	return probe;
 }
 
@@ -94,10 +111,12 @@ export function startPiCliWorkerRun(
 				controller.signal.addEventListener("abort", cancelProbeWait, { once: true });
 				if (controller.signal.aborted) cancelProbeWait();
 			});
-			const builtinLlamaCpp = await Promise.race([
-				binary === null || controller.signal.aborted ? Promise.resolve(false) : hasBuiltinLlamaCpp(binary, cwd, sourceEnv),
-				cancelled,
+			const version = await Promise.race([
+				binary === null || controller.signal.aborted ? Promise.resolve(null) : probePiVersion(binary, cwd, sourceEnv),
+				cancelled.then(() => null),
 			]);
+			const builtinLlamaCpp = version !== null && atLeast(version, [0, 99, 0]);
+			const noContextFiles = version === null || atLeast(version, [0, 67, 4]);
 			if (controller.signal.aborted) {
 				const message: AgentMessage & { role: "assistant" } = {
 					role: "assistant",
@@ -118,8 +137,15 @@ export function startPiCliWorkerRun(
 				emit({ type: "agent_end", messages: [message] });
 				return { messages: [message], exitCode: 1 };
 			}
+			if (input.skipRepositoryInstructions === true && !noContextFiles && version !== null) {
+				// Pi reads its own AGENTS.md or CLAUDE.md after all; the host records the rules as read beside them.
+				emit({
+					type: "clio_coder_repository_instructions",
+					payload: { reason: "switch-unsupported", detail: `Pi ${version.text} has no --no-context-files` },
+				});
+			}
 			return await startJsonlCliRun(
-				{ ...PI_CLI_CONNECTOR, args: (run) => buildPiCliArgs(run, builtinLlamaCpp) },
+				{ ...PI_CLI_CONNECTOR, args: (run) => buildPiCliArgs(run, builtinLlamaCpp, noContextFiles) },
 				{ ...input, signal: controller.signal },
 				emit,
 				{ ...dependencies, ...(binary === null ? {} : { binary }) },
