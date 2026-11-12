@@ -6,12 +6,21 @@
 version: 2
 checks:
   - id: bench
+    description: Wall time of stats.py on 3000 values (min is better)
     kind: command
     command: [python3, bench.py]   # prints {"wall_ms": 12.3}
+    cwd: .
+    timeoutMs: 60000
+    tags: [benchmark]
   - id: correct
+    description: stats.py answers match the reference on a holdout input
     kind: numeric-compare
     command: [python3, check.py]
     reference: tests/reference/stats.json
+    tolerance: { relative: 1.0e-9 }
+    cwd: .
+    timeoutMs: 60000
+    tags: [correctness]
 ```
 
 Commit this file so every research worktree contains it.
