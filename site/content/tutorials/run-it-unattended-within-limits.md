@@ -103,5 +103,6 @@ A `--json` run of the third step from the same set ended with this frame:
 
 ::: next
 - [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
+- [Report a problem without leaking your machine](/tutorials/report-a-problem-without-leaking-your-machine.html)
 - [Commands and shortcuts](/docs/guide/commands-and-modes.html)
 :::

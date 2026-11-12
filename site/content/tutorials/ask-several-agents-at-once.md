@@ -87,7 +87,7 @@ It went on to say that `index.test.js` already imports `add` and checks `add(2,2
 A spread of independent answers to one question, and for a council either a tally or one written answer with every member's answer behind it. Each member's run has its own sealed run record, and no file in the project changed.
 :::
 
-The answers stay out of your main conversation. `/fleet share <runId>` brings the synthesis or one member's answer into it.
+The answers stay out of your main conversation. `/fleet share <runId>` brings one member's answer into it; shared from the synthesis run, it brings the synthesis with every member's labelled answer.
 
 ::: limits
 - Members on one model are not fully independent. They share its habits, so a unanimous vote from one model is weaker evidence than a split across several. Use `--models` or a mixed roster to spread the question.
