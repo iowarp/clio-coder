@@ -979,7 +979,10 @@ main() {
 	if [ -z "$package_file" ]; then
 		case "$version" in
 			latest | beta | dev)
-				PATH="$runtime_dir/bin:$PATH" npm_config_update_notifier=false npm_config_fund=false "$node_bin" "$npm_cli" view "$PACKAGE" dist-tags --json --loglevel=error >"$work/dist-tags.json" </dev/null || fail "cannot resolve the $channel channel from the registry"
+				# The channel is resolved from $work with --prefix there, so a project
+				# .npmrc in the operator's directory cannot pick the registry that
+				# answers it; the user and global npmrc still apply.
+				(cd "$work" && PATH="$runtime_dir/bin:$PATH" npm_config_update_notifier=false npm_config_fund=false "$node_bin" "$npm_cli" view "$PACKAGE" dist-tags --json --loglevel=error --prefix "$work" >"$work/dist-tags.json" </dev/null) || fail "cannot resolve the $channel channel from the registry"
 				resolved="$("$node_bin" -e '
 const fs=require("node:fs"), semver=require(process.argv[1]+"/node_modules/semver");
 const tags=JSON.parse(fs.readFileSync(process.argv[2],"utf8")), channel=process.argv[3];
@@ -988,6 +991,11 @@ const versions=tracks.map(tag=>tags[tag]).filter(v=>semver.valid(v));
 if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);
 ' "$runtime_dir/lib/node_modules/npm" "$work/dist-tags.json" "$version")" || fail "no published version on $channel or its stable fallback"
 				require_supported_version "$resolved"
+				current_prefix="$(manifest_field current)"
+				if [ -n "$current_prefix" ] && active_version="$("$node_bin" -e 'process.stdout.write(require(process.argv[1]).version)' "$current_prefix/lib/node_modules/@iowarp/clio-coder/package.json" 2>/dev/null)" &&
+					"$node_bin" -e 'const s=require(process.argv[1]+"/node_modules/semver");process.exit(s.valid(process.argv[3])&&s.lt(process.argv[2],process.argv[3])?0:1)' "$runtime_dir/lib/node_modules/npm" "$resolved" "$active_version"; then
+					fail "the $channel channel resolved to $resolved, older than the active $active_version; the installation was left unchanged. To install $resolved, pass --version $resolved; to return to the previous install, use --rollback."
+				fi
 				spec="$PACKAGE@$resolved"
 				log "resolved $channel to $resolved"
 				;;

@@ -4,11 +4,21 @@
  * so nothing reaches the network or a real home.
  */
 import { match, ok, strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -165,6 +175,102 @@ describe("contracts/install-script", () => {
 			match(oldTool.stderr, /could not check the SHASUMS256\.txt signature/u);
 			match(`${oldTool.stdout}${oldTool.stderr}`, /checksum verified for node-v24\.11\.1-linux-x64\.tar\.gz/u);
 		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves the channel without a project .npmrc and refuses a channel older than the active install", {
+		skip:
+			process.platform === "win32" || !existsSync(join(dirname(process.execPath), "..", "lib", "node_modules", "npm")),
+	}, async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-install-npmrc-"));
+		const requests: string[] = [];
+		// One loopback registry per source, each answering the packument with its own latest.
+		const registry = (name: string, latest: string) =>
+			new Promise<{ server: Server; url: string }>((resolve) => {
+				const server = createServer((req, res) => {
+					requests.push(`${name} ${req.url}`);
+					res.setHeader("content-type", "application/json");
+					res.end(
+						JSON.stringify({
+							name: "@iowarp/clio-coder",
+							"dist-tags": { latest },
+							versions: { [latest]: { name: "@iowarp/clio-coder", version: latest } },
+						}),
+					);
+				});
+				server.listen(0, "127.0.0.1", () => {
+					const address = server.address();
+					resolve({ server, url: `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/` });
+				});
+			});
+		const project = await registry("project", "0.6.0");
+		const user = await registry("user", "0.8.0");
+		try {
+			const build = `${process.platform === "darwin" ? "darwin" : "linux"}-${process.arch === "arm64" ? "arm64" : "x64"}`;
+			const installRoot = join(root, "install");
+			const runtime = join(installRoot, "runtime", `node-v${process.versions.node}-${build}`);
+			mkdirSync(join(runtime, "bin"), { recursive: true });
+			mkdirSync(join(runtime, "lib", "node_modules"), { recursive: true });
+			symlinkSync(process.execPath, join(runtime, "bin", "node"));
+			symlinkSync(
+				join(dirname(process.execPath), "..", "lib", "node_modules", "npm"),
+				join(runtime, "lib", "node_modules", "npm"),
+			);
+			writeFileSync(join(installRoot, ".installer-owner"), "");
+			const home = join(root, "home");
+			const repo = join(root, "repo");
+			const bin = join(root, "bin");
+			for (const dir of [home, repo, bin, join(root, "launchers")]) mkdirSync(dir);
+			writeFileSync(join(repo, ".npmrc"), `registry=${project.url}\n@iowarp:registry=${project.url}\n`);
+			writeFileSync(join(home, ".npmrc"), `registry=${user.url}\n`);
+			writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 22\n");
+			chmodSync(join(bin, "curl"), 0o755);
+			const install = () =>
+				new Promise<string>((resolve) => {
+					const child = spawn(
+						"sh",
+						[
+							SCRIPT,
+							"--node-version",
+							process.versions.node,
+							"--install-dir",
+							installRoot,
+							"--bin-dir",
+							join(root, "launchers"),
+							"--no-post-install",
+						],
+						{
+							cwd: repo,
+							env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, LANG: "C", TMPDIR: root, CLIO_CODER_NODE_BUILD: build },
+							stdio: ["ignore", "pipe", "pipe"],
+						},
+					);
+					let output = "";
+					child.stdout.on("data", (chunk) => {
+						output += chunk;
+					});
+					child.stderr.on("data", (chunk) => {
+						output += chunk;
+					});
+					child.on("close", () => resolve(output));
+				});
+			const fresh = await install();
+			match(fresh, /resolved latest to 0\.8\.0/u, fresh);
+			ok(!requests.some((line) => line.startsWith("project")), requests.join("\n"));
+			const active = join(installRoot, "versions", "0.9.0");
+			mkdirSync(join(active, "lib", "node_modules", "@iowarp", "clio-coder"), { recursive: true });
+			writeFileSync(
+				join(active, "lib", "node_modules", "@iowarp", "clio-coder", "package.json"),
+				'{"name":"@iowarp/clio-coder","version":"0.9.0"}',
+			);
+			writeFileSync(join(installRoot, "install.json"), `{\n  "current": "${active}"\n}\n`);
+			const older = await install();
+			match(older, /latest channel resolved to 0\.8\.0, older than the active 0\.9\.0/u, older);
+			ok(!/installing @iowarp/u.test(older), older);
+		} finally {
+			project.server.close();
+			user.server.close();
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

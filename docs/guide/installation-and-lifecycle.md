@@ -94,6 +94,14 @@ publication forwards those tags to stable when they point lower. A bare upgrade
 follows the managed installation's recorded channel, or uses `latest` for a
 package-manager installation.
 
+The installers read the channel's dist-tags with npm from their own work
+directory, and `clio-coder upgrade` starts the installer or npm from the
+directory it installs into. A project `.npmrc` in the directory you run them
+from does not choose the registry; your user `~/.npmrc`, the global npmrc and
+`npm_config_registry` still do. A channel that resolves to a version older than
+the active one is refused before anything is installed. To move down, name the
+version with `--version`, or use `--rollback`.
+
 Return to stable with `clio-coder upgrade --channel latest`,
 `curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --channel latest`, or:
 

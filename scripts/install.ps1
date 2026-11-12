@@ -303,8 +303,10 @@ function Install-ClioCoder {
 			$savedNotifier = $env:npm_config_update_notifier
 			$savedFund = $env:npm_config_fund
 			$env:npm_config_update_notifier = "false"; $env:npm_config_fund = "false"
-			try { $tags = & $node $npmCli view $PackageName dist-tags --json --loglevel=error }
-			finally { $env:npm_config_update_notifier = $savedNotifier; $env:npm_config_fund = $savedFund }
+			# Resolved from $work with --prefix there, so a project .npmrc in the operator's directory cannot pick the registry; user and global npmrc still apply.
+			Push-Location -LiteralPath $work
+			try { $tags = & $node $npmCli view $PackageName dist-tags --json --loglevel=error --prefix $work }
+			finally { Pop-Location; $env:npm_config_update_notifier = $savedNotifier; $env:npm_config_fund = $savedFund }
 			if ($LASTEXITCODE -ne 0) { Fail "cannot resolve the $spec channel from the registry" }
 			[IO.File]::WriteAllText($tagsFile, ($tags -join "`n"))
 			$resolve = 'const fs=require("node:fs"),semver=require(process.argv[2]+"/node_modules/semver");const tags=JSON.parse(fs.readFileSync(process.argv[3],"utf8")),c=process.argv[4];const tracks=c==="dev"?["dev","beta","latest"]:c==="beta"?["beta","latest"]:["latest"];const versions=tracks.map(t=>tags[t]).filter(v=>semver.valid(v));if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rcompare)[0]);'
@@ -312,6 +314,14 @@ function Install-ClioCoder {
 			[IO.File]::WriteAllText($resolverFile, $resolve)
 			$resolved = & $node $resolverFile (Join-Path $runtimeDir "node_modules\npm") $tagsFile $spec
 			if ($LASTEXITCODE -ne 0) { Fail "no published version on $spec or its stable fallback" }
+			if ($previous) {
+				$activeVersion = $null
+				try { $activeVersion = [string](Get-Content -LiteralPath (Join-Path $previous "lib\node_modules\@iowarp\clio-coder\package.json") -Raw | ConvertFrom-Json).version } catch { $activeVersion = $null }
+				if ($activeVersion) {
+					& $node -e 'const s=require(process.argv[1]+"/node_modules/semver");process.exit(s.valid(process.argv[3])&&s.lt(process.argv[2],process.argv[3])?0:1)' (Join-Path $runtimeDir "node_modules\npm") $resolved $activeVersion
+					if ($LASTEXITCODE -eq 0) { Fail "the $spec channel resolved to $resolved, older than the active $activeVersion; the installation was left unchanged. To install $resolved, pass -Version $resolved; to return to the previous install, use -Rollback." }
+				}
+			}
 			$installSpec = "$PackageName@$resolved"
 			Say "resolved $spec to $resolved"
 		}

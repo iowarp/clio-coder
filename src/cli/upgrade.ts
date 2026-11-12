@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { appliedMigrationIds, initializeClioHome, recordHomeDowngrade } from "../core/init.js";
 import { runCommandVector } from "../core/safe-exec.js";
@@ -182,13 +182,14 @@ async function runChild(
 	args: ReadonlyArray<string>,
 	label: string,
 	env: NodeJS.ProcessEnv = process.env,
-	run: { log?: string; signal?: AbortSignal } = {},
+	run: { log?: string; signal?: AbortSignal; cwd?: string } = {},
 ): Promise<string> {
 	const { log } = run;
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn(command, [...args], {
 			stdio: ["ignore", "pipe", "pipe"],
 			env,
+			...(run.cwd !== undefined ? { cwd: run.cwd } : {}),
 			...(run.signal ? { signal: run.signal } : {}),
 		});
 		let stdout = "";
@@ -272,6 +273,14 @@ function migrationsUnknownTo(packageRoot: string, applied: ReadonlyArray<string>
 }
 
 /** The Node that runs `installation`: its managed runtime for install.sh, else this process's. */
+/**
+ * The package manager runs from the directory it installs into, never the
+ * operator's, so a project .npmrc there cannot choose the registry or version.
+ */
+function packageManagerCwd(dir: string | null): string {
+	return dir !== null && existsSync(dir) ? dir : homedir();
+}
+
 function nodeFor(installation: Installation): string {
 	const node = installation.installer?.node;
 	return node !== undefined && existsSync(node) ? node : process.execPath;
@@ -290,7 +299,7 @@ async function runNpmInstall(
 			...process.env,
 			...invocation.env,
 		},
-		run,
+		{ ...run, cwd: packageManagerCwd(installation.prefix) },
 	);
 }
 
@@ -359,11 +368,17 @@ async function runInstallerUpgrade(installation: Installation, invocation: Upgra
 	const record = installation.installer;
 	if (installation.kind !== "installer" || record === undefined)
 		throw new Error("installer upgrade needs an install.sh installation");
-	await runChild(invocation.command, invocation.args, process.platform === "win32" ? "install.ps1" : "install.sh", {
-		...process.env,
-		...invocation.env,
-		...UPGRADE_CHILD_ENV,
-	});
+	await runChild(
+		invocation.command,
+		invocation.args,
+		process.platform === "win32" ? "install.ps1" : "install.sh",
+		{
+			...process.env,
+			...invocation.env,
+			...UPGRADE_CHILD_ENV,
+		},
+		{ cwd: packageManagerCwd(record.root) },
+	);
 	const updated = readInstallerRecord(record.root);
 	if (updated === null) throw new Error(`install.sh finished but ${join(record.root, "install.json")} is unreadable`);
 	return inspectInstallation(join(installerPackageRoot(updated.current), "dist", "cli", "index.js"));
