@@ -714,12 +714,15 @@ export function planMainSandboxSpawn(
 		.map((hooks) => ({ path: hooks, kind: "directory" }));
 	const configMask =
 		availability.backend === "bwrap"
-			? clioConfigDirMask([
-					policy.secretRoots.workspace,
-					...policy.secretRoots.scratchRoots,
-					...policy.writableRoots,
-					...(policy.sandboxCache !== undefined ? [policy.sandboxCache] : []),
-				])
+			? clioConfigDirMask(
+					[
+						policy.secretRoots.workspace,
+						...policy.secretRoots.scratchRoots,
+						...policy.writableRoots,
+						...(policy.sandboxCache !== undefined ? [policy.sandboxCache] : []),
+					],
+					{ revealSettings: policy.env.maskSettings !== true },
+				)
 			: null;
 	const baseMasks = [
 		...workerSandboxMasks(),

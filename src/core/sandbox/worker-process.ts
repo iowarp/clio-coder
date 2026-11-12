@@ -187,17 +187,25 @@ export function workerSandboxMasks(): ReadonlyArray<SandboxMaskedPath> {
 	return workerSandboxMaskedPaths();
 }
 
-/** The config subtrees Clio points the model at (read-scope.ts), readable inside a masked config directory. */
-const CONFIG_READ_SUBTREES = ["skills", "plugins", "extensions"] as const;
+/**
+ * The config subtrees readable inside a masked config directory: those Clio points the model at (read-scope.ts) and
+ * the operator-written recipes a contained read-only `clio-coder` loads. None holds a secret.
+ */
+const CONFIG_READ_SUBTREES = ["skills", "plugins", "extensions", "agents", "playbooks", "prompts"] as const;
 
 /**
  * Under bubblewrap, Clio's config directory as one empty tmpfs with the installed skills, plugins and extensions
  * bound back read-only. Clio rewrites credentials.yaml and settings.yaml by renaming a new file over them, which
  * detaches a mask mounted on the old file inside a running sandbox and shows the new one; a mount on the directory
- * survives that and also hides mcp.yaml, the backups and every temp file a write leaves. Null when the directory is
- * absent or holds one of the run's roots, whose files the command needs; the file masks stand then.
+ * survives that and also hides mcp.yaml, the backups and every temp file a write leaves. With `revealSettings`,
+ * settings.yaml is bound back too, for a launch that would not have masked it: the bind holds the inode it was made
+ * from, so a host rewrite by rename leaves the command reading the old content, never the new file. Null when the
+ * directory is absent or holds one of the run's roots, whose files the command needs; the file masks stand then.
  */
-export function clioConfigDirMask(roots: ReadonlyArray<string>): SandboxMaskedPath | null {
+export function clioConfigDirMask(
+	roots: ReadonlyArray<string>,
+	options: { revealSettings: boolean },
+): SandboxMaskedPath | null {
 	let config: string;
 	try {
 		config = realpathSync(clioConfigPath());
@@ -218,6 +226,15 @@ export function clioConfigDirMask(roots: ReadonlyArray<string>): SandboxMaskedPa
 			if (statSync(source).isDirectory()) reveal.push({ source, target });
 		} catch {
 			// Nothing installed of this kind.
+		}
+	}
+	if (options.revealSettings) {
+		const target = path.join(config, "settings.yaml");
+		try {
+			const source = realpathSync(target);
+			if (statSync(source).isFile()) reveal.push({ source, target });
+		} catch {
+			// No settings written yet.
 		}
 	}
 	return { path: config, kind: "directory", ...(reveal.length > 0 ? { reveal } : {}) };
@@ -420,7 +437,12 @@ function isDirectoryPath(entry: string): boolean {
 
 /** Secret files under the worker's own trees, on top of the home credential masks. */
 function workerSpawnMasks(policy: WorkerSandboxSpec, backend: SandboxBackend | null, cwd: string): SandboxMaskedPath[] {
-	const config = backend === "bwrap" ? clioConfigDirMask([cwd, ...policy.writableRoots, ...policy.readableRoots]) : null;
+	const config =
+		backend === "bwrap"
+			? clioConfigDirMask([cwd, ...policy.writableRoots, ...policy.readableRoots], {
+					revealSettings: policy.maskSettings !== true,
+				})
+			: null;
 	const base = [
 		...workerSandboxMasks(),
 		...(config === null && policy.maskSettings === true ? settingsFileMasks() : []),

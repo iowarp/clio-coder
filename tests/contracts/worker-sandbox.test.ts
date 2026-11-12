@@ -186,7 +186,7 @@ test("under bwrap no contained command reads the desktop app's launch token", as
 	}
 });
 
-test("under bwrap a running command cannot read Clio's credential store after Clio rewrites it", async (t) => {
+test("under bwrap a running command cannot read Clio's credential store after Clio rewrites it, and still reads settings and recipes", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {
 		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
@@ -196,10 +196,14 @@ test("under bwrap a running command cannot read Clio's credential store after Cl
 	const store = join(config, "credentials.yaml");
 	mkdirSync(join(config, "skills", "demo"), { recursive: true });
 	writeFileSync(join(config, "skills", "demo", "SKILL.md"), "SKILL_BODY\n");
+	mkdirSync(join(config, "agents"), { recursive: true });
+	writeFileSync(join(config, "agents", "demo.md"), "AGENT_BODY\n");
+	const settings = join(config, "settings.yaml");
+	writeFileSync(settings, "# SETTINGS_BEFORE\n");
 	writeFileSync(store, "token: STORE_BEFORE\n", { mode: 0o600 });
 	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-store-rename-")));
 	t.after(() => rmSync(workspace, { recursive: true, force: true }));
-	const shell = `cat ${join(config, "skills", "demo", "SKILL.md")}; for i in 1 2 3 4 5 6 7 8; do cat ${store} 2>&1; ls -a ${config}; sleep 0.25; done`;
+	const shell = `cat ${join(config, "skills", "demo", "SKILL.md")} ${join(config, "agents", "demo.md")}; for i in 1 2 3 4 5 6 7 8; do cat ${store} ${settings} 2>&1; ls -a ${config}; sleep 0.25; done`;
 	const plan = planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), { shell }, workspace);
 	assert.equal(plan.kind, "sandboxed");
 	if (plan.kind !== "sandboxed") return;
@@ -214,7 +218,13 @@ test("under bwrap a running command cannot read Clio's credential store after Cl
 	writeFileSync(temp, "token: STORE_AFTER\n", { mode: 0o600 });
 	await new Promise((resolve) => setTimeout(resolve, 300));
 	renameSync(temp, store);
+	// settings.yaml is bound back from its old inode, so the same rewrite cannot show the new file.
+	writeFileSync(join(config, ".settings.yaml.tmp-1-x"), "# SETTINGS_AFTER\n");
+	renameSync(join(config, ".settings.yaml.tmp-1-x"), settings);
 	await exited;
 	assert.match(output, /^SKILL_BODY$/mu, "installed skills stay readable");
+	assert.match(output, /^AGENT_BODY$/mu, "user agent recipes stay readable");
+	assert.match(output, /^# SETTINGS_BEFORE$/mu, "settings.yaml stays readable when it is not masked");
+	assert.doesNotMatch(output, /SETTINGS_AFTER|settings\.yaml\.tmp/u, output);
 	assert.doesNotMatch(output, /STORE_BEFORE|STORE_AFTER|credentials\.yaml\.tmp/u, output);
 });
