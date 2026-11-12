@@ -34,6 +34,7 @@ if (values.review)
 	for (const item of JSON.parse(await read("content/drafts/review-catalog.json")).articles)
 		tutorials.push({ ...item, draft: true });
 const research = JSON.parse(await read("content/research.json"));
+const paths = JSON.parse(await read("content/paths.json")).paths;
 const collections = [
 	{
 		id: "tutorials",
@@ -70,6 +71,17 @@ for (const item of articles)
 		if (!index.some((doc) => doc.path === path)) throw new Error(`Article ${item.slug} names an unknown guide: ${path}`);
 		related.set(path, [...(related.get(path) ?? []), item]);
 	}
+// Learning paths order published tutorials for one kind of reader each.
+for (const path of paths) {
+	for (const key of ["id", "label", "title", "summary"])
+		if (!path[key]) throw new Error(`Learning path ${path.id ?? "?"} is missing ${key}.`);
+	if (!/^path-[a-z]+$/.test(path.id)) throw new Error(`Learning path id ${path.id} must look like path-name.`);
+	if (!(path.steps?.length >= 3 && path.steps.length <= 5))
+		throw new Error(`Learning path ${path.id} needs three to five steps.`);
+	for (const slug of path.steps)
+		if (!tutorials.some((item) => item.slug === slug && !item.draft))
+			throw new Error(`Learning path ${path.id} names an unpublished tutorial: ${slug}`);
+}
 for (const [id, item] of Object.entries(captures)) {
 	for (const key of ["image", "original", "alt", "caption", "label", "interface", "version", "capturedAt", "source"])
 		if (!item[key]) throw new Error(`Capture ${id} is missing ${key}.`);
@@ -930,13 +942,35 @@ for (const collection of collections) {
 				`<a class="tutorial-card" href="${item.url}">${item.image ? `<img src="${escapeHtml(item.image)}" width="${item.width}" height="${item.height}" alt="${escapeHtml(item.alt)}"${position === 0 ? ' fetchpriority="high"' : ' loading="lazy"'} decoding="async">` : ""}<p class="eyebrow">${escapeHtml(item.category)} / ${escapeHtml(item.time)}</p><h2>${escapeHtml(item.title)}</h2><p>${escapeHtml(item.description)}</p>${item.status ? `<p class="caption"><span class="chapter">${escapeHtml(item.status)}</span></p>` : ""}<span class="text-link">Read ${collection.id === "tutorials" ? "the tutorial" : "the article"} <span aria-hidden="true">↗</span></span></a>`,
 		)
 		.join("\n");
+	const learningPaths =
+		collection.id === "tutorials"
+			? `<div class="learning-paths">${paths
+					.map((path, number) => {
+						const steps = path.steps
+							.map((slug, step) => {
+								const item = articles.find((article) => article.collection === collection && article.slug === slug);
+								return `<li><span class="step-number">${String(step + 1).padStart(2, "0")}</span><a href="${item.url}">${escapeHtml(item.title)}</a><span class="caption">${escapeHtml(item.time)}</span></li>`;
+							})
+							.join("");
+						return `<section class="learning-path" id="${path.id}" aria-labelledby="${path.id}-title"><p class="eyebrow"><span class="chapter">Path ${number + 1} /</span> ${escapeHtml(path.label)}</p><div><h2 id="${path.id}-title">${escapeHtml(path.title)}</h2><p>${escapeHtml(path.summary)}</p><ol>${steps}</ol></div></section>`;
+					})
+					.join("\n")}</div><p class="eyebrow tutorial-catalog-label">All tutorials</p>`
+			: "";
 	await writePage(
 		collection.listing,
-		(await read(collection.listing.slice(1))).replace("<!-- tutorial-cards -->", cards),
+		(await read(collection.listing.slice(1)))
+			.replace("<!-- learning-paths -->", learningPaths)
+			.replace("<!-- tutorial-cards -->", cards),
 		collection.title,
 		collection.description,
 		"WebPage",
-		{ sources: [collection.listing.slice(1), `content/${collection.id}.json`] },
+		{
+			sources: [
+				collection.listing.slice(1),
+				`content/${collection.id}.json`,
+				...(learningPaths ? ["content/paths.json"] : []),
+			],
+		},
 	);
 }
 

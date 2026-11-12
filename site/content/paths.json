@@ -1,0 +1,42 @@
+{
+  "paths": [
+    {
+      "id": "path-agents",
+      "label": "Coding agents",
+      "title": "You already use a coding agent",
+      "summary": "Run a first session in your own repository, see what CLIO Coder may do without asking and how to undo it, check a change against the tests you name, hand bounded work to the agents you already use, then leave a run unattended within limits.",
+      "steps": [
+        "first-session",
+        "let-it-work-with-containment-and-rewind",
+        "check-a-change-against-your-repository",
+        "coordinate-your-coding-agents",
+        "run-it-unattended-within-limits"
+      ]
+    },
+    {
+      "id": "path-hpc",
+      "label": "Science and HPC",
+      "title": "You write research code and run it on a cluster",
+      "summary": "Start in your own repository, follow a numerical fix from a failing test to recorded verification, let the agent submit and follow a Slurm job you asked for, lock a benchmark's thresholds before any result exists, and coordinate workers on other machines over SSH.",
+      "steps": [
+        "first-session",
+        "temperature-calibration",
+        "submit-a-slurm-job",
+        "pre-register-a-benchmark",
+        "work-from-a-laptop-with-remote-workers"
+      ]
+    },
+    {
+      "id": "path-local",
+      "label": "Local models",
+      "title": "You run your own models",
+      "summary": "Connect a model server with no account or key, choose models for conversation and for delegated work, read what each session cost and why a run stopped, and carry a long task through a handoff without losing its decisions.",
+      "steps": [
+        "run-on-a-local-model",
+        "choose-model-for-your-project",
+        "see-what-a-session-cost-and-what-a-run-did",
+        "keep-long-coding-tasks-on-track"
+      ]
+    }
+  ]
+}
