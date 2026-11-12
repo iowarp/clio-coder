@@ -311,6 +311,9 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - The workspace secret scan reads task worktrees under `.clio-coder/worktrees` as roots of their own and judges every listed entry before it walks an untracked directory, so a large checkout, or one holding task worktrees, keeps its own secret files masked.
 - A cached secret scan is reused only while every secret it found, and each directory above it, is still where the scan saw it, so a rename by a tool that does not refresh the scan cannot unmask a secret for the next command.
 - No sandbox can read the desktop app's launch token or the pane-host sockets: every sandbox hides `<state>/gui` as a directory along with `<state>/mux/run` and `<cache>/run`, and typed tools refuse them. Before this a contained command could read the token and reach the app on loopback.
+- Every sandbox hides Clio Coder's config directory behind one mount and binds back only what a contained command reads (skills, plugins, extensions, agents, playbooks, prompts, and `settings.yaml` where it is not masked), so a credential store Clio Coder rewrites during an OAuth refresh never becomes readable to a running command.
+- Under `safety.sandbox: required`, an outward git or gh line stays in the sandbox once the repository's hook files or executable git config differ from the session's start, or when git would push to a local repository, whose hooks would run as you; the refusal names what changed. An added remote does not count.
+- `web_fetch` and `web_read` clean fetched HTML with forward scans, so a page full of unclosed comments or tags can no longer freeze the session.
 
 ### Desktop app
 
@@ -319,6 +322,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - The approval card shows why a call stopped (the safety-net rule or the autonomy level), the size and sha256 digest of a parked write or edit, and the recorded task, matching the terminal card.
 - The machine proxy refuses credential routes however the path is encoded, and a malformed percent-encoded path returns 400 instead of 500.
 - When the open desktop window belongs to a server that restarted, `clio-coder gui` opens a fresh window instead of focusing the dead one. That dead window retitles itself so a later relaunch never raises it; on WSL a relaunch that names a page shows it in the live window instead of replacing the window, and the launcher scripts update themselves on launch after an upgrade.
+- A fleet attach polls the forwarded port only after ssh has set up its forwards and fails when the forward exits, so another local account cannot take the port and receive the node's client credential.
 
 ### Context and compaction
 
@@ -402,6 +406,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - An interrupted uninstall or prune no longer leaves an install lock that blocks every later install.
 - The installer fails closed when the nodejs.org signature file holds no valid signature, unless `CLIO_CODER_REQUIRE_SIGNATURE=0`.
 - `install.sh`, `install.ps1` and `clio-coder upgrade` resolve the release channel outside the current directory, so a repository's `.npmrc` cannot pick the version, and a channel that resolves below the installed version is refused.
+- Uninstall and `reset --data` or `--all` keep a `data` or `cache` directory under `CLIO_CODER_HOME` that holds files Clio Coder did not create, name it and exit 1, instead of deleting it.
 
 ### Windows
 
@@ -579,7 +584,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Work in a sister repository that has no `CLIO-CODER.md` gets no compiled handbook for that repository.
 - Claude Code and OpenCode always read their own instruction files beside the rules Clio Coder compiles, so a stale rule in those files still reaches them; Clio Coder names the files and how many rules are stale.
 - A `run_script` run links an input to the project store only when it gets the store reference (`<tag>:<name>`); a path taken from `store get` runs the same but records no store provenance.
-- Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, and then exits 1.
+- Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, or a `data` or `cache` directory under `CLIO_CODER_HOME` that holds files Clio Coder did not create, and then exits 1.
 - A fleet action step that is not a check, a gate or a commit runs as you outside the sandbox, even when it runs code a worker wrote.
 - A secret file inside a wholly untracked directory that the workspace secret scan reaches only after 20,000 entries stays readable in the sandbox; `clio-coder doctor` warns when the scan stopped at that limit, and a session does not.
 
