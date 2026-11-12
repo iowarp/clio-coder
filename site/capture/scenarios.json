@@ -631,6 +631,494 @@
 				}
 			},
 			"settings": ["interface: { demo: true, outputDetail: detailed }"]
+		},
+		{
+			"id": "stills-terminal",
+			"summary": "terminal stills: plugin list, /context after one turn, Settings Models and Workers, Library browse and installed, interop",
+			"title": "Terminal stills",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"peers": ["claude", "codex", "opencode", "copilot"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library list --kind plugin",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "plugin:wtfp[\\s\\S]*\\$\\s*$",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"shot": "cli-library-list-plugin",
+					"rows": [1, 21]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "List the files in this repository and say in one line what each is for. Do not change files.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"type": "/context",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Next request",
+					"timeout": 15,
+					"pause": 1
+				},
+				{
+					"shot": "tui-context",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Next request",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/settings",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Sections",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Tab"]
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Connections",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-settings-models",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Sections",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/settings fleet",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Default fleet connection",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down"],
+					"delay": 150
+				},
+				{
+					"wait": "❯ Add SSH node",
+					"timeout": 10,
+					"pause": 1
+				},
+				{
+					"shot": "tui-settings-fleet",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Sections",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/library",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Skills \\d+",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Left", "Left", "Left", "Left"],
+					"delay": 200
+				},
+				{
+					"wait": "❯ Skills",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/"
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"type": "tdd",
+					"delay": 120
+				},
+				{
+					"wait": "> tdd",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-library-skill-tdd",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape", "Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"gone": "Skills \\d+",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/library interop",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "proposed",
+					"timeout": 20,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-interop",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"gone": "proposed",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "/library",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Skills \\d+",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Left", "Left", "Left", "Left"],
+					"delay": 200
+				},
+				{
+					"wait": "❯ Skills",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"keys": ["s"]
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"keys": ["b"]
+				},
+				{
+					"wait": "tdd",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-library-installed",
+					"rows": [5, 22]
+				},
+				{
+					"keys": ["Escape", "Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-library-list-plugin": {
+					"label": "Plugins",
+					"alt": "Terminal listing the six bundled plugins, hpc, life-science, literature, materio, science-data and wtfp, each with its version, available but not installed, and a description of what it adds.",
+					"caption": "The bundled plugins, listed without installing them."
+				},
+				"tui-context": {
+					"label": "/context",
+					"alt": "Terminal Context Window dock after one short turn: a usage bar with 13,737 of 200,000 tokens in use, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
+					"caption": "/context: the probed window, tokens in use, and what fills them."
+				},
+				"tui-settings-models": {
+					"label": "Models",
+					"alt": "Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.",
+					"caption": "Settings: the model answering you, under Models."
+				},
+				"tui-settings-fleet": {
+					"label": "Workers",
+					"alt": "Terminal Settings open on Workers with Add SSH node selected under Machines: automatic routing, the ready local node, Tailscale discovery, workers at once, and fleet retry and tool limits.",
+					"caption": "Settings: worker routing, machines, and limits under Workers."
+				},
+				"tui-library-skill-tdd": {
+					"label": "Browse",
+					"alt": "Terminal Library on the Skills tab filtered to tdd: the bundled skill, not installed in user scope, with its version, what it does, and the key to review an install.",
+					"caption": "The Library in Browse mode, filtered to the bundled tdd skill."
+				},
+				"tui-interop": {
+					"label": "/interop",
+					"alt": "Terminal Local coding agents view: Claude Code, Codex, OpenCode and GitHub Copilot proposed for connection and not configured, their inventories with nothing to adopt, Antigravity CLI not installed, and the configuration entry that connecting Claude Code would append.",
+					"caption": "/library interop lists the coding agents CLIO Coder detected and the entry that connecting would add."
+				},
+				"tui-library-installed": {
+					"label": "Installed",
+					"alt": "Terminal Library Installed view at project scope with the tdd skill available and trusted: how to use it with /skill tdd, its kind, source and origin, and the keys to disable, update or remove it.",
+					"caption": "Installed at project scope: how to use the skill and where it came from."
+				}
+			}
+		},
+		{
+			"id": "stills-configure-source",
+			"summary": "guided setup on a fresh profile with no model server: what do you have?",
+			"title": "Guided setup stills",
+			"live": false,
+			"stillsOnly": true,
+			"privateNet": {},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "❯ Guided setup",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "What do you have\\?",
+					"timeout": 30,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-source",
+					"rows": [1, 16]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-configure-source": {
+					"label": "Route",
+					"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind each.",
+					"caption": "Guided setup asks what you have and lists the providers behind each route."
+				}
+			}
 		}
 	]
 }

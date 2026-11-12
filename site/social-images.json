@@ -41,28 +41,28 @@
 			"path": "assets/social/tui-context.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "81c4ef0c72de75381905cb24615f6046ae430a563638fd824a3b7c2aa6a54226"
+			"sha256": "962aef0a0095ce1e011977f97b5ce08f2185b9d3115c43ea3615bd01fa808afc"
 		},
 		"tui-interop": {
 			"source": "assets/guides/tui-interop.png",
 			"path": "assets/social/tui-interop.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "bc5e7d0b1015d7e2e7a2e936d72245fc7fcede1856885395d4fcb0e36b07053e"
+			"sha256": "a89d295f4f932de791ca7d85938be22691e0c213ee6c9a46002f047d5f4a76ff"
 		},
 		"tui-library-installed": {
 			"source": "assets/guides/tui-library-installed.png",
 			"path": "assets/social/tui-library-installed.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "9fa624d6e16822219199e9f8055bbbb222e58ea7fd199ca6063fcfba845cc425"
+			"sha256": "cc73e7b19a94d7b221b19f91e6ae6ec3f3a1e3cba34c7df39b8f3b3a45193f92"
 		},
 		"tui-settings-fleet": {
 			"source": "assets/guides/tui-settings-fleet.png",
 			"path": "assets/social/tui-settings-fleet.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "f69d77bd9f1232d9635693927564cb4f89ddfecc7b7b302541b404c7943a7931"
+			"sha256": "c31cdaddfd6d3b7bc81bb91e27602840582198144d7e6df0aec57dbf5a965df7"
 		},
 		"tui-verify-result": {
 			"source": "assets/guides/tui-verify-result.png",
