@@ -529,6 +529,13 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - Pruning and uninstall on macOS are verified by unit tests only, and process discovery there reads command lines without working directories.
 - A research campaign tries one candidate per iteration and has no parameter sweeps. Only `.clio-coder/verifiers.yaml` is copied into an arena contender's worktree, so untracked files a check reads must be committed.
 - Delegation from clio-agent to Clio Coder was not qualified for this release; clio-agent's own runtime failed before delegating.
+- At yolo the safety floor also reads any line holding a command substitution as raw text, so a line that quotes a destructive command as data beside `$(` or a backtick is blocked, including a command sent to a remote host or container (`ssh host "rm -rf /var/www/old && echo $(date)"`); write such text with the write tool and pass the file. After a `cd` to anything but a literal path, a relative delete of `.`, `..`, `*` or a system directory name (`bin`, `lib`, `var`, `home`) is blocked, and `cd "$X" && shred -u <name>` is not caught.
+- Under `safety.sandbox: required` an outward line that leaves the sandbox still trusts what Clio Coder cannot check: the job script `sbatch` submits runs on the cluster as you; `npm publish` and `pnpm publish` read the package's `.npmrc`; an ssh host alias or a DNS name can name this machine; a bare-name push remote and an input file are checked once, before the command runs; and a config or program named by a variable Clio Coder was started with (`KUBECONFIG`, `GIT_SSH_COMMAND`, `DOCKER_CONFIG`, `GIT_CONFIG_GLOBAL`) is not checked against the writable trees. A host given as an IP address, any `scp`, and any option missing from a CLI's short list keep the line inside.
+- On the `openai` route the system prompt still goes out as one instructions block, so a change below the pinned layer, such as a handbook edit, misses the prompt cache for the whole prompt; only the openai-codex route splits it.
+- While an answer streams, a long tight list (items with no blank line between them) or text with reference-style link definitions is not settled early and re-renders whole on each update until the answer ends.
+- Work in a sister repository that has no `CLIO-CODER.md` gets no compiled handbook for that repository.
+- Claude Code and OpenCode always read their own instruction files beside the rules Clio Coder compiles, so a stale rule in those files still reaches them; Clio Coder names the files and how many rules are stale.
+- A `run_script` run links an input to the project store only when it gets the store reference (`<tag>:<name>`); a path taken from `store get` runs the same but records no store provenance.
 
 ## 0.7.0 - 2026-11-08
 
