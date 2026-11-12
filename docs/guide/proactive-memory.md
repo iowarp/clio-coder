@@ -20,6 +20,20 @@ not change the action agent's system prompt or tool surface. Disabling
 `context.memory.enabled` removes observation, bank writes, model resolution,
 reminders, the `# Memory` section, handoff offers, and handoff seeding.
 
+## Quick start
+
+Memory is on by default and needs no setup. While you work, CLIO Coder notes
+your requirements, facts about your environment, what failed and why, and
+reminds the agent of them when they matter again.
+
+- `/memory` shows what it holds for this session.
+- On a selected row, `p` proposes it as a lasting lesson for this
+  repository, and `g` for every project. `clio-coder memory` reviews the
+  proposals.
+- Memory uses your chat model unless you give it a route of its own in
+  `/settings` → **Context & Memory** → **Proactive memory**, where you can
+  also turn it off.
+
 ## Inspect or configure memory
 
 ### Turn memory off

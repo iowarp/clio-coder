@@ -17,6 +17,27 @@ files, and write nothing into those agents' directories
 agent, their directories (`.windsurf/`, `.clinerules/`, `~/.codeium/windsurf/`,
 `~/Documents/Cline/` and `~/.aider/`) are default no-write paths for CLIO Coder's tools.
 
+## Quick start
+
+1. Install and sign in to the other agent's own CLI, such as Claude Code,
+   Codex or OpenCode.
+2. Run `clio-coder interop inspect` or open `/library interop` to see what
+   CLIO Coder found and which connections are ready.
+3. Add an ACP connection with `clio-coder configure --interop`.
+4. Hand it a task from a session:
+
+   ```text
+   /run acp:opencode Review the proposed parser change and its edge cases.
+   ```
+
+   `/panes peer <id> <task>` opens the agent in a pane beside you instead.
+
+To give an agent write work as a managed run, add a target for its headless
+runtime and start it with `/run --target <id> --worktree`, so its changes land
+on a branch of their own. That agent runs its own tools, which CLIO Coder
+cannot check one by one, so the target needs `trustedUnmediated: true`; see
+the example below.
+
 ## Delegate work to an installed coding agent
 
 Depending on the peer, CLIO Coder can run a named task through an Agent Client
