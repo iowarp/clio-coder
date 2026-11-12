@@ -30,7 +30,7 @@
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "de58d44bc9d80737c1182489d432dc31c8e4b43d3685e19dccbabb4c6d437d51",
+      "sha256": "a8d75c9765c071c0cc85e8b005bfa9d41bd6c03f6b55d7b4c7ff39e0029d450c",
       "sourceSha256": "d6457f623ce2edad599191d7088b3257e693561d2622249239b26c5ebfe84dde"
     },
     {
@@ -60,7 +60,7 @@
     {
       "path": "guide/gui.md",
       "source": "docs/guide/gui.md",
-      "sha256": "bcea6e743f25e182a8eaff46901b759fb351b825c0414bd42e98e0e31aa2fe39",
+      "sha256": "b3d203c636eaa3c81a3dd3f16185f50c289f7ba814db8a318ab03b3fbcd47d4c",
       "sourceSha256": "edb1c8450204380547c74f3a7482e43caee1eef789976005c08e6ae8f3ee2446"
     },
     {
@@ -108,7 +108,7 @@
     {
       "path": "guide/troubleshooting.md",
       "source": "docs/guide/troubleshooting.md",
-      "sha256": "7fa6d7e177b05cea98db0dad1ae1d52108d5042c7ac872b65e16291970a5fc48",
+      "sha256": "909d9ef1eef8eac9985aca55dc564bb1e9371058dba4bcd39d3a63ade3f3d2de",
       "sourceSha256": "881fa0898ed39eb1e30a655559e80f2bd8c83e30460037791b9d25ad24ac2bb3"
     },
     {

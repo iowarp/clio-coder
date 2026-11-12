@@ -42,6 +42,11 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | `/tree` | Conversation history and branches |
 | `/new` | A fresh conversation |
 | `/view` | Artifacts and recorded results |
+| `/trust` | Review the project's own CLIO Coder configuration and decide whether to activate it |
+| `/poll <n> <question>` | Ask 2 to 5 independent agents the same question and see how they vote |
+| `/report` | Draft a report for the maintainers; nothing is sent until you review it |
+
+Familiar names work as aliases: `/clear` is `/new`, `/exit` is `/quit`, `/undo` is `/rewind`, `/cost` and `/status` open `/usage`, `/login` opens connections, and `/init` writes a project handbook. A mistyped command names the closest one and keeps your draft.
 
 ## A few keys to remember
 
@@ -57,6 +62,7 @@ Alt+letter runs a CLIO Coder action, and **Ctrl+G** then the same letter runs it
 | Alt+L | Open the Library |
 | Alt+O | Cycle the output detail level |
 | Alt+W | Open Workers: the Fleet Runs board, or the workers dock in a session with panes |
+| Alt+U | Open or close the one-page dashboard |
 
 Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
 
