@@ -137,15 +137,35 @@ export class ApplicationInputTuiAltScreen extends TuiAltScreen implements Applic
 	 * that selected nothing as a click and offers it to the overlay, so that
 	 * release is dropped, and a release that ends a selection is preceded by a
 	 * motion report so it never counts as a click.
+	 * A left press on the latest marker still returns to the live edge, as it
+	 * does with no overlay up.
 	 */
 	selectPastOverlay(data: string): void {
 		const event = this.parseSgrMouseEvent(data);
 		if (!event || (event.button & 64) !== 0) return;
+		if (!event.release && (event.button & 35) === 0 && this.latestMarkerAt(event.x, event.y)) {
+			this.scrollToBottom();
+			return;
+		}
 		if (event.release) {
 			if (!this.hasActiveSelection()) return;
 			this.handleSelectionMouseEvent({ ...event, button: event.button | 32, release: false });
 		}
 		this.handleSelectionMouseEvent(event);
+	}
+
+	/** Whether the last frame shows the latest marker at this 0-based cell, uncovered by an overlay. */
+	private latestMarkerAt(x: number, y: number): boolean {
+		// Pi keeps both rectangles private; they are written by the frame the pointer clicked on.
+		const frame = this as unknown as {
+			scrollToEndIndicatorRect?: { row: number; column: number; width: number };
+			renderedOverlayLayouts?: readonly { row: number; col: number; width: number; height: number }[];
+		};
+		const marker = frame.scrollToEndIndicatorRect;
+		if (!marker || y !== marker.row || x < marker.column || x >= marker.column + marker.width) return false;
+		return !(frame.renderedOverlayLayouts ?? []).some(
+			(card) => x >= card.col && x < card.col + card.width && y >= card.row && y < card.row + card.height,
+		);
 	}
 }
 

@@ -1387,6 +1387,66 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("returns to the live edge from the latest marker while a modal overlay owns the pointer", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, fullscreenTuiOptions(terminal));
+		let transcript: { isFollowingEnd: boolean } | undefined;
+		const parts = {
+			banner: new Text("", 0, 0),
+			chat: new Text(Array.from({ length: 80 }, (_, row) => `row ${row}`).join("\n"), 0, 0),
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer", 0, 0),
+		};
+		tui.setLayoutRoot(
+			buildLayout(parts, {
+				mode: "fullscreen",
+				onTranscript: (view) => {
+					transcript = view;
+				},
+			}),
+		);
+		tui.start();
+		const label = `${GLYPH.down} latest`;
+		const marker = () => {
+			terminal.writes = [];
+			tui.renderNow(true);
+			const rows = terminal.writes
+				.join("")
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: the cursor move is the row separator
+				.split(/\x1b\[\d+;1H/u)
+				.slice(1)
+				.map(stripTerminalSequences);
+			const row = rows.findIndex((line) => line.includes(label));
+			return row < 0 ? undefined : { row, column: (rows[row] ?? "").indexOf(label) };
+		};
+		const click = (at: { row: number; column: number }) => {
+			// The application controller hands every pointer report here while an overlay owns input.
+			tui.selectPastOverlay(`\x1b[<0;${at.column + 2};${at.row + 1}M`);
+			tui.selectPastOverlay(`\x1b[<0;${at.column + 2};${at.row + 1}m`);
+		};
+		try {
+			strictEqual(marker(), undefined, "no marker while the view follows the end");
+			tui.scrollBy(-20);
+			const card = tui.showOverlay(new Text("card", 0, 0), { anchor: "top-center" });
+			const shown = marker();
+			ok(shown, "the marker shows beside the card");
+			click(shown);
+			strictEqual(transcript?.isFollowingEnd, true, "a click on the marker returns to the live edge");
+			strictEqual(marker(), undefined);
+			tui.scrollBy(-20);
+			const under = marker();
+			ok(under, "the marker shows again once scrolled up");
+			card.hide();
+			tui.showOverlay(new Text("cover", 0, 0), { row: under.row, col: under.column, width: label.length + 2 });
+			marker();
+			click(under);
+			strictEqual(transcript?.isFollowingEnd, false, "a card painted over the marker takes the click");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("paints fullscreen search matches with theme roles and names the leader action in Clio's words", () => {
 		strictEqual(createKeybindingManagerForTesting().getLabel("tui.altScreen.search"), "Search transcript");
 		const terminal = new RenderingTerminal();
