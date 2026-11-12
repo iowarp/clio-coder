@@ -29,13 +29,6 @@
 			"height": 630,
 			"sha256": "5097e54b28a94e7e63e30570b91745e87e2f7ccae65256877b1f12a8c24464dd"
 		},
-		"tui-boot": {
-			"source": "assets/tui-boot.png",
-			"path": "assets/social/tui-boot.png",
-			"width": 1200,
-			"height": 630,
-			"sha256": "31638dc6109dd4412e9cf94e68d7cf60de0ae0bbe918628bef47fd1d9298001e"
-		},
 		"tui-configure-review": {
 			"source": "assets/guides/tui-configure-review.png",
 			"path": "assets/social/tui-configure-review.png",
