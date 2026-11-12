@@ -4,7 +4,7 @@ import { type Dirent, lstatSync, readdirSync, readFileSync, statSync } from "nod
 import { homedir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { probeToolEnv } from "../../core/bash-exec.js";
+import { bashSearchPath, probeToolEnv } from "../../core/bash-exec.js";
 import { asDirectoryPathBoundary, resolvePathBoundary, writeRootsCover } from "../../core/path-boundary.js";
 import {
 	canonicalizeExistingPath,
@@ -1820,8 +1820,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const workspace = canonicalizePath(cwd) ?? cwd;
 		const roots = mainSandboxWritableRoots(workspace, effectiveScratchRoots(scope.scratchRoots, cwd));
 		return {
+			workspace,
 			fileRoots: [...new Set(roots.flatMap((root) => [root, canonicalizePath(root) ?? root]))],
 			cwd: canonicalizePath(callCwd) ?? callCwd,
+			searchPath: bashSearchPath(),
 		};
 	};
 
@@ -1849,7 +1851,13 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return blockDecision(base, {
 				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
 				reasonCode: YOLO_SANDBOX_REQUIRED_RULE_ID,
-				reasons: [required === "refused" ? YOLO_SANDBOX_REFUSED : YOLO_SANDBOX_NOT_LEFT],
+				reasons: [
+					required === "unsandboxed"
+						? YOLO_SANDBOX_NOT_LEFT
+						: reachesOutward(call, base.classification, judgedCommand)
+							? YOLO_SANDBOX_REFUSED_OUTWARD
+							: YOLO_SANDBOX_REFUSED,
+				],
 				policySource: "builtin-classifier",
 			});
 		}
@@ -3471,6 +3479,10 @@ function runsUnderShell(args: Record<string, unknown> | undefined): boolean {
 /** Why yolo refuses a command when `safety.sandbox` is `required` and the host has no backend. */
 const YOLO_SANDBOX_REFUSED =
 	'safety.sandbox is "required" and no OS sandbox is available, so yolo does not run this command; use a typed tool, or have the operator set safety.sandbox to auto';
+
+/** Why yolo refuses an outward line it would have run inside, when `safety.sandbox` is `required` and the host has no backend. */
+const YOLO_SANDBOX_REFUSED_OUTWARD =
+	'safety.sandbox is "required" and no OS sandbox is available, so yolo does not run this command; an outward command runs only alone on its line, with literal arguments and only the options its CLI is allowed, from the workspace repository';
 
 /** Why yolo refuses `unsandboxed: true` when `safety.sandbox` is `required`. */
 const YOLO_SANDBOX_NOT_LEFT =

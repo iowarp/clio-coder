@@ -383,6 +383,18 @@ async function bashSpawnPlan(): Promise<BashSpawnPlan> {
 	return { mode: "-c", env: buildToolEnv(merged), source: baseToolEnv(merged) };
 }
 
+/**
+ * The PATH a bash command runs with, read at once: the login profile's once its capture has settled, the
+ * process's when that capture failed, and null while it is pending, which a read starts.
+ */
+export function bashSearchPath(): string | null {
+	if (!loginEnvSettled) {
+		void captureLoginEnvOnce();
+		return null;
+	}
+	return buildToolEnv({ ...process.env, ...loginEnvSnapshot }).PATH ?? "";
+}
+
 /** The credential values a command run through {@link runBashCommand} could print, read from the environment it inherits. */
 export async function bashSecretValues(secretNames?: Iterable<string>): Promise<string[]> {
 	return knownSecretValues((await bashSpawnPlan()).source, secretNames);

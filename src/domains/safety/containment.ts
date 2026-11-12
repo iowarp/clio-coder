@@ -1,4 +1,5 @@
-import { accessSync, constants, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
@@ -312,14 +313,19 @@ function literalSimpleCommand(command: string): string[] | null {
 	return words.length > 0 && CLI_NAME.test(name) ? words : null;
 }
 
+/** The words of a space-separated list. */
+const listed = (text: string): ReadonlyArray<string> => text.split(" ");
+
 /** Where an outward line would run and what a contained command can write, for the checks that read paths. */
 export interface OutwardPlaces {
+	/** The workspace, with links resolved. */
+	readonly workspace: string;
 	/** The trees a contained command can write: the workspace, the scratch roots, the sandbox cache, the git dirs. */
 	readonly fileRoots: ReadonlyArray<string>;
 	/** The directory the line runs in. */
 	readonly cwd: string;
-	/** The PATH the line's CLI is found on; the process's when not given. */
-	readonly searchPath?: string;
+	/** The PATH the line runs with; null when it is not known yet, which keeps every line inside. */
+	readonly searchPath: string | null;
 }
 
 /** True when `target` lies in a tree a contained command can write, as written or once links resolve. */
@@ -330,26 +336,23 @@ function inWritableRoot(target: string, places: OutwardPlaces): boolean {
 	);
 }
 
-/** True when the path `value`, read from `dir`, may name a file a contained command planted, or cannot be placed. */
-function plantedPath(value: string, dir: string, places: OutwardPlaces): boolean {
-	if (value === "" || value.startsWith("~")) return true;
-	const resolved = path.isAbsolute(value) ? path.normalize(value) : canonicalizeRawPath(value, dir);
-	return resolved === null || inWritableRoot(resolved, places);
+/** True when the local path `value`, read from `places.cwd`, lies in a writable tree both as written and once links resolve. */
+function insideWritableRoots(value: string, places: OutwardPlaces): boolean {
+	if (value === "" || value.startsWith("~")) return false;
+	const written = path.resolve(places.cwd, value);
+	const real = canonicalizeRawPath(value, places.cwd);
+	const inside = (target: string) => places.fileRoots.some((root) => isSameOrDescendant(target, root));
+	return real !== null && inside(written) && inside(real);
 }
 
 /**
- * True when PATH may run a program a contained command planted for `name`: a directory before the first one
- * holding an executable `name`, or any when none does, that is relative, empty or in a writable tree.
+ * True when PATH may run a program a contained command planted: any directory on it that is relative, empty
+ * or in a writable tree. The CLI is not the only program PATH finds: gh runs git, git and rsync run ssh, and
+ * a script CLI runs its interpreter.
  */
-function plantedOnPath(name: string, places: OutwardPlaces): boolean {
-	for (const dir of (places.searchPath ?? process.env.PATH ?? "").split(":")) {
-		if (dir === "" || !path.isAbsolute(dir) || inWritableRoot(dir, places)) return true;
-		try {
-			accessSync(path.join(dir, name), constants.X_OK);
-			return false;
-		} catch {}
-	}
-	return false;
+function plantedOnPath(places: OutwardPlaces): boolean {
+	if (places.searchPath === null) return true;
+	return places.searchPath.split(":").some((dir) => dir === "" || !path.isAbsolute(dir) || inWritableRoot(dir, places));
 }
 
 /** The nearest directory at or above `dir` holding `.git`. */
@@ -360,133 +363,385 @@ function repositoryTop(dir: string): string | null {
 	}
 }
 
-/** git's global options that take the next word as a value. */
-const GIT_VALUE_OPTIONS = /^(?:-c|--namespace|--config-env|--super-prefix|--attr-source)$/u;
+/**
+ * True when a line run from `dir` runs in the workspace's own repository: inside the workspace, outside any
+ * `.git` directory, and with no other repository between it and the workspace, so git and the CLIs that run
+ * git read the workspace repository's config and hooks, which the sandbox keeps read-only.
+ */
+function inWorkspaceRepository(dir: string, places: OutwardPlaces): boolean {
+	const real = canonicalizePath(dir);
+	if (real === null || !isSameOrDescendant(real, places.workspace)) return false;
+	if (path.relative(places.workspace, real).split(path.sep).includes(".git")) return false;
+	return repositoryTop(real) === repositoryTop(places.workspace);
+}
 
-/** git's global options that name a repository, a work tree or an exec path. */
-const GIT_LOCATION_OPTION = /^--(?:git-dir|work-tree|exec-path)(?:=(.*))?$/u;
-
-/** push options that name a program git runs or the repository it pushes to. */
-const GIT_PUSH_PROGRAM_OPTION = /^--(?:receive-pack|exec)(?:=|$)/u;
+/** A host that is this machine, where a command sent over ssh would run outside the sandbox. */
+function localHost(host: string): boolean {
+	const name = host
+		.replace(/^[^@]*@/u, "")
+		.replace(/^\[|\]$/gu, "")
+		.replace(/\.$/u, "")
+		.toLowerCase();
+	return (
+		name === "" ||
+		name === "::" ||
+		name.startsWith("::ffff:") ||
+		name === "localhost" ||
+		name.endsWith(".localhost") ||
+		name === "::1" ||
+		name === "0.0.0.0" ||
+		/^127\./u.test(name) ||
+		name === hostname().toLowerCase()
+	);
+}
 
 /**
- * Why a `git` argv publishes, or null; `planted` is set when it may run hooks or programs a contained command
- * planted: `-C` or a location option into another repository in a writable tree, a push into a local
- * repository there, whose receive hooks run on this host, a `--receive-pack` or `--exec` program, a `-c`
- * override or a `transport::address` remote.
+ * The options an outward CLI may carry and still leave the sandbox. None names a file, directory, program or
+ * config the CLI would read or run, except an `inputs` option, whose file must lie in a writable tree. An
+ * option is matched whole: an abbreviation, a short-option cluster or a short option with its value attached
+ * is not on the list.
  */
-function gitPushReason(
-	args: ReadonlyArray<string>,
-	places: OutwardPlaces,
-): { reason: string | null; planted: boolean } {
+interface OptionList {
+	/** Options without a value. */
+	readonly flags: ReadonlyArray<string>;
+	/** Options with a value, the next word or after `=` on a long option. */
+	readonly values?: ReadonlyArray<string>;
+	/** Long options whose value, when given, follows `=`. */
+	readonly optionalValues?: ReadonlyArray<string>;
+	/** Options whose value names a file the CLI only reads. */
+	readonly inputs?: ReadonlyArray<string>;
+	/** A further test of an option's value. */
+	readonly value?: (option: string, value: string) => boolean;
+	/** After this many operands, the next operand starts a command whose words are all operands (ssh's remote command). */
+	readonly commandAfter?: number;
+}
+
+/** The operands of `args` read against `list`, or null when a word is an option it does not name or a value it refuses. */
+function listedOperands(args: ReadonlyArray<string>, list: OptionList, places: OutwardPlaces): string[] | null {
+	const operands: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const word = args[index] ?? "";
+		if (word === "--") return [...operands, ...args.slice(index + 1)];
+		if (word === "-" || !word.startsWith("-")) {
+			if (list.commandAfter !== undefined && operands.length === list.commandAfter)
+				return [...operands, ...args.slice(index)];
+			operands.push(word);
+			continue;
+		}
+		const equals = word.startsWith("--") ? word.indexOf("=") : -1;
+		const option = equals === -1 ? word : word.slice(0, equals);
+		if (list.flags.includes(option) || list.optionalValues?.includes(option)) {
+			if (equals !== -1 && list.optionalValues?.includes(option) !== true) return null;
+			continue;
+		}
+		const input = list.inputs?.includes(option) === true;
+		if (!input && list.values?.includes(option) !== true) return null;
+		let value: string | undefined = word.slice(equals + 1);
+		if (equals === -1) {
+			index += 1;
+			value = args[index];
+		}
+		// A value read as an option would hide the word after it from this reading.
+		if (value === undefined || value.startsWith("-")) return null;
+		if (input && !insideWritableRoots(value, places)) return null;
+		if (list.value !== undefined && !list.value(option, value)) return null;
+	}
+	return operands;
+}
+
+/** git push: the guardian's list, and the remote and refspecs as operands. */
+const GIT_PUSH_OPTIONS: OptionList = {
+	flags: listed(
+		"-u --set-upstream -f --force --force-if-includes --tags --follow-tags -d --delete -n --dry-run --no-verify --atomic --all -q --quiet -v --verbose --porcelain",
+	),
+	optionalValues: ["--force-with-lease"],
+};
+
+/** A push remote that is a configured remote's name or a network URL, not a local repository or a remote helper. */
+function networkRemote(remote: string, here: string): boolean {
+	if (remote.includes("::")) return false;
+	if (/^[A-Za-z0-9_][\w.-]*$/u.test(remote)) return !existsSync(path.resolve(here, remote));
+	const url = /^([A-Za-z][\w+.-]*):\/\/(?:[^@/]*@)?(\[[^\]]*\]|[^:/]*)/u.exec(remote);
+	if (url !== null) return /^(?:https?|ssh|git)$/iu.test(url[1] ?? "") && !localHost(url[2] ?? "");
+	const scp = /^(?:[\w.-]+@)?([\w.-]+):/u.exec(remote);
+	return scp !== null && !localHost(scp[1] ?? "");
+}
+
+/**
+ * True when a `git` argv pushes and may leave: global options `-C` and `--no-pager` only, `-C` into the
+ * workspace repository, push options from {@link GIT_PUSH_OPTIONS}, and a remote that is a name or a
+ * network URL.
+ */
+function gitPushLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): boolean {
 	let here = places.cwd;
-	let planted = false;
 	let index = 0;
 	for (; index < args.length; index += 1) {
 		const word = args[index] ?? "";
-		if (word === "-C") {
-			index += 1;
-			const resolved = canonicalizeRawPath(args[index] ?? "", here);
-			if (resolved === null) planted = true;
-			else here = resolved;
-			continue;
-		}
-		const location = GIT_LOCATION_OPTION.exec(word);
-		if (location !== null) {
-			if (location[1] === undefined) index += 1;
-			if (plantedPath(location[1] ?? args[index] ?? "", here, places)) planted = true;
-			continue;
-		}
-		// A config override can name a program git runs (core.sshCommand, a url rewrite to `ext::`).
-		if (/^(?:-c|--config-env)(?:=|$)/u.test(word) || /^-c./u.test(word)) planted = true;
-		if (GIT_VALUE_OPTIONS.test(word)) index += 1;
-		else if (!word.startsWith("-")) break;
+		if (word === "--no-pager") continue;
+		if (word !== "-C") break;
+		index += 1;
+		const resolved = canonicalizeRawPath(args[index] ?? "", here);
+		if (resolved === null) return false;
+		here = resolved;
 	}
-	if (args[index] !== "push") return { reason: null, planted: false };
-	const rest = args.slice(index + 1);
-	if (rest.includes("--dry-run")) return { reason: null, planted: false };
-	const start = repositoryTop(places.cwd) ?? places.cwd;
-	if (
-		here !== places.cwd &&
-		(repositoryTop(here) ?? here) !== start &&
-		inWritableRoot(repositoryTop(here) ?? here, places)
-	)
-		planted = true;
-	if (rest.some((word) => GIT_PUSH_PROGRAM_OPTION.test(word))) planted = true;
-	const remotes: string[] = [];
-	const repo = rest.findIndex((word) => /^--repo(?:=|$)/u.test(word));
-	if (repo !== -1)
-		remotes.push(rest[repo] === "--repo" ? (rest[repo + 1] ?? "") : (rest[repo] ?? "").slice("--repo=".length));
-	const operand = rest.find(
-		(word, at) => !word.startsWith("-") && !(repo !== -1 && rest[repo] === "--repo" && at === repo + 1),
-	);
-	if (operand !== undefined) remotes.push(operand);
-	for (const remote of remotes) {
-		// `transport::address` runs the remote helper git-remote-<transport>; `ext::` runs any command.
-		if (remote.includes("::")) planted = true;
-		const local = remote.startsWith("file://") ? remote.slice("file://".length) : remote;
-		// `host:path` is a remote host; a bare word is a remote's name unless a directory of that name exists.
-		if (/^[^/]*:/u.test(local)) continue;
-		const pathLike = local !== remote || /^(?:\/|\.{1,2}\/|~)/u.test(local);
-		const target = canonicalizeRawPath(local, here);
-		if (pathLike || (target !== null && existsSync(target))) {
-			if (plantedPath(local, here, places)) planted = true;
-		}
-	}
-	return { reason: "git push publishes commits", planted };
+	if (args[index] !== "push" || !inWorkspaceRepository(here, places)) return false;
+	const operands = listedOperands(args.slice(index + 1), GIT_PUSH_OPTIONS, places);
+	if (operands === null) return false;
+	const remote = operands[0];
+	return remote === undefined || networkRemote(remote, here);
 }
 
-/** ssh options whose value runs a command or reads a config that can (ProxyCommand, LocalCommand and the like). */
-const SSH_PROGRAM_KEYS = /^(?:proxycommand|localcommand|permitlocalcommand|knownhostscommand|include|match)\b/iu;
+/** ssh `-o` keys that name no file, program or config, with a plain value. */
+const SSH_OPTION_KEY =
+	/^(?:StrictHostKeyChecking|ConnectTimeout|ConnectionAttempts|BatchMode|ServerAliveInterval|ServerAliveCountMax|LogLevel)[= ][\w.-]+$/iu;
+
+const sshOptionValue = (option: string, value: string): boolean => option !== "-o" || SSH_OPTION_KEY.test(value);
+
+const SSH_OPTIONS: OptionList = {
+	flags: listed("-t -T -q -v -4 -6 -n -N -C"),
+	values: listed("-p -l -o"),
+	value: sshOptionValue,
+	commandAfter: 1,
+};
+
+const SCP_OPTIONS: OptionList = {
+	flags: listed("-q -r -p -C -4 -6 -B -v"),
+	values: listed("-P -l -o"),
+	value: sshOptionValue,
+};
+
+const RSYNC_OPTIONS: OptionList = {
+	flags: listed(
+		"-a --archive -r --recursive -v --verbose -z --compress -n --dry-run -c --checksum -t --times -u --update -h --human-readable -P --progress --partial --delete",
+	),
+	values: listed("--exclude --include"),
+};
+
+/** The host of a remote scp or rsync operand, or null for a local path. */
+function remoteOperandHost(operand: string): string | null {
+	if (operand.startsWith("rsync://")) return /^rsync:\/\/(?:[^@/]*@)?([^:/]*)/u.exec(operand)?.[1] ?? "";
+	return /^([^/:]*):/u.exec(operand)?.[1] ?? null;
+}
+
+/** scp and rsync: every remote operand on another host, every local one in a writable tree. */
+function copyOperandsStay(operands: ReadonlyArray<string>, places: OutwardPlaces): boolean {
+	return operands.every((operand) => {
+		const host = remoteOperandHost(operand);
+		return host !== null ? !localHost(host) : insideWritableRoots(operand, places);
+	});
+}
+
+/** An http or https URL whose host is not this machine. */
+function webUrlOffHost(text: string): boolean {
+	if (!/^https?:\/\//iu.test(text)) return false;
+	try {
+		return !localHost(new URL(text).hostname);
+	} catch {
+		return false;
+	}
+}
+
+/** gh subcommands that leave, by noun and verb; `api` has its own list. */
+const GH_VERBS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+	["pr", listed("list view create edit comment close reopen merge ready review checks diff status")],
+	["issue", listed("list view create edit comment close reopen status")],
+	["run", listed("list view rerun cancel watch")],
+	["workflow", listed("list view run")],
+	["release", listed("list view")],
+	["repo", ["view"]],
+	["label", ["list"]],
+]);
+
+/** gh's options across those subcommands; a short letter that means two things there is left out. */
+const GH_OPTIONS: OptionList = {
+	flags: listed(
+		"-d --draft --fill --merge --squash --rebase --auto --delete-branch --admin --approve --request-changes --comment --log --log-failed --exit-status --failed",
+	),
+	values: listed(
+		"-t --title -b --body -B --base -H --head -l --label --add-label --remove-label --assignee --reviewer --milestone -L --limit -s --state --status -A --author -S --search --json -q --jq -R --repo --subject --workflow --event --branch --raw-field --job --attempt",
+	),
+	inputs: ["--body-file"],
+	value: (option, value) =>
+		!(option === "-R" || option === "--repo") || /^(?:github\.com\/)?[\w.-]+\/[\w.-]+$/u.test(value),
+};
+
+/** `gh api`: no `-F`, which reads `@file`, and no `--input`. */
+const GH_API_OPTIONS: OptionList = {
+	flags: listed("--paginate --slurp -i --include --silent --verbose"),
+	values: listed("-X --method -f --raw-field -H --header -q --jq"),
+};
+
+function ghLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): boolean {
+	const [noun = "", ...rest] = args;
+	const operands = listedOperands(rest, noun === "api" ? GH_API_OPTIONS : GH_OPTIONS, places);
+	// A URL names the host gh sends its token to.
+	if (operands === null || operands.some((word) => word.includes("://") && !word.startsWith("https://github.com/")))
+		return false;
+	return noun === "api" ? operands.length >= 1 : GH_VERBS.get(noun)?.includes(operands[0] ?? "") === true;
+}
+
+const KUBECTL_SUBCOMMANDS: ReadonlyArray<string> = listed(
+	"get describe logs delete rollout scale top version explain api-resources cluster-info",
+);
+
+/** kubectl: no `--kubeconfig`, no `-f`, and no output format read from a file. */
+const KUBECTL_OPTIONS: OptionList = {
+	flags: listed("-A --all-namespaces --show-labels --previous --all"),
+	values: listed(
+		"-n --namespace -l --selector -o --output --context --cluster -c --container --tail --since --field-selector --replicas --sort-by",
+	),
+	value: (option, value) => !(option === "-o" || option === "--output") || !/file/iu.test(value),
+};
+
+/** curl: no output, upload, form, config or `@file` value, and an HTTP URL. */
+const CURL_OPTIONS: OptionList = {
+	flags: listed("-s --silent -S --show-error -f --fail --fail-with-body -L --location -i --include --compressed"),
+	values: listed(
+		"-X --request -H --header -d --data --data-raw --json -u --user -m --max-time --connect-timeout --retry -A --user-agent",
+	),
+	value: (_option, value) => !value.startsWith("@"),
+};
+
+const NPM_PUBLISH_OPTIONS: OptionList = {
+	flags: listed("--dry-run --provenance --ignore-scripts"),
+	values: listed("--access --tag --otp"),
+};
+
+const PNPM_PUBLISH_OPTIONS: OptionList = {
+	flags: listed("--dry-run --provenance --ignore-scripts --no-git-checks"),
+	values: listed("--access --tag --otp --publish-branch"),
+};
+
+const IMAGE_PUSH_OPTIONS: OptionList = { flags: listed("-a --all-tags -q --quiet --disable-content-trust") };
+
+/** Slurm clients: no output, error, working-directory, node-file, export or wrapped-command option. */
+const SLURM_OPTIONS: ReadonlyMap<string, OptionList> = new Map([
+	[
+		"sbatch",
+		{
+			flags: listed("--parsable --exclusive -H --hold --requeue --no-requeue"),
+			values: listed(
+				"-p --partition -N --nodes -n --ntasks --ntasks-per-node -c --cpus-per-task -t --time -J --job-name -A --account -q --qos --mem --mem-per-cpu --gres --gpus -C --constraint -a --array -d --dependency --begin --reservation --mail-type --mail-user",
+			),
+		},
+	],
+	[
+		"squeue",
+		{
+			flags: listed("--me -h --noheader -l --long -r --array"),
+			values: listed(
+				"-u --user -j --jobs -p --partition -t --states -o --format -O --Format -A --account -n --name -S --sort",
+			),
+		},
+	],
+	[
+		"scancel",
+		{
+			flags: ["--me"],
+			values: listed("-u --user -n --name -p --partition -t --state -s --signal -A --account"),
+		},
+	],
+	[
+		"sacct",
+		{
+			flags: listed("-X --allocations -n --noheader -P --parsable2 -p --parsable -a --allusers -l --long"),
+			values: listed("-j --jobs -u --user -S --starttime -E --endtime -o --format --name -s --state --units"),
+		},
+	],
+	[
+		"sinfo",
+		{
+			flags: listed("-N --Node -l --long -h --noheader -s --summarize -R --list-reasons -a --all"),
+			values: listed("-p --partition -o --format -O --Format -t --states"),
+		},
+	],
+]);
 
 /**
- * True when an argv's options name a program the CLI runs on this host, a config file that can name one, or
- * a file it writes: ssh's, scp's and sftp's `-F`, `-S`, `-D`, `-E` and command `-o` keys, rsync's `-e`, and a
- * `--kubeconfig` or other `--*config*` path option into a writable tree.
+ * Whether an outward CLI's argv may leave, by CLI. A CLI not named here runs inside on every line: its argv is
+ * open-ended, it runs workspace code by design (terraform, pulumi, srun, salloc), or no line of it needs to leave.
  */
-function argvRunsPlanted(name: string, args: ReadonlyArray<string>, places: OutwardPlaces): boolean {
-	const optionValue = (index: number, flag: string): string => {
-		const word = args[index] ?? "";
-		const attached = word.startsWith(`${flag}=`) ? word.slice(flag.length + 1) : word.slice(flag.length);
-		return attached !== "" ? attached : (args[index + 1] ?? "");
-	};
-	for (let index = 0; index < args.length; index += 1) {
-		const word = args[index] ?? "";
-		if (word === "--") break;
-		if (name === "ssh" || name === "scp" || name === "sftp") {
-			if (/^-[FE]/u.test(word)) return true;
-			if ((name === "scp" || name === "sftp") && /^-S/u.test(word)) return true;
-			if (name === "sftp" && /^-D/u.test(word)) return true;
-			if (/^-o/u.test(word) && SSH_PROGRAM_KEYS.test(optionValue(index, "-o").replace(/^["']/u, ""))) return true;
-		}
-		if (name === "rsync" && (/^-[A-Za-z]*e/u.test(word) || /^--rsh(?:=|$)/u.test(word))) return true;
-		const config = /^--[\w-]*config[\w-]*(?:=(.*))?$/iu.exec(word);
-		if (config !== null) {
-			const value = config[1] ?? args[index + 1] ?? "";
-			if (/[/~]|^\.{1,2}$/u.test(value) && plantedPath(value, places.cwd, places)) return true;
-		}
-	}
-	return false;
-}
+const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: OutwardPlaces) => boolean> = new Map<
+	string,
+	(args: ReadonlyArray<string>, places: OutwardPlaces) => boolean
+>([
+	["gh", ghLeaves],
+	[
+		"ssh",
+		(args, places) => {
+			const operands = listedOperands(args, SSH_OPTIONS, places);
+			const host = operands?.[0];
+			if (host === undefined) return false;
+			const url = /^ssh:\/\/([^/]*?)(?::\d+)?\/?$/u.exec(host);
+			return !localHost(url !== null ? (url[1] ?? "") : host);
+		},
+	],
+	[
+		"scp",
+		(args, places) => {
+			const operands = listedOperands(args, SCP_OPTIONS, places);
+			return operands !== null && operands.length >= 2 && copyOperandsStay(operands, places);
+		},
+	],
+	[
+		"rsync",
+		(args, places) => {
+			const operands = listedOperands(args, RSYNC_OPTIONS, places);
+			return operands !== null && operands.length >= 2 && copyOperandsStay(operands, places);
+		},
+	],
+	[
+		"kubectl",
+		(args, places) => {
+			const operands = listedOperands(args, KUBECTL_OPTIONS, places);
+			return operands !== null && KUBECTL_SUBCOMMANDS.includes(operands[0] ?? "");
+		},
+	],
+	[
+		"curl",
+		(args, places) => {
+			const operands = listedOperands(args, CURL_OPTIONS, places);
+			return operands !== null && operands.length > 0 && operands.every(webUrlOffHost);
+		},
+	],
+	[
+		"npm",
+		(args, places) => args[0] === "publish" && listedOperands(args.slice(1), NPM_PUBLISH_OPTIONS, places)?.length === 0,
+	],
+	[
+		"pnpm",
+		(args, places) => args[0] === "publish" && listedOperands(args.slice(1), PNPM_PUBLISH_OPTIONS, places)?.length === 0,
+	],
+	...listed("docker podman").map(
+		(name) =>
+			[
+				name,
+				(args: ReadonlyArray<string>, places: OutwardPlaces) =>
+					args[0] === "push" && listedOperands(args.slice(1), IMAGE_PUSH_OPTIONS, places)?.length === 1,
+			] as const,
+	),
+	...[...SLURM_OPTIONS].map(
+		([name, list]) =>
+			[name, (args: ReadonlyArray<string>, places: OutwardPlaces) => listedOperands(args, list, places) !== null] as const,
+	),
+]);
 
 /**
  * Under `safety.sandbox: required`, true when an outward line may leave the sandbox: the whole line is one
- * simple command with literal arguments ({@link literalSimpleCommand}) whose CLI is the one PATH finds outside
- * every writable tree, its argv reaches outward on its own, and no option names a program, config or
- * repository a contained command may have planted. Any other line runs inside the sandbox.
+ * simple command with literal arguments ({@link literalSimpleCommand}), run from the workspace repository,
+ * with a PATH on which no directory is writable; its CLI has an option list here, every option is on it, its
+ * operands name no local repository, file outside the writable trees or this machine, and its argv reaches
+ * outward on its own. Any other line runs inside the sandbox.
  */
 export function outwardLineLeaves(command: string, places: OutwardPlaces): boolean {
 	if (outwardShellReason(command) === null) return false;
 	const words = literalSimpleCommand(command);
 	if (words === null) return false;
 	const [name = "", ...args] = words;
-	if (plantedOnPath(name, places)) return false;
-	if (name === "git") {
-		const push = gitPushReason(args, places);
-		return push.reason !== null && !push.planted;
-	}
-	if (nameOutwardReason(name, args) === null) return false;
-	return !argvRunsPlanted(name, args, places);
+	if (!inWorkspaceRepository(places.cwd, places) || plantedOnPath(places)) return false;
+	if (name === "git") return gitPushLeaves(args, places);
+	const leaves = OUTWARD_ARGV.get(name);
+	return leaves !== undefined && nameOutwardReason(name, args) !== null && leaves(args, places);
 }
 
 /**
