@@ -1,6 +1,6 @@
 # Authoring a portable agent plugin
 
-`isPluginId` in [discovery.ts](../../src/domains/plugins/discovery.ts) validates package identifiers. An agent plugin packages a workflow and its supporting resources as one versioned installation. It is content only: installing one never runs code inside Clio Coder, and code that changes Clio Coder itself ships as a separate [extension](harness-extensions.md). Its canonical identity is the [Agent Plugins 1.0.0 manifest](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). Clio Coder keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime. This page owns the manifest fields. Package invariants are in [library architecture](../architecture/library.md) and operator commands are in [library packages](resource-library.md).
+`isPluginId` in [discovery.ts](../../src/domains/plugins/discovery.ts) validates package identifiers. An agent plugin packages a workflow and its supporting resources as one versioned installation. It is content only: installing one never runs code inside CLIO Coder, and code that changes CLIO Coder itself ships as a separate [extension](harness-extensions.md). Its canonical identity is the [Agent Plugins 1.0.0 manifest](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). CLIO Coder keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime. This page owns the manifest fields. Package invariants are in [library architecture](../architecture/library.md) and operator commands are in [library packages](resource-library.md).
 
 The minimal package has a root `plugin.json` and an immediate child skill directory:
 
@@ -33,13 +33,13 @@ The root schema permits exactly these keys, and any other key is a validation er
 | `description`, `homepage`, `repository`, `license` | Optional strings. |
 | `author` | Optional object with string `name`, `email` and `url`. |
 | `keywords` | Optional array of strings. |
-| `extensions` | Optional map of namespaced objects. Clio Coder reads only the Clio namespace, `ai.iowarp.clio`. |
+| `extensions` | Optional map of namespaced objects. CLIO Coder reads only its own namespace, `ai.iowarp.clio`. |
 
 A root `state.json` is rejected, and `plugin.json` must be a regular file at the package root. A root `mcp.json` is preserved and reported as a warning. Its stdio servers become plugin-scope declarations after installation and enablement; none launches until the operator runs `clio-coder mcp trust <id>`. See [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session).
 
 ### Per-tool action classes in mcp.json
 
-`mcp.json` has the Agent Plugins shape `{"mcpServers": {"<id>": {...}}}`. A server entry accepts `type` (only `stdio`), `command`, `args`, `cwd`, `env`, `timeoutMs`, `network` and Clio's `toolActionClasses`; any other field fails the whole file closed. `network` in a plugin file is ignored with a warning, because only the operator grants network with `clio-coder mcp trust <id> --network`. `toolActionClasses` maps up to 128 tool names to `read`, `execute`, `destructive` or `unknown`, so a pack can let its read tools run while its file-writing tools ask:
+`mcp.json` has the Agent Plugins shape `{"mcpServers": {"<id>": {...}}}`. A server entry accepts `type` (only `stdio`), `command`, `args`, `cwd`, `env`, `timeoutMs`, `network` and CLIO Coder's `toolActionClasses`; any other field fails the whole file closed. `network` in a plugin file is ignored with a warning, because only the operator grants network with `clio-coder mcp trust <id> --network`. `toolActionClasses` maps up to 128 tool names to `read`, `execute`, `destructive` or `unknown`, so a pack can let its read tools run while its file-writing tools ask:
 
 ```json
 {
@@ -62,21 +62,21 @@ A root `state.json` is rejected, and `plugin.json` must be a regular file at the
 
 A skill in the package can confine itself to those server tools: its `allowed-tools` may name a full MCP capability (`mcp_<id>__<tool>`) or extension capability (`extension_<id>__<tool>`), which is kept as written. See the skill frontmatter fields in [extensions-and-sharing.md](extensions-and-sharing.md).
 
-## The Clio namespace
+## The CLIO Coder namespace
 
-`extensions["ai.iowarp.clio"]`, called the Clio namespace, holds optional Clio Coder metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: Clio discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form, and `clio-coder library package <directory>` generates it for an existing bare skill while preserving its scripts and references. Clio Coder prompts, strict agents, playbooks and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
+`extensions["ai.iowarp.clio"]`, called the CLIO Coder namespace, holds optional product metadata inside the portable manifest. A plugin containing `skills/<name>/SKILL.md` needs only the root identity fields above: CLIO Coder discovers the conventional `skills/` directory. A standalone skill package with a root `SKILL.md` declares `kind: "skill"`, `resources.skills: "."` and its one public skill component through the extension; the supplied skill template demonstrates that form, and `clio-coder library package <directory>` generates it for an existing bare skill while preserving its scripts and references. CLIO Coder prompts, strict agents, playbooks and explicit component graphs also use this metadata. The key does not select a directory: its `resources` map names the paths the package actually uses.
 
 | Field | Rule |
 | --- | --- |
 | `manifestVersion` | Must be `1` whenever the object is present. |
 | `kind` | `plugin` (default), `skill`, `agent`, `prompt` or `playbook`. |
 | `requires` | Package dependencies as `kind:name` references (see [Package dependencies](#package-dependencies)). |
-| `compatibility.clio` | Optional SemVer range. Install and load refuse a package whose range excludes the running Clio Coder. |
+| `compatibility.clio` | Optional SemVer range. Install and load refuse a package whose range excludes the running CLIO Coder. |
 | `resources` | Map from `skills`, `prompts`, `agents` or `playbooks` to a relative directory inside the package. |
 | `components` | Up to 1024 component declarations (see [Components and references](#components-and-references)). |
 | `evals` | Removed in 0.7.0. Install refuses a manifest that declares it, and an installed copy that still declares it lists as invalid and loads no resources. Delete the key from the package manifest and reinstall. |
 
-Resources use ordinary top-level directories (`agents/`, `prompts/`, `skills/`, `playbooks/`), while `assets/` holds shared supporting files. Clio content may instead live under an `ai.iowarp.clio/` directory, as it does in the `materio` plugin, which keeps peer hosts from default-scanning it; top-level directories are recommended for new packages. Portable skills must use the root `skills` directory unless the package is a standalone skill package.
+Resources use ordinary top-level directories (`agents/`, `prompts/`, `skills/`, `playbooks/`), while `assets/` holds shared supporting files. CLIO Coder content may instead live under an `ai.iowarp.clio/` directory, as it does in the `materio` plugin, which keeps peer hosts from default-scanning it; top-level directories are recommended for new packages. Portable skills must use the root `skills` directory unless the package is a standalone skill package.
 
 ```json
 {
@@ -123,7 +123,7 @@ Resources use ordinary top-level directories (`agents/`, `prompts/`, `skills/`, 
 }
 ```
 
-Create every declared directory and file before validation. A manifest declaring any other resource kind, `themes` included, fails validation. There is no `fleets` resource key: a manifest that declares `resources.fleets`, kind `fleet`, a `fleet` component or a `fleet:` requirement was built for an older Clio and is refused with the rename that fixes it (`fleets` to `playbooks`).
+Create every declared directory and file before validation. A manifest declaring any other resource kind, `themes` included, fails validation. There is no `fleets` resource key: a manifest that declares `resources.fleets`, kind `fleet`, a `fleet` component or a `fleet:` requirement was built for an older CLIO Coder and is refused with the rename that fixes it (`fleets` to `playbooks`).
 
 ### Package kinds
 
@@ -140,7 +140,7 @@ A `plugin` may carry many public components. Every other content kind is a singl
 
 Component kinds are `skill`, `prompt`, `agent`, `playbook`, `script`, `resource`, and `tool`. A component has a stable `kind:id` identity (id: lowercase letters, digits, dots, underscores and hyphens, at most 80 characters), one contained file path, and optional `requires` references to other components in the same plugin. A skill points to its `SKILL.md`. Dependencies must exist and form an acyclic graph. Native discoverable components (`skill`, `prompt`, `agent`, `playbook`) must live beneath their declared resource root, and agent and playbook files must sit directly in that root because nested ones cannot be discovered. Component metadata records relationships; it does not execute scripts or register tool implementations.
 
-Clio Coder text can refer to `${pluginRoot}/assets/methods.md` or `${component:resource:methods}`. Prompts, agent bodies, and skills recognize prose markers with portable, space-free slash suffixes. For a filename containing spaces or Unicode, declare a component and refer to its `kind:id`. The referenced target must exist within the declaring package. Playbook argument paths use a separate complete-path parser: the reference must occupy the whole argument, and containment is checked after expanding the entire suffix, including spaces and Unicode. A reference embedded in an option such as `--file=${pluginRoot}/data.csv` is rejected; pass the path as its own argument. These are Clio Coder reference forms; peer exports translate instructions and paths for their native host. Portable skill text should use relative file references where practical.
+CLIO Coder text can refer to `${pluginRoot}/assets/methods.md` or `${component:resource:methods}`. Prompts, agent bodies, and skills recognize prose markers with portable, space-free slash suffixes. For a filename containing spaces or Unicode, declare a component and refer to its `kind:id`. The referenced target must exist within the declaring package. Playbook argument paths use a separate complete-path parser: the reference must occupy the whole argument, and containment is checked after expanding the entire suffix, including spaces and Unicode. A reference embedded in an option such as `--file=${pluginRoot}/data.csv` is rejected; pass the path as its own argument. These are CLIO Coder reference forms; peer exports translate instructions and paths for their native host. Portable skill text should use relative file references where practical.
 
 Prompt names follow their path beneath the prompts root, with directory separators written as colons. The example exposes `/lab-research:start`. Give agent and playbook filenames a package prefix to keep their registered identities unambiguous. Agents retain the strict version 1 contract, including required and optional tool lists, custom audience, budget, and result contract. A plugin's agents may bind skills from their own package, and a bound skill must be trusted and live inside that package. Workers have no `ask_user`; interviews belong to the orchestrator.
 
@@ -167,7 +167,7 @@ clio-coder library inspect ./lab-research --json
 
 ## Host projections and runtime capabilities
 
-Agent Plugins 1.0.0 standardizes skills and MCP declarations. Clio Coder consumes portable skills, the Clio namespace and explicitly trusted stdio declarations in a root `mcp.json`. Disabling, removing or changing the installed plugin withdraws those declarations; see [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session). Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host runs Clio Coder playbooks.
+Agent Plugins 1.0.0 standardizes skills and MCP declarations. CLIO Coder consumes portable skills, its own namespace and explicitly trusted stdio declarations in a root `mcp.json`. Disabling, removing or changing the installed plugin withdraws those declarations; see [plugin MCP loading](plugins.md#how-plugin-resources-reach-a-session). Claude Code and Gemini have their own native manifests and component formats. A package exporter must translate those formats and report which features are native, adapted as instructions, or unavailable. An exported skill workflow does not establish that a peer host runs CLIO Coder playbooks.
 
 The bundled `materio` plugin includes a Python exporter, `library/plugins/materio/assets/scripts/project_plugin.py`, for Codex, Claude Code and Gemini. See its package README for commands and capability reports. It also provides a complete worked example of explicit component relationships and shared domain references.
 
@@ -176,9 +176,9 @@ Two layouts need no exporter at all, because Claude Code and Codex load them dir
 - A standalone skill package with a root `SKILL.md`, no `skills/` directory and no top-level `skills` manifest field. Claude Code loads it as a single-skill plugin and takes the invocation name from the `SKILL.md` frontmatter. Codex finds the same directory under any of its skills roots.
 - A plugin with a real `skills/` directory. Both hosts publish exactly those skills.
 
-What a peer host does *not* load matters just as much. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`, `output-styles/` and `.mcp.json` with no manifest asking it to. A Clio Coder strict-v1 agent sitting in a top-level `agents/` directory is therefore picked up and shown as a native Claude agent, tools, model and budget fields included, none of which that host honors. Clio Coder `prompts/` and `playbooks/` are inert to it.
+What a peer host does *not* load matters just as much. Claude Code scans a plugin root for `agents/`, `commands/`, `hooks/`, `output-styles/` and `.mcp.json` with no manifest asking it to. A CLIO Coder strict-v1 agent sitting in a top-level `agents/` directory is therefore picked up and shown as a native Claude agent, tools, model and budget fields included, none of which that host honors. CLIO Coder `prompts/` and `playbooks/` are inert to it.
 
-That leaves a real choice when a package should serve both audiences. Ordinary top-level `agents/` and `prompts/` directories are the recommended Clio Coder layout and stay a valid first-class library package; the repository marketplace simply does not publish such a package, and `pnpm run library:pin` prints the reason. To publish it as well, declare its Clio Coder resource roots at paths no peer host scans, for example `"agents": "native/agents"` in the manifest's `resources` map, and put the agents there. The bundled `materio` plugin does this with an `ai.iowarp.clio/` directory.
+That leaves a real choice when a package should serve both audiences. Ordinary top-level `agents/` and `prompts/` directories are the recommended CLIO Coder layout and stay a valid first-class library package; the repository marketplace simply does not publish such a package, and `pnpm run library:pin` prints the reason. To publish it as well, declare its CLIO Coder resource roots at paths no peer host scans, for example `"agents": "native/agents"` in the manifest's `resources` map, and put the agents there. The bundled `materio` plugin does this with an `ai.iowarp.clio/` directory.
 
 Keep the skill surface intact when you edit a package: adding a `skills/` directory to a standalone skill silently stops its root `SKILL.md` from loading. [library-portability.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/extended/library-portability.test.ts) asserts all of this for every curated package. See [coding agent interoperability](interop.md) for the exact install commands.
 
@@ -186,7 +186,7 @@ Extensions are a separate package kind with their own manifest, installation sta
 
 ## Authoring templates and contributor journey
 
-Clio Coder provides working, valid authoring templates for the five content kinds in `library/_authoring/templates/`:
+CLIO Coder provides working, valid authoring templates for the five content kinds in `library/_authoring/templates/`:
 
 - `library/_authoring/templates/skill/`: Standalone skill with house conventions and triggers.
 - `library/_authoring/templates/agent/`: Standalone agent using strict v1 fields, `skills: []`, and `audience: custom`.
@@ -196,9 +196,9 @@ Clio Coder provides working, valid authoring templates for the five content kind
 
 Templates are reference models and are excluded from `library/registry.yaml`. Follow this unified contributor journey:
 
-1. **Choose package kind**: Decide whether your package is a single-kind package (`skill`, `agent`, `prompt`, `playbook`) exposing exactly one public component, or a composite `plugin` combining multiple components. Code that changes Clio Coder is an extension, authored with `clio-coder extensions init` instead.
+1. **Choose package kind**: Decide whether your package is a single-kind package (`skill`, `agent`, `prompt`, `playbook`) exposing exactly one public component, or a composite `plugin` combining multiple components. Code that changes CLIO Coder is an extension, authored with `clio-coder extensions init` instead.
 2. **Copy authoring template**: Copy from `library/_authoring/templates/<kind>/` into your project or repository.
-3. **Author resources**: Single-kind packages expose exactly one public resource file in their declared resource directory. Packages may carry explicitly invoked scripts (for example for offline evaluation or verification tasks); these are declared metadata and are strictly distinct from extensions, which run Clio code with hooks and runtime tools.
+3. **Author resources**: Single-kind packages expose exactly one public resource file in their declared resource directory. Packages may carry explicitly invoked scripts (for example for offline evaluation or verification tasks); these are declared metadata and are strictly distinct from extensions, which run code with hooks and runtime tools.
 4. **Validate**: Run `clio-coder library validate ./lab-research --json` to verify manifest schemas, resource payloads, reference syntax, and loadability.
 5. **Pin and check**: Maintainers run `pnpm run library:pin` and `pnpm run library:check` to refresh and verify full-tree distribution pins, which also refreshes the normalized skill evidence. The registry files and pin stages are described in [skills-marketplace.md](skills-marketplace.md#registry-and-pins).
 6. **Try in an isolated project**: Register locally with `clio-coder library register ./lab-research --project`. Registration writes identity, version, source, and full-tree SHA-256 into the scoped `library.yaml` without installing. Preview and install with `library install plugin:lab-research --project --dry-run`, then `library install plugin:lab-research --project`. An operator install into new or already trusted project state can approve the identities it wrote. Identical reinstalls, disables and removals preserve consent; an unapproved identity needs `clio-coder config trust plugins`. See [project package trust](resource-library.md#workspace-trust-for-project-packages). Test invocation through `/skill <name>`, `/run`, prompt slash commands, or `/fleet run <playbook>`.

@@ -2,15 +2,15 @@
 
 The [architecture overview](../architecture/architecture.md) explains the installed runtime and its entry points.
 
-## Install Clio Coder
+## Install CLIO Coder
 
-To install Clio Coder on Linux or macOS, run `curl -fsSL https://coder.iowarp.ai/install.sh | sh`.
+To install CLIO Coder on Linux or macOS, run `curl -fsSL https://coder.iowarp.ai/install.sh | sh`.
 
 On Windows, run `irm https://coder.iowarp.ai/install.ps1 | iex` in PowerShell. Both installers bring a private Node runtime. For npm or source installs, see the methods below.
 
 ## Installation methods
 
-Clio Coder installs with `scripts/install.sh` (or `scripts/install.ps1` on Windows), which brings a private Node.js runtime; from the npm registry as
+CLIO Coder installs with `scripts/install.sh` (or `scripts/install.ps1` on Windows), which brings a private Node.js runtime; from the npm registry as
 `@iowarp/clio-coder` using npm, pnpm, or Bun; or from a source checkout using the
 pinned pnpm workflow. The [README quick start](../../README.md#get-started) covers
 installing and first run. The package routes require Node.js `>=22.19.0`,
@@ -32,7 +32,7 @@ and starts the managed Node with your arguments unchanged, so cmd.exe never
 expands `%NAME%` or splits on `&` in them. The installer copies it only when its
 bytes match the SHA-256 pinned in the package. Installing over a version that
 wrote `clio-coder.cmd` replaces that file with a stub that names the exe. An
-npm or pnpm global install still starts Clio through npm's own `clio-coder.cmd`,
+npm or pnpm global install still starts CLIO Coder through npm's own `clio-coder.cmd`,
 which cmd.exe expands as before.
 Both installers refuse a package older than 0.6.0 before they change the active
 installation (`install.sh` leaves it unchanged and exits with an error). `install.sh` run from an MSYS, MinGW or Cygwin shell stops and names the
@@ -57,7 +57,7 @@ npm versions that gate dependency install scripts behind `allowScripts` may prin
 complete and works without them: the `@google/genai` preinstall is `echo 'preinstall: no-op'`,
 and the `protobufjs` postinstall only prints a warning when a package that depends on it
 pins a version range in a style it does not recommend. Neither builds, downloads or writes
-anything Clio Coder needs, so skipping them is safe. To silence the warning, allow them as
+anything CLIO Coder needs, so skipping them is safe. To silence the warning, allow them as
 npm suggests, once with `npm install -g --allow-scripts=@google/genai,protobufjs @iowarp/clio-coder`
 or for every global install with
 `npm config set allow-scripts=@google/genai,protobufjs --location=user`.
@@ -150,7 +150,7 @@ channel is selected.
 
 Upgrading older 0.3.x through 0.5.x layouts and adopting npm/Bun global
 installations into the native layout are unsupported. Users of those layouts
-remove Clio Coder and reinstall; the hosted installer has no conversion path
+remove CLIO Coder and reinstall; the hosted installer has no conversion path
 for them.
 
 ### The installer layout
@@ -225,8 +225,8 @@ lock, which exits 75. `--help` exits 0.
 | `--no-post-install` | none | Skip the `clio-coder upgrade --post-install` run after installing. |
 | `--gui` | `CLIO_CODER_INSTALL_GUI=1` | Install the desktop app without asking. See [Desktop app offer](#desktop-app-offer-linux-and-wsl). |
 | `--no-gui` | `CLIO_CODER_INSTALL_GUI=0` | Skip the desktop app. |
-| `--no-workspace` | none | Deprecated and ignored, with a warning. The installer always runs `clio-coder tools install herdr --json`, as `install.ps1` does, which downloads Clio Coder's pinned herdr into its own data directory unless that version is already there. `CLIO_CODER_TOOLCHAIN_MIRROR` points it at a local or internal copy. A failure there never fails the install; bare `clio-coder` then starts in the plain terminal with one notice and never downloads on first launch, so run `clio-coder panes install` when you have network access. After an upgrade moves the pin, launch installs the new pin. A herdr on `PATH` is never used to host Clio Coder. |
-| `--force`, `-f` | none | Replace a `clio-coder` launcher this installer did not write, including a symlink that points outside the install. A symlink into an npm install of Clio Coder is replaced without it, with a warning. |
+| `--no-workspace` | none | Deprecated and ignored, with a warning. The installer always runs `clio-coder tools install herdr --json`, as `install.ps1` does, which downloads CLIO Coder's pinned herdr into its own data directory unless that version is already there. `CLIO_CODER_TOOLCHAIN_MIRROR` points it at a local or internal copy. A failure there never fails the install; bare `clio-coder` then starts in the plain terminal with one notice and never downloads on first launch, so run `clio-coder panes install` when you have network access. After an upgrade moves the pin, launch installs the new pin. A herdr on `PATH` is never used to host CLIO Coder. |
+| `--force`, `-f` | none | Replace a `clio-coder` launcher this installer did not write, including a symlink that points outside the install. A symlink into an npm install of CLIO Coder is replaced without it, with a warning. |
 | `--dry-run` | none | Print the platform, Node build, package, install root and launcher, then what would run. Nothing is downloaded or changed. |
 | `-h`, `--help` | none | Print the usage text. |
 
@@ -299,12 +299,12 @@ set `CLIO_CODER_BACKGROUND_UPDATE` and `CLIO_CODER_BACKGROUND_CURRENT`; see the
 `@anthropic-ai/claude-agent-sdk`, pinned to `0.3.292`, is not a dependency of the
 published package. The build keeps it as a development dependency for types, and
 `tsup` leaves it external. Its platform package carries a proprietary binary of
-about 224 MB, and only the `claude-sdk` runtime uses it, so Clio Coder provisions
+about 224 MB, and only the `claude-sdk` runtime uses it, so CLIO Coder provisions
 it as a separate per-user component in
 `<data>/components/claude-agent-sdk/0.3.292/`, where `<data>` is the data root
 `clio-coder paths` prints. Every install method works this way, and no
 package-manager flag changes it. The component sits outside every version's
-package root, so `upgrade` and background updates keep it. A Clio Coder version
+package root, so `upgrade` and background updates keep it. A CLIO Coder version
 that pins another SDK version provisions that version in its own directory beside
 it.
 
@@ -331,9 +331,9 @@ When none resolves:
   setup and an attended dispatch ask once:
   `The Claude SDK runtime needs a separate component. Install it now?`
   The wizard and a dispatch offer **Install now** and **Not now**, and the line prompt
-  takes yes or no; each defaults to declining. Accepting runs the Node that runs Clio
+  takes yes or no; each defaults to declining. Accepting runs the Node that runs CLIO
   Coder with its paired npm, `npm install --prefix <staging> --save-exact --omit=dev --include=optional @anthropic-ai/claude-agent-sdk@0.3.292`,
-  in a staging directory beside the component with a 10 minute limit. Clio checks that
+  in a staging directory beside the component with a 10 minute limit. CLIO Coder checks that
   the package exports `query` and renames the staging directory into place. The
   command inherits the environment, so `https_proxy`, `http_proxy`, `no_proxy`,
   `npm_config_registry` and `NODE_EXTRA_CA_CERTS` apply. Parallel dispatches share one
@@ -349,7 +349,7 @@ When none resolves:
 It prints `Claude SDK component available at <path>`, or `{"id":"claude-sdk","path":"<path>"}`
 with `--json`, and does nothing when the component is already there. A managed install
 uses the npm paired with its own Node; an unmanaged Linux install may use an `npm` on
-`PATH`. Clio Coder never downloads Node or npm, so without one the command fails and
+`PATH`. CLIO Coder never downloads Node or npm, so without one the command fails and
 names `CLIO_CODER_CLAUDE_SDK_DIR` as the other way in.
 
 ### Desktop app offer (Linux and WSL)
@@ -387,17 +387,17 @@ and an explicit `--gui` (or `CLIO_CODER_INSTALL_GUI=1`) warns
 
 | Task | Command | Result |
 | --- | --- | --- |
-| Set up a new installation | `clio-coder configure` | Guided setup: choose the kind of model access you already have, select a discovered model, review what Clio Coder checked, then start `clio-coder`. |
+| Set up a new installation | `clio-coder configure` | Guided setup: choose the kind of model access you already have, select a discovered model, review what CLIO Coder checked, then start `clio-coder`. |
 | Change a connection | `clio-coder configure --section targets` | Open Connections to add or edit endpoints, credentials, and available models. |
 | Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
 | Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
-| Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, Clio asks you to exit and restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS is not replaced under the running session: `/upgrade` arms the update to run after every session of that install has quit. |
+| Review an available update in the TUI | `/upgrade` | Recheck the release, show exactly what is preserved, and ask before replacing an npm-global or installer install. It follows the channel an installer install recorded and leaves a pinned install alone. After success, CLIO Coder asks you to exit and restart. A user-writable npm, pnpm, Bun or Volta install on Linux or macOS is not replaced under the running session: `/upgrade` arms the update to run after every session of that install has quit. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
 | Undo the last installer upgrade | `clio-coder upgrade --rollback` | Make the previous version current again and turn background updates off. A version pin moves to the restored version. |
 | Start configuration over | `clio-coder reset --settings` | Delete `settings.yaml`, keep credentials and history, then print `clio-coder configure` as the next step. |
 | Emulate a fresh user | `clio-coder reset --all` | Delete all four user roots and recreate the empty structure, then print `clio-coder configure` as the next step. |
-| Remove Clio Coder | `clio-coder uninstall` | Remove the config, data, state and cache roots. It also removes the launcher, and for an installer install the managed Node and every version. |
+| Remove CLIO Coder | `clio-coder uninstall` | Remove the config, data, state and cache roots. It also removes the launcher, and for an installer install the managed Node and every version. |
 
 Reset and uninstall preview their scope and ask for confirmation. Use
 `--dry-run` to inspect without changing anything. Use `reset --settings` when your intent
@@ -428,7 +428,7 @@ credential the session opens with that route unavailable. A new home starts
 
 ## 1. Directory Layout & Platform Defaults
 
-Clio Coder follows standard platform specifications for user configurations, databases, and caches, but allows full environment overrides.
+CLIO Coder follows standard platform specifications for user configurations, databases, and caches, but allows full environment overrides.
 
 ### Platform Defaults
 | Operating System | Config (`configDir`) | Data (`dataDir`) | State (`stateDir`) | Cache (`cacheDir`) |
@@ -440,7 +440,7 @@ Clio Coder follows standard platform specifications for user configurations, dat
 Run `clio-coder paths [--json]` to print the resolved table for the current environment.
 
 ### Environment Overrides
-You can redirect Clio Coder's folders using environment variables:
+You can redirect CLIO Coder's folders using environment variables:
 *   `CLIO_CODER_HOME`: Sets a symmetric tree: `$CLIO_CODER_HOME/config`, `$CLIO_CODER_HOME/data`, `$CLIO_CODER_HOME/state`, and `$CLIO_CODER_HOME/cache`.
 *   `CLIO_CODER_CONFIG_DIR`: Overrides the configuration directory only (takes precedence over `CLIO_CODER_HOME`).
 *   `CLIO_CODER_DATA_DIR`: Overrides the data directory only (takes precedence over `CLIO_CODER_HOME`).
@@ -452,7 +452,7 @@ On Linux an empty or relative `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOM
 The four resolved roots are ownership boundaries. They must be absolute,
 distinct, non-nesting, and below the home directory. `CLIO_CODER_HOME` set to the
 home directory or above it is refused as well, because it would put the four roots
-straight into the home. Clio resolves existing symlinked parents while
+straight into the home. CLIO Coder resolves existing symlinked parents while
 checking this rule, so two spellings of the same directory are not treated as
 separate roots. Bootstrap and upgrade refuse an unsafe layout before writing;
 reset and uninstall refuse it before previewing or deleting. `clio-coder doctor`
@@ -461,14 +461,14 @@ files with a destructive lifecycle command.
 
 ### The Project `.clio-coder/` Directory
 
-The tables above cover the per-user roots. A repository Clio works in also grows a
+The tables above cover the per-user roots. A repository CLIO Coder works in also grows a
 `.clio-coder/` directory, and everything in it falls into one of three kinds:
 
-*   **Operator input.** You wrote it. Clio only reads it. Deleting it removes a
+*   **Operator input.** You wrote it. CLIO Coder only reads it. Deleting it removes a
     behavior you configured and nothing else.
-*   **Runtime state.** Clio wrote it. It is derived from your repository and can be
+*   **Runtime state.** CLIO Coder wrote it. It is derived from your repository and can be
     regenerated, though not always cheaply.
-*   **Overlay.** You wrote it, and it composes with a directory Clio ships. The
+*   **Overlay.** You wrote it, and it composes with a directory CLIO Coder ships. The
     overlay column below says how.
 
 | Path | Kind | What it is | Safe to delete? | `context reset` |
@@ -478,7 +478,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/hooks.yaml`, `.clio-coder/hooks.local.yaml` | Operator input | Project-declared hooks. | Yes. | Kept |
 | `.clio-coder/rules/**/*.md` | Operator input | Path-scoped project rules injected into the prompt. | Yes. | Kept |
 | `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
-| `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A workspace that still has `.clio-coder/fleets/` is converted once, the first time Clio opens it. | Yes; builtin playbooks remain. | Kept |
+| `.clio-coder/playbooks/*.md`, `.clio-coder/playbooks/commands.yaml` | Overlay | Playbooks the fleet runs and their command registry. Adds to the builtin playbooks that ship in the package. A workspace that still has `.clio-coder/fleets/` is converted once, the first time CLIO Coder opens it. | Yes; builtin playbooks remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
 | `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
 | `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Installed plugin, skill, agent, prompt and playbook packages and their scoped state. `clio-coder library install skill:<name> --project` installs here. They load only while their package identities are approved. An operator install into new or trusted state can approve its written identities; identical reinstalls, disables and removals preserve consent ([resource-library.md](resource-library.md)). The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
@@ -494,7 +494,7 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 `~/.config/clio-coder/runtimes/` holds third-party runtime plugins. It lives under the
 user configuration directory, not in any repository.
 
-None of `.clio-coder/` is published by Clio Coder's own package. The directories Clio ships
+None of `.clio-coder/` is published by CLIO Coder's own package. The directories the package ships
 (`src/domains/agents/builtins/`, the builtin playbooks, the whole `library/` catalog
 with its registry, packages and skill provenance records, `src/domains/prompts/fragments/`,
 `src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
@@ -515,9 +515,9 @@ The core files are created automatically during the first run. `settings.yaml`, 
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **Config** | `workspace-trust/` | Project approvals from `clio-coder config trust`, one record per workspace. Operator decisions rather than disposable state, so they survive `reset --state` and `uninstall --keep-config`. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
 | **Config** | `migrations.json` | Log of successfully applied schema/state migrations. It sits beside the settings whose shape it records, so it survives `reset --state` and `uninstall --keep-config`. A home created by this run starts with every registered migration recorded. | `0o600` (rw-------) | Removed by uninstall (unless `--keep-config`) and by `reset --all`. |
-| **State** | `home.json` | Install metadata: Clio Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
+| **State** | `home.json` | Install metadata: CLIO Coder version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | `0o600` (rw-------) | Removed by uninstall / `reset --state`. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. At the cap a write evicts undecided proposals first; an invalid record moves to `memory/records.invalid.json`. | `0o600` (rw-------) | Removed by uninstall / `reset --data`. |
-| **Data** | `tools/<id>/<version>/` | One pinned external program Clio Coder downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
+| **Data** | `tools/<id>/<version>/` | One pinned external program CLIO Coder downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-coder-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `telemetry/{process,sessions,runs}/<id>/` | One telemetry scope per process, session and run: its hash-chained `journal.jsonl` segments (safety decisions, approvals and tool facts included), content-addressed `objects/`, and `bundle.json` once sealed. Beside them, `telemetry/consent.json` (research content consent) and `telemetry/install.json` (this installation's random id). See [Layout](../architecture/telemetry.md#layout). | `0o600` (rw-------) for journals, objects, seals and consent | `clio-coder telemetry prune --apply` applies retention; removed by uninstall / `reset --state`. |
 | **State** | `sessions/<cwdHash>/<id>/` | Session details: `meta.json`, `current.jsonl`, and fork hierarchies `tree.json`, with spilled tool output beside them. | `0o700` directories, `0o600` files | Removed by uninstall / `reset --state`. |
 
@@ -525,12 +525,12 @@ The core files are created automatically during the first run. `settings.yaml`, 
 
 ## 3. Bootstrap Initialization
 
-When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see [init.ts](../../src/core/init.ts)) to bootstrap missing structures:
+When CLIO Coder boots (or after a reset), it calls `initializeClioHome()` (see [init.ts](../../src/core/init.ts)) to bootstrap missing structures:
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory` under data, and `sessions`/`interviews`/`scratch` under state. Telemetry creates `<stateDir>/telemetry/` on its first write.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config at `0o600`. An existing file is never read, validated, or rewritten by initialization, and no `settings.yaml.lock` is taken for it.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`). An existing file takes no `credentials.yaml.lock`, so a boot over a set-up home creates no lock file in the config root.
 4.  **Migration Manifest**: When this call wrote `settings.yaml` and no manifest exists, writes `migrations.json` with every registered migration recorded, because the fresh settings file is already in the current shape. A `settings.yaml` that was already there is left to `clio-coder upgrade`.
-5.  **Install Metadata**: Writes `home.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`. When a newer Clio Coder last used the home, an older binary leaves `home.json` alone: the interactive start says so and asks before continuing (default no), and accepting records the downgrade so later starts do not ask. Headless `run` and ACP exit 2 instead unless `CLIO_CODER_ALLOW_OLDER=1` is set, and `doctor` names both versions and every `clio-coder` on `PATH`. A `-dev` or `-rc` build of the same release does not count as older.
+5.  **Install Metadata**: Writes `home.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If CLIO Coder reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`. When a newer CLIO Coder last used the home, an older binary leaves `home.json` alone: the interactive start says so and asks before continuing (default no), and accepting records the downgrade so later starts do not ask. Headless `run` and ACP exit 2 instead unless `CLIO_CODER_ALLOW_OLDER=1` is set, and `doctor` names both versions and every `clio-coder` on `PATH`. A `-dev` or `-rc` build of the same release does not count as older.
 
 ---
 
@@ -566,7 +566,7 @@ answer for an older install earlier on `PATH`. A `hash -r` or `rehash` hint
 follows, then two closing lines: `Run: clio-coder` and
 `Desktop app: clio-coder gui`.
 
-On a machine where Clio Coder has never run, plain `clio-coder doctor` prints one
+On a machine where CLIO Coder has never run, plain `clio-coder doctor` prints one
 `WARN installation  not set up yet` row, exits 0, and creates nothing (it is a
 read-only diagnosis, and an untouched home is not a broken one). Launching
 `clio-coder`, running `clio-coder configure`, or `clio-coder doctor --fix`
@@ -604,7 +604,7 @@ clio-coder targets --probe
 clio-coder
 ```
 
-For a GitHub Copilot seat, sign in with the official Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`); Clio uses that login through the official Copilot SDK and never signs in itself:
+For a GitHub Copilot seat, sign in with the official Copilot CLI (`copilot login`) or the GitHub CLI (`gh auth login`); CLIO Coder uses that login through the official Copilot SDK and never signs in itself:
 ```bash
 clio-coder auth login copilot-sdk   # checks the login; in a terminal it offers to run `copilot login`
 clio-coder configure --id copilot --runtime copilot-sdk --set-orchestrator
@@ -618,18 +618,18 @@ its command cache with `hash -r` in Bash or `rehash` in Zsh.
 
 ## 5. Lifecycle Commands
 
-Clio Coder provides CLI utilities to manage operations safely. For a complete catalog of operational errors, permission denial handling, and remediation procedures, see [troubleshooting.md](troubleshooting.md).
+CLIO Coder provides CLI utilities to manage operations safely. For a complete catalog of operational errors, permission denial handling, and remediation procedures, see [troubleshooting.md](troubleshooting.md).
 
 ### A. Integrity Diagnostics (`clio-coder doctor`)
 Runs a series of health sweeps across the environment:
 *   Validates `settings.yaml` against the strict schema, reporting exact key paths, read-only.
 *   Asserts owner-only permissions on credentials (`0o600`) and warns when `settings.yaml` is wider than owner-only.
-*   Reports the installed Clio Coder, Node, platform, and engine package readiness.
+*   Reports the installed CLIO Coder, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
 *   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential and settings permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema. `--fix` rewrites retired enum values and YAML 1.1 booleans in place and removes settings keys that were retired with no replacement (the ones doctor names in its `settings.yaml retired keys` row), but it does not rename moved keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; moved paths with no registered migration still require deliberate editing. The rows, levels and exit codes are in [Doctor](doctor.md).
 
 ### B. Upgrades (`clio-coder upgrade`)
-Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data. The dated migration `2026-10-06-playbooks-and-packages` converts the user home once: `<configDir>/fleets` merges into `<configDir>/playbooks` without overwriting, plugin install records and the user Library index rename the fleet kind to playbook, a Library plugin the current layout cannot read (for example a single plugin that carried an extension manifest) is replaced with the Library copy that ships inside Clio, and an api 2 extension installed before capability envelopes were bound is reinstalled from the Library or named with the command that reinstalls it. A workspace's `.clio-coder/` converts the first time Clio opens it, with one notice. Third-party plugins that still declare `fleets` stay installed but do not load, and the report names the fix for their author. Nothing in the conversion deletes operator data, and each package it writes leaves a Library receipt with actor `upgrade`. The dated migration `2026-10-31-remove-old-telemetry` deletes, once, the files the telemetry stores before #434 wrote, such as `trace.sqlite`, `receipts/`, `audit/`, `evidence-index.json`, `route-history.json` and `<dataDir>/evidence/`, and keeps session ledgers, run recordings, the memory store and `<stateDir>/telemetry/` ([retention](../architecture/telemetry.md#retention)). Boot applies it on its own when a background update skipped `clio-coder upgrade`.
+Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data. The dated migration `2026-10-06-playbooks-and-packages` converts the user home once: `<configDir>/fleets` merges into `<configDir>/playbooks` without overwriting, plugin install records and the user Library index rename the fleet kind to playbook, a Library plugin the current layout cannot read (for example a single plugin that carried an extension manifest) is replaced with the Library copy that ships inside CLIO Coder, and an api 2 extension installed before capability envelopes were bound is reinstalled from the Library or named with the command that reinstalls it. A workspace's `.clio-coder/` converts the first time CLIO Coder opens it, with one notice. Third-party plugins that still declare `fleets` stay installed but do not load, and the report names the fix for their author. Nothing in the conversion deletes operator data, and each package it writes leaves a Library receipt with actor `upgrade`. The dated migration `2026-10-31-remove-old-telemetry` deletes, once, the files the telemetry stores before #434 wrote, such as `trace.sqlite`, `receipts/`, `audit/`, `evidence-index.json`, `route-history.json` and `<dataDir>/evidence/`, and keeps session ledgers, run recordings, the memory store and `<stateDir>/telemetry/` ([retention](../architecture/telemetry.md#retention)). Boot applies it on its own when a background update skipped `clio-coder upgrade`.
 ```bash
 clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--refresh-runtime] [--restart] [--json]
 clio-coder upgrade --post-install [--dry-run] [--skip-migrations] [--channel=<latest|beta|dev>]
@@ -732,7 +732,7 @@ the approval text says the new version installs beside the current one under the
 install root, the launcher switches, and the current version stays for rollback. For
 an npm install it says the replacement touches only the npm package in the prefix.
 Nothing is replaced until you choose **Upgrade now**. On success, a persistent
-restart-required notice is shown and Clio asks whether to exit now; start
+restart-required notice is shown and CLIO Coder asks whether to exit now; start
 `clio-coder` again and use `/resume`. Choosing **Not now** leaves the quiet update
 reminder in place.
 
@@ -795,7 +795,7 @@ a dry run prints the same and exits 0. The commands are
 `brew upgrade clio-coder` and `winget upgrade --id IOWarp.ClioCoder --exact`; an unknown
 layout is told to use its original manager and then run
 `clio-coder upgrade --post-install`. Keep the original manager's global directory or
-prefix when updating or removing the package. On Windows, where npm, pnpm and npx are `.cmd` shims, Clio starts them through `cmd.exe /d /s /c` and only with arguments `cmd.exe` cannot reinterpret; an update whose arguments would need quoting is refused instead of run. `doctor --fix` rebuilding a source checkout (`pnpm run build`) and `fleet nodes install` or `setup` packing this build (`npm pack`) launch them the same way. Package removal preserves Clio Coder's user configuration and
+prefix when updating or removing the package. On Windows, where npm, pnpm and npx are `.cmd` shims, CLIO Coder starts them through `cmd.exe /d /s /c` and only with arguments `cmd.exe` cannot reinterpret; an update whose arguments would need quoting is refused instead of run. `doctor --fix` rebuilding a source checkout (`pnpm run build`) and `fleet nodes install` or `setup` packing this build (`npm pack`) launch them the same way. Package removal preserves CLIO Coder's user configuration and
 sessions; the uninstall operation below deliberately removes those roots.
 
 After a successful upgrade, and when this state root has an owned graphical
@@ -874,7 +874,7 @@ the build that lists them. Each long-lived process records its build in
 running the result equals a clean build. A session that outlives a rebuild
 therefore keeps loading its own features; workers, pane viewers and GUI
 sessions started afterwards run the new build.
-`node --import tsx scripts/build.ts --clean` empties `dist/` first, and `pnpm run build:release`, which release packages are built with, runs it that way; a session still running from that checkout can then miss a feature it has not loaded yet. In Clio Coder's
+`node --import tsx scripts/build.ts --clean` empties `dist/` first, and `pnpm run build:release`, which release packages are built with, runs it that way; a session still running from that checkout can then miss a feature it has not loaded yet. In CLIO Coder's
 own source tree, running from that tree's build, the model is also told once
 that the code it edited is not what runs and to `/restart` before verifying.
 
@@ -916,7 +916,7 @@ quits, never during it. The conditions are a user-writable package prefix, a
 non-root user, no `sudo`, and an install that the package manager owns. While the
 session runs the footer says `v<version> available · installs after you quit`, with
 `; the last attempt waited for <holders>` when an earlier wrapper gave up. When the
-session exits, Clio starts one detached wrapper that waits until no process of that
+session exits, CLIO Coder starts one detached wrapper that waits until no process of that
 install is left, runs the package manager for that exact version, and writes a result
 file. The wrapper waits up to 30 minutes for other sessions, then gives up for that
 quit, and caps the package-manager run itself at 10 minutes. `/upgrade` arms the same
@@ -968,8 +968,8 @@ that name is left in place and named in the report.
 
 The package migration converts the playbook layout and repairs bundled package
 installations as described above. The adapter migration updates only the
-unchanged ACP recipes Clio previously offered. The subscription migration moves
-Clio's stored Anthropic OAuth login to `anthropic-max` and updates matching
+unchanged ACP recipes CLIO Coder previously offered. The subscription migration moves
+the stored Anthropic OAuth login to `anthropic-max` and updates matching
 subscription targets; Anthropic API keys stay under `anthropic`. The fleet permissions migration moves each user-layer `fleet.permissions.mode: deny` to `judge`, because the 0.6.4 default is `judge` but earlier settings templates wrote `deny` into every new home. It edits only that value in place, keeps the file's quoting and comments, leaves project layers alone, and reports how to restore `deny`. A `deny` that comes through a YAML anchor, alias or escape stays as written and is named in the report.
 
 The naming migration `2026-09-01-clio-coder-naming` and the runtime-id
@@ -1096,7 +1096,7 @@ another running session, an unverifiable graphical installation or a failed dele
 root: one alive on this host, or one on another host whose heartbeat is under 180 seconds old. `--force` does not override
 this, and `--dry-run` lists the sessions and exits 0. Close them or run `clio-coder session terminate <id>`.
 
-Clio's private pane hosts (the herdr servers under the state root's `mux/` directory) are stopped
+CLIO Coder's private pane hosts (the herdr servers under the state root's `mux/` directory) are stopped
 first on Linux and macOS; one that does not stop is listed as kept. Owned graphical background services are stopped and disabled next, and their desktop launchers are
 removed using the app's ownership manifests. A build with no graphical application cannot verify them,
 so uninstall leaves them and the state root's `gui` directory in place and prints
@@ -1123,7 +1123,7 @@ under `Kept, and why`, while any other program shares that directory (pipx, uv a
 `pip --user` install into `~/.local/bin` too and rely on the line). The edit changes only those
 bytes, lands at the target of a symlinked startup file, and replaces the file through a synced
 rename that keeps its mode and owner, so a failure leaves the original as it was. Any other line
-in a shell startup file that mentions Clio Coder is reported as a `Shell config` row and never
+in a shell startup file that mentions CLIO Coder is reported as a `Shell config` row and never
 edited. The candidates are the files `install.sh --modify-path` writes: `~/.bashrc`, `~/.zshrc`,
 `$ZDOTDIR/.zshrc` when `ZDOTDIR` is absolute, `~/.profile`, and fish's `config.fish` under an
 absolute `$XDG_CONFIG_HOME` or `~/.config`. A file is reported when it contains `clio-coder` or
@@ -1149,7 +1149,7 @@ survives the uninstall, the run says so.
 #### Per-project `.clio-coder/` directories
 
 Uninstall removes the four roots under your home directory. The `.clio-coder/`
-directory Clio writes inside each repository it runs in is not one of them and
+directory CLIO Coder writes inside each repository it runs in is not one of them and
 is never removed here. Every project is recorded in the session metadata under
 the state root, so both the real run and `--dry-run` list the surviving
 `.clio-coder/` directories and name the command that clears one:
@@ -1171,9 +1171,9 @@ CLI directly from the checkout: `node dist/cli/index.js uninstall --force`.
 #### What uninstall will and will not remove
 
 Ownership is identity, not shape. `uninstall` and `reset` delete a root only when they can
-prove it is Clio Coder's own: it is the platform default for its role, its directory is named
+prove it is CLIO Coder's own: it is the platform default for its role, its directory is named
 `clio-coder`, or it holds its role's file (`settings.yaml` for config, `home.json` for state,
-and the `.clio-coder-root` marker Clio Coder writes when it creates a data or cache root).
+and the `.clio-coder-root` marker CLIO Coder writes when it creates a data or cache root).
 The home directory, anything above it, `~/.local` and the shared XDG base directories
 (`~/.config`, `~/.local/share`, `~/.local/state`, `~/.cache` or their `XDG_*` values) never
 qualify. A root that fails the rule, for example `CLIO_CODER_CONFIG_DIR=~/.config`, is not
@@ -1181,16 +1181,16 @@ touched: `uninstall` lists it under `Kept, and why` and `reset` reports it as a 
 both exit 1. `uninstall --dry-run` shows the same kept rows.
 
 A `data` or `cache` root under `CLIO_CODER_HOME` that has no marker, as one created before
-0.8.0 or one that already existed when Clio Coder first used the home (a scratch
-allocation such as `/scratch/<user>/data`), counts as Clio Coder's only while every entry
-in it is one Clio Coder creates there (`memory`, `tools`, `components` and `store` in data;
+0.8.0 or one that already existed when CLIO Coder first used the home (a scratch
+allocation such as `/scratch/<user>/data`), counts as CLIO Coder's only while every entry
+in it is one CLIO Coder creates there (`memory`, `tools`, `components` and `store` in data;
 its own cache directories and files in cache). Anything else keeps the root, with the first
 foreign entry named.
 
 The launcher is removed only when it resolves
 to *this* installation's own entry, `dist/cli/index.js` or the `bin/clio-coder.cjs`
 guard that package managers link. The spelling of the target never qualifies it, so a
-symlink into a different Clio Coder checkout, or a target that is not a file, is kept
+symlink into a different CLIO Coder checkout, or a target that is not a file, is kept
 and cannot strand another installation.
 
 The launcher path is the one the installer manifest records for an installer install,
@@ -1201,7 +1201,7 @@ The launcher path is the one the installer manifest records for an installer ins
 | --- | --- |
 | A launcher script the installer wrote for this install root | Removed |
 | A symlink resolving to this installation's entry | Removed |
-| A symlink resolving to a different Clio Coder installation | Kept, with the path it points at and the exact `rm` that removes it |
+| A symlink resolving to a different CLIO Coder installation | Kept, with the path it points at and the exact `rm` that removes it |
 | A symlink to a directory named `index.js` | Kept, because a directory is not an entry |
 | A real file | Kept, with a note to remove it through the package manager that put it there |
 | A dangling symlink naming a clio-coder entry | Removed, and reported as dangling. Leaving it would put a broken `clio-coder` on PATH after an uninstall that claimed to finish |
@@ -1256,7 +1256,7 @@ Lifecycle facts that belong here:
 
 ## 6. Residues Checklist for Manual Purging
 
-If you are removing Clio Coder completely from your system, verify that all categories of residues are removed:
+If you are removing CLIO Coder completely from your system, verify that all categories of residues are removed:
 
 1.  **System Roots**:
     *   `~/.config/clio-coder`
@@ -1270,18 +1270,18 @@ If you are removing Clio Coder completely from your system, verify that all cate
 4.  **Installer Root** (installer installs only; `clio-coder uninstall` removes it):
     *   `~/.local/share/clio-coder-install` on Linux, `~/Library/Application Support/clio-coder/install` on macOS, `%LOCALAPPDATA%\clio-coder\install` on Windows, or the `--install-dir` you chose.
     *   An installer root no longer in use after a move to another method: `clio-coder uninstall --inactive` removes it.
-    *   Only lines you edited yourself in a shell startup file; uninstall removes the exact `PATH` block `--modify-path` added, unless other programs share the launcher's directory, and reports any other line that mentions Clio Coder.
+    *   Only lines you edited yourself in a shell startup file; uninstall removes the exact `PATH` block `--modify-path` added, unless other programs share the launcher's directory, and reports any other line that mentions CLIO Coder.
 5.  **Desktop App** (only if you installed it):
     *   Run `clio-coder gui background uninstall` and `clio-coder gui launcher uninstall`, which `uninstall` also does for an app whose ownership it can verify.
 6.  **Per-Repository State**:
-    *   `.clio-coder/` in every repository Clio has worked in, and the generated `CLIO-CODER.md` beside it. See [The Project `.clio-coder/` Directory](#the-project-clio-coder-directory) for what each entry is before deleting.
+    *   `.clio-coder/` in every repository CLIO Coder has worked in, and the generated `CLIO-CODER.md` beside it. See [The Project `.clio-coder/` Directory](#the-project-clio-coder-directory) for what each entry is before deleting.
     *   Remove `.clio-coder/worktrees/` with `git worktree remove` rather than `rm -rf`, so git does not keep stale worktree metadata.
 
 ---
 
 ## 7. Headless and CI Execution Behavior
 
-Clio Coder supports headless operation for automation and continuous integration.
+CLIO Coder supports headless operation for automation and continuous integration.
 
 When executing tasks headlessly using `clio-coder run`, interactive permission prompting is unavailable and the `ask_user` interview tool is not registered. The engine resolves permission requests using a deterministic model:
 - **Main-agent auto-denial:** At autonomy `default` the safety judge first reviews a call that would park, against the task prompt and nothing the agent wrote: an allow runs it and a block returns the judge's refusal. A main-agent call that still parks for operator authorization, because the judge gave no verdict or the ask is one only the operator answers, is denied with `clio-coder run cannot confirm permission requests; rerun interactively to approve this action.` At `yolo`, which a headless run takes only from `--autonomy yolo`, nothing parks. The parked call is cancelled with that reason, and the headless turn finishes according to the resulting assistant outcome. The headless session prompt states this up front: no operator is attached, approval-required calls are denied, and the model should use recognized commands and typed checks and report what could not run.
@@ -1292,8 +1292,8 @@ When executing tasks headlessly using `clio-coder run`, interactive permission p
 
 ## 8. What the npm Package Ships
 
-The published package carries Clio Coder's own TypeScript source and code map so
-that Clio can answer questions about itself, but in compressed form:
+The published package carries CLIO Coder's own TypeScript source and code map so
+that it can answer questions about itself, but in compressed form:
 
 - **Packed source.** Every `.ts` file under `src/`, except the extension scaffold
   templates in `src/domains/extensions/authoring/templates/`, is stored in one
@@ -1301,7 +1301,7 @@ that Clio can answer questions about itself, but in compressed form:
   index, and one brotli stream per file (`src/core/source-pack.ts`). Other files under
   `src/`, such as prompt fragments and recipes, ship loose. The public extension
   types ship as bundled declarations in `dist/extensions/`.
-- **Code map.** Clio's own code map ships gzipped as `dist/assets/codemap.json.gz`.
+- **Code map.** CLIO Coder's own code map ships gzipped as `dist/assets/codemap.json.gz`.
   `code_nav` with `source: "clio"` reads it, and falls back to a plain
   `codemap.json` or `codewiki.json` in an older build.
 
@@ -1313,7 +1313,7 @@ source checkout has a pack too, but its real files take precedence.
 
 ## 9. First-Use Downloads and Air-Gapped Hosts
 
-A few optional assets are not in the package. Clio Coder downloads each one the first
+A few optional assets are not in the package. CLIO Coder downloads each one the first
 time it is needed, checks it against a pinned sha256, and caches it under the
 cache root (`src/core/pinned-asset.ts`). A file that fails the check is never
 loaded.
@@ -1343,11 +1343,11 @@ On a host with no network:
   [data](tool-usage.md#data-inspect-structured-files-through-the-gateway).
 - A System One route bound to the `julia-1` engine fetches its 34 MB tokenizer
   from the published model repository, pinned by revision and sha256, with a
-  120 s bound. Offline, Clio keeps its byte-length check, which only makes that
+  120 s bound. Offline, CLIO Coder keeps its byte-length check, which only makes that
   engine abstain more often.
 
 To pre-seed an offline host, download the file on a connected machine and copy
 it to the cache path in the table, under the cache root of the account that runs
-Clio. The hash is checked when it is loaded. Once a grammar is cached, the next
+CLIO Coder. The hash is checked when it is loaded. Once a grammar is cached, the next
 index update parses again the files that fell back to line patterns, even if
 their content has not changed.

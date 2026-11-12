@@ -2,7 +2,7 @@
 
 `runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
 
-`clio-coder doctor` diagnoses a Clio Coder install and the workspace it runs in. It
+`clio-coder doctor` diagnoses a CLIO Coder install and the workspace it runs in. It
 reads, performs passive endpoint probes, and reports; plain `doctor` writes
 nothing and sends no model generation request. This page covers what the checks
 are, the deep checks, the in-session `/doctor`, and how to read the rows.
@@ -13,7 +13,7 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 | --- | --- |
 | `clio-coder doctor` | Every standard check. Read-only; quiet row families are folded in text output. |
 | `clio-coder doctor --verbose` | Print every finding separately in text output. JSON always retains every finding. |
-| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600` and a state or data root open to other users to `0700` when it can prove the root is Clio Coder's own, removes settings keys retired without a replacement and rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, regenerates a managed Yazi profile that is not current, repairs the GUI background service and launchers, and rebuilds a source checkout whose build outputs are missing. A configured model ID is corrected only after an interactive confirmation. It does not apply lifecycle migrations or rename moved settings paths; `clio-coder upgrade` does. |
+| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600` and a state or data root open to other users to `0700` when it can prove the root is CLIO Coder's own, removes settings keys retired without a replacement and rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, regenerates a managed Yazi profile that is not current, repairs the GUI background service and launchers, and rebuilds a source checkout whose build outputs are missing. A configured model ID is corrected only after an interactive confirmation. It does not apply lifecycle migrations or rename moved settings paths; `clio-coder upgrade` does. |
 | `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
 | `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
@@ -39,7 +39,7 @@ Each row has a level:
 | --- | --- | --- | --- |
 | `ok` | `OK` | Healthy. | No |
 | `info` | `INFO` | A fact that needs no action, such as an optional tool that is not installed. | No |
-| `warn` | `WARN` | Worth attention; Clio Coder still works. | No |
+| `warn` | `WARN` | Worth attention; CLIO Coder still works. | No |
 | `error` | `!!` | Broken. | Yes: doctor exits 1 |
 
 Doctor exits 0 when no row is an error. See
@@ -54,7 +54,7 @@ satisfies (`2026-09-01-settings-v2` and `2026-09-01-retire-panes-knobs`) is
 reported as satisfied, not pending. Invalid JSON, an invalid manifest
 shape, duplicate IDs, or an oversized manifest is an error: doctor does not
 rewrite it or guess that no migration ran. Restore or review the manifest before
-running upgrade. An unknown install method is a warning because Clio cannot
+running upgrade. An unknown install method is a warning because CLIO Coder cannot
 safely choose a package manager for it; ordinary work remains available.
 
 Standard checks include one `connection <id>` row for every configured target.
@@ -63,7 +63,7 @@ check, whether the endpoint answered, and whether a live model list was read.
 A target used by chat, fleet, or memory is an error when its passive check
 fails or required credentials are missing; an unused target is a warning. Successful public metadata does not prove that credentials are ready for inference. Each target’s passive probe has a 2.5-second total budget, including credential resolution and all metadata requests. Expired browser credentials are reported without refreshing or writing them. `model <id>` separately says whether each
 configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
-a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. The exception is a runtime that serves models it does not list, which today is `copilot-sdk`: the row is `INFO`, says Clio sends the model id as typed, and proposes no repair. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
+a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. The exception is a runtime that serves models it does not list, which today is `copilot-sdk`: the row is `INFO`, says CLIO Coder sends the model id as typed, and proposes no repair. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
 
 A `copilot sign-in` row appears when a `copilot-sdk` target is configured and the
 Copilot SDK component is installed. Doctor starts a short-lived Copilot runtime
@@ -75,7 +75,7 @@ names the headless fix, because the TUI, ACP and the GUI can use it but `run` an
 workers cannot. The `connection <id>` row of each Copilot target, whose passive
 check also runs with the keychain closed, is then the same warning instead of an
 error. Without a terminal the keychain is not checked, and the row says so. A missing login is an error when chat, memory or the fleet routes to a
-Copilot target and a warning otherwise. Clio reads no token; only the runtime
+Copilot target and a warning otherwise. CLIO Coder reads no token; only the runtime
 answers. Beside that row, each `copilot-sdk` target that sets
 `contextTier: long_context` gets an `INFO` `copilot tier <id>` row saying the
 model's long-context prompt budget and prices apply. The default tier adds no
@@ -83,7 +83,7 @@ row.
 
 The `local worker capacity` row reports usable CPUs, currently available memory,
 any process/cgroup memory bound, and the worker count `auto` resolves to. It
-also states that Clio did not inspect GPU/VRAM or model fit.
+also states that CLIO Coder did not inspect GPU/VRAM or model fit.
 
 ## Core install rows
 
@@ -103,13 +103,13 @@ The core rows read as follows.
 | `settings.yaml repair`, `settings.yaml repair skipped` | What `--fix` rewrote, and `WARN` for values it could not rewrite safely because of aliases, anchors or tags. |
 | `credentials` | `!!` when `credentials.yaml` is missing, unreadable, or not `0600` on POSIX. On Windows only its content is checked. |
 | `state metadata` | `!!` when the state `home.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
-| `state metadata` (newer home) | `!!` when a newer Clio Coder last used this home: the row names that version, this binary's version and path, and every `clio-coder` on `PATH`, and asks you to run the newer one. The older binary leaves the home's recorded version alone; `CLIO_CODER_ALLOW_OLDER=1` lets a headless run or ACP session start anyway. |
-| `state dir mode`, `data dir mode` | `WARN` when the state or data root is open to group or other users, who could read session transcripts. `--fix` tightens a root that passes the same ownership test `reset` uses, and the row then reads `tightened to 700`; otherwise `chmod 700` it yourself when the directory is Clio Coder's alone. |
+| `state metadata` (newer home) | `!!` when a newer CLIO Coder last used this home: the row names that version, this binary's version and path, and every `clio-coder` on `PATH`, and asks you to run the newer one. The older binary leaves the home's recorded version alone; `CLIO_CODER_ALLOW_OLDER=1` lets a headless run or ACP session start anyway. |
+| `state dir mode`, `data dir mode` | `WARN` when the state or data root is open to group or other users, who could read session transcripts. `--fix` tightens a root that passes the same ownership test `reset` uses, and the row then reads `tightened to 700`; otherwise `chmod 700` it yourself when the directory is CLIO Coder's alone. |
 | `proxy` | Present when `HTTPS_PROXY`, `HTTP_PROXY` or their lowercase forms are set: the proxy model requests use and the `NO_PROXY` hosts that go direct. |
 | `scheduler commands` | Present when the shell sandbox is active and a Slurm, PBS, LSF or Flux client is on `PATH`: those commands run outside the sandbox with approval. See [HPC clusters](hpc-clusters.md#scheduler-clients). |
 | `lifecycle migrations` | See the migration paragraph above. |
 | `installation files` | For a source checkout, or a release package that records its build, whether the build outputs are present. `!!` names the missing files and the remedy: `pnpm --dir <checkout> run build` for a checkout, which `--fix` runs, or `clio-coder upgrade` for a package. |
-| `running <surface> <pid>` | `WARN` for a live Clio process whose loaded build is no longer the activated one, with the command to restart it once its work is done. |
+| `running <surface> <pid>` | `WARN` for a live CLIO Coder process whose loaded build is no longer the activated one, with the command to restart it once its work is done. |
 | `GUI background`, `GUI running version` | Present only when the GUI background service was installed. `WARN` when the service or its launchers need repair or belong to another install, which `--fix` repairs or hands over, and when the running app is older than the installed version. |
 | `session store` | `OK` with the number of readable session ledgers. `!!` when ledgers hold lines that cannot be read or a directory cannot be listed. |
 | `telemetry` | The telemetry mode a session in the current directory gets, the research flags it captures, and whether content capture is on, with the workspace consent that grants it (who and when) or why it is off. In standard mode it counts recorded workspace consents. `WARN` when settings cannot be read, or when the consent store cannot be read, which grants no workspace consent. Journal health and seal states are in `clio-coder telemetry doctor`. |
@@ -120,7 +120,7 @@ The core rows read as follows.
 | `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
 | `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
 
-On a home Clio Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
+On a home CLIO Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
 Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, `harness` rows for the repository's custom agent recipes, its skills and `.clio-coder/settings.local.yaml` (one `!!` `harness <file>` row per file with an unresolved reference; `clio-coder agents validate` lists each problem), and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing. A `playbook <name>` row is a `WARN` for each user or project playbook that replaces another of the same name: it names both files and says which one `/fleet run <name>` runs. A `reports` row is `INFO` once you have sent a report: it reads `<N> sent, <M> fixed` and lists each fixed issue with the release that fixed it. The `store backend` row names the store backend in use, `local (no selection; the default)` unless one was chosen, and is a `WARN` when the selection record cannot be used; `store root` gives the store directory and its free space, and a selected clio-core backend adds one `store <check>` row per probe, an error when the probe fails. See [Store](store.md).
 
@@ -129,8 +129,8 @@ Other rows appear when they apply: `validation contract` (valid, absent, Markdow
 Doctor reports one `external tool <id>` row for each pinned external program:
 `asciinema` (recording playback), `herdr` (the pane host), `yazi` (the files pane),
 `croc` (relay file transfer between machines) and `cliamp` (the terminal music
-player behind `/music`). The `herdr` row describes only Clio's own pinned copy, because
-Clio never hosts on a `herdr` from `PATH`: ``pane host <pin> (Clio's pinned copy) at <path>``
+player behind `/music`). The `herdr` row describes only CLIO Coder's own pinned copy, because
+it never hosts on a `herdr` from `PATH`: ``pane host <pin> (Clio's pinned copy) at <path>``
 is `OK`, ``pane host <pin> is not installed; run `clio-coder panes install` ``
 is a `WARN`, and `no pinned pane host for this platform; Clio runs without panes` is `INFO`.
 For every other tool the detail says
@@ -140,7 +140,7 @@ where the tool resolves, with a `PATH` copy winning when it meets the pin's mini
 | --- | --- |
 | `PATH <path> (<version>, pin <pin>)` | A copy on `PATH` met the minimum and is used. |
 | `vendored <path> (<pin>)` | The copy `clio-coder tools install <id>` downloaded is used. When a `PATH` copy was rejected the detail names it, its version and the floor it missed. |
-| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A Clio Coder upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
+| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A CLIO Coder upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
 | `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | A `PATH` copy is too old and there is no vendored copy. |
 | ``not found (install with `clio-coder tools install <id>`)`` | Nothing resolves. |
 | `not installed and no pinned asset for this platform (<platform>)` | The pin has no download for this machine. |
@@ -162,7 +162,7 @@ missing or `pdftotext -v` prints no version, and then names the install command 
 the platform: `brew install poppler` on macOS, `scoop install poppler` on Windows,
 and `poppler-utils` from the system package manager elsewhere. `@`-attached PDFs and
 `read` on a PDF need both binaries. The row reads only `PATH`, so it also appears on
-a home Clio Coder has never written to.
+a home CLIO Coder has never written to.
 
 ## HPC toolchain rows
 

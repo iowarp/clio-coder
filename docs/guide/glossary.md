@@ -1,6 +1,6 @@
-# Clio Coder Glossary
+# CLIO Coder Glossary
 
-This document defines the core architectural concepts and terminology used throughout Clio Coder, mapped to their authoritative TypeScript type definitions in `src/`.
+This document defines the core architectural concepts and terminology used throughout CLIO Coder, mapped to their authoritative TypeScript type definitions in `src/`.
 
 ---
 
@@ -79,7 +79,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `WorkerEntryState` in [worker-stream.ts](../../src/session-control/worker-stream.ts).
 
 ### 19. Origin Glyphs (`◇`/`◆`)
-- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal Clio Coder runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
+- **Definition**: Transcript and fleet board indicators that identify who requested a run. The glyph `◇` marks operator-typed runs, `◆` marks model-requested dispatches, and a dim dot marks internal CLIO Coder runs and harness-started runs. Transcript worker entries admit only user and agent origins; internal and harness runs can appear on dispatch surfaces but never become transcript worker entries.
 - **Owning Types**: `WorkerRunOrigin` in [entries.ts](../../src/domains/session/entries.ts) for transcript entries; `DispatchRequestOrigin` in [types.ts](../../src/domains/dispatch/types.ts) for user, agent, internal, and harness dispatches.
 
 ### 20. Share Note
@@ -107,11 +107,11 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `PathPolicyKind` in [path-policy.ts](../../src/domains/safety/path-policy.ts).
 
 ### 26. Foreign Prompt Root
-- **Definition**: An external prompt directory owned by another coding agent (such as `.claude/commands` or `.codex/prompts`) that Clio Coder inventories for explicit adoption. Loose compatibility prompts cannot expand, and imported copies require the foreign-resource trust gate.
+- **Definition**: An external prompt directory owned by another coding agent (such as `.claude/commands` or `.codex/prompts`) that CLIO Coder inventories for explicit adoption. Loose compatibility prompts cannot expand, and imported copies require the foreign-resource trust gate.
 - **Owning Type**: `PromptTemplateRoot` in [loader.ts](../../src/domains/resources/prompts/loader.ts).
 
 ### 27. Compat Root
-- **Definition**: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native Clio Coder resource roots.
+- **Definition**: A compatibility directory for prompts or skills discovered from foreign agent installations, ranked below native CLIO Coder resource roots.
 - **Owning Type**: `ResourceSourceInfo` in [collision.ts](../../src/domains/resources/collision.ts).
 
 ### 28. Trust Gate
@@ -119,7 +119,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `PromptTemplate` in [loader.ts](../../src/domains/resources/prompts/loader.ts).
 
 ### 29. Fleet
-- **Definition**: The set of addressable nodes Clio may place work on, `local` plus every configured SSH host, together with their capacity accounting. `fleet` is also the topology of a plan compiled from a playbook. The fleet is the coordinator and its workers; a playbook is what the fleet runs.
+- **Definition**: The set of addressable nodes CLIO Coder may place work on, `local` plus every configured SSH host, together with their capacity accounting. `fleet` is also the topology of a plan compiled from a playbook. The fleet is the coordinator and its workers; a playbook is what the fleet runs.
 - **Owning Types**: `FleetNodeSnapshot` in [cluster.ts](../../src/domains/scheduling/cluster.ts) for capacity; `Playbook` for the declared multi-step workflow (see Playbook below).
 
 ### 30. Dispatch
@@ -163,7 +163,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `ParsedClioMd` in [clio-md.ts](../../src/domains/context/clio-md.ts).
 
 ### 40. Delegate
-- **Definition**: Another coding agent Clio drives over ACP stdio as if it were a worker, configured under `integrations.externalAgents.entries` and invoked with `/run <agent-id>`. A delegate is a foreign harness, not a model target.
+- **Definition**: Another coding agent CLIO Coder drives over ACP stdio as if it were a worker, configured under `integrations.externalAgents.entries` and invoked with `/run <agent-id>`. A delegate is a foreign harness, not a model target.
 - **Owning Type**: `DelegationAgentConfig` in [defaults.ts](../../src/core/defaults.ts).
 
 ### 41. Working Set
@@ -203,7 +203,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `TRUST_STATE_WORDS` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts).
 
 ### 50. Commonly Confused Trust States
-- **Definition**: `sealed` is not `grounded`: a run's seal can verify perfectly over a run that validated nothing. `grounded` is not `independently reviewed`: a host check is Clio Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
+- **Definition**: `sealed` is not `grounded`: a run's seal can verify perfectly over a run that validated nothing. `grounded` is not `independently reviewed`: a host check is CLIO Coder observing the run's own declared command, not a second agent judging the result. A `host checks verified` unit on the board is folded into validation grounding and is never independent review. `not_requested` is not a trust state at all; a run with no host check reads `no validation observed`. `completion unevidenced` (a mutation finished with no validation at the completion boundary) is distinct from `no validation observed` (no validation was linked anywhere in the run): the first is the finish contract's observation, the second the evidence linker's.
 - **Owning Type**: `TRUST_STATE_WORDS` and `trustVerdict` in [trust-projection.ts](../../src/domains/evidence/trust-projection.ts); the axis states in `TRUST_STATUS_STATES` in [trust-status.ts](../../src/domains/evidence/trust-status.ts).
 
 ### 51. System One
@@ -255,7 +255,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `DetectedChatRoute` in [detect-chat-routes.ts](../../src/cli/detect-chat-routes.ts); the verdict is `DefaultTargetVerdict` in [default-target.ts](../../src/cli/default-target.ts).
 
 ### 63. Route Provenance
-- **Definition**: Where each active model route comes from: the `chat`, `memory`, `compaction` and `fleet` routes each report `session`, `project`, `user`, `built-in`, or `chat` when the route is unset and follows the chat route. It is recomputed from live state on every read, so a compaction summary that dropped a session-only route cannot decide what Clio says about it.
+- **Definition**: Where each active model route comes from: the `chat`, `memory`, `compaction` and `fleet` routes each report `session`, `project`, `user`, `built-in`, or `chat` when the route is unset and follows the chat route. It is recomputed from live state on every read, so a compaction summary that dropped a session-only route cannot decide what CLIO Coder says about it.
 - **Owning Type**: `RouteProvenance` in [route-provenance.ts](../../src/core/route-provenance.ts).
 
 ### 64. Settled
@@ -263,22 +263,22 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `routeSettledLabel` in [route-history.ts](../../src/domains/telemetry/route-history.ts).
 
 ### 65. Operator Notes
-- **Definition**: The `<operator-notes>` block of a compaction summary, a bounded list of things the operator asked Clio to keep. Each compaction collects the notes already in earlier summaries, sentences in the operator's own messages that open with `remember`, `keep in mind` or `don't forget`, and the instructions given to `/compact`. Instructions to `/compact` also bind the summarizer through an `<operator-instructions>` block and are kept verbatim in the notes. A note is clipped to 400 characters, the block keeps the latest 30, and notes are XML-escaped inside it.
+- **Definition**: The `<operator-notes>` block of a compaction summary, a bounded list of things the operator asked CLIO Coder to keep. Each compaction collects the notes already in earlier summaries, sentences in the operator's own messages that open with `remember`, `keep in mind` or `don't forget`, and the instructions given to `/compact`. Instructions to `/compact` also bind the summarizer through an `<operator-instructions>` block and are kept verbatim in the notes. A note is clipped to 400 characters, the block keeps the latest 30, and notes are XML-escaped inside it.
 - **Owning Type**: `extractOperatorNotes` and `formatOperatorNotes` in [compact.ts](../../src/domains/session/compaction/compact.ts).
 
 ### 66. Run Result Facts
 - **Definition**: The compact terminal facts of a finished run, read from the read model's run DTO over its sealed run scope: outcome and outcome code, exit code, token and tool counts, duration, changed paths, placement, result contract and the trust status authenticated by the run seal. One module produces them for the TUI worker block (live and replayed) and for ACP terminal fleet frames, so every surface draws the same numbers from the same record. A run that has not settled reads as `result unavailable` and never fails a render.
 - **Owning Type**: `RunResultSummary` and `RunResultFacts` in [run-result-facts.ts](../../src/domains/dispatch/run-result-facts.ts).
 
-### 67. Clio Coder
-- **Definition**: Clio Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.
+### 67. CLIO Coder
+- **Definition**: CLIO Coder is named for Kleio, the Greek muse of history, a female figure in myth; the software is referred to by name and has no gender.
 
 ### 68. Plugin
-- **Definition**: An Agent Plugin: a package with a root `plugin.json` that carries content only (skills, agents, prompt templates and playbooks). Content specific to Clio lives under the Clio namespace, `extensions["ai.iowarp.clio"]` in `plugin.json` and the `ai.iowarp.clio/` directory. Installing a plugin never runs code inside Clio. A plugin is a different package from an extension, and the two never share a manifest, digest or consent.
+- **Definition**: An Agent Plugin: a package with a root `plugin.json` that carries content only (skills, agents, prompt templates and playbooks). Product-specific content lives under the CLIO Coder namespace, `extensions["ai.iowarp.clio"]` in `plugin.json` and the `ai.iowarp.clio/` directory. Installing a plugin never runs any code. A plugin is a different package from an extension, and the two never share a manifest, digest or consent.
 - **Owning Type**: `PluginManifest` in [types.ts](../../src/domains/plugins/types.ts).
 
 ### 69. Extension
-- **Definition**: Clio code in its own process, declared in `clio-coder-extension.yaml` with runtime api 2: hooks, runtime tools named `extension_<id>__<tool>`, commands `/ext:<id>:<name>`, workspaces and skins, and interviews. The operator reviews its capability envelope before install and update, and the recorded envelope digest must match when it is applied and loaded. A runtime child runs under the OS sandbox when one exists. See [Extensions](harness-extensions.md).
+- **Definition**: Code that runs in its own process, declared in `clio-coder-extension.yaml` with runtime api 2: hooks, runtime tools named `extension_<id>__<tool>`, commands `/ext:<id>:<name>`, workspaces and skins, and interviews. The operator reviews its capability envelope before install and update, and the recorded envelope digest must match when it is applied and loaded. A runtime child runs under the OS sandbox when one exists. See [Extensions](harness-extensions.md).
 - **Owning Type**: `ExtensionRuntimeDeclarationV2` in [manifest-v2.ts](../../src/domains/extensions/manifest-v2.ts).
 
 ### 70. Pairing
@@ -292,30 +292,30 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: `Playbook` in the agents domain.
 
 ### 73. Component
-- **Definition**: One discoverable unit a package or Clio itself provides: a skill, an agent, a prompt template or a playbook. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
+- **Definition**: One discoverable unit a package or CLIO Coder itself provides: a skill, an agent, a prompt template or a playbook. A package holds components, and `clio-coder library components` reads them with their owner, origin and invocation.
 
 ### 74. Safety Judge
 - **Definition**: The model that reviews, at autonomy `default`, each main-session call that would park for an operator approval, and each ordinary worker ask under `fleet.permissions.mode: judge`. It reads only the operator's messages and the redacted call, then allows it, blocks it back to the model with a rule and a reason, or gives no verdict, which sends the call to the operator. Three consecutive or twenty total blocks in a session hand the next call to the operator. Configured by `safety.judge`.
 - **Owning Type**: `SafetyJudgeSeat` and `createSafetyJudge` in [safety-judge.ts](../../src/domains/safety/safety-judge.ts).
 
 ### 75. Yolo Floor
-- **Definition**: The short list of actions blocked at every autonomy level: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into Clio's own config, state and trust records, and reads of Clio's credential store. A floor block carries reason code `yolo-floor:<rule id>` and no judge or approval clears it.
+- **Definition**: The short list of actions blocked at every autonomy level: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, writes to a block device, fork bombs, writes into CLIO Coder's own config, state and trust records, and reads of its credential store. A floor block carries reason code `yolo-floor:<rule id>` and no judge or approval clears it.
 - **Owning Type**: `YOLO_FLOOR_RULE_IDS` in [yolo-floor.ts](../../src/domains/safety/yolo-floor.ts).
 
 ### 76. Containment
-- **Definition**: Running the main session's `bash`, `run_script` and command-running `verify` calls at autonomy `default` inside the main-session sandbox, which lets only the workspace, the scratch roots, a private sandbox cache and the repository's git dirs be written, hides credentials and the SSH agent, and keeps the network on. A contained call needs no approval for what Clio cannot read in its command text; a call with `unsandboxed: true` is not contained and asks, so the safety judge reviews it first, and one that reaches outward is not contained either.
+- **Definition**: Running the main session's `bash`, `run_script` and command-running `verify` calls at autonomy `default` inside the main-session sandbox, which lets only the workspace, the scratch roots, a private sandbox cache and the repository's git dirs be written, hides credentials and the SSH agent, and keeps the network on. A contained call needs no approval for what CLIO Coder cannot read in its command text; a call with `unsandboxed: true` is not contained and asks, so the safety judge reviews it first, and one that reaches outward is not contained either.
 - **Owning Type**: `mainShellContained` and `mainSandboxPolicy` in [main-session.ts](../../src/core/sandbox/main-session.ts); `outwardShellReason` in [containment.ts](../../src/domains/safety/containment.ts).
 
 ### 77. Workspace Snapshot
-- **Definition**: A private Git commit of the work tree that Clio writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. It also pins HEAD, the stash entries and any branch a delete removes under `refs/clio-coder/snapshots/<session>/pins/<n>/`. `/rewind` restores files from one. Controlled by `safety.snapshots`.
+- **Definition**: A private Git commit of the work tree that CLIO Coder writes before the main agent's first mutating call of a turn and before every destructive call, stored at `refs/clio-coder/snapshots/<session>/<n>` without touching the operator's index, HEAD or branches. It also pins HEAD, the stash entries and any branch a delete removes under `refs/clio-coder/snapshots/<session>/pins/<n>/`. `/rewind` restores files from one. Controlled by `safety.snapshots`.
 - **Owning Type**: `WorkspaceSnapshots` in [store.ts](../../src/domains/workspace-snapshots/store.ts).
 
 ### 78. Source Pack
-- **Definition**: The single file, `dist/assets/source.pack`, that holds Clio Coder's own `.ts` source in an installed npm package, one brotli stream per file behind a JSON index. `read`, `code_nav` and the component inventory open packed files; `grep`, `find` and `bash` do not see them. A built source checkout has a pack too, but its real files take precedence. See [What the npm package ships](installation-and-lifecycle.md#8-what-the-npm-package-ships).
+- **Definition**: The single file, `dist/assets/source.pack`, that holds CLIO Coder's own `.ts` source in an installed npm package, one brotli stream per file behind a JSON index. `read`, `code_nav` and the component inventory open packed files; `grep`, `find` and `bash` do not see them. A built source checkout has a pack too, but its real files take precedence. See [What the npm package ships](installation-and-lifecycle.md#8-what-the-npm-package-ships).
 - **Owning Type**: `readPackedSource` in [source-pack.ts](../../src/core/source-pack.ts).
 
 ### 79. Pinned Asset
-- **Definition**: An optional file Clio downloads on first use from a fixed URL, checks against a pinned sha256 and caches under the cache root: the Ruby and C# code map grammars, the `data` tool's HDF5 and Parquet readers, and the Julia-1 tokenizer. A failed grammar or reader download is recorded beside the cache path so no process retries it for 10 minutes; when that record cannot be written, the next process tries again at once. See [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
+- **Definition**: An optional file CLIO Coder downloads on first use from a fixed URL, checks against a pinned sha256 and caches under the cache root: the Ruby and C# code map grammars, the `data` tool's HDF5 and Parquet readers, and the Julia-1 tokenizer. A failed grammar or reader download is recorded beside the cache path so no process retries it for 10 minutes; when that record cannot be written, the next process tries again at once. See [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).
 - **Owning Type**: `PinnedAsset` in [pinned-asset.ts](../../src/core/pinned-asset.ts).
 
 ### 80. Sweep
@@ -323,7 +323,7 @@ This document defines the core architectural concepts and terminology used throu
 - **Owning Type**: The `runs` field of a verify catalog check in [catalog.ts](../../src/tools/verify/catalog.ts).
 
 ### 81. Research campaign
-- **Definition**: A budgeted hill climb started by `clio-coder research start` on one metric of one verifier check. Each iteration runs Clio's agent in a fresh worktree. The change is kept on the branch `clio/research/<id>` only when interleaved trials and a seeded bootstrap interval show an improvement over the current best and every gate check passes. The campaign's spec, journal and raw samples are stored under `.clio-coder/research/<id>/`, and `research report` regrades them. See [Research and Arena](research-and-arena.md#research-a-verified-hill-climb).
+- **Definition**: A budgeted hill climb started by `clio-coder research start` on one metric of one verifier check. Each iteration runs CLIO Coder's agent in a fresh worktree. The change is kept on the branch `clio/research/<id>` only when interleaved trials and a seeded bootstrap interval show an improvement over the current best and every gate check passes. The campaign's spec, journal and raw samples are stored under `.clio-coder/research/<id>/`, and `research report` regrades them. See [Research and Arena](research-and-arena.md#research-a-verified-hill-climb).
 - **Owning Type**: `ResearchCampaign` in [types.ts](../../src/domains/research/types.ts).
 
 ### 82. Arena match

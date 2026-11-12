@@ -4,11 +4,11 @@ The [evidence and memory contract](../architecture/evidence-and-memory.md) expla
 
 After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
 
-Clio Coder's proactive task memory records requirements, environment facts, failed
+CLIO Coder's proactive task memory records requirements, environment facts, failed
 attempts, and diagnoses in bounded session banks. Rules and a model step select
 visible reminders at tool or turn boundaries. The design follows
 Wu et al., *Remember When It Matters: Proactive Memory Agent for Long-Horizon
-Agents* (2026), adapted to Clio Coder's middleware and model routing.
+Agents* (2026), adapted to CLIO Coder's middleware and model routing.
 
 The rules tier is always part of memory and makes no model calls. The LLM memory
 tier runs on the independent `context.memory.target` and `context.memory.model`
@@ -63,7 +63,7 @@ context engine. The registration is `observer.memory-intervention` in
 
 - **Private status** is the memory policy's short progress model. Inspect it
   with `/memory`. It stays out of ordinary reminders, the memory model's bank
-  input, and handoffs. After compaction, Clio Coder can include it in the restored
+  input, and handoffs. After compaction, CLIO Coder can include it in the restored
   state sent to the action agent.
 - **Knowledge** contains stable task facts such as requirements, paths,
   environment facts, and constraints.
@@ -177,7 +177,7 @@ operator's call. A quote from a repository file is provenance only: the file
 can vouch for any sentence it contains, so a lesson backed by `source:` refs
 and no `command:` ref waits for the operator, and automatic approval needs a
 command that could have failed. A lesson that quotes a source and names a
-command Clio has not seen succeed carries that command as a
+command CLIO Coder has not seen succeed carries that command as a
 `command-claimed:` ref instead: it grants no approval, but it counts as the
 lesson's claim on the command, so a rejected lesson still holds back a later
 rewording that names the same command. Procedural proposals still wait for an
@@ -196,7 +196,7 @@ the failure the reminder was about record it as contradicted. Source:
 
 ## Claims and hypotheses that reach memory
 
-Clio Coder keeps a claims ledger beside memory: every judged `reproduce` or
+CLIO Coder keeps a claims ledger beside memory: every judged `reproduce` or
 `numeric-compare` check the main session runs, through `verify` or host
 verification of a worker run with a declared gate, appends a claim saying
 whether the result agreed with its reference within tolerance. Agreement is not
@@ -317,9 +317,9 @@ unreadable files go first, then batches prepared against another checkpoint or
 branch anchor, then batches a reflection replaced
 (`src/domains/memory/observation-store.ts`).
 
-## Paper mapping and Clio Coder constraints
+## Paper mapping and CLIO Coder constraints
 
-| Paper mechanism | Clio Coder implementation |
+| Paper mechanism | CLIO Coder implementation |
 | --- | --- |
 | Separate memory agent | One stateful middleware registration beside the unmodified action agent |
 | Status, knowledge, and procedural bank | Bounded in-memory `TaskMemoryBank`; status stays out of every reminder except the post-compaction restore |
@@ -393,7 +393,7 @@ All keys live under `context.memory` in `settings.yaml` (`src/core/defaults.ts`,
 | `context.memory.maxOutputTokens` | `2000` | `1` | Bounds the rendered memory-bank context, the ordinary policy-model completion, and the reminder (4 characters per token). An always-on-thinking model receives twice this value and at least `4000` tokens, within the model's own output cap, so it can still reach the strict envelope. |
 | `context.memory.timeoutMs` | `60000` | `1` | Wall-clock limit for one background memory-policy step, including its one permitted chat fallback attempt. The step is detached, so this deadline never delays a turn, but it does hold a request slot on a real inference endpoint that your own turns and dispatched workers queue against. Raise it only after inspecting the timeout and hit-rate evidence for the selected route. |
 
-There is no thinking-level key. Clio Coder always requests thinking off for the memory route.
+There is no thinking-level key. CLIO Coder always requests thinking off for the memory route.
 
 ## Trigger semantics
 
@@ -542,7 +542,7 @@ gateway URL alone does not imply one request slot or one physical server.
 
 ### Dedicated routing, chat fallback and endpoint capacity
 
-Clio Coder uses the explicitly configured memory target and model when both are
+CLIO Coder uses the explicitly configured memory target and model when both are
 set. With neither set, it uses the active chat route. When an explicit route is
 known unavailable, it uses the active chat route for that step. A step is skipped
 entirely when the endpoint has no request capacity left.
@@ -552,7 +552,7 @@ entirely when the endpoint has no request capacity left.
 
 If the dedicated route is
 known unavailable (missing target/runtime, down target, absent model in a known
-catalog, or a model reported unloaded/loading), Clio selects the active chat
+catalog, or a model reported unloaded/loading), CLIO Coder selects the active chat
 route for that step. A runtime client error on the dedicated route, or an
 information-flow refusal of the dedicated destination, permits one chat attempt
 within the original remaining deadline. It does not retry after a
@@ -603,7 +603,7 @@ waves. A two-slot endpoint with one foreground request can admit memory; a full
 one-slot endpoint skips it. Known dedicated saturation does not itself initiate
 chat fallback. Larger declared capacities work without a new constant.
 
-LiteLLM and OpenRouter are model-routed gateways, so Clio does not invent a local
+LiteLLM and OpenRouter are model-routed gateways, so CLIO Coder does not invent a local
 one-slot limit for their URL. Distinct model routes can share that gateway URL (for
 example, separate chat and memory target profiles pointing to the same LiteLLM
 proxy); the gateway owns their physical routing and backend residency. Behind a
@@ -617,7 +617,7 @@ against the gateway total. When the gateway has no declared or discovered
 capacity, the memory step admits against its own model's key, counting only
 streams on its own model plus gateway streams attributed to no model, so a turn on
 another model through the same gateway no longer skips it
-(`backgroundMemoryEndpointKey` in `src/entry/orchestrator.ts`). Clio Coder's process-local foreground
+(`backgroundMemoryEndpointKey` in `src/entry/orchestrator.ts`). CLIO Coder's process-local foreground
 holds and observed dispatch state are not a global scheduler for every client
 using the gateway. Slot holds are released on success, failure and abort.
 
@@ -631,7 +631,7 @@ actually evicted the chat prefix.
 ## Background budget
 
 Every model step is admitted against what its route costs before any request
-leaves the process, so a skipped step costs nothing. Clio derives the route's
+leaves the process, so a skipped step costs nothing. CLIO Coder derives the route's
 kind from its resolved pricing and runtime; there is no setting for it.
 
 - **Metered** routes have a nonzero declared or catalog price. A step runs only
@@ -639,10 +639,10 @@ kind from its resolved pricing and runtime; there is no setting for it.
   input rate plus `context.memory.maxOutputTokens` at the output rate) stays
   below `safety.limits.sessionCostUsd`, where `0` means no ceiling. Otherwise it
   is skipped with `cost_ceiling`.
-- **Quota** routes bill a subscription Clio reads usage for (Codex, Anthropic
+- **Quota** routes bill a subscription CLIO Coder reads usage for (Codex, Anthropic
   OAuth, Claude Code, Antigravity). A step is skipped with `quota_window` while
   the binding window is at or past the warning level `/usage` draws, and with
-  `quota_retry` while the usage endpoint's 429 retry interval runs. Clio never
+  `quota_retry` while the usage endpoint's 429 retry interval runs. CLIO Coder never
   fetches usage for this. A missing, stale or unusable reading defers the step
   with `quota_unknown` until a trustworthy reading arrives.
 - **Free** and **unpriced** routes, such as a LiteLLM proxy
@@ -655,14 +655,14 @@ kind from its resolved pricing and runtime; there is no setting for it.
   is `context.memory.timeoutMs`.
 
 A skipped step is journaled as a `memory.step_decided` record with decision `dropped` and its reason, plus
-`resumeAt` when Clio knows when room returns (a window reset or a retry instant).
+`resumeAt` when CLIO Coder knows when room returns (a window reset or a retry instant).
 `/memory` shows the newest skip and that time. A skipped step is not retried;
 the next cadence tick or turn end decides again.
 
 ## Choosing a background model
 
 Memory reads a trajectory and writes a bounded envelope. A small model can reduce
-latency and resource use. Clio Coder requests thinking off for the memory route and
+latency and resource use. CLIO Coder requests thinking off for the memory route and
 exposes no key to change that.
 
 The off request depends on runtime and model metadata: llama.cpp reads
@@ -850,7 +850,7 @@ which restores status and knowledge only.
 ## Handoff continuity
 
 The bank normally dies with the session. When `context-handoff` is explicitly
-requested, Clio Coder supplies the skill a redacted `clio-coder-task-memory` fenced
+requested, CLIO Coder supplies the skill a redacted `clio-coder-task-memory` fenced
 snapshot (`version: 2`) containing knowledge and procedural entries only, plus
 the source session, its evidence reference, the runtime ID and redaction facts.
 Ordinary turns receive no snapshot. The skill writes the handoff to
@@ -863,7 +863,7 @@ promoted, because they carry no source provenance.
 `clio-coder context reset` removes `.clio-coder/handoffs/`.
 
 When `/resume` restores a session with an id different from the previous one,
-or a resumed session opens at startup, Clio checks only the newest
+or a resumed session opens at startup, CLIO Coder checks only the newest
 `handoff-*.md` by modification time (at most 1,000,000 bytes) and offers
 `/memory seed` if it contains a valid snapshot. Seeding is explicit and
 deduplicated by class and normalized content. The session takes the flow

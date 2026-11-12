@@ -1,8 +1,8 @@
 # Project quality policies
 
-A project quality policy tells Clio Coder which declared checks a change requires.
+A project quality policy tells CLIO Coder which declared checks a change requires.
 It can use the project's existing linters, type checkers, tests, numerical
-comparisons, or performance checks. Clio supplies the completion assessment
+comparisons, or performance checks. CLIO Coder supplies the completion assessment
 and verification provenance; the repository owns the standards and commands.
 
 Create `.clio-coder/quality.yaml` at a Git workspace root:
@@ -29,11 +29,11 @@ checks, use a root package script that invokes the subproject or a catalog
 entry with its declared `cwd`. The quality policy cannot introduce an
 executable command or bypass execution approval.
 
-Clio does not generate or modify this file automatically. Clio's own
+CLIO Coder does not generate or modify this file automatically. Its own
 `.clio-coder/.gitignore` leaves it visible to Git. If the project's `.gitignore`
 still ignores all of `.clio-coder/`, remove that line or force-add this one file.
 
-## Why does Clio ask before running tests?
+## Why does CLIO Coder ask before running tests?
 
 At `default` autonomy in an attended TUI or ACP session, the main agent's first recognized test-runner command that runs outside the main-session sandbox asks for session consent. A `bash` or `run_script` test runner that runs contained in the sandbox owes none, because the sandbox bounds what it writes. The approval explains: `This test command runs repository code, whoever wrote it: this session, an earlier one, a worker or a checkout. Approve once to allow test runners for the rest of this session.` Approval covers later test runners in that session; denial leaves the next test runner asking again. Replacing or closing the session resets consent.
 
@@ -48,7 +48,7 @@ rejected. Every matching rule applies; a change to the policy itself activates
 every rule in the current policy.
 
 `inputs` adds files whose contents affect the result. It defaults to `paths`.
-Clio Coder fingerprints Git-enumerated files matching either `paths` or `inputs`, so
+CLIO Coder fingerprints Git-enumerated files matching either `paths` or `inputs`, so
 an explicit `inputs` list cannot exclude covered, enumerated source. A covered
 mutation absent from that inventory is unavailable, never certified as fresh.
 Include tests, compiler configuration,
@@ -74,17 +74,17 @@ Call `verify()` to see the existing checks and the quality requirements.
 The structured listing includes `details.qualityPolicy` with the rules and
 the SHA-256 digest of the policy bytes.
 
-For a policy check, Clio Coder captures source and declaration fingerprints before
+For a policy check, CLIO Coder captures source and declaration fingerprints before
 and after execution. The result includes `details.quality` with `stable`, a
 versioned `snapshot`, and an `error` when snapshotting was unavailable. A
 command that modifies its own scoped inputs does not get a stable snapshot;
 run the check again after those changes settle.
 
-At completion, Clio compares the latest paired verification receipt for each
+At completion, CLIO Coder compares the latest paired verification receipt for each
 required check in the current turn with a fresh snapshot. A later failed run
 supersedes an earlier pass. Source edits, additions, deletions, policy edits,
 and changes to the check declaration invalidate an old result, including
-changes made outside Clio Coder's tools.
+changes made outside CLIO Coder's tools.
 
 The assessment and the `completion.evaluated` journal event contain one
 structured finding per applicable rule/check:
@@ -95,7 +95,7 @@ structured finding per applicable rule/check:
 | `missing` | No paired native `verify` receipt for this check exists in the current turn window. |
 | `failed` | The latest execution failed or did not complete successfully. |
 | `stale` | The invocation was narrowed, inputs changed, or the snapshot was unstable or absent. |
-| `unavailable` | Clio could not capture or compare the bounded inputs. |
+| `unavailable` | CLIO Coder could not capture or compare the bounded inputs. |
 | `limited` | The rule explicitly permits a check-scoped limitation; the check remains unverified. |
 
 A valid quality policy selects high rigor by default, as
@@ -145,7 +145,7 @@ Snapshots currently require Git and a workspace that is the repository root.
 They include Git-tracked and nonignored untracked files; ignored untracked
 files are not fingerprinted. A covered mutation to such a file makes its
 requirement unavailable even when a recorded snapshot otherwise matches.
-Clio Coder does not scan ignored dependency or build trees to establish coverage.
+CLIO Coder does not scan ignored dependency or build trees to establish coverage.
 External datasets, installed dependencies,
 environment variables, tool binaries, and services are not captured. A
 lockfile fingerprint records dependency intent, not the installed environment.

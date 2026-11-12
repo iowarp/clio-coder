@@ -2,10 +2,10 @@
 
 `slurmMcpFindings` in [doctor-slurm.ts](../../src/cli/doctor-slurm.ts) checks the local Slurm setup. The [MCP tool guide](tool-usage.md) explains capability calls.
 
-Clio Coder reaches Slurm through the Slurm MCP server that
+CLIO Coder reaches Slurm through the Slurm MCP server that
 [clio-kit](https://github.com/iowarp/clio-kit) ships, over the same local stdio
 MCP gateway every other MCP server uses. There is no Slurm transport inside
-Clio Coder and no `srun` or `sbatch` worker tier: the agent submits, polls, and
+CLIO Coder and no `srun` or `sbatch` worker tier: the agent submits, polls, and
 cancels jobs by calling five gateway capabilities, and the scheduler does the
 rest. Fleet nodes are SSH hosts and do not submit through Slurm; see
 [HPC clusters](hpc-clusters.md) for cluster hosts.
@@ -31,7 +31,7 @@ switches on the per-tool classification and the allocation confirmation
 described below. A server entry takes `id`, `command`, `args`, `cwd`, `env`,
 `timeoutMs` (at most 900000, bounding one tool call), `actionClass`,
 `toolActionClasses`, and `network`, which takes effect only in a user
-declaration. A user-scope `cwd` is absolute or relative to the Clio
+declaration. A user-scope `cwd` is absolute or relative to the CLIO Coder
 config directory, and a user server with no `cwd` runs from the config
 directory itself. A project-scope `cwd` must be repository-relative and stay
 inside the repository, symbolic links included; an absolute project `cwd` is
@@ -74,7 +74,7 @@ repository ships no copy of the server's schema, so a `describe` call is the
 authority for the installed clio-kit version.
 
 The server also exposes its older tool names (`submit_slurm_job`,
-`check_job_status`, and so on). Prefer the five above. Clio Coder classifies the
+`check_job_status`, and so on). Prefer the five above. CLIO Coder classifies the
 older names the same way, as listed below.
 
 ## How autonomy treats them
@@ -83,7 +83,7 @@ An MCP server has a default action class (`read`, `execute`, `destructive` or `u
 with optional `toolActionClasses` overrides for named tools. Launch trust comes
 first. For a trusted user-scope server with no explicit class, a server's
 `readOnlyHint` or `destructiveHint` supplies an advisory default when no
-Clio-defined tool class applies. A read-only ceiling does not accept a server's
+tool class defined by CLIO Coder applies. A read-only ceiling does not accept a server's
 read-only hint as authority. Only user declarations may set the server-wide
 `actionClass`; project and plugin declarations use the class recorded by operator
 trust as their default. Every declaration scope accepts operator-approved
@@ -104,7 +104,7 @@ Where this page says `yolo`, it means unconfined yolo
 these calls as `default` does, with the safety judge, and refuses a call that
 would wait for the operator.
 
-For a trusted user-scope server declared with the id `slurm`, Clio Coder
+For a trusted user-scope server declared with the id `slurm`, CLIO Coder
 classifies tools by name before applying that default, unless
 `toolActionClasses` names the tool:
 
@@ -128,7 +128,7 @@ both allocation tools outright and still allows the read tools. In a server
 with a different id the Slurm name rules do not apply: tools use the normal
 MCP classifier described above.
 
-The server class matters for tool names Clio does not know. A project
+The server class matters for tool names CLIO Coder does not know. A project
 declaration can be trusted with another class:
 `clio-coder mcp trust <id> --action-class read` makes those tools run without
 asking. `--action-class execute` routes the server's launch command through the
@@ -152,7 +152,7 @@ falls back to `sbatch` through `bash`.
 
 ## Parameter sweeps
 
-A parameter sweep runs as a Slurm job array that Clio Coder plans, checks and
+A parameter sweep runs as a Slurm job array that CLIO Coder plans, checks and
 tabulates as one experiment. The `hpc-sweep` skill in the `hpc` plugin drives
 it on top of `slurm-jobs`:
 

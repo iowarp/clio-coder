@@ -1,6 +1,6 @@
 # HPC Clusters
 
-Clio Coder needs Node.js 22.19 or newer. Cluster login nodes often offer Node 18
+CLIO Coder needs Node.js 22.19 or newer. Cluster login nodes often offer Node 18
 or 20 through `module load nodejs`, run an old glibc (RHEL and CentOS 7 ship
 2.17, while official Node 22 and 24 builds need 2.28), sit behind a proxy, or
 have no internet at all. The installer handles each of these without root.
@@ -86,7 +86,7 @@ export http_proxy="$https_proxy"
 curl -fsSL https://coder.iowarp.ai/install.sh | sh
 ```
 
-Clio Coder reads the same variables at run time. `HTTPS_PROXY`, `HTTP_PROXY`
+CLIO Coder reads the same variables at run time. `HTTPS_PROXY`, `HTTP_PROXY`
 and their lowercase forms apply to model requests, discovery probes, OAuth
 refreshes and web fetches, and `clio-coder doctor` shows the proxy in effect.
 `localhost`, `127.0.0.1` and `[::1]` always go direct. A `NO_PROXY` entry
@@ -104,7 +104,7 @@ export NO_PROXY=localhost,gpu-node-07,10.1.4.22
 
 ## Connect a model
 
-Clio Coder sends prompts to a model it reaches over HTTP: a provider API, a
+CLIO Coder sends prompts to a model it reaches over HTTP: a provider API, a
 site or lab gateway, or a server such as vLLM or llama.cpp that you run on a
 compute node. Its requests use the proxy variables in [Proxies](#proxies), so
 export `https_proxy` and a `NO_PROXY` naming the cluster hosts it should reach
@@ -113,7 +113,7 @@ directly before connecting.
 There are three ways to connect. Each saves a *target* in your user settings
 and makes it the chat and worker model.
 
-1. **A site setup file.** When your site or lab publishes one, import it. Clio
+1. **A site setup file.** When your site or lab publishes one, import it. CLIO Coder
    prints each address and where the key comes from, and asks once:
 
    ```bash
@@ -157,7 +157,7 @@ clio-coder configure --id gpu --runtime vllm --url http://127.0.0.1:8000 \
 ```
 
 A login node is shared, so pick a port other users are unlikely to take, and
-see [Shared login nodes](#shared-login-nodes) for why Clio asks before using a
+see [Shared login nodes](#shared-login-nodes) for why CLIO Coder asks before using a
 server it found on a local port. Connecting to `http://gpu-node-07:8000`
 directly also works when the login node can reach it; name the host in
 `NO_PROXY`.
@@ -205,27 +205,27 @@ home is on.
   open to group or other users, and `clio-coder doctor --fix` tightens it.
   Keep `CLIO_CODER_HOME` or the state directory out of shared project space.
 - **Do not accept a local server you do not run.** On a home with no chat
-  model, Clio may find a model server on a default local port. It uses one
+  model, CLIO Coder may find a model server on a default local port. It uses one
   only after a yes, and on Linux the question names the account that owns the
   listener and defaults to no when it is another user. Prompts sent to
   someone else's server are readable by them; answer no and connect your own.
 - **One home across nodes.** When the login node and compute nodes share one
   home, each host's workers are counted against that host's limits for the
   local node and for local-port servers, and a plan running on one node is
-  not cut short by Clio starting on another. Slots held by a host that died
+  not cut short by CLIO Coder starting on another. Slots held by a host that died
   free up five minutes after they expire, or at once with
   `clio-coder session terminate --force`.
 - **Apptainer with its own pid namespace.** An instance started with `--pid`
   or `--containall` keeps the host's name but numbers its processes on its
-  own. The lock Clio takes on its state files (`settings.yaml`,
+  own. The lock CLIO Coder takes on its state files (`settings.yaml`,
   `credentials.yaml`, the dispatch admission state) records the holder's pid
-  namespace and boot, so a Clio on the host never takes a container
+  namespace and boot, so a CLIO Coder process on the host never takes a container
   holder's lock by mistaking it for a host process, and the reverse. This
-  holds only when the host and the container both run a Clio release that
-  records the namespace; an older Clio on either side still compares plain
+  holds only when the host and the container both run a release that
+  records the namespace; an older release on either side still compares plain
   pids. A lock left by a container that has exited, or held where the kernel
   does not report namespace pids (before Linux 4.1, as on EL7), is taken
-  over once it is 30 seconds old. Other records Clio keeps on the home
+  over once it is 30 seconds old. Other records CLIO Coder keeps on the home
   (session ownership, worker slot leases, the store lock, update and build
   locks) still compare plain pids,
   so do not share one home between the host and such a container: give the
@@ -264,7 +264,7 @@ the `data` tool names the file to pre-seed; see
 
 | Option | Effect |
 | --- | --- |
-| `--version 0.6.0` or `CLIO_CODER_VERSION` | Install that Clio Coder version or dist-tag |
+| `--version 0.6.0` or `CLIO_CODER_VERSION` | Install that CLIO Coder version or dist-tag |
 | `--channel beta` or `CLIO_CODER_CHANNEL` | Follow a release channel (`latest`, `beta`, `dev`) |
 | `--node-version 24` or `CLIO_CODER_NODE_VERSION` | Install the newest Node of a major, or an exact version |
 | `--refresh-runtime` | Download Node again even when the wanted one is present |
@@ -287,7 +287,7 @@ every installed version.
 ## Using a Node you already have
 
 If the site provides Node 22.19 or newer somewhere other than the default `PATH`,
-for example a module whose `node` you cannot put first, point Clio Coder at it:
+for example a module whose `node` you cannot put first, point CLIO Coder at it:
 
 ```bash
 export CLIO_CODER_NODE=/path/to/node22/bin/node
@@ -333,7 +333,7 @@ guidance in `hpc-parallel-io` is compile-checked only.
 
 On an air-gapped login node the pack needs no network of its own, but the
 clio-kit Slurm server downloads its environment on its first launch; launch it
-once while online or copy a warm `clio-kit` cache from a connected node. Clio
+once while online or copy a warm `clio-kit` cache from a connected node. CLIO
 Coder's own first-use downloads (the Ruby and C# code map grammars and the HDF5,
 NetCDF-4 and Parquet readers) are listed with their pre-seeding paths in
 [First-use downloads and air-gapped hosts](installation-and-lifecycle.md#9-first-use-downloads-and-air-gapped-hosts).

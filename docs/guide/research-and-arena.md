@@ -1,9 +1,9 @@
 # Research campaigns and the arena
 
-Clio Coder has two ways to compare work by evidence instead of by impression:
+CLIO Coder has two ways to compare work by evidence instead of by impression:
 
 - **`clio-coder research`** improves one measured number in your project, such as wall time, an error or a score. It
-  runs Clio's own agent again and again and keeps a change only when the measurement shows a real improvement and every
+  runs CLIO Coder's own agent again and again and keeps a change only when the measurement shows a real improvement and every
   correctness check still passes.
 - **`clio-coder arena`** gives one prompt to 2 to 4 target/model pairs side by side. You see their answers and diffs
   without knowing which model produced which, vote, and get standings from your votes.
@@ -238,7 +238,7 @@ campaign, one per project at a time. See [Graphical application](gui.md#research
 
 | What | Where |
 | --- | --- |
-| Research campaigns | `.clio-coder/research/<id>/`: `campaign.json` (the frozen spec, checks with their digest, seed and Clio version), `journal.jsonl`, `samples/`, `slate.json` and, while a run holds it, `run.lock` |
+| Research campaigns | `.clio-coder/research/<id>/`: `campaign.json` (the frozen spec, checks with their digest, seed and CLIO Coder version), `journal.jsonl`, `samples/`, `slate.json` and, while a run holds it, `run.lock` |
 | Research worktrees | `.clio-coder/worktrees/research-<id>-base/` and `research-<id>-it-NNNN/`, removed after grading unless `--keep` |
 | Research results | The branch `clio/research/<id>` |
 | Arena matches | `.clio-coder/arena/<match-id>/`: `match.json`, each contender's `contender-N.ndjson` stream and `contender-N.diff`, and `vote.json` |
@@ -253,7 +253,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 - `--autonomy yolo` is contained yolo only. Neither command runs unconfined yolo. Each agent run is launched with `CLIO_CODER_YOLO_CONFINEMENT=contained`, so it stays contained even if your settings turn unconfined while the campaign or match runs. The pin also reaches every `clio-coder` such a run starts from bash, and setting it to another value does not widen it.
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
 - Arena contenders do not inherit your whole environment. Each gets the safe command variables (`PATH`, `HOME`, `USER`,
-  `LANG`, `TMPDIR`, the XDG base dirs), Clio's own `CLIO_CODER_*`, `LC_*`, `TERM`, `SHELL`, `TZ`, `NODE_OPTIONS`, proxy
+  `LANG`, `TMPDIR`, the XDG base dirs), CLIO Coder's own `CLIO_CODER_*`, `LC_*`, `TERM`, `SHELL`, `TZ`, `NODE_OPTIONS`, proxy
   and CA variables, git author and committer names and emails, and the names in `safety.sandboxPassEnv`. From the credentials it
   gets only its own target's: the target's `auth.apiKeyEnvVar`, its runtime's default key variable, and that runtime's
   own variables (`CLAUDE_CONFIG_DIR` and the Anthropic selectors for `claude-code`, also every `ANTHROPIC_*` and

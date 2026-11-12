@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="../assets/clio-mark-gui.webp" alt="Clio Coder logo" width="96" height="96" />
+  <img src="../assets/clio-mark-gui.webp" alt="CLIO Coder logo" width="96" height="96" />
 </p>
 
-# Clio Coder documentation
+# CLIO Coder documentation
 
-Guides and architecture references for **Clio Coder**. Start with the
+Guides and architecture references for **CLIO Coder**. Start with the
 workflow you need, then use the architecture pages for schemas, runtime flow,
 and implementation boundaries.
 
@@ -17,7 +17,7 @@ docs/
 └── wiki/            Generated development reference, v0.1
 ```
 
-Clio reads this Markdown from its installed package. The website serves only
+CLIO Coder reads this Markdown from its installed package. The website serves only
 the guides listed in `site/public-docs.json`. The
 [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a generated source
 reference (v0.1); for implementation decisions, use the architecture guides and
@@ -27,10 +27,10 @@ current source.
 
 | Goal | Guide |
 | --- | --- |
-| Install Clio Coder and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
+| Install CLIO Coder and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
 | Install on an HPC cluster: no root, old glibc, proxies, airgapped mirrors | [HPC clusters](guide/hpc-clusters.md) |
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
-| Understand what Clio Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
+| Understand what CLIO Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Upgrade from 0.7: new `run` exit codes and the `run_end` frame, the required sandbox's outward-command rules, renamed slash commands, the `#ticket=` desktop launch link | [0.8.0 upgrade notes](../CHANGELOG.md#upgrade-notes) |
 | Upgrade from 0.6: removed runtime ids, retired settings keys, the `evals` manifest key and the retired `github-copilot` login | [Upgrading to 0.7.0](guide/installation-and-lifecycle.md#upgrading-to-070-removed-compatibility) |
@@ -50,11 +50,11 @@ current source.
 2. **Check the install.** `clio-coder doctor` lists problems first and
    `doctor --fix` makes only the repairs it reports. See [Doctor](guide/doctor.md).
 3. **Ask a read-only question.** Ask how the project builds and tests, with
-   "do not change files". `/help` lists commands; Clio also answers questions
+   "do not change files". `/help` lists commands; CLIO Coder also answers questions
    about itself from these docs. See
    [Interactive slash commands](guide/commands-and-modes.md#interactive-slash-commands).
 4. **Make one small change.** Name the finish line: which test must pass,
-   which number must match. Approval cards appear for commands Clio cannot
+   which number must match. Approval cards appear for commands CLIO Coder cannot
    sandbox or recognize; see
    [Operating posture and autonomy](guide/commands-and-modes.md#operating-posture-and-autonomy).
    `/view` shows the evidence it kept.
@@ -69,7 +69,7 @@ current source.
 Scripts and CI use `clio-coder run` ([Headless run flags](guide/commands-and-modes.md#headless-run-flags));
 the [GUI guide](guide/gui.md) covers the browser interface.
 
-## Using Clio Coder day to day
+## Using CLIO Coder day to day
 
 | Topic | Guide |
 | --- | --- |
@@ -91,7 +91,7 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 | The HPC, science-data, literature and life-science packs, the hypothesis workflow, and their stated limits | [Science Packs](guide/resource-library.md#science-packs) |
 | Package kinds, how plugins differ from extensions and how the two pair, and where each library contract lives | [Plugins](guide/plugins.md) |
 | Package manifests and component references | [Authoring Plugins](guide/authoring-plugins.md) |
-| Extensions: Clio code in its own process, capability envelope, sandbox, hooks, runtime tools, commands, workspaces, and lifecycle | [Extensions](guide/harness-extensions.md) |
+| Extensions: code in its own process, capability envelope, sandbox, hooks, runtime tools, commands, workspaces, and lifecycle | [Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
 | Focus radio in a Herdr dock: `/music`, cliamp install, the `integrations.music.*` settings, and the opt-in `music` tool | [Music Pane](guide/music.md) |
@@ -150,7 +150,7 @@ reference data, and review define the acceptance criteria for a change.
 | --- | --- |
 | Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture/architecture.md) |
 | Package identity, envelope, integrity, install state, dependency rule, trust by origin, and the shared inventory | [Library Architecture](architecture/library.md) |
-| Pi framework boundary and Clio Coder-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
+| Pi framework boundary and CLIO Coder-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
 | Boot sequence, startup presentation modes, and how to benchmark boot on a machine | [TUI Boot Performance](architecture/tui-boot-performance.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
@@ -181,9 +181,9 @@ task scope. `pnpm run ci` and `pnpm run ci:release` both invoke release-candidat
 qualification; reserve that broader work for an explicitly requested release
 or qualification task.
 
-## Where Clio Coder finds these docs when it is running in someone else's project
+## Where CLIO Coder finds these docs when it is running in someone else's project
 
-Clio Coder's documentation ships with the software, not with your workspace. Everything below
+CLIO Coder's documentation ships with the software, not with your workspace. Everything below
 resolves from the installed package root, never from the directory you launched
 in. The root is `CLIO_CODER_PACKAGE_ROOT` when that variable is set, and
 otherwise the nearest directory holding a `package.json` above the running code
@@ -201,7 +201,7 @@ shipped. The generated `docs/wiki/**` pages stay out of the index in a source
 checkout too, and `package.json` leaves them out of the npm package.
 `scripts/check-hygiene.ts` requires every other Markdown file under `docs/` to
 appear in the listing. A search returns sections, one per heading, ranked by
-BM25 over headings and bodies with Clio Coder vocabulary aliases and phrase
+BM25 over headings and bodies with CLIO Coder vocabulary aliases and phrase
 boosts. The index is deterministic and needs no network or embedding service.
 
 ### What docs/corpus.json controls
@@ -224,7 +224,7 @@ and line range, and `read.args`: the absolute `path`, `offset`, `limit` and
 `line_numbers` that read exactly that section. Pass `read.args` to `read` as
 given. This is the step that matters when the workspace is someone else's
 repository: reading `docs/architecture/safety-model.md` as a plain relative path
-reads *that project's* `docs/`, if it has one. Clio Coder's own system prompt names the
+reads *that project's* `docs/`, if it has one. CLIO Coder's own system prompt names the
 installed documentation directory as `{CLIO_DOCS_PATH}`, substituted as
 `join(packageRoot, "docs")` ([compiler.ts](../src/domains/prompts/compiler.ts)).
 To resolve a `file` by hand, resolve it against the **package root**, which is
@@ -242,7 +242,7 @@ counts) instead of searching it.
 Read the user guides at
 <https://coder.iowarp.ai/docs.html>. The browser application's Help entry links to
 that site and identifies the installed `docs/` directory. Use an editor to read
-those Markdown files offline, or ask Clio to retrieve them with `clio_docs`.
+those Markdown files offline, or ask CLIO Coder to retrieve them with `clio_docs`.
 There is no documentation command or separate documentation server.
 
 ## Reading the bundled reference

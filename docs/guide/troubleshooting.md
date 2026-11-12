@@ -3,7 +3,7 @@
 This guide provides concrete, actionable remediation procedures for
 operational errors, permission denials, target connection failures, and system
 diagnostics in the current source tree. Each quoted message exists in source;
-`<angle brackets>` mark values Clio Coder fills in.
+`<angle brackets>` mark values CLIO Coder fills in.
 
 ---
 
@@ -11,14 +11,14 @@ diagnostics in the current source tree. Each quoted message exists in source;
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
-| `clio-coder requires Node.js >=22.19.0; this is <version>.` | The Node on `PATH` is older than the floor. The package's `clio-coder` command checks before it loads anything else. | Install with the managed runtime: `curl -fsSL https://coder.iowarp.ai/install.sh \| sh`. Or point Clio Coder at a newer Node with `CLIO_CODER_NODE=/path/to/node/bin/node`. See [HPC clusters](hpc-clusters.md). |
-| `No model target is configured.` followed by ``Starting `clio-coder configure`.`` Variant: `No usable default target is configured.` | A bare `clio-coder` found no saved chat route and detected none. | Finish the configure flow it starts, or run `clio-coder targets use <id> --model <model>`. A returning user with a detectable route is not sent here: Clio prints `Chat: <runtime> / <model> from <source>. Change it with /config.` and starts chat. See [configuration and targets](configuration-and-targets.md). |
-| `Target '<id>' has no chat model configured.` or `Target '<id>' runs on '<runtime>', which cannot drive the main agent.` followed by `` Your saved chat route is kept and no other target is used. Run `clio-coder configure` to fix it. `` (exit 2) | An existing home's saved chat route names a target that cannot start a session. Clio does not borrow another target for it. | Run `clio-coder configure`, or `clio-coder targets use <id> --model <model>`, to repair the saved route. |
+| `clio-coder requires Node.js >=22.19.0; this is <version>.` | The Node on `PATH` is older than the floor. The package's `clio-coder` command checks before it loads anything else. | Install with the managed runtime: `curl -fsSL https://coder.iowarp.ai/install.sh \| sh`. Or point CLIO Coder at a newer Node with `CLIO_CODER_NODE=/path/to/node/bin/node`. See [HPC clusters](hpc-clusters.md). |
+| `No model target is configured.` followed by ``Starting `clio-coder configure`.`` Variant: `No usable default target is configured.` | A bare `clio-coder` found no saved chat route and detected none. | Finish the configure flow it starts, or run `clio-coder targets use <id> --model <model>`. A returning user with a detectable route is not sent here: CLIO Coder prints `Chat: <runtime> / <model> from <source>. Change it with /config.` and starts chat. See [configuration and targets](configuration-and-targets.md). |
+| `Target '<id>' has no chat model configured.` or `Target '<id>' runs on '<runtime>', which cannot drive the main agent.` followed by `` Your saved chat route is kept and no other target is used. Run `clio-coder configure` to fix it. `` (exit 2) | An existing home's saved chat route names a target that cannot start a session. CLIO Coder does not borrow another target for it. | Run `clio-coder configure`, or `clio-coder targets use <id> --model <model>`, to repair the saved route. |
 | `Chat: <target> / <model> is unavailable: <what is missing>. Your saved chat route is kept; fix the connection with /config.` | The saved chat route lacks its credential. The TUI still opens, and no other target is used. | Fix the connection with `/config`, set the environment variable the message names, or run `clio-coder auth login <target>`. |
 | ``configuration cancelled; no target saved. Run `clio-coder configure` when you are ready.`` | Setup was left before any target was saved. The command exits 130. | Run `clio-coder configure` again. |
-| `This home was last used by Clio Coder <newer>; you are running <version> (<path>). Run the newer one, or continue at your own risk.` | An older Clio Coder started on a home a newer one last used. A terminal asks `Continue with this version` with no as the default, and a no exits 2. A headless `run` or an ACP session adds `Set CLIO_CODER_ALLOW_OLDER=1 to continue anyway.` and exits 2. | Run the newer `clio-coder`; the `state metadata` row of `clio-coder doctor` lists every `clio-coder` on `PATH`. To stay on the older one, answer yes in the terminal, or set `CLIO_CODER_ALLOW_OLDER=1` for a headless run or ACP session, which leaves the home's recorded version alone. |
-| `clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"` (exit 2) | A task was piped to a bare `clio-coder`. A bare launch reads no task from stdin, so Clio stops instead of discarding it. An empty stdin or `/dev/null` keeps the normal launch. | Run `clio-coder run "<task>"`, or pipe the task to `clio-coder run`. |
-| `Clio Coder: terminal panes unavailable (could not prepare the workspace: no usable runtime directory for the pane host ...). Continuing in this terminal.` | The private pane host found no owner-only, writable directory whose Unix socket path fits. Clio tries `$XDG_RUNTIME_DIR/clio-coder` and then a directory in `TMPDIR` (on macOS only `TMPDIR`), then `<state>/mux/run` and `<cache>/run`, then `/run/user/<uid>/clio-coder` on Linux, a short directory in `TMPDIR` and one in `/tmp`. A directory whose socket path would pass 100 bytes is skipped, and the message names each skipped path and its length. | The session runs without panes. Set the shorter `XDG_RUNTIME_DIR` or `TMPDIR` the message names after `to fix,`, then start `clio-coder` again. |
+| `This home was last used by Clio Coder <newer>; you are running <version> (<path>). Run the newer one, or continue at your own risk.` | An older CLIO Coder started on a home a newer one last used. A terminal asks `Continue with this version` with no as the default, and a no exits 2. A headless `run` or an ACP session adds `Set CLIO_CODER_ALLOW_OLDER=1 to continue anyway.` and exits 2. | Run the newer `clio-coder`; the `state metadata` row of `clio-coder doctor` lists every `clio-coder` on `PATH`. To stay on the older one, answer yes in the terminal, or set `CLIO_CODER_ALLOW_OLDER=1` for a headless run or ACP session, which leaves the home's recorded version alone. |
+| `clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"` (exit 2) | A task was piped to a bare `clio-coder`. A bare launch reads no task from stdin, so CLIO Coder stops instead of discarding it. An empty stdin or `/dev/null` keeps the normal launch. | Run `clio-coder run "<task>"`, or pipe the task to `clio-coder run`. |
+| `Clio Coder: terminal panes unavailable (could not prepare the workspace: no usable runtime directory for the pane host ...). Continuing in this terminal.` | The private pane host found no owner-only, writable directory whose Unix socket path fits. CLIO Coder tries `$XDG_RUNTIME_DIR/clio-coder` and then a directory in `TMPDIR` (on macOS only `TMPDIR`), then `<state>/mux/run` and `<cache>/run`, then `/run/user/<uid>/clio-coder` on Linux, a short directory in `TMPDIR` and one in `/tmp`. A directory whose socket path would pass 100 bytes is skipped, and the message names each skipped path and its length. | The session runs without panes. Set the shorter `XDG_RUNTIME_DIR` or `TMPDIR` the message names after `to fix,`, then start `clio-coder` again. |
 | `[install] error: do not run this installer with sudo; it installs into your home directory.` | `install.sh` was started under `sudo` with `SUDO_USER` set. | Rerun the same command without `sudo`. `CLIO_CODER_INSTALL_ALLOW_SUDO=1` installs for root on purpose. |
 | `[install] error: refusing to overwrite <launcher>, which this installer did not write; ...` or `refusing to replace <launcher>; it points to <target> ...` | A `clio-coder` that the installer did not create sits at the launcher path, or a symlink points outside the install. | Move it aside, choose another `--bin-dir`, or rerun with `--force`. |
 | `[install] error: installation locked at <root>/.install-lock by pid <pid> on <host>. ...` (exit 75) | Another installer, rollback, uninstall or background update holds the lock, or a killed one left it recently. A lock this machine wrote, whose pid is gone and which is older than 10 minutes, is reclaimed by the next run, which prints `reclaimed stale installation lock`. | Wait for the owner and retry. If a foreign or newer lock stays after its process has exited, remove only that lock directory and retry. A background update treats exit 75 as busy, not failed, and tries again later. |
@@ -50,7 +50,7 @@ diagnostics in the current source tree. Each quoted message exists in source;
 
 ### npm EBADENGINE installation warnings on Node 18
 
-An npm `EBADENGINE` installation warning on Node 18 means the Node version is below Clio Coder's required `>=22.19.0`. Use the managed installer, `curl -fsSL https://coder.iowarp.ai/install.sh | sh`, which brings its own Node runtime, or upgrade Node before installing `@iowarp/clio-coder` with npm. The launcher also checks the Node version and refuses to start on an older runtime; `CLIO_CODER_NODE` can point it at a supported Node executable.
+An npm `EBADENGINE` installation warning on Node 18 means the Node version is below CLIO Coder's required `>=22.19.0`. Use the managed installer, `curl -fsSL https://coder.iowarp.ai/install.sh | sh`, which brings its own Node runtime, or upgrade Node before installing `@iowarp/clio-coder` with npm. The launcher also checks the Node version and refuses to start on an older runtime; `CLIO_CODER_NODE` can point it at a supported Node executable.
 
 ## Lifecycle commands
 
@@ -65,12 +65,12 @@ An npm `EBADENGINE` installation warning on Node 18 means the Node version is be
 | `clio-coder changed this workspace to the playbooks layout. ... Left unchanged, needs you: ...` | The first open of a workspace, or the first `playbook` or `fleet run` command in it, converted `.clio-coder/fleets/` to `.clio-coder/playbooks/` once. The second sentence names anything the conversion left, for example a playbook that already existed under `playbooks/`. | Read the named paths and merge by hand. The conversion deletes nothing, and a leftover directory is moved aside with a dated suffix. |
 | `built for an older Clio: <package> declares resources.fleets, and playbooks replaced fleets; ...` | A third-party plugin still declares the retired `fleets` layout. It stays installed and does not load. | Ask its author to rename `resources.fleets` to `resources.playbooks`, its `fleets` directory to `playbooks`, and fleet kinds and requirements to `playbook`. For WTF-P, run `wtf-p install clio`. |
 | `unsafe directory layout` / `uninstall refused an unsafe directory layout: ...` / `reset refused an unsafe directory layout: ...` (exit 2) | The four roots are relative, equal or nested, a root is the home directory or above it, or `CLIO_CODER_HOME` is the home directory or above it, for example through overrides. | Set four absolute, distinct, non-nesting roots below the home directory, then `clio-coder paths` and `clio-coder doctor`. |
-| `not a Clio-only directory (...); remove Clio's files inside it by hand` (`uninstall` under `Kept, and why`, or `reset`, exit 1) | A root override points at a directory Clio Coder cannot prove is its own, such as `CLIO_CODER_CONFIG_DIR=~/.config`. It is not named `clio-coder`, is not the platform default and holds no `settings.yaml`, `home.json` or `.clio-coder-root` for its role, or it is the unmarked `data` or `cache` of a `CLIO_CODER_HOME` and holds an entry Clio Coder does not create there (`it holds <name>`). The directory was left untouched. | Remove Clio Coder's files inside it by hand, or point the override at a dedicated directory. |
+| `not a Clio-only directory (...); remove Clio's files inside it by hand` (`uninstall` under `Kept, and why`, or `reset`, exit 1) | A root override points at a directory CLIO Coder cannot prove is its own, such as `CLIO_CODER_CONFIG_DIR=~/.config`. It is not named `clio-coder`, is not the platform default and holds no `settings.yaml`, `home.json` or `.clio-coder-root` for its role, or it is the unmarked `data` or `cache` of a `CLIO_CODER_HOME` and holds an entry CLIO Coder does not create there (`it holds <name>`). The directory was left untouched. | Remove CLIO Coder's files inside it by hand, or point the override at a dedicated directory. |
 | `` `clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt `` (same for `uninstall`, exit 2) | No terminal and no `--force` or `--dry-run`. | Pass `--dry-run` to preview or `--force` to proceed. |
 | `Another native session (pid <N>) is still running; close it before uninstalling` | `uninstall` found a live session of the same installer install. | Close that session and rerun. |
 | `Native installation is locked; retry after the installer exits` | The install root's lock is held. | Wait, or remove a stale `.install-lock` as in the installer row above. |
 | `Reset stopped; Clio state was preserved.` or `Could not stop the graphical installation; Clio state was preserved.` | An owned background app could not be verified or stopped. | Run `clio-coder gui background uninstall && clio-coder gui launcher uninstall` from a build that includes the app, then retry. |
-| `Background service belongs to another installation; Clio state was left unchanged.` (`reset` or `uninstall`, exit 1) | The background app was installed by a different Clio Coder installation. An earlier version of this same installer install does not count as different. | Run `reset` or `uninstall` from the installation that owns the app, or remove the app with that installation's `clio-coder gui background uninstall`. |
+| `Background service belongs to another installation; Clio state was left unchanged.` (`reset` or `uninstall`, exit 1) | The background app was installed by a different CLIO Coder installation. An earlier version of this same installer install does not count as different. | Run `reset` or `uninstall` from the installation that owns the app, or remove the app with that installation's `clio-coder gui background uninstall`. |
 | `Clio Coder background app is running an older version that this one cannot verify, so it was left running. Run: clio-coder gui background restart` | After an upgrade from 0.7.0, the running desktop app cannot answer the launch proof this version's CLI uses, so `upgrade` and `gui background restart --if-idle` leave it alone. | Run `clio-coder gui background restart` once. Browsers signed in under 0.7.0 move to a client credential on their next load. |
 | `<N> path(s) could not be removed:` | A partial delete: some paths resisted. | Fix the permission or close the holding process, then run the printed command again. It resumes. |
 
@@ -78,8 +78,8 @@ An npm `EBADENGINE` installation warning on Node 18 means the Node version is be
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
-| `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.292. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.292; it does not change Clio's installation.` (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`) | A `claude-sdk` target was configured or a `claude-sdk` worker was dispatched, and the component is not installed. Nobody could be asked, or the offer was declined. | Run `clio-coder tools install claude-sdk`. It needs the npm paired with Clio Coder's Node, or an `npm` on `PATH` on an unmanaged Linux install; Clio Coder never downloads Node or npm. |
-| `The Claude SDK runtime needs a separate component. Install it now?` with **Install now** / **Not now** | An attended operator reached a `claude-sdk` target: the configure wizard, the line-prompt target setup or an attended dispatch. | **Install now** provisions the component, which takes up to 10 minutes. **Not now** fails the run with the message above, and the decision holds until Clio Coder restarts. |
+| `The Claude SDK runtime needs @anthropic-ai/claude-agent-sdk@0.3.292. Run: clio-coder tools install claude-sdk. This installs a separate component at <data>/components/claude-agent-sdk/0.3.292; it does not change Clio's installation.` (error code `CLAUDE_AGENT_SDK_UNAVAILABLE`) | A `claude-sdk` target was configured or a `claude-sdk` worker was dispatched, and the component is not installed. Nobody could be asked, or the offer was declined. | Run `clio-coder tools install claude-sdk`. It needs the npm paired with CLIO Coder's Node, or an `npm` on `PATH` on an unmanaged Linux install; CLIO Coder never downloads Node or npm. |
+| `The Claude SDK runtime needs a separate component. Install it now?` with **Install now** / **Not now** | An attended operator reached a `claude-sdk` target: the configure wizard, the line-prompt target setup or an attended dispatch. | **Install now** provisions the component, which takes up to 10 minutes. **Not now** fails the run with the message above, and the decision holds until CLIO Coder restarts. |
 | `No @anthropic-ai/claude-agent-sdk in prepared prefix <dir>.` | `CLIO_CODER_CLAUDE_SDK_DIR` is set and the prefix holds no `node_modules/@anthropic-ai/claude-agent-sdk`. | Ask the prefix's administrator to provision it, or unset the variable and run `clio-coder tools install claude-sdk`. |
 
 ## Project files ignored for lack of trust
@@ -95,7 +95,7 @@ Project settings, hooks and safety policy require approval of their exact bytes.
 | `extensions list` shows `untrusted`, or a package carries `project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions`. The plugin form reads `project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins`, and `library list` shows the copy as `invalid` or a skill package as `requires trust`. | The project's installed package identities are unapproved or changed, so project copies of that kind are blocked. A user copy with the same ID still loads. | Review with `clio-coder config trust extensions` or `plugins`, approve the digest with `--hash`, then run `/reload extensions` or `/reload library`. |
 | Project packages stopped loading after an install, update, enable, disable or remove | A package identity changed without an applicable approval. Disabling, removing or reinstalling identical content preserves approval. An explicit operator install records approval for a new surface or an already trusted one; it does not approve unrelated existing changes. | Review changed identities with `clio-coder config trust <surface>` and approve the digest. |
 | A package installed with `library import`, `interop adopt`, `share import`, `/archive import` or a skill install offer into a project does not load | Those paths never approve workspace trust, including for the workspace's first project install. | Approve the project's install state with `clio-coder config trust extensions` or `plugins`. |
-| A dispatched worker's task worktree reports its project packages as untrusted | A Clio-created task worktree inherits its origin's current package approval only while the installed identities match the approved identities. A hand-made `git worktree` never inherits. | Approve the origin again, make the worktree package identities match it, or approve the worktree directly. |
+| A dispatched worker's task worktree reports its project packages as untrusted | A task worktree that CLIO Coder created inherits its origin's current package approval only while the installed identities match the approved identities. A hand-made `git worktree` never inherits. | Approve the origin again, make the worktree package identities match it, or approve the worktree directly. |
 | `usage: clio-coder config trust safety\|hooks\|settings\|extensions\|plugins [--json \| --hash SHA256 \| --revoke]` or `trust expects --json, --revoke, or --hash followed by the full reviewed SHA-256 digest` (exit 2) | Wrong arguments. | Pass a surface and, to approve, the full 64-character digest. |
 | `credentials are not allowed in project settings; key ignored` | A project settings layer names a credential key. | Move credentials to `clio-coder auth` or user settings. |
 | `project autonomy may only tighten the level in user settings; project value ignored` or `autonomy is set only in user settings or by the operator; project value ignored` | A project layer asked for a looser or invalid `safety.autonomy`. | Set autonomy in user settings, `--autonomy`, or the session toggle. |
@@ -103,25 +103,25 @@ Project settings, hooks and safety policy require approval of their exact bytes.
 
 ACP clients receive the ignored files in `_meta["clio-coder/trust"]` on `session/new`, `session/load` and `session/resume`, each with the `clio-coder config trust <surface>` command that fixes it.
 
-## Refused by Clio policy, operator approval or MCP server policy
+## Refused by CLIO Coder policy, operator approval or MCP server policy
 
-If Clio refused to edit a file, read the refusal's `To allow it:` line before retrying. An edit can be blocked by tool policy or a run's read-only or tool-allowlist constraints; the refusal identifies the layer and its remedy.
+If CLIO Coder refused to edit a file, read the refusal's `To allow it:` line before retrying. An edit can be blocked by tool policy or a run's read-only or tool-allowlist constraints; the refusal identifies the layer and its remedy.
 
-A refused tool call identifies the refusing layer, Clio's action class and a separate remedy. The account starts with `Refused by Clio policy`, `Refused by operator approval` or `Refused by MCP server policy`, and the next line starts with `To allow it:`. An MCP server refusal may also name the server, its error code and its own annotation. A server's annotation does not override Clio's action class.
+A refused tool call identifies the refusing layer, CLIO Coder's action class and a separate remedy. The account starts with `Refused by Clio policy`, `Refused by operator approval` or `Refused by MCP server policy`, and the next line starts with `To allow it:`. An MCP server refusal may also name the server, its error code and its own annotation. A server's annotation does not override CLIO Coder's action class.
 
-Follow the printed remedy before repeating the call. A Clio approval cannot override an MCP server's own policy; change the server policy or use an allowed operation. A headless run has no operator to approve an ask. The orchestrator remembers refusals within a turn and refuses identical repeats without execution, except for an attended operator's refusal. Worker calls and calls outside a turn do not use that repeat cache. An attended operator refusal lets a repeated call ask again.
+Follow the printed remedy before repeating the call. A CLIO Coder approval cannot override an MCP server's own policy; change the server policy or use an allowed operation. A headless run has no operator to approve an ask. The orchestrator remembers refusals within a turn and refuses identical repeats without execution, except for an attended operator's refusal. Worker calls and calls outside a turn do not use that repeat cache. An attended operator refusal lets a repeated call ask again.
 
 The implementation and exact interpolated format are in [denial.ts](../../src/domains/safety/denial.ts). [Commands and modes](commands-and-modes.md) describes operator tool allowlists, read-only runs and cost caps.
 
 | User-Facing Error / Notice | Cause | Actionable Remediation |
 | :--- | :--- | :--- |
 | `Clio's safety judge blocked this <tool> call (rule <rule>): <reason>` | At autonomy `default` the safety judge found no operator message that authorizes that action. It reads only your messages and the call. | Name the action in a message of your own, such as "force-push this branch", or describe your machine with `safety.judge.environment` and add rules with `safety.judge.allow` in user settings. After three consecutive or twenty total blocks the judge hands the next call to you, and approving it turns review back on. See [Choosing an autonomy level](commands-and-modes.md#telling-the-safety-judge-about-your-environment). |
-| A refusal whose remedy reads `nothing within this run; it is the yolo floor, which holds at every autonomy level.` | The call hit the yolo floor: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, a block-device write, a fork bomb, a write into Clio's own config, state or trust records, or a read of Clio's credential store. | Nothing in Clio approves it. Do it yourself outside Clio if it is really intended. |
+| A refusal whose remedy reads `nothing within this run; it is the yolo floor, which holds at every autonomy level.` | The call hit the yolo floor: deleting or overwriting `/`, the home directory or a system tree, `mkfs`, `wipefs`, a block-device write, a fork bomb, a write into CLIO Coder's own config, state or trust records, or a read of its credential store. | Nothing in CLIO Coder approves it. Do it yourself, outside the agent, if it is really intended. |
 | `<tool> blocked: no workspace snapshot` | The call was admitted at `default` only because a workspace snapshot would undo it, and the snapshot could not be taken; the refusal names why. | Fix the named Git problem, or run the discard or delete yourself. `safety.snapshots: off` makes such calls ask instead. |
-| `The operator did not answer this <tool> approval within <n> s, so Clio denied it automatically; the call did not run.` | A TUI approval card waited past `safety.unattendedAfterSeconds`. | Raise the value, or set `0` to wait forever. `/decisions` and the exit summary's `Unattended` line show what Clio decided while you were away. |
-| `sandbox: this command could write only to <roots> ...` | A contained command at `default` failed on a write outside the main-session sandbox's writable roots, or needed a hidden credential. `~/.cache` and `~/.npm` are among the read-only paths: contained commands get a cache of their own, which `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` point at. | Clio can rerun it with `unsandboxed: true`, which the safety judge reviews. Add a directory scripts should always write to `safety.scratchRoots` in user settings. For a tool that ignores `XDG_CACHE_HOME`, point its own cache variable at a directory under the sandbox cache the message names. |
-| `Operation not permitted` (`EPERM`) from a contained command that opens a local Unix socket: a database client, Docker, the `tsx` CLI, Python multiprocessing with the `forkserver` start method (the Linux default from Python 3.14), an X11 or D-Bus client, a program that listens on a socket path | The OS sandbox refuses new Unix-domain sockets (`safety.sandboxUnixSockets: block`), because a socket the command can reach, such as tmux's, can run commands outside the sandbox. `socketpair`, pipes and TCP still work. | Let Clio rerun the command with `unsandboxed: true`, which the safety judge reviews, or name the tool in your request so the judge allows it. For Python, set the `spawn` start method. `safety.sandboxUnixSockets: owned` in user settings lets a command reach sockets other users own, such as a system daemon's, and `allow` turns the refusal off for every sandbox. |
-| A contained command fails to authenticate, or a variable such as `GITHUB_TOKEN` or `NPM_TOKEN` is empty inside it | The sandbox removes credential variables by name and value before a contained command starts; unsandboxed and yolo commands keep them. | Let Clio rerun it with `unsandboxed: true` for the safety judge, or list the variable in `safety.sandboxPassEnv` in user settings to keep it inside the sandbox. |
+| `The operator did not answer this <tool> approval within <n> s, so Clio denied it automatically; the call did not run.` | A TUI approval card waited past `safety.unattendedAfterSeconds`. | Raise the value, or set `0` to wait forever. `/decisions` and the exit summary's `Unattended` line show what CLIO Coder decided while you were away. |
+| `sandbox: this command could write only to <roots> ...` | A contained command at `default` failed on a write outside the main-session sandbox's writable roots, or needed a hidden credential. `~/.cache` and `~/.npm` are among the read-only paths: contained commands get a cache of their own, which `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` point at. | CLIO Coder can rerun it with `unsandboxed: true`, which the safety judge reviews. Add a directory scripts should always write to `safety.scratchRoots` in user settings. For a tool that ignores `XDG_CACHE_HOME`, point its own cache variable at a directory under the sandbox cache the message names. |
+| `Operation not permitted` (`EPERM`) from a contained command that opens a local Unix socket: a database client, Docker, the `tsx` CLI, Python multiprocessing with the `forkserver` start method (the Linux default from Python 3.14), an X11 or D-Bus client, a program that listens on a socket path | The OS sandbox refuses new Unix-domain sockets (`safety.sandboxUnixSockets: block`), because a socket the command can reach, such as tmux's, can run commands outside the sandbox. `socketpair`, pipes and TCP still work. | Let CLIO Coder rerun the command with `unsandboxed: true`, which the safety judge reviews, or name the tool in your request so the judge allows it. For Python, set the `spawn` start method. `safety.sandboxUnixSockets: owned` in user settings lets a command reach sockets other users own, such as a system daemon's, and `allow` turns the refusal off for every sandbox. |
+| A contained command fails to authenticate, or a variable such as `GITHUB_TOKEN` or `NPM_TOKEN` is empty inside it | The sandbox removes credential variables by name and value before a contained command starts; unsandboxed and yolo commands keep them. | Let CLIO Coder rerun it with `unsandboxed: true` for the safety judge, or list the variable in `safety.sandboxPassEnv` in user settings to keep it inside the sandbox. |
 | A contained command cannot open `.env`, a private key or a credentials file in the workspace (`Permission denied`, or files missing inside a masked directory such as `.terraform/`) | The sandbox masks secret files under the workspace and the scratch roots. Templates such as `.env.example` and unmodified tracked files stay readable. | Rerun with `unsandboxed: true` for the safety judge, or pass the value through `safety.sandboxPassEnv` instead of a file. |
 | A `git push`, `gh`, `ssh` or `rsync` command fails to authenticate at unconfined yolo under `safety.sandbox: required`, or is refused with `safety.sandbox is "required" and no OS sandbox is available, so yolo does not run this command; an outward command runs only alone on its line, with literal arguments and only the options its CLI is allowed, from the workspace repository` | Under `required` an outward command leaves the sandbox only as one literal command with listed options, run from the workspace repository. A line with a substitution, here-doc, redirect, pipe, list, assignment or wrapper ran inside the sandbox, where credentials are hidden, or was refused on a host with no sandbox backend. Every `scp` stays inside, and so does a line that would send a masked secret file, a `git` or `gh` line after the repository's hooks or executable git config changed during the session, and a push to a local repository. The refusal adds `this one stays inside because <reason>` when a masked secret or a hook or config change held it. | Write the command alone on its line with literal arguments. Put a pull request or issue body in a workspace file and pass `--body-file <file>`. Restore the changed hook or config, or have the operator set `safety.sandbox: auto`. The rules are in [Sandbox, questions and turns](../architecture/safety-model.md#sandbox-questions-and-turns). |
 | `safety.sandbox is "required", so yolo does not run this command outside the sandbox; drop unsandboxed: true, or have the operator set safety.sandbox to auto` | A call asked to leave the sandbox with `unsandboxed: true` at unconfined yolo under `safety.sandbox: required`. | Drop `unsandboxed: true`, or have the operator set `safety.sandbox: auto` in user settings. |
@@ -189,11 +189,11 @@ The implementation and exact interpolated format are in [denial.ts](../../src/do
 | `unsealed <path>: no bundle.json (live or never sealed)` from `clio-coder telemetry verify` (exit 1) | The scope is still open, or its process ended before it sealed. A live session or run seals when it closes. | Verify again after the session or run ends. `clio-coder telemetry doctor` counts unsealed scopes beside verified and failed ones. |
 | `failed <path>: <mismatch>` from `clio-coder telemetry verify`, or a `failed <kind> <id>` row in `clio-coder telemetry doctor` (exit 1) | A segment, object, the hash chain or the seal record no longer matches what the seal recorded. Something changed the scope's files after it sealed. | Treat that scope's records as untrusted. See [Verify](../architecture/telemetry.md#verify). |
 | `the session recorded no working directory`, `the session's working directory no longer exists`, or `the session's working directory is not a directory` (the **Session Working Directory** overlay on `/resume`) | The session recorded in `meta.json` has no working directory, or points to one that has been deleted, unmounted, renamed or replaced by a file. | Choose **Continue here** to resume in the terminal's current directory, or **Cancel** (Esc) to return to the session picker. |
-| `Copy unconfirmed: <reasons>; OSC 52 sent` or `Sent to terminal clipboard (OSC 52)` (the flash after a copy in the fullscreen interface) | No clipboard tool confirmed the copy, so Clio sent the text to the terminal as an OSC 52 sequence, which no terminal acknowledges. Over SSH the local tools are skipped, because they would write the remote machine's clipboard; without forwarded X11, OSC 52 is the only path and the second flash is expected. | If the text did not arrive, install the tool the flash names as not found (`wl-copy`, `xclip` or `xsel` on Linux), or use a terminal, and a multiplexer in between, that accepts OSC 52 clipboard writes. Over SSH, forwarding X11 lets `xclip` and `xsel` confirm the copy. See [commands and modes](commands-and-modes.md). |
+| `Copy unconfirmed: <reasons>; OSC 52 sent` or `Sent to terminal clipboard (OSC 52)` (the flash after a copy in the fullscreen interface) | No clipboard tool confirmed the copy, so CLIO Coder sent the text to the terminal as an OSC 52 sequence, which no terminal acknowledges. Over SSH the local tools are skipped, because they would write the remote machine's clipboard; without forwarded X11, OSC 52 is the only path and the second flash is expected. | If the text did not arrive, install the tool the flash names as not found (`wl-copy`, `xclip` or `xsel` on Linux), or use a terminal, and a multiplexer in between, that accepts OSC 52 clipboard writes. Over SSH, forwarding X11 lets `xclip` and `xsel` confirm the copy. See [commands and modes](commands-and-modes.md). |
 | `LM Studio instance '<id>' is also loaded on <peers>; a request may be served by that LM Link peer, and the footer and usage ledger name the id that answered when it differs.` | The model is resident on this server and on an LM Link peer. | Informational. The footer and the usage ledger name the instance that answered when it differs. Verify loaded instances with `clio-coder targets --probe`. |
-| `LM Studio resolved '<model>' to loaded instance '<instance>' on target '<id>'.` | A bare model key matched a loaded instance, so Clio reuses it instead of loading another. | Informational. |
+| `LM Studio resolved '<model>' to loaded instance '<instance>' on target '<id>'.` | A bare model key matched a loaded instance, so CLIO Coder reuses it instead of loading another. | Informational. |
 | `LM Studio target '<id>' does not advertise model '<model>'. Resident instances: <ids or none>. Configure an explicit LM Studio load before requesting an unlisted model.` | The requested model is not listed by the server. | Choose a listed model, or configure an explicit LM Studio load profile for it. |
-| `400 model is already running` (llama.cpp router reply to a load request) | A load request reached a router whose model is idle or sleeping. | Clio does not post a load for a model it sees as loaded or sleeping, so this reply points at another client or a stale view of the slots. Verify router slots and the catalog before evicting anything. |
+| `400 model is already running` (llama.cpp router reply to a load request) | A load request reached a router whose model is idle or sleeping. | CLIO Coder does not post a load for a model it sees as loaded or sleeping, so this reply points at another client or a stale view of the slots. Verify router slots and the catalog before evicting anything. |
 
 ---
 
@@ -204,7 +204,7 @@ provider cache usage, compiled-prompt reuse, and any backend prefill timing.
 Available fields depend on the serving runtime. A backend that omits cache-read
 telemetry is shown without that observation.
 
-When Clio Coder records a cause for a cold prefix, `/context` names it, for example:
+When CLIO Coder records a cause for a cold prefix, `/context` names it, for example:
 
 ```text
 last cache-affecting events: working-set eviction (reuse measured separately)
@@ -234,7 +234,7 @@ If the compiled prompt was reused but the backend reports a cold prefix, check:
   discard resident cache state.
 - **Other traffic on the endpoint.** Workers, another session, or another client
   can use the same cache slots. `clio-coder targets --probe` reports available
-  slot information; fleet settings show Clio Coder's active endpoint allocations.
+  slot information; fleet settings show CLIO Coder's active endpoint allocations.
 - **Model residency.** Switching a router to another model can replace the
   previous model's cache state.
 - **Prompt identity.** Compare `promptHash` and `toolSignature` across the
@@ -258,7 +258,7 @@ it according to the server's memory capacity and concurrent workload.
 When an interactive session stops responding to typing, the question worth
 answering before anything else is which half of the input pipeline stopped: the
 stdin reader that hands bytes to the application, or the renderer that turns
-them into a frame on stdout. Clio Coder keeps that evidence without being asked. Every
+them into a frame on stdout. CLIO Coder keeps that evidence without being asked. Every
 interactive process holds a bounded in-memory ring of the last 256 input-ingress
 records and the last 256 committed frames, and writes it out when the process
 receives `SIGTERM`, which is the signal a `kill` of the stuck pane sends.
@@ -293,7 +293,7 @@ of the same records, for the case where nobody armed the trace first.
 ## Report a problem to the maintainers
 
 `/report` in the TUI and `clio-coder report` in a shell draft a bug report, a
-feature request or a question for Clio Coder's maintainers and post it on
+feature request or a question for CLIO Coder's maintainers and post it on
 `github.com/iowarp/clio-coder`. Nothing leaves the machine until you send it.
 
 ```bash
@@ -303,18 +303,18 @@ clio-coder report bug --title "footer flickers on resize" --last --dry-run
 In the desktop app, **Report a problem** (in the command palette, the help
 dialog and the `/report` slash palette) opens a dialog over the same report
 plan. It walks through Review, Attach and Send: you edit the title and text,
-see what Clio masked, and only the **Send report** button sends; Enter in a
+see what CLIO Coder masked, and only the **Send report** button sends; Enter in a
 field sends nothing. An optional box checks daily for a reply. The dialog never
 builds a diagnostic bundle; sharing one needs `report --share` in a shell.
 
 - **Draft.** `/report bug|feature|question [summary]` uses the summary as the
-  title and adds what Clio Coder observed in the current session. In a shell,
+  title and adds what CLIO Coder observed in the current session. In a shell,
   `--title` and `--body-file <file>` (or `-` for stdin) supply the text, and in
   a terminal without `--body-file`, `$EDITOR` opens a template. `--last` adds
   the newest session in this directory and `--session <id>` a named one.
 - **Review.** The preview is the exact title and body that will be posted,
-  with what Clio Coder masked: local paths (also with spaces or non-ASCII
-  names), URLs other than Clio Coder's own, user, host, project, branch, remote
+  with what CLIO Coder masked: local paths (also with spaces or non-ASCII
+  names), URLs other than CLIO Coder's own, user, host, project, branch, remote
   and target names, e-mail and IP addresses, and secrets, including the API keys
   this process holds. In the TUI `e` edits the text in `$EDITOR` and masks the edit
   again, `m` masks or unmasks a value, Enter moves on, and Esc closes and keeps
@@ -324,7 +324,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   highlighted choice. A
   shell sends after you choose send at the prompt, or with `--yes`; keys typed
   before the prompt are ignored, outside a terminal without `--yes` it exits 2,
-  and `--dry-run` stops after the preview without a network call. With a signed-in `gh`, Clio Coder first searches
+  and `--dry-run` stops after the preview without a network call. With a signed-in `gh`, CLIO Coder first searches
   GitHub for the same problem, then posts a public issue (bug or feature) or
   discussion (question) under your account. An open match asks whether to add
   your details to it, file a new issue that links it, or cancel; with `--yes`,
@@ -332,7 +332,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   the draft and exits 3. A closed match that a release lists as fixed asks
   before filing yours as a regression, and a closed match with a newer release
   out suggests upgrading first. A send that was interrupted is checked on
-  GitHub before it is offered again. Without `gh` Clio
+  GitHub before it is offered again. Without `gh` CLIO
   Coder opens a prefilled form in the browser, and without a browser it writes
   the report to a file and prints the link to paste it into. `c` on the send
   step, or `--credit`, asks for credit in the release notes.
@@ -342,7 +342,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   a saved draft, and `forget <id>` deletes a draft that was never posted. In the
   TUI list, `r` on a sent report turns its reply check off; the list updates in
   place, and the cursor stays on the same report when GitHub's state arrives. A
-  posted report cannot be withdrawn from Clio Coder; edit or close it on GitHub.
+  posted report cannot be withdrawn from CLIO Coder; edit or close it on GitHub.
   `forget` on it deletes only its local bundle. When the report shared an
   encrypted bundle, `clio-coder report forget <id>` first deletes that secret
   gist and then, for a report filed as an issue, shows a one-line comment
@@ -353,7 +353,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   a maintainer's reply (`r` in the TUI, `--reply-check` in a shell). It runs at
   most once a day through your `gh`, for open reports sent in the last 90 days,
   and never in CI or with `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER`
-  set. When an upgrade's changelog fixes an issue you reported, Clio Coder says
+  set. When an upgrade's changelog fixes an issue you reported, CLIO Coder says
   so once and thanks you, and `clio-coder doctor` shows how many reports you
   sent and which a release fixed.
 - **Identifier check.** The review looks for this machine's names, paths
@@ -386,7 +386,7 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   `/report` in the TUI, over ACP or in the desktop app attaches no bundle.
 - **Suggestions.** After one of its own failures (an internal error, the same
   turn-ending fault again, compaction failing three times running, or a crash
-  recorded by the previous process), Clio Coder may suggest `/report` in a
+  recorded by the previous process), CLIO Coder may suggest `/report` in a
   notice. Typing `/report bug` answers it with a draft that carries the failure;
   dismissing it is a no, and that problem is not suggested again. It comes at
   most once a session and once a week, never in your first session, during a
@@ -399,14 +399,14 @@ builds a diagnostic bundle; sharing one needs `report --share` in a shell.
   as a crash. A headless run that hit an internal fault
   prints `clio-coder: this looks like a Clio Coder fault; ...` once on stderr,
   except in CI, with `--json`, or with offers off.
-- **The agent.** When you tell the agent that Clio Coder itself is broken, it
+- **The agent.** When you tell the agent that CLIO Coder itself is broken, it
   can save a draft through its `report` capability (one per session, three
   unsent per install), or ask you once whether to draft one. The draft drops
   escape sequences and hidden characters, and the TUI raises a notice instead
   of opening the review mid-turn. The agent cannot send a report: its draft is
   sent only from your own review (`/report send <id>` in the TUI or
   `clio-coder report send <id>` in a terminal), never with `--yes`, over ACP or
-  from a session's `bash`. A `clio-coder report` that a Clio Coder session's
+  from a session's `bash`. A `clio-coder report` that a CLIO Coder session's
   `bash` runs sends nothing without your review, even at yolo, and what it
   composed is kept as the agent's draft.
 - **Over ACP and in the desktop app.** `/report bug|feature|question
@@ -426,7 +426,7 @@ that has a browser.
 
 ### Share with the maintainers
 
-Clio Coder never calls home. Sharing is explicit, one item at a time, and only
+CLIO Coder never calls home. Sharing is explicit, one item at a time, and only
 when you run the command yourself: it helps the maintainers, a small team
 working with a trusted group of scientists, improve the harness from real
 usage, failures, bugs, feature requests and latent demand.
@@ -447,7 +447,7 @@ clio-coder telemetry share forget <shareId>
   Both print what they hold, the consent text and where it goes before
   anything is sent, and need gh signed in to github.com.
 - **How.** The bundle or archive is encrypted (X25519, HKDF-SHA256,
-  AES-256-GCM) so that only the Clio Coder maintainers' key opens it, and
+  AES-256-GCM) so that only the CLIO Coder maintainers' key opens it, and
   uploaded as a secret gist in your own GitHub account through your `gh`
   (`gh auth refresh -s gist` if gh lacks the gist scope). The public issue's
   report block names it as `bundle: gist:<id>#<shareId>`; a telemetry share
@@ -464,18 +464,18 @@ clio-coder telemetry share forget <shareId>
   issue reads as the fix it asks for.
 - **Who reads it.** Only the maintainers. They keep counts derived from it,
   never its contents or who sent it, in their private metrics repository to
-  rank what to fix next. `consent: debug` lets them read it to fix Clio Coder;
+  rank what to fix next. `consent: debug` lets them read it to fix CLIO Coder;
   `dataset` also lets its mechanics go into public datasets, which cannot be
   recalled once published.
 - **Deleting it.** `clio-coder report forget <id>` or `clio-coder telemetry
   share forget <shareId>` deletes the gist, and the derived counts go on the
   maintainers' next daily run. You can also delete the gist on github.com.
-  Once a share is 180 days old, Clio Coder deletes its gist the next time you
+  Once a share is 180 days old, CLIO Coder deletes its gist the next time you
   run `clio-coder report` or `clio-coder telemetry share`; nothing runs at
   startup or in the background. `telemetry share list` shows every share this machine
   sent; the receipts live in the state directory's `reports/shares.json`.
 - **Never for the agent.** The agent never shares or passes `--share` or
-  `--send`; both are refused in a command a Clio Coder session started, and
+  `--send`; both are refused in a command a CLIO Coder session started, and
   without `--yes` outside a terminal. It may tell you the command to run.
 
 ## Diagnostic Commands

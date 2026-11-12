@@ -24,7 +24,7 @@ The model reaches the same store through the `store` tool. Its eight ops (`tags`
 
 Every command takes `--json`. Exit codes: 0 success, 1 operational failure, such as a tag or blob that does not exist, 2 invalid usage.
 
-On the local backend the store lives under the Clio data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path; `clio-coder store where` prints this project's key and directory. Its files are owner-only: 0600 files and 0700 directories. `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing recovers it afterwards.
+On the local backend the store lives under the CLIO Coder data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path; `clio-coder store where` prints this project's key and directory. Its files are owner-only: 0600 files and 0700 directories. `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing recovers it afterwards.
 
 Known limits: the local backend lives on one host, so a worker on an SSH fleet node sees that node's own store. `put` copies bytes rather than linking. Neither backend keeps earlier versions of a blob. The store has been exercised on Linux only.
 
@@ -40,7 +40,7 @@ Puts and removes of one blob are serialized across processes, whether they come 
 
 ## Choosing a backend
 
-The store uses the **local** backend unless you choose otherwise: blobs are plain files under the Clio data directory. Nothing needs to be installed, and `clio-coder doctor` reports `store backend: local (no selection; the default)`.
+The store uses the **local** backend unless you choose otherwise: blobs are plain files under the CLIO Coder data directory. Nothing needs to be installed, and `clio-coder doctor` reports `store backend: local (no selection; the default)`.
 
 The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOWarp clio-core runtime (the `iowarp-core` Python package). It needs iowarp-core 2.4.0 built from clio-core 6c54cdbf or later, with the agentspace operator 01d8a7d or later; no released `iowarp-core` wheel carries the bindings it uses yet. Choose it when the store must live in clio-core's tiers, be shared through its FUSE mount, or sit beside other clio-core data:
 
@@ -48,7 +48,7 @@ The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOW
 clio-coder store backend clio-core --python /path/to/venv/bin/python3 --config /path/to/clio.yaml --pool 570.0
 ```
 
-Every flag is optional. Without `--python`, Clio uses the interpreter beside a `clio_run` on `PATH`. `--mount <dir>` names a clio-core FUSE mount over the same pool, and `--stop-if-last` stops the daemon when the last Clio process using it exits. The command probes the interpreter, the daemon and its version, the host and a durable tier, and records the choice only when every row passes. `clio-coder store backend` shows the current choice; `clio-coder store backend local` switches back. Switching never moves data, and a clio-core selection never falls back to local: while the runtime is unavailable, store operations fail with a clear message instead.
+Every flag is optional. Without `--python`, CLIO Coder uses the interpreter beside a `clio_run` on `PATH`. `--mount <dir>` names a clio-core FUSE mount over the same pool, and `--stop-if-last` stops the daemon when the last CLIO Coder process using it exits. The command probes the interpreter, the daemon and its version, the host and a durable tier, and records the choice only when every row passes. `clio-coder store backend` shows the current choice; `clio-coder store backend local` switches back. Switching never moves data, and a clio-core selection never falls back to local: while the runtime is unavailable, store operations fail with a clear message instead.
 
 ### clio-core notes
 

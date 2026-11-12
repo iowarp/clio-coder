@@ -1,14 +1,14 @@
-# Clio Coder Agent Fleet
+# CLIO Coder Agent Fleet
 
-Clio Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, result contract, and optional permissions, and the Markdown body is the agent instruction text.
+CLIO Coder dispatches focused fleet agents from Markdown recipes. Recipes are data files, not hidden code plugins: YAML frontmatter declares identity, tool requirements, skill bindings, audience, capability and latency classes, budget, result contract, and optional permissions, and the Markdown body is the agent instruction text.
 
-The source of truth is `src/domains/agents/**`. Clio Coder's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
+The source of truth is `src/domains/agents/**`. CLIO Coder's agent dispatch engine and execution boundaries are built upon the [@earendil-works/pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core) library.
 
 ---
 
 ## Agent Architecture Semantics
 
-Clio Coder's agent architecture distinguishes between authoring configurations and runtime policies:
+CLIO Coder's agent architecture distinguishes between authoring configurations and runtime policies:
 
 *   **Recipe**: An authored Markdown file containing frontmatter configuration and an instruction body.
 *   **AgentSpec**: The normalized runtime and catalog policy object derived from a recipe.
@@ -16,13 +16,13 @@ Clio Coder's agent architecture distinguishes between authoring configurations a
 *   **source**: Origin of the recipe (`builtin` | `plugin` | `user` | `project`).
 
 ### Discovery, Overrides, and Precedence
-At startup, Clio loads recipes in four precedence tiers:
+At startup, CLIO Coder loads recipes in four precedence tiers:
 
 | Source | Root | Notes |
 | --- | --- | --- |
 | **Built-in** | `src/domains/agents/builtins/*.md` in the installed package | Shipped defaults. A defect in a shipped recipe aborts discovery. |
 | **Plugin** | Each enabled plugin's `agents` resource root | Loaded in stable plugin-source order. A plugin recipe may bind only skills from the same plugin's skill root. |
-| **User** | `<configDir>/agents/*.md` | Per-user recipes. `<configDir>` follows Clio Coder's XDG/platform config directory. |
+| **User** | `<configDir>/agents/*.md` | Per-user recipes. `<configDir>` follows CLIO Coder's XDG/platform config directory. |
 | **Project** | `.clio-coder/agents/*.md` under the working directory | Repository-local additions (custom/domain agents). |
 
 Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Only `.md` files directly under a root are read; subdirectories are not scanned.
@@ -36,7 +36,7 @@ Recipe IDs are derived from filenames (e.g., `architect.md` -> `architect`). Onl
 *   **Namespace**: Native recipes and ACP delegation agents share one id namespace. A delegation entry in `integrations.externalAgents.entries` whose id equals a native recipe id fails agent startup.
 *   **Quarantine and diagnostics**: A plugin, user, or project recipe that fails parsing or policy validation is quarantined, not loaded. Discovery records at most 256 diagnostics of kind `quarantine`, `ignored`, or `overridden`, each with the file path and reason.
 *   **Timing**: Recipes are discovered when the agents domain starts and again when a plugin resource reload commits a changed plugin generation.
-*   **Playbooks**: The fleet runs playbooks. Shipped builtin playbooks (`build-test`, `build-review`, `sdlc`) ship inside the package. Enabled-plugin playbooks load next, user playbooks at `<configDir>/playbooks/<name>.md` load after them, and project playbooks at `.clio-coder/playbooks/<name>.md` take highest precedence. Clio reads no `fleets/` directory; `clio-coder upgrade` converts an older one once. The parser accepts playbook versions 1 through 5. Version 4 introduces enforced per-step `writes` boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the `writers: 1` single-writer declaration. Deterministic code steps reference commands declared in `.clio-coder/playbooks/commands.yaml`.
+*   **Playbooks**: The fleet runs playbooks. Shipped builtin playbooks (`build-test`, `build-review`, `sdlc`) ship inside the package. Enabled-plugin playbooks load next, user playbooks at `<configDir>/playbooks/<name>.md` load after them, and project playbooks at `.clio-coder/playbooks/<name>.md` take highest precedence. CLIO Coder reads no `fleets/` directory; `clio-coder upgrade` converts an older one once. The parser accepts playbook versions 1 through 5. Version 4 introduces enforced per-step `writes` boundaries; version 5 adds plan and gate steps, per-step target or profile routes, and the `writers: 1` single-writer declaration. Deterministic code steps reference commands declared in `.clio-coder/playbooks/commands.yaml`.
 
 ---
 
@@ -67,7 +67,7 @@ Internal orchestration helpers and internal process agents. They are hidden from
 | Agent ID | Audience | Required tools | Optional tools | Purpose | Latency | Budget | Result contract |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `scout` | shadow | read | grep, find, ls, context, code_nav, git, ledger, store, data | Broad repository reconnaissance with cited findings: orientation, structure and entry-point mapping, multi-file symbol hunting. | `fast` | 18/4 | `scout-report` |
-| `researcher` | shadow | read | web_fetch, context, ledger, git, store, data | Extracts and compares concrete supplied URLs, standards, release notes, and papers through Clio Coder-observed reads and URL retrieval. | `deep` | 24/4 | `research-report` |
+| `researcher` | shadow | read | web_fetch, context, ledger, git, store, data | Extracts and compares concrete supplied URLs, standards, release notes, and papers through CLIO Coder-observed reads and URL retrieval. | `deep` | 24/4 | `research-report` |
 | `world-knowledge` | shadow | none | web_fetch, read, context, ledger | Current open-world discovery, ecosystem comparison, broad external context, and an advisory second opinion; reports when discovery is unavailable. | `deep` | 20/3 | `world-knowledge-report` |
 | `provenance` | shadow | evidence | read, grep, find, ls, git, ledger | Reads run records, diffs, and telemetry for evidence-backed handoffs. | `balanced` | 16/4 | `provenance-report` |
 | `oracle` | shadow | read | grep, find, ls, code_nav, context, ledger | Shadow advisor behind `/oracle` that protects consistency with prior decisions and returns the strongest challenge to a question. | `deep` | 14/3 | `oracle-report` |
@@ -84,10 +84,10 @@ Grounding is checked against the run's own reads, not just against the file. The
 The three discovery roles are deliberately non-overlapping. `scout` is
 repository-only reconnaissance with live `path:line` grounding and never browses
 external sources. `researcher` starts from concrete URLs or documents and uses
-Clio Coder-observed `read`/`web_fetch` calls to extract and compare them; `web_fetch` is
+CLIO Coder-observed `read`/`web_fetch` calls to extract and compare them; `web_fetch` is
 URL retrieval, not search. `world-knowledge` is for current open-world discovery,
 ecosystem comparison, broad context, and an independent advisory opinion. Its
-tools are all optional so it can run on a native Clio Coder target or an opaque external
+tools are all optional so it can run on a native CLIO Coder target or an opaque external
 worker. A native target without discovery must use caller-supplied sources or say
 discovery was unavailable. Its `world-knowledge-report` separates supported
 facts and supplied source identifiers from synthesis, uncertainty, and follow-up
@@ -215,11 +215,11 @@ Skills are knowledge attachments declared under `skills: [...]` in the YAML fron
 
 ## Dispatching agents
 
-*   **Visibility**: Normal `clio-coder agents` lists user-visible (base/custom) agents, including configured ACP delegation agents. The command `clio-coder agents --all` includes shadow/internal specs reserved for Clio Coder orchestration, and `--json` prints the specs without their persona bodies. The `/library agents` slash command opens the Library overlay on its Agents tab.
+*   **Visibility**: Normal `clio-coder agents` lists user-visible (base/custom) agents, including configured ACP delegation agents. The command `clio-coder agents --all` includes shadow/internal specs reserved for CLIO Coder orchestration, and `--json` prints the specs without their persona bodies. The `/library agents` slash command opens the Library overlay on its Agents tab.
 *   **Invocation limits**: User-origin `/run` and `clio-coder run --agent` **cannot** invoke shadow/internal agents. The refusal names the stand-in, `coder` with `--read-only`, only when that request would itself be admitted on the same route (target, model, tool profile and denied tools); otherwise it names none. Harness-origin dispatch accepts only recipes whose capability class is `read-only`.
 *   **Orchestrator dispatch**: Internal main-agent dispatch can invoke shadow agents through the `dispatch` tool. The operating contract and Scout's catalog description steer the model to dispatch Scout for broad repository reconnaissance, while narrow file or symbol inspection remains local to the main agent. If a turn reaches 9 or more manual read-only exploration calls without completing Scout dispatch, a threshold nudge advises delegation once, as a model-only reminder the operator does not see. It never carries the turn onward into another model round.
 *   **TUI rendering and control**: Shadow and internal runs show the `↳` sub-process glyph in a subordinate tone instead of a name prefix, and a hollow `◇` or filled `◆` marks whether the operator or the model started a run. The Fleet Runs island and board show the bounded task, run ID, live tools, tokens, priced cost, retry state, and terminal outcome. Select an HTTP/SDK run to steer it or cancel any active worker/retry timer.
-*   **ACP Delegation**: `/run <agent-id>` with an external ACP agent id (or `acp:<id>`) is ACP delegation, which is separate from Clio Coder fleet subagents.
+*   **ACP Delegation**: `/run <agent-id>` with an external ACP agent id (or `acp:<id>`) is ACP delegation, which is separate from CLIO Coder fleet subagents.
 
 ### Measured agent automation
 
@@ -242,12 +242,12 @@ To ensure security and proper boundary isolation, shadow and internal agents are
 
 ### Subscription Worker Runtimes
 
-In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, Clio dispatches subagents to supported subscription worker runtimes:
-- **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside Clio Coder's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Every tool call is mediated by Clio Coder (`canUseTool` plus a `PreToolUse` hook): the safety net and autonomy matrix apply, and the run's admitted tool surface, which is narrowed by any `tool_profile`, is enforced authoritatively. Consequently, an out-of-profile tool (for example `bash` under `minimal-local`) is denied even though the underlying preset offers it. The narrowed surface is also translated into the SDK's `disallowedTools` option as defense in depth. Because it routes tool calls through Clio Coder safety, it behaves as a native worker. The SDK package is not part of the default install. The first attended dispatch to `claude-sdk` asks the operator once to install it as a separate component under the data directory, and without an operator the error names `clio-coder tools install claude-sdk` ([Lean install](installation-and-lifecycle.md#lean-install-the-claude-agent-sdk)). On an SSH fleet node, install it from the client with `clio-coder fleet nodes tools install <node> claude-sdk --yes`.
-- **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker with `--permission-mode acceptEdits`. Admission refuses read-only work on it before launch, because a plan mode or a tool list cannot keep it from changing user files (see [Read-only runs](../architecture/safety-model.md#read-only-runs)). It is a black box: tool calls run inside the `claude` process and are not routed through Clio Coder's per-tool mediation, so Clio cannot enforce a per-tool profile on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
-- **`antigravity-code` (Antigravity CLI, experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a second opinion or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. Clio Coder consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` agent declares `capabilityClass: read-only`, and admission refuses read-only work on this runtime, so a `world-knowledge` dispatch routed to `antigravity-code` is refused before launch.
+In addition to standard HTTP targets and [Agent Client Protocol (ACP)](https://agentclientprotocol.com) delegation agents, CLIO Coder dispatches subagents to supported subscription worker runtimes:
+- **`claude-sdk` (Claude Agent SDK):** Serves as a main worker runtime for driving fleet agents. It integrates with [@anthropic-ai/claude-agent-sdk](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk) alongside CLIO Coder's native subagent workers (like a local [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com), [LM Studio](https://lmstudio.ai), [vLLM](https://github.com/vllm-project/vllm), or [SGLang](https://github.com/sgl-project/sglang) fleet) to execute tasks under a Claude subscription. Every tool call is mediated by CLIO Coder (`canUseTool` plus a `PreToolUse` hook): the safety net and autonomy matrix apply, and the run's admitted tool surface, which is narrowed by any `tool_profile`, is enforced authoritatively. Consequently, an out-of-profile tool (for example `bash` under `minimal-local`) is denied even though the underlying preset offers it. The narrowed surface is also translated into the SDK's `disallowedTools` option as defense in depth. Because it routes tool calls through CLIO Coder safety, it behaves as a native worker. The SDK package is not part of the default install. The first attended dispatch to `claude-sdk` asks the operator once to install it as a separate component under the data directory, and without an operator the error names `clio-coder tools install claude-sdk` ([Lean install](installation-and-lifecycle.md#lean-install-the-claude-agent-sdk)). On an SSH fleet node, install it from the client with `clio-coder fleet nodes tools install <node> claude-sdk --yes`.
+- **`claude-code` (Claude Subprocess):** Runs `claude -p` as a subprocess worker with `--permission-mode acceptEdits`. Admission refuses read-only work on it before launch, because a plan mode or a tool list cannot keep it from changing user files (see [Read-only runs](../architecture/safety-model.md#read-only-runs)). It is a black box: tool calls run inside the `claude` process and are not routed through CLIO Coder's per-tool mediation, so no per-tool profile can be enforced on it. Dispatching a narrowing `tool_profile` (`minimal-local` or `science-local`) to this runtime is refused; use `full-agent` (or a native / `claude-sdk` worker) instead.
+- **`antigravity-code` (Antigravity CLI, experimental local delegation):** Runs the operator-installed and authenticated official `agy` command as a local external delegation worker. It is useful for a second opinion or another bounded one-shot subtask; it is never an orchestrator or Gemini chat backend. CLIO Coder consumes agy's structured stream and live model catalog but cannot mediate individual tools, so a narrowing `tool_profile` is refused rather than silently ignored. The `world-knowledge` agent declares `capabilityClass: read-only`, and admission refuses read-only work on this runtime, so a `world-knowledge` dispatch routed to `antigravity-code` is refused before launch.
 
-Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` mediate every tool call, so the budget policy in [Budget semantics](#budget-semantics) applies to them. An opaque external loop instead receives an `external-one-shot` enforcement classification: Clio enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. The run record and status never label those internal per-tool limits enforced, and Clio never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
+Agent budgets follow the same mediation boundary. Native workers and `claude-sdk` mediate every tool call, so the budget policy in [Budget semantics](#budget-semantics) applies to them. An opaque external loop instead receives an `external-one-shot` enforcement classification: CLIO Coder enforces one subprocess launch, its deadline, output cap, cancellation, and result-contract validation, while recording recipe per-tool numbers as `unobserved-not-enforced`. The run record and status never label those internal per-tool limits enforced, and CLIO Coder never automatically retries a generating external-agent run. Claude vendor aliases never appear in recipes or prompt authority and cannot reintroduce a canonical tool removed by admission.
 
 Interactive TUI:
 
@@ -275,7 +275,7 @@ Dispatch admission checks, among others:
 
 The dispatch tool can compose an ephemeral specialist for one task object with
 `persona` and `tool_profile`. `persona` replaces the recipe body inside the
-same stable worker shell used for recipe runs; it does not replace Clio Coder's task
+same stable worker shell used for recipe runs; it does not replace CLIO Coder's task
 contract or safety scaffolding. `tool_profile` narrows tools through the same
 validated profiles as recipe dispatch (`minimal-local`, `science-local`, or
 `full-agent`).
@@ -326,7 +326,7 @@ messages, in the order a worker reads them, each present only when it applies:
 
 ## Fleet Management and Fault Tolerance
 
-Clio Coder manages running subagent tasks, tracks token costs, and handles task failures. It operates under specific safety, concurrency, and retry limits. The classification, exclusion, and delay rules are specified in [Failure classification and retries](../architecture/worker-dispatch-mechanics.md#51-failure-classification-and-retries).
+CLIO Coder manages running subagent tasks, tracks token costs, and handles task failures. It operates under specific safety, concurrency, and retry limits. The classification, exclusion, and delay rules are specified in [Failure classification and retries](../architecture/worker-dispatch-mechanics.md#51-failure-classification-and-retries).
 
 ### 1. In-Memory Retry Queue
 Subagent runs that terminate with retryable outcomes are placed in an in-memory retry queue. The queue does not survive process restarts. The retryable outcomes are:
@@ -345,7 +345,7 @@ Scheduled retries use exponential backoff that starts at 500 ms, doubles, and ca
 The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. `auto` sizes the local node from usable CPUs, available memory, and any cgroup memory limit, up to eight workers; see [Fleet dispatch](fleet-dispatch.md) and [Capacity and scheduling](../architecture/capacity-and-scheduling.md).
 
 ### 5. Heartbeats and Reconciler
-For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the time since the last frame from the worker. A worker silent for more than 15 seconds is terminated automatically and its run finalizes as `stalled`; the thresholds are in [Heartbeats and the Watchdog](../architecture/worker-dispatch-mechanics.md#3-heartbeats-and-the-watchdog).
+For native subprocess workers, CLIO Coder uses a heartbeat mechanism. The reconciler monitors the time since the last frame from the worker. A worker silent for more than 15 seconds is terminated automatically and its run finalizes as `stalled`; the thresholds are in [Heartbeats and the Watchdog](../architecture/worker-dispatch-mechanics.md#3-heartbeats-and-the-watchdog).
 
 ### 6. Worker Permission Postures
 A dispatched worker has no operator by default, so a tool call that requires interactive permission must resolve within bounded time. Workers inherit the main session's autonomy: at `yolo` a mediated, non-read-only worker runs every action class the yolo way and meets no ask (see [Workers at each level](../architecture/safety-model.md#workers-at-each-level)). At `default` the `fleet.permissions.mode` setting picks the posture:

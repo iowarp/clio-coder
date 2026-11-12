@@ -3,13 +3,13 @@
 The [TUI design contract](../architecture/tui-design.md) explains the layout and rendering rules behind these controls.
 
 This page is the operator's path from a clean machine to a working files pane
-beside a Clio Coder session: what to install, how a session joins its pane
+beside a CLIO Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
 says at each stage, and how to resolve a missing dependency or unavailable pane host.
 
 Panes come with the install. Bare `clio-coder` in an interactive terminal opens
-Clio Coder's own private pane host, on the pinned herdr the installer
-provisioned, with no setup question. When the host cannot start, Clio prints
+its own private pane host, on the pinned herdr the installer
+provisioned, with no setup question. When the host cannot start, CLIO Coder prints
 one line and runs in the plain terminal, as it does for headless, non-terminal
 and `TERM=dumb` runs and inside tmux, Zellij or screen. Only the interactive
 session activates panes. `clio-coder run`, `clio-coder acp` and dispatched
@@ -17,12 +17,12 @@ workers never load the pane layer.
 
 ## What you get
 
-Inside its pane host, Clio Coder can open panes beside the session pane. On
-`/quit` in its own host, Clio closes every pane; as a guest in your herdr, it
+Inside its pane host, CLIO Coder can open panes beside the session pane. On
+`/quit` in its own host, it closes every pane; as a guest in your herdr, it
 closes its docks and leaves utility panes open:
 
 - **The files pane.** A file view docked below the session. `/files` or
-  `Alt+E` shows it and moves the keyboard into it. The same key from Clio Coder focus, or `Alt+E` inside the pane, hides it again with Yazi still
+  `Alt+E` shows it and moves the keyboard into it. The same key from CLIO Coder focus, or `Alt+E` inside the pane, hides it again with Yazi still
   running in its directory, and two taps within 400 ms close it for real. Picking a file sends it back to the composer as an `@file`
   mention and returns the keyboard to the prompt. The engine behind it is
   yazi, a vendored file manager installed on request with
@@ -33,21 +33,21 @@ closes its docks and leaves utility panes open:
 - **The shell pane.** `/panes open shell` opens a login `bash` in the
   workspace.
 - **Coding peer handoff.** `/panes peer [--cwd <workspace>] <peer> [brief]` opens
-  a second Clio Coder, Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a Clio Coder-owned pane.
+  a second CLIO Coder, Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a CLIO Coder-owned pane.
   The brief is limited to 8,192 UTF-8 bytes and `--cwd` must name an existing directory.
-  A second Clio Coder takes no brief on its command line; open it without one and give it its task afterwards.
-  It runs against this session's Clio Coder directories and saved credentials, not the pane host's environment.
-  This is an interactive handoff; Clio can close the owned pane but does not
+  A second CLIO Coder takes no brief on its command line; open it without one and give it its task afterwards.
+  It runs against this session's CLIO Coder directories and saved credentials, not the pane host's environment.
+  This is an interactive handoff; CLIO Coder can close the owned pane but does not
   capture a managed run or run record from its contents. See [Coding Agent
   Interoperability](interop.md).
 - **The workers dock.** `Alt+W` shows the workers dashboard in a dock to the right of the session. The dashboard, its keys and the per-run
   takeover are documented with the fleet in [Fleet Dispatch](fleet-dispatch.md). This page covers the utility panes and the dock contract below.
 - **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings workspace` under Panes), and it needs the Herdr pane layer and a cliamp at 1.63.2 or newer, either on `PATH` or vendored by `clio-coder tools install cliamp`. See [Music](music.md).
-- **Status and toasts.** In guest mode Clio reports session state on the hosting pane as agent `clio-coder`: `working`, `blocked` while a tool call waits on an approval, and `idle`. A finished dispatch can raise a herdr toast per `interface.panes.notifications`, and a failed run also leaves a transcript notice.
+- **Status and toasts.** In guest mode CLIO Coder reports session state on the hosting pane as agent `clio-coder`: `working`, `blocked` while a tool call waits on an approval, and `idle`. A finished dispatch can raise a herdr toast per `interface.panes.notifications`, and a failed run also leaves a transcript notice.
 
-Clio acts only on panes it created, which carry a `clio_coder_owner` metadata token. A pane you opened yourself in herdr is never closed, zoomed, or retargeted. The hosting pane is the one exception: Clio reports status on it, returns keyboard focus to it, and leaves zoom on its tab.
+CLIO Coder acts only on panes it created, which carry a `clio_coder_owner` metadata token. A pane you opened yourself in herdr is never closed, zoomed, or retargeted. The hosting pane is the one exception: CLIO Coder reports status on it, returns keyboard focus to it, and leaves zoom on its tab.
 
-When an `@file` mention expands to an image and the routed model cannot accept images, Clio refuses to submit the turn and prints `IMAGE_INPUT_UNSUPPORTED` with the route and up to five known vision-capable `target/model` choices to pick in `/model`. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image instead and the turn proceeds.
+When an `@file` mention expands to an image and the routed model cannot accept images, CLIO Coder refuses to submit the turn and prints `IMAGE_INPUT_UNSUPPORTED` with the route and up to five known vision-capable `target/model` choices to pick in `/model`. When the fleet profile named `vision` (`fleet.profiles.vision`) is configured, that sidecar describes the image instead and the turn proceeds.
 
 Outside herdr, `/files` still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
@@ -55,7 +55,7 @@ The logs and shell panes need a pane host and say so.
 
 ## Install, from a clean machine
 
-Clio Coder bundles neither the pane host nor the files-pane engine. The npm
+CLIO Coder bundles neither the pane host nor the files-pane engine. The npm
 package ships the engine's configuration (the profile under
 `src/domains/mux/yazi/assets/`), and the programs are downloaded only
 when an operator asks, from a registry that pins each release's URL and
@@ -64,11 +64,11 @@ clears the registry's minimum version.
 
 | Program | Role | Pinned | Minimum on `PATH` |
 | --- | --- | --- | --- |
-| herdr | Pane host. Clio Coder hosts itself only on its own pinned copy; a herdr on `PATH` is never used for that. | 0.9.5 | not used for hosting |
+| herdr | Pane host. CLIO Coder hosts itself only on its own pinned copy; a herdr on `PATH` is never used for that. | 0.9.5 | not used for hosting |
 | yazi | Files pane engine; the install also provides its `ya` helper. | 26.8.15 | 26.8.15 |
 | cliamp | Music pane. See [Music](music.md). | 1.63.2 | 1.63.2 |
 
-The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 and for Windows on x64. The Windows asset is a zip holding `herdr.exe` and the ConPTY runtime it loads from `conpty/`. On Windows the pane client talks to herdr over its named pipe, and Clio's private host runs as a herdr `--session` named `clio-coder-<12 hex>`, so its socket and logs live under herdr's own config directory (`%APPDATA%\herdr\sessions\`, or `$XDG_CONFIG_HOME\herdr\sessions\` when that is set) while its managed config stays in Clio's state directory. Clio opened from PowerShell or Windows Terminal gets the same host, docks and keys as on Linux and macOS. New panes start herdr's PowerShell, and a shell, logs or files pane receives its command through the `CLIO_CODER_PANE_RUN` variable, so the line PowerShell records in its history is the same inert runner each time. In the files pane, Yazi runs its keymap commands through `cmd.exe`, and the managed profile writes the Ctrl+Y and Alt+E bindings in that form. Windows on ARM has no herdr asset, so Clio runs in the plain terminal there.
+The registry is `src/domains/toolchain/registry.ts`. herdr has pinned assets for Linux and macOS on x64 and arm64 and for Windows on x64. The Windows asset is a zip holding `herdr.exe` and the ConPTY runtime it loads from `conpty/`. On Windows the pane client talks to herdr over its named pipe, and CLIO Coder's private host runs as a herdr `--session` named `clio-coder-<12 hex>`, so its socket and logs live under herdr's own config directory (`%APPDATA%\herdr\sessions\`, or `$XDG_CONFIG_HOME\herdr\sessions\` when that is set) while its managed config stays in the state directory. CLIO Coder opened from PowerShell or Windows Terminal gets the same host, docks and keys as on Linux and macOS. New panes start herdr's PowerShell, and a shell, logs or files pane receives its command through the `CLIO_CODER_PANE_RUN` variable, so the line PowerShell records in its history is the same inert runner each time. In the files pane, Yazi runs its keymap commands through `cmd.exe`, and the managed profile writes the Ctrl+Y and Alt+E bindings in that form. Windows on ARM has no herdr asset, so CLIO Coder runs in the plain terminal there.
 
 The first `/files` invocation reports any missing dependency and names its
 install command. `doctor` reports the same dependencies. Downloads occur only
@@ -83,26 +83,26 @@ clio-coder tools install yazi
 
 Install verifies the registry's checksum before publishing the executable.
 `clio-coder tools list` shows the selected binary and version. If a `PATH` copy
-is below the registry's minimum version, the listing explains why Clio selects
+is below the registry's minimum version, the listing explains why CLIO Coder selects
 the vendored copy or requests installation.
 
 The vendored programs live under the data root (`clio-coder paths`), so
 `clio-coder reset --data` removes them and `tools install` brings them back.
-`clio-coder tools remove yazi` removes only Clio Coder's copy.
+`clio-coder tools remove yazi` removes only CLIO Coder's copy.
 
 ## Turn panes on
 
-Panes are always on. Bare `clio-coder` in an interactive terminal opens Clio
+Panes are always on. Bare `clio-coder` in an interactive terminal opens CLIO
 Coder's own private pane host: it starts its pinned herdr, runs the session in
 one of its panes and hands the terminal back when you quit. Each project gets
 its own host. There is no question to answer and no setting to change. A
 missing herdr is not downloaded at launch in a home that never had panes: the
-launch prints ``Clio Coder: terminal panes are not installed. Install them with
+launch prints ``CLIO Coder: terminal panes are not installed. Install them with
 `clio-coder panes install`.`` once per pinned version and the session runs in
 the plain terminal; `clio-coder panes install` adds them. A home that already
-has panes updates them when the pinned version moves: the launch prints `Clio
+has panes updates them when the pinned version moves: the launch prints `CLIO
 Coder: setting up terminal panes (one time)...` and downloads the new pin,
-waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal
+waiting at most 30 seconds. If that fails, it prints ``CLIO Coder: terminal
 panes unavailable (<reason>). Continuing in this terminal; run `clio-coder
 panes install` to retry.`` and the session runs in the plain terminal. Later
 launches skip that update for a day, or until the pinned version changes, and
@@ -111,14 +111,14 @@ build the session simply runs in the plain terminal. The installers
 (`install.sh`, `install.ps1`) provision the same copy, and `clio-coder panes
 install` installs it ahead of time; both always retry.
 
-The host is private. Its server, socket, config and state live under Clio
+The host is private. Its server, socket, config and state live under CLIO
 Coder's own directories (see [Artifact placement](../architecture/artifact-placement.md)),
 so your own `herdr`, its sessions, its `~/.config/herdr` and its socket never
-see it, and quitting Clio removes it. Shells opened in its panes get your own
+see it, and quitting removes it. Shells opened in its panes get your own
 `XDG_CONFIG_HOME` and `XDG_STATE_HOME` back and keep your `XDG_RUNTIME_DIR`.
 Outside Windows, the files pane's Yazi alone uses a private runtime directory beside the host
 socket as its `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and `TMPDIR`, and that
-directory is removed with the host. Clio writes the host's herdr
+directory is removed with the host. CLIO Coder writes the host's herdr
 config on every launch: its prefix is `ctrl+b`, herdr's own help, settings,
 workspace, picker and reload screens are unbound, sounds and update checks are
 off, and the pane chrome follows `interface.outputDetail`: Minimal (`compact`)
@@ -126,13 +126,13 @@ drops pane gaps and scrollbars, and Detailed draws outer borders. Changing the o
 the session redraws the host's chrome live.
 
 Started from a pane of your own herdr (`HERDR_ENV=1` with a socket that is not
-Clio Coder's), bare `clio-coder` opens its private host nested inside that pane,
+CLIO Coder's), bare `clio-coder` opens its private host nested inside that pane,
 with the prefix `ctrl+shift+b` (or `ctrl+]`) so your outer `ctrl+b` keeps
 working. `clio-coder --with-panes` instead joins the herdr you are in as a guest.
 
 A launch stays in the plain terminal for `run`, `acp`, a non-terminal stdin or
 stdout, `TERM=dumb`, a session already inside tmux, zellij or screen, and a
-launch from a pane of Clio Coder's own host. A plain session loads no pane code. Its command palette lists `/panes` dimmed with `needs a pane host; this session has none`.
+launch from a pane of CLIO Coder's own host. A plain session loads no pane code. Its command palette lists `/panes` dimmed with `needs a pane host; this session has none`.
 The files pane is a separate switch, off by default:
 
 ```yaml
@@ -152,18 +152,18 @@ Guest mode needs three things, checked in this order: `HERDR_ENV=1` in the
 environment (herdr sets it in every pane it opens), a herdr socket that
 connects, and a ping answered inside one second. The sockets tried, in order,
 are `HERDR_SOCKET_PATH`, `sessions/<HERDR_SESSION>/herdr.sock` and `herdr.sock`, the last two under herdr's config
-directory (`$XDG_CONFIG_HOME/herdr`, else `~/.config/herdr`). Inside Clio Coder's
+directory (`$XDG_CONFIG_HOME/herdr`, else `~/.config/herdr`). Inside CLIO Coder's
 private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 ### A second terminal in the same folder gets its own panes
 
-Opening Clio Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `Clio Coder: this folder already has a Clio in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose Clio no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``Clio Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session, until one of the four exits (#420). A pane host per launch is verified on Linux only.
+Opening CLIO Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `Clio Coder: this folder already has a Clio in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose session no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``Clio Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session, until one of the four exits (#420). A pane host per launch is verified on Linux only.
 
-The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate Clio roots and separate git worktrees get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Non-terminal stdin or `TERM=dumb` skips hosting. This is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
+The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate CLIO Coder roots and separate git worktrees get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Non-terminal stdin or `TERM=dumb` skips hosting. This is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
-When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. The launcher then exits 129 after SIGHUP and 143 after SIGTERM. A closed terminal therefore ends that terminal's Clio and leaves no host behind, as it would for Clio in a plain terminal; leave Clio running by detaching from herdr instead.
+When the creator launcher receives SIGTERM, or SIGHUP because its terminal closed, it verifies the workspace identity and publishes the exit marker before detaching. If that is the host's last workspace, the launcher stops the host directly rather than closing the workspace under possibly delayed attached clients; otherwise it closes only the verified workspace. Terminating a reattached launcher leaves the original workspace running. The launcher then exits 129 after SIGHUP and 143 after SIGTERM. A closed terminal therefore ends that terminal's session and leaves no host behind, as it would in a plain terminal; leave CLIO Coder running by detaching from herdr instead.
 
-When Clio inside the pane crashes or ends on a signal, it still records its exit status. The launcher disposes of the workspace, prints `Clio workspace ended with exit code N.` on stderr, and exits with that status (for example 1 or 143), so the outer terminal and any script around it see the failure ([workspace-launch.ts](../../src/cli/workspace-launch.ts)).
+When CLIO Coder inside the pane crashes or ends on a signal, it still records its exit status. The launcher disposes of the workspace, prints `Clio workspace ended with exit code N.` on stderr, and exits with that status (for example 1 or 143), so the outer terminal and any script around it see the failure ([workspace-launch.ts](../../src/cli/workspace-launch.ts)).
 
 ## What doctor says
 
@@ -194,15 +194,15 @@ doctor prints only `panes mode` and `panes layout` and does not probe a socket. 
 The `panes mode` row reports what a bare `clio-coder` would do from where doctor runs, by the same rule the launcher uses.
 From a pane of your own herdr it reads ``nested; bare `clio-coder` opens Clio's private pane host inside this herdr pane ...``
 and names `clio-coder --with-panes` as the way to join that herdr as a guest; this row is OK even when your herdr does not answer.
-Inside Clio Coder's own host, or under tmux, zellij, screen or `TERM=dumb`, it says the launch stays in the terminal and why. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
+Inside CLIO Coder's own host, or under tmux, zellij, screen or `TERM=dumb`, it says the launch stays in the terminal and why. When a host answers, `panes protocol` reads `server <version>, protocol <n>; Clio's optional methods need 17 (satisfied)`. Below 17, toasts and agent focus fall back, and docks open as plain splits that cannot be hidden.
 The `panes journal dir` row reads `has no run journal yet` when `<state>/telemetry/runs` does not exist and warns when it is not writable, because `fleet view` then has no transcript to follow. The `naming panes` row warns about panes that carry only the legacy
 `clio_owner=clio:mux` token or the stale `clio watch` title; quit and cleanup recognize both token schemes.
 
 The `files pane profile` row is `missing` (INFO) until the first open generates it, then
-`current`. `stale` (WARN) means one of the engine version, Clio Coder's version, the `ya` path, the
+`current`. `stale` (WARN) means one of the engine version, CLIO Coder's version, the `ya` path, the
 vendored profile assets, or the theme changed since, and the next open regenerates it.
 With the files pane enabled and usable `yazi` and `ya` binaries, `doctor --fix` regenerates a missing or stale profile and validates it with
-yazi before installing it. A failed generation leaves a failure marker in Clio Coder's cache. Later doctor runs keep reporting WARN `generation failed` until
+yazi before installing it. A failed generation leaves a failure marker in CLIO Coder's cache. Later doctor runs keep reporting WARN `generation failed` until
 regeneration succeeds or the operator resets the profile.
 
 ## Commands and keys
@@ -210,32 +210,32 @@ regeneration succeeds or the operator resets the profile.
 | Surface | What it does |
 | --- | --- |
 | `/files` | Show or hide the files pane. A closed or hidden pane is opened or shown below the session and the keyboard moves into it. A visible pane is hidden and Yazi keeps running. |
-| `Alt+E` | The same single tap from Clio Coder focus (`clio-coder.files.toggle`; `Ctrl+G` then `e` on terminals without Alt). Two taps within 400 ms close the pane. See [Showing, hiding and closing docks](#showing-hiding-and-closing-docks). |
+| `Alt+E` | The same single tap from CLIO Coder focus (`clio-coder.files.toggle`; `Ctrl+G` then `e` on terminals without Alt). Two taps within 400 ms close the pane. See [Showing, hiding and closing docks](#showing-hiding-and-closing-docks). |
 | `/files open` | Open the pane, show it when hidden, or focus it when it is already visible. The keyboard moves into it. |
 | `/files hide` | Hide the pane. Yazi keeps running and keeps its directory. Reports `the files pane is not open` when nothing is running. |
 | `/files close` | Close the pane and end Yazi, hidden or not. |
 | `/files pick` | Borrow the pane for one selection, then close it. Outside herdr, `/files` always behaves this way. |
-| `/panes` | Mode, availability, host version and protocol, socket, effective settings (`enabled`, `notifications`, `layout`, `journal`), the files settings, the files pane's state, docks, every Clio Coder-owned pane, and the presets. The `docks:` line lists each running dock with its pane id and target share, and marks a parked dock `hidden`. |
+| `/panes` | Mode, availability, host version and protocol, socket, effective settings (`enabled`, `notifications`, `layout`, `journal`), the files settings, the files pane's state, docks, every CLIO Coder-owned pane, and the presets. The `docks:` line lists each running dock with its pane id and target share, and marks a parked dock `hidden`. |
 | `/panes open files\|logs\|shell` | Open a preset pane; a second open focuses the pane that is already there instead of splitting again. `yazi` still parses as `files`. |
 | `/panes open files --once` | The same one-shot pick as `/files pick`. |
 | `/panes open <command…>` | Open an arbitrary command in a pane labelled with its first word. Operator-only; the model's `panes` tool cannot do this. |
 | `/panes show <run-or-agent>` | Take the workers dock over for a live (running or retrying) run, matched by agent id substring first and run id prefix second, newest first. The dock behavior is in [Fleet Dispatch](fleet-dispatch.md). |
-| `/panes zoom [target]` | Toggle zoom on a Clio Coder-owned pane (default: the watch pane). |
-| `/panes close [target\|all]` | Close one Clio Coder-owned pane, or all of them (the default). A target matches a pane id exactly, then a label substring, then a purpose, newest first. |
+| `/panes zoom [target]` | Toggle zoom on a CLIO Coder-owned pane (default: the watch pane). |
+| `/panes close [target\|all]` | Close one CLIO Coder-owned pane, or all of them (the default). A target matches a pane id exactly, then a label substring, then a purpose, newest first. |
 | `/panes peer [--cwd <workspace>] <peer> [brief]` | Open `clio`, `claude-code`, `codex`, `opencode`, `antigravity` or `pi` (binaries `clio-coder`, `claude`, `codex`, `opencode`, `agy`, `pi`) in an owned pane. `clio` refuses a brief. |
 | `Alt+A` | The music pane's single tap (`clio-coder.music.toggle`; `Ctrl+G` then `a`). Two taps within 400 ms close it. See [Music](music.md). |
 | `/music [on\|off\|pause\|next\|status\|station <name or url>]` | Drive the music pane. Bare `/music` does what `Alt+A` does. The contract is in [Music](music.md). |
 
 The model has the same doors with exceptions. Its `panes` tool exists only in a session whose pane host answered,
-takes eight actions: `list`, `show`, `open`, `handoff`, `send`, `wait`, `read` and `close`. It opens only the three presets (`files`, `logs`, `shell`), and never opens arbitrary argv or zooms (zooming steals focus). `send`, `wait` and `read` work only on a handoff pane and replace driving the pane host's CLI through `bash`. `send` delivers a prompt of at most 8,192 bytes, or one interrupt key (`esc` or `ctrl+c`), and nothing else, so no field types raw text or presses a key that could accept an approval; a prompt to a second Clio Coder becomes a turn on that Clio's own queue, labelled as coming from this one, and it refuses a peer that is blocked on its operator. `wait` waits up to 120 seconds by default (at most 600) for the peer to settle and reports `blocked` when the peer is asking its operator. `read` returns the last 120 lines by default (at most 400) under the untrusted-content banner, because what a peer prints is its unverified claim. A brief or a prompt leaving the session passes the same information-flow check as a handoff brief. Its `list` action reports each dock as `visible`, `hidden` or `closed`, and what the music pane is playing, whether or not the model may control music. Opening the `files` preset shows a hidden files pane. The model has no action that hides a dock. See
+takes eight actions: `list`, `show`, `open`, `handoff`, `send`, `wait`, `read` and `close`. It opens only the three presets (`files`, `logs`, `shell`), and never opens arbitrary argv or zooms (zooming steals focus). `send`, `wait` and `read` work only on a handoff pane and replace driving the pane host's CLI through `bash`. `send` delivers a prompt of at most 8,192 bytes, or one interrupt key (`esc` or `ctrl+c`), and nothing else, so no field types raw text or presses a key that could accept an approval; a prompt to a second CLIO Coder session becomes a turn on that session's own queue, labelled as coming from this one, and it refuses a peer that is blocked on its operator. `wait` waits up to 120 seconds by default (at most 600) for the peer to settle and reports `blocked` when the peer is asking its operator. `read` returns the last 120 lines by default (at most 400) under the untrusted-content banner, because what a peer prints is its unverified claim. A brief or a prompt leaving the session passes the same information-flow check as a handoff brief. Its `list` action reports each dock as `visible`, `hidden` or `closed`, and what the music pane is playing, whether or not the model may control music. Opening the `files` preset shows a hidden files pane. The model has no action that hides a dock. See
 [Tool Usage](tool-usage.md).
 
 ### Picking a file
 
 The pane opens on the workspace directory with the keyboard in it. Yazi's default
 keys apply: move with the arrow keys or `j`/`k`, enter a directory with `l` or `Enter`, go up with
-`h`, and mark several files with `Space`. Clio Coder's managed profile adds two keys. `Ctrl+Y` sends the selection to
-Clio Coder, and `Alt+E` hides the pane and returns the keyboard to Clio Coder. In pick mode `Enter` on a file sends the selection and closes the pane.
+`h`, and mark several files with `Space`. CLIO Coder's managed profile adds two keys. `Ctrl+Y` sends the selection to
+CLIO Coder, and `Alt+E` hides the pane and returns the keyboard to CLIO Coder. In pick mode `Enter` on a file sends the selection and closes the pane.
 
 What arrives in the composer is appended to the draft, never submitted. A
 file becomes `@src/a.ts`; a directory (shown with a trailing `/`) or a path with spaces is inserted as
@@ -255,43 +255,43 @@ The files dock (`Alt+E`), the music dock (`Alt+A`) and the workers dock (`Alt+W`
 | `hidden` | The pane is parked out of sight with its process still running. |
 | `closed` | No process. |
 
-The first tap acts at once, with no delay while Clio waits to see whether a second tap follows:
+The first tap acts at once, with no delay while CLIO Coder waits to see whether a second tap follows:
 
 | State before | `Alt+E` (files) | `Alt+A` (music) |
 | --- | --- | --- |
-| `closed` | Opens the pane and moves the keyboard into Yazi. | Opens the pane and plays. The keyboard stays in Clio Coder. |
+| `closed` | Opens the pane and moves the keyboard into Yazi. | Opens the pane and plays. The keyboard stays in CLIO Coder. |
 | `hidden` | Shows the pane at its remembered share and moves the keyboard into Yazi. Yazi keeps its directory. | Shows the pane at its remembered share without moving the keyboard. Playback is unchanged. |
 | `visible` | Hides the pane. | Hides the pane. Playback is unchanged. |
 
 A second tap of the same key within 400 ms (`DOCK_DOUBLE_TAP_MS` in `src/domains/mux/dock-keys.ts`) closes that dock for real and ends its process. For music it stops the stream first. A double tap spends both taps, so a third quick tap starts a fresh pair. Taps for one dock run in order, so a double tap that lands while the first tap's move is still in flight closes the dock after the move settles. The bare commands `/files` and `/music` make the single tap, and `/files hide`, `/files close` and `/music off` are the explicit halves. None of them has a double-tap window.
 
-**Parking.** Hiding moves the pane with Herdr's `pane.move` into one tab labelled `clio parked` in the Clio Coder workspace. Every hidden dock of a session shares that tab, and Herdr removes the tab when its last pane leaves. Showing moves the pane back beside the session pane at the share the dock held before it was hidden, so a divider you dragged survives the round trip. Showing never focuses the pane; the files key focuses Yazi as a separate step. `pane.move` exists from Herdr protocol 14. The dock tier that calls it floors at protocol 17, so hiding needs protocol 17 or later in practice. A pane you move out of the parking tab yourself counts as visible from then on.
+**Parking.** Hiding moves the pane with Herdr's `pane.move` into one tab labelled `clio parked` in the CLIO Coder workspace. Every hidden dock of a session shares that tab, and Herdr removes the tab when its last pane leaves. Showing moves the pane back beside the session pane at the share the dock held before it was hidden, so a divider you dragged survives the round trip. Showing never focuses the pane; the files key focuses Yazi as a separate step. `pane.move` exists from Herdr protocol 14. The dock tier that calls it floors at protocol 17, so hiding needs protocol 17 or later in practice. A pane you move out of the parking tab yourself counts as visible from then on.
 
 When Herdr declines a move, the notice names the reason (`the files pane did not hide: …`, `the files pane stayed hidden: …`, `the music pane did not hide: …`, `the music pane stayed hidden: …`). A show is also refused, and the dock stays hidden, when the session pane is too small for the dock's floor (see Dock geometry).
 
-**Zoomed tab.** Herdr refuses to move a pane into or out of a zoomed tab. Clio does not leave zoom ahead of a move. After that refusal Clio runs `pane.zoom off` on the session pane, which focuses it, and retries the move once.
+**Zoomed tab.** Herdr refuses to move a pane into or out of a zoomed tab. CLIO Coder does not leave zoom ahead of a move. After that refusal it runs `pane.zoom off` on the session pane, which focuses it, and retries the move once.
 
-**Keys inside the dock.** A program inside a dock pane receives keyboard input, so the key handler in Clio does not receive Alt+E or Alt+A there. The files and music docks forward the key to Clio Coder, which hides the pane and returns keyboard focus to the composer. The double-tap window stays Clio Coder's, so a quick second press closes the dock.
+**Keys inside the dock.** A program inside a dock pane receives keyboard input, so the session's key handler does not receive Alt+E or Alt+A there. The files and music docks forward the key to CLIO Coder, which hides the pane and returns keyboard focus to the composer. The double-tap window stays CLIO Coder's, so a quick second press closes the dock.
 
-- Alt+E inside Yazi: the managed profile binds `<A-e>` to a `clio-coder-dock` event published with `ya pub-to`. The event carries the session's pick token, and Clio ignores a line with another token (counted in the `dropped` figure of `/panes`). This applies to the companion pane on `interface.panes.files.profile: managed`. The `user` profile has no Clio Coder keymap.
-- Alt+A inside cliamp: a generated cliamp plugin appends a line to a tap file under Clio Coder's state directory. See [Music](music.md).
+- Alt+E inside Yazi: the managed profile binds `<A-e>` to a `clio-coder-dock` event published with `ya pub-to`. The event carries the session's pick token, and CLIO Coder ignores a line with another token (counted in the `dropped` figure of `/panes`). This applies to the companion pane on `interface.panes.files.profile: managed`. The `user` profile has no CLIO Coder keymap.
+- Alt+A inside cliamp: a generated cliamp plugin appends a line to a tap file under CLIO Coder's state directory. See [Music](music.md).
 
-**Hidden at boot.** After the first frame is committed, Clio prepares the docks hidden so the first key press only shows them and boot never waits on the pane host. The files dock is prepared when `interface.panes.files.enabled` is `true` and a pane host is live, and the music dock when `integrations.music.enabled` is `true`. Neither changes the layout or moves the keyboard, and the music pane starts silent. A failure is silent. The key that wants the dock finds it absent, opens it as it would a closed dock and reports the reason if that fails too. A companion files pane that never reports back while still hidden is closed without a notice.
+**Hidden at boot.** After the first frame is committed, CLIO Coder prepares the docks hidden so the first key press only shows them and boot never waits on the pane host. The files dock is prepared when `interface.panes.files.enabled` is `true` and a pane host is live, and the music dock when `integrations.music.enabled` is `true`. Neither changes the layout or moves the keyboard, and the music pane starts silent. A failure is silent. The key that wants the dock finds it absent, opens it as it would a closed dock and reports the reason if that fails too. A companion files pane that never reports back while still hidden is closed without a notice.
 
-**Crash safety.** A parked dock is out of sight, so a crash could leave a hidden cliamp playing with nothing on screen. Each dock Clio opens carries a `dock` and a `pid` token. Before preparing its own docks, a new session closes every pane in the `clio parked` tab of its workspace that carries Clio Coder's ownership token, a `dock` token, and the `pid` of a process that no longer exists. Panes owned by a live process and docks visible in the layout are never touched.
+**Crash safety.** A parked dock is out of sight, so a crash could leave a hidden cliamp playing with nothing on screen. Each dock carries a `dock` and a `pid` token. Before preparing its own docks, a new session closes every pane in the `clio parked` tab of its workspace that carries CLIO Coder's ownership token, a `dock` token, and the `pid` of a process that no longer exists. Panes owned by a live process and docks visible in the layout are never touched.
 
 ### What closes what
 
-- From Clio Coder focus, `/files close` closes the files pane. `Alt+E` and `/files` hide a visible pane, and `Alt+E` pressed twice within 400 ms closes it. Yazi owns its own keys until Ctrl+Y returns the selection and focus, or Alt+E hides the pane. A pane the
+- From CLIO Coder focus, `/files close` closes the files pane. `Alt+E` and `/files` hide a visible pane, and `Alt+E` pressed twice within 400 ms closes it. Yazi owns its own keys until Ctrl+Y returns the selection and focus, or Alt+E hides the pane. A pane the
   operator closed from herdr is treated as closed the moment herdr reports
   it, so the next toggle opens rather than trying to hide a pane that is
   not there.
 - `/panes close shell`, `/panes close logs`, `/panes close all` close the
   utility panes. `/panes close all` and `/panes close <label>` also close docks, hidden or not.
-- `/quit` in Clio Coder's private pane host closes every pane in the host, shell and logs
+- `/quit` in CLIO Coder's private pane host closes every pane in the host, shell and logs
   panes included, then stops the host, so nothing outlives the session and the next launch
-  starts from a single Clio pane. The host never restores an earlier layout.
-- `/quit` as a guest in your own herdr (`clio-coder --with-panes`) closes the docks Clio
+  starts from a single session pane. The host never restores an earlier layout.
+- `/quit` as a guest in your own herdr (`clio-coder --with-panes`) closes the docks CLIO Coder
   manages, hidden ones included: the files pane, the workers dock and the music pane. It
   preserves a shell or logs pane you opened. Utility panes there have their own lifetime and
   are not reclaimed by the next session, so `/quit` prints what it left, one line after the
@@ -315,7 +315,7 @@ The workers dock (right of the session), the files pane (below) and the music pa
 
 The workers floor lets the dock open in an 80-column terminal. The music share is small on purpose, so the floor decides its height: cliamp draws its spectrum only from 16 inner rows and Herdr's border takes two. A share is capped at half the axis, and the floor wins over a smaller share. A dock whose floor exceeds half of the session pane's axis is refused with `the <slot> dock needs <n> cells and at most half of <m> is available; enlarge the anchor pane before trying again`. Showing a hidden dock plans the same way, with the share the dock held when it was hidden, and a refusal leaves it hidden.
 
-A divider you drag in herdr becomes the dock's new target share, and a dock you close stays closed. Opening or showing a dock never steals focus by itself. The explicit actions that move the keyboard into a pane are the ones that open or show the files pane (`/files`, `Alt+E`, `/files open`, `/panes open files`, the model's `panes` open of `files`, and the files pane that `interface.panes.layout: cockpit` opens at boot), repeating `/panes open logs` or `shell`, and the workers key (see [Fleet Dispatch](fleet-dispatch.md)). Showing the music pane leaves the keyboard in Clio Coder.
+A divider you drag in herdr becomes the dock's new target share, and a dock you close stays closed. Opening or showing a dock never steals focus by itself. The explicit actions that move the keyboard into a pane are the ones that open or show the files pane (`/files`, `Alt+E`, `/files open`, `/panes open files`, the model's `panes` open of `files`, and the files pane that `interface.panes.layout: cockpit` opens at boot), repeating `/panes open logs` or `shell`, and the workers key (see [Fleet Dispatch](fleet-dispatch.md)). Showing the music pane leaves the keyboard in CLIO Coder.
 
 ## Settings
 
@@ -323,7 +323,7 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 | --- | --- | --- |
 | `interface.panes.files.enabled` | `false` | Whether `/files`, its key, `/panes open files`, and the `panes` tool may open the files pane. Refused with the key's name otherwise. |
 | `interface.panes.files.mode` | `companion` | `companion` keeps the pane open across picks; `chooser` closes it after one selection. |
-| `interface.panes.files.profile` | `managed` | `managed` runs the engine on Clio Coder's generated, themed profile; `user` runs it on the operator's own configuration, in which case picks use the one-shot chooser. |
+| `interface.panes.files.profile` | `managed` | `managed` runs the engine on CLIO Coder's generated, themed profile; `user` runs it on the operator's own configuration, in which case picks use the one-shot chooser. |
 | `interface.panes.files.followCwd` | `true` | Reopening an open or hidden pane pushes the conversation's working directory into it when that directory changed since Yazi last learned it. Showing a hidden pane otherwise leaves Yazi where it was. |
 | `interface.panes.files.ratio` | `0.3` | Share of the terminal height the files dock takes, `0.05` through `0.5`, floored at 12 rows. Also the share a files dock prepared hidden at boot starts with. |
 | `interface.panes.layout` | `off` | `workers` opens the workers dock at boot; `cockpit` opens the workers dock and, when `interface.panes.files.enabled` is `true`, the files pane, visible. Both close on `/quit`. Takes effect at the next start. Independent of the hidden-at-boot preparation of the files and music docks. |
@@ -340,25 +340,25 @@ and the other pane keys are in the same area, group Panes (`/settings workspace`
 
 ## Theme
 
-The files pane is themed from Clio Coder's own palette. Every color in the
+The files pane is themed from CLIO Coder's own palette. Every color in the
 engine's generated theme comes from the semantic roles in
 [theme-roles.ts](../../src/core/theme-roles.ts) projected through the palette in
 [theme-token-hex.ts](../../src/core/theme-token-hex.ts), rendered when the managed profile is generated on open
 and stamped into the profile, so a palette change regenerates the profile on
 the next open. The palette has a projection for a dark terminal, a light terminal, and an unknown
-background. Clio picks one from `CLIO_CODER_THEME` (`dark`, `light` or `neutral`), then the terminal's reply to a
+background. CLIO Coder picks one from `CLIO_CODER_THEME` (`dark`, `light` or `neutral`), then the terminal's reply to a
 startup background query, then `COLORFGBG`, then falls back to the unknown-background projection.
 The managed profile also shows hidden files and git status.
 
-What is not themed by Clio Coder is herdr's own chrome: the sidebar, tab bar,
+What is not themed by CLIO Coder is herdr's own chrome: the sidebar, tab bar,
 borders, and agent rows come from herdr's `config.toml`, and herdr has no
-per-pane styling on its socket. `clio-coder panes theme` takes no arguments and prints Clio Coder's tokens
+per-pane styling on its socket. `clio-coder panes theme` takes no arguments and prints CLIO Coder's tokens
 as a herdr `[theme.custom]` block (`accent`, `green`, `red`, `yellow`, `selection_bg`, `active_row_bg`) drawn for the detected background, dark when unknown.
-Paste it into herdr's `config.toml` and reload herdr's config. Writing or merging that block on your behalf would cross Clio Coder's rule of
-writing nothing outside its own roots, so Clio does not offer it (#273).
+Paste it into herdr's `config.toml` and reload herdr's config. Writing or merging that block on your behalf would cross CLIO Coder's rule of
+writing nothing outside its own roots, so it is not offered (#273).
 With `interface.panes.files.profile: user`, nothing is themed and the engine runs on your own configuration.
 
-Clio Coder's generated profile lives under the cache root at `yazi/profile` and
+CLIO Coder's generated profile lives under the cache root at `yazi/profile` and
 never touches `~/.config/yazi`. `clio-coder tools status yazi --reset-profile`
 deletes it; the next open rebuilds it.
 
@@ -370,7 +370,7 @@ deletes it; the next open rebuilds it.
 `clio-coder --with-panes` inside herdr.
 
 **`the pane layer is not available in this session: HERDR_ENV is not 1 …`**
-on `/panes open logs` or `shell`: Clio Coder is not running inside a pane host.
+on `/panes open logs` or `shell`: CLIO Coder is not running inside a pane host.
 Quit and start bare `clio-coder` in a plain terminal. `/files`
 still works as a one-shot pick in this state.
 
@@ -389,7 +389,7 @@ started in this state root, or `fleet.history.journal` is `false`. Dispatch some
 **`the <slot> dock needs <n> cells …`**: the session pane is too small for the dock. Enlarge it and open again.
 
 **The pane opened but nothing arrived after `Ctrl+Y`**: within five seconds
-of opening, Clio expects the pane to report its directory; if that never
+of opening, CLIO Coder expects the pane to report its directory; if that never
 comes it says `the files pane did not report back in time; reopening it in
 pick mode` and retries with the one-shot chooser, whose picks arrive through
 a file instead of the event stream. `/panes` shows `file pane: … lastLine=`
@@ -398,7 +398,7 @@ and a `dropped` count of lines that carried another session's token.
 **`doctor` warns `files pane profile … (stale)`**: nothing to do; the next
 open regenerates it. `tools status yazi --reset-profile` forces it.
 
-**A dock disappeared after a key press**: it was hidden, not closed. Look for the tab labelled `clio parked` in the Clio Coder workspace, or press the dock's key again to show it. `/panes` marks a parked dock `hidden`, and the `panes` tool's `list` reports it as `hidden`.
+**A dock disappeared after a key press**: it was hidden, not closed. Look for the tab labelled `clio parked` in the CLIO Coder workspace, or press the dock's key again to show it. `/panes` marks a parked dock `hidden`, and the `panes` tool's `list` reports it as `hidden`.
 
 **A dock closed when I wanted it hidden**: two taps of the same key landed within 400 ms, which closes the dock and ends its process. Tap once and wait.
 
@@ -414,7 +414,7 @@ what" above.
 | Path | What |
 | --- | --- |
 | `<data>/tools/<id>/<version>/` | Vendored programs with their license files and an install marker. |
-| `<cache>/yazi/profile/` | Clio Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
+| `<cache>/yazi/profile/` | CLIO Coder's generated engine profile: `yazi.toml`, `keymap.toml`, `theme.toml`, `init.lua`, a git-status plugin, and a stamp of the inputs. |
 | `<cache>/yazi/sessions/` | Per-pane transport files and `.owner.json` receipts (host, PID and process birth token), removed when the pane closes. An open sweeps receipts older than a day only when the recorded local owner is demonstrably dead. Live, unknown, foreign-host and legacy unowned transports are retained. The plain-terminal chooser removes its files after every invocation. |
 | `<state>/runs/<runId>/feed.jsonl` | The run's display feed, which the logs pane follows. |
 | `<state>/telemetry/runs/<runId>/journal.jsonl` | The run's telemetry journal. |
