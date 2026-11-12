@@ -4,7 +4,7 @@ Choose the declared checks a change requires and inspect verification freshness.
 
 ## Tell CLIO Coder what “checked” means in your project
 
-A quality policy names the declared checks required when particular files change. Your repository supplies the standards; Clio records verification and assesses whether the results still match the current inputs.
+A quality policy names the declared checks required when particular files change. Your repository supplies the standards; CLIO Coder records verification and assesses whether the results still match the current inputs.
 
 At a Git workspace root, create `.clio-coder/quality.yaml`:
 
@@ -18,7 +18,7 @@ rules:
     allowLimitations: false
 ```
 
-This example assumes the root `package.json` declares a `test` script. Adapt the paths, lockfile, and check IDs to your project. Include configuration, fixtures, and helper files that affect the result. Clio does not create or modify this policy automatically.
+This example assumes the root `package.json` declares a `test` script. Adapt the paths, lockfile, and check IDs to your project. Include configuration, fixtures, and helper files that affect the result. CLIO Coder does not create or modify this policy automatically.
 
 ## Run the declared checks
 

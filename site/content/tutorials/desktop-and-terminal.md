@@ -17,7 +17,7 @@ The terminal combines the conversation, tool calls, permissions, and worker acti
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 
-During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
+During a turn, **Enter** queues a message that CLIO Coder reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
 
 On a permission card, **Enter** allows the call. **Esc** denies it, which skips that call and leaves the run going. **Alt+X** stops the turn.
 
@@ -37,7 +37,7 @@ You can keep any number of tasks open in one window. Launching again brings that
 
 Up to four turns run at once by default, set by `interface.guiTurnCapacity` from 1 to 16, and later ones wait for a slot. A task nobody has looked at for five minutes is paused with its conversation kept; choose **Resume session** to continue it.
 
-With the default **Ask first** setting, Clio reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
+With the default **Ask first** setting, CLIO Coder reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
 
 The same control can be switched to **Run without asking** for one task after a second confirmation. The cards stop, and by default the sandbox, snapshots, and safety judge stay on. A turn that changed files ends with a card that opens the changes for review. Type `/` in the composer to list session commands.
 

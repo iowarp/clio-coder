@@ -30,6 +30,6 @@ Type `/` in the composer for session commands such as `/context`, `/usage`, `/tr
 
 With **Ask first**, reads, edits, and recognized commands run, and unrecognized shell commands, large dispatch plans, and anything that publishes outside the project wait on a card. The card states what the call is, what allowing it authorizes, and what it can affect. Choose **Allow once** or **Reject**.
 
-**Run without asking** stops the cards for one task after a second confirmation. By default the sandbox, snapshots, and safety judge stay on, and a call that would have waited for you is refused back to Clio. It lasts until the task closes or is paused.
+**Run without asking** stops the cards for one task after a second confirmation. By default the sandbox, snapshots, and safety judge stay on, and a call that would have waited for you is refused back to CLIO Coder. It lasts until the task closes or is paused.
 
 If a project carries settings, hooks, safety rules, extensions, or plugins you have not approved, the app lists the ignored files above the conversation with the command that reviews them.

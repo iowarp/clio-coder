@@ -553,7 +553,7 @@ function directive(name, args, inner, render) {
 			return `<ol class="guide-steps">${steps.map((step, index) => `<li class="guide-step"><span class="step-number" aria-hidden="true">${String(index + 1).padStart(2, "0")}</span><div>${step}</div></li>`).join("")}</ol>`;
 		}
 		case "prompt":
-			return `<figure class="guide-prompt"><figcaption class="eyebrow"><span class="chapter">${escapeHtml(args || "Ask Clio")}</span></figcaption><blockquote>${render(inner)}</blockquote><button type="button" class="copy" data-copy="${escapeHtml(plain(inner))}" aria-label="Copy the request">Copy</button></figure>`;
+			return `<figure class="guide-prompt"><figcaption class="eyebrow"><span class="chapter">${escapeHtml(args || "Ask CLIO Coder")}</span></figcaption><blockquote>${render(inner)}</blockquote><button type="button" class="copy" data-copy="${escapeHtml(plain(inner))}" aria-label="Copy the request">Copy</button></figure>`;
 		case "result":
 			return `<section class="guide-result"><p class="eyebrow"><span class="chapter">${escapeHtml(args || "What you should see")}</span></p>${render(inner)}</section>`;
 		case "limits":
@@ -975,7 +975,7 @@ function plainDirectives(markdown) {
 		const labelled = (label) => `**${args || label}**${body ? `\n\n${body}` : ""}`;
 		const block = {
 			needs: () => `## ${args || "Before you start"}\n\n${body}`,
-			prompt: () => `**${args || "Ask Clio"}**\n\n${body.replace(/^/gm, "> ")}`,
+			prompt: () => `**${args || "Ask CLIO Coder"}**\n\n${body.replace(/^/gm, "> ")}`,
 			result: () => labelled("What you should see"),
 			limits: () => labelled("Boundaries"),
 			note: () => labelled("Note"),

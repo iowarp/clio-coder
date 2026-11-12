@@ -55,7 +55,7 @@ Campaigns live in `.clio-coder/research/<id>/` and arena matches in `.clio-coder
 
 ## Compare models blind
 
-`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds an Elo rating once a model has 5 votes. Clio never grades a contender. The desktop app's Arena page runs the same commands.
+`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds an Elo rating once a model has 5 votes. CLIO Coder never grades a contender. The desktop app's Arena page runs the same commands.
 
 ```sh
 clio-coder arena run --check unit \

@@ -91,7 +91,7 @@ CLIO Coder supports more than one kind of model interaction. Its Inception runti
 Vision support depends on the model and the route. A model advertised as multimodal is not enough if the bridge does not carry images: the managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges are text-only. Check what the route accepts before attaching a screenshot.
 
 ::: limits Know where information goes
-- Clio runs locally, but a configured cloud model receives the input sent to that provider.
+- CLIO Coder runs locally, but a configured cloud model receives the input sent to that provider.
 - Local inference keeps inference on the selected server; tools, peers, plugins, and commands can still make network requests.
 - CLIO Coder is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money.
 :::

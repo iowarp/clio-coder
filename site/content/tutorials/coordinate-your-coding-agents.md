@@ -17,7 +17,7 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-The first command reports what Clio can find; the second configures interoperability. In a terminal conversation, `/library interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
+The first command reports what CLIO Coder can find; the second configures interoperability. In a terminal conversation, `/library interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
 
 ::: capture tui-interop cli-interop-inspect
 What CLIO Coder detected on a machine with three peer CLIs installed but not signed in.
@@ -63,7 +63,7 @@ A read-only run must leave every file outside CLIO Coder's home unchanged. It is
 | OpenCode | Refused before launch |
 :::
 
-ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. CLIO Coder's own shell commands and native workers' commands run in an OS sandbox when one is available. External peers keep their own authority.
+ACP peers may own their tools. Explicitly permitting peer-owned tools changes what CLIO Coder can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. CLIO Coder's own shell commands and native workers' commands run in an OS sandbox when one is available. External peers keep their own authority.
 
 ## Separate changes with a worktree
 

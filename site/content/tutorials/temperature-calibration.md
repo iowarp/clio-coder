@@ -26,7 +26,7 @@ These reference temperatures cover ordinary values and the physical lower bounda
 | Boiling point | 100 °C | 373.15 K | 212 °F |
 | Absolute zero | −273.15 °C | 0 K | −459.67 °F |
 
-When CLIO Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. Clio changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
+When CLIO Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. The agent changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
 
 ## Run a declared check
 
@@ -34,7 +34,7 @@ The example’s private `package.json` declares its test command. With the archi
 
 > Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.
 
-Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and Clio read the test file for the table. Naming the file keeps a fast model from searching the project for it.
+Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
 ![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
 

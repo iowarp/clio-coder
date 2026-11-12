@@ -53,7 +53,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, point Clio to it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 

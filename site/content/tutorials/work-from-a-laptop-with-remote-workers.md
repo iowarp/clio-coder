@@ -6,7 +6,7 @@ This guide describes the v0.6.8 fleet. Remote workers use your existing SSH acce
 
 ::: needs
 - Noninteractive SSH access to a machine you may use for work.
-- CLIO Coder on the node at exactly your client's version. To let Clio install it, the node needs Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
+- CLIO Coder on the node at exactly your client's version. For an automatic install, the node needs Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
 - The project at the same absolute path on the client and node, using shared storage or matching clean Git checkouts.
 - A model route the worker can reach from the node.
 :::
@@ -78,7 +78,7 @@ Choose one supported arrangement:
 | Shared storage at the same absolute path | A transient client-side file challenge is visible from the node. | Read-only and mutating workers use that storage. |
 | Independent checkout at the same absolute path | Both trees are clean, have the same Git HEAD and matching root history. | Read-only work; mutations through an isolated task worktree and SSH commit return. |
 
-Clio does not clone an arbitrary repository, map different paths, install project dependencies or stage datasets. Prepare those yourself. For independent checkouts, update both to the same clean baseline before testing.
+CLIO Coder does not clone an arbitrary repository, map different paths, install project dependencies or stage datasets. Prepare those yourself. For independent checkouts, update both to the same clean baseline before testing.
 
 ::: steps
 ### Observe first
@@ -120,7 +120,7 @@ Use a read-only Scout to inspect the README and explain this project's test comm
 Before dispatching, ask me once where to run it, offering local and suitable verified fleet nodes.
 ```
 
-When a verified node suits substantial work and no preference or pin exists, Clio asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, Clio can pin it directly.
+When a verified node suits substantial work and no preference or pin exists, CLIO Coder asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, it can be pinned directly.
 
 A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
@@ -130,7 +130,7 @@ Remote workers run under their own permits. The safety judge does not answer for
 
 An editing dispatch to an independent node checkout must use `worktree: true`. Ask CLIO Coder to use an isolated task worktree, name the files the worker may change and declare the host checks you want before application.
 
-Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, Clio commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
+A matching branch and worktree are created on the node at the approved baseline. After the worker exits, CLIO Coder commits the worker's edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
 
 The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
 

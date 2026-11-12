@@ -1,6 +1,6 @@
 ## Bring an installed coding agent
 
-CLIO Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what Clio can use:
+CLIO Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what is available:
 
 ```sh
 clio-coder interop inspect --json

@@ -45,7 +45,7 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 
 ## A few keys to remember
 
-Alt+letter runs a Clio action, and **Ctrl+G** then the same letter runs it in any terminal, including ones that intercept Alt. The menu also lists a few actions with no Alt key; arrows and Enter work too, and Esc closes it. On an empty composer, `?` shows the keys; `/help` shows every binding, custom ones included.
+Alt+letter runs a CLIO Coder action, and **Ctrl+G** then the same letter runs it in any terminal, including ones that intercept Alt. The menu also lists a few actions with no Alt key; arrows and Enter work too, and Esc closes it. On an empty composer, `?` shows the keys; `/help` shows every binding, custom ones included.
 
 | Default key | Action |
 | --- | --- |

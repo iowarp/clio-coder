@@ -10,7 +10,7 @@ A useful sequence is **inspect → change → verify → review**. Inspect the a
 
 **default** follows one rule: containment first, judgment second, asking last. Workspace edits run. Shell commands run inside an OS sandbox when the host has one. In a Git work tree, CLIO Coder snapshots your files before the first change of a turn, and `/rewind` restores them. A safety judge reviews what would otherwise ask against your own messages, and you are asked when it has no verdict or the decision is yours.
 
-**yolo** is for long jobs you leave running: nothing waits for you. It is contained by default, so the sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to Clio. It needs a one-time acceptance. Set the level in Settings, with `--autonomy`, or with the leader key.
+**yolo** is for long jobs you leave running: nothing waits for you. It is contained by default, so the sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to CLIO Coder. It needs a one-time acceptance. Set the level in Settings, with `--autonomy`, or with the leader key.
 
 Unconfined yolo is the skip-permissions mode for a container or another disposable environment. Commands run unsandboxed as you, and only a short floor, your project rules, and the run's ceilings block. It takes effect only with `safety.yoloConfinement: unconfined` in your user settings and its own one-time acceptance. See [the containment tutorial](/tutorials/let-it-work-with-containment-and-rewind.html).
 

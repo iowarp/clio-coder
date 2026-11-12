@@ -124,7 +124,7 @@ Start with a request that lets you assess its understanding of your project:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Then ask for a small change, name the files or behavior you care about, and tell Clio which checks should pass. Review the diff and recorded results before accepting the work.
+Then ask for a small change, name the files or behavior you care about, and tell CLIO Coder which checks should pass. Review the diff and recorded results before accepting the work.
 
 Follow the [desktop and terminal walkthrough](/tutorials/desktop-and-terminal.html), or try [a numerical change with seven tests](/tutorials/temperature-calibration.html).
 
@@ -137,4 +137,4 @@ Follow the [desktop and terminal walkthrough](/tutorials/desktop-and-terminal.ht
 
 ## When you need more detail
 
-These web guides cover the essentials. Detailed documentation ships with CLIO Coder; ask Clio to look up its bundled guide for the feature you're using. Each page also links to its full source guide.
+These web guides cover the essentials. Detailed documentation ships with CLIO Coder; ask it to look up the bundled guide for the feature you're using. Each page also links to its full source guide.

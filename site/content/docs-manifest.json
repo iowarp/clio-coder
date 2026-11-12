@@ -12,7 +12,7 @@
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "cb8ab1aa4a3b4abd9fa09cb6283a8f08a70197e4d1469f8bf9d45d362b85c7f4",
+      "sha256": "d03be65a1426cb29a0262909b9e75531620caf6fbbaecb34e4cbb6aafcf184e4",
       "sourceSha256": "370cd3250c42204eab35deec86d42cf3b1793daaac00a894dd6289a928407940"
     },
     {
@@ -30,13 +30,13 @@
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "8d5d5e44bfbac0a00336cfbc48c14d12a02148dab8aabed5ea47d4b3614b1830",
+      "sha256": "de58d44bc9d80737c1182489d432dc31c8e4b43d3685e19dccbabb4c6d437d51",
       "sourceSha256": "d6457f623ce2edad599191d7088b3257e693561d2622249239b26c5ebfe84dde"
     },
     {
       "path": "guide/tool-usage.md",
       "source": "docs/guide/tool-usage.md",
-      "sha256": "f42e08d0ebfabe27e90a663937194bd59511e9969f34314a6a011f3eddc35fa8",
+      "sha256": "5b581e5cce802e48286a898f0170fb7501c0167f76113708af017f5f47281535",
       "sourceSha256": "d323a3d98db625657894b7ab5a35e7c4611194d4240a9f6bf84070712971d045"
     },
     {
@@ -60,7 +60,7 @@
     {
       "path": "guide/gui.md",
       "source": "docs/guide/gui.md",
-      "sha256": "adf54023dfc1fe229ebf1baa7449e96c6197830cbd185fe8ef54a4a97db79f50",
+      "sha256": "bcea6e743f25e182a8eaff46901b759fb351b825c0414bd42e98e0e31aa2fe39",
       "sourceSha256": "edb1c8450204380547c74f3a7482e43caee1eef789976005c08e6ae8f3ee2446"
     },
     {
@@ -90,7 +90,7 @@
     {
       "path": "guide/interop.md",
       "source": "docs/guide/interop.md",
-      "sha256": "a788425fa28c67f4f7143ec1cbe351790dd132a774f1e92faee6a4ce931c5b2f",
+      "sha256": "286ad5b5fa6f7b78cf8cd814d7e0a53ea538e88e4c7741c7764ae73ff0bdf6c2",
       "sourceSha256": "01a2fbda2db84239da5b39d085230a9d6649b0e32281cbbc30cd0816623a0b52"
     },
     {
@@ -114,13 +114,13 @@
     {
       "path": "guide/quality-policy.md",
       "source": "docs/guide/quality-policy.md",
-      "sha256": "507da0be9e710a87cff4f9212af6ed737b3d9da02d8246158694c3ac2896f6ac",
+      "sha256": "be24b3b17aeb837e5bdff736253f1bdb5dabd7009344a5ec9a9b3e4b2b1bc503",
       "sourceSha256": "ce441564d4770511dcc54cf4674764b80b42c94d05ab53f8f3ce4eecbf711695"
     },
     {
       "path": "guide/research-and-arena.md",
       "source": "docs/guide/research-and-arena.md",
-      "sha256": "565434dbf4245c29df64d75b07d3e2d8a0ddc43a1f4ec4812a270240351eee52",
+      "sha256": "c2282c070a50dbd13cecf25781344cf3e19d9b21801b853cf610ddcdfbfaa6a7",
       "sourceSha256": "595fe72065cb5be42e786e887697a0462d92c243d9634c2b38356ab4fb55f99f"
     },
     {
