@@ -35,7 +35,10 @@
 		const button = document.createElement("button");
 		button.type = "button";
 		button.className = "cast-play";
-		button.textContent = `▶ Play recording · ${figure.dataset.castLength}`;
+		const icon = document.createElement("span");
+		icon.setAttribute("aria-hidden", "true");
+		icon.textContent = "▶";
+		button.append(icon, `Play recording · ${figure.dataset.castLength}`);
 		stage.append(button);
 		button.addEventListener("click", async () => {
 			button.disabled = true;

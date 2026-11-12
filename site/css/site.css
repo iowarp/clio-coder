@@ -2013,7 +2013,7 @@
 		display: inline-flex;
 		align-items: center;
 		gap: var(--space-2);
-		min-block-size: 2.5rem;
+		min-block-size: 2.75rem;
 		padding: var(--space-2) var(--space-4);
 		background: var(--code);
 		border: 1px solid var(--code-border);
