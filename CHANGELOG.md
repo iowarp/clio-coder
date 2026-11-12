@@ -168,6 +168,17 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - A headless run in a workspace with no declared or derivable checks no longer exits 1 because its `verify` call found nothing to run and it recorded a limitation: Clio Coder reports that no checks are declared as a fact, and the `observed:` line and the JSON `observed` field say so. A named check that resolves to nothing is still an error.
 - When a project's agents or playbooks replace yours, built-in or plugin ones, the session says which once at startup and points to `clio-coder doctor`.
 - In Fleet Runs, `/` closes the board and starts a command in the composer, and the board moves to a live run that registers after it opened unless you have moved the cursor.
+- In fullscreen a mouse selection copies what was written, not the screen: a wrapped paragraph or list item comes out as one line, a wrapped code line as its source line, and the turn glyph, the gutter, the prompt bar and the code indent stay out. Tables copy as drawn, and a tab copies as three spaces (#453).
+- In fullscreen you can select and copy while transcript search is focused or an overlay is open, and click the search box's buttons; choices in an overlay still move only on keys.
+- In fullscreen, pointer movement and window focus no longer act as keys: a nudge between two Ctrl+C presses no longer cancels the exit, and quick help, the leader menu and overlays no longer react to the mouse.
+- A fullscreen resize keeps a scrolled-up reader at their place and drops a selection whose text re-wrapped instead of highlighting other text.
+- The fullscreen wheel follows its speed: one row for a single notch, up to six for a fast spin, five times that with Alt.
+- While the fullscreen transcript is scrolled up, a `↓ latest` marker on its last row says newer output exists; a click returns to the live edge.
+- Copies in quick succession show one flash instead of stacking, and over SSH a copy says `Sent to terminal clipboard (OSC 52)` instead of a long warning.
+- Fullscreen search matches use the theme's colors, and the viewport's actions use Clio Coder's own labels.
+- Inside Herdr and other terminal multiplexers, fullscreen tracks the mouse only while a button is held, so a moving pointer no longer streams reports.
+- A clean exit in regular mode clears the input box, its rails and the footer before the exit summary.
+- In regular mode a finished turn no longer measures every transcript row again, which cost a long session tens of milliseconds per turn.
 
 ### Sign-in, setup and providers
 
