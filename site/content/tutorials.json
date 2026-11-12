@@ -67,7 +67,7 @@
     "time": "7 min",
     "author": "The CLIO Coder team",
     "source": "run-it-unattended-within-limits.md",
-    "basis": "Documented workflow",
+    "basis": "Recorded session",
     "versionScope": "0.8.0",
     "guides": [
       "guide/commands-and-modes.md",
