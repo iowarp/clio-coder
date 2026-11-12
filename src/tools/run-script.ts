@@ -116,11 +116,10 @@ export const RUN_SCRIPT_DEFAULT_INTERPRETER_ARGS: Readonly<Record<RunScriptInter
 export const RUN_SCRIPT_TOOL_NAME = "run_script" as string as DynamicToolName;
 
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/u;
-// A shell sources BASH_ENV or ENV before the script admission read, and the
-// last three are Clio's own controls, which the runner sets from live state.
+// Non-interactive bash sources BASH_ENV before the script admission read, and
+// the last three are Clio's own controls, which the runner sets from live state.
 const RUN_SCRIPT_RESERVED_ENV_KEYS: ReadonlySet<string> = new Set([
 	"BASH_ENV",
-	"ENV",
 	"CDPATH",
 	"CLIO_CODER_INTERACTIVE",
 	"CLIO_CODER_AUTONOMY_CEILING",

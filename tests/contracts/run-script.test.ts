@@ -30,7 +30,8 @@ import {
 	runRecordsDir,
 	sweepRunRecords,
 } from "../../src/core/run-records.js";
-import type { SafeCommandResult } from "../../src/core/safe-exec.js";
+import { buildSafeToolEnv, type SafeCommandResult } from "../../src/core/safe-exec.js";
+import { withContainedYoloPin } from "../../src/domains/safety/autonomy.js";
 import { findExecutableOnPath } from "../../src/domains/toolchain/resolve.js";
 import type { ToolResult } from "../../src/tools/registry.js";
 import {
@@ -862,7 +863,7 @@ describe("run_script: argument normalization and safety projection", () => {
 			"env.js",
 			'process.stdout.write([process.env.CLIO_CODER_AUTONOMY_CEILING, process.env.CLIO_CODER_YOLO_CONFINEMENT].join("|"))',
 		);
-		for (const key of ["BASH_ENV", "ENV", "CDPATH", "CLIO_CODER_INTERACTIVE", "CLIO_CODER_AUTONOMY_CEILING"]) {
+		for (const key of ["BASH_ENV", "CDPATH", "CLIO_CODER_INTERACTIVE", "CLIO_CODER_AUTONOMY_CEILING"]) {
 			const refused = await tool(root).run({ interpreter: "node", script: relative, env: { [key]: "x" } });
 			strictEqual(refused.kind, "error", key);
 			if (refused.kind === "error") match(refused.message, new RegExp(`env\\.${key} is set by Clio`, "u"));
@@ -877,6 +878,13 @@ describe("run_script: argument normalization and safety projection", () => {
 			const result = await tool(root).run({ interpreter: "node", script: relative, env: { FOO: "x" } });
 			strictEqual(result.kind, "ok");
 			if (result.kind === "ok") strictEqual(stdoutTailOf(result.output), "default|contained");
+			setToolEnvAutonomy(() => "yolo");
+			const pinned = buildSafeToolEnv(withContainedYoloPin({ CLIO_CODER_AUTONOMY_CEILING: "default", ENV: "production" }));
+			deepStrictEqual(
+				[pinned.CLIO_CODER_AUTONOMY_CEILING, pinned.CLIO_CODER_YOLO_CONFINEMENT, pinned.ENV],
+				["default", "contained", "production"],
+				"a caller may tighten the ceiling and pin its child, and ENV is the app's own",
+			);
 		} finally {
 			setToolEnvAutonomy(null);
 		}

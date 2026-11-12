@@ -213,6 +213,8 @@ export { AUTONOMY_CEILING_ENV, setToolEnvAutonomy } from "./tool-env-controls.js
 function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...source };
 	for (const key of Object.keys(env)) if (key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
+	// Bash commands have always run without ENV; safe-exec children keep it for the apps that read it.
+	Reflect.deleteProperty(env, "ENV");
 	env.AI_AGENT = AI_AGENT_NAME;
 	return applyToolEnvControls(env);
 }
