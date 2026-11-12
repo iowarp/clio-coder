@@ -450,6 +450,16 @@ class Session {
 				await sleep(150);
 			}
 		}
+		// A list whose order depends on the live turn: press `key` until `seek`
+		// shows, at most `max` times.
+		if (step.seek !== undefined) {
+			const pattern = new RegExp(step.seek, "m");
+			for (let presses = 0; !pattern.test(this.screen() ?? ""); presses++) {
+				if (presses >= (step.max ?? 30)) throw new Error(`${this.id}: /${step.seek}/ not reached with ${step.key}`);
+				this.tmux("send-keys", "-t", "cap", step.key ?? "Down");
+				await sleep(step.delay ?? 250);
+			}
+		}
 		if (step.pause) await sleep(step.pause * 1000);
 		if (step.type !== undefined)
 			for (const char of step.type) {

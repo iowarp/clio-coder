@@ -1,0 +1,10 @@
+{
+	"description": "A small project with the tutorial's temperature-calibration archive extracted into examples/temperature-calibration/, as the tutorial asks; the example is correct.",
+	"archive": "assets/temperature-calibration.zip",
+	"root": "temperature-calibration",
+	"run": [
+		"mkdir -p .example && mv README.md temperature.mjs calibration.test.mjs package.json .example/ && mkdir examples && mv .example examples/temperature-calibration",
+		"printf '# Lab tools\\n\\nSmall utilities for the lab. Runnable examples live under examples/.\\n' > README.md"
+	],
+	"commit": "Add the temperature-calibration example"
+}
