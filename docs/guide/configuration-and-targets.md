@@ -7,6 +7,7 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Task | Entry point |
 | --- | --- |
 | Connect a model | [First-run flow](#first-run-flow), or `clio-coder configure --quick` when you already know the endpoint |
+| Use a model running on your own machine or a compute node | [Use a local model server](#use-a-local-model-server) |
 | Understand how an existing home picks a chat route | [Chat route detection](#chat-route-detection) |
 | Apply a lab or site setup file | [Setup files](#setup-files): `clio-coder configure --import <path-or-https-url>` |
 | Edit saved settings | `clio-coder configure --settings` or TUI `/settings`; TUI `/config` opens Connections, where **Add a target** or **Connect by URL** adds one |
@@ -15,6 +16,25 @@ Use this guide to connect a provider and choose where chat and workers run. Exac
 | Make a target report cost | [Pricing and cost provenance](#pricing-and-cost-provenance) |
 | Find exact keys, flags, and project file owners | [Configuration reference](configuration-reference.md) |
 | Troubleshoot startup and provider errors | [Troubleshooting checklist](#troubleshooting-checklist) |
+
+## Use a local model server
+
+1. Start the server and load a model that can call tools: LM Studio, Ollama,
+   llama.cpp, vLLM, SGLang or Lemonade. CLIO Coder works only through tools,
+   so a model without tool calling cannot read a file or run a command.
+2. Run `clio-coder`. On a new home it looks for a server on its default port
+   (LM Studio 1234, Ollama 11434, llama.cpp 8080, vLLM 8000, SGLang 30000)
+   and offers it, for example `A model server at http://127.0.0.1:11434 (Ollama)`.
+   Choose it. CLIO Coder sends one short test request and saves when the model
+   answers.
+3. On another address or port, run `clio-coder configure`, choose
+   **A model server or gateway** and give its address.
+4. Run `clio-coder doctor`. Its `chat` row should end in `endpoint reachable`.
+   `clio-coder targets --probe --tools --target <id>` sends a test that shows
+   whether the model really calls tools.
+
+The context window comes from the server where it reports one; see
+[Context-window provenance](#context-window-provenance).
 
 ## Directory locations
 
