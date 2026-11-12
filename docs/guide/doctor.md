@@ -13,12 +13,12 @@ are, the deep checks, the in-session `/doctor`, and how to read the rows.
 | --- | --- |
 | `clio-coder doctor` | Every standard check. Read-only; quiet row families are folded in text output. |
 | `clio-coder doctor --verbose` | Print every finding separately in text output. JSON always retains every finding. |
-| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600`, removes settings keys retired without a replacement and rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, regenerates a managed Yazi profile that is not current, repairs the GUI background service and launchers, and rebuilds a source checkout whose build outputs are missing. A configured model ID is corrected only after an interactive confirmation. It does not apply lifecycle migrations or rename moved settings paths; `clio-coder upgrade` does. |
+| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600` and a state or data root open to other users to `0700` when it can prove the root is Clio Coder's own, removes settings keys retired without a replacement and rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, regenerates a managed Yazi profile that is not current, repairs the GUI background service and launchers, and rebuilds a source checkout whose build outputs are missing. A configured model ID is corrected only after an interactive confirmation. It does not apply lifecycle migrations or rename moved settings paths; `clio-coder upgrade` does. |
 | `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
 | `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
 | `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
 | `/doctor` | The standard checks, rendered in the session as one notice. |
-| `/doctor deep` | The deep checks against the session's targets and autonomy. |
+| `/doctor --deep` | The deep checks against the session's targets and autonomy. |
 
 `--deep` composes with `--json` and `--fix`. `--tools-timeout` without
 `--deep`, a value that is not a positive number of seconds, and an unknown flag
@@ -63,7 +63,7 @@ check, whether the endpoint answered, and whether a live model list was read.
 A target used by chat, fleet, or memory is an error when its passive check
 fails or required credentials are missing; an unused target is a warning. Successful public metadata does not prove that credentials are ready for inference. Each target’s passive probe has a 2.5-second total budget, including credential resolution and all metadata requests. Expired browser credentials are reported without refreshing or writing them. `model <id>` separately says whether each
 configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
-a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
+a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. The exception is a runtime that serves models it does not list, which today is `copilot-sdk`: the row is `INFO`, says Clio sends the model id as typed, and proposes no repair. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
 
 A `copilot sign-in` row appears when a `copilot-sdk` target is configured and the
 Copilot SDK component is installed. Doctor starts a short-lived Copilot runtime
@@ -76,7 +76,10 @@ workers cannot. The `connection <id>` row of each Copilot target, whose passive
 check also runs with the keychain closed, is then the same warning instead of an
 error. Without a terminal the keychain is not checked, and the row says so. A missing login is an error when chat, memory or the fleet routes to a
 Copilot target and a warning otherwise. Clio reads no token; only the runtime
-answers.
+answers. Beside that row, each `copilot-sdk` target that sets
+`contextTier: long_context` gets an `INFO` `copilot tier <id>` row saying the
+model's long-context prompt budget and prices apply. The default tier adds no
+row.
 
 The `local worker capacity` row reports usable CPUs, currently available memory,
 any process/cgroup memory bound, and the worker count `auto` resolves to. It
@@ -113,13 +116,13 @@ The core rows read as follows.
 | `cache telemetry` | From the latest session's telemetry journal: the cached share of its prompt tokens, its prompt-cache verdict counts (`hot`, `partial`, `cold`, `small`, `unknown`), tokens read from cache, tokens re-prefilled by calls that missed an expected cache hit with the number of breaks and their cost, and the most common cause. `INFO`, with no advice, when that session journaled no prompt-cache verdict (it made no cached model call); `WARN` when its journal cannot be read. `clio-coder telemetry cache <session>` shows the full report. |
 | `state storage` | Total size of the state root and its largest top-level contributor. `!!` only when the root cannot be measured. |
 | `home storage` | Size of the config, data and cache roots. `!!` only when one cannot be measured. |
-| `install root` | Size and path of the installer root, when there is one. It also says when this binary does not run from that root, which happens after the launcher moves to a checkout or a package manager; nothing updates or prunes such a root, and `clio-coder uninstall --inactive` removes only it. |
+| `install root` | Size and path of the installer root, when there is one. It is `WARN` and says so when this binary does not run from that root, which happens after the launcher moves to a checkout or a package manager; nothing updates or prunes such a root, and `clio-coder uninstall --inactive` removes only it. |
 | `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
 | `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
 
 On a home Clio Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
 
-Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, `harness` rows for the repository's custom agent recipes, its skills and `.clio-coder/settings.local.yaml` (one `!!` `harness <file>` row per file with an unresolved reference; `clio-coder agents validate` lists each problem), and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing.
+Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, `harness` rows for the repository's custom agent recipes, its skills and `.clio-coder/settings.local.yaml` (one `!!` `harness <file>` row per file with an unresolved reference; `clio-coder agents validate` lists each problem), and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing. A `playbook <name>` row is a `WARN` for each user or project playbook that replaces another of the same name: it names both files and says which one `/fleet run <name>` runs. A `reports` row is `INFO` once you have sent a report: it reads `<N> sent, <M> fixed` and lists each fixed issue with the release that fixed it. The `store backend` row names the store backend in use, `local (no selection; the default)` unless one was chosen, and is a `WARN` when the selection record cannot be used; `store root` gives the store directory and its free space, and a selected clio-core backend adds one `store <check>` row per probe, an error when the probe fails. See [Store](store.md).
 
 ## External tool rows
 
@@ -245,7 +248,7 @@ Doctor reports how System One is configured and never asks a decision. See the [
 
 ## Deep checks
 
-`--deep` and `/doctor deep` add two groups of rows.
+`--deep` and `/doctor --deep` add two groups of rows.
 
 ### Tool probe: `tools <target>`
 
@@ -274,7 +277,7 @@ For each command under `validators:` in the workspace validation contract,
 doctor resolves the program (the first word after any `NAME=value`
 assignments) on PATH, or relative to the workspace when it contains a `/`.
 Then it evaluates the command as a bash call the way tool admission does, at
-the configured `safety.autonomy` or at the session's level for `/doctor deep`.
+the configured `safety.autonomy` or at the session's level for `/doctor --deep`.
 At `default` it uses this host's containment for the operator's session: with a
 sandbox backend the command runs contained, and a discard or delete a workspace
 snapshot undoes runs when the workspace is a Git work tree with
