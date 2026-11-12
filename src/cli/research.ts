@@ -1,3 +1,4 @@
+import { readSettings } from "../core/config.js";
 import {
 	campaignStatusLines,
 	createSpawnAgentRunner,
@@ -309,6 +310,7 @@ async function driveCampaign(
 			agent: createSpawnAgentRunner(),
 			log,
 			signal: controller.signal,
+			settings: readSettings(),
 		});
 	} catch (error) {
 		if (!(error instanceof ResearchResumeError)) throw error;

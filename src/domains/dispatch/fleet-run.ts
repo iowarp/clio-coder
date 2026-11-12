@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attributeCommitMessage } from "../../core/commit-attribution.js";
+import type { ClioSettings } from "../../core/config.js";
 import { gitCommitAuthorSetting, resolveClioCommitAuthorship } from "../../core/git-commit-attribution.js";
 import { telemetryContext } from "../../core/telemetry/context.js";
 import type { EventPayload } from "../../core/telemetry/events.js";
@@ -78,6 +79,7 @@ import {
 	reviewerInspectionOf,
 	stagePendingGateDecision,
 } from "./gate-decisions.js";
+import { hostVerificationSandbox } from "./host-verification.js";
 import { type DispatchIntent, declaredScopeIntent } from "./intent.js";
 import { type FleetRootTelemetry, openFleetRootTelemetry } from "./run-telemetry.js";
 import { type FleetRunRecord, writeFleetRun, writeFleetRunSync } from "./state.js";
@@ -258,6 +260,11 @@ export interface ExecuteFleetRunInput {
 	agents: FleetRunAgentAccess;
 	/** Whether a commit node stamps Clio's attribution trailers. */
 	attributionEnabled: boolean;
+	/**
+	 * The settings that choose the sandbox loop checks and gates run in, as host
+	 * verification's checks do; absent reads as `safety.sandbox: auto`.
+	 */
+	settings?: Readonly<Pick<ClioSettings, "safety" | "targets">>;
 	/** Cancel the fleet, including queued and running proposals. */
 	signal?: AbortSignal;
 	/** Variables rendered into the playbook body and sealed into the run record. */
@@ -1035,12 +1042,14 @@ async function runFleetHoldingWorkspace(
 								stepSucceeded = false;
 								failureReason = gateBytes.length === 0 ? "gate_path_missing" : "gate_command_missing";
 							} else {
+								const shellSandbox = hostVerificationSandbox(input.settings, workspaceRoot);
 								const baseline = await runCodeStep({
 									stepId: `${step.id}.baseline`,
 									command,
 									workspaceRoot,
 									artifactDir: codeStepDir(fleetRootId),
 									substitutions: { path: step.gate.path },
+									...(shellSandbox !== undefined ? { shellSandbox } : {}),
 								});
 								const baselineFailure = gateBaselineFailure(baseline.report.passed);
 								if (baselineFailure !== null) {
@@ -1152,6 +1161,13 @@ async function runFleetHoldingWorkspace(
 					}
 				}
 				const codeRunId = newCodeRunId();
+				// A loop check or gate executes what the workers before it wrote, so it runs
+				// where host verification runs a check; an action or commit step is the
+				// operator's own command and runs as before.
+				const shellSandbox =
+					!isCommit && (step.loop?.role === "check" || step.gate !== undefined)
+						? hostVerificationSandbox(input.settings, workspaceRoot)
+						: undefined;
 				const commitAuthorship =
 					isCommit && input.attributionEnabled && gitCommitAuthorSetting() === "auto"
 						? resolveClioCommitAuthorship(workspaceRoot)
@@ -1166,6 +1182,7 @@ async function runFleetHoldingWorkspace(
 					workspaceRoot,
 					artifactDir: codeStepDir(fleetRootId),
 					signal,
+					...(shellSandbox !== undefined ? { shellSandbox } : {}),
 					...(step.gate !== undefined ? { substitutions: { path: step.gate.path } } : {}),
 					...(isCommit && evidence !== null && originalMessage !== null
 						? {

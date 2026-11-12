@@ -487,6 +487,7 @@ async function runFleet(
 					dispatch,
 					agents: { getSpec: (agentId) => agents.getSpec(agentId) },
 					attributionEnabled: config?.get().integrations.git.commitAttribution ?? true,
+					settings: fleetSettings,
 					vars,
 					...(resume !== undefined ? { resume } : {}),
 					onStarted() {

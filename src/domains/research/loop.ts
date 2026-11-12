@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import { StateFileLockTimeoutError, withStateFileLock } from "../../core/state-file-lock.js";
 import { clampTimerDelayMs } from "../../core/timers.js";
@@ -21,6 +22,7 @@ import {
 } from "../../tools/verify/catalog.js";
 import { resolveSweepRun, sweepRunNames } from "../../tools/verify/resolve.js";
 import { claimsProjectRoot } from "../claims/index.js";
+import { hostVerificationSandbox } from "../dispatch/host-verification.js";
 import { type AgentRunner, hypothesisFromSummary, iterationPrompt } from "./agent.js";
 import { budgetStop, nextRunLimits } from "./budget.js";
 import { describeGrade } from "./format.js";
@@ -232,6 +234,11 @@ export interface ResearchLoopDeps {
 	now?: () => Date;
 	log?: (line: string) => void;
 	signal?: AbortSignal;
+	/**
+	 * The settings that choose the sandbox the default objective and gates run in,
+	 * as host verification's checks do; absent reads as `safety.sandbox: auto`.
+	 */
+	settings?: Readonly<Pick<ClioSettings, "safety" | "targets">>;
 }
 
 export interface ResearchRunOutcome {
@@ -359,8 +366,17 @@ async function runCampaignLoop(
 	deps: ResearchLoopDeps,
 	resume: ResearchResumeState | null,
 ): Promise<ResearchRunOutcome> {
-	const measure = deps.measure ?? runObjective;
-	const gate = deps.gate ?? runGateIn;
+	// Both sides run what an agent wrote once an iteration has been kept, and one
+	// sandbox for both keeps a wall-time objective comparable.
+	const sandboxFor = (worktree: string) => hostVerificationSandbox(deps.settings, worktree);
+	const measure =
+		deps.measure ??
+		((check: DeclaredCheck, metric: string, worktree: string, signal?: AbortSignal) =>
+			runObjective(check, metric, worktree, signal, sandboxFor(worktree)));
+	const gate =
+		deps.gate ??
+		((worktree: string, check: DeclaredCheck, signal?: AbortSignal) =>
+			runGateIn(worktree, check, signal, sandboxFor(worktree)));
 	const recorder = deps.recorder ?? { begin: beginIterationRecord, finish: finishIterationRecord };
 	const clock = deps.clock ?? (() => performance.now());
 	const now = deps.now ?? (() => new Date());

@@ -114,6 +114,10 @@ git diff HEAD clio/research/<id>
    - the median moves by at least `--min-improvement` (default 5%) in the right direction;
    - a seeded bootstrap 95% interval (2,000 resamples) excludes zero.
 5. **Gates.** Every `--gate` check, and a `numeric-compare` objective itself, must pass in the candidate's worktree.
+   The objective and every gate, on the base and on the candidate, run inside the main-session sandbox rooted at their
+   worktree, as host verification's checks do: credentials and secret files are hidden and writes stay in the worktree,
+   the scratch roots and package caches. `safety.sandbox: off` runs them bare, as does `auto` on a host with no backend;
+   `required` without a backend refuses them.
 6. **Ratchet.** A kept change moves `clio/research/<id>` by compare-and-swap. If that fails because the ref moved, the
    change is archived as `ratchet-lost`. Your checked-out branch is never touched.
 

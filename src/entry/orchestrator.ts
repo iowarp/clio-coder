@@ -3676,7 +3676,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 										const fleetRootId = `fleet-${randomBytes(6).toString("hex")}`;
 										// Read before the single-run guard is taken: a throw here would
 										// otherwise leave it set and refuse every later fleet run.
-										const attributionEnabled = getCurrentSettings().integrations.git.commitAttribution;
+										const fleetSettings = getCurrentSettings();
+										const attributionEnabled = fleetSettings.integrations.git.commitAttribution;
 										acpFleetInFlight = { name: preview.name, fleetRootId };
 										let admitted = false;
 										let started = false;
@@ -3714,6 +3715,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 											agents: { getSpec: (agentId) => agents.getSpec(agentId) },
 											getDecisionBoard: () => decisionBoard.snapshot(),
 											attributionEnabled,
+											settings: fleetSettings,
 											vars: preview.vars,
 											...(preview.resume !== undefined
 												? { resume: { record: preview.resume.record, replayed: preview.resume.replayed } }

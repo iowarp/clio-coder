@@ -8,6 +8,7 @@ import { existsSync, lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { minimatch } from "minimatch";
 import { runCommandVector } from "../../core/safe-exec.js";
+import type { MainSandboxPolicy } from "../../core/sandbox/main-session.js";
 import type { ToolResult } from "../../tools/registry.js";
 import { type DeclaredCheck, resolveProjectVerifierExecutionCwd } from "../../tools/verify/catalog.js";
 import { extractNumericPayloadText, parseNumericPayload } from "../../tools/verify/numeric.js";
@@ -44,6 +45,7 @@ export async function runObjective(
 	metric: string,
 	worktree: string,
 	signal?: AbortSignal,
+	shellSandbox?: MainSandboxPolicy,
 ): Promise<ObjectiveValue> {
 	const [file, ...args] = check.command;
 	if (file === undefined) return { ok: false, reason: `check '${check.id}' has an empty argv` };
@@ -55,6 +57,7 @@ export async function runObjective(
 		timeoutMs: check.timeoutMs,
 		maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
 		...(signal !== undefined ? { signal } : {}),
+		...(shellSandbox !== undefined ? { shellSandbox } : {}),
 	});
 	if (result.aborted) return { ok: false, reason: "aborted" };
 	if (result.timedOut) return { ok: false, reason: `timed out after ${check.timeoutMs}ms` };
@@ -94,11 +97,19 @@ export async function measurePairs(
  * reference file against the process working directory, so the process enters the worktree for the call. The
  * research loop is the only work in its process while this runs.
  */
-export async function runGateIn(worktree: string, check: DeclaredCheck, signal?: AbortSignal): Promise<ToolResult> {
+export async function runGateIn(
+	worktree: string,
+	check: DeclaredCheck,
+	signal?: AbortSignal,
+	shellSandbox?: MainSandboxPolicy,
+): Promise<ToolResult> {
 	const previous = process.cwd();
 	process.chdir(worktree);
 	try {
-		return await runProjectCheck(check, signal !== undefined ? { signal } : undefined);
+		return await runProjectCheck(check, {
+			...(signal !== undefined ? { signal } : {}),
+			...(shellSandbox !== undefined ? { shellSandbox } : {}),
+		});
 	} finally {
 		process.chdir(previous);
 	}
