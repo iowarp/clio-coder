@@ -56,6 +56,23 @@ A bare `/loop` lists the jobs. A loop runs only while its conversation is idle a
 A finished turn with its exit code, not a parked prompt. An exit of 4 means the cost ceiling stopped it. `clio-coder telemetry why-stopped <session>` explains a stop afterward.
 :::
 
+## Read how a run ended
+
+Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
+
+::: compare
+| Exit | What it means |
+| --- | --- |
+| `0` | The run settled and succeeded |
+| `1` | It failed: the model was unreachable, a worker did not deliver, or a refused call left the task undone |
+| `2` | A usage error, including `--autonomy yolo` as root outside a container |
+| `4` | A cost ceiling, or at `yolo` the tool-call budget, stopped it; `--continue` resumes |
+| `124` | `--timeout` expired; the run still settled and sealed |
+| `130`, `143` | Ctrl+C or a SIGTERM stopped it |
+:::
+
+## Pick the right tool
+
 ::: compare
 | When you want | Use | What still stops it |
 | --- | --- | --- |
@@ -65,7 +82,7 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 :::
 
 ::: limits Boundaries
-- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews. Under `safety.sandbox: required` at `yolo`, that retry is refused.
+- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews. At unconfined `yolo` under `safety.sandbox: required`, that retry is refused.
 - `yolo` does not carry over from `settings.yaml` to a headless run. It comes only from that run's own `--autonomy yolo`, and it exits 2 as root outside a detected container.
 :::
 
