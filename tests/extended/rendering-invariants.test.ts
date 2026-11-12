@@ -36,6 +36,7 @@ import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { dockTop } from "../../src/interactive/dock.js";
 import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
 import { healthData, healthLines } from "../../src/interactive/health-overlay.js";
+import { fullscreenTuiOptions } from "../../src/interactive/interactive-shell.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -1295,6 +1296,58 @@ describe("Pi TUI compatibility", () => {
 			strictEqual(moved("\x1b[<72;2;2M"), 15, "Alt moves five steps");
 			tui.setWheelScrollLines(2);
 			strictEqual(moved("\x1b[<64;2;2M"), 2, "a changed step reaches the overlay path");
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("labels a scrolled-up fullscreen transcript with a themed latest marker that returns to the live edge", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, fullscreenTuiOptions(terminal));
+		let transcript: { isFollowingEnd: boolean } | undefined;
+		const chat = new Text(Array.from({ length: 80 }, (_, row) => `row ${row}`).join("\n"), 0, 0);
+		const parts = {
+			banner: new Text("", 0, 0),
+			chat,
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer", 0, 0),
+		};
+		tui.setLayoutRoot(
+			buildLayout(parts, {
+				mode: "fullscreen",
+				onTranscript: (view) => {
+					transcript = view;
+				},
+			}),
+		);
+		tui.start();
+		const frame = () => {
+			terminal.writes = [];
+			tui.renderNow(true);
+			return terminal.writes.join("");
+		};
+		const label = `${GLYPH.down} latest`;
+		try {
+			ok(!stripTerminalSequences(frame()).includes(label), "no marker while the view follows the end");
+			terminal.input("\x1b[<64;2;2M");
+			const painted = frame();
+			ok(painted.includes(clioTheme().paint(` ${label} `, { fg: "scrollMarker", bg: "raisedSurface" })), "themed marker");
+			// A full frame paints every row after a cursor move to its first column.
+			const rows = painted
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: the cursor move is the row separator
+				.split(/\x1b\[\d+;1H/u)
+				.slice(1)
+				.map(stripTerminalSequences);
+			const row = rows.findIndex((line) => line.includes(label));
+			ok(row > 0, "the marker sits on a transcript row");
+			ok(!rows[row + 1]?.includes("row "), "on the transcript's last row");
+			strictEqual(transcript?.isFollowingEnd, false);
+			const column = (rows[row] ?? "").indexOf(label);
+			terminal.input(`\x1b[<0;${column + 2};${row + 1}M`);
+			terminal.input(`\x1b[<0;${column + 2};${row + 1}m`);
+			strictEqual(transcript?.isFollowingEnd, true, "a click on the marker returns to the live edge");
+			ok(!stripTerminalSequences(frame()).includes(label));
 		} finally {
 			tui.stop();
 		}

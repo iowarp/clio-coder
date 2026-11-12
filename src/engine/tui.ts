@@ -29,6 +29,7 @@ export type {
 	Terminal,
 	Tokens,
 	TUI,
+	TuiAltScreenOptions,
 	TuiMode,
 	TuiMouseEvent,
 	TuiMouseEventResult,

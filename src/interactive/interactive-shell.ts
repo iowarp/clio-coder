@@ -1,7 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../core/xdg.js";
-import type { ApplicationInputTui, Component, Terminal, TuiMode, TuiRenderObserver } from "../engine/tui.js";
+import type {
+	ApplicationInputTui,
+	Component,
+	Terminal,
+	TuiAltScreenOptions,
+	TuiMode,
+	TuiRenderObserver,
+} from "../engine/tui.js";
 import { InstrumentedTuiAltScreen, InstrumentedTuiMainScreen, ProcessTerminal } from "../engine/tui.js";
 import {
 	createRenderTrace,
@@ -12,6 +19,7 @@ import {
 } from "./render-trace.js";
 import type { StdoutBackpressureGate } from "./stdout-backpressure.js";
 import { installStdoutBackpressureGate } from "./stdout-backpressure.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
 
 export interface InteractiveShellTui {
 	readonly mode?: TuiMode;
@@ -206,6 +214,22 @@ export function applyEscapeTimeoutDefault(env: NodeJS.ProcessEnv = process.env):
 	env.PI_TUI_ESC_TIMEOUT = LOCAL_ESCAPE_TIMEOUT_MS;
 }
 
+/** Fullscreen engine options for the process terminal. */
+export function fullscreenTuiOptions(terminal: Terminal): TuiAltScreenOptions {
+	const theme = clioTheme();
+	return {
+		// A fast wheel spin moves up to six rows per report; an isolated notch moves one.
+		wheelScrollLines: "auto",
+		// Drawn on the transcript's last row while it is scrolled away from the live edge; a click returns there.
+		scrollToEndIndicator: () => theme.paint(` ${GLYPH.down} latest `, { fg: "scrollMarker", bg: "raisedSurface" }),
+		// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
+		copySelection: (text) =>
+			import("../engine/clipboard.js")
+				.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
+				.catch(() => "Copy failed: clipboard module did not load"),
+	};
+}
+
 export function createProcessInteractiveShell(
 	options: {
 		tuiMode?: TuiMode;
@@ -376,15 +400,7 @@ export function createProcessInteractiveShell(
 							renderObserver,
 							undefined,
 							logDirectory,
-							{
-								// A fast wheel spin moves up to six rows per report; an isolated notch moves one.
-								wheelScrollLines: "auto",
-								// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
-								copySelection: (text) =>
-									import("../engine/clipboard.js")
-										.then(({ copyToSystemClipboard }) => copyToSystemClipboard(text, (sequence) => terminal.write(sequence)))
-										.catch(() => "Copy failed: clipboard module did not load"),
-							},
+							fullscreenTuiOptions(terminal),
 							renderAdmission,
 						)
 					: new InstrumentedTuiMainScreen(terminal, renderObserver, undefined, logDirectory, renderAdmission);
