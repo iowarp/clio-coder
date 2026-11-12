@@ -80,7 +80,7 @@ Stored memory is not fine-tuning of the underlying model. Its value depends on s
 :::
 
 ::: next
-- [Your first session with CLIO Coder](/tutorials/first-session.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Continuity guide](/docs/guide/context-continuity.html)
 - [Resource Library](/docs/guide/resource-library.html)
 :::

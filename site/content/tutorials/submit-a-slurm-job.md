@@ -96,6 +96,7 @@ Ask the agent to cancel the job by id. Cancelling is confirmed the same way, and
 :::
 
 ::: next
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Pre-register a benchmark before you measure](/tutorials/pre-register-a-benchmark.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)

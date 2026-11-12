@@ -114,6 +114,7 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 
 ::: next
 - [Choose a model for your project](/tutorials/choose-model-for-your-project.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Fleet guide](/docs/guide/fleet-dispatch.html)
 - [Diffusion models in the terminal](/tutorials/diffusion-models.html)
 :::

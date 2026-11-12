@@ -339,5 +339,77 @@
       "guide/resource-library.md",
       "guide/research-and-arena.md"
     ]
+  },
+  {
+    "slug": "keep-results-in-the-project-store",
+    "title": "Keep results outside the tree with the project store",
+    "description": "Store a result with a note, check it for drift, read it from a script, and let a worker write into one granted tag.",
+    "category": "Scientific software",
+    "time": "5 min",
+    "author": "The CLIO Coder team",
+    "source": "keep-results-in-the-project-store.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/tool-usage.md",
+      "guide/fleet-dispatch.md"
+    ]
+  },
+  {
+    "slug": "set-up-a-lab-from-one-setup-file",
+    "title": "Set up a lab from one setup file",
+    "description": "Write one YAML file that connects every lab member to your model gateway, check what it may carry, and test the route.",
+    "category": "Models",
+    "time": "5 min",
+    "author": "The CLIO Coder team",
+    "source": "set-up-a-lab-from-one-setup-file.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/configuration-and-targets.md",
+      "guide/hpc-clusters.md"
+    ]
+  },
+  {
+    "slug": "share-a-folder-with-a-teammate-or-a-second-terminal",
+    "title": "Share a folder with a teammate or a second terminal",
+    "description": "Run two sessions in one project, keep each person's state private, and commit project settings that can only make CLIO Coder stricter.",
+    "category": "Terminal workspace",
+    "time": "4 min",
+    "author": "The CLIO Coder team",
+    "source": "share-a-folder-with-a-teammate-or-a-second-terminal.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/configuration-and-targets.md",
+      "guide/panes-and-files.md"
+    ]
+  },
+  {
+    "slug": "run-a-research-campaign-and-a-blind-arena",
+    "title": "Run a research campaign and a blind arena",
+    "description": "Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them.",
+    "category": "Scientific software",
+    "time": "7 min",
+    "author": "The CLIO Coder team",
+    "source": "run-a-research-campaign-and-a-blind-arena.md",
+    "basis": "Recorded session",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/research-and-arena.md",
+      "guide/quality-policy.md"
+    ]
   }
 ]

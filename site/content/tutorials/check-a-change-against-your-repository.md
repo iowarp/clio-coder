@@ -97,6 +97,7 @@ The actual check, its result, and any missing evidence. A sealed run record is a
 ::: next
 - [Coordinate the coding agents you already use](/tutorials/coordinate-your-coding-agents.html)
 - [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Quality policy guide](/docs/guide/quality-policy.html)
 - [Install CLIO Coder](/#start)
 :::

@@ -17,12 +17,12 @@
       "id": "path-hpc",
       "label": "Science and HPC",
       "title": "You write research code and run it on a cluster",
-      "summary": "Start in your own repository, follow a numerical fix from a failing test to recorded verification, let the agent submit and follow a Slurm job you asked for, lock a benchmark's thresholds before any result exists, and coordinate workers on other machines over SSH.",
+      "summary": "Start in your own repository, follow a numerical fix from a failing test to recorded verification, let the agent submit and follow a Slurm job you asked for, keep a speed-up only when a measurement proves it and the answers still match, and coordinate workers on other machines over SSH.",
       "steps": [
         "first-session",
         "temperature-calibration",
         "submit-a-slurm-job",
-        "pre-register-a-benchmark",
+        "run-a-research-campaign-and-a-blind-arena",
         "work-from-a-laptop-with-remote-workers"
       ]
     },
@@ -30,12 +30,13 @@
       "id": "path-local",
       "label": "Local models",
       "title": "You run your own models",
-      "summary": "Connect a model server with no account or key, choose models for conversation and for delegated work, read what each session cost and why a run stopped, and carry a long task through a handoff without losing its decisions.",
+      "summary": "Connect a model server with no account or key, choose models for conversation and for delegated work, read what each session cost and why a run stopped, carry a long task through a handoff without losing its decisions, then compare answers blind before you trust a ranking of your models.",
       "steps": [
         "run-on-a-local-model",
         "choose-model-for-your-project",
         "see-what-a-session-cost-and-what-a-run-did",
-        "keep-long-coding-tasks-on-track"
+        "keep-long-coding-tasks-on-track",
+        "run-a-research-campaign-and-a-blind-arena"
       ]
     }
   ]

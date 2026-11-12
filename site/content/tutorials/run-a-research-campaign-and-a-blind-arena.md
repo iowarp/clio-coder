@@ -138,6 +138,7 @@ That is the inconclusive result, reported as it is. A match that pits a model ag
 :::
 
 ::: next
+- [Work from a laptop with remote workers](/tutorials/work-from-a-laptop-with-remote-workers.html)
 - [Research campaigns and the arena](/docs/guide/research-and-arena.html)
 - [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
 - [Pre-register a benchmark](/tutorials/pre-register-a-benchmark.html)

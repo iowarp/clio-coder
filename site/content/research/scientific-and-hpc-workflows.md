@@ -129,6 +129,8 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 
 ::: next
 - [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
+- [Keep results outside the tree with the project store](/tutorials/keep-results-in-the-project-store.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 :::
