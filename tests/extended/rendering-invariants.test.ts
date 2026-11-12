@@ -1469,6 +1469,41 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("does not measure a regular-mode transcript again when a settled turn hands back the same rows", () => {
+		const rows = Array.from(
+			{ length: 40_000 },
+			(_, i) => `\x1b[1mrow ${i}\x1b[22m ${"lorem ipsum dolor sit amet ".repeat(2)}${"x".repeat(i % 7)}`,
+		);
+		const overwide = "y".repeat(120);
+		rows[3] = overwide;
+		const chat = {
+			render: () => rows,
+			renderRegions: () => ({ prefix: rows.slice(), tail: [] }),
+			invalidate() {},
+		};
+		const root = buildLayout(
+			{ banner: new Text("", 0, 0), chat, editor: new Text("editor", 0, 0), footer: new Text("footer", 0, 0) },
+			{ mode: "regular" },
+		);
+		const frame = (width: number): number => {
+			const start = performance.now();
+			const out = root.render(width);
+			const took = performance.now() - start;
+			const cut = out.find((row) => row.startsWith("yyy")) ?? "";
+			ok(visibleWidth(cut) > 0 && visibleWidth(cut) <= width, "an overwide row is still cut to the width");
+			return took;
+		};
+		frame(100);
+		let remeasured = Number.POSITIVE_INFINITY;
+		let kept = Number.POSITIVE_INFINITY;
+		for (let repeat = 0; repeat < 5; repeat += 1) {
+			remeasured = Math.min(remeasured, frame(101));
+			frame(100);
+			kept = Math.min(kept, frame(100));
+		}
+		ok(kept < remeasured / 3, `a same-width frame took ${kept.toFixed(2)} ms against ${remeasured.toFixed(2)} ms`);
+	});
+
 	it("returns a scrolled-up fullscreen transcript to its live edge when the operator submits", async () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

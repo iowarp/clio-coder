@@ -247,6 +247,8 @@ class RegularRoot implements Component {
 	private heldTail: readonly string[] | undefined;
 	private heldTailAt = -1;
 	private renderedSkinEpoch = skinEpoch();
+	/** The width the buffer's rows were measured against: at that width, a row already in place is known to fit. */
+	private heldWidth = -1;
 	/** Counts `render` calls, so a renderer can tell `keptRowCount` is about the call after the one it saw. */
 	renderCount = 0;
 	/** How many leading rows the last `render` left as the very strings the render before it returned. */
@@ -265,7 +267,16 @@ class RegularRoot implements Component {
 		let row = 0;
 		// The first row this frame wrote a string other than the one already there.
 		let firstChanged = -1;
+		// A settled turn hands back a new prefix array of the same rows, and measuring every one of them again cost a
+		// long session tens of milliseconds a turn. A row already in place at the same width was measured when it was
+		// written; a new width measures every row, since one that fit the old width may not fit this one.
+		const sameWidth = width === this.heldWidth;
+		this.heldWidth = width;
 		const put = (raw: string): void => {
+			if (sameWidth && out[row] === raw) {
+				row += 1;
+				return;
+			}
 			// The main-screen renderer throws on an overwide row; one component's bug clips instead.
 			const line = visibleWidth(raw) > width ? truncateToWidth(raw, width) : raw;
 			if (out[row] !== line) {
