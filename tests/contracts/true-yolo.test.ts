@@ -1,8 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, rejects, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir, userInfo } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, hostname, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { before, test } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
@@ -843,10 +843,10 @@ test("under a required sandbox an outward command leaves it only as one simple c
 		"sbatch --partition=gpu -N 2 job.sh",
 		"ssh host uptime",
 		"ssh -o StrictHostKeyChecking=no host uptime",
-		"scp a.txt user@host:/tmp/a.txt",
+		"rsync -a a.txt user@host:/tmp/a.txt",
 		"kubectl get pods -n prod",
 		"curl -X POST https://example.com/hook",
-		"npm publish --access public",
+		"npm publish --ignore-scripts --access public",
 	]) {
 		strictEqual(sandboxOf(command), undefined, command);
 	}
@@ -1003,7 +1003,9 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		"git push --exe=./x origin main",
 		`git push --rep=${planted} main`,
 		"git push --push-option=x origin main",
-		"git push -uf origin main",
+		"git push -uF origin main",
+		"git push -u4 origin main",
+		"git push -uf=x origin main",
 		"git --no-replace-objects push origin main",
 		"git --git-dir=.git push origin main",
 		"git push file:///srv/r main",
@@ -1019,10 +1021,36 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		"ssh -o XAuthLocation=./x -X host",
 		"ssh -oStrictHostKeyChecking=no host",
 		"ssh -p22 host",
+		"ssh -qp 22 host",
+		"ssh -46 host uptime",
+		"ssh -- -oProxyCommand=./x",
+		"git push ssh://-oProxyCommand=./x/y main",
+		"git push -- -oProxyCommand=./x main",
 		"ssh host -F ./cfg uptime",
 		"ssh localhost uptime",
 		"ssh me@127.0.0.1 uptime",
 		"ssh ::1 uptime",
+		"ssh 0 id",
+		"ssh 0x7f000001 id",
+		"ssh 2130706433 id",
+		"ssh 0177.0.0.1 id",
+		"ssh 127.1 id",
+		"ssh 0:0:0:0:0:0:0:1 id",
+		"ssh [::1] id",
+		"ssh 10.0.0.5 id",
+		"ssh ip6-localhost id",
+		"ssh ip6-loopback id",
+		`ssh ${hostname()} id`,
+		`ssh ${hostname()}.localdomain id`,
+		`ssh me@${hostname().toUpperCase()}.lan id`,
+		"git push 0:/ws/planted main",
+		"git push me@2130706433:/ws/planted main",
+		"git push ssh://0x7f000001/ws/planted main",
+		"rsync -a dist/ 0:dst/",
+		"rsync -a dist/ [::1]:dst/",
+		"curl -X POST https://0x7f000001/x",
+		"curl -X POST https://2130706433/x",
+		"curl -X POST https://10.0.0.5/x",
 		"ssh ssh://me@localhost:22 uptime",
 		"scp -D ./x a.txt host:b",
 		"scp -vS ./x a.txt host:b",
@@ -1031,7 +1059,8 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		"scp a.txt localhost:/tmp/a",
 		"sftp -vD ./x host",
 		// rsync: clusters, filter rules, local operands outside the writable trees.
-		"rsync -avz dist/ host:/srv/",
+		"rsync -ave ./x dist/ host:/srv/",
+		"rsync -avL dist/ host:/srv/",
 		"rsync --filter='. ./x' dist/ host:/srv/",
 		"rsync /etc/passwd host:/srv/",
 		// kubectl: bare config names, abbreviations, file templates, plugins and copies.
@@ -1069,6 +1098,11 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		// Publishers and schedulers: config names, a folder, output files, exported variables and local runs.
 		"npm publish --userconfig ./x",
 		"npm publish ./dir",
+		"npm publish --access public --tag next",
+		"npm publish --dry-run",
+		"pnpm publish --no-git-checks",
+		"scp body.md host:/tmp/body.md",
+		"scp -P 2222 host:/tmp/a.txt .",
 		"sbatch -o /tmp/x job.sh",
 		"sbatch --export=LD_PRELOAD=./x job.sh",
 		"srun ./x",
@@ -1092,13 +1126,21 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		"git push --delete origin old",
 		"git push --follow-tags origin main",
 		"git push origin main --no-verify",
+		"git push -uf origin main",
+		"git push -fu origin main",
+		"rsync -avz dist/ host:/srv/",
+		"rsync -av dist/ me@build.example.com:/srv/",
+		"ssh -tq host top",
+		"ssh me@build.example.com uptime",
+		"git push https://github.com/o/r.git main",
+		"git push git@github.com:o/r.git main",
+		"npm publish --ignore-scripts --access public --tag next",
+		"pnpm publish --ignore-scripts --no-git-checks",
 		"ssh -p 22 -l me host uptime",
 		"ssh -t host top",
 		"ssh host ls -la",
 		"ssh -o ConnectTimeout=5 host uptime",
 		"ssh ssh://me@host.example.com:22 uptime",
-		"scp body.md host:/tmp/body.md",
-		"scp -P 2222 host:/tmp/a.txt .",
 		"rsync -a --delete dist/ host:/srv/",
 		"gh pr create --title t --body-file body.md",
 		"gh pr merge 12 --squash --delete-branch",
@@ -1112,12 +1154,18 @@ test("under a required sandbox an outward option outside its CLI's list, a clust
 		"kubectl -n prod get pods",
 		"kubectl rollout restart deploy/x -n prod",
 		"curl -X POST -H 'Content-Type: application/json' -d '{\"a\":1}' https://example.com/hook",
-		"npm publish --access public --tag next",
 		"sbatch -p gpu -N 2 job.sh",
 		"scancel 123",
 		"docker push registry.example.com/img:1",
 	]) {
 		strictEqual(sandboxOf(command), undefined, command);
+	}
+	// Every name the hosts file gives a loopback address names this machine.
+	const hosts = existsSync("/etc/hosts") ? readFileSync("/etc/hosts", "utf8") : "";
+	for (const line of hosts.split("\n")) {
+		const [address = "", ...names] = line.replace(/#.*/u, "").trim().split(/\s+/u);
+		if (!/^(?:127\.|::1$)/u.test(address)) continue;
+		for (const name of names) strictEqual(sandboxOf(`ssh ${name} id`), cwd, name);
 	}
 });
 
@@ -1136,6 +1184,63 @@ test("under a required sandbox an outward line run from outside the workspace re
 	strictEqual(sandboxOf("git -C sub push origin main"), cwd);
 	strictEqual(sandboxOf("git -C .git push origin main"), cwd);
 	strictEqual(sandboxOf("git -C src push origin main"), undefined);
+});
+
+test("under a required sandbox git's own discovery decides: a bare layout or a workspace with no repository keeps git and gh inside", (t) => {
+	const { cwd, sandboxOf } = requiredWorkspace(t, "clio-yolo-outward-bare-");
+	const bare = (dir: string) => {
+		mkdirSync(join(dir, "objects"), { recursive: true });
+		mkdirSync(join(dir, "refs"));
+		writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
+	};
+	bare(join(cwd, "evil"));
+	bare(join(cwd, "mid"));
+	mkdirSync(join(cwd, "mid", "deep"));
+	mkdirSync(join(cwd, "src"));
+	strictEqual(sandboxOf("git -C evil push origin main"), cwd);
+	strictEqual(sandboxOf("git -C mid/deep push origin main"), cwd);
+	for (const run of ["git push origin main", "gh pr list", "ssh host uptime"]) {
+		strictEqual(sandboxOf(run, join(cwd, "evil")), cwd, `${run} @ evil`);
+		strictEqual(sandboxOf(run, join(cwd, "mid", "deep")), cwd, `${run} @ mid/deep`);
+		strictEqual(sandboxOf(run, join(cwd, "src")), undefined, `${run} @ src`);
+	}
+	rmSync(join(cwd, ".git"), { recursive: true });
+	for (const run of ["git push origin main", "gh pr list"])
+		strictEqual(sandboxOf(run), cwd, `${run} without a repository`);
+	strictEqual(sandboxOf("ssh host uptime"), undefined, "ssh without a repository");
+	bare(cwd);
+	for (const run of ["git push origin main", "gh pr list", "ssh host uptime"]) {
+		strictEqual(sandboxOf(run), cwd, `${run} in a bare workspace root`);
+	}
+});
+
+test("a bash cwd of ~ is judged as the home directory bash runs in, by the outward rule and the yolo floor", async (t) => {
+	const { cwd, sandboxOf } = requiredWorkspace(t, "clio-yolo-tilde-cwd-");
+	const fakeHome = workspace("clio-yolo-tilde-home-");
+	mkdirSync(join(fakeHome, "repo", ".git"), { recursive: true });
+	writeFileSync(join(fakeHome, "keep.txt"), "x\n");
+	const savedHome = process.env.HOME;
+	process.env.HOME = fakeHome;
+	t.after(() => {
+		if (savedHome === undefined) delete process.env.HOME;
+		else process.env.HOME = savedHome;
+	});
+	strictEqual(homedir(), fakeHome);
+	mkdirSync(join(cwd, "~", "repo"), { recursive: true });
+	strictEqual(sandboxOf("git push origin main", "~/repo"), cwd);
+	strictEqual(sandboxOf("gh pr list", "~"), cwd);
+	const engine = engineFor(cwd);
+	const floor = (callCwd: string) =>
+		engine.evaluate({ tool: ToolNames.Bash, args: { command: "rm -rf ./*", cwd: callCwd } }, "yolo", OPERATOR_YOLO);
+	const atHome = floor(fakeHome);
+	strictEqual(atHome.kind, "block");
+	for (const spelled of ["~", "~/", "@~"]) {
+		const decision = floor(spelled);
+		strictEqual(decision.kind, atHome.kind, spelled);
+		strictEqual(decision.ruleId, atHome.ruleId, spelled);
+	}
+	const ran = await bashTool.run({ command: "pwd", cwd: "~" }, { operatorYolo: true });
+	strictEqual(ran.kind, "ok");
 });
 
 test("the yolo floor blocks a destructive command in every wrapper the outward rule touched, as on v080", async (t) => {

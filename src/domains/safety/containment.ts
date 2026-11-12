@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { hostname } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { hostname, networkInterfaces } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
@@ -355,44 +355,81 @@ function plantedOnPath(places: OutwardPlaces): boolean {
 	return places.searchPath.split(":").some((dir) => dir === "" || !path.isAbsolute(dir) || inWritableRoot(dir, places));
 }
 
-/** The nearest directory at or above `dir` holding `.git`. */
-function repositoryTop(dir: string): string | null {
-	for (let current = dir; ; current = path.dirname(current)) {
-		if (existsSync(path.join(current, ".git"))) return current;
-		if (path.dirname(current) === current) return null;
-	}
+/** True when git, finding no `.git` in `dir`, would take `dir` itself as a repository: a HEAD beside objects, refs or a commondir. */
+function gitDirectoryLayout(dir: string): boolean {
+	return (
+		existsSync(path.join(dir, "HEAD")) &&
+		["objects", "refs", "commondir"].some((entry) => existsSync(path.join(dir, entry)))
+	);
 }
 
 /**
- * True when a line run from `dir` runs in the workspace's own repository: inside the workspace, outside any
- * `.git` directory, and with no other repository between it and the workspace, so git and the CLIs that run
- * git read the workspace repository's config and hooks, which the sandbox keeps read-only.
+ * True when a line run from `dir` runs where git's own discovery lands on the workspace repository: `dir` lies in
+ * the workspace outside every `.git` directory, and no directory from it up to the workspace holds a `.git` or is
+ * laid out as a git directory, the workspace's own `.git` aside. So git and the CLIs that run git read the workspace
+ * repository's config and hooks, which the sandbox keeps read-only. With `ownRepository` (git, gh) the workspace
+ * must have that `.git`; another CLI may run from a workspace that has none.
  */
-function inWorkspaceRepository(dir: string, places: OutwardPlaces): boolean {
+function inWorkspaceRepository(dir: string, places: OutwardPlaces, ownRepository: boolean): boolean {
 	const real = canonicalizePath(dir);
 	if (real === null || !isSameOrDescendant(real, places.workspace)) return false;
 	if (path.relative(places.workspace, real).split(path.sep).includes(".git")) return false;
-	return repositoryTop(real) === repositoryTop(places.workspace);
+	for (let current = real; current !== places.workspace; current = path.dirname(current)) {
+		if (path.dirname(current) === current) return false;
+		if (existsSync(path.join(current, ".git")) || gitDirectoryLayout(current)) return false;
+	}
+	if (existsSync(path.join(places.workspace, ".git"))) return true;
+	return !ownRepository && !gitDirectoryLayout(places.workspace);
 }
 
-/** A host that is this machine, where a command sent over ssh would run outside the sandbox. */
-function localHost(host: string): boolean {
+/** The addresses that reach this machine: loopback, unspecified and every interface's own. */
+function localAddresses(): Set<string> {
+	const addresses = new Set(["::1", "::", "0.0.0.0"]);
+	for (const entries of Object.values(networkInterfaces())) {
+		for (const entry of entries ?? []) addresses.add(entry.address.toLowerCase());
+	}
+	return addresses;
+}
+
+/** The names the hosts file gives an address of this machine. */
+function hostsFileLocalNames(): Set<string> {
+	const names = new Set<string>();
+	let text = "";
+	try {
+		text = readFileSync("/etc/hosts", "utf8");
+	} catch {
+		return names;
+	}
+	const local = localAddresses();
+	for (const line of text.split("\n")) {
+		const [address = "", ...aliases] = line.replace(/#.*/u, "").trim().split(/\s+/u);
+		if (!/^127\./u.test(address) && !local.has(address.toLowerCase())) continue;
+		for (const alias of aliases) names.add(alias.replace(/\.$/u, "").toLowerCase());
+	}
+	return names;
+}
+
+/**
+ * A host an outward line may not name, deny by default: an address in any spelling (a numeric, octal or hex last
+ * label, as inet_aton and URL parsers read `0`, `2130706433`, `0x7f000001` or `127.1`; anything with a `:`, as
+ * IPv6), a name that is not plain letters, digits, dots, `-` and `_`, one that starts with `-` and would read as an
+ * option, `localhost` in any form, this machine's host name with any suffix, and a name the hosts file gives an
+ * address of this machine.
+ */
+function hostRefused(host: string): boolean {
 	const name = host
 		.replace(/^[^@]*@/u, "")
 		.replace(/^\[|\]$/gu, "")
 		.replace(/\.$/u, "")
 		.toLowerCase();
-	return (
-		name === "" ||
-		name === "::" ||
-		name.startsWith("::ffff:") ||
-		name === "localhost" ||
-		name.endsWith(".localhost") ||
-		name === "::1" ||
-		name === "0.0.0.0" ||
-		/^127\./u.test(name) ||
-		name === hostname().toLowerCase()
-	);
+	if (!/^[a-z0-9_][a-z0-9._-]*$/u.test(name)) return true;
+	const labels = name.split(".");
+	if (/^(?:0x[0-9a-f]*|\d+)$/u.test(labels.at(-1) ?? "")) return true;
+	if (labels[0] === "localhost" || labels.at(-1) === "localhost" || /^ip6-(?:localhost|loopback)$/u.test(name))
+		return true;
+	const self = hostname().toLowerCase().split(".")[0] ?? "";
+	if (self !== "" && labels[0] === self) return true;
+	return hostsFileLocalNames().has(name);
 }
 
 /**
@@ -421,12 +458,22 @@ function listedOperands(args: ReadonlyArray<string>, list: OptionList, places: O
 	const operands: string[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const word = args[index] ?? "";
-		if (word === "--") return [...operands, ...args.slice(index + 1)];
+		if (word === "--") {
+			const rest = args.slice(index + 1);
+			const named = list.commandAfter === undefined ? rest : rest.slice(0, list.commandAfter - operands.length);
+			// The CLI's own parser may still read an operand that starts with `-` as an option.
+			return named.some((operand) => operand.startsWith("-")) ? null : [...operands, ...rest];
+		}
 		if (word === "-" || !word.startsWith("-")) {
 			if (list.commandAfter !== undefined && operands.length === list.commandAfter)
 				return [...operands, ...args.slice(index)];
 			operands.push(word);
 			continue;
+		}
+		if (/^-[^-]./u.test(word)) {
+			// A cluster parses as its flags apart only when every letter is a listed flag that takes no value.
+			if ([...word.slice(1)].every((letter) => /^[A-Za-z]$/u.test(letter) && list.flags.includes(`-${letter}`))) continue;
+			return null;
 		}
 		const equals = word.startsWith("--") ? word.indexOf("=") : -1;
 		const option = equals === -1 ? word : word.slice(0, equals);
@@ -462,9 +509,9 @@ function networkRemote(remote: string, here: string): boolean {
 	if (remote.includes("::")) return false;
 	if (/^[A-Za-z0-9_][\w.-]*$/u.test(remote)) return !existsSync(path.resolve(here, remote));
 	const url = /^([A-Za-z][\w+.-]*):\/\/(?:[^@/]*@)?(\[[^\]]*\]|[^:/]*)/u.exec(remote);
-	if (url !== null) return /^(?:https?|ssh|git)$/iu.test(url[1] ?? "") && !localHost(url[2] ?? "");
+	if (url !== null) return /^(?:https?|ssh|git)$/iu.test(url[1] ?? "") && !hostRefused(url[2] ?? "");
 	const scp = /^(?:[\w.-]+@)?([\w.-]+):/u.exec(remote);
-	return scp !== null && !localHost(scp[1] ?? "");
+	return scp !== null && !hostRefused(scp[1] ?? "");
 }
 
 /**
@@ -484,7 +531,7 @@ function gitPushLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): bool
 		if (resolved === null) return false;
 		here = resolved;
 	}
-	if (args[index] !== "push" || !inWorkspaceRepository(here, places)) return false;
+	if (args[index] !== "push" || !inWorkspaceRepository(here, places, true)) return false;
 	const operands = listedOperands(args.slice(index + 1), GIT_PUSH_OPTIONS, places);
 	if (operands === null) return false;
 	const remote = operands[0];
@@ -504,12 +551,6 @@ const SSH_OPTIONS: OptionList = {
 	commandAfter: 1,
 };
 
-const SCP_OPTIONS: OptionList = {
-	flags: listed("-q -r -p -C -4 -6 -B -v"),
-	values: listed("-P -l -o"),
-	value: sshOptionValue,
-};
-
 const RSYNC_OPTIONS: OptionList = {
 	flags: listed(
 		"-a --archive -r --recursive -v --verbose -z --compress -n --dry-run -c --checksum -t --times -u --update -h --human-readable -P --progress --partial --delete",
@@ -517,17 +558,17 @@ const RSYNC_OPTIONS: OptionList = {
 	values: listed("--exclude --include"),
 };
 
-/** The host of a remote scp or rsync operand, or null for a local path. */
+/** The host of a remote rsync operand, or null for a local path. */
 function remoteOperandHost(operand: string): string | null {
 	if (operand.startsWith("rsync://")) return /^rsync:\/\/(?:[^@/]*@)?([^:/]*)/u.exec(operand)?.[1] ?? "";
 	return /^([^/:]*):/u.exec(operand)?.[1] ?? null;
 }
 
-/** scp and rsync: every remote operand on another host, every local one in a writable tree. */
+/** rsync: every remote operand on another host, every local one in a writable tree. */
 function copyOperandsStay(operands: ReadonlyArray<string>, places: OutwardPlaces): boolean {
 	return operands.every((operand) => {
 		const host = remoteOperandHost(operand);
-		return host !== null ? !localHost(host) : insideWritableRoots(operand, places);
+		return host !== null ? !hostRefused(host) : insideWritableRoots(operand, places);
 	});
 }
 
@@ -535,7 +576,7 @@ function copyOperandsStay(operands: ReadonlyArray<string>, places: OutwardPlaces
 function webUrlOffHost(text: string): boolean {
 	if (!/^https?:\/\//iu.test(text)) return false;
 	try {
-		return !localHost(new URL(text).hostname);
+		return !hostRefused(new URL(text).hostname);
 	} catch {
 		return false;
 	}
@@ -659,7 +700,9 @@ const SLURM_OPTIONS: ReadonlyMap<string, OptionList> = new Map([
 
 /**
  * Whether an outward CLI's argv may leave, by CLI. A CLI not named here runs inside on every line: its argv is
- * open-ended, it runs workspace code by design (terraform, pulumi, srun, salloc), or no line of it needs to leave.
+ * open-ended, it runs workspace code by design (terraform, pulumi, srun, salloc), it follows links both ways
+ * (scp; rsync without `-L` copies a link as a link), or no line of it needs to leave. npm and pnpm publish leave only
+ * with `--ignore-scripts`, since the lifecycle scripts come from a package.json the sandbox can edit.
  */
 const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: OutwardPlaces) => boolean> = new Map<
 	string,
@@ -673,14 +716,7 @@ const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: Ou
 			const host = operands?.[0];
 			if (host === undefined) return false;
 			const url = /^ssh:\/\/([^/]*?)(?::\d+)?\/?$/u.exec(host);
-			return !localHost(url !== null ? (url[1] ?? "") : host);
-		},
-	],
-	[
-		"scp",
-		(args, places) => {
-			const operands = listedOperands(args, SCP_OPTIONS, places);
-			return operands !== null && operands.length >= 2 && copyOperandsStay(operands, places);
+			return !hostRefused(url !== null ? (url[1] ?? "") : host);
 		},
 	],
 	[
@@ -706,11 +742,17 @@ const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: Ou
 	],
 	[
 		"npm",
-		(args, places) => args[0] === "publish" && listedOperands(args.slice(1), NPM_PUBLISH_OPTIONS, places)?.length === 0,
+		(args, places) =>
+			args[0] === "publish" &&
+			args.includes("--ignore-scripts") &&
+			listedOperands(args.slice(1), NPM_PUBLISH_OPTIONS, places)?.length === 0,
 	],
 	[
 		"pnpm",
-		(args, places) => args[0] === "publish" && listedOperands(args.slice(1), PNPM_PUBLISH_OPTIONS, places)?.length === 0,
+		(args, places) =>
+			args[0] === "publish" &&
+			args.includes("--ignore-scripts") &&
+			listedOperands(args.slice(1), PNPM_PUBLISH_OPTIONS, places)?.length === 0,
 	],
 	...listed("docker podman").map(
 		(name) =>
@@ -738,7 +780,7 @@ export function outwardLineLeaves(command: string, places: OutwardPlaces): boole
 	const words = literalSimpleCommand(command);
 	if (words === null) return false;
 	const [name = "", ...args] = words;
-	if (!inWorkspaceRepository(places.cwd, places) || plantedOnPath(places)) return false;
+	if (!inWorkspaceRepository(places.cwd, places, name === "git" || name === "gh") || plantedOnPath(places)) return false;
 	if (name === "git") return gitPushLeaves(args, places);
 	const leaves = OUTWARD_ARGV.get(name);
 	return leaves !== undefined && nameOutwardReason(name, args) !== null && leaves(args, places);

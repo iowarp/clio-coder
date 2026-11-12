@@ -6,7 +6,7 @@ import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from 
 import { storeReadRoots, storeReplacedBytes, storeWriteTarget } from "../../core/store-paths.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
-import { normalizeToolPath } from "../../tools/path-utils.js";
+import { expandPath, normalizeToolPath } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
@@ -693,9 +693,11 @@ const PATH_UTILS_TOOLS: ReadonlySet<string> = new Set([
 /**
  * The call as its tool reads it. The file tools drop a leading `@` and fold
  * Unicode spaces before they resolve a path, and they resolve it against the
- * process cwd whatever `cwd` the call carries; bash does the same spelling
- * change to its `cwd`. Judging the raw arguments judged a different path:
- * `@../x` read as a directory named `@..` inside the workspace, and a `cwd`
+ * process cwd whatever `cwd` the call carries; bash makes the same spelling
+ * change to its `cwd` and reads a leading `~` as the home directory, through
+ * the {@link expandPath} its tool calls. Judging the raw arguments judged a
+ * different path: `@../x` read as a directory named `@..` inside the
+ * workspace, a `cwd` of `~` as a folder named `~` in it, and a `cwd`
  * padded with missing levels pulled `../../x` back inside it. Idempotent, so
  * the policy engine normalizes once and classify can do it again.
  */
@@ -704,7 +706,7 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 	if (!args) return call;
 	if (call.tool === ToolNames.Bash) {
 		if (typeof args.cwd !== "string") return call;
-		const cwd = normalizeToolPath(args.cwd);
+		const cwd = expandPath(args.cwd);
 		return cwd === args.cwd ? call : { ...call, args: { ...args, cwd } };
 	}
 	if (!PATH_UTILS_TOOLS.has(call.tool)) return call;

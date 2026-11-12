@@ -258,7 +258,7 @@ test("the unconfined prompt says how an outward command leaves a required sandbo
 		yoloConfinement: "unconfined",
 	});
 	match(unconfined, /outward command[^.]*leaves it only on a line of its own with literal arguments/u);
-	match(unconfined, /each option spelled in full and apart/u);
+	match(unconfined, /only the options on that CLI's list, each spelled in full and apart/u);
 	match(unconfined, /or is refused where the host has no sandbox/u);
 	match(unconfined, /--body-file/u);
 });
