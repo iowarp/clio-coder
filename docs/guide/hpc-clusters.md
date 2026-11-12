@@ -183,8 +183,10 @@ scheduler commands run outside the shell sandbox behind an approval; see
 ## Scheduler clients
 
 Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch`, `qstat`, `bsub`,
-`flux` and the rest) run outside the shell sandbox behind the same approval as
-`ssh`: an ask at the default autonomy level, the safety judge at yolo. A script
+`flux` and the rest) run outside the shell sandbox behind the same review as
+`ssh`: at the default autonomy level the safety judge decides first and asks
+you when it has no verdict, contained yolo runs one only when your own message
+names it, and unconfined yolo runs it. A script
 that calls `sbatch` itself stays inside the sandbox and fails there, so submit
 from the command line the agent runs rather than from a wrapper script. A
 workspace script named like a client (`./sbatch`, `bin/ssh`) is not one and
