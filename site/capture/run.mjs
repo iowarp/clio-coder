@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
 import { compactEvents } from "./compact.mjs";
+import { plain, privacyHits, scanChunks } from "./privacy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = dirname(here);
@@ -72,48 +73,16 @@ function resolveClio(path) {
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", ...options });
 
-// Forbidden in anything published: machine and operator names, private
-// addresses, credential shapes, and the gateway behind the alias.
-function privacyHits(text) {
-	const secrets = [
-		process.env.LITELLM_API_KEY,
-		process.env.CLIO_CAPTURE_GATEWAY_URL,
-		process.env.CLIO_CAPTURE_GATEWAY_URL && new URL(process.env.CLIO_CAPTURE_GATEWAY_URL).host,
-		userInfo().username,
-		homedir(),
-		hostname(),
-		scratch,
-	].filter((value) => value && value.length >= 3);
-	const hits = secrets.filter((value) => text.includes(value)).map(() => "an operator secret or path");
-	const patterns = [
-		[/mini\//i, "a gateway model id"],
-		[/\b(?:blade|mini|dragon|zbook|dynamo)\b/i, "a host name"],
-		[/\b192\.168\.\d/, "a private address"],
-		[/\b10\.\d+\.\d+\.\d+\b/, "a private address"],
-		[/\b(?:sk|ghp|gho|github_pat|xox[bp]|AKIA)[-_][A-Za-z0-9_-]{12,}/, "a key shape"],
-		[/\/home\/(?!researcher\b)[a-z]/, "a home path"],
-		[
-			/\b[a-z][a-z0-9+.-]*:\/\/(?!(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|\b)|(?:[a-z0-9-]+\.)*iowarp\.ai\b|github\.com\/iowarp\b)\S+/i,
-			"a URL",
-		],
-	];
-	for (const [pattern, label] of patterns) {
-		const match = text.match(pattern);
-		if (match) hits.push(`${label} (${JSON.stringify(match[0].slice(0, 40))})`);
-	}
-	return hits;
-}
-
-// Strips terminal control sequences, enough for scanning the output text.
-const ESC = "\u001b";
-const BEL = "\u0007";
-const controls = [
-	new RegExp(`${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`, "g"),
-	new RegExp(`${ESC}\\[[0-9;?<>=!]*[ -/]*[@-~]`, "g"),
-	new RegExp(`${ESC}[PX^_][\\s\\S]*?${ESC}\\\\`, "g"),
-	new RegExp(`${ESC}[@-Z\\\\-_]`, "g"),
+// Operator values that must never appear in anything published.
+const secrets = [
+	process.env.LITELLM_API_KEY,
+	process.env.CLIO_CAPTURE_GATEWAY_URL,
+	process.env.CLIO_CAPTURE_GATEWAY_URL && new URL(process.env.CLIO_CAPTURE_GATEWAY_URL).host,
+	userInfo().username,
+	homedir(),
+	hostname(),
+	scratch,
 ];
-const plain = (text) => controls.reduce((value, pattern) => value.replace(pattern, ""), text);
 
 function prepareHome(dir, scenario) {
 	const home = join(dir, "home/researcher");
@@ -601,9 +570,20 @@ for (const scenario of scenarios) {
 		const text = transcript(session, scenario);
 		// Stills are rendered from this cast alone, so scanning it covers them too.
 		const hits = [
-			...privacyHits(plain(cast.events.map(([, , data]) => data).join(""))),
-			...privacyHits(cast.text),
-			...privacyHits(text),
+			...scanChunks(
+				cast.events.map(([, , data]) => plain(data)),
+				secrets,
+			),
+			...scanChunks(
+				cast.events.map(([, , data]) => data),
+				secrets,
+			),
+			// The cast file holds these events (some dropped by compaction), its header, and the markers.
+			...privacyHits(
+				[cast.text.slice(0, cast.text.indexOf("\n")), ...cast.markers.map((marker) => marker.label)].join("\n"),
+				secrets,
+			),
+			...privacyHits(text, secrets),
 		];
 		writeFileSync(join(outDir, `${scenario.id}.cast`), cast.text);
 		writeFileSync(join(outDir, `${scenario.id}.txt`), text);
@@ -659,7 +639,7 @@ for (const scenario of scenarios) {
 					: {}),
 			};
 		}
-		const registryHits = privacyHits(JSON.stringify(entries));
+		const registryHits = privacyHits(JSON.stringify(entries), secrets);
 		if (registryHits.length)
 			throw new Error(`${scenario.id}: privacy scan failed on the registry entry: ${registryHits.join("; ")}`);
 		writeFileSync(join(outDir, "captures.json"), `${JSON.stringify(entries, null, "\t")}\n`);
