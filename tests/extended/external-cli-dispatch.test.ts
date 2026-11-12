@@ -248,7 +248,7 @@ for (const event of [
 			stale: 1,
 			notCarried: 0,
 		});
-		deepStrictEqual(notices, []);
+		equal(notices.length, 0);
 		// Kept: the operator keeps Codex on its AGENTS.md, so the compiled rules ride beside it.
 		settings.fleet.keepPeerInstructionFiles = ["codex-cli"];
 		const kept = await run();
