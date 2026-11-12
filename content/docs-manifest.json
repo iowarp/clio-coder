@@ -12,7 +12,7 @@
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "5cffdb62d8a2244e9ead188a68808068c307c3b22553c43d958fb9077c9c6e39",
+      "sha256": "ac8aef9431ef99d1360304435d6204c6a150837cfd3dbf71ce564667c601c68e",
       "sourceSha256": "370cd3250c42204eab35deec86d42cf3b1793daaac00a894dd6289a928407940"
     },
     {
@@ -30,7 +30,7 @@
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "a888570fef5198b4560b09f871bbddd30abc55324dbd54b5ebdfc289cae6a0bf",
+      "sha256": "4ed74f0a7de010431eff2adad378969bece813db18e36fb32d81b7893f39852c",
       "sourceSha256": "d6457f623ce2edad599191d7088b3257e693561d2622249239b26c5ebfe84dde"
     },
     {
@@ -90,7 +90,7 @@
     {
       "path": "guide/interop.md",
       "source": "docs/guide/interop.md",
-      "sha256": "4c33288819e8cc1931e9c1962087535ec9d9515a70ab82ea288af989631d7c97",
+      "sha256": "d05896962bd7fcdbf31dc73ccfc1003b028d3619c8281ccac4274e325867e1ad",
       "sourceSha256": "01a2fbda2db84239da5b39d085230a9d6649b0e32281cbbc30cd0816623a0b52"
     },
     {
@@ -114,13 +114,13 @@
     {
       "path": "guide/quality-policy.md",
       "source": "docs/guide/quality-policy.md",
-      "sha256": "507da0be9e710a87cff4f9212af6ed737b3d9da02d8246158694c3ac2896f6ac",
+      "sha256": "be24b3b17aeb837e5bdff736253f1bdb5dabd7009344a5ec9a9b3e4b2b1bc503",
       "sourceSha256": "ce441564d4770511dcc54cf4674764b80b42c94d05ab53f8f3ce4eecbf711695"
     },
     {
       "path": "guide/research-and-arena.md",
       "source": "docs/guide/research-and-arena.md",
-      "sha256": "ad1b42ff6eac83b2cc13993f2ce1c3a3dfe7e862b2337ec7e0f735f0c040305c",
+      "sha256": "acff38080600dc767873e2cdeb0f24b6317b35e4da131303ecd2efd8b4546c5b",
       "sourceSha256": "595fe72065cb5be42e786e887697a0462d92c243d9634c2b38356ab4fb55f99f"
     },
     {

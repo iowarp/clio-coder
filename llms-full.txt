@@ -137,7 +137,7 @@ Start with a request that lets you assess its understanding of your project:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Then ask for a small change, name the files or behavior you care about, and tell Clio which checks should pass. Review the diff and recorded results before accepting the work.
+Then ask for a small change, name the files or behavior you care about, and tell CLIO Coder which checks should pass. Review the diff and recorded results before accepting the work.
 
 Follow the [desktop and terminal walkthrough](https://coder.iowarp.ai/tutorials/desktop-and-terminal.html), or try [a numerical change with seven tests](https://coder.iowarp.ai/tutorials/temperature-calibration.html).
 
@@ -150,7 +150,7 @@ Follow the [desktop and terminal walkthrough](https://coder.iowarp.ai/tutorials/
 
 ## When you need more detail
 
-These web guides cover the essentials. Detailed documentation ships with CLIO Coder; ask Clio to look up its bundled guide for the feature you're using. Each page also links to its full source guide.
+These web guides cover the essentials. Detailed documentation ships with CLIO Coder; ask it to look up the bundled guide for the feature you're using. Each page also links to its full source guide.
 
 ---
 
@@ -309,7 +309,7 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 
 ## A few keys to remember
 
-Alt+letter runs a Clio action, and **Ctrl+G** then the same letter runs it in any terminal, including ones that intercept Alt. The menu also lists a few actions with no Alt key; arrows and Enter work too, and Esc closes it. On an empty composer, `?` shows the keys; `/help` shows every binding, custom ones included.
+Alt+letter runs a CLIO Coder action, and **Ctrl+G** then the same letter runs it in any terminal, including ones that intercept Alt. The menu also lists a few actions with no Alt key; arrows and Enter work too, and Esc closes it. On an empty composer, `?` shows the keys; `/help` shows every binding, custom ones included.
 
 | Default key | Action |
 | --- | --- |
@@ -849,7 +849,7 @@ Use supported agent connections and editor integrations.
 
 ## Bring an installed coding agent
 
-CLIO Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what Clio can use:
+CLIO Coder can dispatch a focused task to a configured coding peer or open an interactive handoff pane. Install and authenticate that peer's own CLI first, then inspect what is available:
 
 ```sh
 clio-coder interop inspect --json
@@ -1117,7 +1117,7 @@ Choose the declared checks a change requires and inspect verification freshness.
 
 ## Tell CLIO Coder what “checked” means in your project
 
-A quality policy names the declared checks required when particular files change. Your repository supplies the standards; Clio records verification and assesses whether the results still match the current inputs.
+A quality policy names the declared checks required when particular files change. Your repository supplies the standards; CLIO Coder records verification and assesses whether the results still match the current inputs.
 
 At a Git workspace root, create `.clio-coder/quality.yaml`:
 
@@ -1131,7 +1131,7 @@ rules:
     allowLimitations: false
 ```
 
-This example assumes the root `package.json` declares a `test` script. Adapt the paths, lockfile, and check IDs to your project. Include configuration, fixtures, and helper files that affect the result. Clio does not create or modify this policy automatically.
+This example assumes the root `package.json` declares a `test` script. Adapt the paths, lockfile, and check IDs to your project. Include configuration, fixtures, and helper files that affect the result. CLIO Coder does not create or modify this policy automatically.
 
 ## Run the declared checks
 
@@ -1210,7 +1210,7 @@ Campaigns live in `.clio-coder/research/<id>/` and arena matches in `.clio-coder
 
 ## Compare models blind
 
-`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds an Elo rating once a model has 5 votes. Clio never grades a contender. The desktop app's Arena page runs the same commands.
+`clio-coder arena run` gives one prompt to 2 to 4 target/model pairs, each in its own worktree. `arena show` hides which model produced which answer until you vote with `arena vote`. `arena standings` counts the votes and adds an Elo rating once a model has 5 votes. CLIO Coder never grades a contender. The desktop app's Arena page runs the same commands.
 
 ```sh
 clio-coder arena run --check unit \
@@ -1695,7 +1695,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, point Clio to it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -1740,7 +1740,7 @@ The terminal combines the conversation, tool calls, permissions, and worker acti
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 
-During a turn, **Enter** queues a message that Clio reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
+During a turn, **Enter** queues a message that CLIO Coder reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
 
 On a permission card, **Enter** allows the call. **Esc** denies it, which skips that call and leaves the run going. **Alt+X** stops the turn.
 
@@ -1760,7 +1760,7 @@ You can keep any number of tasks open in one window. Launching again brings that
 
 Up to four turns run at once by default, set by `interface.guiTurnCapacity` from 1 to 16, and later ones wait for a slot. A task nobody has looked at for five minutes is paused with its conversation kept; choose **Resume session** to continue it.
 
-With the default **Ask first** setting, Clio reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
+With the default **Ask first** setting, CLIO Coder reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
 
 The same control can be switched to **Run without asking** for one task after a second confirmation. A turn that changed files ends with a card that opens the changes for review. Type `/` in the composer to list session commands.
 
@@ -2210,7 +2210,7 @@ These reference temperatures cover ordinary values and the physical lower bounda
 | Boiling point | 100 °C | 373.15 K | 212 °F |
 | Absolute zero | −273.15 °C | 0 K | −459.67 °F |
 
-When CLIO Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. Clio changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
+When CLIO Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. The agent changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
 
 ## Run a declared check
 
@@ -2218,7 +2218,7 @@ The example’s private `package.json` declares its test command. With the archi
 
 > Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.
 
-Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and Clio read the test file for the table. Naming the file keeps a fast model from searching the project for it.
+Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
 ![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](https://coder.iowarp.ai/assets/tui-verify.webp)
 
@@ -2324,7 +2324,7 @@ The model list says whether it is live, cached, or the provider's catalog. Setup
 
 ## Ask one question you can check
 
-**Ask Clio**
+**Ask CLIO Coder**
 
 > Explain this project's build and test entry points. Do not change files. Identify one check I could run to confirm your explanation.
 
@@ -2356,7 +2356,7 @@ Vision support depends on the model and the route. A model advertised as multimo
 
 **Know where information goes**
 
-- Clio runs locally, but a configured cloud model receives the input sent to that provider.
+- CLIO Coder runs locally, but a configured cloud model receives the input sent to that provider.
 - Local inference keeps inference on the selected server; tools, peers, plugins, and commands can still make network requests.
 - CLIO Coder is Apache 2.0 software. Inference hardware, provider usage, and subscriptions can still cost money.
 
@@ -2393,7 +2393,7 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-The first command reports what Clio can find; the second configures interoperability. In a terminal conversation, `/interop` shows the available connections. The [interoperability guide](https://coder.iowarp.ai/docs/guide/interop.html) covers the mode for each peer.
+The first command reports what CLIO Coder can find; the second configures interoperability. In a terminal conversation, `/interop` shows the available connections. The [interoperability guide](https://coder.iowarp.ai/docs/guide/interop.html) covers the mode for each peer.
 
 ![Terminal interop view listing detected coding agents, with the configuration entry that connecting Claude Code would add.](https://coder.iowarp.ai/assets/guides/tui-interop.webp)
 
@@ -2439,7 +2439,7 @@ Each peer enforces read-only through its own mechanism. Check the mode you selec
 | Pi | Read tools |
 | OpenCode | Refused before launch |
 
-ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. CLIO Coder's own session is not an operating-system sandbox. Native workers run their commands in one when it is available, and external peers keep their own authority.
+ACP peers may own their tools. Explicitly permitting peer-owned tools changes what CLIO Coder can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. CLIO Coder's own session is not an operating-system sandbox. Native workers run their commands in one when it is available, and external peers keep their own authority.
 
 ## Separate changes with a worktree
 
@@ -2598,7 +2598,7 @@ Recorded verification is evidence about named checks and named inputs. It is not
 
 The verifier derives checks from supported build systems, project scripts, and CI definitions. When it cannot resolve a requested check, it should not substitute an arbitrary command and call it a pass.
 
-**Ask Clio**
+**Ask CLIO Coder**
 
 > Run this project's test check through verify. Report its exit status, failures, and anything you could not check.
 
@@ -2833,7 +2833,7 @@ This guide describes the v0.6.8 fleet. Remote workers use your existing SSH acce
 ## Before you start
 
 - Noninteractive SSH access to a machine you may use for work.
-- CLIO Coder on the node at exactly your client's version. To let Clio install it, the node needs Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
+- CLIO Coder on the node at exactly your client's version. For an automatic install, the node needs Node.js 22.19 or newer and npm on its noninteractive SSH PATH.
 - The project at the same absolute path on the client and node, using shared storage or matching clean Git checkouts.
 - A model route the worker can reach from the node.
 
@@ -2910,7 +2910,7 @@ Choose one supported arrangement:
 | Shared storage at the same absolute path | A transient client-side file challenge is visible from the node. | Read-only and mutating workers use that storage. |
 | Independent checkout at the same absolute path | Both trees are clean, have the same Git HEAD and matching root history. | Read-only work; mutations through an isolated task worktree and SSH commit return. |
 
-Clio does not clone an arbitrary repository, map different paths, install project dependencies or stage datasets. Prepare those yourself. For independent checkouts, update both to the same clean baseline before testing.
+CLIO Coder does not clone an arbitrary repository, map different paths, install project dependencies or stage datasets. Prepare those yourself. For independent checkouts, update both to the same clean baseline before testing.
 
 ### Observe first
 
@@ -2951,7 +2951,7 @@ Use a read-only Scout to inspect the README and explain this project's test comm
 Before dispatching, ask me once where to run it, offering local and suitable verified fleet nodes.
 ```
 
-When a verified node suits substantial work and no preference or pin exists, Clio asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, Clio can pin it directly.
+When a verified node suits substantial work and no preference or pin exists, CLIO Coder asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, it can be pinned directly.
 
 A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
@@ -2961,7 +2961,7 @@ Remote workers run under their own permits. The safety judge does not answer for
 
 An editing dispatch to an independent node checkout must use `worktree: true`. Ask CLIO Coder to use an isolated task worktree, name the files the worker may change and declare the host checks you want before application.
 
-Clio creates a matching branch and worktree on the node at the approved baseline. After the worker exits, Clio commits its edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
+A matching branch and worktree are created on the node at the approved baseline. After the worker exits, CLIO Coder commits the worker's edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
 
 The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
 
