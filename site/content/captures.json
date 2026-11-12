@@ -44,28 +44,28 @@
 		"tui-view-result": {
 			"image": "assets/guides/tui-view-result.webp",
 			"original": "assets/guides/tui-view-result.png",
-			"width": 2240,
-			"height": 832,
+			"width": 2268,
+			"height": 784,
 			"label": "/view",
-			"alt": "Terminal View dock with the transcript list on the left and, on the right, the recorded verify call: check test, its working directory, exit 0, and the passing test lines.",
-			"caption": "/view keeps the recorded check, its working directory, and its output.",
+			"alt": "Terminal View dock with the session's records on the left and the checked test row selected; the preview shows check test, its working directory examples/temperature-calibration, exit 0, the test command, and the passing test lines.",
+			"caption": "/view: the recorded check, with its working directory, exit status and output.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. /view after the verify turn; the checked-test row selected. Cropped to the View dock."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-view-result\" marker, rows 26-43, rendered by the site's player at 2x."
 		},
 		"tui-approval-effect": {
 			"image": "assets/guides/tui-approval-effect.webp",
 			"original": "assets/guides/tui-approval-effect.png",
-			"width": 2240,
-			"height": 832,
+			"width": 2268,
+			"height": 784,
 			"label": "Approval",
-			"alt": "Terminal approval card for git push origin main with an Effect line reading Publishes to origin, and the allow, inspect, stop, and deny keys.",
-			"caption": "A shell approval card names the command and its effect before anything runs.",
+			"alt": "Terminal approval card for git push origin main at default autonomy: an outward-consequence header, the exact command, an effect row reading Publishes to origin, undo not guaranteed, the task that asked for it, the timeout notice, and the allow, deny and stop keys.",
+			"caption": "With the safety judge off, an outward command such as git push comes to you; the effect row says what it would change.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. Request: Push main to origin. The project has a local bare repository as origin. Bottom 20 rows while the call was parked."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-approval-effect\" marker, rows 26-43, rendered by the site's player at 2x."
 		},
 		"tui-context": {
 			"image": "assets/guides/tui-context.webp",
@@ -125,38 +125,12 @@
 			"width": 2268,
 			"height": 704,
 			"label": "Route",
-			"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind each.",
-			"caption": "Guided setup asks what you have and lists the providers behind each route.",
+			"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind the first three and a path or https address for the setup file.",
+			"caption": "Guided setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file.",
 			"interface": "Terminal",
 			"version": "0.8.0-rc.1",
 			"capturedAt": "2026-11-12",
 			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-source) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. The sandbox has its own network namespace with only a loopback interface. Still at the \"tui-configure-source\" marker, rows 1-16, rendered by the site's player at 2x."
-		},
-		"tui-configure-models": {
-			"image": "assets/guides/tui-configure-models.webp",
-			"original": "assets/guides/tui-configure-models.png",
-			"width": 2240,
-			"height": 1174,
-			"label": "Models",
-			"alt": "Guided setup after choosing Lemonade at 127.0.0.1:13305: the server is reachable and eleven models are listed live.",
-			"caption": "The model list, read live from the local app just now.",
-			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Guided setup: An app on this computer, Lemonade, no key, address 127.0.0.1:13305."
-		},
-		"tui-configure-review": {
-			"image": "assets/guides/tui-configure-review.webp",
-			"original": "assets/guides/tui-configure-review.png",
-			"width": 2240,
-			"height": 1212,
-			"label": "Review",
-			"alt": "Guided setup review listing the connection, model, reachable endpoint, eleven live models, and that no generation or tool tests ran, with Save target selected.",
-			"caption": "The review states what CLIO Coder could verify and what it did not test.",
-			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Same path; Gemma-4-26B-A4B-it-GGUF selected; the optional worker connection declined. Not saved."
 		},
 		"tui-library-skill-tdd": {
 			"image": "assets/guides/tui-library-skill-tdd.webp",
@@ -451,15 +425,15 @@
 		"tui-verify-table": {
 			"image": "assets/guides/tui-verify-table.webp",
 			"original": "assets/guides/tui-verify-table.png",
-			"width": 2240,
-			"height": 1668,
+			"width": 2268,
+			"height": 1868,
 			"label": "Verify",
-			"alt": "Terminal conversation in which CLIO Coder runs the declared test check through verify with exit 0, reads the test file, and shows the three reference temperatures as a table.",
-			"caption": "A declared test check through verify, then the reference temperatures from the test file.",
+			"alt": "Terminal turn for the verify request: CLIO Coder runs the declared test check in examples/temperature-calibration with exit 0, reads calibration.test.mjs, reports all seven tests passing, and shows freezing point, boiling point and absolute zero in Celsius, Kelvin and Fahrenheit as a table.",
+			"caption": "The declared test check through verify, exit 0, then the reference temperatures read from the test file.",
 			"interface": "Terminal",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-01",
-			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. Request typed in a new session; the full screen at the end of the turn."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify-table\" marker, rendered by the site's player at 2x."
 		},
 		"cast-first-launch": {
 			"image": "assets/guides/cast-first-launch.webp",
@@ -479,6 +453,45 @@
 			"rows": 36,
 			"duration": 15.4,
 			"posterAt": 2.431
+		},
+		"tui-settings-workers": {
+			"image": "assets/guides/tui-settings-workers.webp",
+			"original": "assets/guides/tui-settings-workers.png",
+			"width": 2268,
+			"height": 784,
+			"label": "Workers",
+			"alt": "Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
+			"caption": "Settings: the default worker's connection, model and thinking level, under Workers.",
+			"interface": "Terminal",
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-workers\" marker, rows 18-35, rendered by the site's player at 2x."
+		},
+		"tui-configure-detected": {
+			"image": "assets/guides/tui-configure-detected.webp",
+			"original": "assets/guides/tui-configure-detected.png",
+			"width": 2268,
+			"height": 664,
+			"label": "Detected",
+			"alt": "Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.",
+			"caption": "When setup finds a model server it offers it first; Set up something else leads to the routes.",
+			"interface": "Terminal",
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-detected\" marker, rows 1-15, rendered by the site's player at 2x."
+		},
+		"tui-configure-saved": {
+			"image": "assets/guides/tui-configure-saved.webp",
+			"original": "assets/guides/tui-configure-saved.png",
+			"width": 2268,
+			"height": 1304,
+			"label": "Saved",
+			"alt": "Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.",
+			"caption": "A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails.",
+			"interface": "Terminal",
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-saved\" marker, rows 1-31, rendered by the site's player at 2x."
 		}
 	}
 }

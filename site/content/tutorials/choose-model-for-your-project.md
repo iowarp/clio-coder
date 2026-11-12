@@ -57,7 +57,7 @@ Answer what you have, then provide the key, sign-in, or server address it asks f
 Setup sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults, and `/model` changes the model later.
 :::
 
-::: capture tui-configure-source tui-configure-models tui-configure-review
+::: capture tui-configure-detected tui-configure-source tui-configure-saved
 Guided setup in the terminal, from the route to the review.
 :::
 
@@ -80,7 +80,7 @@ The model answering you need not handle every delegated task. The terminal `/set
 
 `clio-coder configure --settings` opens the shell menu, which uses eight sections instead: the conversation model is under **Chat** and worker defaults under **Fleet**. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
-::: capture tui-settings-models tui-settings-fleet
+::: capture tui-settings-models tui-settings-workers
 Terminal settings keep the conversation model and the worker defaults apart.
 :::
 

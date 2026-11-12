@@ -29,26 +29,26 @@
 			"height": 630,
 			"sha256": "5097e54b28a94e7e63e30570b91745e87e2f7ccae65256877b1f12a8c24464dd"
 		},
-		"tui-configure-review": {
-			"source": "assets/guides/tui-configure-review.png",
-			"path": "assets/social/tui-configure-review.png",
+		"tui-configure-saved": {
+			"source": "assets/guides/tui-configure-saved.png",
+			"path": "assets/social/tui-configure-saved.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "0e7a685ed6b315d46769e4c252fd50db034e2324ce5c4d53da4456f109eb2f0d"
+			"sha256": "fedfea1c0a811cc77cc314f8fb3ecace5b36814dbf5d78f45f87ee8e1c139968"
 		},
 		"tui-context": {
 			"source": "assets/guides/tui-context.png",
 			"path": "assets/social/tui-context.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "962aef0a0095ce1e011977f97b5ce08f2185b9d3115c43ea3615bd01fa808afc"
+			"sha256": "18cab25f81b1458ee01703638d2199545fb340358e7af1708a2cbf5f133537c0"
 		},
 		"tui-interop": {
 			"source": "assets/guides/tui-interop.png",
 			"path": "assets/social/tui-interop.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "a89d295f4f932de791ca7d85938be22691e0c213ee6c9a46002f047d5f4a76ff"
+			"sha256": "ac07ec599aae9122946c75e7510e5504d3b57f2cbc58ac5ce8eb99f0be9a8f37"
 		},
 		"tui-library-installed": {
 			"source": "assets/guides/tui-library-installed.png",
@@ -76,7 +76,7 @@
 			"path": "assets/social/tui-view-result.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "065fc0faeefa6b8ca887b574372e4ecd53ce2485bfc95c015929f164aee40c60"
+			"sha256": "7df439e9faa52bad448858502e68f415484c92bb3a40df73fe24489cd123da4c"
 		}
 	}
 }

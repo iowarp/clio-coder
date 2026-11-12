@@ -114,7 +114,7 @@
     "time": "6 min",
     "author": "The CLIO Coder team",
     "source": "choose-model-for-your-project.md",
-    "cover": "tui-configure-review",
+    "cover": "tui-configure-saved",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [

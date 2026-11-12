@@ -794,7 +794,11 @@
 				{
 					"wait": "Default fleet connection",
 					"timeout": 15,
-					"pause": 0.5
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-settings-workers",
+					"rows": [18, 35]
 				},
 				{
 					"keys": ["Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down"],
@@ -1023,6 +1027,11 @@
 					"alt": "Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.",
 					"caption": "Settings: the model answering you, under Models."
 				},
+				"tui-settings-workers": {
+					"label": "Workers",
+					"alt": "Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
+					"caption": "Settings: the default worker's connection, model and thinking level, under Workers."
+				},
 				"tui-settings-fleet": {
 					"label": "Workers",
 					"alt": "Terminal Settings open on Workers with Add SSH node selected under Machines: automatic routing, the ready local node, Tailscale discovery, workers at once, and fleet retry and tool limits.",
@@ -1115,8 +1124,295 @@
 			"shots": {
 				"tui-configure-source": {
 					"label": "Route",
-					"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind each.",
-					"caption": "Guided setup asks what you have and lists the providers behind each route."
+					"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind the first three and a path or https address for the setup file.",
+					"caption": "Guided setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file."
+				}
+			}
+		},
+		{
+			"id": "stills-configure-gateway",
+			"summary": "guided setup on a fresh profile with the model gateway reachable: the detected offer, then the manual server route to a saved connection",
+			"title": "Guided setup with a model server",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "❯ Guided setup",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Set up something else",
+					"timeout": 30,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-detected",
+					"rows": [1, 15]
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "What do you have\\?",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "server's address",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"type": "127.0.0.1:4000",
+					"delay": 60
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "└  Done",
+					"timeout": 120,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-saved",
+					"rows": [1, 31]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-configure-detected": {
+					"label": "Detected",
+					"alt": "Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.",
+					"caption": "When setup finds a model server it offers it first; Set up something else leads to the routes."
+				},
+				"tui-configure-saved": {
+					"label": "Saved",
+					"alt": "Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.",
+					"caption": "A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails."
+				}
+			}
+		},
+		{
+			"id": "stills-verify",
+			"summary": "a live turn in a project with the temperature-calibration example under examples/: verify and a table, the check in /view, then an approval card for git push, denied",
+			"title": "Verify, view and approval stills",
+			"live": true,
+			"stillsOnly": true,
+			"profile": "configured",
+			"settings": ["safety: { judge: { enabled: false } }"],
+			"repo": "lab-tools",
+			"fixture": "calibration-project",
+			"remote": true,
+			"cols": 120,
+			"rows": 44,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.",
+					"delay": 15
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "Absolute zero[^\\n]*459\\.67[^\\n]*\\n[^\\n]*└",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 0.8
+				},
+				{
+					"shot": "tui-verify-table"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"type": "/view",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "List ·",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"seek": "❯ \\$ checked test"
+				},
+				{
+					"wait": "│ check › test",
+					"timeout": 15,
+					"pause": 1.2
+				},
+				{
+					"shot": "tui-view-result",
+					"rows": [26, 43]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "List ·",
+					"timeout": 10,
+					"pause": 0.8
+				},
+				{
+					"type": "Run git push origin main.",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "▌ Run git push[\\s\\S]*✓ Done ·",
+					"approve": "\\[Esc\\]\\s+deny",
+					"answer": "Escape",
+					"approveShot": "tui-approval-effect",
+					"timeout": 300,
+					"pause": 2,
+					"approveRows": [26, 43]
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-verify-table": {
+					"label": "Verify",
+					"alt": "Terminal turn for the verify request: CLIO Coder runs the declared test check in examples/temperature-calibration with exit 0, reads calibration.test.mjs, reports all seven tests passing, and shows freezing point, boiling point and absolute zero in Celsius, Kelvin and Fahrenheit as a table.",
+					"caption": "The declared test check through verify, exit 0, then the reference temperatures read from the test file."
+				},
+				"tui-view-result": {
+					"label": "/view",
+					"alt": "Terminal View dock with the session's records on the left and the checked test row selected; the preview shows check test, its working directory examples/temperature-calibration, exit 0, the test command, and the passing test lines.",
+					"caption": "/view: the recorded check, with its working directory, exit status and output."
+				},
+				"tui-approval-effect": {
+					"label": "Approval",
+					"alt": "Terminal approval card for git push origin main at default autonomy: an outward-consequence header, the exact command, an effect row reading Publishes to origin, undo not guaranteed, the task that asked for it, the timeout notice, and the allow, deny and stop keys.",
+					"caption": "With the safety judge off, an outward command such as git push comes to you; the effect row says what it would change."
 				}
 			}
 		}
