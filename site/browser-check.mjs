@@ -293,10 +293,26 @@ try {
 	await themeContext.close();
 	// Recordings load the player only on Play, never advance on their own under
 	// reduced motion, and run under the page policy without errors.
+	// Recordings sit on guide pages, so every built page is a candidate.
+	const sitemap = await (await fetch(`${values.url}/sitemap.xml`)).text();
+	const built = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => new URL(loc).pathname);
+	const castPages = [];
+	for (const path of new Set([...primary, ...built])) {
+		const html = await (await fetch(`${values.url}${path}`)).text();
+		if (html.includes(" data-cast=")) castPages.push(path);
+		else assert.ok(!html.includes("/assets/player/"), `${path} references the player without a recording`);
+	}
+	const casts = Object.values(JSON.parse(await readFile(join(site, "content/captures.json"), "utf8")).captures).filter(
+		(item) => item.cast,
+	);
+	assert.ok(
+		!casts.length || castPages.length,
+		`captures.json has ${casts.length} recordings, but no built page embeds one`,
+	);
 	let recordings = 0;
 	for (const reducedMotion of ["reduce", "no-preference"]) {
 		const castContext = await browser.newContext({ viewport: { width: 1024, height: 900 }, reducedMotion });
-		for (const path of primary) {
+		for (const path of castPages) {
 			const castPage = await castContext.newPage();
 			const errors = [];
 			const player = [];
@@ -309,11 +325,7 @@ try {
 			});
 			await castPage.goto(`${values.url}${path}?__static=1`, { waitUntil: "load" });
 			const figures = castPage.locator("figure[data-cast]");
-			if (!(await figures.count())) {
-				assert.deepEqual(player, [], `${path} loads no player`);
-				await castPage.close();
-				continue;
-			}
+			assert.ok(await figures.count(), `${path} embeds a recording`);
 			recordings++;
 			assert.deepEqual(player, [], `${path} loads the player only on Play`);
 			await figures.first().locator(".cast-play").click();
