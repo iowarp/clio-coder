@@ -17,7 +17,7 @@ uv tool install clio-kit
 clio-kit mcp-server slurm
 ```
 
-The second command lets clio-kit prepare its private runtime, which can take longer than the 15-second bound on a first launch. Stop it with Ctrl-C once it is running.
+The second command lets clio-kit prepare its private runtime, which can take longer than the 15 seconds CLIO Coder allows a server to start on a first launch. Stop it with Ctrl-C once it is running.
 
 ## Declare it
 
@@ -32,7 +32,7 @@ servers:
     timeoutMs: 120000
 ```
 
-Keep the id `slurm`. The skill expects it, and it is what switches on the confirmation for allocations.
+Keep the id `slurm`. The `slurm-jobs` skill you install below expects it, and it is what switches on the confirmation for allocations.
 
 ```sh
 clio-coder doctor --verbose
@@ -50,6 +50,9 @@ INFO scheduler commands     sbatch is on PATH: scheduler commands run outside th
 
 The server row names the `mcp.yaml` that declares it and its trust. The scheduler row means only that `sbatch` and `squeue` answered `--version`; it does not contact the controller. None of these rows fails the check.
 
+::: capture cli-slurm-doctor
+:::
+
 ## Install the skill
 
 ```sh
@@ -57,16 +60,13 @@ clio-coder library install skill:slurm-jobs --project --dry-run
 clio-coder library install skill:slurm-jobs --project
 ```
 
-::: capture cli-slurm-doctor
-:::
-
 ## Submit one job
 
 ::: prompt Example
 /skill slurm-jobs Run scripts/smoke.sbatch on the debug partition with 2 cores for 5 minutes. Report the exit code and the last lines of stdout.
 :::
 
-The skill checks that the server is declared, looks at the partition, and submits once. The submission is confirmed before the job reaches the scheduler. When the safety judge has no verdict, a permission card appears, so read the script, cores, memory, and time limit before you press Enter.
+The skill checks that the server is declared, looks at the partition, and submits once. The submission is confirmed before the job reaches the scheduler. When the safety judge has no verdict, an approval card appears, so read the script, cores, memory, and time limit before you press Enter.
 
 The skill then polls with a growing wait until the job reaches a terminal state, and fetches bounded output.
 
@@ -96,6 +96,7 @@ Ask the agent to cancel the job by id. Cancelling is confirmed the same way, and
 :::
 
 ::: next
+- [Pre-register a benchmark before you measure](/tutorials/pre-register-a-benchmark.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)
 - [What would make a scientist trust an agent's change?](/research/scientific-and-hpc-workflows.html)

@@ -46,7 +46,7 @@ Tool calls that really run, followed by an answer that matches your project. If 
 
 A local chat route does not by itself make the whole session local.
 
-- Memory uses the chat route when no memory route is set, so it stays local unless you name another. Compaction does the same unless `context.compaction.model` names another.
+- Memory uses the chat route when no memory connection is set, so it stays local unless you name another. Compaction does the same unless `context.compaction.model` names another.
 - System One is off by default. A hosted route would send data out.
 - Web tools, MCP servers, plugins, peers, and shell commands can still make network requests.
 

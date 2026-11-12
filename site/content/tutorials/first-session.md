@@ -53,7 +53,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -70,3 +70,9 @@ In the terminal, `/help` lists commands, `/model` selects a model, `/settings` o
 When you quit, CLIO Coder prints a summary of the session and a `/resume <id>` line. Start `clio-coder` again and type that line to return to the conversation, or use `/resume` alone to pick from a list.
 
 The [commands guide](/docs/guide/commands-and-modes.html) covers shortcuts and session controls. The [tools guide](/docs/guide/tool-usage.html) explains the repository tools and their permissions.
+
+::: next
+- [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
+- [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
+- [Commands and modes](/docs/guide/commands-and-modes.html)
+:::

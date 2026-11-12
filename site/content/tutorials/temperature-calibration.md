@@ -34,7 +34,7 @@ The example’s private `package.json` declares its test command. With the archi
 
 > Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.
 
-Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
+If an approval card appears, read the command before allowing it. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
 ![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
 
@@ -52,3 +52,9 @@ In the terminal, open `/view` and select the `checked test` row. The preview sho
 :::
 
 Passing tests establish the behavior covered by those tests. This small example does not establish the scientific validity of a larger application. For project-specific requirements, see [quality policies](/docs/guide/quality-policy.html) and [tool usage](/docs/guide/tool-usage.html).
+
+::: next
+- [Submit a Slurm job through CLIO Coder](/tutorials/submit-a-slurm-job.html)
+- [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
+- [Quality policy guide](/docs/guide/quality-policy.html)
+:::

@@ -7,7 +7,7 @@ Recorded verification is evidence about named checks and named inputs. It is not
 ::: needs
 - A Git repository with a test or build check it already declares, such as a package script or a CI step.
 - CLIO Coder with a model that supports tool calling.
-- Time to read the resolved command before you approve it.
+- Time to read the resolved command each check runs.
 :::
 
 ## Start with checks the project already owns
@@ -22,9 +22,9 @@ Run this project's test check through verify. Report its exit status, failures, 
 The same request in the temperature-calibration example, with the check's working directory named.
 :::
 
-Read the resolved command and working directory before approving execution. `verify` is subject to command admission: naming a check does not grant permission to run it, and a denied command is not a validation result.
+Read the resolved command and working directory in the tool activity. A recognized test runner runs without a card, and other commands may ask first. `verify` is subject to command admission: naming a check does not grant permission to run it, and a denied command is not a validation result.
 
-When a command needs your approval, the terminal card names the tool and the exact command. Its **effect** row says in plain words what a recognized command changes, and warns when Clio cannot classify the command at all.
+When a command does ask, the terminal approval card names the tool and the exact command. Its **effect** row says in plain words what a recognized command changes, and warns when CLIO Coder cannot classify the command at all.
 
 ::: capture tui-approval-effect
 :::
@@ -95,6 +95,7 @@ The actual check, its result, and any missing evidence. A sealed run record is a
 :::
 
 ::: next
+- [Coordinate the coding agents you already use](/tutorials/coordinate-your-coding-agents.html)
 - [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
 - [Quality policy guide](/docs/guide/quality-policy.html)
 - [Install CLIO Coder](/#start)

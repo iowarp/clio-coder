@@ -80,6 +80,7 @@ Figures labelled by provenance, and a `verify` result that names any gap. A clea
 :::
 
 ::: next
+- [Keep a long coding task on track](/tutorials/keep-long-coding-tasks-on-track.html)
 - [Run it unattended within limits](/tutorials/run-it-unattended-within-limits.html)
 - [Check your installation](/docs/guide/doctor.html)
 :::

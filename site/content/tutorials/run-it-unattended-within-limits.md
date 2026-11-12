@@ -39,7 +39,7 @@ The stream opens with a `session` header carrying its schema version and ends wi
 
 ### Walk away from an open session
 
-In the terminal, an unanswered permission card is denied after `safety.unattendedAfterSeconds` (300 by default) and the turn continues. A question takes its recommended option. Any key stops the countdown. When you return, `/decisions` shows what was chosen, and the exit summary counts it on an `Unattended` line.
+In the terminal, an unanswered approval card is denied after `safety.unattendedAfterSeconds` (300 by default) and the turn continues. A question takes its recommended option. Any key stops the countdown. When you return, `/decisions` shows what was chosen, and the exit summary counts it on an `Unattended` line.
 
 ### Schedule turns while idle
 

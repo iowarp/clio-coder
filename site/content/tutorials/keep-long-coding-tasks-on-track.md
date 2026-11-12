@@ -48,7 +48,7 @@ Read the continuation. Compaction reduces history; it does not prove that the mo
 /handoff Fix the empty-input parser bug: keep the failing case in tests/parser.test.ts, the chosen approach of validating before tokenizing, and rerun the parser tests before finishing.
 :::
 
-Handoffs are bound to the active branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing. To return to a session after quitting, type the `/resume <id>` line from the exit summary; a prefix works when it matches one session.
+Handoffs are bound to the active conversation branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing. To return to a session after quitting, type the `/resume <id>` line from the exit summary; a prefix works when it matches one session.
 
 ## Recover an interrupted transition explicitly
 

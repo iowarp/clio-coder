@@ -25,7 +25,7 @@ What CLIO Coder detected on a machine with three peer CLIs installed but not sig
 
 ## Choose managed work or an interactive handoff
 
-The three commands answer different needs. Pick by whether you want a recorded run or a place to work with the peer yourself.
+The three commands answer different needs. Pick by whether you want a recorded run or a place to work with the peer yourself. An ACP peer is one CLIO Coder drives over the Agent Client Protocol; a headless target runs the peer's own CLI once for the task.
 
 ::: compare
 | Command | What happens | What CLIO Coder records |
@@ -35,7 +35,7 @@ The three commands answer different needs. Pick by whether you want a recorded r
 | `/panes peer <agent> [brief]` | A pane opens beside the conversation for you to work in | No run record |
 :::
 
-The [panes guide](/tutorials/panes-and-docks.html) covers the pane host. Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
+The [panes tutorial](/tutorials/panes-and-docks.html) covers the pane host. Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
 
 ## Give one bounded assignment
 
@@ -47,7 +47,7 @@ That last sentence is a task instruction, not an enforced boundary. For an enfor
 
 ## Keep worker authority separate
 
-A native worker inherits the main session's level inside its own permit and OS sandbox. At contained `yolo`, which is yolo's default, workers are dispatched as at `default`; at unconfined `yolo` a mediated worker runs the yolo way within its dispatch scope. A read-only worker stays at `default`.
+A native worker, one of CLIO Coder's own agents, inherits the main session's level inside its own permit and OS sandbox. At contained `yolo`, which is yolo's default, workers are dispatched as at `default`; at unconfined `yolo` a mediated worker runs the yolo way within its dispatch scope. A read-only worker stays at `default`.
 
 Managed peer dispatches run at default permissions, even when the main session uses `yolo`, and each external agent runs its own tool loop.
 
@@ -86,7 +86,7 @@ When comparing agents, give them the same task and evaluate the actual output. R
 :::
 
 ::: next
-- [Your first session with CLIO Coder](/tutorials/first-session.html)
+- [Run it unattended within limits](/tutorials/run-it-unattended-within-limits.html)
 - [Project quality checks](/docs/guide/quality-policy.html)
 - [Interoperability guide](/docs/guide/interop.html)
 :::

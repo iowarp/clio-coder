@@ -122,7 +122,7 @@ Use a read-only Scout to inspect the README and explain this project's test comm
 Before dispatching, ask me once where to run it, offering local and suitable verified fleet nodes.
 ```
 
-When a verified node suits substantial work and no preference or pin exists, CLIO Coder asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, it can be pinned directly.
+Scout is CLIO Coder's built-in read-only agent for finding your way around a codebase. When a verified node suits substantial work and no preference or pin exists, CLIO Coder asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, it can be pinned directly.
 
 A **Standing worker node preference**, under **Machines** in the Workers area of `/settings`, persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 

@@ -68,7 +68,7 @@ Contained work runs without a card, and `/rewind` lists a snapshot from before t
 
 ## What still reaches you
 
-Some decisions never go to the judge: `ask_user` questions, CLIO Coder's own settings, a plan-scale dispatch, and a model edit of project settings. A permission card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and `/decisions` shows what was chosen for you.
+Some decisions never go to the judge: `ask_user` questions, CLIO Coder's own settings, a plan-scale dispatch, and a model edit of project settings. An approval card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and `/decisions` shows what was chosen for you.
 
 ## When to use yolo
 
@@ -105,7 +105,7 @@ To keep unconfined yolo inside the sandbox, also set `safety.sandbox: required`.
 :::
 
 ::: next
+- [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
 - [Tools and permissions](/docs/guide/tool-usage.html)
 - [Keep a long coding task on track](/tutorials/keep-long-coding-tasks-on-track.html)
-- [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
 :::

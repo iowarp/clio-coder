@@ -72,7 +72,7 @@ A candidate is kept only when the median improves by at least 5% (the default) w
 :::
 
 ::: next
-- [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
+- [Work from a laptop with remote workers](/tutorials/work-from-a-laptop-with-remote-workers.html)
 - [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
 - [Research campaigns and arena](/docs/guide/research-and-arena.html)
 - [What would make a scientist trust an agent's change?](/research/scientific-and-hpc-workflows.html)
