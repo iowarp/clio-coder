@@ -7,7 +7,7 @@ import { saveControl } from "../../src/cli/configure-controls.js";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { getAtPath } from "../../src/core/session-routing.js";
-import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
+import { applyControlValue, orderAreaEntries, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
 import { renderYamlPreservingLayout } from "../../src/core/yaml-preserve.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { buildSettingItems, buildSettingsSections, SettingsCenter } from "../../src/interactive/overlays/settings.js";
@@ -197,3 +197,33 @@ for (const [seconds, shown] of [
 		);
 	});
 }
+
+test("/settings ranks each row once to order an area and follows rows refreshed in place", () => {
+	const rows = SETTING_CONTROLS.map((control) => ({ id: control.path, path: control.path }));
+	let ranked = 0;
+	const ordered = orderAreaEntries("advanced", rows, (row) => {
+		ranked += 1;
+		return row;
+	});
+	// Ranking inside the comparator cost every /settings frame about 110 ms.
+	assert.equal(ranked, rows.length, "one rank per row, not two per comparison");
+	assert.deepEqual(
+		orderAreaEntries("advanced", [...rows].reverse(), (row) => row),
+		ordered,
+	);
+
+	const items = buildSettingItems(fixture());
+	const center = new SettingsCenter(items, {
+		getBodyHeight: () => 30,
+		prepareChange: () => null,
+		onApply: () => {},
+		onCancel: () => {},
+	});
+	center.render(180);
+	const moved = items.find((item) => item.presentationKind === "setting" && item.section !== "advanced");
+	assert.ok(moved);
+	moved.section = "advanced";
+	const advanced = buildSettingsSections(items).find((section) => section.id === "advanced");
+	center.setSelection("advanced", advanced?.items.indexOf(moved) ?? -1);
+	assert.equal(center.getSelection().rowId, moved.id, "a row moved in place reaches its new area");
+});

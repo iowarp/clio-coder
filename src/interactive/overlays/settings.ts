@@ -2207,6 +2207,42 @@ function shortcutRows(items: readonly SettingsCenterItem[], shortcuts: SettingsS
 	];
 }
 
+/** What `buildSettingsSections` reads from a row to place it; everything else reaches a section through the row object. */
+interface SettingsRowPlacement {
+	readonly item: SettingsCenterItem;
+	readonly id: string;
+	readonly section: SettingsCenterItem["section"];
+	readonly kind: SettingsCenterItem["presentationKind"];
+	readonly path: string;
+	readonly readOnly: boolean;
+}
+
+function placementOf(item: SettingsCenterItem): SettingsRowPlacement {
+	return {
+		item,
+		id: item.id,
+		section: item.section,
+		kind: item.presentationKind,
+		path: item.configPath,
+		readOnly: item.readOnly === true,
+	};
+}
+
+function samePlacement(rows: readonly SettingsRowPlacement[], items: readonly SettingsCenterItem[]): boolean {
+	if (rows.length !== items.length) return false;
+	return rows.every((row, index) => {
+		const item = items[index];
+		return (
+			row.item === item &&
+			row.id === item.id &&
+			row.section === item.section &&
+			row.kind === item.presentationKind &&
+			row.path === item.configPath &&
+			row.readOnly === (item.readOnly === true)
+		);
+	});
+}
+
 export function buildSettingsSections(
 	items: readonly SettingsCenterItem[],
 	shortcuts: SettingsShortcuts = { pinned: [], recent: [] },
@@ -3216,7 +3252,7 @@ export class SettingsCenter implements Component {
 	 * section with no matching row disappears from the list entirely.
 	 */
 	private sections(): SettingsCenterSection[] {
-		const all = buildSettingsSections(this.items, this.shortcuts);
+		const all = this.wholeSections();
 		if (this.effectiveFilterQuery().length === 0) return all;
 		// Search reaches every setting at its home; the shortcut view would only repeat those rows.
 		return all
@@ -3224,6 +3260,25 @@ export class SettingsCenter implements Component {
 			.map((section) => ({ ...section, items: this.filterSectionItems(section.items, section.label) }))
 			.filter((section) => section.items.some((item) => this.isSelectableRow(item)));
 	}
+
+	/**
+	 * The unfiltered catalog, rebuilt only when a row's placement or the shortcuts change.
+	 * Rows refresh in place, so the check reads their placement fields; labels and values
+	 * reach the sections through the shared row objects.
+	 */
+	private wholeSections(): SettingsCenterSection[] {
+		const built = this.built;
+		if (built && built.shortcuts === this.shortcuts && samePlacement(built.rows, this.items)) return built.sections;
+		this.built = {
+			shortcuts: this.shortcuts,
+			rows: this.items.map(placementOf),
+			sections: buildSettingsSections(this.items, this.shortcuts),
+		};
+		return this.built.sections;
+	}
+	private built:
+		| { shortcuts: SettingsShortcuts; rows: SettingsRowPlacement[]; sections: SettingsCenterSection[] }
+		| undefined;
 
 	private filterSectionItems(items: readonly SettingsCenterItem[], sectionLabel: string): SettingsCenterItem[] {
 		const kept: SettingsCenterItem[] = [];
@@ -3248,7 +3303,7 @@ export class SettingsCenter implements Component {
 	/** The section's size, measured on the whole section when a filter has narrowed it. */
 	private sectionCount(section: SettingsCenterSection): string {
 		if (this.effectiveFilterQuery().length === 0) return sectionCount(section);
-		const whole = buildSettingsSections(this.items, this.shortcuts).find((entry) => entry.id === section.id);
+		const whole = this.wholeSections().find((entry) => entry.id === section.id);
 		return sectionCount(section, whole ?? section);
 	}
 

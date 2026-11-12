@@ -5,14 +5,17 @@ import type { ClioTheme, ClioToken } from "./tokens.js";
 /**
  * Pad or clip a styled string to exactly `width` visible columns.
  *
- * `truncateToWidth(…, pad = true)` already returns a string of exactly `width`
- * columns on both its paths: it appends the shortfall on the fits path and pads
- * through its own finalizer on the cut path. Measuring the result again to
- * compute a repeat count that is always zero cost ~24 µs per line whenever the
- * string missed pi-tui's width cache, which is every footer line that carries a
- * spinner frame or an elapsed time.
+ * A row that already fits is padded from `visibleWidth`, which reads styled
+ * ASCII without segmenting it and caches the rest; `truncateToWidth` walks every
+ * escape and grapheme even when nothing is cut, and a dock row passes through
+ * here once per enclosing frame (a /settings row is fitted several times a render).
+ * Its fits path returns this same string, so only a row that overflows pays for
+ * both. `truncateToWidth(…, pad = true)` already returns exactly `width` columns
+ * on the cut path, so that result is never measured again.
  */
 export function padAnsi(text: string, width: number, ellipsis = ""): string {
+	const used = visibleWidth(text);
+	if (width > 0 && used <= width) return text + " ".repeat(width - used);
 	return truncateToWidth(text, Math.max(0, width), ellipsis, true);
 }
 

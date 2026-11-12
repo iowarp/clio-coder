@@ -903,18 +903,12 @@ export function orderAreaEntries<T>(
 	rowFor: (entry: T) => { id: string; path: string },
 ): T[] {
 	const groups = SETTINGS_AREA_GROUPS[area];
-	const rank = (entry: T): [number, number] => {
+	controlIndex ??= firstIndexByPath(SETTING_CONTROLS.map((control) => control.path));
+	const catalog = controlIndex;
+	return sortByRank(entries, (entry) => {
 		const { id, path } = rowFor(entry);
 		const group = groups.indexOf(settingsPlacementForRow(id, path).group);
-		const control = SETTING_CONTROLS.findIndex(
-			(candidate) => path === candidate.path || path.startsWith(`${candidate.path}.`),
-		);
-		return [group < 0 ? groups.length : group, control < 0 ? SETTING_CONTROLS.length : control];
-	};
-	return [...entries].sort((a, b) => {
-		const left = rank(a);
-		const right = rank(b);
-		return left[0] - right[0] || left[1] - right[1];
+		return [group < 0 ? groups.length : group, catalogRank(catalog, path, SETTING_CONTROLS.length)];
 	});
 }
 
@@ -926,19 +920,40 @@ export function orderSettingsEntries<T>(
 ): T[] {
 	const catalog = orderedSectionControls(section);
 	const groups = [...new Set(catalog.map((entry) => entry.group))];
-	const rank = (entry: T): [number, number] => {
+	const index = firstIndexByPath(catalog.map((entry) => entry.control.path));
+	return sortByRank(entries, (entry) => {
 		const path = pathFor(entry);
 		const group = groups.indexOf(settingsGroupForPath(path));
-		const control = catalog.findIndex(
-			(entry) => path === entry.control.path || path.startsWith(`${entry.control.path}.`),
-		);
-		return [group < 0 ? groups.length : group, control < 0 ? catalog.length : control];
-	};
-	return [...entries].sort((a, b) => {
-		const left = rank(a);
-		const right = rank(b);
-		return left[0] - right[0] || left[1] - right[1];
+		return [group < 0 ? groups.length : group, catalogRank(index, path, catalog.length)];
 	});
+}
+
+let controlIndex: ReadonlyMap<string, number> | undefined;
+
+function firstIndexByPath(paths: readonly string[]): Map<string, number> {
+	const index = new Map<string, number>();
+	paths.forEach((path, at) => {
+		if (!index.has(path)) index.set(path, at);
+	});
+	return index;
+}
+
+/** The first catalog control at the path or at any dotted ancestor of it; `missing` when none is listed. */
+function catalogRank(index: ReadonlyMap<string, number>, path: string, missing: number): number {
+	let rank = missing;
+	for (let end = path.length; end > 0; end = path.lastIndexOf(".", end - 1)) {
+		const at = index.get(path.slice(0, end));
+		if (at !== undefined && at < rank) rank = at;
+	}
+	return rank;
+}
+
+/** A stable sort that ranks each entry once; a comparator that ranks per comparison cost /settings a frame. */
+function sortByRank<T>(entries: readonly T[], rank: (entry: T) => readonly [number, number]): T[] {
+	return entries
+		.map((entry) => ({ entry, rank: rank(entry) }))
+		.sort((a, b) => a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1])
+		.map(({ entry }) => entry);
 }
 
 export function settingControl(path: string): SettingControl | undefined {
