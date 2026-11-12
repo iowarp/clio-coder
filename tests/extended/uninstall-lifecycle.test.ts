@@ -1,4 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -23,6 +24,14 @@ import { installRootHolders } from "../../src/domains/lifecycle/install-plan.js"
 import { createLifecycleHome, type LifecycleHome, runInHome, writeLiveSession } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
+
+const readdirSafe = (dir: string): string => {
+	try {
+		return readdirSync(dir, { recursive: true }).join(", ");
+	} catch {
+		return "(absent)";
+	}
+};
 
 /** The launcher path uninstall resolves, from CLIO_CODER_BIN_DIR. */
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");
@@ -214,6 +223,39 @@ describe("contracts/uninstall-lifecycle", () => {
 		} finally {
 			kept.cleanup();
 			removed.cleanup();
+		}
+	});
+
+	it("does not recreate the managed git hooks in removed state when npm removes the package", async () => {
+		const temp = home();
+		const savedCwd = process.cwd();
+		const savedPath = process.env.PATH;
+		const savedEntry = process.argv[1];
+		try {
+			const packageRoot = join(temp.root, "npm", "lib", "node_modules", "@iowarp", "clio-coder");
+			mkdirSync(join(packageRoot, "dist", "cli"), { recursive: true });
+			writeFileSync(join(packageRoot, "package.json"), JSON.stringify({ name: "@iowarp/clio-coder" }), "utf8");
+			writeFileSync(join(packageRoot, "dist", "cli", "index.js"), "", "utf8");
+			const fakeBin = join(temp.root, "fake-bin");
+			mkdirSync(fakeBin);
+			writeFileSync(join(fakeBin, "npm"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+			const repo = join(temp.root, "repo");
+			mkdirSync(repo);
+			execFileSync("git", ["init", "-q", repo]);
+			process.chdir(repo);
+			process.env.PATH = `${fakeBin}:${savedPath ?? ""}`;
+			process.argv[1] = join(packageRoot, "dist", "cli", "index.js");
+			const { code, stdout } = await runInHome(temp, () => runUninstallCommand(["--force"]));
+			strictEqual(code, 0, stdout);
+			match(stdout, /Removed the npm package/u);
+			strictEqual(existsSync(temp.stateDir), false, `state came back: ${readdirSafe(temp.stateDir)}`);
+		} finally {
+			process.chdir(savedCwd);
+			if (savedPath === undefined) delete process.env.PATH;
+			else process.env.PATH = savedPath;
+			if (savedEntry === undefined) process.argv.splice(1, 1);
+			else process.argv[1] = savedEntry;
+			temp.cleanup();
 		}
 	});
 

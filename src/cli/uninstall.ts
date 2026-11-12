@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { CLIO_GIT_COMMITS_ENABLED_ENV, setGitCommitAttributionEnabled } from "../core/git-commit-attribution.js";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { runCommandVector } from "../core/safe-exec.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
@@ -1100,11 +1101,17 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		let packageRemoved = false;
 		if (removePackage && npmPrefix !== null && failures.length === 0) {
 			const besideNode = join(dirname(process.execPath), "npm");
+			// Commit attribution would reinstall its git hooks under the state root just removed.
+			const attributionWas = process.env[CLIO_GIT_COMMITS_ENABLED_ENV];
+			setGitCommitAttributionEnabled(false);
 			const result = await runCommandVector(
 				existsSync(besideNode) ? besideNode : "npm",
 				["uninstall", "-g", "--prefix", npmPrefix, "@iowarp/clio-coder"],
 				{ timeoutMs: 120_000 },
-			);
+			).finally(() => {
+				if (attributionWas === undefined) delete process.env[CLIO_GIT_COMMITS_ENABLED_ENV];
+				else process.env[CLIO_GIT_COMMITS_ENABLED_ENV] = attributionWas;
+			});
 			if (result.exitCode === 0) {
 				presenter.completedStep(`Removed the npm package from ${shortenPath(npmPrefix)}`);
 				packageRemoved = true;
