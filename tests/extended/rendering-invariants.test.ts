@@ -1423,6 +1423,52 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps a scrolled-up reader at their place when the width changes", () => {
+		const terminal = new RenderingTerminal();
+		terminal.columns = 120;
+		terminal.rows = 30;
+		const tui = new TuiAltScreen(terminal);
+		const paragraphs = Array.from(
+			{ length: 150 },
+			(_, i) => `Row-${String(i).padStart(4, "0")} ${"lorem ipsum dolor sit amet ".repeat(5)}END`,
+		);
+		const root = buildLayout(
+			{
+				banner: new Text("banner", 0, 0),
+				chat: new Text(paragraphs.join("\n\n"), 0, 0),
+				editor: new Text("editor", 0, 0),
+				footer: new Text("footer", 0, 0),
+			},
+			{ mode: "fullscreen" },
+		);
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		const top = () =>
+			Number(/Row-(\d+)/u.exec(tui.getScreenLines().map(stripTerminalSequences).join("\n"))?.[1] ?? Number.NaN);
+		try {
+			tui.renderNow(true);
+			scroll.scrollTo(scroll.scrollTop - 150, { disableFollow: true });
+			tui.renderNow(true);
+			const reading = top();
+			terminal.columns = 70;
+			tui.renderNow(true);
+			ok(Math.abs(top() - reading) <= 2, `narrowing kept the reader near Row-${reading}, not at Row-${top()}`);
+			terminal.columns = 120;
+			tui.renderNow(true);
+			strictEqual(top(), reading);
+			strictEqual(scroll.isFollowingEnd, false);
+			scroll.scrollToEnd();
+			terminal.columns = 90;
+			tui.renderNow(true);
+			strictEqual(scroll.isFollowingEnd, true, "a view that follows the end keeps following");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("returns a scrolled-up fullscreen transcript to its live edge when the operator submits", async () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

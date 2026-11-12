@@ -156,18 +156,41 @@ function transcriptDocument(
  * Reserving it costs one column and never reflows when the bar comes and goes.
  */
 class TranscriptScrollView extends ScrollView {
+	/** The content width the layout asked for last, and the width and height of the content last laid out. */
+	private askedWidth: number | undefined;
+	private laidWidth: number | undefined;
+	private laidHeight = 0;
+
 	override getContentWidth(width: number): number {
-		return this.scrollbar !== "hidden" && width > 1 ? width - 1 : width;
+		const contentWidth = this.scrollbar !== "hidden" && width > 1 ? width - 1 : width;
+		this.askedWidth = contentWidth;
+		return contentWidth;
 	}
 
 	/**
 	 * The document pads a short transcript to the viewport it last saw, so a
 	 * viewport that changes height under short content asks for one more frame,
 	 * which pads to the new height instead of leaving a gap until the next event.
+	 *
+	 * A width change re-wraps every row above a scrolled-up reader, so the same
+	 * row index lands tens of paragraphs away. The top moves by the same share of
+	 * the content instead, which keeps the reader near their place and brings it
+	 * back when the width does. A view that follows the end keeps following.
 	 */
 	override updateLayout(contentHeight: number, viewportHeight: number, requestRender: () => void): void {
 		const before = this.viewportHeight;
+		const top = this.scrollTop;
+		const reflowed =
+			this.laidWidth !== undefined &&
+			this.askedWidth !== this.laidWidth &&
+			!this.isFollowingEnd &&
+			this.laidHeight > 0 &&
+			top > 0;
+		const laidHeight = this.laidHeight;
 		super.updateLayout(contentHeight, viewportHeight, requestRender);
+		this.laidWidth = this.askedWidth;
+		this.laidHeight = contentHeight;
+		if (reflowed) this.scrollTo(Math.round((top * contentHeight) / laidHeight), { disableFollow: true });
 		if (viewportHeight !== before && contentHeight <= Math.max(before, viewportHeight)) requestRender();
 	}
 }
