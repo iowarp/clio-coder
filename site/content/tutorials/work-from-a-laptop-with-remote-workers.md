@@ -1,7 +1,7 @@
 Your conversation can stay on your laptop while a worker runs tools on another machine. Register an SSH node, install the exact CLIO Coder build if needed, verify its project and model route, then choose where the first bounded task runs.
 
 ::: note Version scope
-This guide describes the v0.6.8 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
+This guide describes the 0.8.0 fleet. Remote workers use your existing SSH access. They do not grant access to institutional systems or replace their scheduler and data rules.
 :::
 
 ::: needs
@@ -67,7 +67,7 @@ clio-coder fleet nodes install build-node --yes
 
 CLIO Coder packs the build the client actually runs, transfers it over SSH, checks its SHA-256 digest, and installs it under the node's `~/.local/share/clio-coder/workers/<digest>/`. The install uses the node's existing Node.js and npm, verifies the version and updates the saved worker entry. The installer does not require sudo or modify services or shell profiles. Optional SDK dependencies are omitted.
 
-You can also manage CLIO Coder yourself, for example with the standard installer on a cluster login node, whose private Node.js is not on `PATH`. The default invocation is `clio-coder worker`. A custom `--entry` needs an explicit `--version-command` that reports its CLIO Coder version; it cannot skip version verification.
+You can also manage CLIO Coder yourself, for example with the standard installer on a cluster login node, whose private Node.js is not on `PATH`. The default invocation is `clio-coder worker`. A custom `--entry` that ends in ` worker` is checked through its base command's `--version`; any other entry needs an explicit `--version-command`. The version check is never skipped.
 
 ## Prepare and verify the project
 
@@ -91,6 +91,8 @@ clio-coder doctor
 These commands observe the node without creating directories there or granting new dispatch eligibility. A plain test can identify a clean matching checkout; recording also permits the transient client-side challenge that proves shared storage.
 
 Model facts distinguish network reachability, access to the model listing, model presence and runtime support. Unknown remains unknown; a catalog listing is not a successful generation or proof of a resident model.
+
+Each registered node adds a `fleet node <id>` row to `doctor` with its host, remote version and project check. The recording shows the report on a fresh install, before any node or model is added; each warning names the command that clears it.
 
 ::: capture cli-doctor
 :::
@@ -132,7 +134,7 @@ An editing dispatch to an independent node checkout must use `worktree: true`. A
 
 A matching branch and worktree are created on the node at the approved baseline. After the worker exits, CLIO Coder commits the worker's edits there, fetches the branch through the existing SSH connection and checks the returned baseline and permitted paths.
 
-The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result without merging it.
+The commit is imported into the owned local task worktree before the existing host verification and guarded apply flow. `apply: "preserve"` keeps the result on the local task branch, and `clio-coder fleet land` lists and lands such branches later.
 
 Transfer, verification and application failures preserve the node branch for recovery. The run record names the node, branch, worktree and returned commit when available. Inspect preserved work before merging or deleting it. A successful guarded merge permits remote cleanup. The node's original checkout stays at its old baseline, so update it deliberately before the next dispatch that needs the new commit.
 
@@ -152,7 +154,7 @@ The installer needs no root, refuses to run under sudo, and brings a private Nod
 
 That private Node.js is not added to `PATH`. A node installed this way already has CLIO Coder, so skip `fleet nodes install` there and keep its version equal to your client's.
 
-CLIO Coder does not submit jobs for its own workers. Scheduler work goes through the clio-kit Slurm tools, which the agent calls to submit, list, describe, and cancel jobs, with each submission and cancellation confirmed first.
+CLIO Coder does not submit jobs for its own workers. The agent submits scheduler work through the clio-kit Slurm tools or the scheduler clients in `bash`, both under review; [Submit a Slurm job](/tutorials/submit-a-slurm-job.html) walks through it.
 
 ::: limits
 - SSH access, exact CLIO Coder version and the same absolute project path remain prerequisites.
@@ -162,6 +164,7 @@ CLIO Coder does not submit jobs for its own workers. Scheduler work goes through
 - Worker slots limit concurrency. They are not an allocation, and a login node is not a compute node.
 - A remote worker sandboxes its commands only when bubblewrap is present on that node.
 - A worker that uses a cloud model sends its input to that provider from the node.
+- A worker on a node opens that node's own project store. Admission refuses store tag grants to a remote node, so run store-writing tasks locally.
 :::
 
 ::: next

@@ -191,7 +191,7 @@
     "source": "work-from-a-laptop-with-remote-workers.md",
     "cover": "tui-settings-fleet",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/fleet-dispatch.md",
       "guide/hpc-clusters.md"
