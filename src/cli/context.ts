@@ -10,6 +10,8 @@ const HELP = `Usage:
   clio-coder context
   clio-coder context init [--preview] [--heuristic] [--json] [--adopt] [--global] [--propose|--apply|--rewrite]
                     [--depth quick|standard|deep] [--target <id> [--model <id>] [--thinking <level>]]
+  clio-coder context init --verify [--apply] [--json]
+  clio-coder context init --accept [<proposal path or id>] [--json]
   clio-coder context refresh [--wiki]
   clio-coder context wiki [--update|--retry-pending] [--replan] [--status] [--depth auto|simple|medium|detailed] [--pages <path,path>]
                     [--target <id>] [--model <id>] [--thinking off|low|medium|high]

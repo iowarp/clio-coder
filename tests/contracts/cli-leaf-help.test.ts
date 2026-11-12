@@ -5,7 +5,7 @@
  * with exit 2, or as "--help needs a value" from `telemetry share`, whose
  * parser asked any unknown flag for a value before naming it as unknown.
  */
-import { equal, match } from "node:assert/strict";
+import { equal, match, ok } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,14 @@ describe("leaf commands answer --help", { concurrency: 4 }, () => {
 			match(result.stdout, usage);
 		});
 	}
+	it("clio-coder context --help lists every context init form that context init --help does", async () => {
+		const [summary, init] = await Promise.all([cli(["context", "--help"]), cli(["context", "init", "--help"])]);
+		equal(summary.status, 0, summary.stderr);
+		equal(init.status, 0, init.stderr);
+		const forms = init.stdout.split("\n").filter((line) => line.startsWith("  clio-coder context init "));
+		match(forms.join("\n"), /--verify[\s\S]*--accept/);
+		for (const form of forms) ok(summary.stdout.includes(`${form}\n`), `context --help omits: ${form.trim()}`);
+	});
 });
 
 describe("telemetry share names the flag it refuses", { concurrency: 2 }, () => {
