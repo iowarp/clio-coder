@@ -31,14 +31,23 @@ export interface DetectedChatRoute {
 	model?: string;
 }
 
+/** A model list is a few kilobytes; a larger answer is not a model server's. */
+const LOOPBACK_BODY_LIMIT = 1024 * 1024;
+
 /**
- * One loopback GET, parsed as JSON; a redirect or any other non-2xx reply rejects.
+ * Control, format (bidi, zero-width) and separator characters. A probed listener may belong to another
+ * user, and its id is shown in the question that warns about exactly that, so an id holding one is not offered.
+ */
+const UNSHOWABLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+
+/**
+ * One loopback GET, parsed as JSON; a redirect, any other non-2xx reply, or a body over 1 MiB rejects.
  * node:http destroys a socket that is still connecting when the signal aborts.
  * fetch keeps it until undici's 10 s connect timeout, so on a host where a
  * closed loopback port never answers (WSL2) a cancelled configure sat for
  * 10 s after its last line before the process could exit.
  */
-function readLoopbackJson(url: string, signal: AbortSignal): Promise<unknown> {
+export function readLoopbackJson(url: string, signal: AbortSignal): Promise<unknown> {
 	return new Promise((resolve, reject) => {
 		get(url, { signal }, (response) => {
 			const status = response.statusCode ?? 0;
@@ -48,7 +57,16 @@ function readLoopbackJson(url: string, signal: AbortSignal): Promise<unknown> {
 				return;
 			}
 			const chunks: Buffer[] = [];
-			response.on("data", (chunk: Buffer) => chunks.push(chunk));
+			let bytes = 0;
+			response.on("data", (chunk: Buffer) => {
+				bytes += chunk.length;
+				if (bytes > LOOPBACK_BODY_LIMIT) {
+					response.destroy();
+					reject(new Error("answer too large"));
+					return;
+				}
+				chunks.push(chunk);
+			});
 			response.on("error", reject);
 			response.on("end", () => {
 				try {
@@ -89,7 +107,9 @@ async function localModels(readJson: typeof readLoopbackJson): Promise<Map<strin
 						const ids = url.endsWith("/api/tags")
 							? (body.models ?? []).map((entry) => entry?.name)
 							: (body.data ?? []).map((entry) => entry?.id);
-						const model = ids.find((id) => typeof id === "string" && id.trim() !== "" && offeredAsChatModel(id));
+						const model = ids.find(
+							(id) => typeof id === "string" && id.trim() !== "" && !UNSHOWABLE.test(id) && offeredAsChatModel(id),
+						);
 						if (!controller.signal.aborted && typeof model === "string" && model.trim()) {
 							models.set(new URL(url).origin, model);
 						}

@@ -8,6 +8,7 @@ import {
 	collectSetupCandidates,
 	detectChatRoutes,
 	headlessChatRoute,
+	readLoopbackJson,
 	useDetectedChatRoute,
 } from "../../src/cli/detect-chat-routes.js";
 import { readSettings, settingsPath, updateSettings } from "../../src/core/config.js";
@@ -175,6 +176,38 @@ test("a local server's first chat model is adopted, never an embedding model lis
 	};
 	const routes = await detectChatRoutes(readSettings(), readJson);
 	assert.equal(routes.find((route) => route.runtime.id === "ollama")?.model, "qwen3:8b");
+});
+
+test("a probed listener's model id with terminal control or format characters is never offered, nor an oversized answer", async (t) => {
+	const home = await isolateClioEnv("clio-route-control-");
+	t.after(() => home.restore());
+	initializeClioHome();
+	const readJson = async (input: string) => {
+		const url = new URL(input);
+		if (url.port === String(DEFAULT_PORTS.lmstudio))
+			return { data: [{ id: "qwen\x1b[8m hidden" }, { id: "evil\u202egnp" }, { id: "zero\u200bwidth" }] };
+		if (url.port === String(DEFAULT_PORTS.vllm)) return { data: [{ id: "bad\x9bname" }, { id: "org/Qwen 3:8b@q4.é" }] };
+		throw new Error("absent");
+	};
+	const routes = await detectChatRoutes(readSettings(), readJson);
+	assert.equal(
+		routes.some((route) => route.source === `http://127.0.0.1:${DEFAULT_PORTS.lmstudio}`),
+		false,
+	);
+	assert.equal(
+		routes.find((route) => route.source === `http://127.0.0.1:${DEFAULT_PORTS.vllm}`)?.model,
+		"org/Qwen 3:8b@q4.é",
+	);
+
+	const { createServer } = await import("node:http");
+	const server = createServer((_request, response) => {
+		response.writeHead(200, { "content-type": "application/json" });
+		response.end(`{"data":[{"id":"m"}],"pad":"${"x".repeat(2 * 1024 * 1024)}"}`);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => server.close());
+	const { port } = server.address() as { port: number };
+	await assert.rejects(readLoopbackJson(`http://127.0.0.1:${port}/v1/models`, new AbortController().signal));
 });
 
 test("headless borrowing never takes a saved copilot target, whatever memory points at", async (t) => {
