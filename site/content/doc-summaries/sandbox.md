@@ -1,6 +1,6 @@
 ## Check your machine first
 
-Run `clio-coder doctor` and read the `shell sandbox` row. `OK` means shell commands run inside an OS sandbox: bubblewrap on Linux and WSL, `sandbox-exec` on macOS. `WARN` means they run uncontained, so more of them ask first. Windows has no sandbox.
+Run `clio-coder doctor` and read the `shell sandbox` row. `OK` means shell commands run inside an OS sandbox: bubblewrap on Linux and WSL, `sandbox-exec` on macOS (not yet verified on a real Mac). `WARN` means they run uncontained, so more of them ask first. Windows has no sandbox.
 
 Then work at the `default` level. In your request, name anything that reaches beyond the project, such as "push the branch when the tests pass".
 
@@ -18,7 +18,7 @@ The command cannot read SSH and GPG keys, the SSH agent, cloud and cluster login
 
 ## Stricter or looser
 
-`safety.sandbox` is `auto` by default. `required` refuses workers' commands on a machine without a sandbox and keeps unconfined yolo sandboxed. `off` never sandboxes. Unconfined yolo, for containers only, runs commands as you with your credentials.
+`safety.sandbox` is `auto` by default. `required` refuses workers' commands on a machine without a sandbox and keeps unconfined yolo sandboxed; `srun`, `salloc` and `flux` then stay inside it. `off` never sandboxes. Unconfined yolo, for containers only, runs commands as you with your credentials.
 
 ## Project configuration and /trust
 

@@ -32,7 +32,7 @@ The full guide lists the codes other commands use.
 - `--timeout <seconds>` stops the run and exits 124.
 - `--max-cost-usd <n>` caps what the run may spend on priced models.
 - `--read-only` leaves every file outside CLIO Coder's own folders unchanged.
-- `--autonomy yolo` lets an unattended job continue without waiting. Use it only where a command cannot damage the machine.
+- `--autonomy yolo` lets an unattended job continue without waiting. It stays contained by default, and a call that would ask you is refused back to CLIO Coder, which continues without it.
 
 ## Read structured output
 
