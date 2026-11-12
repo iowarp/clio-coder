@@ -76,9 +76,6 @@ safety:
 Contained work runs without a card, and `/rewind` lists a snapshot from before the first change of the turn. This shows the controls work on your host. It does not show that the agent's change is correct, so review the diff and the check results.
 :::
 
-::: capture cast-let-it-work
-:::
-
 ## What still reaches you
 
 Some decisions never go to the judge: `ask_user` questions, CLIO Coder's own settings, a plan-scale dispatch, and a model edit of project settings. An approval card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and `/decisions` shows what was chosen for you.

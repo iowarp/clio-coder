@@ -56,9 +56,6 @@ A bare `/loop` lists the jobs. A loop runs only while its conversation is idle a
 A finished turn with its exit code, not a parked prompt. An exit of 4 means the cost ceiling stopped it. `clio-coder telemetry why-stopped <session>` explains a stop afterward.
 :::
 
-::: capture cast-headless-run
-:::
-
 ## Read how a run ended
 
 Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
