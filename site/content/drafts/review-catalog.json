@@ -55,6 +55,24 @@
         "guide/configuration-and-targets.md",
         "guide/panes-and-files.md"
       ]
+    },
+    {
+      "slug": "run-a-research-campaign-and-a-blind-arena",
+      "title": "Run a research campaign and a blind arena",
+      "description": "Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them.",
+      "category": "Scientific software",
+      "time": "9 min",
+      "author": "The CLIO Coder team",
+      "source": "run-a-research-campaign-and-a-blind-arena.md",
+      "basis": "Recorded session",
+      "versionScope": "0.8.0",
+      "interfaces": [
+        "Terminal"
+      ],
+      "guides": [
+        "guide/research-and-arena.md",
+        "guide/quality-policy.md"
+      ]
     }
   ]
 }
