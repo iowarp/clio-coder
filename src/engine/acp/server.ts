@@ -50,6 +50,7 @@ export type { AcpSafeSettingsPatch, AcpThinkingLevel } from "./types.js";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type BashCommandProgress, combineLiveBashOutput } from "../../core/bash-exec.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import { readDispatchScopeNotice } from "../../core/dispatch-scope-notice.js";
@@ -1007,10 +1008,11 @@ function resourceName(uri: string): string {
  * Binary (`blob`) resources are refused rather than dropped, so a client never
  * believes the model saw a file it did not.
  */
-function promptResources(params: unknown): { rendered: string; names: string[] } {
-	if (!isRecord(params) || !Array.isArray(params.prompt)) return { rendered: "", names: [] };
+function promptResources(params: unknown): { rendered: string; names: string[]; paths: string[] } {
+	if (!isRecord(params) || !Array.isArray(params.prompt)) return { rendered: "", names: [], paths: [] };
 	const files: string[] = [];
 	const names: string[] = [];
+	const paths: string[] = [];
 	for (const block of params.prompt) {
 		if (!isRecord(block) || block.type !== "resource") continue;
 		const resource = isRecord(block.resource) ? block.resource : {};
@@ -1026,13 +1028,34 @@ function promptResources(params: unknown): { rendered: string; names: string[] }
 			);
 		const name = resourceName(resource.uri);
 		names.push(name);
-		files.push(`<file name="${name}">\n${resource.text}\n</file>`);
+		const local = resourcePath(resource.uri);
+		if (local !== null) paths.push(local);
+		files.push(`<file name="${name}">\n${neutralizeFileFrames(resource.text)}\n</file>`);
 	}
 	if (files.length > ACP_MAX_PROMPT_RESOURCES)
 		throw new AcpRequestError(-32602, `a prompt carries at most ${ACP_MAX_PROMPT_RESOURCES} embedded resources`, {
 			code: "invalid_params",
 		});
-	return { rendered: files.join("\n"), names };
+	return { rendered: files.join("\n"), names, paths };
+}
+
+/** The local path a `file://` resource names, which is flow-labelled like an `@path` reference; null otherwise. */
+function resourcePath(uri: string): string | null {
+	if (!uri.startsWith("file://")) return null;
+	try {
+		return fileURLToPath(uri);
+	} catch {
+		return null;
+	}
+}
+
+/** A resource body cannot open or close a `<file>` block: `<file` and `</file` (any case) become `<\file`, `<\/file`. */
+function neutralizeFileFrames(text: string): string {
+	return text.replace(/<\s*(\/?)\s*(file)(?![\w-])/giu, (_, slash: string, tag: string) => `<\\${slash}${tag}`);
+}
+
+function attachedNote(names: ReadonlyArray<string>): string {
+	return `attached ${names.length} ${names.length === 1 ? "file" : "files"}: ${names.join(", ")}`;
 }
 
 /** Typed text, then the embedded files after a blank line. */
@@ -7411,7 +7434,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			} else if (options.chat.discoverOperatorEgg && (await options.chat.discoverOperatorEgg(promptText(params, false)))) {
 				active.sawTurnEnd = true;
 			} else if (options.expandPrompt === undefined) {
-				await options.chat.submit(withResources(sentText, resources));
+				await options.chat.submit(
+					withResources(sentText, resources),
+					resources.names.length > 0
+						? {
+								display: { text: sentText, note: attachedNote(resources.names) },
+								...(resources.paths.length > 0 ? { workingContextPaths: resources.paths } : {}),
+							}
+						: undefined,
+				);
 			} else {
 				let expansion: AcpPromptExpansion | undefined;
 				const expansionAbort = new AbortController();
@@ -7431,12 +7462,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					delete active.expansionAbort;
 				}
 				if (expansion !== undefined && !active.cancelled) {
-					// The transcript paints what the operator typed and names attached files, not their bodies.
+					// The transcript paints what the operator typed and names attached files, not their bodies. The typed
+					// text is also what the record keeps as the operator's words, so a file attached alone is none.
 					if (resources.names.length > 0) {
-						const attached = `attached ${resources.names.length} ${resources.names.length === 1 ? "file" : "files"}: ${resources.names.join(", ")}`;
+						const attached = attachedNote(resources.names);
 						expansion = {
 							...expansion,
 							text: withResources(expansion.text, resources),
+							workingContextPaths: [...expansion.workingContextPaths, ...resources.paths],
 							display: {
 								text: expansion.display?.text ?? sentText,
 								note: expansion.display?.note ? `${expansion.display.note}; ${attached}` : attached,

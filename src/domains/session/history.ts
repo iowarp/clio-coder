@@ -320,11 +320,13 @@ export function isOperatorTypedUserPayload(payload: unknown): boolean {
  * operator-authored remains, so the caller moves on to the next turn.
  */
 export function operatorTextOfUserPayload(payload: unknown): string | null {
-	// An expansion (prompt template, command) replaced the typed input. The
-	// typed input is the title; the expansion starts with generated scaffolding.
+	// An expansion (prompt template, command, attached file) replaced the typed
+	// input. The typed input is the title; the expansion starts with generated
+	// scaffolding or holds a file's text. An empty one is a turn the operator
+	// typed nothing for, never a reason to read the expansion as their words.
 	if (payload && typeof payload === "object" && typeof (payload as { displayText?: unknown }).displayText === "string") {
 		const typed = collapseWhitespace((payload as { displayText: string }).displayText);
-		if (typed.length > 0) return typed;
+		return typed.length > 0 ? typed : null;
 	}
 	if (
 		payload &&
