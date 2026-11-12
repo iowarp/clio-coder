@@ -1417,6 +1417,45 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps button-motion mouse tracking inside Herdr and any-motion outside a multiplexer", () => {
+		const keys = ["HERDR_ENV", "TMUX", "ZELLIJ", "STY", "TERM"] as const;
+		const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+		const anyMotion = (writes: string[]) => {
+			const out = writes.join("");
+			return out.lastIndexOf("\x1b[?1003h") > out.lastIndexOf("\x1b[?1003l");
+		};
+		const run = (herdr: boolean) => {
+			for (const key of keys) delete process.env[key];
+			process.env.TERM = "xterm-256color";
+			if (herdr) process.env.HERDR_ENV = "1";
+			const terminal = new RenderingTerminal();
+			const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+			const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, fullscreenTuiOptions(terminal));
+			tui.start();
+			try {
+				const started = anyMotion(terminal.writes);
+				ok(terminal.writes.join("").includes("\x1b[?1002h"), "button motion keeps drags and selections");
+				const release = tui.useTerminalSelection();
+				terminal.writes = [];
+				release();
+				ok(terminal.writes.join("").includes("\x1b[?1002h"), "a released lease restores tracking");
+				return { started, restored: anyMotion(terminal.writes) };
+			} finally {
+				tui.stop();
+			}
+		};
+		try {
+			deepStrictEqual(run(true), { started: false, restored: false }, "Herdr is a multiplexer");
+			deepStrictEqual(run(false), { started: true, restored: true }, "hover still reaches the auto scrollbar");
+		} finally {
+			for (const key of keys) {
+				const value = saved[key];
+				if (value === undefined) delete process.env[key];
+				else process.env[key] = value;
+			}
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";

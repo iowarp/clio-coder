@@ -231,6 +231,24 @@ export class InstrumentedTuiMainScreen extends ApplicationInputTuiMainScreen {
 	private keptRootRenders = -1;
 }
 
+/**
+ * Multiplexers can lag when every pointer movement is forwarded, so inside one the
+ * fullscreen TUI keeps button-motion tracking: clicks, wheel, drags and selections.
+ * pi-tui's own check, plus Herdr, which sets none of the variables it reads.
+ */
+function multiplexed(): boolean {
+	const env = process.env;
+	const term = env.TERM?.toLowerCase() ?? "";
+	return (
+		env.TMUX !== undefined ||
+		env.ZELLIJ !== undefined ||
+		env.STY !== undefined ||
+		env.HERDR_ENV !== undefined ||
+		term.startsWith("tmux") ||
+		term.startsWith("screen")
+	);
+}
+
 /** A root component that knows how many leading rows of each render are the very strings of the render before. */
 interface KeptRowsRoot {
 	readonly renderCount: number;
@@ -255,17 +273,10 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 			if (released) return;
 			released = true;
 			if (--this.terminalSelectionUsers !== 0) return;
-			// Match pi-tui's negotiated tracking mode; focus reporting was never disabled.
-			const term = process.env.TERM?.toLowerCase() ?? "";
-			const multiplexed =
-				process.env.TMUX !== undefined ||
-				process.env.ZELLIJ !== undefined ||
-				process.env.STY !== undefined ||
-				term.startsWith("tmux") ||
-				term.startsWith("screen");
+			// Match the start's tracking mode; focus reporting was never disabled.
 			// 1007 comes back on because it is the common terminal default and tracking
 			// supersedes it until Clio leaves the alternate screen.
-			this.terminal.write(`\x1b[?1000h\x1b[?1002h${multiplexed ? "" : "\x1b[?1003h"}\x1b[?1006h\x1b[?1007h`);
+			this.terminal.write(`\x1b[?1000h\x1b[?1002h${multiplexed() ? "" : "\x1b[?1003h"}\x1b[?1006h\x1b[?1007h`);
 		};
 	}
 	private currentFrame: unknown | undefined;
@@ -303,6 +314,8 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	protected override beforeTerminalStart(): void {
 		this.flashShownUntil.clear();
 		super.beforeTerminalStart();
+		// pi-tui asks for every pointer movement unless it recognises the multiplexer; Herdr it does not.
+		if (this.capturesMouse && multiplexed()) this.terminal.write("\x1b[?1003l");
 	}
 
 	protected override beforeTerminalStop(options: TuiStopOptions): void {
