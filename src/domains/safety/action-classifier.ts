@@ -6,7 +6,7 @@ import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from 
 import { storeReadRoots, storeReplacedBytes, storeWriteTarget } from "../../core/store-paths.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { resolveClioDirs } from "../../core/xdg.js";
-import { expandPath, normalizeToolPath } from "../../tools/path-utils.js";
+import { expandPath, normalizeToolPath, runScriptCwd } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
@@ -698,7 +698,9 @@ const PATH_UTILS_TOOLS: ReadonlySet<string> = new Set([
  * the {@link expandPath} its tool calls. Judging the raw arguments judged a
  * different path: `@../x` read as a directory named `@..` inside the
  * workspace, a `cwd` of `~` as a folder named `~` in it, and a `cwd`
- * padded with missing levels pulled `../../x` back inside it. Idempotent, so
+ * padded with missing levels pulled `../../x` back inside it. run_script trims
+ * its `cwd` and drops a blank one ({@link runScriptCwd}), so `" /usr"` is
+ * `/usr`, not a folder in the workspace. Idempotent, so
  * the policy engine normalizes once and classify can do it again.
  */
 export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
@@ -708,6 +710,13 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 		if (typeof args.cwd !== "string") return call;
 		const cwd = expandPath(args.cwd);
 		return cwd === args.cwd ? call : { ...call, args: { ...args, cwd } };
+	}
+	if (call.tool === ToolNames.RunScript) {
+		if (!("cwd" in args)) return call;
+		const cwd = runScriptCwd(args.cwd);
+		if (cwd === args.cwd) return call;
+		const { cwd: _dropped, ...rest } = args;
+		return { ...call, args: cwd === undefined ? rest : { ...rest, cwd } };
 	}
 	if (!PATH_UTILS_TOOLS.has(call.tool)) return call;
 	let next: Record<string, unknown> | null = null;

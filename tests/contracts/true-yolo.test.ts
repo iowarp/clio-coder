@@ -537,6 +537,26 @@ test("yolo reads a run_script through the shell line scan only when a shell inte
 	}
 });
 
+test("a run_script cwd is judged as the tool reads it, trimmed, so a padded cwd meets the floor where the script runs", () => {
+	const cwd = workspace("clio-yolo-run-script-cwd-");
+	writeFileSync(join(cwd, "clean.sh"), "rm -rf lib\n");
+	mkdirSync(join(cwd, " /usr"), { recursive: true });
+	const engine = engineFor(cwd);
+	const judged = (callCwd: string) =>
+		engine.evaluate(
+			{ tool: ToolNames.RunScript, args: { interpreter: "sh", script: join(cwd, "clean.sh"), cwd: callCwd } },
+			"yolo",
+			OPERATOR_YOLO,
+		);
+	const atUsr = judged("/usr");
+	strictEqual(atUsr.kind, "block");
+	for (const padded of [" /usr", "/usr ", "\t/usr\n"]) {
+		strictEqual(judged(padded).kind, atUsr.kind, JSON.stringify(padded));
+		strictEqual(judged(padded).ruleId, atUsr.ruleId, JSON.stringify(padded));
+	}
+	strictEqual(judged("  ").kind, judged(".").kind);
+});
+
 test("run_script runs a script and cwd outside the workspace only under the operator's yolo", async () => {
 	const cwd = workspace("clio-yolo-run-script-");
 	const outside = workspace("clio-yolo-run-script-outside-");

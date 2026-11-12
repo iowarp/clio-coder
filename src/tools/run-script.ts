@@ -35,6 +35,7 @@ import type { StoreBackend } from "../domains/store/backend.js";
 import { findExecutableOnPath } from "../domains/toolchain/resolve.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolSurface } from "./lazy-tool.js";
+import { runScriptCwd } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { formatSize } from "./truncate.js";
 import { byteLength } from "./truncate-utf8.js";
@@ -378,7 +379,7 @@ function validateRequest(args: Record<string, unknown>, workspaceRoot: string, o
 		interpreterArgs = explicit;
 	}
 
-	const cwdArg = typeof args.cwd === "string" && args.cwd.trim().length > 0 ? args.cwd.trim() : undefined;
+	const cwdArg = runScriptCwd(args.cwd);
 	let cwdExecution: string;
 	try {
 		const resolved =

@@ -56,6 +56,11 @@ export function normalizeToolPath(filePath: string): string {
 	return normalizeUnicodeSpaces(normalizeAtPrefix(filePath));
 }
 
+/** The cwd a run_script call names, as the tool reads it: trimmed, and none when blank or not a string. */
+export function runScriptCwd(cwd: unknown): string | undefined {
+	return typeof cwd === "string" && cwd.trim().length > 0 ? cwd.trim() : undefined;
+}
+
 export function expandPath(filePath: string): string {
 	const normalized = normalizeToolPath(filePath);
 	if (normalized === "~") return homedir();
