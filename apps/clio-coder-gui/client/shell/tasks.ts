@@ -128,7 +128,7 @@ export function useRenameTask(client: Client) {
 			} catch (error) {
 				// A task joins the saved history once Clio has answered in it, and only saved tasks can be named.
 				if (error instanceof ApiProblem && error.problem.status === 404)
-					throw new Error("This task is not saved yet. Rename it after Clio has answered once.");
+					throw new Error("This task is not saved yet. Rename it after CLIO Coder has answered once.");
 				throw error;
 			}
 		},

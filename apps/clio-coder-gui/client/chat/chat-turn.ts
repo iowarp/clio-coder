@@ -14,16 +14,16 @@ import type { TurnActivity } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
 import type { ChatTurn } from "./turns.js";
 
-export const PRODUCT_NAME = "Clio Coder";
+export const PRODUCT_NAME = "CLIO Coder";
 export const REASONING_PREVIEW_MAX = 140;
 export const REASONING_LABEL = "Reasoning";
-export const REASONING_SOURCE = "reported by Clio Coder";
+export const REASONING_SOURCE = "reported by CLIO Coder";
 export const REPLAY_CHIP = "earlier record";
 export const REPLAY_PROMPT_MISSING = "(earlier prompt not replayed)";
 export const EMPTY_PROMPT = "(empty prompt)";
 
 /** Verbatim. The wording the page carried before read like data loss, which it is not. */
-export const TRUNCATION_NOTE = "Earlier turns are not shown; Clio Coder still has the full context.";
+export const TRUNCATION_NOTE = "Earlier turns are not shown; CLIO Coder still has the full context.";
 
 export const EMPTY_GLYPH = "◎";
 export const EMPTY_EYEBROW = "NEW RESEARCH THREAD";

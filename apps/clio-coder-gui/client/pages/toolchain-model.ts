@@ -22,7 +22,7 @@ export function toolCandidateNote(tool: Pick<Tool, "resolution">): string | null
 	const candidate = tool.resolution.pathCandidate;
 	if (!candidate) return null;
 	if (candidate.satisfiesMinimum) return null;
-	return `A copy at ${candidate.path} reports ${candidate.version ?? "no version"}, which is below the pinned minimum, so Clio does not use it.`;
+	return `A copy at ${candidate.path} reports ${candidate.version ?? "no version"}, which is below the pinned minimum, so CLIO Coder does not use it.`;
 }
 
 /** Explain the effect beside the action rather than making an operator infer it from the resolution. */
@@ -31,8 +31,8 @@ export function toolActionEffect(tool: Pick<Tool, "supported" | "installed" | "r
 		return "No pinned download is available for this platform. A compatible tool on PATH can still be inspected above.";
 	if (tool.installed) return "Check confirms the pinned binaries are present. Remove deletes only the vendored copy.";
 	return tool.resolution.source === "path"
-		? "Install adds a pinned fallback. The compatible PATH copy may remain the executable Clio uses."
-		: "Install downloads and verifies the pinned version into Clio’s toolchain folder.";
+		? "Install adds a pinned fallback. The compatible PATH copy may remain the executable CLIO Coder uses."
+		: "Install downloads and verifies the pinned version into CLIO Coder’s toolchain folder.";
 }
 
 export const TOOL_FILTERS = ["all", "available", "missing", "unsupported"] as const;
@@ -66,8 +66,8 @@ export function requestOutcomeUnknown(status: number | undefined): boolean {
 }
 
 export function toolAvailability(tool: Pick<Tool, "supported" | "resolution">): string {
-	if (tool.resolution.source === "path") return "A compatible executable on PATH is available to Clio.";
-	if (tool.resolution.source === "vendored") return "Clio resolves the installed pinned executable.";
+	if (tool.resolution.source === "path") return "A compatible executable on PATH is available to CLIO Coder.";
+	if (tool.resolution.source === "vendored") return "CLIO Coder resolves the installed pinned executable.";
 	return tool.supported
 		? "No usable executable was resolved. Install the pinned version to make this tool available."
 		: "No executable was resolved and no pinned download is available for this platform.";

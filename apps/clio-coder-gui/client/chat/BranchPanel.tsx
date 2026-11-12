@@ -79,7 +79,7 @@ export const BranchPanel = memo(function BranchPanel({
 					notify({
 						tone: "warning",
 						title: "The forked conversation starts empty",
-						detail: "Clio Coder created the fork but could not replay its earlier turns.",
+						detail: "CLIO Coder created the fork but could not replay its earlier turns.",
 					});
 				await Promise.all([
 					queries.invalidateQueries({ queryKey: ["sessions"] }),
@@ -110,7 +110,7 @@ export const BranchPanel = memo(function BranchPanel({
 	const body = (
 		<>
 			{!sessionOpen ? <p>This task is not open. Open it to read its branches.</p> : null}
-			{sessionOpen && !supported ? <p>Clio does not report branches for this task.</p> : null}
+			{sessionOpen && !supported ? <p>CLIO Coder does not report branches for this task.</p> : null}
 			{tree.isPending && sessionOpen && supported && !data ? <p>Reading the branches…</p> : null}
 			{tree.error ? (
 				<div className="pane-inspection-error" role="alert">

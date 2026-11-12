@@ -41,7 +41,7 @@ export const PANELS = {
 		eyebrow: eyebrow("Run evidence", "installation-wide", "recheck"),
 		title: "Evidence",
 		boundary:
-			"Each run's evidence is read from its sealed run scope on this installation. Rechecking runs the same Clio command you would run yourself, on this machine; no run is edited and nothing is uploaded.",
+			"Each run's evidence is read from its sealed run scope on this installation. Rechecking runs the same CLIO Coder command you would run yourself, on this machine; no run is edited and nothing is uploaded.",
 	},
 	evidenceBundle: {
 		eyebrow: eyebrow("Run evidence", "one dispatch run", "recheck"),
@@ -65,7 +65,7 @@ export const PANELS = {
 		eyebrow: eyebrow("Recorded usage", "30-day window", READ_ONLY),
 		title: "Usage",
 		boundary:
-			"Every figure is read from the session and dispatch ledgers on this machine and is Clio's own accounting, never an estimate made here. Conversation text stays in those ledgers.",
+			"Every figure is read from the session and dispatch ledgers on this machine and is CLIO Coder's own accounting, never an estimate made here. Conversation text stays in those ledgers.",
 	},
 	traceRun: {
 		eyebrow: eyebrow("Durable accounting", "trace database", READ_ONLY),
@@ -77,7 +77,7 @@ export const PANELS = {
 		eyebrow: eyebrow("Pinned tools", "this installation", "install and remove"),
 		title: "Toolchain",
 		boundary:
-			"Resolution is read from this machine: a compatible copy on PATH first, then the pinned copy Clio vendored. Removing a vendored copy leaves your PATH installation in place.",
+			"Resolution is read from this machine: a compatible copy on PATH first, then the pinned copy CLIO Coder vendored. Removing a vendored copy leaves your PATH installation in place.",
 	},
 	routing: {
 		eyebrow: eyebrow("Models", "worker routing", "read offline"),
@@ -98,8 +98,8 @@ export const PANELS = {
 			"Values are read from the configuration layers on this machine. Credentials, executable arguments and structured collections stay in those files; what crosses is that they are configured.",
 	},
 	configMap: {
-		eyebrow: eyebrow("Effective Clio Coder", "one workspace", READ_ONLY),
-		title: "Why Clio behaves this way",
+		eyebrow: eyebrow("Effective CLIO Coder", "one workspace", READ_ONLY),
+		title: "Why CLIO Coder behaves this way",
 		boundary:
 			"Source contents, hook arguments and environment maps stay in their files on this machine. What crosses is each surface's scope, precedence, trust, apply timing and its numeric facts.",
 	},
@@ -162,11 +162,11 @@ export const emptyState = {
 	/** 2. The store itself is absent. */
 	missingStore: (subject: string, path?: string | null) =>
 		`This installation has no ${subject} store at all. That is a missing store, not an empty one.${
-			path ? ` Clio Coder looked for it at ${path}.` : ""
+			path ? ` CLIO Coder looked for it at ${path}.` : ""
 		}`,
 	/** 3. The store is there and holds nothing. `where` narrows the claim to one record. */
 	emptyStore: (subject: string, where = "on this installation") =>
-		`Clio Coder has recorded no ${subject} ${where}. This is an empty record, not a health claim.`,
+		`CLIO Coder has recorded no ${subject} ${where}. This is an empty record, not a health claim.`,
 	/** 4. The record is older than the projection being asked for. */
 	predatesSchema: (record: string, projection: string, items: string) =>
 		`This ${record} predates the canonical ${projection}, so it records no ${items} to open.`,
@@ -174,5 +174,5 @@ export const emptyState = {
 	bounded: (subject: string, edge: "Older" | "Later" | "Earlier" = "Older") =>
 		`${edge} ${subject} are outside this bounded view.`,
 	/** What a dash in a figure means, wherever a missing store can produce one. */
-	dash: () => "A dash means Clio Coder could not find that local history store. It does not mean zero activity.",
+	dash: () => "A dash means CLIO Coder could not find that local history store. It does not mean zero activity.",
 } as const;

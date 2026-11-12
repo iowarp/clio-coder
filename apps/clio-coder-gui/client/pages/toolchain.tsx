@@ -86,7 +86,7 @@ export function Toolchain({
 						title="Toolchain"
 						action={<span className="count">{tools.data?.length ?? "—"} pinned tools</span>}
 					/>
-					<p className="intro">Inspect the executable Clio resolves and manage its pinned, vendored copy.</p>
+					<p className="intro">Inspect the executable CLIO Coder resolves and manage its pinned, vendored copy.</p>
 					<p className="panel-note">
 						A compatible PATH installation may take precedence over the pinned copy. Removing a vendored copy leaves PATH
 						installations intact.

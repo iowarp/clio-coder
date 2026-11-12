@@ -132,7 +132,7 @@ export function filterMachines(
 
 export const machineCheckLabels = [
 	["reachable", "SSH reached"],
-	["clioPresent", "Clio found"],
+	["clioPresent", "CLIO Coder found"],
 	["versionMatch", "Version matched"],
 	["pathParity", "Project path found"],
 	["stateDirWritable", "State writable"],

@@ -166,7 +166,7 @@ test("resolution wording keeps the difference between told no and not told no", 
 	assert.match(RESOLUTION_SUMMARY.expired ?? "", /was not told no/);
 	assert.match(RESOLUTION_SUMMARY.cancelled ?? "", /was not told no/);
 	assert.equal(resolutionSummary("allowed"), "Allowed once by the operator.");
-	assert.equal(resolutionSummary("something-new"), "Clio Coder recorded an outcome this GUI does not classify.");
+	assert.equal(resolutionSummary("something-new"), "CLIO Coder recorded an outcome this GUI does not classify.");
 });
 
 // ---- the agent's own classification ----------------------------------------------------------
@@ -310,7 +310,7 @@ test("a write shows the path and a fetch shows the host, never a query string", 
 test("a tool this build has never seen degrades to a readable row, never to an empty body", () => {
 	const unknown = gatedPreview({ title: "teleport", rawInput: { destination: "mars" } });
 	assert.equal(unknown.kind, "none");
-	assert.equal(unknown.kind === "none" && unknown.note, "Clio Coder reported no reviewable input for teleport.");
+	assert.equal(unknown.kind === "none" && unknown.note, "CLIO Coder reported no reviewable input for teleport.");
 	// An unrecognised tool that still reported locations shows them rather than nothing.
 	const located = gatedPreview({ title: "teleport", locations: [{ path: "src/a.ts", line: 4 }] });
 	assert.equal(located.kind === "path" && located.path, "src/a.ts:5");
@@ -462,10 +462,10 @@ test("every fact type has a label, a tone and a sentence, and an unknown one deg
 	const unknown = presentFleetFact({ type: "fleet.teleported", payload: { anything: 1 } });
 	assert.equal(unknown.known, false);
 	assert.equal(unknown.label, "fleet.teleported");
-	assert.equal(unknown.summary, "Clio Coder reported a fact this build does not classify.");
+	assert.equal(unknown.summary, "CLIO Coder reported a fact this build does not classify.");
 	// A payload of the wrong shape entirely still produces a row rather than throwing.
 	assert.equal(presentFleetFact({ type: "fleet.failed", payload: "not an object" }).known, true);
-	assert.equal(presentFleetFact({ type: "fleet.failed" }).summary, "Clio Coder reported no reason.");
+	assert.equal(presentFleetFact({ type: "fleet.failed" }).summary, "CLIO Coder reported no reason.");
 });
 
 test("the loop guard and evidence facts are reported as notices rather than dropped in silence", () => {

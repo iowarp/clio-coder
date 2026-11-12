@@ -33,7 +33,7 @@ export function useFirstTask(client: Client) {
 					const meta = await client.call(routes.meta, emptyInput);
 					queries.setQueryData(["meta"], meta);
 					if (request.epoch !== meta.epoch)
-						throw new Error("Clio Coder restarted. Review the earlier task before starting another request.");
+						throw new Error("CLIO Coder restarted. Review the earlier task before starting another request.");
 				} else {
 					// Setup resolves and validates this workspace; neither read needs to wait on the other.
 					const [meta, status] = await Promise.all([

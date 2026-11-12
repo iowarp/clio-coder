@@ -119,7 +119,7 @@ test("segmentSettled marks only the last segment of a live turn as still growing
 
 test("responseAuthor prefers the delegated worker and never guesses an attribution", () => {
 	const plain = turnOf([item({ id: "a", kind: "text", text: "hello" })]);
-	assert.deepEqual(responseAuthor(plain), { name: "Clio Coder", delegated: false });
+	assert.deepEqual(responseAuthor(plain), { name: "CLIO Coder", delegated: false });
 
 	const orchestrated = turnOf([
 		item({
@@ -129,7 +129,7 @@ test("responseAuthor prefers the delegated worker and never guesses an attributi
 			provenance: [{ version: 1, role: "orchestrator", agentId: "clio" }],
 		}),
 	]);
-	assert.equal(responseAuthor(orchestrated).name, "Clio Coder");
+	assert.equal(responseAuthor(orchestrated).name, "CLIO Coder");
 
 	const delegated = turnOf([
 		item({

@@ -77,7 +77,7 @@ export const UsagePanel = memo(function UsagePanel({
 				</p>
 			)}
 			{!sessionOpen ? <p className="pane-empty">{summary.note}</p> : null}
-			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report usage for this task.</p> : null}
+			{sessionOpen && !supported ? <p className="pane-empty">CLIO Coder does not report usage for this task.</p> : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
 			{sessionOpen && usage.error ? (
 				<p role="alert" className="pane-empty">
@@ -183,7 +183,7 @@ export const UsagePanel = memo(function UsagePanel({
 							</ul>
 						) : null}
 						<p className="drill__note">
-							Each provider's report for the signed-in plan. It covers every tool using that plan, not only Clio Coder.
+							Each provider's report for the signed-in plan. It covers every tool using that plan, not only CLIO Coder.
 						</p>
 					</details>
 				</>

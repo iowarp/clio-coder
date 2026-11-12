@@ -394,7 +394,7 @@ test("a tool with no title at all falls back to a generic safe label", () => {
 		toolKind: "other",
 		toolCallId: "c2",
 	};
-	assert.equal(presentTool(untitled).headline, "Use a Clio Coder tool");
+	assert.equal(presentTool(untitled).headline, "Use a CLIO Coder tool");
 });
 
 test("headlines are one bounded line and never JSON", () => {

@@ -97,7 +97,7 @@ export function createClient(
 						title: "Server unavailable",
 						status: 503,
 						code: "unavailable",
-						detail: "Cannot reach Clio Coder. Check that the server is running.",
+						detail: "Cannot reach CLIO Coder. Check that the server is running.",
 						instance: "browser",
 					});
 				}
@@ -118,7 +118,7 @@ export function createClient(
 					title: "Server changed",
 					status: 503,
 					code: "unavailable",
-					detail: "Clio Coder restarted while this request was in flight. Refresh the task before continuing.",
+					detail: "CLIO Coder restarted while this request was in flight. Refresh the task before continuing.",
 					instance: "browser",
 				});
 			return value;

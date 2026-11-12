@@ -2,7 +2,7 @@
 export function WindowTitlebar() {
 	return (
 		<div className="window-titlebar" aria-hidden="true">
-			<span>Clio Coder</span>
+			<span>CLIO Coder</span>
 		</div>
 	);
 }

@@ -47,7 +47,7 @@ test("an event connection never presents deferred diagnostics as running or heal
 	assert.deepEqual(systemStatus("Connected", undefined, false), {
 		tone: "unverified",
 		label: "Not checked",
-		detail: "Open System to check Clio installation diagnostics.",
+		detail: "Open System to check CLIO Coder installation diagnostics.",
 	});
 	assert.equal(systemStatus("Connected", report.findings, false).label, "1 issue");
 	assert.equal(systemStatus("Reconnecting…", report.findings, false).label, "Reconnecting");

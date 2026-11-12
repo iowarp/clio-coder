@@ -33,7 +33,7 @@ export function useSessionControls(client: Client) {
 			if (original.epoch !== null && original.epoch !== meta.epoch) {
 				store.patch(original.key, { restarted: true });
 				throw new Error(
-					"Clio restarted. This request will not be replayed. Refresh the recorded session state before continuing.",
+					"CLIO Coder restarted. This request will not be replayed. Refresh the recorded session state before continuing.",
 				);
 			}
 			store.patch(original.key, { epoch: meta.epoch });
@@ -52,7 +52,7 @@ export function useSessionControls(client: Client) {
 					stage: closed ? "complete" : "unresolved",
 					message: closed
 						? "This session is closed. Its recorded conversation remains available."
-						: "Clio returned a session whose closure is unconfirmed. Refresh its recorded state before starting another control.",
+						: "CLIO Coder returned a session whose closure is unconfirmed. Refresh its recorded state before starting another control.",
 				});
 			} else {
 				await client.call(
@@ -65,7 +65,7 @@ export function useSessionControls(client: Client) {
 				store.patch(original.key, {
 					stage: "complete",
 					message:
-						"Clio accepted the stop request for the original turn. Refresh or open the session to inspect its outcome.",
+						"CLIO Coder accepted the stop request for the original turn. Refresh or open the session to inspect its outcome.",
 				});
 			}
 			refreshLists();
@@ -89,7 +89,7 @@ export function useSessionControls(client: Client) {
 				key: crypto.randomUUID(),
 				epoch: expectedEpoch,
 				stage: "sending",
-				message: "Checking Clio before submitting…",
+				message: "Checking CLIO Coder before submitting…",
 				restarted: false,
 			};
 			try {

@@ -94,7 +94,7 @@ export function UsagePage({ client }: { client: Client }) {
 					{query.data.performance ? (
 						<OperatorMetrics client={client} performance={query.data.performance} cost={cost} />
 					) : (
-						<p className="operator-note">Recorded operator metrics are not exposed by this Clio build.</p>
+						<p className="operator-note">Recorded operator metrics are not exposed by this CLIO Coder build.</p>
 					)}
 					<div className="usage-secondary">
 						<section aria-labelledby="usage-token-fields">
@@ -241,11 +241,11 @@ export function UsagePage({ client }: { client: Client }) {
 						<summary>
 							<Icon name="skills" />
 							<span>
-								Suggestions from Clio<small>{query.data.opportunities.length} recorded suggestions in this window</small>
+								Suggestions from CLIO Coder<small>{query.data.opportunities.length} recorded suggestions in this window</small>
 							</span>
 							<Icon name="chevronDown" />
 						</summary>
-						{!query.data.opportunities.length && <PanelEmpty>Clio recorded no suggestion for this window.</PanelEmpty>}
+						{!query.data.opportunities.length && <PanelEmpty>CLIO Coder recorded no suggestion for this window.</PanelEmpty>}
 						{query.data.opportunities.map((row) => (
 							<article className="usage-source-fact" key={`${row.kind}:${row.evidence}`}>
 								<h3>{usageLabel(row.kind)}</h3>

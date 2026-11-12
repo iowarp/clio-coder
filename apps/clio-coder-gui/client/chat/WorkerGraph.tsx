@@ -247,7 +247,7 @@ export const WorkerGraph = memo(function WorkerGraph({
 			<div className="agents-tree">
 				<div className="agents-root" data-opens={shown.length > 0 ? "yes" : undefined}>
 					<span className="agents-root__dot" aria-hidden="true" />
-					<span className="agents-root__name">Clio Coder</span>
+					<span className="agents-root__name">CLIO Coder</span>
 					<span className="agents-root__role">main conversation</span>
 					<StatusMark live={running && open} tone={running ? "running" : "neutral"} label={running ? "Working" : "Idle"} />
 				</div>

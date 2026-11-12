@@ -10,7 +10,7 @@ const TITLES: Record<string, string> = {
 	goal: "Say what the next conversation should accomplish",
 	turn_in_flight: "Wait for the current turn to finish",
 	no_session: "There is no conversation to hand off",
-	extraction: "Clio Coder could not draw up the handoff",
+	extraction: "CLIO Coder could not draw up the handoff",
 	provider: "The model round failed",
 	empty: "The reviewed document is empty",
 	stale: "The conversation moved on",
@@ -24,7 +24,7 @@ export function handoffRefusal(refusal: HandoffRefused): { tone: "warning" | "er
 	const sentence = refusal.reason.charAt(0).toUpperCase() + refusal.reason.slice(1);
 	return {
 		tone: refusal.level === "error" ? "error" : "warning",
-		title: TITLES[refusal.code] ?? "Clio Coder refused the handoff",
+		title: TITLES[refusal.code] ?? "CLIO Coder refused the handoff",
 		detail: /[.!?]$/.test(sentence) ? sentence : `${sentence}.`,
 	};
 }

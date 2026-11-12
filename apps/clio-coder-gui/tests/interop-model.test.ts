@@ -48,10 +48,10 @@ test("the wiring states never share a sentence", () => {
 	assert.equal(new Set(sentences).size, sentences.length);
 	assert.deepEqual(sentences.slice(0, 6), [
 		"Wired as a delegation peer.",
-		"Speaks no ACP, so Clio Coder cannot delegate to it.",
+		"Speaks no ACP, so CLIO Coder cannot delegate to it.",
 		"Offered, and never answered.",
 		"Offered again, because the facts moved since you last answered.",
-		"Declined, so Clio Coder stays quiet about it.",
+		"Declined, so CLIO Coder stays quiet about it.",
 		"Accepted, but no delegation entry names it.",
 	]);
 	for (const sentence of sentences) assert.match(sentence, /\.$/u);
@@ -137,7 +137,7 @@ test("only an agent on offer can be answered, and accepting names the settings e
 	});
 	assert.deepEqual(decisionOutcome({ decided: ["codex"], wired: [], diagnostics: [] }, "decline"), {
 		tone: "neutral",
-		text: "Declined. Clio Coder stays quiet about it until its facts change.",
+		text: "Declined. CLIO Coder stays quiet about it until its facts change.",
 	});
 	assert.deepEqual(
 		decisionOutcome({ decided: [], wired: [], diagnostics: ["codex is not a pending proposal"] }, "accept"),

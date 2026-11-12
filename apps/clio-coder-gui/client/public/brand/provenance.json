@@ -10,7 +10,7 @@
 	],
 	"projection": {
 		"source": "site/export-brand.mjs",
-		"designSha256": "3ac20c87fad09db521621c5ac57fe6c5184b120897ede3d347e991ab8624f5d9",
+		"designSha256": "98206586801df4bc6135885674d46040c48974e5348624b02ce0e11dfb741901",
 		"encoders": { "pngquant": "2.18.0", "Pillow": "12.1.0", "libwebp": "1.6.0" },
 		"padding": "Square app icons center the mark within a 94% safe area; the header mark is unchanged.",
 		"sha256": {

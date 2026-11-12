@@ -52,7 +52,7 @@ function PlanReview({ plan }: { plan: Plan }) {
 					<h3>{stepTitle(step)}</h3>
 					{step.refusal && (
 						<p className="library-refusal" role="alert">
-							Clio refuses this step: {step.refusal}
+							CLIO Coder refuses this step: {step.refusal}
 						</p>
 					)}
 					<p>{effectSentence(step)}</p>
@@ -354,7 +354,7 @@ function PlanDialog({
 					<p>
 						{plan.applicable
 							? "This is exactly what will be applied. Nothing has been written yet."
-							: "Clio will not apply this plan. Nothing has been written."}
+							: "CLIO Coder will not apply this plan. Nothing has been written."}
 					</p>
 					<PlanReview plan={plan} />
 					{!!plan.diagnostics.length && (

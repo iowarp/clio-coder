@@ -40,14 +40,14 @@ test("browser opener accepts only the loopback app and treats URL as one literal
 });
 
 test("a launch on a Linux desktop raises an open app window and otherwise reports none", async (t) => {
-	for (const title of ["Clio Coder", "Tasks · Clio Coder - Google Chrome", "● Approval needed — Chat · Clio Coder"])
+	for (const title of ["CLIO Coder", "Tasks · CLIO Coder - Google Chrome", "● Approval needed — Chat · CLIO Coder"])
 		assert.ok(isAppWindowTitle(title), title);
-	for (const title of ["Clio Coder notes.md - Visual Studio Code", "Not Clio Coder at all", "Clio Coder docs - GitHub"])
+	for (const title of ["CLIO Coder notes.md - Visual Studio Code", "Not CLIO Coder at all", "CLIO Coder docs - GitHub"])
 		assert.ok(!isAppWindowTitle(title), title);
 	const dir = await mkdtemp(join(tmpdir(), "clio-web-focus-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const log = join(dir, "argv");
-	const listing = "0x01 0 host Clio Coder docs - GitHub\n0x02 -1 host Settings · Clio Coder\n";
+	const listing = "0x01 0 host CLIO Coder docs - GitHub\n0x02 -1 host Settings · CLIO Coder\n";
 	assert.equal(wmctrlAppWindow(listing), "0x02");
 	await writeFile(
 		join(dir, "wmctrl"),

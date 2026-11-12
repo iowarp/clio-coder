@@ -90,7 +90,7 @@ export const PANE_GROUPS: readonly { label: string; views: readonly PaneView[] }
 export const PANE_DESCRIPTIONS: Record<PaneView, string> = {
 	session: "Status, progress and the facts behind this task.",
 	changes: "Edits and file paths reported by this conversation's tools.",
-	board: "Your checklist, Clio's plan and recorded decisions.",
+	board: "Your checklist, CLIO Coder's plan and recorded decisions.",
 	agents: "Worker activity and results linked to this task.",
 	artifacts: "Saved artifacts exposed by this task's connection.",
 	context: "Recorded window use, instructions and context management.",

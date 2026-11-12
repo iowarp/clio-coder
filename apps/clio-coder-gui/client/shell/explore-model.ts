@@ -3,7 +3,7 @@ import { SETTINGS_SECTIONS } from "./shell-model.js";
 
 const GROUPS = [
 	{ label: "Workbench", detail: "Sessions and research machines", sections: ["sessions", "machines"] },
-	{ label: "Capabilities", detail: "What Clio can use", sections: ["library", "skills", "toolchain", "interop"] },
+	{ label: "Capabilities", detail: "What CLIO Coder can use", sections: ["library", "skills", "toolchain", "interop"] },
 	{
 		label: "Research activity",
 		detail: "Work, results and recorded evidence",
@@ -11,7 +11,7 @@ const GROUPS = [
 	},
 	{
 		label: "Settings",
-		detail: "Make Clio work for you",
+		detail: "Make CLIO Coder work for you",
 		sections: ["general", "models", "safety", "context", "all", "system"],
 	},
 ];

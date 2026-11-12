@@ -45,7 +45,7 @@ export const ExtensionsPanel = memo(function ExtensionsPanel({
 	const body = (
 		<>
 			{!sessionOpen ? <p>This task is not open. Open it to read its extensions.</p> : null}
-			{sessionOpen && !supported ? <p>Clio does not report extensions for this task.</p> : null}
+			{sessionOpen && !supported ? <p>CLIO Coder does not report extensions for this task.</p> : null}
 			{list.isPending && sessionOpen && supported ? <p>Reading the extensions…</p> : null}
 			{list.error ? (
 				<div role="alert" className="pane-inspection-error">

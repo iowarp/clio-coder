@@ -9,7 +9,7 @@ export const ARENA_PANEL: PanelCopy = {
 	eyebrow: eyebrow("Arena matches", "this workspace", "run and vote"),
 	title: "Arena",
 	boundary:
-		"Matches, contender streams, diffs and votes live under .clio-coder/arena in this workspace. Clio records your vote and never judges a match itself.",
+		"Matches, contender streams, diffs and votes live under .clio-coder/arena in this workspace. CLIO Coder records your vote and never judges a match itself.",
 };
 
 export const ARENA_MIN_CONTENDERS = 2;
@@ -59,7 +59,7 @@ export function voteState(match: Pick<ArenaMatch, "status" | "vote">): VoteState
 	if (match.vote) return { kind: "recorded", choice: match.vote.choice, note: match.vote.note };
 	if (match.status === "running") return { kind: "waiting", reason: "Contenders are still running." };
 	if (match.status === "failed")
-		return { kind: "waiting", reason: "This match did not finish, so Clio does not take a vote on it." };
+		return { kind: "waiting", reason: "This match did not finish, so CLIO Coder does not take a vote on it." };
 	return { kind: "open" };
 }
 

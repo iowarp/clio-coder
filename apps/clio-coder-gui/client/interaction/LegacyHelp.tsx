@@ -5,7 +5,7 @@ import { publicHelpUrl } from "./public-help.js";
 import "./help.css";
 
 const GUIDES = [
-	{ path: "gui", title: "Your workspace", detail: "Projects, sessions and working with Clio", icon: "sessions" },
+	{ path: "gui", title: "Your workspace", detail: "Projects, sessions and working with CLIO Coder", icon: "sessions" },
 	{
 		path: "configuration-and-targets",
 		title: "Connect your models",
@@ -38,7 +38,7 @@ export function LegacyHelp() {
 				<h1>
 					Make yourself <em>at home.</em>
 				</h1>
-				<p>Find your way around Clio, connect your research tools, and keep your work moving.</p>
+				<p>Find your way around CLIO Coder, connect your research tools, and keep your work moving.</p>
 			</header>
 			<div className="help-landing__actions">
 				<button type="button" className="primary" onClick={() => shell?.openHelp()}>
@@ -69,8 +69,8 @@ export function LegacyHelp() {
 			</div>
 			<footer>
 				<p>
-					Quick help and keyboard shortcuts are available inside the app. Full guides open on Clio’s documentation site. The
-					installed package also includes a reference for offline reading.
+					Quick help and keyboard shortcuts are available inside the app. Full guides open on CLIO Coder’s documentation
+					site. The installed package also includes a reference for offline reading.
 				</p>
 				<Link to="/">
 					Back to your workspace

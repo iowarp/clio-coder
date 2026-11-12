@@ -64,7 +64,7 @@ function RouteError() {
 	useEffect(() => console.error("Route failed to render:", error), [error]);
 	return (
 		<main className="route-error" role="alert">
-			<p className="eyebrow">Clio Coder</p>
+			<p className="eyebrow">CLIO Coder</p>
 			<h1>This view could not open.</h1>
 			<p>Check the local connection and reload the app.</p>
 			<button type="button" className="primary" onClick={() => window.location.reload()}>
@@ -80,7 +80,7 @@ const router = createBrowserRouter([
 		hydrateFallbackElement: (
 			<main className="app-opening" role="status">
 				<ClioPulse size={PULSE_SIZE.stage} />
-				<p>Opening Clio Coder…</p>
+				<p>Opening CLIO Coder…</p>
 			</main>
 		),
 		children: [

@@ -207,7 +207,7 @@ export function ReportDialog({
 									</label>
 								))}
 								<fieldset className="report-dialog__masks">
-									<legend>What Clio masked</legend>
+									<legend>What CLIO Coder masked</legend>
 									<span>{view?.plan.maskSummary ?? ""}</span>
 									{view?.masks.map((mask) => (
 										<button

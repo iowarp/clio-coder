@@ -550,8 +550,8 @@ export function SettingsControlsView({
 			: checked?.status === "succeeded"
 				? `${targetId} answered at ${formatTime(checked.finishedAt)}: ${target.models.length} ${target.models.length === 1 ? "model" : "models"}.`
 				: checked?.status === "failed"
-					? `The check did not finish: ${checked.problem.detail} These are the models Clio Coder last read from ${targetId}.`
-					: `The models Clio Coder last read from ${targetId}.`;
+					? `The check did not finish: ${checked.problem.detail} These are the models CLIO Coder last read from ${targetId}.`
+					: `The models CLIO Coder last read from ${targetId}.`;
 		return {
 			models: target.models.length > 0 ? target.models : target.defaultModel ? [target.defaultModel] : null,
 			defaultModel: target.defaultModel,

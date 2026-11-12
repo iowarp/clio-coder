@@ -14,14 +14,14 @@ async function reconnect() {
 	button.disabled = true;
 	try {
 		const response = await fetch("/manifest.webmanifest", { cache: "no-store", signal: AbortSignal.timeout(2000) });
-		if (response.ok && (await response.json()).name === "Clio Coder") {
+		if (response.ok && (await response.json()).name === "CLIO Coder") {
 			location.reload();
 			return;
 		}
 	} catch {
 		/* An unavailable local service is expected during restart or sleep. */
 	}
-	status.textContent = "Still waiting for Clio Coder. Your work stays in Clio Coder; nothing has been sent.";
+	status.textContent = "Still waiting for CLIO Coder. Your work stays in CLIO Coder; nothing has been sent.";
 	pending = false;
 	button.disabled = false;
 	clearTimeout(timer);

@@ -35,7 +35,7 @@ const ACTION_COPY: Readonly<Record<string, { title: string; description: string 
 	"fleet-run": { title: "Run a workflow", description: "Choose a saved workflow and review it before starting" },
 };
 const COMMAND_TITLES: Readonly<Record<string, string>> = {
-	doctor: "Check Clio",
+	doctor: "Check CLIO Coder",
 	"context compact": "Make room in conversation",
 	"context reset": "Reset conversation memory",
 	"context recover": "Recover conversation memory",

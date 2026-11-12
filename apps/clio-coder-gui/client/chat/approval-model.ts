@@ -54,13 +54,13 @@ export function approvalQueue(permissions: readonly Permission[]) {
  */
 export const RESOLUTION_SUMMARY: Readonly<Record<string, string>> = {
 	allowed: "Allowed once by the operator.",
-	rejected: "Rejected by the operator. Clio Coder was told no.",
-	cancelled: "Withdrawn when the turn was cancelled. Clio Coder was not told no.",
-	expired: "Nobody answered. The turn was stopped; Clio Coder was not told no.",
+	rejected: "Rejected by the operator. CLIO Coder was told no.",
+	cancelled: "Withdrawn when the turn was cancelled. CLIO Coder was not told no.",
+	expired: "Nobody answered. The turn was stopped; CLIO Coder was not told no.",
 };
 
 export const resolutionSummary = (status: string): string =>
-	RESOLUTION_SUMMARY[status] ?? "Clio Coder recorded an outcome this GUI does not classify.";
+	RESOLUTION_SUMMARY[status] ?? "CLIO Coder recorded an outcome this GUI does not classify.";
 
 export interface ApprovalTimings {
 	/** True once the declared escalation window has passed, or once the server said so. */
@@ -112,7 +112,7 @@ export function deriveApprovalTimings(
 export function countdownSentence(timings: ApprovalTimings, expiresAt: string): string {
 	return timings.budgetKnown
 		? `If unanswered, this turn stops in ${formatDuration(timings.remainingMs)} (at ${formatClock(expiresAt)}).`
-		: "If unanswered, this turn stops when Clio Coder's approval budget runs out.";
+		: "If unanswered, this turn stops when CLIO Coder's approval budget runs out.";
 }
 
 /** Under a second the wait is not a measurement worth printing, so it says the request just arrived. */
@@ -189,7 +189,7 @@ export const ACTION_CLASS_LABELS: Readonly<Record<string, string>> = {
 	dispatch: "dispatches a worker",
 	system_modify: "changes this machine",
 	git_destructive: "rewrites git history",
-	unknown: "does something Clio Coder did not classify",
+	unknown: "does something CLIO Coder did not classify",
 };
 
 export const AFFECTED_SCOPE_LABELS: Readonly<Record<string, string>> = {
@@ -266,7 +266,7 @@ export function decisionRows(decision: PermissionDecisionFacts | undefined): rea
 	const effects = decision.consequenceLines ?? [];
 	if (effects.length > 0) rows.push({ term: "Effect", value: effects.join(" "), lines: effects });
 	else if (decision.actionClass === "execute")
-		push("Effect", "Not classified. Clio Coder has no reading of what this command changes.");
+		push("Effect", "Not classified. CLIO Coder has no reading of what this command changes.");
 	push(
 		"Reversibility",
 		decision.reversibilityCopy.length > 0
@@ -323,7 +323,7 @@ export function workerAskRows(worker: Permission["worker"]): readonly DecisionRo
 }
 
 /** Said in place of the classification when the agent announced none, so the gap is stated. */
-export const NO_DECISION_FACTS = "Clio Coder sent no classification with this request.";
+export const NO_DECISION_FACTS = "CLIO Coder sent no classification with this request.";
 
 // ---- the answers ---------------------------------------------------------------------------
 
@@ -355,7 +355,7 @@ const ALLOW_ONCE: ApprovalAction = {
 	decision: "allow-once",
 	label: "Allow once",
 	variant: "primary",
-	description: "Allows this one call. Clio Coder asks again next time.",
+	description: "Allows this one call. CLIO Coder asks again next time.",
 	keybinding: "allowOnce",
 };
 
@@ -574,13 +574,13 @@ export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFac
 					label: name === "git" ? "Git operation" : "Operation",
 					summary: clampText(operation, 1, 256).text,
 				};
-			return { kind: "none", label: "Command", note: "Clio Coder reported no command for this call." };
+			return { kind: "none", label: "Command", note: "CLIO Coder reported no command for this call." };
 		}
 		const clamped = clampText(raw, PREVIEW_MAX_LINES, COMMAND_MAX_CHARS);
 		return { kind: "command", label: "Command", command: clamped.text, truncated: clamped.truncated };
 	}
 	if (EDIT_TOOLS.has(name)) {
-		const path = text(input.path) ?? "a file Clio Coder did not name";
+		const path = text(input.path) ?? "a file CLIO Coder did not name";
 		const edits = editsFrom(input);
 		if (edits.length === 0) return { kind: "path", label: "File", path };
 		let truncated = false;
@@ -594,7 +594,7 @@ export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFac
 		return { kind: "edits", label: "Proposed · not yet applied", path, edits: clamped, truncated };
 	}
 	if (name === "write") {
-		const path = text(input.path) ?? "a file Clio Coder did not name";
+		const path = text(input.path) ?? "a file CLIO Coder did not name";
 		const content = text(input.content);
 		if (content === null) return { kind: "path", label: "File", path };
 		const clamped = clampText(content, PREVIEW_MAX_LINES, PREVIEW_MAX_CHARS);
@@ -608,7 +608,7 @@ export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFac
 	}
 	if (name === "web_fetch") {
 		const url = text(input.url);
-		if (url === null) return { kind: "none", label: "Address", note: "Clio Coder reported no address for this fetch." };
+		if (url === null) return { kind: "none", label: "Address", note: "CLIO Coder reported no address for this fetch." };
 		const clamped = clampText(url, 1, 512);
 		try {
 			const parsed = new URL(url);
@@ -648,6 +648,6 @@ export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFac
 	return {
 		kind: "none",
 		label: "What is being approved",
-		note: `Clio Coder reported no reviewable input for ${name}.`,
+		note: `CLIO Coder reported no reviewable input for ${name}.`,
 	};
 }

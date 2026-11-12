@@ -87,7 +87,7 @@ export const FleetRunPanel = memo(function FleetRunPanel({
 	const content = (
 		<>
 			{!sessionOpen ? <p className="agents-note">This task is not open. Open it to run a playbook.</p> : null}
-			{sessionOpen && !supported ? <p className="agents-note">This Clio Coder session cannot preview playbooks.</p> : null}
+			{sessionOpen && !supported ? <p className="agents-note">This CLIO Coder session cannot preview playbooks.</p> : null}
 			{sessionOpen && supported ? (
 				<form
 					className="agents-form"

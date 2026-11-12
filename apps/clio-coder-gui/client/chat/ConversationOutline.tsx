@@ -63,7 +63,7 @@ export function ConversationOutline({
 					{found.total} {found.query ? "matching" : "loaded"} {found.total === 1 ? "exchange" : "exchanges"}
 					{found.rows.length < found.total ? ` · first ${found.rows.length} shown; refine your search` : ""}.
 					{truncated
-						? " Searches retained requests and responses; older exchanges omitted by Clio are not included."
+						? " Searches retained requests and responses; older exchanges omitted by CLIO Coder are not included."
 						: " Searches every request and response, including earlier turns."}
 				</p>
 				<ol

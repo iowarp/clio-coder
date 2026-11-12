@@ -53,7 +53,7 @@ test("operator tasks carry exactly the actions their state admits", () => {
 		[
 			["u1", "Open", ["hand", "done", "drop"], "expects report.md · 2 declared checks"],
 			["u2", "Dropped", [], ""],
-			["u3", "In Clio Coder's plan", ["done", "drop"], ""],
+			["u3", "In CLIO Coder's plan", ["done", "drop"], ""],
 		],
 	);
 });
@@ -81,7 +81,7 @@ test("decisions split into active and earlier, with who decided and why", () => 
 			ref: "agent:1/cache",
 			name: "cache",
 			value: "none",
-			who: "Decided by Clio Coder",
+			who: "Decided by CLIO Coder",
 			note: "use redis",
 			target: null,
 		},
@@ -91,7 +91,7 @@ test("decisions split into active and earlier, with who decided and why", () => 
 test("memory reads as a sentence and a missing report says so", () => {
 	assert.equal(memoryLine(board.memory), "Task memory is on, model tier, 1 entry, updating now.");
 	assert.equal(memoryLine({ enabled: false, tier: "rules", entries: 0, stepInFlight: false }), "Task memory is off.");
-	assert.equal(memoryLine(null), "Clio does not report task memory here.");
+	assert.equal(memoryLine(null), "CLIO Coder does not report task memory here.");
 });
 
 test("board writes are worded as what happened, and a proposal always names its review step", async () => {
@@ -106,7 +106,7 @@ test("board writes are worded as what happened, and a proposal always names its 
 	assert.match(supersedeOutcome({ status: "superseded" }, false).text, /stays in the record/);
 	assert.match(
 		supersedeOutcome({ status: "superseded", correctionTurn: "x" }, true).text,
-		/sent to Clio Coder as a request/,
+		/sent to CLIO Coder as a request/,
 	);
 	assert.match(supersedeOutcome({ status: "already_superseded" }, false).text, /nothing was written/);
 });

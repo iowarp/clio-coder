@@ -3,7 +3,7 @@ import type { KeybindingId } from "./keybindings.js";
 import { KEYBINDINGS } from "./keybindings.js";
 
 export const HELP_VIEWS = [
-	{ id: "guide", title: "Using Clio" },
+	{ id: "guide", title: "Using CLIO Coder" },
 	{ id: "shortcuts", title: "Shortcuts" },
 	{ id: "documentation", title: "Documentation" },
 ] as const;

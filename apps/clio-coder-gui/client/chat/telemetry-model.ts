@@ -11,7 +11,7 @@ const states = {
 
 export function livePlanView(plan: SessionPlan): { title: string; rows: PlanRow[] } {
 	return {
-		title: plan.title ?? "Clio Coder’s plan",
+		title: plan.title ?? "CLIO Coder’s plan",
 		rows: plan.entries.map((entry) => ({
 			id: entry.id,
 			title: entry.content,
@@ -44,7 +44,7 @@ export function memoryGuardianMark(
 			return {
 				tone: "running",
 				label: "Memory reviewing",
-				title: "Clio is reviewing finished work and this repository's earlier sessions for lessons",
+				title: "CLIO Coder is reviewing finished work and this repository's earlier sessions for lessons",
 				live: true,
 			};
 		case "waiting-capacity":

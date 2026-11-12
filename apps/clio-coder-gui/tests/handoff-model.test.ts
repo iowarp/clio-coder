@@ -9,7 +9,7 @@ test("a handoff refusal names what happened and keeps the service's own sentence
 	);
 	assert.equal(
 		handoffRefusal({ status: "refused", level: "error", code: "novel", reason: "x." }).title,
-		"Clio Coder refused the handoff",
+		"CLIO Coder refused the handoff",
 	);
 	assert.equal(handoffRefusal({ status: "refused", level: "error", code: "provider", reason: "x" }).tone, "error");
 });

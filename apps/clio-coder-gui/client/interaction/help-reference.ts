@@ -32,12 +32,12 @@ export interface HelpMatch {
 export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: string }>> = {
 	"/": {
 		title: "New task",
-		meaning: "Choose a workspace and describe a task. Clio starts when you send your first message.",
+		meaning: "Choose a workspace and describe a task. CLIO Coder starts when you send your first message.",
 	},
 	"/sessions": {
 		title: "Sessions",
 		meaning:
-			"Follow the sessions held by this Clio server across projects. Filter by activity, review requests for your input, stop a turn or continue a session.",
+			"Follow the sessions held by this CLIO Coder server across projects. Filter by activity, review requests for your input, stop a turn or continue a session.",
 	},
 	"/machines": {
 		title: "Machines",
@@ -72,7 +72,7 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 	"/research": {
 		title: "Research",
 		meaning:
-			"Run a research hill climb: Clio's agent changes an isolated worktree, each change is measured against the best so far, and only changes that beat noise are kept.",
+			"Run a research hill climb: CLIO Coder's agent changes an isolated worktree, each change is measured against the best so far, and only changes that beat noise are kept.",
 	},
 	"/library": {
 		title: "Library",
@@ -101,11 +101,11 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		title: "Documentation",
 		lede: "Guides online and an offline reference included with your installation.",
 		entries: [
-			{ term: "Public documentation", meaning: "Read the Clio Coder guides on the web." },
+			{ term: "Public documentation", meaning: "Read the CLIO Coder guides on the web." },
 			{
 				term: "Installed reference",
 				meaning:
-					"The bundled Markdown docs are available offline. Ask Clio to look up a guide with clio_docs, or open the files in your editor.",
+					"The bundled Markdown docs are available offline. Ask CLIO Coder to look up a guide with clio_docs, or open the files in your editor.",
 			},
 		],
 	},
@@ -125,17 +125,17 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		id: "working-freedom",
 		title: "Autonomy",
 		lede:
-			"Autonomy controls when Clio asks before acting. The current session keeps its reported level; a settings change applies to the next session.",
+			"Autonomy controls when CLIO Coder asks before acting. The current session keeps its reported level; a settings change applies to the next session.",
 		entries: [
 			{
 				term: "default",
 				meaning:
-					"Clio can read, edit and run recognised commands. Unrecognised shell commands, dispatching a full plan and publishing outside the project require approval.",
+					"CLIO Coder can read, edit and run recognised commands. Unrecognised shell commands, dispatching a full plan and publishing outside the project require approval.",
 			},
 			{
 				term: "yolo",
 				meaning:
-					"Clio skips ordinary approval prompts. Safety rules can still ask or block an action, and protected paths remain protected.",
+					"CLIO Coder skips ordinary approval prompts. Safety rules can still ask or block an action, and protected paths remain protected.",
 			},
 		],
 	},
@@ -147,14 +147,14 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			{ term: "Target", meaning: "A configured service or runtime that handles a turn." },
 			{ term: "Model", meaning: "The AI model a target uses for that turn." },
 			{ term: "Session", meaning: "A saved conversation you can resume. A project can have many sessions." },
-			{ term: "Turn", meaning: "One request and everything Clio does in response." },
+			{ term: "Turn", meaning: "One request and everything CLIO Coder does in response." },
 			{
 				term: "Evidence",
 				meaning: "Tool activity, approvals, results and records that record what happened.",
 			},
 			{
 				term: "Run record",
-				meaning: "A sealed record of a saved run. Verified means Clio checked the record and it still authenticates.",
+				meaning: "A sealed record of a saved run. Verified means CLIO Coder checked the record and it still authenticates.",
 			},
 			{
 				term: "Truncated",
@@ -165,14 +165,14 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 				meaning:
 					"Data kept in the local host process, such as an event payload or command line. The app names it without displaying its contents.",
 			},
-			{ term: "Reported", meaning: "Supplied by Clio, rather than measured by the app." },
+			{ term: "Reported", meaning: "Supplied by CLIO Coder, rather than measured by the app." },
 			{ term: "Observed", meaning: "Seen directly by the app." },
 			{ term: "Status: queued", meaning: "Accepted, but not started." },
 			{ term: "Status: active", meaning: "Running now." },
 			{ term: "Status: waiting", meaning: "Waiting for you, usually for approval." },
-			{ term: "Status: complete", meaning: "Clio reported that the work finished." },
+			{ term: "Status: complete", meaning: "CLIO Coder reported that the work finished." },
 			{ term: "Status: canceled", meaning: "Stopped before finishing. This does not mean the work failed." },
-			{ term: "Status: failed", meaning: "Clio reported that the work failed." },
+			{ term: "Status: failed", meaning: "CLIO Coder reported that the work failed." },
 			{
 				term: "Status: replayed",
 				meaning: "Restored from an earlier turn in this session, rather than observed live.",
@@ -186,7 +186,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		entries: [
 			{
 				term: "Inspections are read-only",
-				meaning: "Inspections use fixed commands, accept no browser-supplied arguments and do not change Clio.",
+				meaning: "Inspections use fixed commands, accept no browser-supplied arguments and do not change CLIO Coder.",
 			},
 			{
 				term: "Project work is project-scoped",
@@ -206,7 +206,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		entries: [
 			{
 				term: "/help",
-				meaning: "In the terminal, /help lists Clio Coder commands. The app has its own controls and shortcuts.",
+				meaning: "In the terminal, /help lists CLIO Coder commands. The app has its own controls and shortcuts.",
 			},
 		],
 	},
@@ -214,7 +214,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		id: INTERVIEW_KEYBINDING_NAMESPACE,
 		title: "Interviews",
 		lede:
-			"Clio may ask a round of questions during a turn when the connected runtime supports interviews. Answering an interview is separate from approving an action.",
+			"CLIO Coder may ask a round of questions during a turn when the connected runtime supports interviews. Answering an interview is separate from approving an action.",
 		entries: [
 			{
 				term: "Review, then submit",

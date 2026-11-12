@@ -345,7 +345,7 @@ export const ToolCard = memo(function ToolCard({ item, options, agent = null, el
 				<span className="tool-card__glyph" aria-hidden="true">
 					{card.ended ? "–" : card.failed ? "✕" : statusGlyph(item.status)}
 				</span>
-				<span className="tool-card__verb" title={`Clio Coder tool: ${card.name}`}>
+				<span className="tool-card__verb" title={`CLIO Coder tool: ${card.name}`}>
 					{card.verb}
 				</span>
 				<span className="tool-card__headline" title={card.headline}>

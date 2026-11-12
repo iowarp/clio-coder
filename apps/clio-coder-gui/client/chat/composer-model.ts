@@ -381,12 +381,12 @@ export function shellNotice(text: string, shell: boolean): string | null {
 	const line = shell ? shellLine(text) : null;
 	if (line === null) return null;
 	return line.excludeFromContext
-		? "Runs in this task's shell as you. The output is recorded and kept out of Clio's context."
-		: "Runs in this task's shell as you. Clio sees the command and its output. Start with !! to hide the output from Clio.";
+		? "Runs in this task's shell as you. The output is recorded and kept out of CLIO Coder's context."
+		: "Runs in this task's shell as you. CLIO Coder sees the command and its output. Start with !! to keep the output out of its context.";
 }
 
 const CLOSED_SESSION_REASON: Readonly<Record<string, string>> = {
-	starting: "This task is still starting. It takes a message once Clio answers.",
+	starting: "This task is still starting. It takes a message once CLIO Coder answers.",
 	parked: "This task is paused. Resume it before sending.",
 	unknown: "This task is not reachable right now, so nothing can be sent to it.",
 	closed: "This task is closed. Start a new one to keep working.",
@@ -439,10 +439,10 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 			return blocked("Could not check this agent's mid-turn controls. Retry the check before sending.");
 		if (!situation.steering.steer)
 			return blocked(
-				"This Clio Coder build cannot take direction while a turn runs. Your draft is kept; send it when the turn settles, or stop the turn.",
+				"This CLIO Coder build cannot take direction while a turn runs. Your draft is kept; send it when the turn settles, or stop the turn.",
 			);
 		const mode = situation.steering.modes.includes(draft.mode) ? draft.mode : situation.steering.modes[0];
-		if (mode === undefined) return blocked("This Clio Coder build announced no steering mode.");
+		if (mode === undefined) return blocked("This CLIO Coder build announced no steering mode.");
 		const over = tooLong(text, STEER_TEXT_MAX_BYTES, STEER_TEXT_MAX_BYTES);
 		return over === null ? { kind: "steer", text, mode, idempotencyKey: draft.key } : blocked(over);
 	}
@@ -707,7 +707,7 @@ export function capabilityRefusal(error: unknown): string | null {
 	if (problem?.status !== 409) return null;
 	return typeof problem.detail === "string" && problem.detail.trim() !== ""
 		? problem.detail
-		: "This Clio Coder build does not serve that control.";
+		: "This CLIO Coder build does not serve that control.";
 }
 
 export function noticeForError(error: unknown): ComposerNotice | null {

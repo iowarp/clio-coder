@@ -20,8 +20,8 @@ export function focusTools(env: NodeJS.ProcessEnv): FocusTool[] {
 const BROWSER_SUFFIX = / [-—] [A-Za-z][A-Za-z0-9 .]*$/;
 
 /**
- * Whether a window shows the app: the page titles the app composes (`Clio Coder`, `Tasks · Clio Coder`,
- * `● Approval needed — Tasks · Clio Coder`), alone in an installed app window or followed by the browser's
+ * Whether a window shows the app: the page titles the app composes (`CLIO Coder`, `Tasks · CLIO Coder`,
+ * `● Approval needed — Tasks · CLIO Coder`), alone in an installed app window or followed by the browser's
  * name when the app is the front tab of a browser window.
  */
 export function isAppWindowTitle(title: string) {

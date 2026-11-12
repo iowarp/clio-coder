@@ -36,7 +36,7 @@ test("a PATH copy that lost to the pin says why", () => {
 				pathCandidate: { path: "/usr/bin/herdr", version: "0.1.0", satisfiesMinimum: false },
 			},
 		}),
-		"A copy at /usr/bin/herdr reports 0.1.0, which is below the pinned minimum, so Clio does not use it.",
+		"A copy at /usr/bin/herdr reports 0.1.0, which is below the pinned minimum, so CLIO Coder does not use it.",
 	);
 	assert.equal(
 		toolCandidateNote({

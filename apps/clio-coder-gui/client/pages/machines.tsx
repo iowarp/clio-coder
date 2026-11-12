@@ -168,7 +168,7 @@ function AddMachine({
 				</fieldset>
 			</details>
 			<p className="machines-caption">
-				SSH uses the configuration and available keys on the machine running Clio. Labels are your declarations, not
+				SSH uses the configuration and available keys on the machine running CLIO Coder. Labels are your declarations, not
 				measured hardware. Adding a machine does not connect to it.
 			</p>
 			{error && <p role="alert">{error}</p>}
@@ -224,7 +224,7 @@ function MachineDetail({
 			<dl className="machines-facts">
 				<div>
 					<dt>Registration</dt>
-					<dd>Saved in your Clio settings</dd>
+					<dd>Saved in your CLIO Coder settings</dd>
 				</div>
 				<div>
 					<dt>Worker capacity</dt>
@@ -257,8 +257,8 @@ function MachineDetail({
 					))}
 				</div>
 				<p className="machines-caption">
-					These are saved observations, not a live connection. Checks expire after one day; changes to the connection or Clio
-					build can invalidate them sooner.
+					These are saved observations, not a live connection. Checks expire after one day; changes to the connection or CLIO
+					Coder build can invalidate them sooner.
 				</p>
 				{machine.reason || machine.note ? (
 					<details className="machines-diagnostics">
@@ -270,7 +270,7 @@ function MachineDetail({
 				{machine.checks && (
 					<dl className="machines-facts">
 						<div>
-							<dt>Clio version</dt>
+							<dt>CLIO Coder version</dt>
 							<dd>
 								Local {machine.localVersion ?? "unknown"} / remote {machine.remoteVersion ?? "unknown"}
 							</dd>
@@ -291,7 +291,7 @@ function MachineDetail({
 					<span className="machines-kicker">Desktop app on this machine</span>
 					<StatusMark tone={attachStatus.tone} label={attachStatus.label} live={attachStatus.tone === "running"} />
 					<p className="machines-caption">
-						Open starts the node's own Clio Coder app over SSH when it is not running, and this window moves to it: its
+						Open starts the node's own CLIO Coder app over SSH when it is not running, and this window moves to it: its
 						projects, tasks, settings and traces. The node must run this exact build.
 					</p>
 					{attachment?.detail ? <p className="machines-reason">{attachment.detail}</p> : null}
@@ -324,7 +324,7 @@ function MachineDetail({
 					{confirm === "check" ? (
 						<>
 							<p>
-								Clio will contact <strong>{machine.host}</strong>, inspect its worker and model endpoints, and verify this
+								CLIO Coder will contact <strong>{machine.host}</strong>, inspect its worker and model endpoints, and verify this
 								project at the same absolute path. Recording the check updates local fleet eligibility and may create a
 								temporary shared-storage marker in this workspace.
 							</p>
@@ -335,8 +335,8 @@ function MachineDetail({
 						</>
 					) : (
 						<p>
-							This removes the user registry entry. Remote files remain in place. Clio refuses removal while the node is a
-							standing default or is pinned by a fleet profile.
+							This removes the user registry entry. Remote files remain in place. CLIO Coder refuses removal while the node is
+							a standing default or is pinned by a fleet profile.
 						</p>
 					)}
 					<div className="machines-actions">
@@ -454,7 +454,7 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 				const currentMeta = await client.call(routes.meta, emptyInput);
 				queries.setQueryData(["meta"], currentMeta);
 				if (sent.epoch !== null && sent.epoch !== currentMeta.epoch)
-					throw new Error("Clio restarted. Review the original workspace's records before making a new request.");
+					throw new Error("CLIO Coder restarted. Review the original workspace's records before making a new request.");
 				store.update((current) => ({
 					...current,
 					request: current.request?.key === sent.key ? { ...current.request, epoch: currentMeta.epoch } : current.request,
@@ -578,7 +578,7 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 					</p>
 					{epochChanged ? (
 						<p>
-							Clio restarted. This request will not be replayed. Its earlier outcome may be unknown; review the original
+							CLIO Coder restarted. This request will not be replayed. Its earlier outcome may be unknown; review the original
 							workspace's records.
 						</p>
 					) : request.operationId ? (
@@ -766,7 +766,7 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 							<div className="machines-empty">
 								<Icon name="system" />
 								<h2>Connect the lab to your workflow.</h2>
-								<p>Register a workstation or server, then explicitly check that it can run Clio for this project.</p>
+								<p>Register a workstation or server, then explicitly check that it can run CLIO Coder for this project.</p>
 								<button type="button" disabled={busy} onClick={() => setAdding(true)}>
 									Add your first machine
 								</button>

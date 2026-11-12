@@ -118,13 +118,13 @@ export function MissionControl({ client }: { client: Client }) {
 							<StatusMark tone={connected ? "success" : "warn"} label={connection} />
 							<span>
 								<Icon name="system" />
-								{overview.data?.host ?? "This Clio server"}
+								{overview.data?.host ?? "This CLIO Coder server"}
 							</span>
 						</span>
 					</header>
 					{!connected ? (
 						<p className="mission__notice" role="status">
-							Session status may be out of date while the connection recovers. Controls return when Clio reconnects.
+							Session status may be out of date while the connection recovers. Controls return when CLIO Coder reconnects.
 						</p>
 					) : null}
 					<div className="mission__figures">
@@ -252,8 +252,8 @@ export function MissionControl({ client }: { client: Client }) {
 						</div>
 					) : null}
 					<footer className="mission__scope">
-						Sessions held by this Clio server. Saved project history stays in each project's task list. SSH worker activity
-						appears within its owning session.
+						Sessions held by this CLIO Coder server. Saved project history stays in each project's task list. SSH worker
+						activity appears within its owning session.
 					</footer>
 				</div>
 			</div>

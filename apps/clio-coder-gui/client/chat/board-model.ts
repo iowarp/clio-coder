@@ -55,8 +55,8 @@ export interface BoardView {
 
 const TASK_STATES: Record<SessionBoard["operatorTasks"][number]["status"], [StatusTone, string]> = {
 	open: ["neutral", "Open"],
-	handed: ["running", "Handed to Clio Coder"],
-	picked: ["running", "In Clio Coder's plan"],
+	handed: ["running", "Handed to CLIO Coder"],
+	picked: ["running", "In CLIO Coder's plan"],
 	done: ["success", "Done"],
 	dropped: ["neutral", "Dropped"],
 };
@@ -94,14 +94,14 @@ function decision(row: SessionBoard["decisions"][number]): DecisionRow {
 		ref: row.ref,
 		name: row.label ?? row.key,
 		value: row.value,
-		who: row.source === "agent" ? "Decided by Clio Coder" : row.source === "operator" ? "Your answer" : "Recorded",
+		who: row.source === "agent" ? "Decided by CLIO Coder" : row.source === "operator" ? "Your answer" : "Recorded",
 		note: row.status === "superseded" ? row.correction : row.rationale,
 		target: row.interviewId === undefined ? null : { interviewId: row.interviewId, key: row.key },
 	};
 }
 
 export function memoryLine(memory: SessionBoard["memory"]): string {
-	if (memory === null) return "Clio does not report task memory here.";
+	if (memory === null) return "CLIO Coder does not report task memory here.";
 	if (!memory.enabled) return "Task memory is off.";
 	const tier = memory.tier === "llm" ? "model tier" : "rules tier";
 	return `Task memory is on, ${tier}, ${plural(memory.entries, "entry", "entries")}${memory.stepInFlight ? ", updating now" : ""}.`;
@@ -179,7 +179,7 @@ export function supersedeOutcome(
 	return {
 		tone: "success",
 		text: corrected
-			? "Superseded. The new direction was sent to Clio Coder as a request."
+			? "Superseded. The new direction was sent to CLIO Coder as a request."
 			: "Superseded. It stays in the record under earlier decisions.",
 	};
 }

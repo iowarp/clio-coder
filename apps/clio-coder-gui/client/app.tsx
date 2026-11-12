@@ -382,8 +382,8 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		<div className="app-update-notice" role="status">
 			<strong>
 				{meta.data.pendingVersion === meta.data.clio
-					? `A different build of Clio Coder ${meta.data.clio} is installed. This app is still running the previous build.`
-					: `Clio Coder ${meta.data.pendingVersion} is installed. This app is still running ${meta.data.clio}.`}
+					? `A different build of CLIO Coder ${meta.data.clio} is installed. This app is still running the previous build.`
+					: `CLIO Coder ${meta.data.pendingVersion} is installed. This app is still running ${meta.data.clio}.`}
 			</strong>
 			<p>
 				Finish active work, then run <code>clio-coder gui background restart --if-idle</code> and reload this window.
@@ -479,7 +479,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			<aside
 				className="wb-sidebar"
 				id={SIDEBAR_ID}
-				aria-label="Clio navigation and settings"
+				aria-label="CLIO Coder navigation and settings"
 				inert={layered || (phone && !drawer)}
 				onKeyDown={(event) => {
 					if (event.key === "Escape" && drawer) setDrawer(false);

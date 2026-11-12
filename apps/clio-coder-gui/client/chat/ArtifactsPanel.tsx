@@ -59,7 +59,7 @@ export function ArtifactsPanel({
 			{!open ? (
 				<p className="pane-empty">Open this task to read its artifacts.</p>
 			) : !supported ? (
-				<p className="pane-empty">Clio does not report artifacts for this task.</p>
+				<p className="pane-empty">CLIO Coder does not report artifacts for this task.</p>
 			) : selected ? (
 				<>
 					<button
@@ -111,7 +111,7 @@ export function ArtifactsPanel({
 								</pre>
 							</section>
 							{page.data.clippedLines ? (
-								<p className="pane-hint">{page.data.clippedLines} oversized lines were shortened by Clio.</p>
+								<p className="pane-hint">{page.data.clippedLines} oversized lines were shortened by CLIO Coder.</p>
 							) : null}
 							<div className="artifacts__paging">
 								<button

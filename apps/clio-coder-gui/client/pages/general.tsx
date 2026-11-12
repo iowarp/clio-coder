@@ -47,7 +47,7 @@ export function GeneralPage({ client }: { client: Client }) {
 			<section className="general__block" aria-labelledby="general-appearance">
 				<div className="general__label">
 					<h2 id="general-appearance">Appearance</h2>
-					<p>Choose how Clio Coder looks. System follows your device and changes with it.</p>
+					<p>Choose how CLIO Coder looks. System follows your device and changes with it.</p>
 				</div>
 				<div className="general__control">
 					<div className="theme-choice" role="radiogroup" aria-labelledby="general-appearance">

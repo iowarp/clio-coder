@@ -86,7 +86,7 @@ export function originSentence(pkg: Package): string {
 	const origin = pkg.origin as { kind?: string; agent?: string };
 	switch (origin.kind) {
 		case "bundled":
-			return "Ships with Clio Coder";
+			return "Ships with CLIO Coder";
 		case "remote":
 			return "Pinned GitHub source";
 		case "local":
@@ -105,7 +105,7 @@ export function effectSentence(step: PlanStep): string {
 	const note = step.fallbackNote ? `${step.fallbackNote[0]?.toUpperCase()}${step.fallbackNote.slice(1)}.` : "";
 	const after = step.effectiveAfter;
 	if (!after) return note;
-	const state = after.loadable ? "Clio can load it" : `it is ${copyState(after.state).label.toLowerCase()}`;
+	const state = after.loadable ? "CLIO Coder can load it" : `it is ${copyState(after.state).label.toLowerCase()}`;
 	return `${note} Afterwards the ${after.scope} copy is the one in effect, and ${state}.`.trim();
 }
 

@@ -309,7 +309,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					{located.data === undefined ? (
 						<p>Looking for it in your projects…</p>
 					) : found ? (
-						<p>It is saved in {found.name}. Resuming starts Clio for it and continues the conversation.</p>
+						<p>It is saved in {found.name}. Resuming starts CLIO Coder for it and continues the conversation.</p>
 					) : (
 						<p>
 							None of your projects has a saved task with this link.
@@ -527,7 +527,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 										snapshot.state === "closed"
 											? "This task is closed."
 											: snapshot.state === "unknown"
-												? "Clio is no longer connected to this task."
+												? "CLIO Coder is no longer connected to this task."
 												: "This task could not continue."
 									}
 									action={<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>Reopen from the task list</Link>}

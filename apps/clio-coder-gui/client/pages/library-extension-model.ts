@@ -10,7 +10,7 @@ export interface TerminalStep {
 }
 
 export const TERMINAL_NOTE =
-	"Extensions are reviewed and changed in the terminal, where their capability envelope is shown for approval. Run one of these, or open /library in Clio Coder.";
+	"Extensions are reviewed and changed in the terminal, where their capability envelope is shown for approval. Run one of these, or open /library in CLIO Coder.";
 
 /** True when the plan contract accepts this package's ref, so the catalog may offer Install, Update, Enable, Disable and Remove. */
 export const desktopManaged = (pkg: Pick<Package, "kind">): boolean =>

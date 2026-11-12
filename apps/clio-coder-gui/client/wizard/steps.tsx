@@ -113,19 +113,19 @@ export function WelcomeStep({
 	return (
 		<Step
 			title={
-				mode === "first" ? "Welcome to Clio Coder." : mode === "add" ? "Add a connection." : "Repair your connection."
+				mode === "first" ? "Welcome to CLIO Coder." : mode === "add" ? "Add a connection." : "Repair your connection."
 			}
 			lede={
 				mode === "first" ? (
 					<>
-						<p>Choose what you already use. Clio checks the endpoint and model list when the provider allows it.</p>
+						<p>Choose what you already use. CLIO Coder checks the endpoint and model list when the provider allows it.</p>
 						<p>
 							Back returns to the previous step. Your choices are saved only at the review, except a browser sign-in you
 							complete.
 						</p>
 					</>
 				) : (
-					<p>Clio checks what you choose before it saves anything, and a sign-in you finish stays stored.</p>
+					<p>CLIO Coder checks what you choose before it saves anything, and a sign-in you finish stays stored.</p>
 				)
 			}
 			actions={
@@ -154,10 +154,10 @@ export function WelcomeStep({
 						<strong>Pick a provider.</strong> An app on this computer, a server, a subscription or an API account.
 					</li>
 					<li>
-						<strong>Connect and choose a model.</strong> Clio checks the address and reads the model list.
+						<strong>Connect and choose a model.</strong> CLIO Coder checks the address and reads the model list.
 					</li>
 					<li>
-						<strong>Open a folder.</strong> Clio works inside it. Your approval policy controls which actions ask first.
+						<strong>Open a folder.</strong> CLIO Coder works inside it. Your approval policy controls which actions ask first.
 					</li>
 				</ol>
 			) : null}
@@ -287,8 +287,8 @@ export function SignInStep({ view, busy, send }: StepProps<Of<"signin">>) {
 			title={`Sign in to ${view.provider}`}
 			lede={
 				<p>
-					Clio opens your browser so you can sign in there. The Clio command-line tool stores the result, and this page never
-					sees it.
+					CLIO Coder opens your browser so you can sign in there. The command-line tool stores the result, and this page
+					never sees it.
 				</p>
 			}
 			actions={
@@ -329,8 +329,8 @@ export function SignInStep({ view, busy, send }: StepProps<Of<"signin">>) {
 }
 
 const SOURCE_NOTES: Readonly<Record<string, string>> = {
-	stored: "Recommended. Paste it once and Clio remembers it.",
-	env: "For managed machines. Clio reads the variable each time and writes nothing.",
+	stored: "Recommended. Paste it once and it is remembered.",
+	env: "For managed machines. CLIO Coder reads the variable each time and writes nothing.",
 	keep: "Use the key that is already saved.",
 	skip: "Only for servers that accept requests without a key.",
 };
@@ -358,7 +358,7 @@ export function CredentialSourceStep({ view, busy, send }: StepProps<Of<"credent
 	);
 	return (
 		<Step
-			title="How should Clio get the API key?"
+			title="How should CLIO Coder get the API key?"
 			lede={view.status ? <p>Currently: {view.status}.</p> : undefined}
 			actions={
 				<button
@@ -392,7 +392,7 @@ export function CredentialKeyStep({ view, busy, problem, send }: StepProps<Of<"c
 			title="Paste the API key"
 			lede={
 				<p>
-					The Clio command-line tool stores the key in <code>credentials.yaml</code> with file mode 0600. It is not
+					The CLIO Coder command-line tool stores the key in <code>credentials.yaml</code> with file mode 0600. It is not
 					encrypted, and this page never keeps it.
 				</p>
 			}
@@ -429,7 +429,7 @@ export function CredentialKeyStep({ view, busy, problem, send }: StepProps<Of<"c
 					</button>
 				</div>
 				<p id={`${field}-hint`} className="wizard-hint">
-					{view.prompt.hint || "Stored by the Clio CLI only."}
+					{view.prompt.hint || "Stored by the CLIO Coder CLI only."}
 				</p>
 				<Problem text={problem} />
 			</form>
@@ -517,7 +517,7 @@ export function TextStep({
 
 export function DetectedStep({ view, busy, send }: StepProps<Of<"detected">>) {
 	return (
-		<Step title={`That address is serving ${view.served}.`} lede={<p>Clio can talk to it either way.</p>}>
+		<Step title={`That address is serving ${view.served}.`} lede={<p>CLIO Coder can talk to it either way.</p>}>
 			<ul className="wizard-options">
 				{view.options.map((choice, index) => (
 					<li key={choice.id}>
@@ -546,8 +546,8 @@ export function DetectedStep({ view, busy, send }: StepProps<Of<"detected">>) {
 export function OfferedStep({ view, busy, send }: StepProps<Of<"offered">>) {
 	return (
 		<Step
-			title="Clio found a way to reach a model."
-			lede={<p>Pick one and Clio sends it one short test message before it saves anything.</p>}
+			title="CLIO Coder found a way to reach a model."
+			lede={<p>Pick one, and it gets one short test message before anything is saved.</p>}
 			actions={
 				view.other ? (
 					<button
@@ -637,7 +637,9 @@ export function ModelStep({ view, busy, send }: StepProps<Of<"model">>) {
 			title="Which model?"
 			wide
 			lede={
-				<p>{sentence(view.note ?? "read live from the connection just now")} Clio starts on the one marked default.</p>
+				<p>
+					{sentence(view.note ?? "read live from the connection just now")} CLIO Coder starts on the one marked default.
+				</p>
 			}
 			actions={
 				<button
@@ -706,7 +708,7 @@ export function ModelMissingStep({ view, busy, send }: StepProps<Of<"model-missi
 	const run = (choice: Choice | null) => choice && send(selectAnswer(view.prompt, choice));
 	return (
 		<Step
-			title="Clio could not read a model list."
+			title="CLIO Coder could not read a model list."
 			lede={<p>{view.reason ?? "Start the app or server and load a model, then check again."}</p>}
 			actions={
 				<>
@@ -779,10 +781,10 @@ export function ReviewStep({ view, busy, send }: StepProps<Of<"review">>) {
 	const done = shown >= view.facts.length;
 	return (
 		<Step
-			title="Review what Clio could verify."
+			title="Review what CLIO Coder could verify."
 			lede={
 				<p>
-					These are the checks Clio ran while you set this up, without sending a prompt.{" "}
+					These are the checks CLIO Coder ran while you set this up, without sending a prompt.{" "}
 					{view.tests
 						? "Save sends the model one short test message, and saves when it answers."
 						: "Nothing is saved until you save."}
@@ -814,14 +816,14 @@ export function ReviewStep({ view, busy, send }: StepProps<Of<"review">>) {
 				</>
 			}
 		>
-			<ul className="wizard-checks" aria-label="What Clio could verify">
+			<ul className="wizard-checks" aria-label="What CLIO Coder could verify">
 				{view.facts.slice(0, shown).map((fact) => (
 					<FactRow key={fact.key} fact={fact} />
 				))}
 			</ul>
 			<p className="wizard-verdict" data-tone={view.verified ? "ok" : "warn"} role="status" hidden={!done}>
 				{view.verified
-					? "Everything Clio can check without sending a prompt checks out."
+					? "Everything CLIO Coder can check without sending a prompt checks out."
 					: "Some checks could not run. You can still save, and fix the connection later in Settings."}
 			</p>
 			{view.notes.length > 0 ? (

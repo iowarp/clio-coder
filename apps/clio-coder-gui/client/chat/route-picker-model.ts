@@ -121,10 +121,10 @@ export function thinkingControlNote(
 	) {
 		const control = config?.options.find((row) => row.id === "thinkingLevel");
 		if (control?.notice) return control.notice;
-		if (!control) return "Clio Coder has not reported a thinking control for this conversation.";
+		if (!control) return "CLIO Coder has not reported a thinking control for this conversation.";
 	}
 	if (levels.length === 0)
-		return "No thinking choices are reported for this model. Clio Coder will resolve its thinking behavior when the model is applied.";
+		return "No thinking choices are reported for this model. CLIO Coder will resolve its thinking behavior when the model is applied.";
 	if (levels.length === 1 && levels[0] === "off") return "This model reports thinking off as its only supported choice.";
 	return null;
 }

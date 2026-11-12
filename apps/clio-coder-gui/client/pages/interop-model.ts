@@ -17,7 +17,7 @@ export function wiringSentence(
 		case "configured":
 			return "Wired as a delegation peer.";
 		case "not-acp":
-			return "Speaks no ACP, so Clio Coder cannot delegate to it.";
+			return "Speaks no ACP, so CLIO Coder cannot delegate to it.";
 		case "proposed": {
 			const fetch =
 				agent.adapter === "present" ? "" : " Accepting would fetch its ACP adapter from the network on first use.";
@@ -30,7 +30,7 @@ export function wiringSentence(
 		case "decided":
 			return agent.decision === "accepted"
 				? "Accepted, but no delegation entry names it."
-				: "Declined, so Clio Coder stays quiet about it.";
+				: "Declined, so CLIO Coder stays quiet about it.";
 		case "not-offered":
 			return agent.presence === "unknown"
 				? "Not offered, because its executable could not be established."
@@ -136,7 +136,7 @@ export function decisionOutcome(
 	if (result.decided.length === 0)
 		return { tone: "warn", text: `Nothing changed: ${result.diagnostics.join("; ") || "no answer was recorded"}.` };
 	if (decision === "decline")
-		return { tone: "neutral", text: "Declined. Clio Coder stays quiet about it until its facts change." };
+		return { tone: "neutral", text: "Declined. CLIO Coder stays quiet about it until its facts change." };
 	return result.wired.length > 0
 		? { tone: "success", text: "Wired as a delegation peer." }
 		: { tone: "neutral", text: "Accepted; a delegation entry already named it." };

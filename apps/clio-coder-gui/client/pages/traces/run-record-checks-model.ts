@@ -75,7 +75,7 @@ const NOT_RECORDED = (key: CheckRow["key"], label: string, source: string, meani
 	items: [],
 });
 
-const VERIFICATION_SOURCE = "Sealed by Clio Coder from the run's own tool calls.";
+const VERIFICATION_SOURCE = "Sealed by CLIO Coder from the run's own tool calls.";
 
 function verification(value: Sealed["verification"]): CheckRow {
 	const state = string(value?.state);
@@ -97,7 +97,7 @@ function verification(value: Sealed["verification"]): CheckRow {
 				: basis === "read-only-agent"
 					? "A read-only agent changes nothing, so there is nothing to verify."
 					: basis === "acp-external-unobserved"
-						? "An external agent did the work where Clio Coder could not observe its checks."
+						? "An external agent did the work where CLIO Coder could not observe its checks."
 						: basis === "result-unavailable"
 							? "No sealed record could be read for this run."
 							: `Recorded basis: ${basis ?? "none"}.`;
@@ -112,7 +112,7 @@ function verification(value: Sealed["verification"]): CheckRow {
 	return { key: "verification", label: "Verification", tone, word, meaning, source: VERIFICATION_SOURCE, items: [] };
 }
 
-const TYPED_SOURCE = "Observed by Clio Coder from validation tool results. A worker's own report never fills this.";
+const TYPED_SOURCE = "Observed by CLIO Coder from validation tool results. A worker's own report never fills this.";
 
 function typedChecks(validations: Sealed["typedValidations"]): CheckRow {
 	if (!Array.isArray(validations))
@@ -159,7 +159,7 @@ function typedChecks(validations: Sealed["typedValidations"]): CheckRow {
 }
 
 const HOST_SOURCE =
-	"Run by Clio Coder on the settled tree after the worker finished. A worker's own report never fills this.";
+	"Run by CLIO Coder on the settled tree after the worker finished. A worker's own report never fills this.";
 
 const HOST_REASONS: Record<string, string> = {
 	worker_not_successful: "The worker did not succeed, so the declared checks did not run.",
@@ -172,7 +172,7 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 			label: "Host checks",
 			tone: "neutral",
 			word: "None declared",
-			meaning: "This run declared no checks for Clio Coder to run on its result.",
+			meaning: "This run declared no checks for CLIO Coder to run on its result.",
 			source: HOST_SOURCE,
 			items: [],
 		};
@@ -223,7 +223,7 @@ function hostChecks(value: Sealed["hostVerification"]): CheckRow {
 }
 
 const CONTRACT_SOURCE =
-	"Checked by Clio Coder against the agent's declared result contract when the record was sealed.";
+	"Checked by CLIO Coder against the agent's declared result contract when the record was sealed.";
 
 function contract(fact: Sealed["resultContract"]): CheckRow[] {
 	if (fact === null)

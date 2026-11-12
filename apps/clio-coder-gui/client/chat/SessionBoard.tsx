@@ -91,7 +91,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	const canPropose = !!capabilities?.board?.proposeMemory;
 	const supersede = useMutation({
 		mutationFn: async ({ row, text }: { row: DecisionRow; text?: string }) => {
-			if (row.target === null) throw new Error("This decision cannot be named to Clio Coder.");
+			if (row.target === null) throw new Error("This decision cannot be named to CLIO Coder.");
 			const result = await client.call(
 				routes.supersedeDecision,
 				{ ...params, body: { ...row.target, ...(text === undefined ? {} : { correction: text }) } },
@@ -151,7 +151,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		<div ref={panel} className="pane-drill drill board-panel">
 			{!sessionOpen ? <p className="pane-empty">This task is not open. Open it to read its tasks and decisions.</p> : null}
 			{sessionOpen && !supported ? (
-				<p className="pane-empty">Clio does not report a task list or decisions for this task.</p>
+				<p className="pane-empty">CLIO Coder does not report a task list or decisions for this task.</p>
 			) : null}
 			{board.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the board…</p> : null}
 			{board.error ? (
@@ -188,7 +188,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 															change.isPending || (action === "hand" && (running || capabilities?.commands?.promptTurns !== true))
 														}
 														onClick={() => act(task.id, action)}
-														aria-label={`${action === "hand" ? "Hand to Clio Coder" : action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
+														aria-label={`${action === "hand" ? "Hand to CLIO Coder" : action === "done" ? "Mark done" : "Drop"}: ${task.title}`}
 													>
 														{action === "hand" ? "Hand" : action === "done" ? "Done" : "Drop"}
 													</button>
@@ -222,7 +222,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 							</button>
 						</form>
 						{view.tasks.some((task) => task.actions.includes("hand")) && capabilities?.commands?.promptTurns !== true ? (
-							<p className="drill__note">Handing a task needs a Clio Coder build that records command turns.</p>
+							<p className="drill__note">Handing a task needs a CLIO Coder build that records command turns.</p>
 						) : null}
 						{change.error ? (
 							<p role="alert" className="drill__note drill__note--error">
@@ -236,9 +236,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 						) : null}
 					</section>
 					<section className="drill__section" aria-labelledby={`${titleId}-plan`}>
-						<h3 id={`${titleId}-plan`}>Clio Coder's plan</h3>
+						<h3 id={`${titleId}-plan`}>CLIO Coder's plan</h3>
 						{view.plan === null ? (
-							<p className="pane-empty">Clio has not made a plan in this task.</p>
+							<p className="pane-empty">No plan has been made in this task.</p>
 						) : (
 							<>
 								<p className="board-panel__plan-title">{view.plan.title}</p>
@@ -254,7 +254,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 										</li>
 									))}
 								</ol>
-								<p className="drill__note">As Clio Coder reports it; a completed step is its claim, not a check.</p>
+								<p className="drill__note">As CLIO Coder reports it; a completed step is its claim, not a check.</p>
 							</>
 						)}
 					</section>
@@ -322,7 +322,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 																className="drill__btn drill__btn--line"
 																disabled={supersede.isPending || running || !correction.trim()}
 															>
-																Supersede and tell Clio Coder
+																Supersede and tell CLIO Coder
 															</button>
 															<button type="button" className="drill__btn" onClick={() => setCorrecting(null)}>
 																Cancel
@@ -397,7 +397,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 						) : null}
 					</section>
 					<section className="drill__section" aria-labelledby={`${titleId}-bank`}>
-						<h3 id={`${titleId}-bank`}>{view.bank.length > 0 ? "What Clio Coder learned this session" : "Memory"}</h3>
+						<h3 id={`${titleId}-bank`}>{view.bank.length > 0 ? "What CLIO Coder learned this session" : "Memory"}</h3>
 						<p className="drill__note">{view.memory}</p>
 						{view.bank.length > 0 ? (
 							<>

@@ -9,7 +9,7 @@ export function staleBundle(
 ): { title: string; detail: string } | null {
 	if (!bundle || !server || bundle === server) return null;
 	return {
-		title: `This window runs Clio Coder ${bundle}, and the server runs ${server}.`,
+		title: `This window runs CLIO Coder ${bundle}, and the server runs ${server}.`,
 		detail: "Reload this window to use the version the server runs. It does not reload on its own.",
 	};
 }

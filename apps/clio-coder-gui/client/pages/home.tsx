@@ -146,8 +146,8 @@ function Onboarding({
 				<div>
 					<h2>Open a workspace</h2>
 					<p>
-						A folder on this machine. Clio can read and edit files inside it. Your approval policy controls which actions ask
-						first.
+						A folder on this machine. CLIO Coder can read and edit files inside it. Your approval policy controls which
+						actions ask first.
 					</p>
 					{hasWorkspace ? null : (
 						<button type="button" className="primary" onClick={onOpenWorkspace}>
@@ -288,7 +288,7 @@ export function Home({ client }: { client: Client }) {
 						<div className="newtask__notice newtask__recovery" role={workspaces.isError ? "alert" : "status"}>
 							<p>
 								{workspaces.isPending
-									? "Loading workspaces. You can keep writing while Clio checks."
+									? "Loading workspaces. You can keep writing while CLIO Coder checks."
 									: workspaces.isError
 										? "Workspaces could not be loaded. Your draft is kept; retry to check them again."
 										: missingWorkspace
@@ -323,7 +323,7 @@ export function Home({ client }: { client: Client }) {
 						}}
 					>
 						<label className="sr-only" htmlFor={fieldId}>
-							Message Clio Coder
+							Message CLIO Coder
 						</label>
 						{assist.palette}
 						<textarea
@@ -412,7 +412,7 @@ export function Home({ client }: { client: Client }) {
 							</dd>
 							<dt>Approvals</dt>
 							<dd>
-								Clio may read, edit and run commands. Approval prompts depend on the effective workspace policy.{" "}
+								CLIO Coder may read, edit and run commands. Approval prompts depend on the effective workspace policy.{" "}
 								<Link to={workspaceId ? `/settings/safety?workspace=${encodeURIComponent(workspaceId)}` : "/settings/safety"}>
 									Review policy
 								</Link>
@@ -423,9 +423,9 @@ export function Home({ client }: { client: Client }) {
 						<div className="newtask__notice newtask__recovery" role="status">
 							<p>
 								{busy
-									? "Starting your task. Your request is kept until Clio confirms it."
+									? "Starting your task. Your request is kept until CLIO Coder confirms it."
 									: epochChanged
-										? "Clio Coder restarted. The earlier request may have been accepted. Review the task before making a new request."
+										? "CLIO Coder restarted. The earlier request may have been accepted. Review the task before making a new request."
 										: "The earlier request has no confirmed outcome. Retry sends that original request; edits above stay separate."}
 							</p>
 							<details>

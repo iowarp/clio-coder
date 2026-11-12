@@ -1,8 +1,8 @@
 {
 	"id": "/",
-	"name": "Clio Coder",
-	"short_name": "Clio Coder",
-	"description": "Build and explore with Clio Coder in your own projects.",
+	"name": "CLIO Coder",
+	"short_name": "CLIO Coder",
+	"description": "Build and explore with CLIO Coder in your own projects.",
 	"start_url": "/",
 	"scope": "/",
 	"display": "standalone",

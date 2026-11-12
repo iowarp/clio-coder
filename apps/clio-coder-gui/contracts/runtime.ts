@@ -7,7 +7,7 @@ export const API_VERSION = 1;
 export const APP_VERSION = "0.0.0";
 
 /** Every connected window's title ends with this. The launcher finds an open app window by it, so a title never drops it. */
-export const APP_TITLE = "Clio Coder";
+export const APP_TITLE = "CLIO Coder";
 
 /**
  * The title of a window with no working credential, such as one left on screen when its server restarted. It does

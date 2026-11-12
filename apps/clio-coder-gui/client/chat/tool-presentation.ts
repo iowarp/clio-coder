@@ -30,7 +30,7 @@ export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
 	think: "Reason about the task",
 	fetch: "Fetch external content",
 	switch_mode: "Change work mode",
-	other: "Use a Clio Coder tool",
+	other: "Use a CLIO Coder tool",
 };
 
 /** App.tsx:1156. A tool running longer than this is called out without expanding. */
@@ -454,7 +454,7 @@ function searchFacts(details: Record<string, unknown> | undefined): ToolFact[] {
 			value: total !== null && total !== shown ? `${shown} of ${total}` : String(shown),
 		});
 	if (observation?.truncated === true)
-		facts.push({ label: "bounded", value: "Clio Coder cut this result", tone: "warn" });
+		facts.push({ label: "bounded", value: "CLIO Coder cut this result", tone: "warn" });
 	const search = record(details?.search);
 	if (search !== undefined && search.complete === false) {
 		const reason = str(search.reason) ?? "unknown";
@@ -480,7 +480,7 @@ function terminalFacts(details: Record<string, unknown> | undefined): ToolFact[]
 	if (stdout !== null) facts.push({ label: "stdout", value: formatBytes(stdout) });
 	if (stderr !== null && stderr > 0) facts.push({ label: "stderr", value: formatBytes(stderr) });
 	// An operator shell line run with `!!`: recorded, and not given to the model.
-	if (details.excludedFromContext === true) facts.push({ label: "context", value: "kept from Clio" });
+	if (details.excludedFromContext === true) facts.push({ label: "context", value: "kept from CLIO Coder" });
 	if (details.timedOut === true) facts.push({ label: "outcome", value: "timed out", tone: "warn" });
 	const outcome = str(details.outcome);
 	if (outcome !== null && outcome !== "success")

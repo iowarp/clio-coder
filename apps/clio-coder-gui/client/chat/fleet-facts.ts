@@ -259,7 +259,7 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: "Run reporting",
 				tone: "running",
 				known: true,
-				summary: `${amount(integer(payload.progressCount))} steps reported${flag(payload.truncated) ? ", and Clio Coder truncated the report" : ""}.`,
+				summary: `${amount(integer(payload.progressCount))} steps reported${flag(payload.truncated) ? ", and CLIO Coder truncated the report" : ""}.`,
 			};
 		case "fleet.completed":
 			return {
@@ -273,7 +273,7 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: "Run failed",
 				tone: "fail",
 				known: true,
-				summary: `${terminalOutcome(payload) ?? "Clio Coder reported no reason"}.`,
+				summary: `${terminalOutcome(payload) ?? "CLIO Coder reported no reason"}.`,
 			};
 		case "fleet.loopBlocked": {
 			const disposition = text(payload.disposition);
@@ -281,7 +281,7 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: "Loop guard",
 				tone: flag(payload.interrupted) ? "fail" : "warn",
 				known: true,
-				summary: `${text(payload.tool) ?? "A tool"} repeated ${amount(integer(payload.repeatCount))} times against a budget of ${amount(integer(payload.budget))}, so Clio Coder ${disposition === null ? "intervened" : (DISPOSITION_LABELS[disposition] ?? disposition)}.`,
+				summary: `${text(payload.tool) ?? "A tool"} repeated ${amount(integer(payload.repeatCount))} times against a budget of ${amount(integer(payload.budget))}, so CLIO Coder ${disposition === null ? "intervened" : (DISPOSITION_LABELS[disposition] ?? disposition)}.`,
 			};
 		}
 		case "evidence.ready":
@@ -296,7 +296,7 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				label: fact.type,
 				tone: "neutral",
 				known: false,
-				summary: "Clio Coder reported a fact this build does not classify.",
+				summary: "CLIO Coder reported a fact this build does not classify.",
 			};
 	}
 }
@@ -354,16 +354,16 @@ export function fleetEvidence(items: readonly FleetItemLike[]): readonly FleetEv
  * operator can act on. An unknown code is printed as reported, never hidden.
  */
 export const STEER_REFUSALS: Readonly<Record<string, string>> = {
-	"dispatch-unavailable": "This Clio Coder build has no dispatch domain to steer.",
+	"dispatch-unavailable": "This CLIO Coder build has no dispatch domain to steer.",
 	"fleet-unavailable": "The fleet control channel is not available in this task.",
 	"run-not-active": "That run is no longer active, so there is nothing to steer.",
-	"cancel-failed": "Clio Coder could not stop that run. It may already be settling.",
+	"cancel-failed": "CLIO Coder could not stop that run. It may already be settling.",
 	"empty-message": "Guidance needs some text.",
 	"steering-unsupported": "That worker's runtime does not accept live guidance. It can still be stopped.",
 	"no-input-channel": "That worker has no input channel, so guidance cannot reach it. It can still be stopped.",
 	"input-closed": "That worker no longer accepts input. It is finishing on its own.",
 	"run-terminating": "That run is already terminating.",
-	"steer-failed": "Clio Coder refused the guidance and reported no specific reason.",
+	"steer-failed": "CLIO Coder refused the guidance and reported no specific reason.",
 };
 
 export interface SteerOutcome {
@@ -385,7 +385,7 @@ export function steerOutcome(
 					: "Stop requested. The run row settles when the worker exits.",
 		};
 	const reason = result.reason ?? "steer-failed";
-	return { tone: "warn", message: STEER_REFUSALS[reason] ?? `Clio Coder refused: ${reason}.` };
+	return { tone: "warn", message: STEER_REFUSALS[reason] ?? `CLIO Coder refused: ${reason}.` };
 }
 
 /** Guidance is trimmed before it is sent; whitespace alone is refused upstream with a 422. */

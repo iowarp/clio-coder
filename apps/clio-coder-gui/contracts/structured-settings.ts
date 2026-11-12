@@ -42,7 +42,7 @@ export const STRUCTURED_SETTINGS: Readonly<Record<string, StructuredSettingEdito
 			{ key: "user", label: "SSH user" },
 			{ key: "port", label: "SSH port", kind: "number" },
 			{ key: "identityFile", label: "Identity file path" },
-			{ key: "clioCoderEntry", label: "Clio Coder executable path" },
+			{ key: "clioCoderEntry", label: "CLIO Coder executable path" },
 			{ key: "labels", label: "Machine labels", kind: "list" },
 			{ key: "maxWorkers", label: "Worker slots", kind: "number" },
 			{ key: "residency", label: "Residency", choices: ["observe", "manage"] },

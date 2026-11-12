@@ -37,7 +37,7 @@ export function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bund
 							) : (
 								<p className="help-docs-path">
 									<span>Installed location</span>
-									<code>{bundledDocsPath ?? "docs/ in the Clio Coder package"}</code>
+									<code>{bundledDocsPath ?? "docs/ in the CLIO Coder package"}</code>
 								</p>
 							)
 						) : null}
@@ -122,7 +122,7 @@ export function HelpReferenceBody({
 						: view === "shortcuts"
 							? "Ctrl on Windows / Linux · Cmd on Mac. Tab moves between controls."
 							: view === "guide"
-								? "A quick guide to working with Clio."
+								? "A quick guide to working with CLIO Coder."
 								: "Read online or use the reference installed on this machine."}
 				</p>
 				{content.searching && content.count === 0 ? (

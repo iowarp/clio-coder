@@ -47,12 +47,12 @@ export function routeFacts(
 	const tone = provider?.tone ?? "unverified";
 	const healthText = provider
 		? `Target ${provider.key}: ${sentenceEnd(provider.detail ?? provider.label)}`
-		: "No target health reported by Clio Coder.";
+		: "No target health reported by CLIO Coder.";
 	if (settings === undefined) {
 		return {
 			tone,
 			text: "Model not reported",
-			title: `Clio Coder has not reported this task's model. ${healthText}`,
+			title: `CLIO Coder has not reported this task's model. ${healthText}`,
 			spoken: `Model not reported. ${healthText}`,
 		};
 	}

@@ -10,7 +10,7 @@ type AsideCapability = NonNullable<AgentCapabilities["aside"]>;
 /** Why the aside cannot run right now, or null when it can. */
 // A running turn does not block it: the agent answers over a snapshot of the history (#415).
 export function asideBlock(capability: AsideCapability | undefined, sessionOpen: boolean): string | null {
-	if (!capability) return "This Clio Coder build cannot answer beside the conversation.";
+	if (!capability) return "This CLIO Coder build cannot answer beside the conversation.";
 	if (!sessionOpen) return "This task is not open. Open it to ask beside it.";
 	return null;
 }

@@ -21,14 +21,18 @@ export function systemStatus(
 ): { tone: StatusTone; label: string; detail: string } {
 	if (connection !== "Connected") {
 		return connection === "Connecting…"
-			? { tone: "unverified", label: "Connecting", detail: "Connecting to the Clio runtime." }
+			? { tone: "unverified", label: "Connecting", detail: "Connecting to the CLIO Coder runtime." }
 			: connection === "Reconnecting…"
-				? { tone: "warn", label: "Reconnecting", detail: "The Clio event connection is interrupted." }
-				: { tone: "fail", label: "Offline", detail: "The Clio runtime is not connected." };
+				? { tone: "warn", label: "Reconnecting", detail: "The CLIO Coder event connection is interrupted." }
+				: { tone: "fail", label: "Offline", detail: "The CLIO Coder runtime is not connected." };
 	}
 	if (failed) return { tone: "unverified", label: "Unverified", detail: "Installation diagnostics are unavailable." };
 	if (!findings)
-		return { tone: "unverified", label: "Not checked", detail: "Open System to check Clio installation diagnostics." };
+		return {
+			tone: "unverified",
+			label: "Not checked",
+			detail: "Open System to check CLIO Coder installation diagnostics.",
+		};
 	if (!findings.length) return { tone: "unverified", label: "Unverified", detail: "No installation findings reported." };
 	const errors = findings.filter((finding) => finding.level === "error").length;
 	const warnings = findings.filter((finding) => finding.level === "warn").length;

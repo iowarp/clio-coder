@@ -31,7 +31,7 @@ interface EntryBase {
 	readonly group: SlashGroup;
 }
 
-export type SlashGroup = "Clio Coder commands" | "Session" | "Open beside";
+export type SlashGroup = "CLIO Coder commands" | "Session" | "Open beside";
 
 export type SlashEntry =
 	| (EntryBase & {
@@ -75,7 +75,7 @@ function commandEntries(catalog: CommandCatalog | undefined): SlashEntry[] {
 				name: command.name,
 				summary: command.summary,
 				hint: argumentHint(command.args),
-				group: "Clio Coder commands",
+				group: "CLIO Coder commands",
 				command,
 				subcommand: null,
 				needsArgs: (command.args.positionals ?? []).some((positional) => positional.required),
@@ -87,7 +87,7 @@ function commandEntries(catalog: CommandCatalog | undefined): SlashEntry[] {
 				name: `${command.name} ${subcommand}`,
 				summary: command.subcommandSummaries?.[subcommand] ?? command.summary,
 				hint: argumentHint(args),
-				group: "Clio Coder commands",
+				group: "CLIO Coder commands",
 				command,
 				subcommand,
 				needsArgs: (args.positionals ?? []).some((positional) => positional.required),

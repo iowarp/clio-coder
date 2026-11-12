@@ -105,7 +105,7 @@ function toolBudgetDetail(
 	interrupted: boolean,
 ): string {
 	const counts = `${tool} was called ${amount(callsThisTurn)} times this turn against a soft budget of ${amount(softBudget)} and a hard ceiling of ${amount(hardCeiling)}.`;
-	return interrupted ? `${counts} Clio Coder interrupted the turn.` : counts;
+	return interrupted ? `${counts} CLIO Coder interrupted the turn.` : counts;
 }
 
 function toRow(item: HealthItemLike): HealthRow | null {
@@ -205,7 +205,7 @@ function toRow(item: HealthItemLike): HealthRow | null {
 				kind: "unknown",
 				key: type,
 				label: "Unrecognised health report",
-				detail: `Clio Coder reported "${type}", which this build does not understand. The report was kept rather than dropped.`,
+				detail: `CLIO Coder reported "${type}", which this build does not understand. The report was kept rather than dropped.`,
 				tone: "unverified",
 				attention: false,
 			};

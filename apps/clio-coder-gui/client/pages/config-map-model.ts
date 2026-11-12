@@ -11,11 +11,11 @@ type ReloadClass = Entry["reloadClass"];
 
 /** Display order. A category the graph reports and this table lacks is a type error, not a blank. */
 export const CATEGORY_PRESENTATION: Record<Category, { short: string; label: string; description: string }> = {
-	settings: { short: "SET", label: "Settings", description: "Layered values that shape Clio Coder's behavior." },
+	settings: { short: "SET", label: "Settings", description: "Layered values that shape CLIO Coder's behavior." },
 	"clio-md": {
 		short: "CTX",
 		label: "Project context",
-		description: "CLIO-CODER.md context Clio Coder can add to the next turn.",
+		description: "CLIO-CODER.md context CLIO Coder can add to the next turn.",
 	},
 	rule: { short: "RUL", label: "Rules", description: "Project rules and conditional context boundaries." },
 	"operator-profile": {
@@ -23,30 +23,30 @@ export const CATEGORY_PRESENTATION: Record<Category, { short: string; label: str
 		label: "Operator profile",
 		description: "Declared operator preferences added to context.",
 	},
-	hook: { short: "HOK", label: "Hooks", description: "Middleware reactions loaded by Clio Coder." },
+	hook: { short: "HOK", label: "Hooks", description: "Middleware reactions loaded by CLIO Coder." },
 	extension: { short: "EXT", label: "Extensions", description: "Installed packages and their effective precedence." },
-	"skill-root": { short: "SKL", label: "Skill roots", description: "Locations Clio Coder searches for skills." },
+	"skill-root": { short: "SKL", label: "Skill roots", description: "Locations CLIO Coder searches for skills." },
 	"prompt-root": {
 		short: "PMT",
 		label: "Prompt roots",
-		description: "Locations Clio Coder searches for saved prompts.",
+		description: "Locations CLIO Coder searches for saved prompts.",
 	},
 	"agent-root": { short: "AGT", label: "Agent roots", description: "Agent recipe sources visible to this project." },
 	"playbook-root": {
 		short: "PLB",
 		label: "Playbook roots",
-		description: "Locations Clio Coder searches for saved playbooks.",
+		description: "Locations CLIO Coder searches for saved playbooks.",
 	},
 	safety: { short: "SAFE", label: "Safety", description: "Effective working-freedom and safety facts." },
-	memory: { short: "MEM", label: "Memory", description: "The durable memory surface Clio Coder can consult." },
+	memory: { short: "MEM", label: "Memory", description: "The durable memory surface CLIO Coder can consult." },
 };
 export const CATEGORY_ORDER = Object.keys(CATEGORY_PRESENTATION) as Category[];
 
 export const RELOAD_PRESENTATION: Record<ReloadClass, { label: string; description: string }> = {
-	hot: { label: "Now", description: "Clio Coder reports this surface as hot-reloadable." },
-	"next-turn": { label: "Next turn", description: "Clio Coder reads this surface when the next turn begins." },
+	hot: { label: "Now", description: "CLIO Coder reports this surface as hot-reloadable." },
+	"next-turn": { label: "Next turn", description: "CLIO Coder reads this surface when the next turn begins." },
 	reload: { label: "On reload", description: "A reload inside the conversation picks this up." },
-	restart: { label: "Restart", description: "A new Clio Coder process is required before this changes." },
+	restart: { label: "Restart", description: "A new CLIO Coder process is required before this changes." },
 	"n/a": { label: "Informational", description: "No apply timing is attached to this entry." },
 };
 

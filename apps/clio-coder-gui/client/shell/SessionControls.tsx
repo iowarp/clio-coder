@@ -134,7 +134,7 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 			</section>
 			{reviewing ? (
 				<Dialog title="Session requests" eyebrow="Session control" size="wide" onClose={() => setReviewing(false)}>
-					<p>Each request stays with its original session as you move around Clio.</p>
+					<p>Each request stays with its original session as you move around CLIO Coder.</p>
 					{controls.notice ? (
 						<p role="alert">
 							{controls.notice}
@@ -210,8 +210,8 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 									<details>
 										<summary>Review tracking</summary>
 										<p>
-											The outcome is unconfirmed. A retry uses this request's original key and session. Clio refuses replay after
-											its server restarts.
+											The outcome is unconfirmed. A retry uses this request's original key and session. CLIO Coder refuses replay
+											after its server restarts.
 										</p>
 										<p>
 											Session <code>{record.sessionId}</code>

@@ -85,7 +85,7 @@ export function TaskSidebar({
 	});
 	const status = systemStatus(connection, system.data?.findings, system.isError);
 	const platformName = platformLabel(platform);
-	const systemDetail = `Clio runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
+	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
 	const activeTask = sessionIdFromPath(location.pathname);
 	const ordered = useMemo(
 		() =>
@@ -102,13 +102,13 @@ export function TaskSidebar({
 					className="wb-brand"
 					to="/"
 					onClick={onNavigate}
-					aria-label={version ? `Clio Coder ${version} home` : "Clio Coder home"}
+					aria-label={version ? `CLIO Coder ${version} home` : "CLIO Coder home"}
 				>
 					<ClioLogo size={22} />
 					<span className="wb-brand__identity">
-						<span>Clio Coder</span>
+						<span>CLIO Coder</span>
 						{version ? (
-							<span className="wb-brand__version" title={`Running Clio Coder ${version}`}>
+							<span className="wb-brand__version" title={`Running CLIO Coder ${version}`}>
 								v{version}
 							</span>
 						) : null}

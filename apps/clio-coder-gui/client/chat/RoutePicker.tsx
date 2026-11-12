@@ -233,7 +233,7 @@ function RouteForm({
 	};
 	const cut =
 		models !== null && catalogMayBeCut(models)
-			? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} models per connection.`
+			? ` CLIO Coder lists at most ${ACP_TARGET_MODEL_LIMIT} models per connection.`
 			: "";
 	const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
 	const note =
@@ -244,10 +244,10 @@ function RouteForm({
 				: catalogCheck.data?.healthy
 					? `${chosenTarget} answered at ${formatTime(new Date(catalogCheck.dataUpdatedAt).toISOString())}.${count}${cut}`
 					: catalogCheck.data
-						? `${chosenTarget} did not answer (${catalogCheck.data.reason ?? "no reason reported"}). These are the models Clio Coder last knew for it.${cut}`
+						? `${chosenTarget} did not answer (${catalogCheck.data.reason ?? "no reason reported"}). These are the models CLIO Coder last knew for it.${cut}`
 						: catalogCheck.error
-							? `The check failed: ${catalogCheck.error.message} These are the models Clio Coder last knew for it.${cut}`
-							: `The models Clio Coder knows for ${chosenTarget}.${count}${cut}`;
+							? `The check failed: ${catalogCheck.error.message} These are the models CLIO Coder last knew for it.${cut}`
+							: `The models CLIO Coder knows for ${chosenTarget}.${count}${cut}`;
 	const choices = routePickerChoices(config, draft, targets.data?.targets);
 	const thinkingNote = thinkingControlNote(config, draft, thinkingLevels);
 	const refusal = modelSelectionRefusal(save.error instanceof ApiProblem ? save.error.problem : null);
@@ -306,7 +306,7 @@ function RouteForm({
 			<p>{note}</p>
 			{choices.needsConnectionSetup ? (
 				<p>
-					No connection is selected, and Clio Coder has not exposed a connection selector for this conversation.{" "}
+					No connection is selected, and CLIO Coder has not exposed a connection selector for this conversation.{" "}
 					<Link
 						to={workspaceId ? `/settings/targets?${new URLSearchParams({ workspace: workspaceId })}` : "/settings/targets"}
 					>
@@ -331,7 +331,7 @@ function RouteForm({
 					{refusal ? (
 						<>
 							<p>
-								Clio Coder refused {refusal.requestedModel ?? "the requested model"} for{" "}
+								CLIO Coder refused {refusal.requestedModel ?? "the requested model"} for{" "}
 								{refusal.targetId ?? "the reported connection"}.
 							</p>
 							{recoveryModels.length > 0 ? (

@@ -126,7 +126,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 				</p>
 			) : null}
 			{!sessionOpen ? <p>This task is not open. Open it to hand it off.</p> : null}
-			{sessionOpen && !supported ? <p>This task cannot be handed off: Clio does not offer it here.</p> : null}
+			{sessionOpen && !supported ? <p>This task cannot be handed off: CLIO Coder does not offer it here.</p> : null}
 			{sessionOpen && supported && !held ? (
 				<form
 					className="handoff-panel__goal"
@@ -137,7 +137,7 @@ export const HandoffPanel = memo(function HandoffPanel({
 					}}
 				>
 					<p className="session-board__note">
-						Clio Coder draws up a document from this conversation for you to read and edit. Nothing is written until you start
+						CLIO Coder draws up a document from this conversation for you to read and edit. Nothing is written until you start
 						the new conversation from it.
 					</p>
 					<label htmlFor={fieldId}>What should the next conversation accomplish?</label>

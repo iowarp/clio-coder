@@ -23,7 +23,7 @@ const LEVELS: Readonly<
 	yolo: {
 		label: "Run without asking",
 		short: "Auto-run",
-		lands: "Nothing waits for approval in this task. Clio runs commands and edits on its own judgement.",
+		lands: "Nothing waits for approval in this task. CLIO Coder runs commands and edits on its own judgement.",
 		icon: "bolt",
 	},
 };
@@ -116,7 +116,7 @@ export function AutonomyPill({
 				{confirming ? (
 					<div className="autonomy__confirm" role="alert">
 						<p>
-							Turn off approvals for this task? Clio will run commands and edits without asking. It lasts until the task
+							Turn off approvals for this task? CLIO Coder will run commands and edits without asking. It lasts until the task
 							closes.
 						</p>
 						<div>

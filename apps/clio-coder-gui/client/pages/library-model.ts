@@ -68,14 +68,14 @@ export function agentCard(agent: Agent): AgentCard {
 export function reachSentence(skill: Pick<Resource, "availability" | "trusted" | "modelInvocable">): string {
 	if (skill.availability === "invalid") return "It did not load, so nothing can use it";
 	if (skill.availability === "shadowed") return "Another skill of the same name outranks it, so this copy never loads";
-	if (skill.availability === "unavailable") return "Clio Coder reports it as unavailable";
+	if (skill.availability === "unavailable") return "CLIO Coder reports it as unavailable";
 	if (!skill.trusted) return "Its root is not trusted, so the model never sees it";
 	if (skill.modelInvocable === false) return "Its frontmatter reserves it for you";
 	return "The model can load this by name";
 }
 
 const SOURCE_CLASS: Record<string, string> = {
-	core: "Clio Coder core",
+	core: "CLIO Coder core",
 	package: "An installed package",
 	user: "Your user root",
 	project: "This project's root",
@@ -232,7 +232,7 @@ export function resourceDetails(
 	if (collection === "Verifiers")
 		return {
 			explanation:
-				"A discovered check describes how Clio can verify work. Discovery does not mean this check has run or passed.",
+				"A discovered check describes how CLIO Coder can verify work. Discovery does not mean this check has run or passed.",
 			facts: [
 				fact("Runner", word(row.runner)),
 				fact("Evidence signal", word(row.signal)),

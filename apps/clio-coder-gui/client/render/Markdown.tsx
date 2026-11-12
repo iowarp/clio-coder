@@ -695,7 +695,7 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 					href={href}
 					target="_blank"
 					rel="noopener noreferrer"
-					title="Clio Coder does not load images from other places. Open this one in the browser."
+					title="CLIO Coder does not load images from other places. Open this one in the browser."
 				>
 					[{label}]
 				</a>

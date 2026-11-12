@@ -74,8 +74,8 @@ export function ArenaPage({ client }: { client: Client }) {
 				}
 			/>
 			<p className="intro">
-				One prompt, two to four contenders, side by side with their names hidden. You vote; Clio records it and keeps the
-				standings.
+				One prompt, two to four contenders, side by side with their names hidden. You vote; CLIO Coder records it and keeps
+				the standings.
 			</p>
 			<div className="arena-scope">
 				<WorkspacePicker selection={selection} />

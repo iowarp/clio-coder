@@ -175,7 +175,7 @@ export function FleetPage({ client }: { client: Client }) {
 	return (
 		<section className="run-inspection">
 			<PanelHeading panel={PANELS.fleet} level={1} />
-			<p>Fleet plans, their dispatch runs, and the decisions Clio Coder recorded about them.</p>
+			<p>Fleet plans, their dispatch runs, and the decisions CLIO Coder recorded about them.</p>
 			<p className="panel-note">{DISPATCH_SCOPE}</p>
 			<div className="actions">
 				<button

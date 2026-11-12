@@ -99,7 +99,7 @@ export function SafetySettings({ client }: { client: Client }) {
 			client={client}
 			scope="safety"
 			title="Safety"
-			lede="What Clio may do without asking, and the limits on spending, tools and workers."
+			lede="What CLIO Coder may do without asking, and the limits on spending, tools and workers."
 		/>
 	);
 }
@@ -110,7 +110,7 @@ export function ContextSettings({ client }: { client: Client }) {
 			client={client}
 			scope="context"
 			title="Context and memory"
-			lede="How Clio keeps a long conversation useful, and what it remembers between sessions."
+			lede="How CLIO Coder keeps a long conversation useful, and what it remembers between sessions."
 		/>
 	);
 }

@@ -44,7 +44,7 @@ export function PwaBoot({ enabled }: { enabled: boolean }) {
 			update({
 				installed: true,
 				prompt: null,
-				message: "Clio Coder is installed. Open it from your applications whenever you need it.",
+				message: "CLIO Coder is installed. Open it from your applications whenever you need it.",
 			});
 		window.addEventListener("beforeinstallprompt", ready);
 		window.addEventListener("appinstalled", completed);
@@ -89,11 +89,11 @@ export function AppPreferencesPanel({
 	const background = platform === undefined ? undefined : backgroundCapability(platform);
 	return (
 		<div className="pwa-controls">
-			<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
+			<p className="app-version">{version ? `Version ${version}` : "Connecting to CLIO Coder…"}</p>
 			{desktopManaged ? (
 				<>
 					<p>
-						Open Clio Coder from the Windows Start Menu or run <code>clio-coder gui</code>. You can pin its window to the
+						Open CLIO Coder from the Windows Start Menu or run <code>clio-coder gui</code>. You can pin its window to the
 						taskbar.
 					</p>
 					{pwa.prompt ? (
@@ -102,7 +102,7 @@ export function AppPreferencesPanel({
 							onClick={() => {
 								const prompt = pwa.prompt;
 								if (!prompt) return;
-								void prompt.prompt().catch(() => setNote("Use your browser’s Install app command, then reopen Clio Coder."));
+								void prompt.prompt().catch(() => setNote("Use your browser’s Install app command, then reopen CLIO Coder."));
 							}}
 						>
 							Install integrated app window
@@ -115,10 +115,10 @@ export function AppPreferencesPanel({
 				</>
 			) : enabled ? (
 				<>
-					<p>Keep Clio Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
+					<p>Keep CLIO Coder beside your other apps. It uses the same projects and tasks as this browser.</p>
 					{!pwa.storage ? (
 						<p role="alert">
-							This browser cannot save your connection. Allow site storage before installing so Clio can reconnect when
+							This browser cannot save your connection. Allow site storage before installing so the app can reconnect when
 							reopened.
 						</p>
 					) : pwa.prompt ? (
@@ -135,7 +135,7 @@ export function AppPreferencesPanel({
 										if (choice.outcome === "dismissed")
 											setNote("Installation was dismissed. You can install later from your browser's app menu.");
 									})
-									.catch(() => setNote("Use your browser's app menu to install Clio Coder."));
+									.catch(() => setNote("Use your browser's app menu to install CLIO Coder."));
 							}}
 						>
 							Install app
@@ -146,8 +146,8 @@ export function AppPreferencesPanel({
 						)
 					)}
 					<p>
-						This browser stays connected on this device. Forgetting it keeps saved tasks in Clio, removes unsent drafts from
-						this tab, and requires a fresh launch link to reconnect.
+						This browser stays connected on this device. Forgetting it keeps saved tasks in CLIO Coder, removes unsent drafts
+						from this tab, and requires a fresh launch link to reconnect.
 					</p>
 					<button
 						type="button"

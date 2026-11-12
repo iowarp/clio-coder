@@ -23,7 +23,7 @@ export function ExploreDrawer({
 	const id = useId();
 	return (
 		<Dialog
-			title="Explore Clio"
+			title="Explore CLIO Coder"
 			eyebrow="A place for everything"
 			className="wb-explore"
 			onClose={onClose}
@@ -42,7 +42,7 @@ export function ExploreDrawer({
 					placeholder="Try machines, memory, costs or skills…"
 				/>
 			</label>
-			<nav className="wb-explore__groups" aria-label="Explore Clio">
+			<nav className="wb-explore__groups" aria-label="Explore CLIO Coder">
 				{groups.map((group, index) => (
 					<section className="wb-explore__group" key={group.label} aria-labelledby={`${id}-${index}`}>
 						<div className="wb-explore__heading">

@@ -24,7 +24,7 @@ const problem = (status: number, code: Problem["code"], title: string, detail: s
 export const unauthorizedProblem = () =>
 	problem(401, "unauthorized", "unauthorized", "A fresh launch link is required.");
 const unavailableProblem = () =>
-	problem(503, "unavailable", "Server unavailable", "Cannot reach Clio Coder. Check that the server is running.");
+	problem(503, "unavailable", "Server unavailable", "Cannot reach CLIO Coder. Check that the server is running.");
 
 interface Held {
 	clientId: string;

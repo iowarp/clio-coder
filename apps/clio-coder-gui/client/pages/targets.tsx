@@ -180,11 +180,11 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										<button
 											type="button"
 											disabled={busy}
-											title="Remove the API key or login Clio stored for this connection. The connection itself stays."
+											title="Remove the API key or login CLIO Coder stored for this connection. The connection itself stays."
 											onClick={() => {
 												if (
 													window.confirm(
-														`Sign out of ${target.id}? Clio removes the credential it stored for this connection. The connection stays configured.`,
+														`Sign out of ${target.id}? CLIO Coder removes the credential it stored for this connection. The connection stays configured.`,
 													)
 												)
 													tracking.start({ workspaceId: id, resourceId: target.id, action: "signout" });

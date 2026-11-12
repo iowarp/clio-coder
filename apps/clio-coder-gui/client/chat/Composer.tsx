@@ -795,7 +795,7 @@ export const Composer = memo(function Composer({
 				{/* The server refuses every change from a window that only views the task, so none is offered. */}
 				<fieldset className="composer__body" disabled={viewing !== null}>
 					<label className="composer__label sr-only" htmlFor={fieldId}>
-						Message Clio Coder
+						Message CLIO Coder
 					</label>
 					{historySearch !== null ? (
 						<HistorySearch
@@ -1025,7 +1025,7 @@ export const Composer = memo(function Composer({
 									? `Viewing. ${viewing} controls this task.`
 									: running
 										? steering.steer || steering.queue
-											? "Steer Clio while it works"
+											? "Steer CLIO Coder while it works"
 											: "Draft your next message"
 										: "Describe a task or ask a question"
 						}
@@ -1294,7 +1294,7 @@ export const Composer = memo(function Composer({
 											type="button"
 											className="composer__menu-item"
 											disabled={interrupt.isPending}
-											title="Ask Clio Coder to put down what it is doing and take new direction. The turn stays open."
+											title="Ask CLIO Coder to put down what it is doing and take new direction. The turn stays open."
 											onClick={() => {
 												closeOptions();
 												interrupt.mutate();
@@ -1473,7 +1473,7 @@ export const Composer = memo(function Composer({
 								// biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded result can scroll with keyboard arrows.
 								<pre tabIndex={0}>{command.data.result.lines.join("\n")}</pre>
 							) : (
-								<p>Clio Coder returned no lines. Check the conversation for any ongoing work.</p>
+								<p>CLIO Coder returned no lines. Check the conversation for any ongoing work.</p>
 							)}
 						</div>
 					) : null}

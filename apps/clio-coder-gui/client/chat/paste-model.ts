@@ -36,7 +36,7 @@ export function planPaste(
 			text: paste,
 			bytes: bytes.length,
 			reason:
-				"The full paste exceeds Clio's 128 KiB text attachment limit. Save it as a project file and reference its path in your message.",
+				"The full paste exceeds CLIO Coder's 128 KiB text attachment limit. Save it as a project file and reference its path in your message.",
 		};
 	const decoded = decodeTextFile(name, bytes);
 	if (!decoded.ok) return { kind: "review", text: paste, bytes: bytes.length, reason: decoded.reason };

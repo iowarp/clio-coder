@@ -51,16 +51,16 @@ export type WizardExit = "home" | "back";
 const CAPTIONS: Readonly<Record<StageId | "welcome" | "saved", string>> = {
 	welcome: "A coding agent that works in your folders, with approvals governed by your workspace policy.",
 	provider: "Choose what you already use.",
-	connect: "Credentials stay with the Clio command-line tool, never in this page.",
-	model: "Clio starts on the model marked default.",
+	connect: "Credentials stay with the CLIO Coder command-line tool, never in this page.",
+	model: "CLIO Coder starts on the model marked default.",
 	test: "Nothing here sends a prompt.",
-	workspace: "Clio works inside the folder you choose.",
+	workspace: "CLIO Coder works inside the folder you choose.",
 	saved: "Connected.",
 };
 
-const CAPTION_NO_MODELS = "Clio only checks the address. It never sends a prompt.";
+const CAPTION_NO_MODELS = "CLIO Coder only checks the address. It never sends a prompt.";
 // Repair edits a saved connection without the test request; adding one ends on it.
-const CAPTION_TEST = "Clio sends the model one short test message before it saves.";
+const CAPTION_TEST = "CLIO Coder sends the model one short test message before it saves.";
 
 /** A delay before the working screen replaces a step, so an answer the CLI takes a moment to accept does not flash. */
 const WORKING_DELAY_MS = 350;
@@ -86,7 +86,7 @@ function Stepper({ stages, current, done }: { stages: readonly StageId[]; curren
 }
 
 function titleOf(view: WizardView): string {
-	if (view.kind === "welcome") return "Welcome to Clio Coder";
+	if (view.kind === "welcome") return "Welcome to CLIO Coder";
 	if (view.kind === "starting") return "Starting setup";
 	if (view.kind === "working") return view.label;
 	if (view.kind === "saved") return "Connection saved";
@@ -189,7 +189,7 @@ export default function Wizard({
 	}, [canBack, goBack]);
 
 	useEffect(() => {
-		setPageTitle("Set up Clio Coder");
+		setPageTitle("Set up CLIO Coder");
 		return () => setPageTitle(null);
 	}, []);
 	const spoken = phase === "workspace" ? "Open your first workspace" : titleOf(view);
@@ -291,7 +291,7 @@ export default function Wizard({
 						view={view}
 						{...common}
 						title="Which environment variable?"
-						lede={<p>Clio reads it each time it calls the provider, so the key never lands on disk.</p>}
+						lede={<p>CLIO Coder reads it each time it calls the provider, so the key never lands on disk.</p>}
 						label="Variable name"
 						placeholder="PROVIDER_API_KEY"
 						submitLabel="Continue"
@@ -359,7 +359,7 @@ export default function Wizard({
 						view={view}
 						{...common}
 						title="Enter a model ID"
-						lede={<p>{view.warning ?? "Clio sends this exact text. It cannot verify it before saving."}</p>}
+						lede={<p>{view.warning ?? "CLIO Coder sends this exact text. It cannot verify it before saving."}</p>}
 						label="Model ID"
 						submitLabel="Continue"
 						mono
@@ -433,7 +433,7 @@ export default function Wizard({
 				</div>
 			</header>
 			<div className="wizard__body">
-				<aside className="wizard__stage" aria-label="Clio">
+				<aside className="wizard__stage" aria-label="CLIO Coder">
 					<Stage
 						scene={scene}
 						caption={

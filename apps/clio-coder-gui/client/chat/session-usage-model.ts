@@ -184,6 +184,6 @@ export function usageSummary(
 				? "The read model's figures for this conversation; a partial sum reads as a lower bound with its gap."
 				: recorded?.session
 					? "Live totals. Model details below update when the turn finishes."
-					: "Clio Coder’s own accounting for this conversation.",
+					: "CLIO Coder’s own accounting for this conversation.",
 	};
 }

@@ -232,7 +232,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 				<div className="chat-response__body">
 					{runningMs >= VERY_LONG_TURN_MS && working ? (
 						<p className="chat-response__long">
-							This is a long run. Clio is still working. Use Stop to request that the current turn ends.
+							This is a long run. CLIO Coder is still working. Use Stop to request that the current turn ends.
 						</p>
 					) : null}
 					{turn.segments.length === 0 && live ? (

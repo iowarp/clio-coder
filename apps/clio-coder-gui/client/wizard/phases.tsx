@@ -68,8 +68,8 @@ export function WorkingStep({
 						</p>
 					) : null}
 					<p className="wizard-hint">
-						Clio waits for the browser to finish and carries on by itself. If the browser cannot reach back, a field for the
-						verification code appears here.
+						CLIO Coder waits for the browser to finish and carries on by itself. If the browser cannot reach back, a field for
+						the verification code appears here.
 					</p>
 				</div>
 			) : null}
@@ -107,7 +107,7 @@ export function SavedStep({
 				{view.tested
 					? `The model answered a test message (${view.tested}).`
 					: view.verified
-						? "Clio reached the connection and has the model it will start on."
+						? "CLIO Coder reached the connection and has the model it will start on."
 						: "Availability is not verified. The settings are saved; check the connection again in Settings."}
 			</p>
 			{view.summary.length > 0 ? (
@@ -161,8 +161,8 @@ export function WorkspaceStep({ client, onOpened }: { client: Client; onOpened: 
 				Open your first workspace.
 			</h1>
 			<p className="wizard-step__lede">
-				A folder on this machine. Clio can read and edit files inside it. Your approval policy controls which actions ask
-				first.
+				A folder on this machine. CLIO Coder can read and edit files inside it. Your approval policy controls which actions
+				ask first.
 			</p>
 			<form
 				className="wizard-field"

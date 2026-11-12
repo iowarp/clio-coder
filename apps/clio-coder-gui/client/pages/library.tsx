@@ -130,13 +130,15 @@ function SkillBody({ skill }: { skill: Resource }) {
 }
 const purpose: Record<Collection, string> = {
 	Catalog:
-		"Every package Clio can install, and every copy already installed, for you or for this project. Each change is planned first, shown to you, and only then applied.",
-	Agents: "Specialists Clio can assign work to. Their specifications describe the tools, skills and limits they use.",
-	Skills: "Reusable instructions that guide Clio through a task.",
+		"Every package CLIO Coder can install, and every copy already installed, for you or for this project. Each change is planned first, shown to you, and only then applied.",
+	Agents:
+		"Specialists CLIO Coder can assign work to. Their specifications describe the tools, skills and limits they use.",
+	Skills: "Reusable instructions that guide CLIO Coder through a task.",
 	Prompts: "Saved starting points for conversations and common tasks.",
 	Playbooks: "Saved workflows the fleet runs, coordinating several steps or specialists.",
-	Extensions: "Installed packages that add executable capabilities. Admission state shows whether Clio can load them.",
-	Verifiers: "Checks Clio discovered for this workspace. Viewing this list does not run them.",
+	Extensions:
+		"Installed packages that add executable capabilities. Admission state shows whether CLIO Coder can load them.",
+	Verifiers: "Checks CLIO Coder discovered for this workspace. Viewing this list does not run them.",
 };
 export function LibraryPage({
 	client,
@@ -267,7 +269,9 @@ export function LibraryPage({
 		<section className="library-page">
 			{!compact && <PanelHeading panel={PANELS.library} level={1} />}
 			{!workspaceId && <WorkspacePicker selection={selection} />}
-			{!compact && <p>Explore the capabilities available to Clio in this workspace, and see where they come from.</p>}
+			{!compact && (
+				<p>Explore the capabilities available to CLIO Coder in this workspace, and see where they come from.</p>
+			)}
 			{!id && !selection.workspaces.isPending && <PanelEmpty>{emptyState.unread("library of a workspace")}</PanelEmpty>}
 			<div className="settings-tabs" role="tablist" aria-label="Library collections" onKeyDown={onTabKey}>
 				{collections.map((name) => (

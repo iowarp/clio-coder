@@ -50,7 +50,7 @@ function savedAnswers(round: InterviewRound): InterviewDraft[] {
 export function InterviewHeading({ round, titleId }: { round: InterviewRound; titleId: string }) {
 	return (
 		<div>
-			<p className="eyebrow">Clio Coder needs your input</p>
+			<p className="eyebrow">CLIO Coder needs your input</p>
 			<h2 id={titleId}>
 				Shape the next step<span className="period">.</span>
 			</h2>
@@ -204,7 +204,7 @@ function InterviewDialog({ client, sessionId, round }: { client: Client; session
 							<h3 ref={heading} tabIndex={-1}>
 								End this interview?
 							</h3>
-							<p>Clio receives a cancellation. Your unanswered choices will stay undecided.</p>
+							<p>CLIO Coder receives a cancellation. Your unanswered choices will stay undecided.</p>
 							<div>
 								<button type="button" disabled={send.isPending} onClick={() => submit({ cancelled: true })}>
 									End interview
@@ -282,8 +282,8 @@ function InterviewDialog({ client, sessionId, round }: { client: Client; session
 									disabled={send.isPending}
 									placeholder={
 										question.options?.length
-											? "A different answer, a constraint, or a detail Clio should know…"
-											: "Tell Clio what it needs to know…"
+											? "A different answer, a constraint, or a detail CLIO Coder should know…"
+											: "Tell CLIO Coder what it needs to know…"
 									}
 									onChange={(event) => edit({ ...answer, text: event.target.value })}
 								/>

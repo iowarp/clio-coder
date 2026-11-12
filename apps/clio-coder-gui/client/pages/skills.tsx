@@ -36,7 +36,8 @@ function SkillRow({ skill }: { skill: Resource }) {
 				{skill.reason && <p className="skills__note">{skill.reason}</p>}
 				{card.reachable && (
 					<p>
-						Ask Clio to use <strong>{skill.name}</strong> in your task. It can also choose this skill when the task fits.
+						Ask CLIO Coder to use <strong>{skill.name}</strong> in your task. It can also choose this skill when the task
+						fits.
 					</p>
 				)}
 				<dl className="skill__facts">
@@ -112,8 +113,8 @@ export function SkillsPage({ client }: { client: Client }) {
 			<div className="skills">
 				<div className="skills__inner">
 					<p className="skills__lede">
-						A skill is a set of instructions Clio follows when a task fits it. Clio picks one by name on its own, and you can
-						ask for one in a message.
+						A skill is a set of instructions that CLIO Coder picks by name and follows when a task fits it. You can also ask
+						for one in a message.
 					</p>
 					{id === "" ? <p className="skills__note">Open a workspace to see the skills available in it.</p> : null}
 					{inventory.error ? (

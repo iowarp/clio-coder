@@ -138,7 +138,7 @@ function stripTruncation(source: string): Truncation {
 		return {
 			body: source.slice(0, clio),
 			truncated: true,
-			note: "Clio Coder capped this diff at 32 KiB. Lines below the cut are not shown, so this is not the whole change.",
+			note: "CLIO Coder capped this diff at 32 KiB. Lines below the cut are not shown, so this is not the whole change.",
 		};
 	}
 	return { body: source, truncated: false, note: null };
@@ -419,7 +419,7 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 			diff,
 			note:
 				diff.format === "unparsed"
-					? "Clio Coder returned a diff this view could not parse. The raw bytes are in the disclosure below."
+					? "CLIO Coder returned a diff this view could not parse. The raw bytes are in the disclosure below."
 					: null,
 			firstChangedLine,
 			path,
@@ -431,7 +431,7 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 			provenance: "skipped",
 			label: PROVENANCE_LABEL.skipped,
 			diff: null,
-			note: "The file is larger than 1 MiB, so Clio Coder did not render a diff. The change itself still happened.",
+			note: "The file is larger than 1 MiB, so CLIO Coder did not render a diff. The change itself still happened.",
 			firstChangedLine,
 			path,
 		};
@@ -441,9 +441,9 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 		const provenance: DiffProvenance = refused ? "rejected" : settled ? "unverified" : "proposed";
 		const note =
 			provenance === "rejected"
-				? "Nothing was written. This is the change Clio Coder asked to make."
+				? "Nothing was written. This is the change CLIO Coder asked to make."
 				: provenance === "unverified"
-					? `${inputs.status === "unknown" ? "No terminal result was reported" : "The call did not complete"}, so this view cannot confirm whether any of it reached the file. This is the change Clio Coder asked to make.`
+					? `${inputs.status === "unknown" ? "No terminal result was reported" : "The call did not complete"}, so this view cannot confirm whether any of it reached the file. This is the change CLIO Coder asked to make.`
 					: "Built from the tool's arguments in this browser. Nothing has been written yet.";
 		const label =
 			provenance === "unverified" && inputs.status === "unknown"

@@ -51,7 +51,7 @@ export function ChangesView({ session, workspaceRoot }: { session: PaneSession; 
 			<div className="pane-blank">
 				<Icon name="fileDiff" />
 				<p>No files changed yet.</p>
-				<small>When Clio edits or writes a file, its diff appears here.</small>
+				<small>When CLIO Coder edits or writes a file, its diff appears here.</small>
 			</div>
 		);
 	const allOpen = changes.files.every((file) => opened.has(file.path));

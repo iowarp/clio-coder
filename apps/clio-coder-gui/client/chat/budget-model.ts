@@ -39,7 +39,7 @@ export function budgetBannerView(
 				outcome.raisedTo === String(budget.raiseToUsd) && budget.raiseDisplay
 					? `Ceiling raised to ${budget.raiseDisplay}.`
 					: "Ceiling updated.",
-			detail: "Clio resumes the paused request within a second.",
+			detail: "CLIO Coder resumes the paused request within a second.",
 			raise: null,
 			settingsHref: href,
 		};

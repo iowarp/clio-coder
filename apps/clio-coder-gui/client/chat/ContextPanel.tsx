@@ -117,7 +117,9 @@ export const ContextPanel = memo(function ContextPanel({
 				/>
 			) : null}
 			{!sessionOpen ? <p className="pane-empty">This task is not open. Open it to read its context window.</p> : null}
-			{sessionOpen && !supported ? <p className="pane-empty">Clio does not report context window for this task.</p> : null}
+			{sessionOpen && !supported ? (
+				<p className="pane-empty">CLIO Coder does not report context window for this task.</p>
+			) : null}
 			{ledger.isPending && sessionOpen && supported ? <p className="pane-empty">Reading the context window…</p> : null}
 			{ledger.error ? (
 				<p role="alert" className="pane-empty">
@@ -285,8 +287,8 @@ export const ContextPanel = memo(function ContextPanel({
 							))}
 						</dl>
 						<p className="drill__note">
-							Shell reuse describes Clio's compiled prompt. Provider reads and writes describe model prompt caching; they do
-							not measure tool-call caching. The backend verdict describes the first call of the last run. Missing counts do
+							Shell reuse describes CLIO Coder's compiled prompt. Provider reads and writes describe model prompt caching; they
+							do not measure tool-call caching. The backend verdict describes the first call of the last run. Missing counts do
 							not mean zero; these fields do not establish a cache hit rate or cost savings.
 						</p>
 					</details>

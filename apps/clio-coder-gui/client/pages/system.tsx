@@ -113,7 +113,7 @@ export function SystemPage({
 							<nav className="system-sections" aria-label="On this page">
 								<a href="#system-checks">Health checks</a>
 								<a href="#system-runtime">Runtime versions</a>
-								<a href="#system-folders">Clio folders</a>
+								<a href="#system-folders">CLIO Coder folders</a>
 							</nav>
 							<dl className="facts panel-summary" aria-label="Diagnostic summary">
 								{[
@@ -223,7 +223,7 @@ export function SystemPage({
 					<summary>Runtime versions · {meta.data.clio}</summary>
 					<dl className="settings-list">
 						{Object.entries({
-							"Clio Coder": meta.data.clio,
+							"CLIO Coder": meta.data.clio,
 							"Web application": meta.data.app,
 							Node: meta.data.node,
 							Platform: meta.data.platform,
@@ -242,9 +242,9 @@ export function SystemPage({
 			)}
 			{report.data && (
 				<details className="system-compact-paths" id={compact ? undefined : "system-folders"}>
-					<summary>Clio folders · settings, data, state and cache</summary>
+					<summary>CLIO Coder folders · settings, data, state and cache</summary>
 					<p className="panel-note">
-						These folders belong to the connected Clio runtime. They can differ from this browser’s machine.
+						These folders belong to the connected CLIO Coder runtime. They can differ from this browser’s machine.
 					</p>
 					<dl className="settings-list">
 						{Object.entries(report.data.paths).map(([role, path]) => (

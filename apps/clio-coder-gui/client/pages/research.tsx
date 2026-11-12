@@ -104,8 +104,8 @@ export function ResearchPage({ client }: { client: Client }) {
 				}
 			/>
 			<p className="intro">
-				Name a metric a declared check prints and a budget. Clio lets its agent change an isolated worktree, measures each
-				change against the best so far, and keeps it only when it beats noise.
+				Name a metric a declared check prints and a budget. CLIO Coder lets its agent change an isolated worktree, measures
+				each change against the best so far, and keeps it only when it beats noise.
 			</p>
 			<div className="research-scope">
 				<WorkspacePicker selection={selection} />

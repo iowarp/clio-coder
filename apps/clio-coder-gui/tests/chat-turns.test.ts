@@ -614,7 +614,7 @@ test("compaction, tool budget and provider health reduce to readable rows", () =
 	assert.equal(summary.toolBudget?.tone, "fail");
 	assert.equal(
 		summary.toolBudget?.detail,
-		"Grep was called 41 times this turn against a soft budget of 30 and a hard ceiling of 40. Clio Coder interrupted the turn.",
+		"Grep was called 41 times this turn against a soft budget of 30 and a hard ceiling of 40. CLIO Coder interrupted the turn.",
 	);
 	assert.deepEqual(
 		summary.providers.map((row) => [row.key, row.tone]),
