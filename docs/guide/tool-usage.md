@@ -2,7 +2,7 @@
 
 Operational reference for agents and operators. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section through `gateway(op="call", capability="clio_docs", args={query: ...})`.
 
-### Quick start
+## Quick start
 
 You never call these tools yourself. Ask in plain words, and the agent picks
 the tool:
@@ -21,7 +21,7 @@ the tool:
 - What a call may do without asking is in
   [Sandbox and safety](sandbox-and-safety.md).
 
-### The tool surface at a glance
+## The tool surface at a glance
 
 | Purpose | Tools |
 | --- | --- |
