@@ -41,6 +41,7 @@ import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
 } from "../../src/interactive/interactive-slash-runtime.js";
+import { createKeybindingManagerForTesting } from "../../src/interactive/keybinding-manager.js";
 import { buildLayout, releaseRegularDock, returnToLiveEdge } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
@@ -1381,6 +1382,36 @@ describe("Pi TUI compatibility", () => {
 			terminal.input(`\x1b[<0;${column + 2};${row + 1}m`);
 			strictEqual(transcript?.isFollowingEnd, true, "a click on the marker returns to the live edge");
 			ok(!stripTerminalSequences(frame()).includes(label));
+		} finally {
+			tui.stop();
+		}
+	});
+
+	it("paints fullscreen search matches with theme roles and names the leader action in Clio's words", () => {
+		strictEqual(createKeybindingManagerForTesting().getLabel("tui.altScreen.search"), "Search transcript");
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, fullscreenTuiOptions(terminal));
+		const text = Array.from({ length: 40 }, (_, row) => `row ${row} needle`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true, follow: "end" }));
+		tui.start();
+		const opening = (style: Parameters<ReturnType<typeof clioTheme>["paint"]>[1]) => {
+			const painted = clioTheme().paint("needle", style);
+			return painted.slice(0, painted.indexOf("needle"));
+		};
+		try {
+			tui.renderNow(true);
+			terminal.input("\x1b[102;6u"); // pi's default search key, Ctrl+Shift+F
+			terminal.input("needle");
+			terminal.writes = [];
+			tui.renderNow(true);
+			const frame = terminal.writes.join("");
+			const current = opening({ fg: "onSelection", bg: "selectionBadge", bold: true });
+			const other = opening({ bg: "selectionBackground", underline: true });
+			ok(current.length > 0 && other.length > 0, "the test theme paints colour");
+			strictEqual(frame.split(`${current}needle`).length - 1, 1, "one current match in the badge pair");
+			ok(frame.includes(`${other}needle`), "other matches on the selection background");
+			ok(!frame.includes("\x1b[1;7mneedle"), "not pi's uncoloured inverse");
 		} finally {
 			tui.stop();
 		}

@@ -611,8 +611,20 @@ export function createKeybindingManagerForTesting(
 	return buildManager(overrides, env, false);
 }
 
+/** pi-tui describes its viewport actions in renderer terms ("primary scroll view"); menus show these. */
+const VIEWPORT_LABELS: Partial<Record<Keybinding, string>> = {
+	"tui.altScreen.search": "Search transcript",
+	"tui.altScreen.pageUp": "Page up",
+	"tui.altScreen.pageDown": "Page down",
+	"tui.altScreen.top": "Top",
+	"tui.altScreen.bottom": "Bottom",
+	"tui.altScreen.previousPrompt": "Previous prompt",
+	"tui.altScreen.nextPrompt": "Next prompt",
+};
+
 function labelOf(id: Keybinding, fallback: string): string {
-	return Object.hasOwn(CLIO_APP_KEYBINDINGS, id) ? CLIO_APP_KEYBINDINGS[id as ClioKeybinding].label : fallback;
+	if (Object.hasOwn(CLIO_APP_KEYBINDINGS, id)) return CLIO_APP_KEYBINDINGS[id as ClioKeybinding].label;
+	return VIEWPORT_LABELS[id] ?? fallback;
 }
 
 /**

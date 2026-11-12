@@ -19,7 +19,7 @@ import {
 } from "./render-trace.js";
 import type { StdoutBackpressureGate } from "./stdout-backpressure.js";
 import { installStdoutBackpressureGate } from "./stdout-backpressure.js";
-import { clioTheme, GLYPH } from "./theme/index.js";
+import { clioTheme, GLYPH, transcriptSearchTheme } from "./theme/index.js";
 
 export interface InteractiveShellTui {
 	readonly mode?: TuiMode;
@@ -220,6 +220,7 @@ export function fullscreenTuiOptions(terminal: Terminal): TuiAltScreenOptions {
 	return {
 		// A fast wheel spin moves up to six rows per report; an isolated notch moves one.
 		wheelScrollLines: "auto",
+		...transcriptSearchTheme(theme),
 		// Drawn on the transcript's last row while it is scrolled away from the live edge; a click returns there.
 		scrollToEndIndicator: () => theme.paint(` ${GLYPH.down} latest `, { fg: "scrollMarker", bg: "raisedSurface" }),
 		// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
