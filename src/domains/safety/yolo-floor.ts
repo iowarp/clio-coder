@@ -155,9 +155,41 @@ function decodeAnsiCBody(body: string): string {
 }
 
 /**
+ * Whether a `$(` or backtick in the command is one the shell runs: outside single quotes, `$'...'`, a backslash
+ * escape and a comment. Inside double quotes it runs. A here-document body is not told apart, so a quote in one
+ * can hide a later substitution; the caller also reads any substitution beside `<<` for that reason.
+ */
+function holdsSubstitution(command: string): boolean {
+	let doubleQuoted = false;
+	for (let index = 0; index < command.length; index += 1) {
+		const char = command[index];
+		const next = command[index + 1];
+		if (char === "\\") {
+			index += 1;
+			continue;
+		}
+		if (char === "`" || (char === "$" && next === "(")) return true;
+		if (doubleQuoted) {
+			if (char === '"') doubleQuoted = false;
+			continue;
+		}
+		if (char === '"') {
+			doubleQuoted = true;
+		} else if (char === "'" || (char === "$" && next === "'")) {
+			const ansiC = char === "$";
+			index += ansiC ? 2 : 1;
+			while (index < command.length && command[index] !== "'") index += ansiC && command[index] === "\\" ? 2 : 1;
+		} else if (char === "#" && (index === 0 || /[\s;&|()<>]/u.test(command[index - 1] ?? ""))) {
+			while (index < command.length && command[index] !== "\n") index += 1;
+		}
+	}
+	return false;
+}
+
+/**
  * The raw-text reading of a line the shared scanners may not follow into every command: one holding a command
- * substitution beside a here-document, a here-string or a `#` (a `#` only beside `$(`, since the scanners follow
- * backticks there). The scanners place a here-document's end, a comment and a substitution's close by bash's rules,
+ * substitution the shell runs, or any `$(` or backtick beside a here-document, a here-string or (for `$(`) a `#`,
+ * where the quote context cannot be told from the text. The scanners place a here-document's end, a comment and a substitution's close by bash's rules,
  * and where they read a step as data the floor never judges it. This reading does not parse: it joins
  * backslash-newlines, decodes `$'...'` and `$"..."`, drops every quote, cuts the text at newlines, operators,
  * parentheses, braces and backticks, and yields each piece, the piece without its first word (a here-document
@@ -168,8 +200,9 @@ function decodeAnsiCBody(body: string): string {
  */
 export function yoloFloorRawCandidates(command: string): { candidates: string[]; overflow: boolean } | null {
 	const substitution = /\$\(/u.test(command);
-	if (!(substitution || command.includes("`")) || !(command.includes("<<") || (substitution && command.includes("#"))))
-		return null;
+	const beside =
+		(substitution || command.includes("`")) && (command.includes("<<") || (substitution && command.includes("#")));
+	if (!beside && !holdsSubstitution(command)) return null;
 	const decoded = command
 		.replace(/\\\r?\n/gu, "")
 		.replace(/\$'((?:[^'\\]|\\[\s\S])*)'/gu, (_all, body: string) => decodeAnsiCBody(body))

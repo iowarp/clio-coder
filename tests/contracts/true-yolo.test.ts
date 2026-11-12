@@ -1058,6 +1058,27 @@ test("the raw-text reading follows a literal cd, joins and decodes its words, an
 	);
 });
 
+test("the raw-text reading covers every line with a substitution the shell runs, not one in single quotes", async (t) => {
+	const cwd = workspace("clio-yolo-floor-raw-any-");
+	const home = await isolateClioEnv("clio-yolo-floor-raw-any-home-");
+	t.after(() => home.restore());
+	const engine = engineFor(cwd);
+	const judge = (command: string) => engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO);
+	for (const command of [
+		': "$(case x in x) :;; esac; wipefs -a /dev/sdz)"',
+		': "`case x in x) :;; esac; wipefs -a /dev/sdz`"',
+		'git commit -m "docs: never shred -u /etc/passwd ($(git rev-parse --short HEAD))"',
+	]) {
+		strictEqual(judge(command).kind, "block", command);
+	}
+	for (const command of [
+		'git commit -m "fix: build on $(uname -s)"',
+		"printf '%s\\n' '$(wipefs -a /dev/sdz)' 'shred -u /etc/passwd'",
+	]) {
+		strictEqual(judge(command).kind, "allow", command);
+	}
+});
+
 // #419: an admitted yolo script commits through git, fills its own package cache,
 // and leaves no commondir behind to redirect the host's next git command.
 test("a yolo script run through bash commits in the workspace repository and its planted commondir is swept", async (t) => {

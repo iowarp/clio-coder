@@ -1179,7 +1179,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return held(
 				floorMatch({
 					ruleId: YOLO_FLOOR_RULE_IDS.rawText,
-					reason: `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}, and this one is too large to read that way; split it, or write the here-document's text with the write tool first`,
+					reason: `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}, and this one is too large to read that way; split it, or write its text to a file with the write tool and pass the file`,
 				}),
 			);
 		}
@@ -3438,8 +3438,7 @@ function blockDecision(
 }
 
 /** Why the floor reads a line as raw text. */
-const RAW_TEXT_REASON =
-	"a line holding a command substitution beside a here-document, a here-string or a # is also read as raw text, quotes dropped";
+const RAW_TEXT_REASON = "a line holding a command substitution is also read as raw text, quotes dropped";
 
 /** Most of a script the floor reads before the call runs (#419, #407). */
 const FLOOR_SCRIPT_SCAN_BYTES = 256 * 1024;
