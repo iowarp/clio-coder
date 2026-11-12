@@ -179,6 +179,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Inside Herdr and other terminal multiplexers, fullscreen tracks the mouse only while a button is held, so a moving pointer no longer streams reports.
 - A clean exit in regular mode clears the input box, its rails and the footer before the exit summary.
 - In regular mode a finished turn no longer measures every transcript row again, which cost a long session tens of milliseconds per turn.
+- With an overlay open, a fullscreen selection in the transcript beside it copies as written too, and the `↓ latest` marker still returns to the live edge.
+- A frame with `/settings` open takes a few milliseconds instead of more than 100, so the wheel and keys stay smooth there.
 
 ### Sign-in, setup and providers
 
@@ -330,6 +332,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - The machine proxy refuses credential routes however the path is encoded, and a malformed percent-encoded path returns 400 instead of 500.
 - When the open desktop window belongs to a server that restarted, `clio-coder gui` opens a fresh window instead of focusing the dead one. That dead window retitles itself so a later relaunch never raises it; on WSL a relaunch that names a page shows it in the live window instead of replacing the window, and the launcher scripts update themselves on launch after an upgrade.
 - A fleet attach polls the forwarded port only after ssh has set up its forwards and fails when the forward exits, so another local account cannot take the port and receive the node's client credential.
+- The background app draws a new launch token on every start, so a token copied earlier stops working at the next restart; launchers and desktop shortcuts read the new one, and a background app installed by 0.7.0 starts and rotates its token on its first 0.8.0 start.
 
 ### Context and compaction
 
