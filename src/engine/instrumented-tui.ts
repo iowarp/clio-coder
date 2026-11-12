@@ -8,12 +8,18 @@
  * write) can belong to that frame.
  */
 
-import type { Terminal, TuiAltScreenOptions, TuiStopOptions } from "@earendil-works/pi-tui";
+import type { Terminal, TuiAltScreenOptions } from "@earendil-works/pi-tui";
 import { ApplicationInputTuiAltScreen, ApplicationInputTuiMainScreen } from "./application-input-tui.js";
 import { hasCopyMark, type SelectedRow, selectedRowsText, stripCopyMarks } from "./selection-text.js";
 
 /** pi-tui's flash duration when the caller passes none (`components/alt-screen-flash.js`). */
 const DEFAULT_FLASH_MS = 1000;
+
+/** One row of pi-tui's private flash stack; `dispose` clears whichever timer the row holds. */
+interface FlashRow {
+	readonly message: string;
+	timer: ReturnType<typeof setTimeout>;
+}
 
 export type TuiRenderPhase = "overlay" | "normalization" | "cursor";
 
@@ -281,8 +287,6 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 	}
 	private currentFrame: unknown | undefined;
 	private paintedColumns: number | undefined;
-	/** When each flashed message leaves the stack; pi-tui appends a repeat as another row. */
-	private readonly flashShownUntil = new Map<string, number>();
 
 	constructor(
 		terminal: Terminal,
@@ -301,26 +305,35 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 		if (!this.deferredAdmission.request(force)) super.requestRender(force);
 	}
 
-	/** A message identical to one still showing is not stacked again, so repeated copies keep one row. */
+	/**
+	 * A message identical to one still showing restarts that row's timer instead of
+	 * stacking another row, so a repeated copy keeps one row that shows for its whole duration.
+	 */
 	override flash(message: string, durationMs?: number): void {
-		const now = performance.now();
-		for (const [shown, until] of this.flashShownUntil) if (until <= now) this.flashShownUntil.delete(shown);
-		if (this.flashShownUntil.has(message)) return;
-		this.flashShownUntil.set(message, now + (durationMs ?? DEFAULT_FLASH_MS));
-		super.flash(message, durationMs);
+		// pi-tui keeps its flash rows private; if a Pi upgrade renames them, a repeat stacks as pi-tui would.
+		const rows = (this as unknown as { flashes?: { entries?: FlashRow[] } }).flashes?.entries;
+		const showing = Array.isArray(rows) ? rows.find((row) => row.message === message && row.timer) : undefined;
+		if (rows === undefined || showing === undefined) {
+			super.flash(message, durationMs);
+			return;
+		}
+		clearTimeout(showing.timer);
+		showing.timer = setTimeout(
+			() => {
+				const index = rows.indexOf(showing);
+				if (index === -1) return;
+				rows.splice(index, 1);
+				this.requestRender();
+			},
+			Math.max(0, durationMs ?? DEFAULT_FLASH_MS),
+		);
+		showing.timer.unref();
 	}
 
-	// pi-tui drops every flash when the terminal starts or stops.
 	protected override beforeTerminalStart(): void {
-		this.flashShownUntil.clear();
 		super.beforeTerminalStart();
 		// pi-tui asks for every pointer movement unless it recognises the multiplexer; Herdr it does not.
 		if (this.capturesMouse && multiplexed()) this.terminal.write("\x1b[?1003l");
-	}
-
-	protected override beforeTerminalStop(options: TuiStopOptions): void {
-		this.flashShownUntil.clear();
-		super.beforeTerminalStop(options);
 	}
 
 	protected override doRender(): void {

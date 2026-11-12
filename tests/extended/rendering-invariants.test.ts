@@ -1456,6 +1456,32 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("renews a copy flash that is repeated while it still shows", (t) => {
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer);
+		tui.setLayoutRoot(new ScrollView(new Text("transcript", 0, 0), { primary: true, follow: "end" }));
+		tui.start();
+		const rows = () => {
+			terminal.writes = [];
+			tui.renderNow(true);
+			return stripTerminalSequences(terminal.writes.join("")).split("Copied!").length - 1;
+		};
+		try {
+			tui.flash("Copied!");
+			t.mock.timers.tick(900);
+			tui.flash("Copied!");
+			strictEqual(rows(), 1, "a repeat keeps one row");
+			t.mock.timers.tick(900);
+			strictEqual(rows(), 1, "the repeat shows for its whole duration");
+			t.mock.timers.tick(200);
+			strictEqual(rows(), 0, "and then leaves");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("keeps one neutral copy flash over SSH however many selections land", async () => {
 		const saved = { SSH_CONNECTION: process.env.SSH_CONNECTION, DISPLAY: process.env.DISPLAY };
 		process.env.SSH_CONNECTION = "client 0 server 0";
