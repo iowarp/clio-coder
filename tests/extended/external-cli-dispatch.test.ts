@@ -9,6 +9,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainName } from "../../src/core/domain-loader.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
+import { type DispatchIntent, declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { opencodeCliRuntime, piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
@@ -284,6 +285,12 @@ for (const event of [
 	}
 });
 
+function declaredIntent(writeRoots: string[]): DispatchIntent {
+	const declared = declaredScopeIntent({ writeRoots });
+	if (!declared.ok) throw new Error(declared.message);
+	return declared.intent;
+}
+
 test("OpenCode in a task worktree reads the compiled rules from its AGENTS.md, which never lands", {
 	timeout: 30_000,
 }, async () => {
@@ -358,11 +365,12 @@ for (const event of [
 		},
 	);
 	await bundle.extension.start();
-	const run = async (task: string) => {
+	const run = async (task: string, writeRoots?: string[]) => {
 		const dispatched = await bundle.contract.dispatch({
 			agentId: "coder",
 			target: "opencode-test",
 			task,
+			...(writeRoots !== undefined ? { intent: declaredIntent(writeRoots) } : {}),
 			worktree: true,
 			apply: "preserve",
 			executionRole: "builder",
@@ -382,11 +390,13 @@ for (const event of [
 		ok(overlaid.agents.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."));
 		ok(!overlaid.agents.includes("test:all"), overlaid.agents);
 		ok(!overlaid.stdin.includes("<project-rules>"), "the rules are not sent twice");
+		// OpenCode appended to the overlaid file; putting the original back dropped that edit, and the record says so.
 		deepStrictEqual(overlaid.receipt.projectContext?.peerInstructions, {
 			delivery: "overlay",
 			files: ["AGENTS.md"],
 			stale: 1,
 			notCarried: 0,
+			discarded: ["AGENTS.md"],
 		});
 		const worktree = overlaid.receipt.worktree;
 		ok(worktree?.commit);
@@ -405,6 +415,11 @@ for (const event of [
 			"AGENTS.md has 1 rule that no longer matches the repository; OpenCode read it in this run.",
 		]);
 		ok(named.stdin.includes("<project-rules>"), named.stdin);
+		// So does a task whose declared directory covers the file.
+		const covered = await run("Round the cart total", ["."]);
+		equal(covered.agents, agents);
+		equal(covered.receipt.projectContext?.peerInstructions?.delivery, "coexist");
+		equal(covered.receipt.projectContext?.peerInstructions?.discarded, undefined);
 
 		// An overlay that cannot be written leaves the harness its own file and sends the rules in the message.
 		lockWorktree = true;

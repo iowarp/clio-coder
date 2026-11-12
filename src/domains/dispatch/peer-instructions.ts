@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../../core/internal-git.js";
+import { writeRootsCover } from "../../core/path-boundary.js";
 import { runCommandVector } from "../../core/safe-exec.js";
 import type { HandbookLedgerEntry } from "../context/bootstrap.js";
 import { judgeInstructionFiles } from "../context/bootstrap.js";
@@ -121,8 +122,8 @@ async function tracked(root: string, files: ReadonlyArray<string>): Promise<bool
 
 /**
  * An overlay needs the run's own task worktree, files Git tracks there as
- * regular files, and a task that does not name them: a task asked to edit
- * the file must see and change the real one.
+ * regular files, and a task that neither names them nor declares a directory
+ * over them: a task that may edit the file must see and change the real one.
  */
 async function overlayAllowed(
 	input: PeerInstructionsInput,
@@ -130,11 +131,12 @@ async function overlayAllowed(
 	files: ReadonlyArray<PeerFile>,
 ): Promise<boolean> {
 	if (input.taskWorktree === undefined || resolve(input.taskWorktree) !== root) return false;
-	const declared = new Set(
-		input.declaredPaths.map((path) => (isAbsolute(path) ? resolve(path) : resolve(input.cwd, path))),
+	// A declared directory (`.`, `packages/api/`) covers the files under it, with or without its trailing slash.
+	const declared = input.declaredPaths.map((path) =>
+		(isAbsolute(path) ? resolve(path) : resolve(input.cwd, path)).split(sep).join("/"),
 	);
 	for (const file of files) {
-		if (declared.has(resolve(file.path))) return false;
+		if (writeRootsCover(declared, resolve(file.path).split(sep).join("/"))) return false;
 		try {
 			if (!lstatSync(file.path).isFile()) return false;
 		} catch {

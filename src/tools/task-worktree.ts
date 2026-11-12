@@ -406,7 +406,7 @@ export function commitWorktreePath(
 /** Tracked files Clio wrote over in a task worktree for one run, with what to put back. */
 export interface TaskWorktreeOverlay {
 	path: string;
-	files: ReadonlyArray<{ file: string; original: Buffer; mode: number; parent: string }>;
+	files: ReadonlyArray<{ file: string; original: Buffer; written: Buffer; mode: number; parent: string }>;
 }
 
 function overlayTarget(path: string, file: string): string {
@@ -438,6 +438,7 @@ export function overlayTaskWorktree(
 			const entry = {
 				file,
 				original: readFileSync(target),
+				written: Buffer.from(content, "utf8"),
 				mode: stat.mode & 0o777,
 				parent: realpathSync(dirname(target)),
 			};
@@ -466,16 +467,25 @@ export function overlayTaskWorktree(
 
 /**
  * Put back what `overlayTaskWorktree` replaced, whatever the run did to those
- * paths. A path whose directory no longer resolves where it did is left alone
- * with its skip-worktree mark, so nothing is written outside the worktree and
- * the landing still drops it.
+ * paths, and return the paths the run changed from what was written: those
+ * edits are gone. A path whose directory no longer resolves where it did is
+ * left alone with its skip-worktree mark, so nothing is written outside the
+ * worktree and the landing still drops it.
  */
-export function restoreTaskWorktreeOverlay(overlay: TaskWorktreeOverlay): void {
+export function restoreTaskWorktreeOverlay(overlay: TaskWorktreeOverlay): string[] {
 	let failure: unknown;
-	for (const { file, original, mode, parent } of overlay.files) {
+	const discarded: string[] = [];
+	for (const { file, original, written, mode, parent } of overlay.files) {
 		try {
 			const target = overlayTarget(overlay.path, file);
 			if (realpathSync(dirname(target)) !== parent) throw new Error(`overlay path ${file} moved during the run`);
+			let current: Buffer | null = null;
+			try {
+				current = readFileSync(target);
+			} catch {
+				// Removed during the run: that is an edit too.
+			}
+			if (current === null || !current.equals(written)) discarded.push(file);
 			safeResourceWrite(target, original, { mode });
 			git(overlay.path, ["update-index", "--no-skip-worktree", "--", file]);
 		} catch (error) {
@@ -483,6 +493,7 @@ export function restoreTaskWorktreeOverlay(overlay: TaskWorktreeOverlay): void {
 		}
 	}
 	if (failure !== undefined) throw failure;
+	return discarded;
 }
 
 /** The bounded account of new files a host commit left out, or undefined when it left none. */

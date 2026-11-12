@@ -149,7 +149,8 @@ in that worktree and empties the others for the run, so OpenCode reads them
 there and not in the message. Each overlaid file is marked skip-worktree in the
 worktree's index and put back before the change is taken, so it never reaches
 the task branch, even when the run dies before the restore. The overlay is
-skipped when the task names one of those files, when one is not a regular file
+skipped when the task names one of those files or declares a directory that
+covers one (a write root of `.` covers them all), when one is not a regular file
 Git tracks, or when the run is on a remote host, and it is dropped when Clio
 cannot write a file at spawn. OpenCode then reads its files beside the compiled
 rules in the message (coexist). A peer also reads them beside the usual
@@ -160,7 +161,8 @@ a file whose guidance Clio cannot extract as rules. Antigravity, ACP peers, and 
 `none` keep their current behavior. The run record's `projectContext.peerInstructions` names the delivery,
 the files, the count of their rules the tree no longer supports (`stale`), and the
 count of the run's rules, from the handbook or those files, that hold but did not
-fit the bound (`notCarried`), and `reason: setting`
+fit the bound (`notCarried`), `discarded` for an overlaid file the run changed,
+whose change the restore dropped, and `reason: setting`
 when the setting kept the files. When a peer read its files as they are and they
 hold rules the tree no longer supports, Clio raises a `peer_instructions_stale`
 notice once per process for those files and counts, such as `AGENTS.md has 1 rule

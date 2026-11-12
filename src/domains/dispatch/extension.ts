@@ -6126,7 +6126,13 @@ export function createDispatchBundle(
 						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
 						...(req.taskWorktree !== undefined ? { taskWorktree: req.taskWorktree.path } : {}),
-						declaredPaths: [...pathScope.workingContextPaths, ...pathScope.writeBoundaries, ...pathScope.inferredOnlyPaths],
+						// A declared scope with no write boundary (write root ".") names the whole workspace.
+						declaredPaths: [
+							...(pathScope.source === "declared" && pathScope.writeBoundaries.length === 0 ? ["."] : []),
+							...pathScope.workingContextPaths,
+							...pathScope.writeBoundaries,
+							...pathScope.inferredOnlyPaths,
+						],
 						keepFiles: keepsPeerInstructionFiles(settings, target.runtime),
 					})
 				: null;
@@ -7939,7 +7945,11 @@ export function createDispatchBundle(
 		const restorePeerOverlay = (): void => {
 			if (peerOverlay === null) return;
 			try {
-				restoreTaskWorktreeOverlay(peerOverlay);
+				const discarded = restoreTaskWorktreeOverlay(peerOverlay);
+				const context = lifecycle.projectContext;
+				if (discarded.length > 0 && context?.peerInstructions !== undefined) {
+					lifecycle.projectContext = { ...context, peerInstructions: { ...context.peerInstructions, discarded } };
+				}
 			} catch (error) {
 				// The skip-worktree mark stays on what was not put back, so the landing still leaves it out.
 				reportDispatchDiagnostic(`restore peer instructions in task worktree ${req.taskWorktree?.runId}`, error);
