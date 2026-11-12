@@ -220,8 +220,8 @@
     "time": "3 min",
     "author": "The CLIO Coder team",
     "source": "diffusion-models.md",
-    "basis": "Documented workflow",
-    "versionScope": "0.6.8",
+    "basis": "Documented workflow, checked against 0.8.0 source without a live Mercury run",
+    "versionScope": "0.8.0",
     "status": "Available since 0.5.3, terminal display only",
     "interfaces": [
       "Terminal"
