@@ -1,15 +1,15 @@
-# Contributing to Clio Coder
+# Contributing to CLIO Coder
 
-Thank you for helping. Clio Coder is an open-source coding agent for scientific software, and it improves fastest when the people who use it on real research code say what worked and what did not. You do not need to be an expert in the codebase to contribute.
+Thank you for helping. CLIO Coder is an open-source coding agent for scientific software, and it improves fastest when the people who use it on real research code say what worked and what did not. You do not need to be an expert in the codebase to contribute.
 
-Clio Coder is pre-1.0, so public interfaces can change between minor releases. User-visible changes belong in [CHANGELOG.md](CHANGELOG.md), participation follows the [Code of Conduct](CODE_OF_CONDUCT.md), and security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+CLIO Coder is pre-1.0, so public interfaces can change between minor releases. User-visible changes belong in [CHANGELOG.md](CHANGELOG.md), participation follows the [Code of Conduct](CODE_OF_CONDUCT.md), and security problems go through [SECURITY.md](SECURITY.md), never a public issue.
 
 ## Ways to contribute
 
-- **Report a problem or ask for a feature.** Inside Clio Coder, `/report bug`, `/report feature` or `/report question` drafts the report, masks paths, host names and secrets, and shows you the exact text before anything is sent. `clio-coder report` does the same from a shell. You can also open an [issue](https://github.com/iowarp/clio-coder/issues/new/choose) by hand.
+- **Report a problem or ask for a feature.** Inside CLIO Coder, `/report bug`, `/report feature` or `/report question` drafts the report, masks paths, host names and secrets, and shows you the exact text before anything is sent. `clio-coder report` does the same from a shell. You can also open an [issue](https://github.com/iowarp/clio-coder/issues/new/choose) by hand.
 - **Ask a question.** Use [Discussions](https://github.com/iowarp/clio-coder/discussions/categories/help).
 - **Share how a model or machine worked.** Local models, cluster login nodes and unusual terminals are where reports help most. Post in [Model and hardware reports](https://github.com/iowarp/clio-coder/discussions/categories/model-and-hardware-reports).
-- **Fix the docs.** The guides under `docs/guide/` ship in the npm package and are what Clio Coder reads to answer questions about itself, so a correction there reaches every user.
+- **Fix the docs.** The guides under `docs/guide/` ship in the npm package and are what CLIO Coder reads to answer questions about itself, so a correction there reaches every user.
 - **Change the code.** Start with the Quickstart below, keep the change focused, and open a pull request against the current version branch.
 
 ## Quickstart
@@ -56,7 +56,7 @@ pnpm run test
 | `pnpm run typecheck:tsc` / `pnpm run typecheck:compare` | Check with TypeScript's own `tsc` as the reference, or run both and fail if their diagnostics differ. Use them when `typecheck` reports something surprising or stays silent about a type error you expect. |
 | `pnpm run lint` | Check formatting, source boundaries, local catalog pins and package hygiene. |
 | `pnpm run check:gui` | Check GUI browser/server TypeScript and lint rules. |
-| `pnpm run build` | Build `dist/` without emptying it: the previous build's chunks stay so a running Clio from this tree keeps working, and chunks no live process needs are pruned afterwards. |
+| `pnpm run build` | Build `dist/` without emptying it: the previous build's chunks stay so a running CLIO Coder from this tree keeps working, and chunks no live process needs are pruned afterwards. |
 | `pnpm run build:release` | Clean build: empties `dist/` first. Use it for packaging, never in a tree another session runs from. |
 | `pnpm run test` | Compact source-based behavior checks; no build required. |
 | `pnpm run ci` | Local candidate qualification, reused for the same clean commit. |
@@ -73,7 +73,7 @@ Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/har
 `tsc` stays authoritative:
 
 - Release preparation (`pnpm run ci` and the `prepare` job) runs `pnpm run typecheck:compare`, so the gate is `tsc`'s verdict, and it also fails when tsrs reports anything different.
-- `tests/contracts/typecheck-corpus.test.ts` (core tier) holds `tsc`, tsrs and `tsrs --fast` to the diagnostics recorded in `tests/fixtures/typecheck-corpus/expected.txt`. The corpus injects errors under the options Clio relies on: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noImplicitOverride`, NodeNext `.js` specifiers, `paths` aliases, JSON modules, `isolatedModules`, TSX and declaration emit. It also covers the `file(line,col): error TSnnnn:` output agents parse, and the fallback.
+- `tests/contracts/typecheck-corpus.test.ts` (core tier) holds `tsc`, tsrs and `tsrs --fast` to the diagnostics recorded in `tests/fixtures/typecheck-corpus/expected.txt`. The corpus injects errors under the options CLIO Coder relies on: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noImplicitOverride`, NodeNext `.js` specifiers, `paths` aliases, JSON modules, `isolatedModules`, TSX and declaration emit. It also covers the `file(line,col): error TSnnnn:` output agents parse, and the fallback.
 - The GUI keeps its own `tsc` in `pnpm run check:gui`.
 
 **Version pairing.** The root's reference compiler, `@typescript/native`, is the TypeScript release that tsrs ports: `tsrs.typescriptVersion` in `node_modules/tsrs/package.json`. The corpus test fails when they differ. Bump both in one commit, refresh the record with `TYPECHECK_CORPUS_WRITE=1 pnpm run test:file -- tests/contracts/typecheck-corpus.test.ts`, review the `expected.txt` diff, then run `pnpm run typecheck:compare`.
@@ -328,7 +328,7 @@ in the guides; command-heavy material and agent orientation use foldable blocks.
   list for the current release), Models, Interfaces, Safety and control,
   No call-home, For AI agents, Documentation, Contribute and get help,
   Acknowledgements.
-- Open with what Clio Coder is and who it is for in two sentences, then the
+- Open with what CLIO Coder is and who it is for in two sentences, then the
   three-step start. Use absolute HTTPS image URLs so npm can render them.
 - Keep the release-tag source installation under Get started, including launcher
   path verification. Release chronology belongs in `CHANGELOG.md`. While a

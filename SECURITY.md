@@ -1,6 +1,6 @@
 # Security Policy
 
-Clio Coder is pre-1.0 software. Security fixes ship in the newest release, so
+CLIO Coder is pre-1.0 software. Security fixes ship in the newest release, so
 the first step for any concern is to update to it.
 
 | Version | Status |
@@ -64,7 +64,7 @@ In scope:
 
 Out of scope:
 
-- Issues confined to an upstream project with no demonstrated impact on Clio
+- Issues confined to an upstream project with no demonstrated impact on CLIO
   Coder. Do report an exploitable problem in a dependency we ship or an
   integration we provide, even when an upstream advisory already exists.
 - Attacks that require an attacker who already has read or write access to
@@ -73,9 +73,9 @@ Out of scope:
   upstream.
 - Social engineering and spam.
 
-## Running Clio Coder safely
+## Running CLIO Coder safely
 
-Clio Coder edits files, runs commands, dispatches workers and calls the model
+CLIO Coder edits files, runs commands, dispatches workers and calls the model
 endpoints you configure. Where the host has a sandbox backend (bubblewrap on
 Linux, Seatbelt on macOS), it runs shell commands inside an OS sandbox under
 `safety.sandbox`, which defaults to `auto`. The
@@ -84,7 +84,7 @@ hides and how approvals work, and each release's
 [changelog](CHANGELOG.md) lists the known limits.
 
 The sandbox narrows what a command can reach. It does not make an untrusted
-repository safe to run unattended. Review a project's Clio Coder configuration
+repository safe to run unattended. Review a project's CLIO Coder configuration
 before you trust it, read an approval card before you answer it, and keep the
 desktop app's launch links private. Do not paste API keys, private source or
 proprietary prompts into public issues or pull requests; `/report` masks

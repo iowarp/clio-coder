@@ -1,6 +1,6 @@
-# Clio Coder
+# CLIO Coder
 
-Clio Coder (`@iowarp/clio-coder`) is a TypeScript and Node.js coding-agent harness with terminal, headless, ACP and browser surfaces on the Pi SDK. `src/` is authoritative for behavior. This handbook is written by hand for work on this repository and is the contributor contract for code changes; you do not need to read `CONTRIBUTING.md` unless the task is a release.
+CLIO Coder (`@iowarp/clio-coder`) is a TypeScript and Node.js coding-agent harness with terminal, headless, ACP and browser surfaces on the Pi SDK. `src/` is authoritative for behavior. This handbook is written by hand for work on this repository and is the contributor contract for code changes; you do not need to read `CONTRIBUTING.md` unless the task is a release.
 
 ## Hard invariants
 
@@ -16,7 +16,7 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 8. Owner capabilities such as `MiddlewareRegistrar` go only to the composition that owns the domain, and `getContract(name)` takes its type from `DomainContractMap`, never from a type argument (rule17).
 9. Only the telemetry domain writes under the telemetry root (rule11); the import closure of `src/core/telemetry/producer.ts` does no persistence, no `JSON.stringify` and no synchronous write (rule13).
 10. Outside `src/engine/**` provider usage is never mutated or put on a ledger payload (rule12); money renders only through `src/core/telemetry/render.ts` (rule10); `src/interactive/**`, `src/engine/acp/**` and `src/cli/**` sum no token or cost field (rule14).
-11. Tests and dev runs never touch the operator's real home or the host's `/tmp`: run tests only through the root pnpm test scripts with `TMPDIR` exported to a scratch directory, and make scratch files and temporary Clio homes with `mktemp -d` under that `TMPDIR`, never at a literal `/tmp/...` path. A bare `node --test` writes the real home.
+11. Tests and dev runs never touch the operator's real home or the host's `/tmp`: run tests only through the root pnpm test scripts with `TMPDIR` exported to a scratch directory, and make scratch files and temporary CLIO Coder homes with `mktemp -d` under that `TMPDIR`, never at a literal `/tmp/...` path. A bare `node --test` writes the real home.
 12. Never commit a path `.gitignore` excludes (lint's tracked-ignored check fails it), never add tracked paths that differ only by case, and never join a gitignored literal onto the checkout root in `scripts/` or `src/`.
 13. Published tags and artifacts are immutable, `npm publish` is never run directly, and nothing is pushed, tagged or released without the maintainer's instruction.
 
@@ -42,7 +42,7 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 - A change to a user-visible name, string or default also updates the tests that pin the old one: grep the test directories for it.
 - A run with skipped tests is missing evidence, and a red test is yours until the same file fails on your base commit.
 - No wall-clock thresholds, and never swap `process.stdout.write` across an `await`.
-- Fixtures isolate Clio state with `isolateClioEnv` from `tests/harness/scratch-env.ts` and never create `.git` at the temp root. A headless subprocess uses `runCli` from `tests/harness/headless-run.ts`.
+- Fixtures isolate CLIO Coder state with `isolateClioEnv` from `tests/harness/scratch-env.ts` and never create `.git` at the temp root. A headless subprocess uses `runCli` from `tests/harness/headless-run.ts`.
 - When the brief is silent: at most one focused regression test per defect, in the nearest existing test file.
 
 ## Gotchas
@@ -83,7 +83,7 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 <!-- clio: paths=none -->
 
 - Work on a branch cut from the current version branch (`v` plus the digits of the `package.json` version, `v080` for 0.8.0); `main` moves only when a release ships.
-- Conventional commits; a tracked-issue fix ends with `fixes #N`, one issue per commit. Never hand-write attribution trailers or set the author: Clio's commit hook appends its own trailers and authors worker and headless commits.
+- Conventional commits; a tracked-issue fix ends with `fixes #N`, one issue per commit. Never hand-write attribution trailers or set the author: CLIO Coder's commit hook appends its own trailers and authors worker and headless commits.
 - All worktrees share one `.git/config`, stash and object store: never `git stash`, never move a branch by relative ref, never amend a commit you did not just make, and unset `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR` and `GIT_PREFIX` for any command a git-driven runner such as `git bisect run` executes.
 - Publication is the maintainer's release flow in `CONTRIBUTING.md`; CI never publishes to npm.
 
@@ -94,8 +94,8 @@ Rule ids are checked by `tests/boundaries/check-boundaries.ts`, which `pnpm run 
 
 ## Operating Clio on this repository
 
-- The running Clio and the workspace are usually different trees: prompt fragments, built-in recipes and tool code come from the build that started the session (`clio-coder --version` shows its commit), while this handbook, `.clio-coder/rules/` and the two self-development skills come from the workspace. Test a workspace edit in a candidate built from the workspace (`pnpm run build`, then `node dist/cli/index.js` with an isolated home), never by rebuilding or relinking the running install.
+- The running CLIO Coder and the workspace are usually different trees: prompt fragments, built-in recipes and tool code come from the build that started the session (`clio-coder --version` shows its commit), while this handbook, `.clio-coder/rules/` and the two self-development skills come from the workspace. Test a workspace edit in a candidate built from the workspace (`pnpm run build`, then `node dist/cli/index.js` with an isolated home), never by rebuilding or relinking the running install.
 - Load `clio-coder-dev` before the first edit to this repository and `clio-coder-test` when choosing checks.
-- Before choosing, scoping or triaging Clio work, follow the Flywheel section of `clio-coder-dev`: start from `clio-coder dev flywheel --json` (usage headline and ranked backlog), pick from the top rows, cite the evidence row, and ask the maintainer before filing a `file-me` item.
+- Before choosing, scoping or triaging CLIO Coder work, follow the Flywheel section of `clio-coder-dev`: start from `clio-coder dev flywheel --json` (usage headline and ranked backlog), pick from the top rows, cite the evidence row, and ask the maintainer before filing a `file-me` item.
 - A dispatched worker receives this handbook's invariants and the sections for its role, cut to 6000 characters and filtered by the paths its task declares; it does not receive your loaded skills. Declare the paths, put any other rule it needs in the task, and write gate commands for a verifier in backticks.
 - Headless `clio-coder run` denies every permission ask and has no `ask_user`; put decisions in the task text.

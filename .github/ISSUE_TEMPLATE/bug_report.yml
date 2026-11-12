@@ -1,5 +1,5 @@
 name: Bug report
-description: Something went wrong in Clio Coder. Tell us what you saw.
+description: Something went wrong in CLIO Coder. Tell us what you saw.
 title: "fix: "
 labels: ["bug"]
 body:
@@ -7,7 +7,7 @@ body:
     id: problem
     attributes:
       label: What happened
-      description: A few sentences are enough. `/report bug` inside Clio Coder, or `clio-coder report bug` in a shell, fills this form for you and masks private details first.
+      description: A few sentences are enough. `/report bug` inside CLIO Coder, or `clio-coder report bug` in a shell, fills this form for you and masks private details first.
     validations:
       required: true
   - type: textarea

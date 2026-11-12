@@ -1,6 +1,6 @@
 # Code of Conduct
 
-Clio Coder is built in the open by researchers, students, research software
+CLIO Coder is built in the open by researchers, students, research software
 engineers and people who run models on their own machines. Everyone is welcome
 to ask a question, report a problem or propose a change, whatever their
 experience with the code.
