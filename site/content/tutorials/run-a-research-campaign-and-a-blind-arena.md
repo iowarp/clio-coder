@@ -94,6 +94,8 @@ clio-coder arena run --suite speed --check correct \
 
 A contender is `<target>/<model>`. Each one runs as a normal `clio-coder run` in its own worktree from `HEAD`, and `--check` runs the named check on each result. Naming the same model twice is an A/A match: it shows how much two runs of one model differ before you read anything into a difference between two models.
 
+To name your own contenders, `clio-coder targets` lists each target id with its model, a local server's target included.
+
 ::: compare
 | | Contender A | Contender B |
 | --- | --- | --- |
