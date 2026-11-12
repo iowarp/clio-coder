@@ -714,7 +714,7 @@
 						"truncateToWidth": "6f3d41ce186e453a785b02a66f4305a013c8f9bc4e0d58d7f8a29001998352f4",
 						"TUI": "3903117a7523c4402c0341285f893f3af5f3e31bcc487d8bf9bdc5c4c291d07e",
 						"TUI_KEYBINDINGS": "4568b71432f3324ca239b4f107ce2289db968579de43586cad686b73c020c2a4",
-						"TuiAltScreen": "3ccffd5327235120191c1b74682cf423a3b4711e344d399ec637f643c3443116",
+						"TuiAltScreen": "cbb83a59b355762bd603f8a03a81fc0e882619eda7217a27eb03bfe8c90d472d",
 						"TuiAltScreenOptions": "6715783523d00c7ed08bdc77c2420e800440974ce71a78448b4bdaa90a7d6455",
 						"TuiInputListener": "efc182cee2cc5dd33fc13abd27a297fad6f7220e53663c18e467a330d6450d9a",
 						"TuiInputListenerResult": "0a0dc1ac87f31d852110d5682d827f04dba2b4e56c146fd4462d21ae975e5f9f",
@@ -776,6 +776,13 @@
 						"truncateToWidth": "6f3d41ce186e453a785b02a66f4305a013c8f9bc4e0d58d7f8a29001998352f4",
 						"visibleWidth": "1994c39effd5e94b9ac1b4ae9b340360afcb65346357d5c2d432d0c0e0487478",
 						"wrapTextWithAnsi": "3f07852e36dede48da1d4d1aa2d473bfa0a040654a222dc4179c29caf9bf9b1d"
+					}
+				},
+				"./dist/wheel-scroll.js": {
+					"declaration": "dist/wheel-scroll.d.ts",
+					"exports": {
+						"WheelScrollAccelerator": "5c5104ba1cad11042a7a94e727a4172e48bf146e6e74546ad1de2f77749f0cdc",
+						"WheelScrollLines": "7b61459283c0b8a43fc95d3412bcf88913e289b27d88af649e115ff94a8d8637"
 					}
 				}
 			}
