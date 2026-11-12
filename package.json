@@ -1,6 +1,6 @@
 {
 	"name": "@iowarp/clio-coder",
-	"version": "0.8.0-dev",
+	"version": "0.8.0-rc.1",
 	"description": "Open-source coding agent for scientific computing and HPC: in your terminal, on the desktop (alpha), headless, and over ACP, with local or cloud models, bounded workers, and inspectable evidence.",
 	"keywords": [
 		"ai",
