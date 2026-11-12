@@ -11,6 +11,7 @@ import { type MainSandboxPolicy, planMainSandboxSpawn } from "./sandbox/main-ses
 import { signalSandboxPayload } from "./sandbox/signal.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
+import { applyToolEnvControls } from "./tool-env-controls.js";
 
 export const SAFE_EXEC_DEFAULT_TIMEOUT_MS = 120_000;
 export const SAFE_EXEC_DEFAULT_MAX_OUTPUT_BYTES = 600_000;
@@ -411,7 +412,10 @@ export function buildSafeToolEnv(
 		env[key] = value;
 	}
 	env.AI_AGENT = AI_AGENT_NAME;
-	return env;
+	// Applied after the caller's keys so a run_script `env` or an MCP server's
+	// config cannot set BASH_ENV past the script admission read, nor lift the
+	// autonomy ceiling or contained-yolo pin a bash command would carry.
+	return applyToolEnvControls(env);
 }
 
 export interface LaunchDetachedOptions {

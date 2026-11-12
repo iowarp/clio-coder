@@ -20,6 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { setToolEnvAutonomy } from "../../src/core/bash-exec.js";
 import {
 	captureFileRef,
 	hashFile,
@@ -848,6 +849,37 @@ describe("run_script: argument normalization and safety projection", () => {
 		const projected = projectedArgv(runScriptSafetyProjection(request).command);
 		strictEqual(projected.length, argv.length, "the policy sees one entry per spawned argument");
 		deepStrictEqual(projected.slice(2), argv.slice(2));
+	});
+
+	it("shows declared variables to the policy and keeps shell startup files and Clio's controls out of the script", async () => {
+		deepStrictEqual(
+			runScriptSafetyProjection({ interpreter: "node", script: "run.js", env: { LD_PRELOAD: "/x.so", A: "it's" } }),
+			{ command: "A='it'\\''s' LD_PRELOAD='/x.so' 'node' 'run.js'" },
+		);
+		const root = workspace();
+		const relative = script(
+			root,
+			"env.js",
+			'process.stdout.write([process.env.CLIO_CODER_AUTONOMY_CEILING, process.env.CLIO_CODER_YOLO_CONFINEMENT].join("|"))',
+		);
+		for (const key of ["BASH_ENV", "ENV", "CDPATH", "CLIO_CODER_INTERACTIVE", "CLIO_CODER_AUTONOMY_CEILING"]) {
+			const refused = await tool(root).run({ interpreter: "node", script: relative, env: { [key]: "x" } });
+			strictEqual(refused.kind, "error", key);
+			if (refused.kind === "error") match(refused.message, new RegExp(`env\\.${key} is set by Clio`, "u"));
+		}
+		deepStrictEqual(runDirs(root), []);
+		// A session at default, or in contained yolo, holds the clio-coder a script starts to the same limits a bash command would.
+		setToolEnvAutonomy(
+			() => "default",
+			() => true,
+		);
+		try {
+			const result = await tool(root).run({ interpreter: "node", script: relative, env: { FOO: "x" } });
+			strictEqual(result.kind, "ok");
+			if (result.kind === "ok") strictEqual(stdoutTailOf(result.output), "default|contained");
+		} finally {
+			setToolEnvAutonomy(null);
+		}
 	});
 });
 

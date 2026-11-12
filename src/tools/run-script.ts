@@ -116,6 +116,16 @@ export const RUN_SCRIPT_DEFAULT_INTERPRETER_ARGS: Readonly<Record<RunScriptInter
 export const RUN_SCRIPT_TOOL_NAME = "run_script" as string as DynamicToolName;
 
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/u;
+// A shell sources BASH_ENV or ENV before the script admission read, and the
+// last three are Clio's own controls, which the runner sets from live state.
+const RUN_SCRIPT_RESERVED_ENV_KEYS: ReadonlySet<string> = new Set([
+	"BASH_ENV",
+	"ENV",
+	"CDPATH",
+	"CLIO_CODER_INTERACTIVE",
+	"CLIO_CODER_AUTONOMY_CEILING",
+	"CLIO_CODER_YOLO_CONFINEMENT",
+]);
 
 function parseStringArray(value: unknown): string[] | null {
 	if (value === undefined || value === null) return [];
@@ -309,6 +319,7 @@ function validateEnv(value: unknown): Record<string, string> | string {
 	const env: Record<string, string> = {};
 	for (const [key, raw] of entries) {
 		if (!ENV_KEY_PATTERN.test(key)) return `env key '${key}' must match /^[A-Z_][A-Z0-9_]*$/`;
+		if (RUN_SCRIPT_RESERVED_ENV_KEYS.has(key)) return `env.${key} is set by Clio and cannot be declared`;
 		if (typeof raw !== "string") return `env.${key} must be a string`;
 		if (raw.includes("\0")) return `env.${key} must not contain a NUL byte`;
 		if (byteLength(raw) > RUN_SCRIPT_CAPS.envValueBytes) {
@@ -467,7 +478,17 @@ export function runScriptSafetyProjection(args: Record<string, unknown>): { comm
 		...(script.length > 0 ? [script] : []),
 		...scriptArgs,
 	];
-	const command = vector.map(quoted).join(" ");
+	// Declared variables lead as shell assignments so the loader, PATH and
+	// hidden-content rules and the judge see LD_PRELOAD, NODE_OPTIONS or PATH
+	// the script will run under. A call without any keeps its exact projection.
+	const env =
+		prepared.env !== null && typeof prepared.env === "object" && !Array.isArray(prepared.env)
+			? Object.entries(prepared.env as Record<string, unknown>)
+					.filter((entry): entry is [string, string] => ENV_KEY_PATTERN.test(entry[0]) && typeof entry[1] === "string")
+					.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+					.map(([key, value]) => `${key}=${quoted(value)}`)
+			: [];
+	const command = [...env, ...vector.map(quoted)].join(" ");
 	const cwd = typeof prepared.cwd === "string" && prepared.cwd.trim().length > 0 ? prepared.cwd.trim() : undefined;
 	return cwd === undefined ? { command } : { command, cwd };
 }

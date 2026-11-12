@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { YOLO_CONFINEMENT_PIN_ENV, yoloConfinementPinned } from "../domains/safety/autonomy.js";
 import { holdUnresolvedUserinfo, isSecretArgKey } from "../domains/safety/redaction.js";
 import { AI_AGENT_NAME } from "./agent-environment.js";
 import { bashShellEnvironment, bashShellPath } from "./bash-shell.js";
@@ -16,6 +15,7 @@ import { signalSandboxPayload } from "./sandbox/signal.js";
 import type { SandboxEnvPolicy } from "./sandbox/types.js";
 import { planSandboxedSpawn } from "./sandbox/worker-process.js";
 import { clampTimerDelayMs } from "./timers.js";
+import { applyToolEnvControls, GENERATED_TOOL_ENV_KEYS } from "./tool-env-controls.js";
 
 export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
 
@@ -26,8 +26,6 @@ export { clampTimerDelayMs as clampTimeoutMs } from "./timers.js";
 // killed. Never truncate merely because the *display* cap was hit — the tail
 // (failing assertion, compiler error, exit summary) must survive.
 export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
-
-const CLIO_CONTROL_ENV_KEYS = ["CLIO_CODER_INTERACTIVE", "BASH_ENV", "ENV"] as const;
 
 export interface BashStreamByteCounts {
 	observedStdoutBytes: number;
@@ -209,53 +207,14 @@ export function createBashOutputProgressController(
 	};
 }
 
-/**
- * Names the autonomy a `clio-coder` started from a bash command may take at most, so a delegated run never gets more
- * autonomy than the session that started it. `run`, `research` and `arena` refuse `--autonomy yolo` under it.
- */
-export const AUTONOMY_CEILING_ENV = "CLIO_CODER_AUTONOMY_CEILING";
-
-/** The keys Clio writes into a command's environment from its live state; only `process.env` may carry inherited ones. */
-const GENERATED_TOOL_ENV_KEYS = [AUTONOMY_CEILING_ENV, YOLO_CONFINEMENT_PIN_ENV] as const;
-
-let toolEnvAutonomy: (() => string) | null = null;
-let toolEnvContainedYolo: (() => boolean) | null = null;
-
-/**
- * Registers the live autonomy of this process's session, and whether it runs contained yolo, read on every command so
- * a level change lands at once.
- */
-export function setToolEnvAutonomy(read: (() => string) | null, containedYolo: (() => boolean) | null = null): void {
-	toolEnvAutonomy = read;
-	toolEnvContainedYolo = containedYolo;
-}
-
-/** A session below yolo sets its own level; one at yolo passes on only a ceiling it inherited itself. */
-function toolEnvAutonomyCeiling(): string | undefined {
-	const live = toolEnvAutonomy?.();
-	if (live !== undefined && live !== "yolo") return live;
-	const inherited = process.env[AUTONOMY_CEILING_ENV];
-	return inherited !== undefined && inherited !== "" ? inherited : undefined;
-}
+export { AUTONOMY_CEILING_ENV, setToolEnvAutonomy } from "./tool-env-controls.js";
 
 /** What every bash command's environment drops, sandboxed or not: exported functions and Clio's control keys. */
 function baseToolEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...source };
 	for (const key of Object.keys(env)) if (key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
 	env.AI_AGENT = AI_AGENT_NAME;
-	// An inherited CDPATH sends a relative cd somewhere the command does not
-	// name, and bash admission resolves cds from the command's text alone.
-	Reflect.deleteProperty(env, "CDPATH");
-	for (const key of CLIO_CONTROL_ENV_KEYS) {
-		Reflect.deleteProperty(env, key);
-	}
-	// Set last from the live state, never from the source, so an env captured in another mode cannot carry a stale key.
-	for (const key of GENERATED_TOOL_ENV_KEYS) Reflect.deleteProperty(env, key);
-	const ceiling = toolEnvAutonomyCeiling();
-	if (ceiling !== undefined) env[AUTONOMY_CEILING_ENV] = ceiling;
-	// A contained-yolo session, or one launched pinned, holds every clio-coder its commands start to contained yolo.
-	if (toolEnvContainedYolo?.() === true || yoloConfinementPinned()) env[YOLO_CONFINEMENT_PIN_ENV] = "contained";
-	return env;
+	return applyToolEnvControls(env);
 }
 
 /**
