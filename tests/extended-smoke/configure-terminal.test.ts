@@ -453,7 +453,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			},
 		});
 		writeFileSync(credentialsFile, originalCredentials, { mode: 0o600 });
-		const tty = terminal(home, ["--section", "targets"]);
+		const tty = terminal(home, ["--section", "targets", "--no-verify"]);
 		try {
 			await tty.expect("Esc or q quit");
 			tty.send(ENTER);
