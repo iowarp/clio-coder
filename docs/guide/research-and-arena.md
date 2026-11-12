@@ -59,6 +59,7 @@ checks:
     command: [python3, bench.py]   # prints {"wall_ms": 12.3}
     cwd: .
     timeoutMs: 60000
+    tags: [benchmark]
   - id: correct
     description: stats.py answers match the reference on a holdout input
     kind: numeric-compare
@@ -67,6 +68,7 @@ checks:
     tolerance: { relative: 1.0e-9 }
     cwd: .
     timeoutMs: 60000
+    tags: [correctness]
 ```
 
 A `perf-budget` check works as an objective too: its `wall_ms` falls back to the measured duration. A `reproduce` check
