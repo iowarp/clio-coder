@@ -1206,12 +1206,16 @@ function fitCodeLine(line: string, fenceIndent: string, width: number, bareFence
 const LIST_BULLET = /^(?:[-*+]|\d{1,9}[.)]) /u;
 /** Table, quote and rule rows start with box drawing, and their rows never join. */
 const BOX_ROW = /^[\u2500-\u259F]/u;
+/** The letters Pi's wrap takes one at a time, so it can break between two of them with no space in the source. */
+const CJK_BREAK =
+	/[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
 
 /**
  * How a prose row joins the row above it when fullscreen copies a selection (#453): as a wrapped continuation of the
  * same paragraph or list item, as the rest of a word too long for one row, or not at all. `above` and `row` are plain
  * text. Pi wraps greedily, so a row continues the one above only when it starts at the column the text above starts
- * at, past a bullet, and its first word would not have fit on the row above.
+ * at, past a bullet, and its first word would not have fit on the row above. Pi breaks between two CJK letters as it
+ * breaks between words, and that break joins tight.
  */
 function continuationMark(above: string | null, row: string, width: number): string {
 	if (above === null) return "";
@@ -1225,6 +1229,10 @@ function continuationMark(above: string | null, row: string, width: number): str
 	if (lead !== aboveLead + bullet) return "";
 	const aboveWidth = visibleWidth(above);
 	if (aboveWidth >= width && !/\s/u.test(aboveText.slice(bullet))) return COPY_TIGHT_MARK;
+	// Between two CJK letters the row above ends a cell short when the wide letter below did not fit.
+	const last = Array.from(aboveText.trimEnd()).at(-1) ?? "";
+	const first = Array.from(text)[0] ?? "";
+	if (CJK_BREAK.test(last) && CJK_BREAK.test(first) && aboveWidth + visibleWidth(first) > width) return COPY_TIGHT_MARK;
 	const word = text.split(" ", 1)[0] ?? "";
 	return aboveWidth + 1 + visibleWidth(word) > width ? COPY_JOIN_MARK : "";
 }

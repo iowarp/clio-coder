@@ -1603,6 +1603,44 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("copies a wrapped CJK paragraph without a space where a wide character did not fit the row", async () => {
+		const copies: string[] = [];
+		const terminal = new RenderingTerminal();
+		terminal.columns = 72;
+		terminal.rows = 30;
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async (text) => {
+				copies.push(text);
+				return true;
+			},
+		});
+		const panel = createChatPanel({ now: () => 1_000, getTerminalRows: () => terminal.rows, copyMarks: true });
+		const text =
+			"日本語のテキストは空白なしで折り返されます。これは長い段落で、七十二桁の端末幅では一行に収まらないため、複数の行に分かれます終わり。";
+		const message = { role: "assistant", content: [{ type: "text", text }], stopReason: "stop" };
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "message_end", message } as never);
+		panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+		const chrome = { banner: new Text("", 0, 0), editor: new Text("draft", 0, 0), footer: new Text("ready", 0, 0) };
+		tui.setLayoutRoot(buildLayout({ ...chrome, chat: panel }, { mode: "fullscreen" }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			const screen = tui.getScreenLines().map(stripTerminalSequences);
+			const first = screen.findIndex((row) => row.includes("日本語")) + 1;
+			const last = screen.findIndex((row) => row.includes("終わり")) + 1;
+			ok(last > first, "the paragraph wraps");
+			terminal.input(`\x1b[<0;1;${first}M`);
+			terminal.input(`\x1b[<32;72;${last}M`);
+			terminal.input(`\x1b[<0;72;${last}m`);
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			strictEqual(copies.at(-1), text);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("drops a fullscreen selection when the width changes and keeps it across a height change", () => {
 		const terminal = new RenderingTerminal();
 		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
