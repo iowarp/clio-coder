@@ -352,7 +352,7 @@ describe("task worktree root", () => {
 
 	it("never lands a file Clio overlaid in a worktree, even when the run dies before putting it back", () => {
 		const crashed = createTaskWorktree(root, "run-overlay-crash", undefined, "merge");
-		overlayTaskWorktree(crashed.path, [{ file: "a.txt", content: "compiled rules\n" }]);
+		overlayTaskWorktree(crashed, [{ file: "a.txt", content: "compiled rules\n" }]);
 		strictEqual(readFileSync(join(crashed.path, "a.txt"), "utf8"), "compiled rules\n");
 		strictEqual(git(crashed.path, "status", "--porcelain"), "");
 		const forced = spawnSync("git", ["-C", crashed.path, "add", "a.txt"], { encoding: "utf8" });
@@ -369,13 +369,13 @@ describe("task worktree root", () => {
 		cleanupTaskWorktree(crashed, true);
 
 		const run = createTaskWorktree(root, "run-overlay", undefined, "merge");
-		const overlay = overlayTaskWorktree(run.path, [{ file: "a.txt", content: "compiled rules\n" }]);
+		const overlay = overlayTaskWorktree(run, [{ file: "a.txt", content: "compiled rules\n" }]);
 		writeFileSync(join(run.path, "a.txt"), "the worker edited the overlay\n");
 		restoreTaskWorktreeOverlay(overlay);
 		strictEqual(readFileSync(join(run.path, "a.txt"), "utf8"), "a\n");
 		strictEqual(git(run.path, "ls-files", "-v", "a.txt"), "H a.txt");
-		throws(() => overlayTaskWorktree(run.path, [{ file: "../repo/a.txt", content: "x" }]), /leaves the worktree/u);
-		throws(() => overlayTaskWorktree(run.path, [{ file: "untracked.txt", content: "x" }]));
+		throws(() => overlayTaskWorktree(run, [{ file: "../repo/a.txt", content: "x" }]), /leaves the worktree/u);
+		throws(() => overlayTaskWorktree(run, [{ file: "untracked.txt", content: "x" }]));
 		cleanupTaskWorktree(run, true);
 	});
 

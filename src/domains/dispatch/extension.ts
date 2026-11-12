@@ -8025,7 +8025,7 @@ export function createDispatchBundle(
 				if (lifecycle.peerOverlay !== undefined && lifecycle.peerCoexist !== undefined && req.taskWorktree !== undefined) {
 					try {
 						if (placement !== null && placement.node.kind !== "local") throw new Error("the worktree is on another node");
-						peerOverlay = overlayTaskWorktree(req.taskWorktree.path, lifecycle.peerOverlay);
+						peerOverlay = overlayTaskWorktree(req.taskWorktree, lifecycle.peerOverlay);
 					} catch (error) {
 						// The harness reads its own files after all, so the rules go in the message and the record says coexist.
 						Object.assign(lifecycle, lifecycle.peerCoexist);

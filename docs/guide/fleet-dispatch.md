@@ -956,7 +956,9 @@ removes it.
 <summary>What crash recovery removes, preserves, and refuses to touch</summary>
 
 At the next start in the same checkout, a claim that is still `active` while its
-owner is gone is a crash. Recovery runs once the first frame is up, and no
+owner is gone is a crash. An instruction file the run had overlaid for a
+delegated harness, which its claim names, is first put back to its base content
+and seen by git again. Recovery runs once the first frame is up, and no
 dispatch is admitted until it has finished.
 
 A worktree with no commit beyond its base and no modified, staged, or untracked

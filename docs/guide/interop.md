@@ -148,7 +148,8 @@ task worktree, Clio writes the compiled rules over the nearest instruction file
 in that worktree and empties the others for the run, so OpenCode reads them
 there and not in the message. Each overlaid file is marked skip-worktree in the
 worktree's index and put back before the change is taken, so it never reaches
-the task branch, even when the run dies before the restore. The overlay is
+the task branch, even when the run dies before the restore; the run's claim
+names the overlaid files, so restart recovery puts them back. The overlay is
 skipped when the task names one of those files or declares a directory that
 covers one (a write root of `.` covers them all), when one is not a regular file
 Git tracks, or when the run is on a remote host, and it is dropped when Clio

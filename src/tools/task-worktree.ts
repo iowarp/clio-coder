@@ -405,6 +405,7 @@ export function commitWorktreePath(
 
 /** Tracked files Clio wrote over in a task worktree for one run, with what to put back. */
 export interface TaskWorktreeOverlay {
+	worktree: TaskWorktree;
 	path: string;
 	files: ReadonlyArray<{ file: string; original: Buffer; written: Buffer; mode: number; parent: string }>;
 }
@@ -422,14 +423,21 @@ function overlayTarget(path: string, file: string): string {
  * worktree for one run. Each path is first marked skip-worktree in the
  * worktree's own index, so no host commit, diff or status sees what was
  * written and `git add` of it is refused: a run that dies before
- * `restoreTaskWorktreeOverlay` still cannot land it.
+ * `restoreTaskWorktreeOverlay` still cannot land it. The claim names the paths
+ * first, so restart recovery puts back what a dead run left overlaid.
  */
 export function overlayTaskWorktree(
-	path: string,
+	worktree: TaskWorktree,
 	files: ReadonlyArray<{ file: string; content: string }>,
 ): TaskWorktreeOverlay {
+	const path = worktree.path;
 	const written: Array<TaskWorktreeOverlay["files"][number]> = [];
 	try {
+		for (const { file } of files) overlayTarget(path, file);
+		recordOverlayOnClaim(
+			worktree,
+			files.map(({ file }) => file),
+		);
 		for (const { file, content } of files) {
 			const target = overlayTarget(path, file);
 			const stat = lstatSync(target);
@@ -456,13 +464,22 @@ export function overlayTaskWorktree(
 		}
 	} catch (error) {
 		try {
-			restoreTaskWorktreeOverlay({ path, files: written });
+			restoreTaskWorktreeOverlay({ worktree, path, files: written });
 		} catch {
 			// What could not be put back keeps its mark; the write failure is the one to report.
 		}
 		throw error;
 	}
-	return { path, files: written };
+	return { worktree, path, files: written };
+}
+
+/** Name the overlaid paths on the run's claim, or clear them with an empty list. */
+function recordOverlayOnClaim(worktree: TaskWorktree, files: ReadonlyArray<string>): void {
+	assertOwnership(worktree);
+	const ownerPath = claimPathFor(worktree.root, worktree.runId);
+	const { overlay: _previous, ...marker } = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
+	if (marker.version !== 2) throw new Error("the task worktree claim predates overlays");
+	replaceMarker(ownerPath, files.length > 0 ? { ...marker, overlay: [...files] } : marker);
 }
 
 /**
@@ -493,7 +510,33 @@ export function restoreTaskWorktreeOverlay(overlay: TaskWorktreeOverlay): string
 		}
 	}
 	if (failure !== undefined) throw failure;
+	try {
+		recordOverlayOnClaim(overlay.worktree, []);
+	} catch {
+		// Every file is back; a record left on the claim only makes recovery check them out again.
+	}
 	return discarded;
+}
+
+/**
+ * Put back the files a dead run's claim says were overlaid: the index still
+ * holds their base content under the skip-worktree mark. Git writes them, so
+ * a path through a symlink is refused, not followed.
+ */
+function restoreRecordedOverlay(claim: TaskClaim): void {
+	const files = claim.marker.overlay;
+	if (!Array.isArray(files)) return;
+	if (existsSync(claim.path)) {
+		for (const file of files) {
+			if (typeof file !== "string") continue;
+			overlayTarget(claim.path, file);
+			git(claim.path, ["update-index", "--no-skip-worktree", "--", file]);
+			git(claim.path, ["checkout", "--", `:(top,literal)${file}`]);
+		}
+	}
+	const { overlay: _overlay, ...marker } = claim.marker;
+	replaceMarker(claim.ownerPath, marker);
+	claim.marker = marker;
 }
 
 /** The bounded account of new files a host commit left out, or undefined when it left none. */
@@ -1878,6 +1921,7 @@ export function recoverTaskWorktrees(
 	for (const claim of readTaskClaims(canonical, allowedParents ?? [diskWorktreeParent(canonical)])) {
 		if (claim.state !== "active" || claim.owner === null || ownerIsAlive(claim.owner)) continue;
 		try {
+			restoreRecordedOverlay(claim);
 			const held = workHeldBy(canonical, claim);
 			if (held !== null) {
 				replaceMarker(claim.ownerPath, { ...claim.marker, state: "abandoned" satisfies TaskWorktreeState });

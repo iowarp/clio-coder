@@ -14,9 +14,11 @@ import {
 	discardTaskWorktree,
 	listPreservedTaskWorktrees,
 	mergeWorktreeBranch,
+	overlayTaskWorktree,
 	previewTaskWorktree,
 	receiptWithDrift,
 	recoverTaskWorktrees,
+	restoreTaskWorktreeOverlay,
 	settleTaskWorktree,
 	taskWorktreePreviewDrift,
 } from "../../src/tools/task-worktree.js";
@@ -120,6 +122,25 @@ describe("task worktree restart recovery", () => {
 		match(result.preserved[0]?.reason ?? "", /1 commit\(s\) beyond its base/u);
 		strictEqual(readFileSync(join(root, "a.txt"), "utf8"), "a\n");
 		deepStrictEqual(branches(), ["clio-coder/task/run-committed"]);
+	});
+
+	it("puts back a file Clio overlaid when its run died before restoring it", () => {
+		const finished = createTaskWorktree(root, "run-overlay-done");
+		const overlay = overlayTaskWorktree(finished, [{ file: "a.txt", content: "compiled rules\n" }]);
+		deepStrictEqual(readMarker(finished).overlay, ["a.txt"]);
+		restoreTaskWorktreeOverlay(overlay);
+		strictEqual(readMarker(finished).overlay, undefined);
+
+		const task = createTaskWorktree(root, "run-overlay-died");
+		overlayTaskWorktree(task, [{ file: "a.txt", content: "compiled rules\n" }]);
+		writeFileSync(join(task.path, "new.txt"), "work\n");
+		crash(task);
+		const result = recoverTaskWorktrees(root);
+		strictEqual(result.preserved[0]?.runId, "run-overlay-died");
+		strictEqual(readFileSync(join(task.path, "a.txt"), "utf8"), "a\n");
+		strictEqual(git(task.path, "ls-files", "-v", "a.txt"), "H a.txt");
+		strictEqual(readMarker(task).overlay, undefined);
+		strictEqual(readFileSync(join(task.path, "new.txt"), "utf8"), "work\n");
 	});
 
 	it("preserves a worktree whose HEAD left the task branch without committing onto the other branch (F5)", () => {
