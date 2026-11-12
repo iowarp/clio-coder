@@ -4,7 +4,7 @@ Bring a decision model, name a route, and read its limits.
 
 ## What it is
 
-System One is an experimental way to bring a fast decision model to Clio Coder. It is off by default and sends nothing until you name a route. The main agent then gets one tool, `consult`, and the route also drives a screen beside the safety judge and, when you turn it on, triage of queued messages. System One never answers you, never edits anything, and never removes a confirmation.
+System One is an experimental way to bring a fast decision model to CLIO Coder. It is off by default and sends nothing until you name a route. The main agent then gets one tool, `consult`, and the route also drives a screen beside the safety judge and, when you turn it on, triage of queued messages. System One never answers you, never edits anything, and never removes a confirmation.
 
 ## Name a route
 

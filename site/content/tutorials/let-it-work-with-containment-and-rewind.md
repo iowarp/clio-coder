@@ -1,4 +1,4 @@
-Most of a coding task should not need you. At the `default` level, Clio Coder runs shell work inside an OS sandbox, snapshots your files before it changes them, and has a safety judge review what escapes the sandbox. You are asked only when the judge has no verdict or the decision is yours.
+Most of a coding task should not need you. At the `default` level, CLIO Coder runs shell work inside an OS sandbox, snapshots your files before it changes them, and has a safety judge review what escapes the sandbox. You are asked only when the judge has no verdict or the decision is yours.
 
 This guide shows how to check that setup, undo a change, and choose when to step up to `yolo`.
 
@@ -7,7 +7,7 @@ This guide describes v0.8.0. The sandbox needs bubblewrap on Linux; on macOS it 
 :::
 
 ::: needs
-- Clio Coder installed, with a connected model.
+- CLIO Coder installed, with a connected model.
 - A Git repository you can experiment in, with a clean working tree.
 :::
 
@@ -58,17 +58,17 @@ Contained work runs without a card, and `/rewind` lists a snapshot from before t
 
 ## What still reaches you
 
-Some decisions never go to the judge: `ask_user` questions, Clio Coder's own settings, a plan-scale dispatch, and a model edit of project settings. A permission card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and `/decisions` shows what was chosen for you.
+Some decisions never go to the judge: `ask_user` questions, CLIO Coder's own settings, a plan-scale dispatch, and a model edit of project settings. A permission card nobody answers within `safety.unattendedAfterSeconds` (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and `/decisions` shows what was chosen for you.
 
 ## When to use yolo
 
-`yolo` is for long jobs you leave running: nothing waits for you. It is contained by default. The sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to Clio Coder, so the job keeps going without it.
+`yolo` is for long jobs you leave running: nothing waits for you. It is contained by default. The sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to CLIO Coder, so the job keeps going without it.
 
 ```sh
 clio-coder --autonomy yolo
 ```
 
-The first interactive activation shows a one-time acceptance card, and yolo is refused as root outside a detected container. A short floor still blocks deleting your home directory or a system tree, `mkfs`, writes to a block device, fork bombs, and reads of Clio Coder's credential store. Your project's approved rules and the run's ceilings also hold. Snapshots stay on.
+The first interactive activation shows a one-time acceptance card, and yolo is refused as root outside a detected container. A short floor still blocks deleting your home directory or a system tree, `mkfs`, writes to a block device, fork bombs, and reads of CLIO Coder's credential store. Your project's approved rules and the run's ceilings also hold. Snapshots stay on.
 
 Unconfined yolo is the skip-permissions mode for a container or another disposable environment: nothing asks, and commands run unsandboxed with your credentials. It takes effect only with `safety.yoloConfinement: unconfined` in your user settings and its own one-time acceptance. The footer shows which one is active.
 
@@ -76,7 +76,7 @@ Unconfined yolo is the skip-permissions mode for a container or another disposab
 | | `default` | `yolo`, contained | `yolo`, unconfined |
 | --- | --- | --- | --- |
 | Shell commands | In the OS sandbox when a backend exists | As at `default` | Unsandboxed as you |
-| Would-be approvals | Judge first, then you | Judge first, then refused back to Clio Coder | None |
+| Would-be approvals | Judge first, then you | Judge first, then refused back to CLIO Coder | None |
 | Your questions | Wait, then resolve after the timeout | Answered at once | Answered at once |
 | Workers | Own sandbox, asks go to the judge | Dispatched as at `default` | Own sandbox, run the yolo way in their scope |
 | `/rewind` | Available | Available | Available |

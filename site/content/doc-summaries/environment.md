@@ -10,7 +10,7 @@ clio-coder paths --json
 
 | Variable | Purpose |
 | --- | --- |
-| `CLIO_CODER_HOME` | Set a shared root for Clio Coder's directories |
+| `CLIO_CODER_HOME` | Set a shared root for CLIO Coder's directories |
 | `CLIO_CODER_CONFIG_DIR` | Override the configuration directory |
 | `CLIO_CODER_DATA_DIR` | Override the data directory |
 | `CLIO_CODER_STATE_DIR` | Override the state directory |
@@ -22,7 +22,7 @@ Individual directory overrides take precedence over the shared root. Separate st
 
 ## How each directory is resolved
 
-Clio Coder resolves the config, data, state, and cache directories one at a time. The first match wins:
+CLIO Coder resolves the config, data, state, and cache directories one at a time. The first match wins:
 
 | Order | Source | Example |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ An isolated root still reads other coding agents' user skills and prompts from y
 
 ## Credentials and terminal behavior
 
-Supported providers can read their conventional credential variables, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`, when that provider is selected. Prefer Clio Coder's managed authentication flow for normal interactive setup, and keep secrets out of project settings and transcripts.
+Supported providers can read their conventional credential variables, such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENROUTER_API_KEY`, when that provider is selected. Prefer CLIO Coder's managed authentication flow for normal interactive setup, and keep secrets out of project settings and transcripts.
 
 | Variable | Used for |
 | --- | --- |

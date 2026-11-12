@@ -40,18 +40,18 @@ const collections = [
 		label: "Tutorials",
 		listing: "/learn.html",
 		items: tutorials,
-		title: "Tutorials for local models, HPC, and agents — Clio Coder",
+		title: "Tutorials for local models, HPC, and agents · CLIO Coder",
 		description:
-			"Practical Clio Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces.",
+			"Practical CLIO Coder tutorials and product tours. Start a first session and explore the desktop and terminal interfaces.",
 	},
 	{
 		id: "research",
 		label: "Research",
 		listing: "/research.html",
 		items: research,
-		title: "Research: open questions on coding agents — Clio Coder",
+		title: "Research: open questions on coding agents · CLIO Coder",
 		description:
-			"Open research questions in Clio Coder: what is measured so far, a first experiment for each, and how students and outside researchers can join.",
+			"Open research questions in CLIO Coder: what is measured so far, a first experiment for each, and how students and outside researchers can join.",
 	},
 ];
 const articles = collections.flatMap((collection) =>
@@ -281,7 +281,7 @@ function minifyCss(css) {
 	flush();
 	return `${result.trim()}\n`;
 }
-const titleSuffix = / — Clio Coder(?: docs)?$/;
+const titleSuffix = / · CLIO Coder(?: docs)?$/;
 const organization = {
 	"@type": "Organization",
 	"@id": "https://iowarp.ai/#organization",
@@ -319,14 +319,15 @@ function head(
 	const article = articles.find((item) => item.url === path);
 	const image = social.images[preview];
 	const imageUrl = `${product.origin}/${image.path}`;
-	const imageAlt = captures[preview].alt;
+	// The shared preview card is named for the product; article covers keep their own description.
+	const imageAlt = preview === social.default ? product.name : captures[preview].alt;
 	const graph = {
 		"@context": "https://schema.org",
 		"@graph": [
 			{
 				"@type": "WebSite",
 				"@id": `${product.origin}/#site`,
-				name: "Clio Coder",
+				name: "CLIO Coder",
 				url: `${product.origin}/`,
 				description: product.description,
 				inLanguage: "en",
@@ -355,7 +356,7 @@ function head(
 		page.mainEntityOfPage = url;
 		page.author = {
 			"@type": !article || /\bteam$/i.test(article.author) ? "Organization" : "Person",
-			name: article?.author ?? "The Clio Coder team",
+			name: article?.author ?? "The CLIO Coder team",
 			url: `${product.origin}/#project`,
 		};
 		page.publisher = { "@id": organization["@id"] };
@@ -369,7 +370,7 @@ function head(
 				? { name: article.collection.label, path: article.collection.listing }
 				: null;
 		const crumbs = [
-			{ name: "Clio Coder", path: "/" },
+			{ name: "CLIO Coder", path: "/" },
 			...(parent ? [parent] : []),
 			{ name: title.replace(titleSuffix, ""), path },
 		];
@@ -388,7 +389,7 @@ function head(
 	if (path === "/") {
 		graph["@graph"].push({
 			"@type": "SoftwareSourceCode",
-			name: "Clio Coder",
+			name: "CLIO Coder",
 			codeRepository: repository,
 			programmingLanguage: "TypeScript",
 			version: product.version,
@@ -429,7 +430,7 @@ function head(
 <link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/site.css"><script>${themeScript}</script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="Clio Coder"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="${escapeHtml(product.name)}"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
 }
@@ -759,7 +760,7 @@ await writeFile(join(out, "content/docs-manifest.json"), `${JSON.stringify(manif
 await writePage(
 	"/",
 	await read("index.html"),
-	"Clio Coder — open-source coding agent for science and HPC",
+	"CLIO Coder · The meta-harness for scientific software",
 	product.description,
 	"WebPage",
 	{ sources: ["index.html", "product.json"] },
@@ -767,8 +768,8 @@ await writePage(
 await writePage(
 	"/404.html",
 	await read("404.html"),
-	"Page not found — Clio Coder",
-	"Find your way back to the Clio Coder overview, documentation, and tutorials.",
+	"Page not found · CLIO Coder",
+	"Find your way back to the CLIO Coder overview, documentation, and tutorials.",
 );
 
 const groups = [...new Set(index.map((item) => item.group))];
@@ -820,7 +821,7 @@ for (const item of index) {
 	await writePage(
 		docUrl(item.path),
 		html,
-		`${item.title} — Clio Coder docs`,
+		`${item.title} · CLIO Coder docs`,
 		docDescription(item, markdown),
 		"TechArticle",
 		{
@@ -914,7 +915,7 @@ for (const item of articles) {
 	await writePage(
 		item.url,
 		html,
-		item.title.includes("Clio Coder") ? item.title : `${item.title} — Clio Coder`,
+		item.title.includes("CLIO Coder") ? item.title : `${item.title} · CLIO Coder`,
 		item.description,
 		"Article",
 		{ sources: articleSources(item, markdown), ...(item.cover ? { preview: item.cover } : {}) },
@@ -944,7 +945,7 @@ for (const [path, target] of Object.entries(redirects)) {
 	await mkdir(dirname(file), { recursive: true });
 	await writeFile(
 		file,
-		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to Clio Coder</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to Clio Coder →</a></p></main></body></html>`,
+		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Continue to CLIO Coder</title><meta name="robots" content="noindex"><meta http-equiv="refresh" content="0; url=${escapeHtml(target)}"><link rel="canonical" href="${product.origin}${escapeHtml(target)}"><link rel="stylesheet" href="/css/site.css"><script src="/js/redirect.js" defer></script></head><body><main class="page page-intro"><h1>This page has moved.</h1><p><a data-redirect href="${escapeHtml(target)}">Continue to CLIO Coder →</a></p></main></body></html>`,
 	);
 }
 await writeFile(
@@ -1032,11 +1033,11 @@ function llmMarkdown(markdown, sourcePath, pageUrl) {
 	).trim();
 }
 const published = articles.filter((item) => !item.draft);
-const llmsSummary = `# Clio Coder
+const llmsSummary = `# CLIO Coder
 
 > ${product.description}
 
-Clio Coder reads, edits, and runs checks in your repository. It records what passed, what failed, and what was never checked. Connect a local model server, an institutional endpoint, a subscription, or a cloud API, and switch models with one command. The installer needs no root and works on HPC login nodes.
+CLIO Coder reads, edits, and runs checks in your repository. It records what passed, what failed, and what was never checked. Connect a local model server, an institutional endpoint, a subscription, or a cloud API, and switch models with one command. The installer needs no root and works on HPC login nodes.
 
 - Install on macOS, Linux, or WSL: \`curl -fsSL ${product.origin}/install.sh | sh\`
 - Install with npm (Node.js 22.19 or newer): \`npm install -g @iowarp/clio-coder\`
@@ -1082,7 +1083,7 @@ for (const item of published) {
 }
 const llmsFull = `${llmsSummary}
 
-This file holds the public Clio Coder guides (documentation for v${source.version}), tutorials, and research pages as Markdown. Each section names the page it comes from.
+This file holds the public CLIO Coder guides (documentation for v${source.version}), tutorials, and research pages as Markdown. Each section names the page it comes from.
 
 ${fullSections.map(({ url, text }) => `---\n\nSource: ${url}\n\n${text}`).join("\n\n")}
 `;

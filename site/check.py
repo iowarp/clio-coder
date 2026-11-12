@@ -269,11 +269,14 @@ if len({p.title for p in pages.values()}) != len(pages):
 if len({p.description for p in pages.values()}) != len(pages):
     errors.append('Page descriptions are not unique')
 # Search results cut longer titles and descriptions; very short descriptions get replaced.
+# The overview carries the product description iowarp.ai uses, whose first sentence
+# still stands alone when a search result cuts the rest.
 for path, page in pages.items():
+    longest = 240 if path == '/' else 160
     if len(page.title) > 65:
         errors.append(f'{path}: title is {len(page.title)} characters; keep it within 65')
-    if not 70 <= len(page.description) <= 160:
-        errors.append(f'{path}: description is {len(page.description)} characters; keep it between 70 and 160')
+    if not 70 <= len(page.description) <= longest:
+        errors.append(f'{path}: description is {len(page.description)} characters; keep it between 70 and {longest}')
 for path, page in pages.items():
     for ref in page.refs:
         url = urlsplit(urljoin(origin + path, ref))
@@ -341,7 +344,7 @@ def site_links(text, label):
 
 articles = [u for u in urls if urlsplit(u).path.startswith(('/docs', '/tutorials/', '/research/'))]
 llms = (root / 'llms.txt').read_text()
-if not llms.startswith('# Clio Coder\n\n> ') or '\n## ' not in llms:
+if not llms.startswith('# CLIO Coder\n\n> ') or '\n## ' not in llms:
     errors.append('llms.txt must open with an H1, a blockquote summary, and H2 link sections')
 linked = site_links(llms, 'llms.txt')
 for url in articles:

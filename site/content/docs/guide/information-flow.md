@@ -18,7 +18,7 @@ clio-coder config trust safety --hash <reviewed-sha256>
 clio-coder config trust safety --revoke
 ```
 
-Restart Clio Coder after approving. An unapproved edit can only forbid more.
+Restart CLIO Coder after approving. An unapproved edit can only forbid more.
 
 Recipients can be a pinned model target, an exact endpoint, an origin, a pinned MCP server, or a named group. Follow [the tutorial](/tutorials/information-flow-rules.html) for a complete worked policy.
 

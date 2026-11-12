@@ -1,4 +1,4 @@
-A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. Clio Coder v0.6.8 can use your repository's declared checks and a project quality policy to make those questions explicit.
+A useful coding result includes more than "done." You need to know what changed, which checks ran, and whether those results still apply to the files you are reviewing. CLIO Coder v0.6.8 can use your repository's declared checks and a project quality policy to make those questions explicit.
 
 ::: note What this establishes
 Recorded verification is evidence about named checks and named inputs. It is not proof of correctness; your tests still need to cover the behavior that matters.
@@ -6,7 +6,7 @@ Recorded verification is evidence about named checks and named inputs. It is not
 
 ::: needs
 - A Git repository with a test or build check it already declares, such as a package script or a CI step.
-- Clio Coder with a model that supports tool calling.
+- CLIO Coder with a model that supports tool calling.
 - Time to read the resolved command before you approve it.
 :::
 
@@ -63,14 +63,14 @@ rules:
 `allowLimitations: false` means a reported limitation does not satisfy the rule.
 :::
 
-Clio Coder does not write this policy for you. Review it as a repository contract: a command that passes a narrow subset of tests should not satisfy a policy that requires the full declared test check.
+CLIO Coder does not write this policy for you. Review it as a repository contract: a command that passes a narrow subset of tests should not satisfy a policy that requires the full declared test check.
 
 ## Inspect freshness after editing
 
 ::: diagram check-freshness
 :::
 
-Clio Coder compares source, check-declaration, and policy fingerprints. A passing check becomes stale after relevant inputs change, and a later failure supersedes an earlier pass of the same check.
+CLIO Coder compares source, check-declaration, and policy fingerprints. A passing check becomes stale after relevant inputs change, and a later failure supersedes an earlier pass of the same check.
 
 This matters during an iterative fix. The agent might run a test, make another edit, and then summarize the earlier success. The current assessment should describe the work that exists now, not the best result observed along the way.
 
@@ -95,7 +95,7 @@ The actual check, its result, and any missing evidence. A sealed run record is a
 :::
 
 ::: next
-- [A numerical change, checked with Clio Coder](/tutorials/temperature-calibration.html)
+- [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
 - [Quality policy guide](/docs/guide/quality-policy.html)
-- [Install Clio Coder](/#start)
+- [Install CLIO Coder](/#start)
 :::

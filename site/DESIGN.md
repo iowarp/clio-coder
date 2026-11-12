@@ -1,12 +1,12 @@
-# Clio Coder public site
+# CLIO Coder public site
 
-This is the public window into an open-source coding tool. It helps a reader understand Clio Coder, install it, and learn to use it. It is not a hosted agent platform, a company brochure, or a development report.
+This is the public window into an open-source coding tool. It helps a reader understand CLIO Coder, install it, and learn to use it. It is not a hosted agent platform, a company brochure, or a development report.
 
 ## Identity and visual language
 
-Use **Clio Coder** as the product name. Public product prose uses Clio Coder, or the CLIO ecosystem when referring to the wider family; do not use gendered pronouns or write about the product as a person. The executable and package are `clio-coder` and `@iowarp/clio-coder`.
+Use **CLIO Coder** as the product name. Public product prose uses CLIO Coder, or the CLIO ecosystem when referring to the wider family; do not use gendered pronouns or write about the product as a person. The executable and package are `clio-coder` and `@iowarp/clio-coder`.
 
-Describe its interfaces as **Clio Coder on the desktop** and **Clio Coder in the terminal**. The desktop interface opens locally in the user's browser and is in alpha. Do not imply a native desktop binary or complete feature parity.
+Describe its interfaces as **CLIO Coder on the desktop** and **CLIO Coder in the terminal**. The desktop interface opens locally in the user's browser and is in alpha. Do not imply a native desktop binary or complete feature parity.
 
 The direction is an editorial field guide: confident typography, generous margins, fine rules, real product captures, and useful technical detail. Newsreader supplies the expressive headings; IBM Plex Sans supplies interface and body text; IBM Plex Mono supplies commands and small labels. Fonts are self-hosted.
 
@@ -30,7 +30,7 @@ Write for someone using the product, not for the team building it. Lead with wha
 
 Do not use superlatives, fabricated outcomes, corporate sales language, rhetorical contrasts, repetitive slogans, unexplained runtime jargon, or development status narration. Avoid wording such as “revolutionary,” “seamlessly,” “unlock the power,” and “single pane of glass.” Do not expose agent deliberations, coding-session transcripts, implementation audits, check inventories, or repository paths as promotional prose. Document user commands and behavior accurately. Claims must be supported by the repository; identify experimental or alpha features where the user chooses them.
 
-The public site footer reads **Copyright 2026 iowarp.ai**, as explicitly directed by the project owner. Keep the repository LICENSE and NOTICE linked; do not rewrite their legal contents as part of site copy work. The project is licensed under **Apache 2.0**. Link the license and notice; retain the bundled font licenses. The project section uses the small label “Created by researchers who love to code” and the heading “Meet the Clio Coder team.” Keep the legal copyright separate from the product story. Attribute the IOWarp ecosystem with its mark in the project section and a “Part of IOWarp” link beside the source and tutorial links; do not repeat the IOWarp logo/link in the footer. Academic attribution belongs only in a small footer link reading “Developed by Gnosis Research Center” linking to https://grc.iit.edu. Do not write research-roots or institutional-pedigree sentences in the product copy. Do not put NSF, grant numbers, or funder branding in the hero, navigation, or footer. The small Gnosis credit above is the sanctioned academic attribution. Do not add unsupported affiliations, sponsors, copyright owners, or legal claims. Do not replace upstream notices or claim ownership of third-party tools or artwork.
+The public site footer reads **Copyright 2026 iowarp.ai**, as explicitly directed by the project owner. Keep the repository LICENSE and NOTICE linked; do not rewrite their legal contents as part of site copy work. The project is licensed under **Apache 2.0**. Link the license and notice; retain the bundled font licenses. The project section uses the small label “Created by researchers who love to code” and the heading “Meet the CLIO Coder team.” Keep the legal copyright separate from the product story. Attribute the IOWarp ecosystem with its mark in the project section and a “Part of IOWarp” link beside the source and tutorial links; do not repeat the IOWarp logo/link in the footer. Academic attribution belongs only in a small footer link reading “Developed by Gnosis Research Center” linking to https://grc.iit.edu. Do not write research-roots or institutional-pedigree sentences in the product copy. Do not put NSF, grant numbers, or funder branding in the hero, navigation, or footer. The small Gnosis credit above is the sanctioned academic attribution. Do not add unsupported affiliations, sponsors, copyright owners, or legal claims. Do not replace upstream notices or claim ownership of third-party tools or artwork.
 
 ## Guides
 
@@ -52,7 +52,7 @@ The site is static HTML and CSS with small progressive enhancements. Use CSS lay
 
 Avoid looping animation, pointer tracking, and animation that moves a layout boundary. The overview may automatically play the bounded decorative films described below. Keep the hero visible during its entrance so motion does not delay the main content paint. Decorative rings echo the CLIO mark and use sanctioned theme tokens.
 
-The overview uses selected, silent Clio Coder films as support for its editorial chapters. The hero uses a large mechanical-ring film beside the spanning headline; on phones its reserved stage leads the heading.
+The overview uses selected, silent CLIO Coder films as support for its editorial chapters. The hero uses a large mechanical-ring film beside the spanning headline; on phones its reserved stage leads the heading.
 
 A single floating stage carries the mark from the hero through alternating chapter margins on wide, sufficiently tall screens. It becomes smaller when crossing the reserved gaps between chapters, keeping the route clear of text and controls.
 

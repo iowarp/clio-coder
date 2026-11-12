@@ -5,7 +5,7 @@ This guide describes v0.8.0. A headless run has no one to ask: it denies whateve
 :::
 
 ::: needs
-- Clio Coder installed, with a connected model.
+- CLIO Coder installed, with a connected model.
 - A Git repository, and a task you can state completely in one prompt.
 :::
 
@@ -65,11 +65,11 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 :::
 
 ::: limits Boundaries
-- A contained command starts without credential variables and cannot open secret files, so name tools that need them. Clio Coder may rerun with `unsandboxed: true`, which the judge reviews.
+- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews.
 - `yolo` does not carry over from `settings.yaml` to a headless run. It comes only from that run's own `--autonomy yolo`, and it exits 2 as root outside a detected container.
 :::
 
 ::: next
-- [Let Clio Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
+- [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 - [Commands and shortcuts](/docs/guide/commands-and-modes.html)
 :::

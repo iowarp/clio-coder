@@ -1,10 +1,10 @@
 # Memory and lessons
 
-See what Clio Coder remembers, approve lessons, or turn memory off.
+See what CLIO Coder remembers, approve lessons, or turn memory off.
 
 ## What memory does
 
-Clio Coder keeps task memory for a session: requirements, environment facts, failed attempts, and diagnoses. A rules tier runs without model calls. With no memory route of its own, the model tier uses your chat route within that route's cost, quota, or speed budget, so a default install spends some model calls on memory.
+CLIO Coder keeps task memory for a session: requirements, environment facts, failed attempts, and diagnoses. A rules tier runs without model calls. With no memory route of its own, the model tier uses your chat route within that route's cost, quota, or speed budget, so a default install spends some model calls on memory.
 
 ## See and approve lessons
 
@@ -40,7 +40,7 @@ All keys live under `context.memory` in `settings.yaml`. `/settings` has rows fo
 
 ## Choose a cheap or local background model
 
-Memory reads a short trajectory and writes a bounded result, so a small model usually suffices. Clio Coder requests thinking off for this route.
+Memory reads a short trajectory and writes a bounded result, so a small model usually suffices. CLIO Coder requests thinking off for this route.
 
 ```yaml
 context:

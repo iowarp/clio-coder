@@ -1,4 +1,4 @@
-You can run Clio Coder with a model on your own machine, with no account and no API key. This guide connects a local server, checks what Clio Coder learned about it, and shows what else to look at if your code must not leave the machine.
+You can run CLIO Coder with a model on your own machine, with no account and no API key. This guide connects a local server, checks what CLIO Coder learned about it, and shows what else to look at if your code must not leave the machine.
 
 ::: note Version scope
 This guide describes v0.8.0. Supported local servers include Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade. Whether a given model handles long agentic work is yours to test, and setup does not test it for you.
@@ -6,7 +6,7 @@ This guide describes v0.8.0. Supported local servers include Ollama, LM Studio, 
 
 ::: needs
 - A local server running, with a model that supports tool calling loaded.
-- Clio Coder installed, and a repository you know.
+- CLIO Coder installed, and a repository you know.
 :::
 
 ## Connect it
@@ -20,7 +20,7 @@ Choose **Guided setup**. A server already running on a default local port is lis
 
 Setup may pick the model for you: a detected server comes with the first model it lists. Use `/model` afterwards to choose one that supports tool calling. Setup checks that the server is reachable, reads its model list, and sends one short test request before saving. It does not test tool calling, so the first real test comes next.
 
-## Check what Clio Coder learned
+## Check what CLIO Coder learned
 
 ```sh
 clio-coder targets --json

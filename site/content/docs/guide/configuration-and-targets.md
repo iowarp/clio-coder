@@ -4,12 +4,12 @@ Set up local models, institutional endpoints, and cloud connections.
 
 ## Connect the way you already work
 
-Run `clio-coder configure`, or choose **Guided setup** in the desktop alpha. First-time setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. When Clio Coder finds a route first, such as a provider key in your environment, it lists that route for you to choose.
+Run `clio-coder configure`, or choose **Guided setup** in the desktop alpha. First-time setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. When CLIO Coder finds a route first, such as a provider key in your environment, it lists that route for you to choose.
 
 1. Provide what the row asks for: paste a key, sign in to a subscription in the browser, or enter a server's address.
-2. For a model server or gateway, Clio Coder checks reachability and reads the model list.
-3. Clio Coder takes the provider's recommended model, or the only model a server lists. Otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
-4. Clio Coder sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults.
+2. For a model server or gateway, CLIO Coder checks reachability and reads the model list.
+3. CLIO Coder takes the provider's recommended model, or the only model a server lists. Otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
+4. CLIO Coder sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults.
 
 The test request shows that the model answers. It does not establish model quality or tool calling, and `--no-verify` skips it. Live, cached, and provider-catalog model lists are labeled separately. Choose a model that supports tool calling for repository work.
 
@@ -45,7 +45,7 @@ If setup fails, check credentials, the endpoint address, and whether the local m
 
 ## Servers without a built-in runtime
 
-Every connection names a runtime, which fixes how Clio Coder talks to the server. `clio-coder configure --list` prints the runtime ids you can choose.
+Every connection names a runtime, which fixes how CLIO Coder talks to the server. `clio-coder configure --list` prints the runtime ids you can choose.
 
 | Kind of server | Runtimes |
 | --- | --- |
@@ -56,4 +56,4 @@ Every connection names a runtime, which fixes how Clio Coder talks to the server
 
 A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.
 
-When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of Clio Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
+When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.

@@ -74,7 +74,7 @@ trap rollback ERR
 docker run --rm --entrypoint nginx clio-coder-site:local -t
 "${compose[@]}" up -d --no-build --wait --wait-timeout 60 site
 docker exec clio-coder-site nginx -t
-curl --fail --silent --show-error -H 'Host: coder.iowarp.ai' -o /dev/null -w 'Clio Coder origin HTTP %{http_code}\n' http://127.0.0.1:8096/
+curl --fail --silent --show-error -H 'Host: coder.iowarp.ai' -o /dev/null -w 'CLIO Coder origin HTTP %{http_code}\n' http://127.0.0.1:8096/
 curl --fail --silent --show-error -I http://127.0.0.1:8096/ | tr -d '\r' | grep -F "X-Clio-Site-Revision: $revision"
 printf 'Deployed website commit %s; rollback retained at %s\n' "$revision" "$backup"
 REMOTE

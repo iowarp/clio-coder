@@ -1,7 +1,7 @@
-Clio Coder can submit and follow a Slurm job for you through the clio-kit MCP server. Each submission or cancellation is confirmed first: the safety judge reviews it against your own messages, and you decide when it has no verdict. Use this when a task needs real compute and you want the job's outcome reported back into the session.
+CLIO Coder can submit and follow a Slurm job for you through the clio-kit MCP server. Each submission or cancellation is confirmed first: the safety judge reviews it against your own messages, and you decide when it has no verdict. Use this when a task needs real compute and you want the job's outcome reported back into the session.
 
 ::: note Version scope
-This guide describes v0.8.0. Clio Coder has no scheduler tier of its own: the agent calls the server's tools, and Slurm does the rest. Fleet workers do not submit through Slurm.
+This guide describes v0.8.0. CLIO Coder has no scheduler tier of its own: the agent calls the server's tools, and Slurm does the rest. Fleet workers do not submit through Slurm.
 :::
 
 ::: needs

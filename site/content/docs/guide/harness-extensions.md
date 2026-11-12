@@ -67,4 +67,4 @@ runtime:
     - { name: protect, description: Protect a path against write and edit calls. }
 ```
 
-The code must register exactly what the manifest declares, and Clio Coder never installs dependencies. Run `validate` and `test`, then `install`; a running session picks it up after `/reload extensions`.
+The code must register exactly what the manifest declares, and CLIO Coder never installs dependencies. Run `validate` and `test`, then `install`; a running session picks it up after `/reload extensions`.

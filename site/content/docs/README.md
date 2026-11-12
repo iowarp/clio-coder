@@ -1,6 +1,6 @@
-# Install Clio Coder
+# Install CLIO Coder
 
-Install, update, and launch Clio Coder on your machine.
+Install, update, and launch CLIO Coder on your machine.
 
 ## Install
 
@@ -15,7 +15,7 @@ curl -fsSL https://coder.iowarp.ai/install.sh | sh
 
 The installer brings its own Node.js 24 and needs no root, including on x64 HPC login nodes with glibc 2.17 or newer. It checks the Node download against its published SHA-256 checksums, and their OpenPGP signature when `gpg` is installed. It installs under `~/.local/share/clio-coder-install` on Linux or `~/Library/Application Support/clio-coder/install` on macOS, and writes the launcher `~/.local/bin/clio-coder`.
 
-On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; Clio Coder offers to fetch it the first time you need it.
+On Linux, an install run from a terminal ends by offering the desktop app, which starts at login and appears in your app menu. The optional Claude Agent SDK, about 224 MB, is skipped; CLIO Coder offers to fetch it the first time you need it.
 
 Pass options after `sh -s --`. For example, `--modify-path` adds the launcher directory to your shell profile, `--gui` sets up the desktop app without asking, and `--include-claude-sdk` installs the SDK now:
 
@@ -86,9 +86,9 @@ clio-coder configure
 clio-coder
 ```
 
-On first launch, **Guided setup** asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. It sends the model one short test request and saves when the model answers. Clio Coder has no account of its own; your provider may require credentials and charge for inference.
+On first launch, **Guided setup** asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. It sends the model one short test request and saves when the model answers. CLIO Coder has no account of its own; your provider may require credentials and charge for inference.
 
-A new installation starts guided setup by itself, so `clio-coder configure` is optional. If you have used Clio Coder before and no chat route is saved, it looks for a route it can use, such as a provider key in your environment, and opens chat with it. A model server found on a local port is used only after you say yes.
+A new installation starts guided setup by itself, so `clio-coder configure` is optional. If you have used CLIO Coder before and no chat route is saved, it looks for a route it can use, such as a provider key in your environment, and opens chat with it. A model server found on a local port is used only after you say yes.
 
 `/config` opens your connections inside a session, where **Add a target** runs setup again.
 
@@ -118,7 +118,7 @@ If an upgrade is refused over a setting the installed version cannot repair, the
 
 If coder.iowarp.ai is unreachable, the latest GitHub release carries the full installer, at `https://github.com/iowarp/clio-coder/releases/latest/download/install.sh`.
 
-## Give Clio Coder a useful first task
+## Give CLIO Coder a useful first task
 
 Start with a request that lets you assess its understanding of your project:
 
@@ -137,4 +137,4 @@ Follow the [desktop and terminal walkthrough](/tutorials/desktop-and-terminal.ht
 
 ## When you need more detail
 
-These web guides cover the essentials. Detailed documentation ships with Clio Coder; ask Clio to look up its bundled guide for the feature you're using. Each page also links to its full source guide.
+These web guides cover the essentials. Detailed documentation ships with CLIO Coder; ask Clio to look up its bundled guide for the feature you're using. Each page also links to its full source guide.

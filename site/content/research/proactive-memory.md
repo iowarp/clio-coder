@@ -1,4 +1,4 @@
-Does memory make an agent better at the next task, or does it only add text to a prompt? Clio Coder has a working memory system with an approval gate, and it can also approve some of its own lessons. Nobody has yet measured whether any of this changes outcomes.
+Does memory make an agent better at the next task, or does it only add text to a prompt? CLIO Coder has a working memory system with an approval gate, and it can also approve some of its own lessons. Nobody has yet measured whether any of this changes outcomes.
 
 ::: note Open question, described for v0.6.8
 Proactive memory has shipped and is on by default. This page has no outcome numbers because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
@@ -14,13 +14,13 @@ Proactive memory has shipped and is on by default. This page has no outcome numb
 
 These are facts about the design at this version. They are not study results.
 
-The design follows Wu et al., *Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents* (2026), adapted to Clio Coder. A session keeps bounded banks of knowledge, attempts, and diagnoses. A rules tier makes no model calls. A model tier uses the memory route, or the chat route when no memory route is set, so a default install spends model calls on memory.
+The design follows Wu et al., *Remember When It Matters: Proactive Memory Agent for Long-Horizon Agents* (2026), adapted to CLIO Coder. A session keeps bounded banks of knowledge, attempts, and diagnoses. A rules tier makes no model calls. A model tier uses the memory route, or the chat route when no memory route is set, so a default install spends model calls on memory.
 
 Durable lessons are separate from those banks, and only eligible approved records reach a prompt. A person can approve any record.
 
 Repository knowledge from a task-bank entry can also receive automatic approval once one session records that the lesson held, with no contradiction or recorded regression. It waits for a person if another approved or rejected lesson already carries the same command as evidence.
 
-Clio Coder records two useful observations about an approved lesson: `delivered` when its reminder was submitted, and `held` when the recommended command then succeeds exactly. A held lesson did not necessarily cause that success, and the agent might have run the command anyway. That gap is the research problem in one sentence.
+CLIO Coder records two useful observations about an approved lesson: `delivered` when its reminder was submitted, and `held` when the recommended command then succeeds exactly. A held lesson did not necessarily cause that success, and the agent might have run the command anyway. That gap is the research problem in one sentence.
 
 ## Why it matters
 
@@ -38,7 +38,7 @@ Memory is the obvious fix, and also an easy way to pay for tokens that do nothin
 
 **Compare memory routes.** A small local model and the main chat model may produce very different lessons at very different costs.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 ::: steps
 ### Look at what memory is doing
@@ -55,7 +55,7 @@ In `/settings`, **Memory connection** and **Memory model** choose the route. **P
 clio-coder telemetry consent --workspace <dir>
 ```
 
-With `telemetry.mode: research`, consent for that workspace, and `telemetry.research.content` on, Clio Coder also records memory traces in the session's journal. This stores redacted content, so use a repository you may study.
+With `telemetry.mode: research`, consent for that workspace, and `telemetry.research.content` on, CLIO Coder also records memory traces in the session's journal. This stores redacted content, so use a repository you may study.
 :::
 
 ## First experiment

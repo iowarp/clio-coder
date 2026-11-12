@@ -1,10 +1,10 @@
 # Tools and permissions
 
-Read, search, edit, and run commands with Clio Coder's repository tools.
+Read, search, edit, and run commands with CLIO Coder's repository tools.
 
 ## Ask for a bounded change
 
-Clio Coder can read and search files, make edits, run shell commands, and execute declared project checks. Give it a concrete scope and an outcome you can review:
+CLIO Coder can read and search files, make edits, run shell commands, and execute declared project checks. Give it a concrete scope and an outcome you can review:
 
 > Fix the parser's handling of empty input. Keep the public API unchanged, add the relevant regression test, and run the project's test check. Show the diff and result.
 
@@ -12,7 +12,7 @@ A useful sequence is **inspect → change → verify → review**. Inspect the a
 
 ## Understand permission requests
 
-**default** follows one rule: containment first, judgment second, asking last. Workspace edits run. Shell commands run inside an OS sandbox when the host has one. In a Git work tree, Clio Coder snapshots your files before the first change of a turn, and `/rewind` restores them. A safety judge reviews what would otherwise ask against your own messages, and you are asked when it has no verdict or the decision is yours.
+**default** follows one rule: containment first, judgment second, asking last. Workspace edits run. Shell commands run inside an OS sandbox when the host has one. In a Git work tree, CLIO Coder snapshots your files before the first change of a turn, and `/rewind` restores them. A safety judge reviews what would otherwise ask against your own messages, and you are asked when it has no verdict or the decision is yours.
 
 **yolo** is for long jobs you leave running: nothing waits for you. It is contained by default, so the sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to Clio. It needs a one-time acceptance. Set the level in Settings, with `--autonomy`, or with the leader key.
 
@@ -24,7 +24,7 @@ Asking for a plan or saying “do not edit” guides the task; it does not estab
 
 ## Verify using your project's checks
 
-Ask Clio Coder to discover available checks, then run the relevant one with `verify`. It uses declared scripts and supported build/CI definitions rather than treating arbitrary output as a test result.
+Ask CLIO Coder to discover available checks, then run the relevant one with `verify`. It uses declared scripts and supported build/CI definitions rather than treating arbitrary output as a test result.
 
 > Discover this project's verification checks. Run the test check through verify and report the exit status, failures, and anything you could not check.
 
@@ -36,6 +36,6 @@ For checks that must accompany specific changes, add a [project quality policy](
 
 A main session starts with a small set of tools attached: `read`, `bash`, `edit`, `write`, `verify`, `ask_user`, and `gateway`, plus `dispatch` when workers are available and `consult` when a decision model is configured. The model finds every other capability through `gateway`, which can search the catalog, describe a tool's arguments, and call it. This keeps the request small while search, Git, web reading, data inspection, and MCP server tools stay one call away. Workers instead receive the tools their agent recipe admits.
 
-Tool results are bounded. Each reading tool has a size cap per call, and all of them share a budget per turn that grows with the model's context window. A cut result ends with one notice line that says how much was shown and gives the exact argument for the next page. When the cap cut content that was already collected, the notice also names a read-only overflow copy in Clio Coder's state directory, outside your workspace. The permission rules above apply to every tool, whether it is attached or reached through `gateway`.
+Tool results are bounded. Each reading tool has a size cap per call, and all of them share a budget per turn that grows with the model's context window. A cut result ends with one notice line that says how much was shown and gives the exact argument for the next page. When the cap cut content that was already collected, the notice also names a read-only overflow copy in CLIO Coder's state directory, outside your workspace. The permission rules above apply to every tool, whether it is attached or reached through `gateway`.
 
 The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](../architecture/prompt-envelope-and-tools.md).

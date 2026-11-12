@@ -1,19 +1,19 @@
-Clio Coder has two interfaces to the same runtime. The terminal offers the primary workflow. The desktop alpha opens locally in your browser and gives you a visual workspace for projects and conversations.
+CLIO Coder has two interfaces to the same runtime. The terminal offers the primary workflow. The desktop alpha opens locally in your browser and gives you a visual workspace for projects and conversations.
 
-## Clio Coder in the terminal
+## CLIO Coder in the terminal
 
-Open your repository and launch Clio Coder:
+Open your repository and launch CLIO Coder:
 
 ```sh
 cd /path/to/your/project
 clio-coder
 ```
 
-![Clio Coder terminal at start, with the project, its Git state, the selected model, and the composer](/assets/tui-boot.webp)
+![CLIO Coder terminal at start, with the project, its Git state, the selected model, and the composer](/assets/tui-boot.webp)
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
-![Clio Coder in the terminal running a declared test check through verify, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
+![CLIO Coder in the terminal running a declared test check through verify, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
 
@@ -21,7 +21,7 @@ During a turn, **Enter** queues a message that Clio reads at the next pause betw
 
 On a permission card, **Enter** allows the call. **Esc** denies it, which skips that call and leaves the run going. **Alt+X** stops the turn.
 
-## Clio Coder on the desktop
+## CLIO Coder on the desktop
 
 From a terminal, run:
 
@@ -47,7 +47,7 @@ A first run with no model connection opens on guided setup, which asks the same 
 The desktop from a new task to a finished one: the composer, the answer with its tool calls, a waiting approval, and guided setup.
 :::
 
-The desktop is in alpha and covers a subset of terminal workflows. Treat it as an optional way to use Clio Coder, and keep the terminal available for commands that the desktop does not yet expose.
+The desktop is in alpha and covers a subset of terminal workflows. Treat it as an optional way to use CLIO Coder, and keep the terminal available for commands that the desktop does not yet expose.
 
 On Linux with a systemd user session, you can install the optional background application, which starts at login and appears in your app menu. The installer offers the same step, and `--gui` accepts it without asking:
 
@@ -59,8 +59,8 @@ For an optional Linux desktop entry, run `clio-coder gui launcher install`. The 
 
 ## Choose where to begin
 
-Start in the terminal if you work mostly from a shell or need the primary set of Clio Coder workflows. Start on the desktop if you prefer browsing projects and working with attachments in a visual interface.
+Start in the terminal if you work mostly from a shell or need the primary set of CLIO Coder workflows. Start on the desktop if you prefer browsing projects and working with attachments in a visual interface.
 
-Both launch commands use the installed Clio Coder package. You do not need an account on this website. Your model connections use your own local server, institutional endpoint, or cloud provider.
+Both launch commands use the installed CLIO Coder package. You do not need an account on this website. Your model connections use your own local server, institutional endpoint, or cloud provider.
 
 Try [a temperature-calibration example with recorded checks](/tutorials/temperature-calibration.html), or follow [your first session](/tutorials/first-session.html) for a concrete task to try in either workspace.

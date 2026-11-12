@@ -1,6 +1,6 @@
 ## See the agents
 
-Clio Coder dispatches focused agents from Markdown recipes. Each recipe declares the agent's tools, budget, and the result it must return.
+CLIO Coder dispatches focused agents from Markdown recipes. Each recipe declares the agent's tools, budget, and the result it must return.
 
 ```sh
 clio-coder agents
@@ -28,7 +28,7 @@ Helper agents such as Scout are dispatched by the main agent, and `clio-coder ag
 
 ## Add your own
 
-Put a recipe at `.clio-coder/agents/<id>.md` for one project, or in the `agents` folder of your Clio Coder config directory for yourself. The file name is the agent's id, and when a user recipe and a project recipe share an id, the project one wins. Run `clio-coder agents validate` after an edit.
+Put a recipe at `.clio-coder/agents/<id>.md` for one project, or in the `agents` folder of your CLIO Coder config directory for yourself. The file name is the agent's id, and when a user recipe and a project recipe share an id, the project one wins. Run `clio-coder agents validate` after an edit.
 
 A recipe must declare every required key, and `audience` must be `custom`:
 

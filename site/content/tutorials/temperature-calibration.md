@@ -14,7 +14,7 @@ Select a model that supports tool calling. You can also use the desktop alpha wi
 
 > Create four temperature conversion functions for Celsius, Kelvin, and Fahrenheit. Reject non-numeric and non-finite inputs with TypeError, and temperatures below absolute zero with RangeError. Use 273.15 for the Celsius/Kelvin offset. Add Node.js tests for freezing, boiling, absolute zero, round trips within 1e-10, and invalid inputs. Use no dependencies. Run the tests and report the actual result.
 
-Choose a new example directory when creating files. In the supplied example, the implementation and tests are already present; start by asking Clio Coder to read them.
+Choose a new example directory when creating files. In the supplied example, the implementation and tests are already present; start by asking CLIO Coder to read them.
 
 ## Check the numerical boundaries
 
@@ -26,17 +26,17 @@ These reference temperatures cover ordinary values and the physical lower bounda
 | Boiling point | 100 °C | 373.15 K | 212 °F |
 | Absolute zero | −273.15 °C | 0 K | −459.67 °F |
 
-When Clio Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. Clio changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
+When CLIO Coder first wrote this example, the first run exposed an exact-equality assertion for the Fahrenheit value at absolute zero. JavaScript produced `−459.66999999999996`; the test expected `−459.67`. Clio changed that assertion to an absolute tolerance of `1e-10` and reran the tests. Review a tolerance against your domain’s numerical requirements before applying it elsewhere.
 
 ## Run a declared check
 
-The example’s private `package.json` declares its test command. With the archive extracted into the folder above, ask Clio Coder:
+The example’s private `package.json` declares its test command. With the archive extracted into the folder above, ask CLIO Coder:
 
 > Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.
 
 Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and Clio read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
-![Clio Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
+![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
 
 To run the same tests yourself from the repository root:
 

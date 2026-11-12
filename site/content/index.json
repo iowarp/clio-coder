@@ -2,9 +2,9 @@
   {
     "path": "README.md",
     "source": "README.md",
-    "title": "Install Clio Coder",
+    "title": "Install CLIO Coder",
     "group": "Start",
-    "excerpt": "Install, update, and launch Clio Coder on your machine.",
+    "excerpt": "Install, update, and launch CLIO Coder on your machine.",
     "summary": "install.md",
     "headings": [
       "Install",
@@ -16,7 +16,7 @@
       "Confirm the installation",
       "Open a project",
       "Update, roll back and remove",
-      "Give Clio Coder a useful first task",
+      "Give CLIO Coder a useful first task",
       "Keep going",
       "When you need more detail"
     ]
@@ -26,8 +26,8 @@
     "source": "docs/guide/hpc-clusters.md",
     "title": "Install on a cluster",
     "group": "Start",
-    "excerpt": "Install Clio Coder on a login node with an old glibc, a proxy, or no internet.",
-    "description": "Install Clio Coder on a cluster login node with old glibc, a proxy, or no internet. The installer brings its own Node.js and needs no root.",
+    "excerpt": "Install CLIO Coder on a login node with an old glibc, a proxy, or no internet.",
+    "description": "Install CLIO Coder on a cluster login node with old glibc, a proxy, or no internet. The installer brings its own Node.js and needs no root.",
     "summary": "hpc.md",
     "headings": [
       "Install without root",
@@ -69,8 +69,8 @@
     "source": "docs/guide/tool-usage.md",
     "title": "Tools and permissions",
     "group": "Everyday use",
-    "excerpt": "Read, search, edit, and run commands with Clio Coder's repository tools.",
-    "description": "Read, search, edit, and run commands with Clio Coder's repository tools, and decide which permission requests to approve.",
+    "excerpt": "Read, search, edit, and run commands with CLIO Coder's repository tools.",
+    "description": "Read, search, edit, and run commands with CLIO Coder's repository tools, and decide which permission requests to approve.",
     "summary": "permissions.md",
     "headings": [
       "Ask for a bounded change",
@@ -85,7 +85,7 @@
     "title": "Save and resume work",
     "group": "Everyday use",
     "excerpt": "Resume conversations, manage context, and prepare a handoff.",
-    "description": "Resume conversations with /resume, manage context as it fills, and prepare a handoff so long work in Clio Coder continues cleanly.",
+    "description": "Resume conversations with /resume, manage context as it fills, and prepare a handoff so long work in CLIO Coder continues cleanly.",
     "summary": "continuity.md",
     "headings": [
       "Pick up a conversation",
@@ -99,8 +99,8 @@
     "source": "docs/guide/proactive-memory.md",
     "title": "Memory and lessons",
     "group": "Everyday use",
-    "excerpt": "See what Clio Coder remembers, approve lessons, or turn memory off.",
-    "description": "See what Clio Coder remembers, approve or reject lessons, and turn memory off or route it to another model.",
+    "excerpt": "See what CLIO Coder remembers, approve lessons, or turn memory off.",
+    "description": "See what CLIO Coder remembers, approve or reject lessons, and turn memory off or route it to another model.",
     "summary": "memory.md",
     "headings": [
       "What memory does",
@@ -143,7 +143,7 @@
     "path": "guide/fleet-dispatch.md",
     "source": "docs/guide/fleet-dispatch.md",
     "title": "Workers and fleets",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Assign focused tasks and combine workers into a workflow.",
     "summary": "workers.md",
     "headings": [
@@ -159,7 +159,7 @@
     "path": "guide/resource-library.md",
     "source": "docs/guide/resource-library.md",
     "title": "Skills and resources",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
     "summary": "library.md",
     "headings": [
@@ -174,8 +174,8 @@
     "path": "guide/plugins.md",
     "source": "docs/guide/plugins.md",
     "title": "Install plugins",
-    "group": "Extend Clio Coder",
-    "excerpt": "Add reusable resources to your Clio Coder installation.",
+    "group": "Extend CLIO Coder",
+    "excerpt": "Add reusable resources to your CLIO Coder installation.",
     "summary": "plugins.md",
     "headings": [
       "Install a bundle of resources",
@@ -187,7 +187,7 @@
     "path": "guide/harness-extensions.md",
     "source": "docs/guide/harness-extensions.md",
     "title": "Write and install extensions",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Install and write extensions that declare what they may do.",
     "summary": "extensions.md",
     "headings": [
@@ -202,7 +202,7 @@
     "path": "guide/interop.md",
     "source": "docs/guide/interop.md",
     "title": "Editors and other agents",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Use supported agent connections and editor integrations.",
     "summary": "interoperability.md",
     "headings": [
@@ -216,8 +216,8 @@
     "path": "guide/slurm.md",
     "source": "docs/guide/slurm.md",
     "title": "Slurm workflows",
-    "group": "Extend Clio Coder",
-    "excerpt": "Connect Clio Coder to supported Slurm tools for cluster work.",
+    "group": "Extend CLIO Coder",
+    "excerpt": "Connect CLIO Coder to supported Slurm tools for cluster work.",
     "summary": "slurm.md",
     "headings": [
       "Work with a scheduler",
@@ -250,7 +250,7 @@
     "title": "Troubleshooting",
     "group": "Reference",
     "excerpt": "Resolve common connection, terminal, and runtime problems.",
-    "description": "Resolve common Clio Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes.",
+    "description": "Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes.",
     "summary": "troubleshooting.md",
     "headings": [
       "A connection is unavailable",
@@ -266,10 +266,10 @@
     "title": "Require project checks",
     "group": "Everyday use",
     "excerpt": "Choose the declared checks a change requires and inspect verification freshness.",
-    "description": "Name the declared checks a change requires in Clio Coder, run them, and see whether passing results still match the files.",
+    "description": "Name the declared checks a change requires in CLIO Coder, run them, and see whether passing results still match the files.",
     "summary": "quality.md",
     "headings": [
-      "Tell Clio Coder what “checked” means in your project",
+      "Tell CLIO Coder what “checked” means in your project",
       "Run the declared checks",
       "Review freshness"
     ]
@@ -355,7 +355,7 @@
     "title": "Semantic context",
     "group": "Everyday use",
     "excerpt": "Search your project by meaning with a local embedding route.",
-    "description": "Search your project by meaning with a local embedding route: configure the model, index code and notes, and ask Clio Coder in plain words.",
+    "description": "Search your project by meaning with a local embedding route: configure the model, index code and notes, and ask CLIO Coder in plain words.",
     "summary": "semantic-context.md",
     "headings": [
       "What it does",

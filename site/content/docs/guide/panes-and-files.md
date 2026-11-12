@@ -6,7 +6,7 @@ Attach files and open companion terminal panes.
 
 The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation.
 
-Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When it cannot start, Clio Coder says so in one line and runs in the plain terminal.
+Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When it cannot start, CLIO Coder says so in one line and runs in the plain terminal.
 
 After an npm or bun install, add the pane host yourself. The file browser is a separate install either way:
 
@@ -21,7 +21,7 @@ To join a Herdr session of your own as a guest, open a pane in your project, the
 clio-coder --with-panes
 ```
 
-The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your Clio Coder settings:
+The option joins the current Herdr session. It does not create a pane host from a plain terminal. For the files pane, also enable it in your CLIO Coder settings:
 
 ```yaml
 interface:
@@ -34,7 +34,7 @@ Check `clio-coder doctor` if the host or files engine is unavailable.
 
 ## Use the files pane
 
-`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Select a file and press **Ctrl+Y** to insert it as an `@file` mention and return focus to Clio Coder. `/files` or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run `/files close`, to end it.
+`/files` or **Alt+E** opens the file browser and gives it keyboard focus. Select a file and press **Ctrl+Y** to insert it as an `@file` mention and return focus to CLIO Coder. `/files` or Alt+E then hides the pane: the browser keeps running and keeps its directory. Press the key twice quickly, or run `/files close`, to end it.
 
 ## Docks hide instead of closing
 

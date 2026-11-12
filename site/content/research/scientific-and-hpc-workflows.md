@@ -1,6 +1,6 @@
 What evidence would convince a domain scientist that a change made by an agent is correct? Scientific code has checks most software lacks, such as conservation laws, reference solutions, and published results.
 
-It also has its own hazards, including schedulers, shared allocations, and results that look plausible while being wrong. Clio Coder has shipped tools for this work. Nobody has yet studied how far they go.
+It also has its own hazards, including schedulers, shared allocations, and results that look plausible while being wrong. CLIO Coder has shipped tools for this work. Nobody has yet studied how far they go.
 
 ::: note Open question, described for v0.6.8
 The skills and integrations on this page have shipped. This page has no study results because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome, especially people who own real scientific codes.
@@ -20,7 +20,7 @@ The library has research skills. `experiment-protocol` pre-registers a performan
 
 `scientific-debugging`, `slurm-jobs`, and `arxiv-literature` are also there, and the `materio` plugin supports materials-science research.
 
-For clusters, Clio Coder installs without root on a login node, and it reaches Slurm through the clio-kit MCP server, with each submission and cancellation confirmed before it reaches the scheduler. Clio Coder does not submit its own workers through a scheduler.
+For clusters, CLIO Coder installs without root on a login node, and it reaches Slurm through the clio-kit MCP server, with each submission and cancellation confirmed before it reaches the scheduler. CLIO Coder does not submit its own workers through a scheduler.
 
 The one worked example is [a temperature-calibration change](/tutorials/temperature-calibration.html), recorded from a real session with seven tests. It is a demonstration on a small task. No study covers real solvers, a domain expert's judgment, or how often an oracle catches an agent's error.
 
@@ -38,7 +38,7 @@ A wrong numerical result can look fine and travel into a paper. If agents are go
 
 **Study expert acceptance.** Show domain scientists an agent's change with and without its evidence, and ask what they would accept and why.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 ::: steps
 ### Install a research skill
@@ -112,7 +112,7 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 :::
 
 ::: next
-- [A numerical change, checked with Clio Coder](/tutorials/temperature-calibration.html)
+- [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 :::

@@ -1,7 +1,7 @@
-Clio Coder in the terminal can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running. Herdr, a terminal multiplexer, hosts the panes.
+CLIO Coder in the terminal can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running. Herdr, a terminal multiplexer, hosts the panes.
 
 ::: note Version scope
-This guide describes v0.8.0. Bare `clio-coder` in an interactive terminal opens its own private pane host, with no question to answer. The files and music docks are off until you enable them. Keys, commands, and settings may change. The pane host has builds for Linux, macOS, and Windows x64; elsewhere Clio Coder runs in the plain terminal.
+This guide describes v0.8.0. Bare `clio-coder` in an interactive terminal opens its own private pane host, with no question to answer. The files and music docks are off until you enable them. Keys, commands, and settings may change. The pane host has builds for Linux, macOS, and Windows x64; elsewhere CLIO Coder runs in the plain terminal.
 :::
 
 ::: needs
@@ -12,13 +12,13 @@ This guide describes v0.8.0. Bare `clio-coder` in an interactive terminal opens 
 
 ## Turn panes on
 
-Panes are on whenever the terminal allows them. Start Clio Coder in your project:
+Panes are on whenever the terminal allows them. Start CLIO Coder in your project:
 
 ```sh
 clio-coder
 ```
 
-It opens its own pane host and hands the terminal back when you quit. From a pane of your own Herdr session, `clio-coder --with-panes` joins that session as a guest instead. A session started inside tmux, Zellij, or screen stays in the plain terminal with no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside Clio Coder.
+It opens its own pane host and hands the terminal back when you quit. From a pane of your own Herdr session, `clio-coder --with-panes` joins that session as a guest instead. A session started inside tmux, Zellij, or screen stays in the plain terminal with no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside CLIO Coder.
 
 ## Three docks, one habit
 
@@ -30,15 +30,15 @@ It opens its own pane host and hands the terminal back when you quit. From a pan
 | Music | Alt+A | A thin strip below | `integrations.music.enabled` |
 :::
 
-Press the key once to show a dock and again to hide it. A hidden dock moves to a parked tab and keeps its state: the file browser stays in its directory and the radio keeps playing. Press the key twice quickly to close the dock and end its program. Quitting Clio Coder closes all of them.
+Press the key once to show a dock and again to hide it. A hidden dock moves to a parked tab and keeps its state: the file browser stays in its directory and the radio keeps playing. Press the key twice quickly to close the dock and end its program. Quitting CLIO Coder closes all of them.
 
 Drag a divider to resize a dock; the size is kept when you hide and show it. A dock never takes more than half the window, and one that cannot fit says how much room it needs. `/panes` prints which docks are visible, hidden, or closed. The same keys are under Ctrl+G, then `w`, `e`, or `a`.
 
 ## Pick files with Yazi
 
-`/files` or Alt+E opens Yazi and moves the keyboard into it. Select files and press Ctrl+Y. Clio Coder appends them to your draft as `@path` references and returns you to the composer without sending anything. One pick carries up to 32 paths.
+`/files` or Alt+E opens Yazi and moves the keyboard into it. Select files and press Ctrl+Y. CLIO Coder appends them to your draft as `@path` references and returns you to the composer without sending anything. One pick carries up to 32 paths.
 
-Yazi runs on a profile and theme that Clio Coder generates, so your own Yazi configuration is untouched. Set `interface.panes.files.profile: user` to use yours instead. `/files hide` and `/files close` do what the key does.
+Yazi runs on a profile and theme that CLIO Coder generates, so your own Yazi configuration is untouched. Set `interface.panes.files.profile: user` to use yours instead. `/files hide` and `/files close` do what the key does.
 
 ## Watch workers live
 
@@ -57,7 +57,7 @@ Move with the arrow keys and press Enter to fill the dock with one worker's live
 /music off
 ```
 
-`next` steps through six built-in focus stations. `station` takes a stream URL or a station name; a name that is not built in is looked up in the public Radio Browser directory. Clio Coder keeps its player configuration separate from your own cliamp setup.
+`next` steps through six built-in focus stations. `station` takes a stream URL or a station name; a name that is not built in is looked up in the public Radio Browser directory. CLIO Coder keeps its player configuration separate from your own cliamp setup.
 
 The model cannot touch the player unless you also set `integrations.music.agentControl: true` and restart. Then a `music` tool can play, pause, skip, and stop, but not choose stations. When to use it is up to your project instructions.
 

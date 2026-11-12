@@ -1,4 +1,4 @@
-What would it take to treat an agent run as a scientific record that someone else can check? Clio Coder already writes a sealed record of each run. Nobody has yet studied what those records can support as evidence, how much two runs of one task differ, or what a reader in another lab would still need.
+What would it take to treat an agent run as a scientific record that someone else can check? CLIO Coder already writes a sealed record of each run. Nobody has yet studied what those records can support as evidence, how much two runs of one task differ, or what a reader in another lab would still need.
 
 ::: note Open question, described for v0.6.8
 The records and commands on this page have shipped. The research use of them is new. No reproducibility study exists yet, so this page has no outcome numbers, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
@@ -41,9 +41,9 @@ Every other page in this section depends on the answer. A study of decision mode
 
 **Test what a reader can conclude.** Give someone a `content-free` archive and a claim. Find out which claims they can check, which need `structural` or `research`, and what is still missing.
 
-**Build the analysis layer.** Clio Coder exposes JSON reads over its journals, and it has no comparison tool. A small script that folds two sets of runs into a paired table would help every study here.
+**Build the analysis layer.** CLIO Coder exposes JSON reads over its journals, and it has no comparison tool. A small script that folds two sets of runs into a paired table would help every study here.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 ::: steps
 ### Run a task and read its record
@@ -95,7 +95,7 @@ Nobody has run this protocol. If you do, the spread you measure is the first bas
 ::: steps
 ### Fix the setup
 
-Choose a small repository with a test suite, and a task whose result those tests can accept or reject. Commit the starting state. Fix the model, route, and Clio Coder version, and write them down.
+Choose a small repository with a test suite, and a task whose result those tests can accept or reject. Commit the starting state. Fix the model, route, and CLIO Coder version, and write them down.
 
 ### Run it ten times
 

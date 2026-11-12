@@ -1,4 +1,4 @@
-Most language models write an answer one token at a time. A diffusion language model starts from a rough version of the whole answer and refines it in a few passes. Clio Coder can use Inception's Mercury models this way, for chat and for workers, with tool calling.
+Most language models write an answer one token at a time. A diffusion language model starts from a rough version of the whole answer and refines it in a few passes. CLIO Coder can use Inception's Mercury models this way, for chat and for workers, with tool calling.
 
 ::: note Version scope
 The `inception` runtime has shipped since v0.5.3 and this article describes v0.6.8. The frame-by-frame display exists only in the terminal, and diffusion models are less tested on long agentic work than the models most people use.
@@ -7,7 +7,7 @@ The `inception` runtime has shipped since v0.5.3 and this article describes v0.6
 ::: needs
 - An Inception account and API key, exported as `INCEPTION_API_KEY`.
 - Permission to send this project's code to that provider.
-- Clio Coder in the terminal, if you want to watch the answer refine.
+- CLIO Coder in the terminal, if you want to watch the answer refine.
 :::
 
 ## Connect Mercury
@@ -28,7 +28,7 @@ The runtime lists `mercury-3`, its default, `mercury-2.5`, `mercury-2`, and `mer
 
 ## What you see
 
-In the terminal, each update from the model carries the whole answer so far. Clio Coder replaces the visible text on every frame instead of appending to it, and dims the part that is still changing. There is no progress gauge, because the provider reports none until the last frame.
+In the terminal, each update from the model carries the whole answer so far. CLIO Coder replaces the visible text on every frame instead of appending to it, and dims the part that is still changing. There is no progress gauge, because the provider reports none until the last frame.
 
 Tool calls, permission cards, `/view`, and run records work as they do with any chat model. Headless runs, workers, the desktop app, and editors connected over ACP receive an ordinary stream of text.
 
@@ -39,7 +39,7 @@ A quick whole-answer model suits short, bounded requests: a commit message, an e
 Try it on a task you can check before trusting it with a long one. This page makes no speed or quality claim; measure both on your own repository.
 
 ::: limits
-- Mercury runs without a thinking level. Clio Coder pins the provider's fastest reasoning setting, because the default spends the output budget on hidden reasoning and can return an empty answer.
+- Mercury runs without a thinking level. CLIO Coder pins the provider's fastest reasoning setting, because the default spends the output budget on hidden reasoning and can return an empty answer.
 - A provider content-filter refusal is shown as a refusal and does not count as a failed connection.
 - Inception is a cloud provider. Input you send leaves your machine, and usage is billed by Inception.
 :::

@@ -1,4 +1,4 @@
-Clio Coder's Library contains skills, agents, prompts, playbooks, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
+CLIO Coder's Library contains skills, agents, prompts, playbooks, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
 
 ::: note Version scope
 This guide describes v0.8.0. Library recipes and extensions have different roles, and installing either is not a grant of authority.
@@ -7,7 +7,7 @@ This guide describes v0.8.0. Library recipes and extensions have different roles
 ::: diagram library-flow
 :::
 
-## Browse what ships with Clio Coder
+## Browse what ships with CLIO Coder
 
 Open `/library` in the terminal or press Alt+L. On the desktop alpha, the Library page lists the catalog with an **Installed only** filter. In the terminal, **Browse** shows available content and **Installed** manages your copies.
 
@@ -36,7 +36,7 @@ Check the destination, dependencies, scope, and package pin. The `--json` form c
 clio-coder library install skill:tdd --project
 ```
 
-The first project install in a workspace is yours, so Clio Coder approves the project's packages for that workspace. After that, a changed project package set, including one that arrives with a clone or a pull, is listed but not loaded until you review it with `clio-coder config trust plugins` and approve the digest it prints.
+The first project install in a workspace is yours, so CLIO Coder approves the project's packages for that workspace. After that, a changed project package set, including one that arrives with a clone or a pull, is listed but not loaded until you review it with `clio-coder config trust plugins` and approve the digest it prints.
 
 ### Load it for one concrete task
 
@@ -67,7 +67,7 @@ Scope helps reproducibility: another person can see which procedures belong to t
 
 ## Use plugins for related resources
 
-A Library plugin groups related skills, prompts, agents, playbooks, and supporting files. The catalog ships with Clio Coder, but its content is not installed automatically.
+A Library plugin groups related skills, prompts, agents, playbooks, and supporting files. The catalog ships with CLIO Coder, but its content is not installed automatically.
 
 ```sh
 clio-coder library list --kind plugin
@@ -93,7 +93,7 @@ After changes made by another process, `/reload library` refreshes recipes and `
 
 Library plugins provide portable recipes. [Extensions](/tutorials/write-an-extension-with-declared-capabilities.html) are code that adds runtime tools, hooks, or interface behavior through `clio-coder extensions`, and load only after you approve the capabilities they declare.
 
-Adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and Clio Coder names any it ignored when a session starts.
+Adding tool schemas requires a new session; reloading recipes does not change them. Project extensions follow the same trust rule through `clio-coder config trust extensions`, and CLIO Coder names any it ignored when a session starts.
 
 ::: limits
 - Choose the least extensive mechanism that supplies the task.
@@ -103,7 +103,7 @@ Adding tool schemas requires a new session; reloading recipes does not change th
 :::
 
 ::: next
-- [Your first session with Clio Coder](/tutorials/first-session.html)
+- [Your first session with CLIO Coder](/tutorials/first-session.html)
 - [Library guide](/docs/guide/resource-library.html)
 - [Plugin guide](/docs/guide/plugins.html)
 :::

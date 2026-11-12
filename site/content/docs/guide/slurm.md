@@ -1,10 +1,10 @@
 # Slurm workflows
 
-Connect Clio Coder to supported Slurm tools for cluster work.
+Connect CLIO Coder to supported Slurm tools for cluster work.
 
 ## Work with a scheduler
 
-Clio Coder connects to Slurm through the stdio MCP server shipped by [clio-kit](https://github.com/iowarp/clio-kit). The server provides job submission, listing, description, cancellation, and cluster information. A working scheduler connection is required; client binaries alone are not enough.
+CLIO Coder connects to Slurm through the stdio MCP server shipped by [clio-kit](https://github.com/iowarp/clio-kit). The server provides job submission, listing, description, cancellation, and cluster information. A working scheduler connection is required; client binaries alone are not enough.
 
 ## Set up the server
 
@@ -51,7 +51,7 @@ The skill submits once, polls through the MCP server, and reports the outcome. I
 
 ## Choose approvals deliberately
 
-With the server declared as `slurm`, Clio Coder classifies the `mcp_slurm__` tools by name:
+With the server declared as `slurm`, CLIO Coder classifies the `mcp_slurm__` tools by name:
 
 | Capability | Class | At `default` | At `yolo` |
 | --- | --- | --- | --- |

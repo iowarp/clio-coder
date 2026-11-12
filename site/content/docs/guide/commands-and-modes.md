@@ -10,7 +10,7 @@ Navigate the terminal, choose models, and control a session.
 | `clio-coder gui --open` | Open the local desktop alpha |
 | `clio-coder configure` | Connect a model with Guided setup |
 | `clio-coder doctor` | Check installation and connections |
-| `clio-coder upgrade` | Update Clio Coder |
+| `clio-coder upgrade` | Update CLIO Coder |
 | `clio-coder --help` | See installed commands |
 
 For a single task without the interactive interface:

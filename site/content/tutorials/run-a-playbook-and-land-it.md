@@ -5,7 +5,7 @@ This guide describes v0.6.8. `fleet land` needs Git 2.38 or newer. Run time and 
 :::
 
 ::: needs
-- Clio Coder installed, with a connected model that supports tool calling.
+- CLIO Coder installed, with a connected model that supports tool calling.
 - A clean Git repository with a test command.
 - A small, specific task you could review by hand.
 :::

@@ -144,7 +144,7 @@ const server = createServer(async (request, response) => {
 });
 server.listen(Number(values.port), values.host, () =>
 	console.log(
-		`\nClio Coder preview: http://localhost:${values.port}/\nWatching site source and public repository guides.\n`,
+		`\nCLIO Coder preview: http://localhost:${values.port}/\nWatching site source and public repository guides.\n`,
 	),
 );
 let timer;

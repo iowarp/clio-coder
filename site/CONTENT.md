@@ -1,7 +1,7 @@
 # Product articles and the personal channel
 
 The product site helps a developer or curious newcomer understand fit, install
-Clio Coder, connect a suitable model, and complete a useful first task. Lead with
+CLIO Coder, connect a suitable model, and complete a useful first task. Lead with
 what the user can do. A research institution is not a product benefit.
 
 Anthony's personal site, akougkas.io, holds personal essays: the insight and
@@ -39,7 +39,7 @@ with outside researchers welcome, and has these parts:
   Say when a sample is small, when a result came from a design that no longer
   exists, and when nothing has been measured.
 - Why the answer matters.
-- How to use Clio Coder on it today, with commands that exist at the stated
+- How to use CLIO Coder on it today, with commands that exist at the stated
   version.
 - A first experiment, labelled "proposed, not yet run" until someone has run it
   and recorded the result.
@@ -122,7 +122,7 @@ Markdown stays the source. A line `::: name arguments` opens a guide block and
 | `::: note Label` | Version scope or what a result establishes |
 | `::: needs` | The "Before you start" checklist |
 | `::: steps` | An ordered procedure; each `###` heading is one numbered step |
-| `::: prompt Label` | A request to type into Clio Coder, with a copy control |
+| `::: prompt Label` | A request to type into CLIO Coder, with a copy control |
 | `::: result Label` | What the reader should see, and what it does not prove |
 | `::: limits Label` | Boundaries of the workflow |
 | `::: compare` | A table whose first column names the rows |

@@ -1,4 +1,4 @@
-Some files should reach only a model you chose. An information-flow rule names a source, such as everything under `secrets/`, and the destinations its content may go to. Once a session has read that source, Clio Coder refuses to send the conversation anywhere else, in every permission mode.
+Some files should reach only a model you chose. An information-flow rule names a source, such as everything under `secrets/`, and the destinations its content may go to. Once a session has read that source, CLIO Coder refuses to send the conversation anywhere else, in every permission mode.
 
 ::: note Advanced, described for v0.6.8
 Information flow does nothing until a project declares source rules and you approve them. The policy format is new and may change. It tracks what a session has read; it is not an operating-system sandbox.
@@ -48,7 +48,7 @@ This prints the policy files, their digest, and the exact approval command. It c
 clio-coder config trust safety --hash <reviewed-sha256>
 ```
 
-Approval belongs to this workspace and this content. Restart Clio Coder to load it.
+Approval belongs to this workspace and this content. Restart CLIO Coder to load it.
 :::
 
 An edit you have not approved can only restrict more: a new, unapproved rule labels content and allows no destination.

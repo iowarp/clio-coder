@@ -5,7 +5,7 @@
     "description": "Open questions on System One: evaluating on trajectories, asking better questions, and bringing a decision model, with a first experiment.",
     "category": "Decision models",
     "time": "12 min",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "source": "system-one-decisions.md",
     "basis": "Small samples; first experiment not yet run",
     "versionScope": "0.6.8",
@@ -20,12 +20,12 @@
   {
     "slug": "sealed-run-records",
     "title": "Can an agent run be a scientific record?",
-    "description": "What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with Clio Coder.",
+    "description": "What a sealed run record proves and what it cannot, how far repeated runs differ, and a first experiment to measure that spread with CLIO Coder.",
     "category": "Reproducible agent science",
     "time": "10 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The records have shipped; no study exists yet.",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"
@@ -44,7 +44,7 @@
     "time": "8 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. Memory has shipped; its effect is unmeasured.",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"
@@ -62,7 +62,7 @@
     "time": "8 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. Cost is measured; fidelity is not.",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
@@ -81,7 +81,7 @@
     "time": "7 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The controls have shipped; no comparison exists.",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"
@@ -101,7 +101,7 @@
     "time": "8 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The skills have shipped; no study exists.",
-    "author": "The Clio Coder team",
+    "author": "The CLIO Coder team",
     "versionScope": "0.6.8",
     "interfaces": [
       "Terminal"

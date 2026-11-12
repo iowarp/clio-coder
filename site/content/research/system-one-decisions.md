@@ -1,4 +1,4 @@
-Can a small, fast decision model make a coding agent's work better? System One is where Clio Coder asks that question. You bring a model that answers typed questions, and Clio Coder gives the agent a `consult` tool, a screen beside the safety judge, and optional triage of queued messages.
+Can a small, fast decision model make a coding agent's work better? System One is where CLIO Coder asks that question. You bring a model that answers typed questions, and CLIO Coder gives the agent a `consult` tool, a screen beside the safety judge, and optional triage of queued messages.
 
 The plumbing has shipped. Whether it helps is still open, and the evidence so far is thin.
 
@@ -58,7 +58,7 @@ The most important number is the last row. Given the tool, the agent did not cal
 
 ### One earlier run, on a design that no longer exists
 
-An on/off evaluation ran the older fixed-site design, where Clio Coder asked its own questions at fixed points in a turn. That design is gone, and so is the run's raw data. Only these numbers remain, so nobody can reanalyze them.
+An on/off evaluation ran the older fixed-site design, where CLIO Coder asked its own questions at fixed points in a turn. That design is gone, and so is the run's raw data. Only these numbers remain, so nobody can reanalyze them.
 
 The run used build `jev-1.14.0` with Haiku as the main model, over 24 episodes per arm. Total time with System One on was 1.237 times total time with it off, meaning slower, with an interval of 1.037 to 1.484. Acceptance was 24 of 24 per arm. Hints fired on 4 of 32 turns and changed no rounds.
 
@@ -76,7 +76,7 @@ The clock is a poor measure of that. A decision that adds a second and saves a w
 
 ### Evaluate on trajectories
 
-Define what a better path means and measure it per episode: rounds, tool calls, files read and then never used, repeated failed commands, cost, and whether the result was accepted. Clio Coder journals each decision without its content, so the outcome, latency, route, and answering build can be set against the rest of the run.
+Define what a better path means and measure it per episode: rounds, tool calls, files read and then never used, repeated failed commands, cost, and whether the result was accepted. CLIO Coder journals each decision without its content, so the outcome, latency, route, and answering build can be set against the rest of the run.
 
 Agents did not reach for `consult`, so a first result may be about adoption: what tool description or prompting makes an agent use it when it would help, and whether forcing the call helps at all.
 
@@ -92,7 +92,7 @@ You can bring a model today. A server that answers `POST /v1/systemone` becomes 
 
 Training is an open research direction with no plan or timeline. There is no training data: the decision dataset from earlier releases was removed, and today's journal keeps decision records without content. Building an opt-in dataset is part of the work, including what consent it needs, what to redact, and what counts as a correct label.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 You need a working chat model, since System One never replaces it, and a route to name. Off is the default and sends nothing.
 
@@ -173,11 +173,11 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 ::: limits Boundaries
 - System One is not a safety net. The deterministic safety rules and the judge decide, the screen can only tighten, and no use removes a confirmation.
 - A filter miss is not proof, especially when `carried.partial` is above zero.
-- Clio Coder ships a client for these wires and no inference server.
+- CLIO Coder ships a client for these wires and no inference server.
 :::
 
 ::: next
 - [The full System One guide](https://github.com/iowarp/clio-coder/blob/main/docs/guide/system-one.md)
 - [Can an agent run be a scientific record?](/research/sealed-run-records.html)
-- [Let Clio Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
+- [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
 :::

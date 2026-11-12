@@ -1,6 +1,6 @@
-# Clio Coder public site
+# CLIO Coder public site
 
-A static public window into Clio Coder: one overview, user documentation, practical tutorials, and open research questions. The site has no account flow or hosted agent service. Read [DESIGN.md](DESIGN.md) before making changes.
+A static public window into CLIO Coder: one overview, user documentation, practical tutorials, and open research questions. The site has no account flow or hosted agent service. Read [DESIGN.md](DESIGN.md) before making changes.
 
 ## Live local preview
 
@@ -18,7 +18,7 @@ Review the unregistered guides in `content/drafts/` in a second preview with its
 
 - `design-system.json` is the sanctioned palette, semantic theme map, shared motion tokens, and copy policy.
 - `tokens.mjs` generates `css/brand.css`; component CSS cannot introduce literal colors.
-- `DESIGN.md` documents the selected Clio Coder identity, IOWarp references, naming, writing, copyright, and accessibility rules.
+- `DESIGN.md` documents the selected CLIO Coder identity, IOWarp references, naming, writing, copyright, and accessibility rules.
 - `partials.html` supplies one header and footer. Primary navigation is Overview, Docs, Tutorials, Research.
 - `policy.mjs` runs on every build and checks palette drift, color declarations, motion tokens, public copy length, disallowed phrases, navigation, attribution, and documentation boundaries.
 
@@ -68,7 +68,7 @@ Research pages use the same registry shape in `content/research.json`, with Mark
 
 Write a useful Markdown article in `content/tutorials/` and register it in `content/tutorials.json`. [CONTENT.md](CONTENT.md) describes the guide blocks, the capture registry, and review builds; a `cover` names a capture in `content/captures.json` in place of `image`, `width`, `height`, and `alt`. Supply a slug, title, description, category, reading time, author, image dimensions, alt text, and source filename. The builder creates both its article and listing entry. An optional `video` field accepts a real YouTube ID and uses the privacy-enhanced embed domain. Publish captions with the recording. Empty media entries and fictional product demonstrations are not allowed.
 
-`assets/temperature-calibration.zip` is the standalone runnable example from the recorded local Clio Coder session. It contains only the implementation, seven tests, private package manifest, and README. It is published through the explicit build asset list so the tutorial does not depend on a separate product repository push. Test an extracted archive with `npm test` in its `temperature-calibration/` directory when replacing it.
+`assets/temperature-calibration.zip` is the standalone runnable example from the recorded local CLIO Coder session. It contains only the implementation, seven tests, private package manifest, and README. It is published through the explicit build asset list so the tutorial does not depend on a separate product repository push. Test an extracted archive with `npm test` in its `temperature-calibration/` directory when replacing it.
 
 ## Build and verify
 

@@ -1,11 +1,11 @@
-Clio Coder records what each process, session, and worker run did in local journals, and every usage figure on every surface comes from those journals. This guide shows how to read a session's cost, find out why it stopped, check a run's record, and prepare an archive for a maintainer.
+CLIO Coder records what each process, session, and worker run did in local journals, and every usage figure on every surface comes from those journals. This guide shows how to read a session's cost, find out why it stopped, check a run's record, and prepare an archive for a maintainer.
 
 ::: note Version scope
 This guide describes v0.8.0. Costs are shown with their provenance: a measured figure, an estimate, and an unknown value stay separate. An unknown stays unknown rather than becoming zero.
 :::
 
 ::: needs
-- Clio Coder installed, and at least one finished session in a repository.
+- CLIO Coder installed, and at least one finished session in a repository.
 - The session id, which the exit summary prints. `/resume` also lists them.
 :::
 

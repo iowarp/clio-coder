@@ -1,4 +1,4 @@
-Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. Clio Coder gives you controls for inspecting that context and continuing after a session grows.
+Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. CLIO Coder gives you controls for inspecting that context and continuing after a session grows.
 
 ::: note Version scope
 This guide describes the v0.6.8 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
@@ -80,7 +80,7 @@ Stored memory is not fine-tuning of the underlying model. Its value depends on s
 :::
 
 ::: next
-- [Your first session with Clio Coder](/tutorials/first-session.html)
+- [Your first session with CLIO Coder](/tutorials/first-session.html)
 - [Continuity guide](/docs/guide/context-continuity.html)
 - [Resource Library](/docs/guide/resource-library.html)
 :::

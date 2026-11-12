@@ -1,4 +1,4 @@
-When an agent's conversation is reduced to fit a model's window, what gets lost, and what does that loss cost later? Clio Coder has several ways to reduce context and an optional index for finding things by meaning. It measures size and cost carefully. It does not yet measure whether the agent still knows what it needs.
+When an agent's conversation is reduced to fit a model's window, what gets lost, and what does that loss cost later? CLIO Coder has several ways to reduce context and an optional index for finding things by meaning. It measures size and cost carefully. It does not yet measure whether the agent still knows what it needs.
 
 ::: note Open question, described for v0.8.0
 Compaction has shipped and is on by default. Semantic context is a beta feature that is off by default. This page has no fidelity numbers because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
@@ -16,7 +16,7 @@ These are facts about the design at this version. They are not study results.
 
 Automatic reduction normally starts at 80% of the effective window, or earlier at a 400,000-token ceiling. Working-set eviction runs first, then summarization if that is not enough. The default eviction policy is `structural-v2`. Summaries follow a fixed checkpoint shape: goal, constraints and preferences, progress, key decisions, next steps, and critical context.
 
-Clio Coder records whether a reduction gained anything. A summary that would not shrink the context is discarded, its cost stays in the totals, and an identical later automatic request makes no call. The journals also separate what a call read from cache and what it had to send again, so the cost side can be measured precisely.
+CLIO Coder records whether a reduction gained anything. A summary that would not shrink the context is discarded, its cost stays in the totals, and an identical later automatic request makes no call. The journals also separate what a call read from cache and what it had to send again, so the cost side can be measured precisely.
 
 The quality side has no measure. A checkpoint can be small, valid, and missing the one constraint that matters, and nothing would notice.
 
@@ -38,7 +38,7 @@ Cost matters too. A reduction can also break the model's cache, so the cheapest-
 
 **Evaluate retrieval on real questions.** Label a set of questions about a repository, then compare semantic search with `grep` and the code map on recall and on how many tool calls the agent spends.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 ::: steps
 ### Inspect and reduce

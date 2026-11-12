@@ -1,4 +1,4 @@
-A benchmark is easy to fool once you have seen the result. The `experiment-protocol` skill has Clio Coder write down the outcome, thresholds, tolerances, and verdict conditions before any measurement, and then keep to them. Use it for a performance study, a numerical comparison, a parameter sweep, or a solver comparison.
+A benchmark is easy to fool once you have seen the result. The `experiment-protocol` skill has CLIO Coder write down the outcome, thresholds, tolerances, and verdict conditions before any measurement, and then keep to them. Use it for a performance study, a numerical comparison, a parameter sweep, or a solver comparison.
 
 ::: note Version scope
 This guide describes v0.6.8 and skill version 0.3.2. To find out why one output is wrong, use `scientific-debugging` instead, since that is a diagnosis and not an experiment.
@@ -56,7 +56,7 @@ A verdict of confirmed, refuted, or inconclusive against the numbers you committ
 :::
 
 ::: next
-- [A numerical change, checked with Clio Coder](/tutorials/temperature-calibration.html)
+- [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
 - [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
 - [What would make a scientist trust an agent's change?](/research/scientific-and-hpc-workflows.html)
 :::

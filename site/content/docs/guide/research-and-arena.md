@@ -4,7 +4,7 @@ Improve a measured number with verified research campaigns, and compare models b
 
 ## Improve a number, and keep only real gains
 
-`clio-coder research start` runs Clio Coder's agent repeatedly to move one measured number in your project, such as the wall time of a benchmark. The number is a key in the JSON that a check in `.clio-coder/verifiers.yaml` prints. Correctness checks run as gates.
+`clio-coder research start` runs CLIO Coder's agent repeatedly to move one measured number in your project, such as the wall time of a benchmark. The number is a key in the JSON that a check in `.clio-coder/verifiers.yaml` prints. Correctness checks run as gates.
 
 ```yaml
 version: 2

@@ -5,7 +5,7 @@ This guide describes v0.8.0, runtime api 2. The runtime runs inside bubblewrap o
 :::
 
 ::: needs
-- Clio Coder installed, on Linux or macOS for a confined runtime.
+- CLIO Coder installed, on Linux or macOS for a confined runtime.
 - Node.js and a little TypeScript. The scaffold includes an entrypoint and a test.
 :::
 
@@ -20,7 +20,7 @@ This creates the package under `.clio-coder/dev/extensions/lint-status/` and pri
 
 ### Read the manifest
 
-`clio-coder-extension.yaml` holds the declaration. Clio Coder discovers and validates it without importing or executing package code. The `runtime` block is the capability envelope, which is the part you consent to.
+`clio-coder-extension.yaml` holds the declaration. CLIO Coder discovers and validates it without importing or executing package code. The `runtime` block is the capability envelope, which is the part you consent to.
 
 ### Validate and test
 

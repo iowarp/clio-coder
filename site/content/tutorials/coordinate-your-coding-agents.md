@@ -1,16 +1,16 @@
-You can use Clio Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
+You can use CLIO Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
 
 ::: note Version scope
-In v0.8.0 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
+In v0.8.0 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in CLIO Coder.
 :::
 
 ::: needs
-- Clio Coder with one working model connection. The [first session](/tutorials/first-session.html) covers it.
+- CLIO Coder with one working model connection. The [first session](/tutorials/first-session.html) covers it.
 - A peer's CLI installed and signed in under its own account.
 - An assignment whose answer you can check against the repository.
 :::
 
-## See which peers Clio Coder can use
+## See which peers CLIO Coder can use
 
 ```sh
 clio-coder interop inspect --json
@@ -20,7 +20,7 @@ clio-coder configure --interop
 The first command reports what Clio can find; the second configures interoperability. In a terminal conversation, `/library interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
 
 ::: capture tui-interop cli-interop-inspect
-What Clio Coder detected on a machine with three peer CLIs installed but not signed in.
+What CLIO Coder detected on a machine with three peer CLIs installed but not signed in.
 :::
 
 ## Choose managed work or an interactive handoff
@@ -28,7 +28,7 @@ What Clio Coder detected on a machine with three peer CLIs installed but not sig
 The three commands answer different needs. Pick by whether you want a recorded run or a place to work with the peer yourself.
 
 ::: compare
-| Command | What happens | What Clio Coder records |
+| Command | What happens | What CLIO Coder records |
 | --- | --- | --- |
 | `/run <agent-id> <task>` | A configured ACP peer runs the task; `acp:<id>` names one explicitly | The result and a sealed run record |
 | `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a sealed run record |
@@ -43,7 +43,7 @@ The [panes guide](/tutorials/panes-and-docks.html) covers the pane host. Do not 
 Inspect the parser's handling of empty input. Identify the existing tests and propose a regression test. Do not edit files.
 :::
 
-That last sentence is a task instruction, not an enforced boundary. For an enforced one, add `--read-only` to `/run`. Clio Coder admits a read-only run only on a peer whose own sandbox refuses every write, and refuses it before launch on every other peer, ACP peers included.
+That last sentence is a task instruction, not an enforced boundary. For an enforced one, add `--read-only` to `/run`. CLIO Coder admits a read-only run only on a peer whose own sandbox refuses every write, and refuses it before launch on every other peer, ACP peers included.
 
 ## Keep worker authority separate
 
@@ -51,7 +51,7 @@ A native worker inherits the main session's level inside its own permit and OS s
 
 Managed peer dispatches run at default permissions, even when the main session uses `yolo`, and each external agent runs its own tool loop.
 
-A read-only run must leave every file outside Clio Coder's home unchanged. It is admitted only where the peer's own sandbox guarantees that, so check the peer before you rely on it.
+A read-only run must leave every file outside CLIO Coder's home unchanged. It is admitted only where the peer's own sandbox guarantees that, so check the peer before you rely on it.
 
 ::: compare
 | Peer | Read-only headless run in v0.8.0 |
@@ -63,7 +63,7 @@ A read-only run must leave every file outside Clio Coder's home unchanged. It is
 | OpenCode | Refused before launch |
 :::
 
-ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. Clio Coder's own shell commands and native workers' commands run in an OS sandbox when one is available. External peers keep their own authority.
+ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. CLIO Coder's own shell commands and native workers' commands run in an OS sandbox when one is available. External peers keep their own authority.
 
 ## Separate changes with a worktree
 
@@ -77,7 +77,7 @@ A worktree is an organizational boundary. It does not confine a peer's filesyste
 A useful result may be a diagnosis, a patch, or a failed attempt that reveals a missing dependency. Look for the files it touched, the checks it ran, and the limits of its report. A claimed test result and an observed check are different evidence.
 :::
 
-When comparing agents, give them the same task and evaluate the actual output. Record the model, connector, setup, check results, and any costs you can substantiate. Clio Coder coordinating two peers does not make either one better.
+When comparing agents, give them the same task and evaluate the actual output. Record the model, connector, setup, check results, and any costs you can substantiate. CLIO Coder coordinating two peers does not make either one better.
 
 ::: limits
 - Supported modes differ by peer, and some cannot receive live steering.
@@ -86,7 +86,7 @@ When comparing agents, give them the same task and evaluate the actual output. R
 :::
 
 ::: next
-- [Your first session with Clio Coder](/tutorials/first-session.html)
+- [Your first session with CLIO Coder](/tutorials/first-session.html)
 - [Project quality checks](/docs/guide/quality-policy.html)
 - [Interoperability guide](/docs/guide/interop.html)
 :::

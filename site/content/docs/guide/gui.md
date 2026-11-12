@@ -4,7 +4,7 @@ Open the desktop alpha, keep tasks in one window, and read the Session column.
 
 ## Open the desktop app
 
-The desktop app is in alpha. It is a local web application: Clio Coder serves it from your own machine on `127.0.0.1`, and it opens in your browser. It shares the terminal's saved connections and settings and covers a subset of terminal workflows.
+The desktop app is in alpha. It is a local web application: CLIO Coder serves it from your own machine on `127.0.0.1`, and it opens in your browser. It shares the terminal's saved connections and settings and covers a subset of terminal workflows.
 
 ```sh
 clio-coder gui --open
@@ -20,7 +20,7 @@ The installer offers the same step. The background app listens on port 4343, or 
 
 ## One window, many tasks
 
-Launching again brings the open Clio Coder window forward under WSL, when the app is installed through Chrome or Edge, and on a Linux desktop with `wmctrl`, `xdotool` or sway when the background app is running. Otherwise it opens a new browser tab. Open a second window on purpose with **Open in new window** in a task's menu.
+Launching again brings the open CLIO Coder window forward under WSL, when the app is installed through Chrome or Edge, and on a Linux desktop with `wmctrl`, `xdotool` or sway when the background app is running. Otherwise it opens a new browser tab. Open a second window on purpose with **Open in new window** in a task's menu.
 
 Any number of tasks can be open. Up to four turns run at once by default, and the `interface.guiTurnCapacity` setting allows 1 to 16. A further turn shows **Waiting for a slot** and starts when one frees. A task with no running turn that no window has shown for five minutes is paused. Its conversation stays readable, and **Resume session** continues it.
 

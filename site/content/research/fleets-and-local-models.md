@@ -1,4 +1,4 @@
-When is it worth running several agents on one problem, and how small a model can still do useful work? Clio Coder can run workers across local and remote machines, have candidates compete, and convene a council of models. These are shipped controls. We have no comparative numbers on when any of them pays off.
+When is it worth running several agents on one problem, and how small a model can still do useful work? CLIO Coder can run workers across local and remote machines, have candidates compete, and convene a council of models. These are shipped controls. We have no comparative numbers on when any of them pays off.
 
 ::: note Open question, described for v0.6.8
 The fleet features on this page have shipped. This page has no comparative results because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
@@ -19,7 +19,7 @@ Compete runs 2 to 4 candidates in scratch worktrees with a read-only judge. A co
 
 Each run is sealed with its route, tokens, cost, and assessment, so a comparison can be built from records.
 
-Clio Coder reads local servers such as LM Studio, Ollama, and llama.cpp, and asks each for its real serving window where it can. Inception's Mercury diffusion models are available for chat and workers. They are less tested on long agentic work than the models most people use.
+CLIO Coder reads local servers such as LM Studio, Ollama, and llama.cpp, and asks each for its real serving window where it can. Inception's Mercury diffusion models are available for chat and workers. They are less tested on long agentic work than the models most people use.
 
 What is missing is any measurement across these options. A sealed record shows what one run did, which leaves open whether a different arrangement would have done better.
 
@@ -37,7 +37,7 @@ Running four agents costs roughly four times as much, and it is not obvious what
 
 **Try diffusion models on agent work.** Compare Mercury with a token-by-token model of similar speed or price on the same tasks.
 
-## Use Clio Coder on it today
+## Use CLIO Coder on it today
 
 ::: steps
 ### Connect a local model

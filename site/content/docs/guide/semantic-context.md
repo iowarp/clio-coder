@@ -8,7 +8,7 @@ Semantic context is a beta local search index for code maps, wiki pages, approve
 
 ## Set it up and search
 
-Create a target for an embedding route you already run. Clio Coder does not start a server for it. Then configure, refresh, and search:
+Create a target for an embedding route you already run. CLIO Coder does not start a server for it. Then configure, refresh, and search:
 
 ```sh
 clio-coder semantic configure --help

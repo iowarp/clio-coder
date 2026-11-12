@@ -1,6 +1,6 @@
 # Install on a cluster
 
-Install Clio Coder on a login node with an old glibc, a proxy, or no internet.
+Install CLIO Coder on a login node with an old glibc, a proxy, or no internet.
 
 ## Install without root
 
