@@ -703,7 +703,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"fleet.keepPeerInstructionFiles": [
 		"Peers that keep their own instruction files",
-		"Runtime ids (claude-code, codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules Clio compiled for the run beside them. Others read the compiled rules in place of their files.",
+		"Runtime ids (codex-cli, pi-cli, opencode-cli) of delegated harnesses that read their own repository instruction files unchanged, with the rules Clio compiled for the run beside them. Others read the compiled rules in place of their files; claude-code always reads its own beside them.",
 	],
 	"safety.scratchRoots": [
 		"Scratch roots",
