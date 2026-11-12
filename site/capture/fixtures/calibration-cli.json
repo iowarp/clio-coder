@@ -1,0 +1,10 @@
+{
+	"description": "The temperature-calibration project with the playbook command registry from run-a-playbook-and-land-it and one result file for the project store.",
+	"archive": "assets/temperature-calibration.zip",
+	"root": "temperature-calibration",
+	"files": {
+		".clio-coder/playbooks/commands.yaml": "version: 1\ncommands:\n  test:\n    argv: [\"npm\", \"run\", \"test\"]\n  commit:\n    argv: [\"git\", \"commit\", \"-m\", \"{{commitMessage}}\"]\n",
+		"run-042.csv": "ranks,wall_s,checksum\n64,812.4,0x5f3a91c2\n"
+	},
+	"commit": "Add temperature conversions with tests"
+}

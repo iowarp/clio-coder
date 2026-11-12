@@ -291,6 +291,65 @@ try {
 		"URL override preserves the saved choice",
 	);
 	await themeContext.close();
+	// Recordings load the player only on Play, never advance on their own under
+	// reduced motion, and run under the page policy without errors.
+	// Recordings sit on guide pages, so every built page is a candidate.
+	const sitemap = await (await fetch(`${values.url}/sitemap.xml`)).text();
+	const built = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => new URL(loc).pathname);
+	const castPages = [];
+	for (const path of new Set([...primary, ...built])) {
+		const html = await (await fetch(`${values.url}${path}`)).text();
+		if (html.includes(" data-cast=")) castPages.push(path);
+		else assert.ok(!html.includes("/assets/player/"), `${path} references the player without a recording`);
+	}
+	const casts = Object.values(JSON.parse(await readFile(join(site, "content/captures.json"), "utf8")).captures).filter(
+		(item) => item.cast,
+	);
+	assert.ok(
+		!casts.length || castPages.length,
+		`captures.json has ${casts.length} recordings, but no built page embeds one`,
+	);
+	let recordings = 0;
+	let pages = 0;
+	for (const reducedMotion of ["reduce", "no-preference"]) {
+		const castContext = await browser.newContext({ viewport: { width: 1024, height: 900 }, reducedMotion });
+		for (const path of castPages) {
+			const castPage = await castContext.newPage();
+			const errors = [];
+			const player = [];
+			castPage.on("pageerror", (error) => errors.push(error.message));
+			castPage.on("console", (message) => {
+				if (message.type() === "error") errors.push(message.text());
+			});
+			castPage.on("request", (request) => {
+				if (/\/assets\/(?:player|casts)\//.test(request.url())) player.push(request.url());
+			});
+			await castPage.goto(`${values.url}${path}?__static=1`, { waitUntil: "load" });
+			const figures = castPage.locator("figure[data-cast]");
+			const count = await figures.count();
+			assert.ok(count, `${path} embeds a recording`);
+			pages++;
+			assert.deepEqual(player, [], `${path} loads the player only on Play`);
+			// Every recording on the page, each with its own player.
+			for (let index = 0; index < count; index++) {
+				const figure = figures.nth(index);
+				const name = `${path} recording ${index + 1} (${await figure.getAttribute("data-cast")})`;
+				await figure.locator(".cast-play").click();
+				await figure.locator(".cast-player .ap-player").waitFor({ timeout: 10000 });
+				const poster = Number(await figure.getAttribute("data-cast-poster"));
+				await castPage.waitForTimeout(1500);
+				const time = await figure.evaluate((element) => element.castPlayer.getCurrentTime());
+				if (reducedMotion === "reduce") assert.equal(time, poster, `${name}: reduced motion keeps it paused`);
+				else assert.ok(time > 0, `${name}: Play starts it`);
+				if (reducedMotion === "reduce") recordings++;
+			}
+			const scripts = player.filter((url) => new URL(url).pathname.endsWith("/asciinema-player.min.js"));
+			assert.equal(scripts.length, 1, `${path} loads the player script once for ${count} recordings`);
+			assert.deepEqual(errors, [], `${path}: recording errors`);
+			await castPage.close();
+		}
+		await castContext.close();
+	}
 	const plain = await browser.newContext({
 		javaScriptEnabled: false,
 		colorScheme: "light",
@@ -317,8 +376,9 @@ try {
 	await plainPage.locator(".nav-more summary").click();
 	assert.ok(await plainPage.locator(".nav-more a").first().isVisible());
 	await plain.close();
+	console.log(`Recorded captures checked: ${recordings} recordings on ${pages / 2} pages.`);
 	console.log(
-		"Interactions passed: menu keyboard, theme persistence, repeated copying, FAQ, screenshot viewer, search keyboard, active contents, redirects, runtime reduced motion, touch tablet rotation, 404, and no-JavaScript navigation.",
+		"Interactions passed: menu keyboard, theme persistence, repeated copying, FAQ, screenshot viewer, search keyboard, active contents, redirects, runtime reduced motion, touch tablet rotation, 404, no-JavaScript navigation, and recordings.",
 	);
 } finally {
 	await browser.close();

@@ -8,7 +8,7 @@
     "author": "The CLIO Coder team",
     "source": "system-one-decisions.md",
     "basis": "Small samples; first experiment not yet run",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "status": "Open question. System One is off by default.",
     "interfaces": [
       "Terminal"
@@ -26,7 +26,7 @@
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The records have shipped; no study exists yet.",
     "author": "The CLIO Coder team",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
@@ -45,7 +45,7 @@
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. Memory has shipped; its effect is unmeasured.",
     "author": "The CLIO Coder team",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
@@ -82,7 +82,7 @@
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The controls have shipped; no comparison exists.",
     "author": "The CLIO Coder team",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
@@ -96,13 +96,13 @@
   {
     "slug": "scientific-and-hpc-workflows",
     "title": "What would make a scientist trust an agent's change?",
-    "description": "Pre-registered checks, validated modernization and scheduler use on scientific code, with a first experiment on catching a numerical error.",
+    "description": "Pre-registered checks, validated modernization, a project store and scheduler use on scientific code, with a first experiment on catching a numerical error.",
     "category": "Scientific and HPC work",
     "time": "8 min",
     "basis": "Read from source; first experiment not yet run",
     "status": "Open question. The skills have shipped; no study exists.",
     "author": "The CLIO Coder team",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
@@ -110,7 +110,8 @@
     "guides": [
       "guide/slurm.md",
       "guide/hpc-clusters.md",
-      "guide/quality-policy.md"
+      "guide/quality-policy.md",
+      "guide/tool-usage.md"
     ]
   }
 ]

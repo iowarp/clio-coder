@@ -51,7 +51,7 @@ For a future release snapshot, after its matching tag exists:
 python3 site/sync-docs.py --source-ref v<VERSION>
 ```
 
-`product.json.version` describes the documentation source; `publishedVersion` describes the released npm package. They intentionally differ during development. The overview and structured source metadata use `version`, set to the upcoming release while a development tree is pinned (a `-dev` package version is accepted for repository snapshots). The source version link points to the pinned repository snapshot. Keep `publishedVersion` accurate to the npm registry; update it only after confirming the published package. Installation always uses the actual npm package, with no link to an unpublished release tag.
+`product.json.version` describes the documentation source; `publishedVersion` describes the released npm package. They intentionally differ during development. The overview and structured source metadata use `version`, set to the upcoming release while a development tree is pinned (a `-dev` package version is accepted for repository snapshots). A working-tree preview also accepts a pre-release of a later version, such as `0.8.0-rc.1` while the site stays on `0.7.0`; deployment and release checks reject working-tree snapshots, so regenerate the committed pin with `--source-ref v<VERSION>` before committing. The source version link points to the pinned repository snapshot. Keep `publishedVersion` accurate to the npm registry; update it only after confirming the published package. Installation always uses the actual npm package, with no link to an unpublished release tag.
 
 A website can also pin the reviewed source without creating a package release:
 

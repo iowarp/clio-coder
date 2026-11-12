@@ -34,7 +34,7 @@ clio-coder research start --check bench --metric wall_ms --direction min \
   --max-iterations 5 --gate correct --scope stats.py --max-wall-minutes 30
 ```
 
-Each attempt runs in its own Git worktree. Before the first attempt, an A/A check measures the base against itself and refuses a noisy measurement. A change is kept only when it clears both measurement tests and every gate passes:
+Each attempt runs in its own Git worktree. Before the first attempt, an A/A check of the base against itself refuses a noisy measurement unless `--allow-noisy`. A change is kept only when it clears both measurement tests and every gate passes:
 
 - **Measurement:** across interleaved trials, the median improves by at least 5% and a seeded bootstrap interval excludes zero.
 - **Gates:** every gate check passes in the change's worktree.

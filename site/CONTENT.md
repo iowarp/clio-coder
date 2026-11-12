@@ -69,6 +69,13 @@ review, move approved Markdown to `content/tutorials/`, supply actual image
 metadata and reading-time estimates, register it, and run the existing site
 checks. Do not claim a tutorial was tested until its recorded workflow ran.
 
+Learning paths live in `content/paths.json`. Each path serves one kind of reader
+and orders three to five published tutorials as its steps; the build stops if a
+path has fewer or more steps, or names a tutorial that is not published. The
+learn page renders the paths, and every step page gets a path strip with its
+place in the path and Previous and Next links. A step's next list should lead
+to its path successor.
+
 ## Creator history and dates
 
 Anthony's September 27, 2026 account dates the exploration to December 2023,
@@ -104,7 +111,8 @@ tracker or an unsupported adoption claim.
 Tutorials and draft guides render through `tutorial.html` as field guides. The
 heading states the answer (the catalog `description`), the version it was
 written for, the interfaces it uses, and its basis: "Recorded session" only
-when the workflow ran as described; otherwise "Documented workflow". The cover
+when the workflow ran as described; otherwise "Documented workflow". The basis
+names no version; each figure carries its own. The cover
 is a capture id from `content/captures.json`, chosen for the task, never a
 generic screen reused across guides.
 
@@ -144,6 +152,25 @@ host names. Caption what the screen shows, including unwelcome results. Add new
 WebP images to `image-variants.py` and regenerate derivatives. A capture used
 as a guide cover also needs a social preview: run
 `python3 site/image-variants.py --social`.
+
+A terminal capture can carry its recording: `cast` (an asciicast v2 file in
+`assets/casts/`), `transcript` (the plain-text screens beside it), `cols`,
+`rows`, `duration` in seconds, and `posterAt`, the time the still shows. The
+page keeps the still, a download link and the transcript; a Play button loads
+the vendored asciinema player on request, and only pages with a recording allow
+`'wasm-unsafe-eval'` in their policy. `node site/capture/run.mjs --scratch
+<directory> --clio <build> [--only <ids>] [--publish]` reruns the recordings
+in `capture/scenarios.json` in a fresh sandboxed profile, renders their stills
+with the same player, and refuses to publish any that name a host, a user, a
+private address, a key or the model gateway. `node site/capture/run.mjs
+--scratch <directory> --release <version> [--publish]` re-records every scenario
+from that npm release, holding the model lock for the whole recording phase,
+and writes wall and lock times to `<directory>/timings.json`. `node
+site/capture/quote-check.mjs [--scratch <directory>]` checks that each `text`
+fence a tutorial attributes to a recording (the line before it says recording
+or recorded) still appears in that recording's transcript; the release run
+ends with it. `python3 site/capture/cast-symbols.py` rebuilds the symbol
+font the player falls back to for glyphs IBM Plex Mono lacks.
 
 ## Review builds
 

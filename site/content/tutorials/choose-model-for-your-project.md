@@ -1,5 +1,7 @@
 CLIO Coder lets you choose the model connection around your project. Start with the place your code is allowed to go, then choose a model and runtime that can do the task. A local GPU, a model server, an institutional gateway, and a cloud API are different deployment choices.
 
+If you already connected a model, skip to **Separate conversation from worker models** below.
+
 ::: note Version scope
 This guide describes v0.8.0. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
 :::
@@ -50,17 +52,17 @@ Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-co
 
 Answer what you have, then provide the key, sign-in, or server address it asks for. Setup takes the provider's recommended model, or the only model a server lists; otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
 
-### Review the connection, then save
+### Test the connection, then save
 
 Setup sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults, and `/model` changes the model later.
 :::
 
-::: capture tui-configure-source tui-configure-models tui-configure-review
-Guided setup in the terminal, from the route to the review.
+::: capture tui-configure-detected tui-configure-source tui-configure-saved
+Guided setup in the terminal: a model server it found, the routes it offers, and the saved connection.
 :::
 
 ::: result
-The model list says whether it is live, cached, or the provider's catalog. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
+When setup shows a model list, the list says whether it is live, cached, or the provider's catalog; a server that lists one model skips the list. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
 :::
 
 
@@ -74,9 +76,11 @@ Read the tool activity and compare the answer with the project. If it fails, che
 
 ## Separate conversation from worker models
 
-The model answering you need not handle every delegated task. The terminal `/settings` lists the conversation model under **Models** and worker defaults under **Workers**; `clio-coder configure --settings` opens the same menu from the shell. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
+The model answering you need not handle every delegated task. The terminal `/settings` groups its rows into seven areas below **Recent & Pinned**, with the conversation model under **Models** and worker defaults under **Workers**.
 
-::: capture tui-settings-models tui-settings-fleet
+`clio-coder configure --settings` opens the shell menu, which uses eight sections instead: the conversation model is under **Chat** and worker defaults under **Fleet**. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
+
+::: capture tui-settings-models tui-settings-workers
 Terminal settings keep the conversation model and the worker defaults apart.
 :::
 
@@ -97,7 +101,7 @@ Vision support depends on the model and the route. A model advertised as multimo
 :::
 
 ::: next
-- [Your first session with CLIO Coder](/tutorials/first-session.html)
+- [See what a session cost and what a run did](/tutorials/see-what-a-session-cost-and-what-a-run-did.html)
 - [Connection guide](/docs/guide/configuration-and-targets.html)
 - [Install CLIO Coder](/#start)
 :::

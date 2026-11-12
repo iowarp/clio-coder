@@ -161,6 +161,15 @@
 		"summary": "research-and-arena.md"
 	},
 	{
+		"path": "guide/exit-codes-and-output.md",
+		"source": "docs/guide/exit-codes-and-output.md",
+		"title": "Automate with clio-coder run",
+		"group": "Everyday use",
+		"excerpt": "Run one task from a script or CI job, read its exit code, and parse its JSON output.",
+		"description": "Run CLIO Coder from scripts and CI with clio-coder run: bound the run, read the exit code, and parse the JSON event stream.",
+		"summary": "automation.md"
+	},
+	{
 		"path": "guide/configuration-reference.md",
 		"source": "docs/guide/configuration-reference.md",
 		"title": "Configuration essentials",

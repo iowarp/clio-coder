@@ -14,6 +14,8 @@ clio-coder gui background install --open
 
 The installer offers the same step. The background app listens on port 4343, or 7373 when another program holds 4343. It uses saved credentials, so store a key that lives only in your shell with `clio-coder auth login <target>`.
 
+`clio-coder gui` prints one link ending in `#ticket=`. The ticket opens one browser window once, within 60 seconds, and the browser then keeps its own short-lived sign-in. If a window shows the reconnect prompt, for example after the background app restarted, run `clio-coder gui` again or paste the new link into the prompt's **Launch link** field.
+
 ## One window, many tasks
 
 Launching again brings the open CLIO Coder window forward under WSL, when the app is installed through Chrome or Edge, and on a Linux desktop with `wmctrl`, `xdotool` or sway when the background app is running. Otherwise it opens a new browser tab. Open a second window on purpose with **Open in new window** in a task's menu.

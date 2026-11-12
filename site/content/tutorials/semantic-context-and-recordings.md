@@ -1,7 +1,7 @@
-CLIO Coder 0.6.2 can keep a local index of your project that you search by meaning instead of exact words. It covers code maps, wiki pages, approved memory, evidence bundles, recorded worker output, and folders of experiment data you register. CLIO Coder can also record what a dispatched worker displayed, as a redacted terminal cast in that run's evidence. Both start off.
+CLIO Coder can keep a local index of your project that you search by meaning instead of exact words. It covers code maps, wiki pages, approved memory, evidence bundles, recorded worker output, and folders of experiment data you register. CLIO Coder can also record what a dispatched worker displayed, as a redacted terminal cast in that run's evidence. Both start off.
 
-::: note Beta in v0.6.2
-Semantic context and worker recording are new in v0.6.2 and off by default. Commands, supported formats, and the index layout may change between releases. Ordinary startup scans and embeds nothing until you configure the feature.
+::: note Beta, described for 0.8.0
+Semantic context and worker recording arrived in v0.6.2 and are still off by default. Commands, supported formats, and the index layout may change between releases. Ordinary startup scans and embeds nothing until you configure the feature.
 :::
 
 ::: needs
@@ -91,7 +91,7 @@ Capture needs no extra program. For playback, `clio-coder tools install asciinem
 :::
 
 ::: next
-- [Semantic context beta guide](https://github.com/iowarp/clio-coder/blob/v0.6.2/docs/guide/semantic-context.md)
+- [Semantic context beta guide](/docs/guide/semantic-context.html)
 - [Work from a laptop with remote workers](/tutorials/work-from-a-laptop-with-remote-workers.html)
 - [Connect a model](/docs/guide/configuration-and-targets.html)
 :::

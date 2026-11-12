@@ -95,34 +95,34 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "284f41d7dbbef31e43c0e130de517466319c004119878008a851c156568388e7",
-			"provenance": "Actual capture of Clio Coder 0.7.0-rc.1 (commit d84913de3) on 2026-11-07, built from the repository and run in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x; Qwen 3.8 27B through a LiteLLM gateway. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 1-23).",
+			"sha256": "ef5ccb5c3f019bfd07cf7cf27b51f04e431194626ded678677ea3682c1afafd6",
+			"provenance": "Actual capture of CLIO Coder 0.8.0-rc.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
-				"width": 2240,
-				"height": 886
+				"width": 2268,
+				"height": 944
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
+			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.png"],
-			"capturedVersion": "0.7.0-rc.1"
+			"capturedVersion": "0.8.0-rc.1"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "475eb28e4675e342c1983dda75473ebe384d05996583c9a56d6bebd310a29885",
-			"provenance": "Actual capture of Clio Coder 0.7.0-rc.1 (commit d84913de3) on 2026-11-07, built from the repository and run in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. Fixed 120x44 tmux window, ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x; Qwen 3.8 27B through a LiteLLM gateway. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 1-23).",
+			"sha256": "514150f8709dc072f270ddf1fc363f7dc564097f9290059f3c924f6527658f07",
+			"provenance": "Actual capture of CLIO Coder 0.8.0-rc.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
-				"width": 2240,
-				"height": 886
+				"width": 2268,
+				"height": 944
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
-			"altTextSeed": "Clio Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
+			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.webp"],
-			"capturedVersion": "0.7.0-rc.1"
+			"capturedVersion": "0.8.0-rc.1"
 		},
 		{
 			"id": "gui-conversation-png",

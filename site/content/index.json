@@ -75,6 +75,7 @@
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
+      "What the sandbox hides",
       "Verify using your project's checks",
       "How tools reach the model"
     ]
@@ -257,6 +258,7 @@
       "Settings fail to load",
       "A terminal shortcut does not arrive",
       "Work stopped or a check failed",
+      "Report a problem to the maintainers",
       "Exit codes"
     ]
   },
@@ -286,6 +288,21 @@
       "Budgets and stopping",
       "Where results go",
       "Compare models blind"
+    ]
+  },
+  {
+    "path": "guide/exit-codes-and-output.md",
+    "source": "docs/guide/exit-codes-and-output.md",
+    "title": "Automate with clio-coder run",
+    "group": "Everyday use",
+    "excerpt": "Run one task from a script or CI job, read its exit code, and parse its JSON output.",
+    "description": "Run CLIO Coder from scripts and CI with clio-coder run: bound the run, read the exit code, and parse the JSON event stream.",
+    "summary": "automation.md",
+    "headings": [
+      "Run one task from a script",
+      "Read the exit code",
+      "Bound the run",
+      "Read structured output"
     ]
   },
   {

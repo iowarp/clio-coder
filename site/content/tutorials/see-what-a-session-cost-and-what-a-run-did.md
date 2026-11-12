@@ -69,7 +69,7 @@ Figures labelled by provenance, and a `verify` result that names any gap. A clea
 
 ## Control what is kept
 
-`telemetry.mode` defaults to `standard`, which keeps accountability and operational records without prompt content. `research` mode, `telemetry.research.content: true`, and `clio-coder telemetry consent` in the workspace are all required before prompts and request bodies are kept.
+`telemetry.mode` defaults to `standard`, which keeps accountability and operational records without prompt content. `research` mode, `telemetry.research.content: true`, and `clio-coder telemetry consent` for the workspace are all required before prompts and request bodies are kept. Consent is stored in your own state directory, keyed by the workspace's real path, so a file committed to a repository cannot grant it.
 
 `clio-coder telemetry prune` is a dry run unless you pass `--apply`.
 
@@ -80,6 +80,7 @@ Figures labelled by provenance, and a `verify` result that names any gap. A clea
 :::
 
 ::: next
+- [Keep a long coding task on track](/tutorials/keep-long-coding-tasks-on-track.html)
 - [Run it unattended within limits](/tutorials/run-it-unattended-within-limits.html)
 - [Check your installation](/docs/guide/doctor.html)
 :::

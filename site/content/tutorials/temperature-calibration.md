@@ -1,8 +1,14 @@
 A small numerical task makes it easy to follow a change from code to a recorded check. This example converts temperatures between Celsius, Kelvin, and Fahrenheit, validates inputs, and tests physical boundaries without adding dependencies.
 
+::: needs
+- CLIO Coder installed, with a connected model that supports tool calling.
+- Node.js 18.1 or newer and npm on your `PATH`. The installer's private Node.js is not added to `PATH`, so install them yourself.
+- The example archive below, extracted into a project you can open.
+:::
+
 ## Open the example
 
-Download the [runnable temperature-calibration example](/assets/temperature-calibration.zip). It includes the actual implementation, seven tests, and a private package manifest. It uses only the built-in Node.js test runner, so it needs `node` and `npm` on your `PATH` and nothing else. The installer's private Node.js is not added to `PATH`.
+Download the [runnable temperature-calibration example](/assets/temperature-calibration.zip). It includes the actual implementation, seven tests, and a private package manifest. It uses only the built-in Node.js test runner and has no dependencies.
 
 Extract the archive into your project's `examples/` folder, so the files live in `examples/temperature-calibration/`. Open the project in the terminal:
 
@@ -34,9 +40,9 @@ The example’s private `package.json` declares its test command. With the archi
 
 > Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.
 
-Review any permission request before allowing the command. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
+If an approval card appears, read the command before allowing it. In the recorded run, the check exited 0 with seven passing tests, and CLIO Coder read the test file for the table. Naming the file keeps a fast model from searching the project for it.
 
-![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/tui-verify.webp)
+![CLIO Coder in the terminal running the declared test check through verify with exit 0, then showing the reference temperatures from the test file as a table](/assets/guides/tui-verify-table.webp)
 
 To run the same tests yourself from the repository root:
 
@@ -52,3 +58,9 @@ In the terminal, open `/view` and select the `checked test` row. The preview sho
 :::
 
 Passing tests establish the behavior covered by those tests. This small example does not establish the scientific validity of a larger application. For project-specific requirements, see [quality policies](/docs/guide/quality-policy.html) and [tool usage](/docs/guide/tool-usage.html).
+
+::: next
+- [Submit a Slurm job through CLIO Coder](/tutorials/submit-a-slurm-job.html)
+- [Check a change against your repository](/tutorials/check-a-change-against-your-repository.html)
+- [Quality policy guide](/docs/guide/quality-policy.html)
+:::

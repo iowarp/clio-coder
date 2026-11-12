@@ -1,6 +1,6 @@
 When is it worth running several agents on one problem, and how small a model can still do useful work? CLIO Coder can run workers across local and remote machines, have candidates compete, and convene a council of models. These are shipped controls. We have no comparative numbers on when any of them pays off.
 
-::: note Open question, described for v0.6.8
+::: note Open question, described for v0.8.0
 The fleet features on this page have shipped. This page has no comparative results because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome.
 :::
 
@@ -16,6 +16,10 @@ The fleet features on this page have shipped. This page has no comparative resul
 These are facts about the design at this version. They are not study results.
 
 Compete runs 2 to 4 candidates in scratch worktrees with a read-only judge. A council runs two to five read-only members on the same task, with optional vote or judge synthesis. A review gate adds a read-only reviewer and a bounded revise loop. Workers can be routed per agent or per call, on the local machine or on SSH nodes.
+
+Each council member can run as a named agent, such as `coder` or `architect`, with its own target, model and thinking level. The council stays read-only whatever the agent. `/poll` asks 2 to 5 participants one question as a one-round vote and shows the distribution; `--models` spreads them across models.
+
+`arena run --check <id>` runs one declared check in each contender's worktree. The project's check file and the uncommitted files the check names are copied in first, so every contender is scored on the project's bytes, not its own copy.
 
 Each run is sealed with its route, tokens, cost, and assessment, so a comparison can be built from records.
 
@@ -42,7 +46,7 @@ Running four agents costs roughly four times as much, and it is not obvious what
 ::: steps
 ### Connect a local model
 
-Run `clio-coder configure` and choose **Connect by endpoint** for a local server. LM Studio commonly serves at `http://localhost:1234`, and Ollama at `http://localhost:11434`. Choose a model that supports tool calling. The [local model tutorial](/tutorials/run-on-a-local-model.html) walks through it.
+On a new home, `clio-coder` looks for a server on its default port, such as LM Studio at `http://localhost:1234` or Ollama at `http://localhost:11434`, and offers it. On another address, run `clio-coder configure` and choose **A model server or gateway**. Choose a model that supports tool calling. The [local model tutorial](/tutorials/run-on-a-local-model.html) walks through it.
 
 ### Run a single worker with a record
 
@@ -59,6 +63,12 @@ In a session, ask the agent to dispatch your task in compete mode with two candi
 
 ```text
 /council --synthesis judge <task>
+```
+
+For a quick comparison across two targets you have configured, here `workstation` and `lab`, ask one question:
+
+```text
+/poll --models workstation,lab --options yes|no --rationale 4 Is this patch safe to merge?
 ```
 
 Rosters are set in settings. `clio-coder fleet status --json` lists runs, and `clio-coder doctor` reports readiness.
@@ -104,6 +114,7 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 
 ::: next
 - [Choose a model for your project](/tutorials/choose-model-for-your-project.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Fleet guide](/docs/guide/fleet-dispatch.html)
 - [Diffusion models in the terminal](/tutorials/diffusion-models.html)
 :::

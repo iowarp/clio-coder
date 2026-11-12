@@ -1,0 +1,1781 @@
+{
+	"cols": 100,
+	"rows": 30,
+	"idleCap": 1,
+	"proxyPort": 43130,
+	"theme": {
+		"fg": "#eeeae2",
+		"bg": "#1e1e1e",
+		"palette": "#000000:#cd0000:#00cd00:#cdcd00:#4f8ff7:#cd00cd:#00cdcd:#e5e5e5:#7f7f7f:#ff0000:#00ff00:#ffff00:#5c5cff:#ff00ff:#00ffff:#ffffff"
+	},
+	"liveSource": "Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias",
+	"scenarios": [
+		{
+			"id": "cli-doctor",
+			"summary": "doctor --fix creates a fresh install's state, then doctor reports each check",
+			"title": "CLIO Coder doctor on a fresh install",
+			"live": false,
+			"rows": 50,
+			"poster": "healthy",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"type": "clio-coder doctor --fix"
+				},
+				{
+					"pause": 0.4,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.2
+				},
+				{
+					"marker": "repaired"
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"type": "clio-coder doctor"
+				},
+				{
+					"pause": 0.4,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "healthy"
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Doctor",
+				"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
+				"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each."
+			},
+			"cols": 120
+		},
+		{
+			"id": "cast-first-launch",
+			"summary": "a live first launch: setup finds the local model server, tests it, saves, chat opens, and the first prompt is sent",
+			"title": "First launch of CLIO Coder: setup finds a local model and chat opens",
+			"live": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"poster": "setup",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Clio found a way to reach a model",
+					"timeout": 30,
+					"pause": 2.5
+				},
+				{
+					"marker": "setup"
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"marker": "chat"
+				},
+				{
+					"type": "Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Qwen3\\.8 is (?:waiting|thinking)",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"marker": "sent"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 3
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "First launch",
+				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
+				"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt."
+			},
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"endAt": "sent"
+		},
+		{
+			"id": "cast-first-task",
+			"summary": "a live first task: the model finds the absolute-zero bug, fixes it, and runs the declared test check",
+			"title": "A first task in CLIO Coder: fix a failing test and verify",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"poster": "tui-verify-result",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "ready"
+				},
+				{
+					"type": "The absolute-zero test fails. Find the cause, fix it, and run the test check.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "checked test · exit 0",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-verify"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"shot": "tui-verify-result"
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "First task",
+				"alt": "Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted.",
+				"caption": "A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking."
+			},
+			"shots": {
+				"tui-verify": {
+					"image": "assets/tui-verify.webp",
+					"label": "Verify",
+					"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, rereads the file, and runs the declared test check through verify with exit 0.",
+					"caption": "The fix as a one-line diff, then the declared test check through verify, exit 0."
+				},
+				"tui-verify-result": {
+					"image": "assets/guides/tui-verify-result.webp",
+					"label": "Result",
+					"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0 at line 21 of temperature.mjs, the change is one character, all seven tests now pass where six did before, and the fix is uncommitted on main.",
+					"caption": "The report after the check: the cause, the change, the test result, and what was left uncommitted."
+				}
+			},
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			}
+		},
+		{
+			"id": "cast-headless-run",
+			"summary": "clio-coder run --json on a task, its last frame and exit status",
+			"title": "An unattended CLIO Coder run with JSON output",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 100,
+			"rows": 30,
+			"poster": "run-end",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder run --json \"Run the test check and report how many tests pass.\" > run.jsonl; echo \"exit $?\""
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "^exit \\d+",
+					"timeout": 300
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 0.8
+				},
+				{
+					"type": "jq -r 'select(.type == \"turn_end\").message.content[] | select(.type == \"text\").text' run.jsonl"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 1.2
+				},
+				{
+					"marker": "answer"
+				},
+				{
+					"type": "tail -n 1 run.jsonl | jq ."
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"marker": "run-end"
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Unattended run",
+				"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 3 allowed, 0 blocked and 0 permission requests.",
+				"caption": "A headless run: JSON events to a file, exit status 0, the answer, and the run_end event that closes the stream."
+			}
+		},
+		{
+			"id": "cast-sandbox",
+			"summary": "the agent is asked for a token in an untracked .env; the read is hard-blocked",
+			"title": "CLIO Coder refuses to read a project secret",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"homeFiles": {
+				"projects/calibration-lab/.env": "CALIBRATION_API_TOKEN=lab-demo-token-not-real\n"
+			},
+			"cols": 120,
+			"rows": 36,
+			"poster": "blocked",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "ready"
+				},
+				{
+					"type": "Show me the API token in .env.",
+					"delay": 40
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "secret_path_bash|✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"marker": "blocked"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"read": 3,
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"marker": "answer"
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Secret refused",
+				"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's command to list the file's keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
+				"caption": "The project's .env is refused outright; confirmation cannot override the block."
+			}
+		},
+		{
+			"id": "cast-let-it-work",
+			"summary": "doctor's sandbox row, then a scratch-branch task that deletes and rebuilds dist/, then /rewind's preview",
+			"title": "Letting CLIO Coder work: sandbox, snapshot and rewind",
+			"live": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-build",
+			"cols": 120,
+			"rows": 36,
+			"poster": "report",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder doctor"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"marker": "doctor"
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"type": "git switch -c scratch"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 10,
+					"pause": 0.6
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1.5
+				},
+				{
+					"type": "Delete the build output directory, regenerate it, and run the project's test check. Report what you ran.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "\\[?Enter\\]? (?:allow|record answer)",
+					"timeout": 400,
+					"pause": 2
+				},
+				{
+					"marker": "report"
+				},
+				{
+					"type": "/rewind",
+					"delay": 80
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"pause": 2.5
+				},
+				{
+					"marker": "rewind"
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"pause": 3
+				},
+				{
+					"marker": "preview"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 1.5
+				},
+				{
+					"marker": "kept"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "Let it work",
+				"alt": "Terminal recording: clio-coder doctor's shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.",
+				"caption": "Doctor's sandbox row, a rebuild on a scratch branch, and /rewind's preview, closed with Esc so nothing is restored."
+			}
+		},
+		{
+			"id": "still-tui-boot",
+			"summary": "a fresh launch in a configured workspace: the welcome panel with the workspace, its Git state, the model, and the composer",
+			"title": "Terminal at start",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 44,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 30
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"shot": "tui-boot",
+					"rows": [3, 24]
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-boot": {
+					"image": "assets/tui-boot.webp",
+					"label": "Ready",
+					"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.",
+					"caption": "The terminal at start, with the project, its Git state, and the selected model."
+				}
+			},
+			"settings": ["interface: { demo: true, outputDetail: detailed }"]
+		},
+		{
+			"id": "stills-terminal",
+			"summary": "terminal stills: plugin list, /context after one turn, Settings Models and Workers, Library browse and installed, interop",
+			"title": "Terminal stills",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"peers": ["claude", "codex", "opencode", "copilot"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library list --kind plugin",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "plugin:wtfp[\\s\\S]*\\$\\s*$",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"shot": "cli-library-list-plugin",
+					"rows": [1, 21]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "List the files in this repository and say in one line what each is for. Do not change files.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"type": "/context",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Next request",
+					"timeout": 15,
+					"pause": 1
+				},
+				{
+					"shot": "tui-context",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Next request",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/settings",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Sections",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Tab"]
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Connections",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-settings-models",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Sections",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/settings fleet",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Default fleet connection",
+					"timeout": 15,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-settings-workers",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down", "Down"],
+					"delay": 150
+				},
+				{
+					"wait": "❯ Add SSH node",
+					"timeout": 10,
+					"pause": 1
+				},
+				{
+					"shot": "tui-settings-fleet",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "Sections",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/library",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Skills \\d+",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Left", "Left", "Left", "Left"],
+					"delay": 200
+				},
+				{
+					"wait": "❯ Skills",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/"
+				},
+				{
+					"pause": 0.4
+				},
+				{
+					"type": "tdd",
+					"delay": 120
+				},
+				{
+					"wait": "> tdd",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-library-skill-tdd",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape", "Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"gone": "Skills \\d+",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"type": "/library interop",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "proposed",
+					"timeout": 20,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-interop",
+					"rows": [18, 35]
+				},
+				{
+					"keys": ["Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"gone": "proposed",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "/library",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Skills \\d+",
+					"timeout": 15,
+					"pause": 0.5
+				},
+				{
+					"keys": ["Left", "Left", "Left", "Left"],
+					"delay": 200
+				},
+				{
+					"wait": "❯ Skills",
+					"timeout": 10,
+					"pause": 0.5
+				},
+				{
+					"keys": ["s"]
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"keys": ["b"]
+				},
+				{
+					"wait": "tdd",
+					"timeout": 10,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-library-installed",
+					"rows": [5, 22]
+				},
+				{
+					"keys": ["Escape", "Escape", "Escape"],
+					"delay": 400
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-library-list-plugin": {
+					"label": "Plugins",
+					"alt": "Terminal listing the six bundled plugins, hpc, life-science, literature, materio, science-data and wtfp, each with its version, available but not installed, and a description of what it adds.",
+					"caption": "The bundled plugins, listed without installing them."
+				},
+				"tui-context": {
+					"label": "/context",
+					"alt": "Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 200,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
+					"caption": "/context: the probed window, tokens in use, and what fills them."
+				},
+				"tui-settings-models": {
+					"label": "Models",
+					"alt": "Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.",
+					"caption": "Settings: the model answering you, under Models."
+				},
+				"tui-settings-workers": {
+					"label": "Workers",
+					"alt": "Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
+					"caption": "Settings: the default worker's connection, model and thinking level, under Workers."
+				},
+				"tui-settings-fleet": {
+					"label": "Workers",
+					"alt": "Terminal Settings open on Workers with Add SSH node selected under Machines: automatic routing, the ready local node, Tailscale discovery, workers at once, and fleet retry and tool limits.",
+					"caption": "Settings: worker routing, machines, and limits under Workers."
+				},
+				"tui-library-skill-tdd": {
+					"label": "Browse",
+					"alt": "Terminal Library on the Skills tab filtered to tdd: the bundled skill, not installed in user scope, with its version, what it does, and the key to review an install.",
+					"caption": "The Library in Browse mode, filtered to the bundled tdd skill."
+				},
+				"tui-interop": {
+					"label": "/interop",
+					"alt": "Terminal Local coding agents view: Claude Code, Codex, OpenCode and GitHub Copilot proposed for connection and not configured, their inventories with nothing to adopt, Antigravity CLI not installed, and the configuration entry that connecting Claude Code would append.",
+					"caption": "/library interop lists the coding agents CLIO Coder detected and the entry that connecting would add."
+				},
+				"tui-library-installed": {
+					"label": "Installed",
+					"alt": "Terminal Library Installed view at project scope with the tdd skill available and trusted: how to use it with /skill tdd, its kind, source and origin, and the keys to disable, update or remove it.",
+					"caption": "Installed at project scope: how to use the skill and where it came from."
+				}
+			}
+		},
+		{
+			"id": "stills-configure-source",
+			"summary": "guided setup on a fresh profile with no model server: what do you have?",
+			"title": "Guided setup stills",
+			"live": false,
+			"stillsOnly": true,
+			"privateNet": {},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "❯ Guided setup",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "What do you have\\?",
+					"timeout": 30,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-source",
+					"rows": [1, 16]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-configure-source": {
+					"label": "Route",
+					"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind the first three and a path or https address for the setup file.",
+					"caption": "Guided setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file."
+				}
+			}
+		},
+		{
+			"id": "stills-configure-gateway",
+			"summary": "guided setup on a fresh profile with the model gateway reachable: the detected offer, then the manual server route to a saved connection",
+			"title": "Guided setup with a model server",
+			"live": true,
+			"stillsOnly": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "❯ Guided setup",
+					"timeout": 30,
+					"pause": 1
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Set up something else",
+					"timeout": 30,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-detected",
+					"rows": [1, 15]
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "What do you have\\?",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"keys": ["Down"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "server's address",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"type": "127.0.0.1:4000",
+					"delay": 60
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "└  Done",
+					"timeout": 120,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-configure-saved",
+					"rows": [1, 31]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 20,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-configure-detected": {
+					"label": "Detected",
+					"alt": "Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.",
+					"caption": "When setup finds a model server it offers it first; Set up something else leads to the routes."
+				},
+				"tui-configure-saved": {
+					"label": "Saved",
+					"alt": "Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.",
+					"caption": "A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails."
+				}
+			}
+		},
+		{
+			"id": "stills-verify",
+			"summary": "a live turn in a project with the temperature-calibration example under examples/: verify and a table, the check in /view, then an approval card for git push, denied",
+			"title": "Verify, view and approval stills",
+			"live": true,
+			"stillsOnly": true,
+			"profile": "configured",
+			"settings": ["safety: { judge: { enabled: false } }"],
+			"repo": "lab-tools",
+			"fixture": "calibration-project",
+			"remote": true,
+			"cols": 120,
+			"rows": 44,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "Use verify with check test and cwd examples/temperature-calibration, then show the reference temperatures from examples/temperature-calibration/calibration.test.mjs as a table. Do not edit files.",
+					"delay": 15
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "Absolute zero[^\\n]*459\\.67[^\\n]*\\n[^\\n]*└",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 0.8
+				},
+				{
+					"shot": "tui-verify-table"
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 2
+				},
+				{
+					"type": "/view",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "List ·",
+					"timeout": 20,
+					"pause": 1
+				},
+				{
+					"seek": "❯ \\$ checked test"
+				},
+				{
+					"wait": "│ check › test",
+					"timeout": 15,
+					"pause": 1.2
+				},
+				{
+					"shot": "tui-view-result",
+					"rows": [26, 43]
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"gone": "List ·",
+					"timeout": 10,
+					"pause": 0.8
+				},
+				{
+					"type": "Run git push origin main.",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "▌ Run git push[\\s\\S]*✓ Done ·",
+					"approve": "\\[Esc\\]\\s+deny",
+					"answer": "Escape",
+					"approveShot": "tui-approval-effect",
+					"timeout": 300,
+					"pause": 2,
+					"approveRows": [26, 43]
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-verify-table": {
+					"label": "Verify",
+					"alt": "Terminal turn for the verify request: CLIO Coder runs the declared test check in examples/temperature-calibration with exit 0, reads calibration.test.mjs, reports all seven tests passing, and shows freezing point, boiling point and absolute zero in Celsius, Kelvin and Fahrenheit as a table.",
+					"caption": "The declared test check through verify, exit 0, then the reference temperatures read from the test file."
+				},
+				"tui-view-result": {
+					"label": "/view",
+					"alt": "Terminal View dock with the session's records on the left and the checked test row selected; the preview shows check test, its working directory examples/temperature-calibration, exit 0, the test command, and the passing test lines.",
+					"caption": "/view: the recorded check, with its working directory, exit status and output."
+				},
+				"tui-approval-effect": {
+					"label": "Approval",
+					"alt": "Terminal approval card for git push origin main at default autonomy: an outward-consequence header, the exact command, an effect row reading Publishes to origin, undo not guaranteed, the task that asked for it, the timeout notice, and the allow, deny and stop keys.",
+					"caption": "With the safety judge off, an outward command such as git push comes to you; the effect row says what it would change."
+				}
+			}
+		},
+		{
+			"id": "stills-cli",
+			"summary": "terminal stills without a model: extension scaffold and validate, playbook validate and graph, library dry run, interop inspect, project store",
+			"title": "Terminal command-line stills",
+			"live": false,
+			"stillsOnly": true,
+			"peers": ["claude", "codex", "opencode", "copilot"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-cli",
+			"cols": 120,
+			"rows": 120,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder extensions init lint-status --template status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder extensions validate .clio-coder/dev/extensions/lint-status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Registration check[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder extensions test .clio-coder/dev/extensions/lint-status",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "duration_ms[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-extension-validate",
+					"rows": [1, 53]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder playbook validate sdlc --var task=\"Add empty-input handling to the parser\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "compiled 14 plan steps[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder playbook graph sdlc --var task=\"Add empty-input handling to the parser\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "loop review[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-playbook-graph",
+					"rows": [1, 46]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project --dry-run",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "planned install[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder library install skill:tdd --project --dry-run --json",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\n\\}\\s*\\n[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-library-dry-run",
+					"rows": [1, 61]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder interop inspect",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 90,
+					"pause": 1
+				},
+				{
+					"pause": 1
+				},
+				{
+					"shot": "cli-interop-inspect",
+					"rows": [1, 31]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder store put results run-042.csv --note \"baseline, 64 ranks\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "stored results[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder store stat results:run-042.csv",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "backend[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-store-stat",
+					"rows": [1, 12]
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-extension-validate": {
+					"label": "Validate",
+					"alt": "Terminal output: extensions init creates lint-status from the status template under .clio-coder/dev/extensions, validate prints its capability envelope with the status command, exec and net false, its SHA-256, and a passed registration check, and test reports one test passed and none failed.",
+					"caption": "Scaffold, validate and test an extension; validate prints the capability envelope you consent to."
+				},
+				"cli-playbook-graph": {
+					"label": "Graph",
+					"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps with the plan hash; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
+					"caption": "validate runs the preflight and graph prints the compiled waves and loops, both without side effects."
+				},
+				"cli-library-dry-run": {
+					"label": "Dry run",
+					"alt": "Terminal: the tdd skill install as a dry run prints one planned-install line; the --json form then shows the full plan with the project destination under .clio-coder/plugins, the bundled source with its sha256, valid content, and no required, missing or inactive dependencies.",
+					"caption": "A dry run plans the install without writing; the --json form carries the full plan."
+				},
+				"cli-interop-inspect": {
+					"label": "Inspect",
+					"alt": "Terminal interop inspect report: Claude Code, Codex, OpenCode and GitHub Copilot present with ACP not configured, each with its ACP, headless and pane status and the next step, no inventory found, and Antigravity CLI absent.",
+					"caption": "interop inspect: each coding agent CLIO Coder detected, how far it is wired, and the next step."
+				},
+				"cli-store-stat": {
+					"label": "Store",
+					"alt": "Terminal: store put saves run-042.csv under the results tag with a note, then store stat shows its ref, path in the store, size in bytes, modification time, drift none, its sha256, no producing run on record, and the local backend.",
+					"caption": "store put keeps a result under a tag; store stat shows its hash and whether it has drifted."
+				}
+			}
+		},
+		{
+			"id": "stills-slurm",
+			"summary": "doctor --verbose and mcp list with the clio-kit slurm server declared, on a host with no Slurm client",
+			"title": "Slurm setup checks",
+			"live": false,
+			"stillsOnly": true,
+			"hostTools": ["uv", "uvx"],
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-cli",
+			"cols": 120,
+			"rows": 120,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"homeFiles": {
+				".config/clio-coder/mcp.yaml": "version: 1\nservers:\n  - id: slurm\n    command: clio-kit\n    args: [mcp-server, slurm]\n    timeoutMs: 120000\n"
+			},
+			"sourceNote": "clio-kit 2.12.3 installed from PyPI with uv tool install and prepared with clio-kit mcp-server slurm --prepare before the shown commands; mcp.yaml as the guide gives it; sbatch and squeue absent. No job was submitted.",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"type": "uv tool install clio-kit==2.12.3",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Installed[\\s\\S]*\\$\\s*$",
+					"timeout": 240,
+					"pause": 1
+				},
+				{
+					"type": "clio-kit mcp-server slurm --prepare >/dev/null 2>&1; echo prepare exit $?",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "prepare exit 0\\s*\\n[\\s\\S]*\\$\\s*$",
+					"timeout": 240,
+					"pause": 1
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder doctor --verbose | grep -E 'slurm|sbatch'",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "slurm scheduler[\\s\\S]*\\$\\s*$",
+					"timeout": 120,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder mcp list",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 120,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder mcp list --refresh",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 180,
+					"pause": 1
+				},
+				{
+					"pause": 1
+				},
+				{
+					"shot": "cli-slurm-doctor",
+					"rows": [1, 19]
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-slurm-doctor": {
+					"label": "No cluster yet",
+					"alt": "Terminal: doctor --verbose filtered to its Slurm rows reports sbatch not on PATH, clio-kit OK with the slurm server, the slurm MCP server OK as declared and trusted in the user mcp.yaml, and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows the server with no recorded tool catalog, and mcp list --refresh lists its five tools: submit and cancel as execute, list, describe and cluster as read.",
+					"caption": "The setup checks on a host with no scheduler: the server is declared and trusted, its tools are listed, and doctor reports sbatch and squeue missing."
+				}
+			}
+		}
+	]
+}

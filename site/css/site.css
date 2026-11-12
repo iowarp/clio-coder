@@ -140,6 +140,9 @@
 		color: var(--ink-soft);
 		font-size: 1.08rem;
 	}
+	.section-heading > :where(p:not(.eyebrow)) + p {
+		margin-block-start: var(--space-4);
+	}
 	:where(.section-heading) .text-link {
 		margin-block-start: 1.5rem;
 	}
@@ -384,6 +387,10 @@
 	.text-link > span,
 	.feature-list a > span:last-child {
 		color: var(--accent);
+	}
+	/* Keep a link's arrow with its own label when two links share a line. */
+	.text-link:has(+ .text-link) {
+		margin-inline-end: var(--space-6);
 	}
 	.status-dot {
 		display: inline-block;
@@ -802,7 +809,8 @@
 		}
 	}
 
-	.research-method {
+	.research-method,
+	.learning-path {
 		display: grid;
 		grid-template-columns: minmax(8rem, 0.6fr) minmax(0, 2fr);
 		column-gap: 3rem;
@@ -812,18 +820,22 @@
 	.research-method:last-child {
 		padding-block-end: 5rem;
 	}
-	.research-method > .eyebrow {
+	.research-method > .eyebrow,
+	.learning-path > .eyebrow {
 		margin: 0;
 	}
-	.research-method > div > * {
+	.research-method > div > *,
+	.learning-path > div > * {
 		max-inline-size: 65ch;
 	}
-	.research-method h2 {
+	.research-method h2,
+	.learning-path h2 {
 		font-size: 2rem;
 		margin-block-end: 1rem;
 	}
 	.research-method p:not(.eyebrow),
-	.research-method li {
+	.research-method li,
+	.learning-path > div > p {
 		color: var(--ink-soft);
 	}
 	.research-method ol {
@@ -833,12 +845,39 @@
 		gap: 0.6rem;
 	}
 	@media (max-width: 600px) {
-		.research-method {
+		.research-method,
+		.learning-path {
 			display: block;
 		}
-		.research-method > .eyebrow {
+		.research-method > .eyebrow,
+		.learning-path > .eyebrow {
 			margin-block-end: 1rem;
 		}
+	}
+	/* Learning paths: numbered tutorials on one rule, each row a full touch target. */
+	.learning-path ol {
+		margin-block: var(--space-5) 0;
+		padding: 0;
+		list-style: none;
+		border-block-start: 1px solid var(--line);
+	}
+	.learning-path li {
+		display: grid;
+		grid-template-columns: var(--space-7) minmax(0, 1fr) auto;
+		column-gap: var(--space-3);
+		align-items: baseline;
+		border-block-end: 1px solid var(--line);
+	}
+	.learning-path li a {
+		padding-block: var(--space-3);
+	}
+	.learning-path li .caption {
+		white-space: nowrap;
+	}
+	.tutorial-catalog-label {
+		margin-block: 0 var(--space-6);
+		padding-block-start: var(--space-6);
+		border-block-start: 1px solid var(--line);
 	}
 
 	.tutorial-article {
@@ -1667,6 +1706,18 @@
 		.faq-items summary {
 			min-block-size: 2.75rem;
 		}
+		/* Each link gets a 44px touch area; the padding stays inside its own line box. */
+		.path-strip li {
+			gap: 0 var(--space-6);
+			padding-block: 0;
+		}
+		.path-strip-path {
+			padding-block: 0.85rem;
+		}
+		.path-strip li > span,
+		.path-strip li > span a {
+			padding-block: 0.75rem;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		[data-reveal] {
@@ -1887,6 +1938,36 @@
 		margin-block-start: var(--space-1);
 		color: var(--ink);
 	}
+	/* Learning path strip: one row per path the tutorial belongs to. */
+	.path-strip {
+		margin-block-end: var(--space-8);
+		border-block: 1px solid var(--line);
+	}
+	.path-strip ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.path-strip li {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: var(--space-1) var(--space-6);
+		padding-block: var(--space-3);
+		color: var(--ink-soft);
+	}
+	.path-strip li + li {
+		border-block-start: 1px solid var(--line);
+	}
+	.path-strip li > span {
+		padding-block: var(--space-1);
+	}
+	.path-strip-path {
+		font: 0.7rem / 1.5 var(--font-mono);
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		color: var(--secondary);
+	}
 	.guide-cover {
 		margin-block-end: var(--space-8);
 	}
@@ -1969,6 +2050,54 @@
 	.guide-capture .tag,
 	.guide-frame .tag {
 		margin-inline-start: auto;
+	}
+	/* Recorded captures: js/cast.js adds the Play control over the still and
+	   swaps in the player only when pressed. */
+	.cast-stage {
+		position: relative;
+	}
+	.cast-play {
+		position: absolute;
+		inset: auto auto var(--space-5) var(--space-5);
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		min-block-size: 2.75rem;
+		padding: var(--space-2) var(--space-4);
+		background: var(--code);
+		border: 1px solid var(--code-border);
+		border-radius: var(--radius-sm);
+		color: var(--code-ink);
+		font: 0.75rem var(--font-mono);
+		cursor: pointer;
+	}
+	.cast-play:hover,
+	.cast-play:focus-visible {
+		color: var(--clio-teal);
+		border-color: var(--clio-teal);
+	}
+	.cast-download {
+		font: 0.7rem var(--font-mono);
+	}
+	.cast-transcript {
+		margin-block-start: var(--space-3);
+	}
+	.cast-transcript summary {
+		cursor: pointer;
+		font: 0.7rem var(--font-mono);
+		color: var(--muted);
+	}
+	.cast-transcript-text {
+		max-block-size: 24rem;
+		overflow: auto;
+		margin-block-start: var(--space-3);
+		padding: var(--space-4);
+		background: var(--code);
+		border: 1px solid var(--code-border);
+		border-radius: var(--radius);
+		color: var(--code-ink);
+		font: 0.75rem / 1.5 var(--font-mono);
+		white-space: pre;
 	}
 	.guide-frames {
 		display: grid;

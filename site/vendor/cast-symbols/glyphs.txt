@@ -1,0 +1,62 @@
+# Code points in the Cast Symbols subset: what the TUI draws that the site's
+# IBM Plex Mono subset lacks. One point (U+XXXX) or range (U+XXXX..U+YYYY) per line.
+# The web player draws box drawing and blocks (U+2500..U+259F) itself.
+# A new TUI glyph is one line here plus a rerun of site/capture/cast-symbols.py.
+U+2800..U+28FF braille patterns (spinners)
+U+03A3 greek capital letter sigma
+U+03BC greek small letter mu
+U+1D62 latin subscript small letter i
+U+2190 leftwards arrow
+U+2192 rightwards arrow
+U+2197 north east arrow
+U+21A9 leftwards arrow with hook
+U+21AA rightwards arrow with hook
+U+21B0 upwards arrow with tip leftwards
+U+21B3 downwards arrow with tip rightwards
+U+21BA anticlockwise open circle arrow
+U+21BB clockwise open circle arrow
+U+21D2 rightwards double arrow
+U+21E2 rightwards dashed arrow
+U+21F2 south east arrow to corner
+U+2208 element of
+U+2211 n-ary summation
+U+221A square root
+U+221E infinity
+U+222B integral
+U+2248 almost equal to
+U+2260 not equal to
+U+2264 less-than or equal to
+U+2265 greater-than or equal to
+U+2298 circled division slash
+U+23CE return symbol
+U+25AC black rectangle
+U+25B0 black parallelogram
+U+25B1 white parallelogram
+U+25B2 black up-pointing triangle
+U+25B6 black right-pointing triangle
+U+25B8 black right-pointing small triangle
+U+25C2 black left-pointing small triangle
+U+25C6 black diamond
+U+25C7 white diamond
+U+25C9 fisheye
+U+25CB white circle
+U+25CC dotted circle
+U+25CF black circle
+U+25D0 circle with left half black
+U+25D1 circle with right half black
+U+25D4 circle with upper right quadrant black
+U+25F7 white circle with upper right quadrant
+U+2605 black star
+U+266B beamed eighth notes
+U+267B black universal recycling symbol
+U+2699 gear
+U+26A0 warning sign
+U+26A1 high voltage sign
+U+2713 check mark
+U+2714 heavy check mark
+U+2716 heavy multiplication x
+U+2717 ballot x
+U+2726 black four pointed star
+U+2731 heavy asterisk
+U+276F heavy right-pointing angle quotation mark ornament
+U+FFFD replacement character

@@ -2,7 +2,7 @@ What evidence would convince a domain scientist that a change made by an agent i
 
 It also has its own hazards, including schedulers, shared allocations, and results that look plausible while being wrong. CLIO Coder has shipped tools for this work. Nobody has yet studied how far they go.
 
-::: note Open question, described for v0.6.8
+::: note Open question, described for v0.8.0
 The skills and integrations on this page have shipped. This page has no study results because none exist yet, and every experiment here is proposed and not yet run. The team, students, and outside researchers are welcome, especially people who own real scientific codes.
 :::
 
@@ -20,7 +20,13 @@ The library has research skills. `experiment-protocol` pre-registers a performan
 
 `scientific-debugging`, `slurm-jobs`, and `arxiv-literature` are also there, and the `materio` plugin supports materials-science research.
 
-For clusters, CLIO Coder installs without root on a login node, and it reaches Slurm through the clio-kit MCP server, with each submission and cancellation confirmed before it reaches the scheduler. CLIO Coder does not submit its own workers through a scheduler.
+For clusters, CLIO Coder installs without root on a login node. The agent can run `sbatch`, `squeue` and the other Slurm, PBS, LSF and Flux clients itself. They run outside the shell sandbox, and at the default autonomy level the safety judge reviews each one first and asks you when it has no verdict.
+
+The clio-kit MCP server is another route to Slurm. CLIO Coder does not submit its own workers through a scheduler.
+
+Results can live outside the repository in the project store, under named tags. Each stored file keeps a write-once record of where it came from and its hash, and a result written by a `run_script` step also names the script and its inputs. `clio-coder store verify` reports any file whose bytes have changed since.
+
+A `research` campaign can optimize one run of a parameter sweep, or gate every candidate on each run of it. A campaign that was stopped or ran out of wall time picks up with `research resume`, within the budget it started with.
 
 The one worked example is [a temperature-calibration change](/tutorials/temperature-calibration.html), recorded from a real session with seven tests. It is a demonstration on a small task. No study covers real solvers, a domain expert's judgment, or how often an oracle catches an agent's error.
 
@@ -63,6 +69,15 @@ clio-coder library install skill:slurm-jobs --project
 ```
 
 The [pre-registration tutorial](/tutorials/pre-register-a-benchmark.html) and the [Slurm tutorial](/tutorials/submit-a-slurm-job.html) walk through both.
+
+### Keep results out of the tree
+
+```sh
+clio-coder store put results run-042.csv --note "baseline, 64 ranks"
+clio-coder store verify results
+```
+
+`verify` exits 1 when a stored result has changed or gone missing, so a job script can stop on it.
 
 ### Keep the record
 
@@ -109,10 +124,13 @@ Open a GitHub issue on [the repository](https://github.com/iowarp/clio-coder/iss
 - A passing check shows only what that check tests. Choose it with someone who knows the science.
 - Your site's access rules, allocation limits, and data policies apply to anything an agent does there.
 - Do not publish data or code you may not share.
+- The project store keeps no earlier versions of a file and has been exercised on Linux only.
 :::
 
 ::: next
 - [A numerical change, checked with CLIO Coder](/tutorials/temperature-calibration.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
+- [Keep results outside the tree with the project store](/tutorials/keep-results-in-the-project-store.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 :::

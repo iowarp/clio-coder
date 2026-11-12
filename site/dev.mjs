@@ -32,6 +32,7 @@ const mime = {
 	".webmanifest": "application/manifest+json; charset=utf-8",
 	".xml": "application/xml",
 	".txt": "text/plain; charset=utf-8",
+	".cast": "application/x-asciicast",
 	".webp": "image/webp",
 	".mp4": "video/mp4",
 	".png": "image/png",
@@ -40,8 +41,9 @@ const mime = {
 };
 // The built pages inline the theme script; allow exactly the hashes they declare.
 let scriptHashes = "";
-const devCsp = () =>
-	`default-src 'self'; script-src 'self'${scriptHashes}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'`;
+// Pages with a recording also allow WebAssembly compilation for the player, as their meta policy does.
+const devCsp = (cast = false) =>
+	`default-src 'self'; script-src 'self'${cast ? " 'wasm-unsafe-eval'" : ""}${scriptHashes}; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'`;
 function run(command, args) {
 	return new Promise((done, reject) => {
 		const child = spawn(command, args, { cwd: site, stdio: "inherit" });
@@ -133,6 +135,8 @@ const server = createServer(async (request, response) => {
 			status = 404;
 		}
 		let body = await readFile(target);
+		if (extname(target) === ".html" && body.includes("'wasm-unsafe-eval'"))
+			response.setHeader("Content-Security-Policy", devCsp(true));
 		if (extname(target) === ".html" && !url.searchParams.has("__static"))
 			body = Buffer.from(body.toString().replace("</body>", '<script src="/__reload.js" defer></script></body>'));
 		response.writeHead(status, { "Content-Type": mime[extname(target)] ?? "application/octet-stream" });

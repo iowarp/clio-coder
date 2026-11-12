@@ -1,7 +1,7 @@
 Long coding work needs more than saved chat history. You need the current objective, the decisions that still apply, the relevant files, and the checks left to run. CLIO Coder gives you controls for inspecting that context and continuing after a session grows.
 
 ::: note Version scope
-This guide describes the v0.6.8 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
+This guide describes the v0.8.0 context workflow. It does not promise that every detail survives summarization or that a model cannot misunderstand a handoff.
 :::
 
 ::: diagram context-controls
@@ -48,7 +48,7 @@ Read the continuation. Compaction reduces history; it does not prove that the mo
 /handoff Fix the empty-input parser bug: keep the failing case in tests/parser.test.ts, the chosen approach of validating before tokenizing, and rerun the parser tests before finishing.
 :::
 
-Handoffs are bound to the active branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing. To return to a session after quitting, type the `/resume <id>` line from the exit summary; a prefix works when it matches one session.
+Handoffs are bound to the active conversation branch and its decisions. A fork can recall earlier notes without inheriting permission to resume its parent's pending transition. Use `/tree` and `/fork` deliberately, and confirm which branch you are continuing. To return to a session after quitting, type the `/resume <id>` line from the exit summary; a prefix works when it matches one session.
 
 ## Recover an interrupted transition explicitly
 
@@ -65,11 +65,11 @@ A restarted process records an interrupted handoff as paused and waits for your 
 
 ## Keep memory reviewable
 
-Proactive memory is separate from the working context. Open `/memory` and use its **Review** tab to approve a proposed lesson with `a` or reject it with `x`; an observation about one repository should not quietly become a rule for every project.
+Proactive memory is separate from the working context. Open `/memory` and use its **Review** tab to approve a proposed lesson with `a`, or press `x` twice to reject it; an observation about one repository should not quietly become a rule for every project.
 
 Global, procedural, runtime, and agent lessons wait for you. A repository knowledge lesson can be approved automatically once a session records that it held with no contradiction, and a later contradiction demotes it.
 
-In `/settings`, **Memory connection** and **Memory model** choose where memory's model calls run. With neither set, memory uses your chat route and spends model calls there. Turning **Proactive memory** off stops those calls, along with task memory and the memory section of the prompt.
+In `/settings`, under **Context and memory**, **Memory connection** and **Memory model** choose where memory's model calls run. With neither set, memory uses your chat route and spends model calls there. Turning **Proactive memory** off stops those calls, along with task memory and the memory section of the prompt.
 
 Stored memory is not fine-tuning of the underlying model. Its value depends on selection, scope, and whether it is still relevant.
 
@@ -80,7 +80,7 @@ Stored memory is not fine-tuning of the underlying model. Its value depends on s
 :::
 
 ::: next
-- [Your first session with CLIO Coder](/tutorials/first-session.html)
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
 - [Continuity guide](/docs/guide/context-continuity.html)
 - [Resource Library](/docs/guide/resource-library.html)
 :::

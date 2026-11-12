@@ -1,0 +1,7 @@
+{
+	"description": "The tutorial's temperature-calibration project with one boundary bug: kelvinToCelsius rejects absolute zero, so the absolute-zero test fails.",
+	"archive": "assets/temperature-calibration.zip",
+	"root": "temperature-calibration",
+	"edits": [{ "file": "temperature.mjs", "find": "if (kelvin < 0) {", "replace": "if (kelvin <= 0) {" }],
+	"commit": "Add temperature conversions with tests"
+}

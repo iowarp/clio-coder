@@ -27,7 +27,7 @@ clio-coder run --max-cost-usd 2 --timeout 1800 \
 clio-coder run --read-only "Which modules have no tests? Report paths."
 ```
 
-`--read-only` is an enforced ceiling on the main agent, not a request. It denies calls other than reads inside the workspace.
+`--read-only` is an enforced ceiling on the main agent, not a request. No file outside CLIO Coder's home changes: writes are refused, and shell commands run only in a read-only sandbox.
 
 ### Stream it to another program
 
@@ -39,7 +39,7 @@ The stream opens with a `session` header carrying its schema version and ends wi
 
 ### Walk away from an open session
 
-In the terminal, an unanswered permission card is denied after `safety.unattendedAfterSeconds` (300 by default) and the turn continues. A question takes its recommended option. Any key stops the countdown. When you return, `/decisions` shows what was chosen, and the exit summary counts it on an `Unattended` line.
+In the terminal, an unanswered approval card is denied after `safety.unattendedAfterSeconds` (300 by default) and the turn continues. A question takes its recommended option. Any key stops the countdown. When you return, `/decisions` shows what was chosen, and the exit summary counts it on an `Unattended` line.
 
 ### Schedule turns while idle
 
@@ -56,6 +56,38 @@ A bare `/loop` lists the jobs. A loop runs only while its conversation is idle a
 A finished turn with its exit code, not a parked prompt. An exit of 4 means the cost ceiling stopped it. `clio-coder telemetry why-stopped <session>` explains a stop afterward.
 :::
 
+## Read how a run ended
+
+Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
+
+In a separate run of the first step, made for this guide apart from the session at the top of the page, Qwen 3.8 27B worked on a repository with one failing parser test. It fixed the parser, ran the test, committed on the branch, and pushed nothing. Stderr read:
+
+```text
+clio-coder run: --max-cost-usd does not bound unpriced routes: litellm/qwen3.8-27b; declare targets[].pricing to bound them
+clio-coder run: session sjajclvyg6cw
+clio-coder run: observed: 10 tool calls, 0 refused · 1 write · checks passed: npm run test, git diff
+```
+
+A `--json` run of the third step from the same set ended with this frame:
+
+```json
+{"type":"run_end","startedAt":"2026-11-12T19:02:57.365Z","endedAt":"2026-11-12T19:03:09.119Z","exitCode":0,"outcome":"succeeded","safety":{"decisions":{"allowed":3,"blocked":0,"permissionRequested":0},"blockedAttempts":[]}}
+```
+
+::: compare
+| Exit | What it means |
+| --- | --- |
+| `0` | The run settled and succeeded |
+| `1` | It failed: the model was unreachable, a worker did not deliver, or a refused call left the task undone |
+| `2` | A usage error, including `--autonomy yolo` as root outside a container |
+| `3` | At `yolo`, the safety judge blocked too many calls in a row; review the run, then `--continue` |
+| `4` | A cost ceiling, or at `yolo` an autonomous cap on tool calls, minutes, or tokens, stopped it; `--continue` resumes |
+| `124` | `--timeout` expired; the run still settled and sealed |
+| `130`, `143` | Ctrl+C or a SIGTERM stopped it |
+:::
+
+## Pick the right tool
+
 ::: compare
 | When you want | Use | What still stops it |
 | --- | --- | --- |
@@ -65,11 +97,12 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 :::
 
 ::: limits Boundaries
-- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews.
+- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews. At unconfined `yolo` under `safety.sandbox: required`, that retry is refused.
 - `yolo` does not carry over from `settings.yaml` to a headless run. It comes only from that run's own `--autonomy yolo`, and it exits 2 as root outside a detected container.
 :::
 
 ::: next
 - [Let CLIO Coder work without watching every call](/tutorials/let-it-work-with-containment-and-rewind.html)
+- [Report a problem without leaking your machine](/tutorials/report-a-problem-without-leaking-your-machine.html)
 - [Commands and shortcuts](/docs/guide/commands-and-modes.html)
 :::

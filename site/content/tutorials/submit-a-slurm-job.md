@@ -17,7 +17,7 @@ uv tool install clio-kit
 clio-kit mcp-server slurm
 ```
 
-The second command lets clio-kit prepare its private runtime, which can take longer than the 15-second bound on a first launch. Stop it with Ctrl-C once it is running.
+The second command lets clio-kit prepare its private runtime, which can take longer than the 15 seconds CLIO Coder allows a server to start on a first launch. Stop it with Ctrl-C once it is running.
 
 ## Declare it
 
@@ -32,14 +32,30 @@ servers:
     timeoutMs: 120000
 ```
 
-Keep the id `slurm`. The skill expects it, and it is what switches on the confirmation for allocations.
+Keep the id `slurm`. The `slurm-jobs` skill you install below expects it, and it is what switches on the confirmation for allocations.
 
 ```sh
 clio-coder doctor --verbose
-clio-coder mcp list
+clio-coder mcp list --refresh
 ```
 
-`doctor --verbose` shows `slurm clio-kit`, `slurm mcp server`, and `slurm scheduler` rows. Those rows are informational or warnings, and they never fail the check.
+Until the first refresh, plain `mcp list` shows the declaration with no recorded tool catalog. `--refresh` starts each trusted server, lists its tools live, and records the catalog.
+
+Plain `doctor` folds the Slurm checks into one row while none of them needs attention:
+
+```text
+OK   slurm                  ready: clio-kit, mcp server, scheduler
+INFO scheduler commands     sbatch is on PATH: scheduler commands run outside the shell sandbox with approval
+```
+
+`doctor --verbose` prints the `slurm clio-kit`, `slurm mcp server` and `slurm scheduler` rows separately, and a row with a warning always keeps its own line.
+
+The server row names the `mcp.yaml` that declares it and its trust. The scheduler row means only that `sbatch` and `squeue` answered `--version`; it does not contact the controller. None of these rows fails the check.
+
+The host in the picture below has no Slurm client, so its scheduler row reads `INFO slurm scheduler        sbatch not on PATH; squeue not on PATH`. The two rows above are what a host with the clients prints.
+
+::: capture cli-slurm-doctor
+:::
 
 ## Install the skill
 
@@ -48,22 +64,29 @@ clio-coder library install skill:slurm-jobs --project --dry-run
 clio-coder library install skill:slurm-jobs --project
 ```
 
-::: capture cli-slurm-doctor
-:::
-
 ## Submit one job
 
 ::: prompt Example
 /skill slurm-jobs Run scripts/smoke.sbatch on the debug partition with 2 cores for 5 minutes. Report the exit code and the last lines of stdout.
 :::
 
-The skill checks that the server is declared, looks at the partition, and submits once. The submission is confirmed before the job reaches the scheduler. When the safety judge has no verdict, a permission card appears, so read the script, cores, memory, and time limit before you press Enter.
+The skill checks that the server is declared, looks at the partition, and submits once. The submission is confirmed before the job reaches the scheduler. When the safety judge has no verdict, an approval card appears, so read the script, cores, memory, and time limit before you press Enter.
 
 The skill then polls with a growing wait until the job reaches a terminal state, and fetches bounded output.
 
 ::: result What you should see
 The answer ends with a line in this form: `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. Check that job id against `squeue` or `sacct` if the result matters.
 :::
+
+To keep a job's output beside its record rather than in scratch space, ask the agent to put it into the project store, or run `clio-coder store put results <stdout path> --note "Slurm job <id>"` yourself. The store lives on the host where CLIO Coder runs, here the login node, and records where each file came from.
+
+## Without the server
+
+The agent can also run `sbatch`, `squeue`, `scancel` and the other Slurm, PBS, LSF and Flux clients through `bash`. They run outside the shell sandbox, because they reach the scheduler through a host daemon the sandbox blocks, and they get the same review as `ssh`.
+
+At `default` the safety judge decides first and asks you when it has no verdict. Contained `yolo` runs one only when your own message names it, and unconfined `yolo` runs it.
+
+A script that calls `sbatch` itself stays inside the sandbox and fails there, and so does a workspace file named like a client, such as `./sbatch`. Submit from the command line the agent runs, not from a wrapper. With `safety.sandbox: required` at unconfined `yolo`, only a one-line `sbatch`, `squeue`, `scancel`, `sacct` or `sinfo` with listed options leaves the sandbox; `srun`, `salloc` and `flux` stay inside.
 
 ## Cancel a job
 
@@ -77,6 +100,8 @@ Ask the agent to cancel the job by id. Cancelling is confirmed the same way, and
 :::
 
 ::: next
+- [Run a research campaign and a blind arena](/tutorials/run-a-research-campaign-and-a-blind-arena.html)
+- [Pre-register a benchmark before you measure](/tutorials/pre-register-a-benchmark.html)
 - [Slurm workflows](/docs/guide/slurm.html)
 - [Install on a cluster](/docs/guide/hpc-clusters.html)
 - [What would make a scientist trust an agent's change?](/research/scientific-and-hpc-workflows.html)

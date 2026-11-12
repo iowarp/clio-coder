@@ -5,7 +5,7 @@ This guide describes v0.8.0. Bare `clio-coder` in an interactive terminal opens 
 :::
 
 ::: needs
-- The pane host. The installer provisions it; after an npm or bun install, run `clio-coder panes install`.
+- The pane host. The installer provisions it and a launch after an upgrade installs the new pin. After an npm or bun install, or when the installer could not fetch it, run `clio-coder panes install`; until then CLIO Coder starts in the plain terminal and says so once.
 - Yazi for the files dock: `clio-coder tools install yazi`.
 - cliamp for music: `clio-coder tools install cliamp`.
 :::
@@ -18,7 +18,9 @@ Panes are on whenever the terminal allows them. Start CLIO Coder in your project
 clio-coder
 ```
 
-It opens its own pane host and hands the terminal back when you quit. From a pane of your own Herdr session, `clio-coder --with-panes` joins that session as a guest instead. A session started inside tmux, Zellij, or screen stays in the plain terminal with no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside CLIO Coder.
+It opens its own pane host and hands the terminal back when you quit. The host is CLIO Coder's own pinned copy of Herdr; a Herdr of yours on `PATH`, with its config and sessions, is never used or touched.
+
+Inside your own Herdr session, bare `clio-coder` opens its host nested in that pane; `clio-coder --with-panes` joins your session as a guest instead. A session started inside tmux, Zellij, or screen stays in the plain terminal with no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside CLIO Coder.
 
 ## Three docks, one habit
 

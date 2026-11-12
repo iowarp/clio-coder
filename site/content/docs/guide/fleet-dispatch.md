@@ -29,7 +29,7 @@ Native workers run their shell, script, and verification commands in an OS sandb
 
 Your own session's shell commands run in the same kind of sandbox at `default` and at contained `yolo`, which is yolo's default. At unconfined `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
 
-When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch.
+When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch. `clio-coder fleet land` lists the branches finished runs kept, previews one, and lands it.
 
 ## Run a playbook when you need one
 
@@ -37,10 +37,9 @@ When a worker's task branch would merge with a failing or unrun check, the termi
 clio-coder playbook list
 clio-coder fleet run sdlc --var task="Add empty-input handling to the parser"
 clio-coder fleet status
-clio-coder fleet land
 ```
 
-A playbook combines workers into a workflow such as a review gate, competing solutions, or a council. The fleet runs it. Copy a builtin with `clio-coder playbook new <name> --from sdlc`, check it with `clio-coder playbook validate <name>`, and inspect the approval preview before starting. `fleet land` lists, previews, and lands the task branches a run kept. See [the playbook tutorial](/tutorials/run-a-playbook-and-land-it.html).
+A playbook combines workers into a workflow such as a review gate, competing solutions, or a council. The fleet runs it. Copy a builtin with `clio-coder playbook new <name> --from sdlc`, check it with `clio-coder playbook validate <name>`, and inspect the approval preview before starting. Its steps work and commit in your checkout, so there is nothing to land afterwards. See [the playbook tutorial](/tutorials/run-a-playbook-and-land-it.html).
 
 ## Give workers MCP tools
 

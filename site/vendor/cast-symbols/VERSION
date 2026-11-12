@@ -1,0 +1,10 @@
+Cast Symbols: a subset of DejaVu fonts 2.37, renamed as the Bitstream Vera license requires.
+Upstream: https://github.com/dejavu-fonts/dejavu-fonts/releases/tag/version_2_37
+Archive: https://github.com/dejavu-fonts/dejavu-fonts/releases/download/version_2_37/dejavu-fonts-ttf-2.37.tar.bz2
+Archive sha256: fa9ca4d13871dd122f61258a80d01751d603b4d3ee14095d65453b4e846e17d7
+Sources (ttf/ in the archive):
+  DejaVuSansMono.ttf sha256 b4a6c3e4faab8773f4ff761d56451646409f29abedd68f05d38c2df667d3c582
+  DejaVuSans.ttf     sha256 7da195a74c55bef988d0d48f9508bd5d849425c1770dba5d7bfc6ce9ed848954 (braille only)
+Glyphs: glyphs.txt
+Rebuild: python3 site/capture/cast-symbols.py --dejavu <archive>/ttf  (needs fontTools and brotli; --check verifies)
+Files: cast-symbols.woff2, glyphs.txt, LICENSE, VERSION

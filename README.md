@@ -186,7 +186,7 @@ removed and what they kept. See [installation and lifecycle](docs/guide/installa
 ## What you can do
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="CLIO Coder terminal at start, with the project, its Git state, the selected model, and the composer" width="100%" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/screenshots/tui-boot.webp" alt="CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready." width="100%" /></a>
 </p>
 
 **Change scientific code and prove it.** Say what "done" means: tests, a
