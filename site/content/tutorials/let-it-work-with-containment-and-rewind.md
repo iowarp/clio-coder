@@ -20,6 +20,8 @@ clio-coder doctor
 
 Look for the `shell sandbox` row. It names the backend and where contained commands may write. If no backend exists, commands outside the recognized set go to the judge and then to you, so the rest of this guide still holds with more questions.
 
+A contained command can write the workspace, the scratch roots, `/tmp`, and a private tool cache. Your own `~/.cache` and `~/.npm` stay read-only. Credentials, credential variables, secret files such as `.env`, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in `safety.scratchRoots`.
+
 ### Give it a task and watch what happens
 
 On a scratch branch, type this:
@@ -70,12 +72,16 @@ clio-coder --autonomy yolo
 
 The first interactive activation shows a one-time acceptance card, and yolo is refused as root outside a detected container. A short floor still blocks deleting your home directory or a system tree, `mkfs`, writes to a block device, fork bombs, and reads of CLIO Coder's credential store. Your project's approved rules and the run's ceilings also hold. Snapshots stay on.
 
+After 600 tool calls since you last spoke, set by `safety.limits.autonomousToolCalls`, the session pauses until you continue.
+
 Unconfined yolo is the skip-permissions mode for a container or another disposable environment: nothing asks, and commands run unsandboxed with your credentials. It takes effect only with `safety.yoloConfinement: unconfined` in your user settings and its own one-time acceptance. The footer shows which one is active.
+
+To keep unconfined yolo inside the sandbox, also set `safety.sandbox: required`. Commands then run contained, and a retry with `unsandboxed: true` is refused. An outward command such as `git push` or `gh pr create` leaves the sandbox only as one literal command on that tool's short option list, with no pipe, redirect, or substitution. `doctor` reports which rule applies.
 
 ::: compare
 | | `default` | `yolo`, contained | `yolo`, unconfined |
 | --- | --- | --- | --- |
-| Shell commands | In the OS sandbox when a backend exists | As at `default` | Unsandboxed as you |
+| Shell commands | In the OS sandbox when a backend exists | As at `default` | Unsandboxed as you, unless `safety.sandbox: required` |
 | Would-be approvals | Judge first, then you | Judge first, then refused back to CLIO Coder | None |
 | Your questions | Wait, then resolve after the timeout | Answered at once | Answered at once |
 | Workers | Own sandbox, asks go to the judge | Dispatched as at `default` | Own sandbox, run the yolo way in their scope |
