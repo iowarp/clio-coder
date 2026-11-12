@@ -5,6 +5,22 @@ operational errors, permission denials, target connection failures, and system
 diagnostics in the current source tree. Each quoted message exists in source;
 `<angle brackets>` mark values CLIO Coder fills in.
 
+## First problems
+
+Most first-day problems are one of these. Run `clio-coder doctor` first: its
+`chat` row names what is missing and the command that fixes it.
+
+| You see | Do this | More |
+| --- | --- | --- |
+| `clio-coder: command not found` right after installing | The installer put the launcher in `~/.local/bin`, which this shell does not have on `PATH`. Open a new shell, or run the `export PATH=...` line the installer printed last. | [Installation](installation-and-lifecycle.md#install-clio-coder) |
+| `<target> at <url> did not answer (<detail>). Start the server, or change the address with /config.` | The model server is not running or the address is wrong, often a local server that was not started. Start it, then rerun `clio-coder doctor`. | [Configuration and targets](configuration-and-targets.md#configure-targets) |
+| `<provider> has no key or sign-in stored. Run: clio-coder auth login <provider>`, or a `connection <id>` row that names HTTP 401 or 403 | The key is missing, wrong or expired. Run the `auth login` command it names, or fix the connection in `/config`. | [Doctor](doctor.md#core-install-rows) |
+| `orchestrator model '<model>' on target '<id>' reports no tool support; Clio drives every agent role through typed tools.` | CLIO Coder works only through tools, so this model cannot read a file or run a command. Pick another with `/model`, or `clio-coder targets use <id> --model <model>`. | [Configuration and targets](configuration-and-targets.md#chat) |
+| `shell sandbox` row is `WARN`: `default-autonomy shell commands run uncontained and keep the approval rails (<reason>)` | This host has no OS sandbox, so more commands ask first. On Linux, install the `bubblewrap` package; a container must also allow unprivileged user namespaces. CLIO Coder still works without it. | [Sandbox and safety](sandbox-and-safety.md) |
+| The final reply names an open decision, and a call was denied because nobody answered its card | A card nobody answers within `safety.unattendedAfterSeconds` (300 seconds by default) is denied and the turn continues. Name the action in your request so the safety judge can allow it, or set the value to `0` to wait for you forever. | [Sandbox and safety](sandbox-and-safety.md#how-each-level-treats-an-escaping-command) |
+
+The sections below list every message by area.
+
 ---
 
 ## Install and startup
