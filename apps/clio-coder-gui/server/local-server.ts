@@ -299,10 +299,15 @@ export async function launchTicket(port: number, token: string) {
 	const ticket = answer?.status === 200 ? answer.value?.ticket : undefined;
 	return typeof ticket === "string" && /^[\w-]{43}$/.test(ticket) ? ticket : null;
 }
-export async function waitForLocalServer(port: number, token: string): Promise<LocalServerMeta> {
+/** With `current`, each attempt proves the token the app published last, since a starting app rotates it. */
+export async function waitForLocalServer(
+	port: number,
+	token: string,
+	current?: () => Promise<string>,
+): Promise<LocalServerMeta> {
 	const deadline = performance.now() + 15_000;
 	while (performance.now() < deadline) {
-		const meta = await findLocalServer(port, token);
+		const meta = await findLocalServer(port, current ? await current().catch(() => token) : token);
 		if (meta) return meta;
 		await setTimeout(200);
 	}

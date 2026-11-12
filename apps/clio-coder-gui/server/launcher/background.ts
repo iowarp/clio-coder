@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { backgroundCapability } from "../../contracts/launch-capability.js";
 import { getVersionInfo, resolveClioDirs } from "../clio/http-shims.js";
@@ -29,7 +30,7 @@ const hash = (value: string) => createHash("sha256").update(value).digest("hex")
 type Control = typeof controlService;
 type Files = ReturnType<typeof backgroundPaths>;
 /** Resolves once the app answers; a fake in tests may resolve without its report. */
-type Ready = (port: number, token: string) => Promise<LocalServerMeta | unknown>;
+type Ready = (port: number, token: string, current?: () => Promise<string>) => Promise<LocalServerMeta | unknown>;
 const serverReport = (meta: unknown) => ({
 	running:
 		meta && typeof meta === "object" && typeof (meta as LocalServerMeta).clio === "string"
@@ -82,14 +83,20 @@ export async function sameInstallation(left: string, right: string) {
 	const root = await nativeInstallRoot(installed);
 	return root !== null && root === (await nativeInstallRoot(current));
 }
-async function publishOwned(directory: string, config: BackgroundConfig, files: Files, replace: boolean) {
+async function publishOwned(
+	directory: string,
+	config: BackgroundConfig,
+	files: Files,
+	replace: boolean,
+	unitChanged = true,
+) {
 	const configText = `${JSON.stringify(config, null, 2)}\n`,
 		unit = backgroundUnit(config, directory);
 	const staging = await mkdtemp(join(dirname(directory), ".clio-coder-background-"));
 	try {
 		await writeFile(join(staging, "server.json"), configText, { flag: "wx", mode: 0o600 });
 		await readBackgroundConfig(join(staging, "server.json"));
-		await writeFile(join(staging, files.unit), unit, { flag: "wx", mode: 0o600 });
+		if (unitChanged) await writeFile(join(staging, files.unit), unit, { flag: "wx", mode: 0o600 });
 		await writeFile(
 			join(staging, "owner.json"),
 			`${JSON.stringify({ v: OWNER_VERSION, owner: "clio-coder-gui-background", config: hash(configText), unit: hash(unit) })}\n`,
@@ -98,7 +105,7 @@ async function publishOwned(directory: string, config: BackgroundConfig, files: 
 		if (replace) {
 			// The manifest moves last: ownership never blesses a mixture of the old and new launch files.
 			await rename(join(staging, "server.json"), files.config);
-			await rename(join(staging, files.unit), files.unitFile);
+			if (unitChanged) await rename(join(staging, files.unit), files.unitFile);
 			await rename(join(staging, "owner.json"), files.manifest);
 		} else {
 			// Rename publishes all three files together and refuses a nonempty competing directory.
@@ -111,7 +118,18 @@ async function publishOwned(directory: string, config: BackgroundConfig, files: 
 
 /** The manifest version 0.8.0 writes; 0.7.0 wrote 1 (`upgradeLegacyBackground`). */
 const OWNER_VERSION = 2;
-async function owned(directory: string) {
+async function owned(directory: string, retry = true): Promise<Owned> {
+	try {
+		return await ownedOnce(directory);
+	} catch (error) {
+		// A starting app renames its new launch token in just before the manifest that blesses it.
+		if (!retry) throw error;
+		await setTimeout(50);
+		return owned(directory, false);
+	}
+}
+type Owned = Awaited<ReturnType<typeof ownedOnce>>;
+async function ownedOnce(directory: string) {
 	const files = backgroundPaths(directory);
 	const manifest = await contents(files.manifest),
 		configText = await contents(files.config),
@@ -137,6 +155,23 @@ async function owned(directory: string) {
 		);
 	}
 }
+/**
+ * Every start of the background app draws a new launch token and publishes it, with the manifest that
+ * blesses it, before it listens, so a copy of an earlier token (and so every credential bought with
+ * one) opens nothing after a restart. Launchers read the token from the file after they start the app.
+ */
+export async function rotateBackgroundToken(configFile: string): Promise<BackgroundConfig> {
+	const directory = dirname(resolve(configFile));
+	const state = await owned(directory);
+	if (state.status !== "installed" || state.files.config !== resolve(configFile))
+		throw new Error("Persistent mode starts only from a verified background setup. No files were changed.");
+	const config = { ...state.config, token: randomBytes(32).toString("base64url") };
+	// The token is not in the unit; leaving its file alone keeps the service manager from seeing a change.
+	await publishOwned(directory, config, state.files, true, false);
+	return config;
+}
+/** The launch token the app published last: one it starts rotates it, so a launcher waits on the file's. */
+const currentToken = (files: Files) => async () => (await readBackgroundConfig(files.config)).token;
 async function serviceState(files: Files, control: Control) {
 	const text = await control("show", files.unit, files.unitFile);
 	const values = Object.fromEntries(
@@ -228,7 +263,7 @@ export async function installBackground(
 	await control("enable", files.unit, files.unitFile);
 	if (launchMoved) await control("restart", files.unit, files.unitFile);
 	// The app falls back to its second port while another program holds the first; report where it listens.
-	const port = serverReport(await ready(config.port, config.token)).port ?? config.port;
+	const port = serverReport(await ready(config.port, config.token, currentToken(files))).port ?? config.port;
 	await installLauncher(config.desktopPrefix, { ...config.launch, background: directory });
 	return { status: "installed", unit: files.unit, origin: `http://127.0.0.1:${port}`, directory };
 }
@@ -326,7 +361,7 @@ async function pinCurrentLaunch(
 async function startOwned(state: Installed, control: Control, ready: Ready, action: "start" | "restart" = "start") {
 	await serviceState(state.files, control);
 	await control(action, state.files.unit, state.files.unitFile);
-	const report = serverReport(await ready(state.config.port, state.config.token));
+	const report = serverReport(await ready(state.config.port, state.config.token, currentToken(state.files)));
 	return {
 		url: `http://127.0.0.1:${report.port ?? state.config.port}/`,
 		...report,

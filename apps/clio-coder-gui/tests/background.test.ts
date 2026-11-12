@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { type ChildProcess, spawn } from "node:child_process";
 import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -27,6 +29,7 @@ import {
 } from "../server/launcher/background-config.js";
 import { desktopEntry } from "../server/launcher/desktop-entry.js";
 import { launcherStatus } from "../server/launcher/install.js";
+import { findLocalServer } from "../server/local-server.js";
 import { serverOptions } from "../server/options.js";
 import { autoOpenBrowser, type controlService, serviceCommand } from "../server/process-policy.js";
 
@@ -572,4 +575,67 @@ test("opening after activation repins the service and restarts only idle work, i
 	await startCurrentBackground(directory, launch, control, ready);
 	assert.equal((await readBackgroundConfig(files.config)).launch.entry, launch.entry);
 	assert.ok(calls.includes("restart"), "rollback opening selects the restored executable once idle");
+});
+
+test("every start of the background app draws a new launch token, so an earlier copy opens nothing", {
+	timeout: 90_000,
+}, async (t) => {
+	const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
+	if (!(await stat(join(clientDir, "index.html")).catch(() => null))) {
+		await mkdir(clientDir, { recursive: true });
+		await writeFile(join(clientDir, "index.html"), "<h1>Fixture client</h1>");
+		t.after(() => rm(clientDir, { recursive: true, force: true }));
+	}
+	const root = await mkdtemp(join(tmpdir(), "clio-web-background-rotate-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const directory = join(root, "background"),
+		files = backgroundPaths(directory);
+	const port = await new Promise<number>((resolve) => {
+		const probe = createServer().listen(0, "127.0.0.1", () => {
+			const { port } = probe.address() as AddressInfo;
+			probe.close(() => resolve(port));
+		});
+	});
+	const config = await newBackgroundConfig(port, launch, join(root, "desktop"));
+	// The service manager, played here: start and restart run the unit's own command line.
+	let app: ChildProcess | null = null;
+	const stopApp = async () => {
+		if (app && app.exitCode === null) {
+			const exited = new Promise((resolve) => app?.once("exit", resolve));
+			app.kill("SIGTERM");
+			await exited;
+		}
+		app = null;
+	};
+	t.after(() => app?.kill("SIGKILL"));
+	let enabled = false;
+	const control: typeof controlService = async (action) => {
+		if (action === "enable") enabled = true;
+		if (action === "restart" || action === "stop") await stopApp();
+		if (action === "start" || action === "restart")
+			app ??= spawn(launch.node, ["--import", launch.loader, launch.entry, "--persistent", files.config], {
+				stdio: "ignore",
+			});
+		return `FragmentPath=${enabled ? files.unitFile : ""}\nActiveState=${app ? "active" : "inactive"}\nUnitFileState=enabled\nMainPID=0\n`;
+	};
+	await installBackground(directory, config, control, async () => {});
+	const unit = await stat(files.unitFile);
+	const seen = [config.token];
+	for (const open of [
+		() => startBackground(directory, control),
+		async () => (await restartBackground(directory, control)).url,
+	]) {
+		// The launcher finds the app with no operator step although the app replaced the token it read.
+		assert.equal(await open(), `http://127.0.0.1:${port}/`);
+		const token = (await readBackgroundConfig(files.config)).token;
+		assert.ok(!seen.includes(token), "this start drew a new launch token");
+		for (const earlier of seen)
+			assert.equal(await findLocalServer(port, earlier), null, "an earlier token opens nothing");
+		assert.ok(await findLocalServer(port, token));
+		assert.equal((await backgroundStatus(directory, control, findLocalServer)).ready, true);
+		seen.push(token);
+	}
+	await stopApp();
+	assert.equal((await stat(files.unitFile)).mtimeMs, unit.mtimeMs, "the unit file is left alone");
+	assert.equal((await stat(files.config)).mode & 0o777, 0o600);
 });

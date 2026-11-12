@@ -16,7 +16,7 @@ import {
 	resolvePackageRoot,
 	runningBuildId,
 } from "./clio/http-shims.js";
-import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
+import { backgroundEnvironment } from "./launcher/background-config.js";
 import { listenPorts } from "./launcher/ports.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
@@ -177,7 +177,10 @@ export async function main(args = process.argv.slice(2)) {
 		backgroundAbsent = reused.kind === "absent";
 	}
 	if (bundled && values.fixture) throw new Error("Fabricated tool fixtures are available in source mode only.");
-	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
+	// A fresh launch token on every start: a copy of an earlier one, and its credentials, open nothing.
+	const persistent = values.persistent
+		? await (await import("./launcher/background.js")).rotateBackgroundToken(values.persistent)
+		: undefined;
 	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
 	const port = persistent?.port ?? values.port;
 	// Read before anything starts, so a parent that sends nothing costs no workers or children.
