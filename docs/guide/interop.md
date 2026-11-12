@@ -142,7 +142,7 @@ off so the peer reads one source:
 | `claude-code` | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`; `AGENTS.md` when none | coexist | none |
 | `codex-cli` | `AGENTS.override.md`, else `AGENTS.md` | single source | `-c project_doc_max_bytes=0` |
 | `pi-cli` | `AGENTS.md`, else `CLAUDE.md` | single source | `--no-context-files` |
-| `opencode-cli` | the first of `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` present in any of them, in each directory that has it | overlay in a task worktree, else coexist | none |
+| `opencode-cli` | the first of `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` present in any of them, in each directory that has it | overlay in a task worktree whose write root leaves the files out, else coexist (every run today) | none |
 
 Claude Code reads its files beside the compiled rules: its only switch,
 `--setting-sources user`, would also skip the project's `.claude/settings.json`
@@ -155,10 +155,14 @@ worktree's index and put back before the change is taken, so it never reaches
 the task branch, even when the run dies before the restore; the run's claim
 names the overlaid files, so restart recovery puts them back. The overlay is
 skipped when the task names one of those files or declares a directory that
-covers one (a write root of `.` covers them all), when one is not a regular file
+covers one, when the run has no write boundary (none declared, or a write root
+of `.`), because it may then edit any of them, when one is not a regular file
 Git tracks, or when the run is on a remote host, and it is dropped when Clio
 cannot write a file at spawn. OpenCode then reads its files beside the compiled
-rules in the message (coexist). OpenCode also reads such a file in a
+rules in the message (coexist). Clio cannot hold OpenCode to a narrower write
+root and refuses one at dispatch, so today every OpenCode run has no write
+boundary and reads its files beside the compiled rules; the overlay applies once
+a run can be held to a write root that leaves the files out. OpenCode also reads such a file in a
 directory below its own when it opens a file there; those files are read as
 they are. An operator who sets `OPENCODE_DISABLE_PROJECT_CONFIG` or
 `OPENCODE_DISABLE_CLAUDE_CODE` changes which files OpenCode reads, so the

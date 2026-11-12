@@ -10,6 +10,7 @@ import type { DomainName } from "../../src/core/domain-loader.js";
 import { renderPromptContext } from "../../src/domains/context/prompt-context.js";
 import { closeAgentLedger, openAgentLedger, readAgentLedger } from "../../src/domains/dispatch/agent-ledger-store.js";
 import { type DispatchIntent, declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
+import { UNMEDIATED_ENFORCEMENT } from "../../src/domains/providers/runtime-enforcement.js";
 import codexCliRuntime from "../../src/domains/providers/runtimes/codex/codex-cli.js";
 import { opencodeCliRuntime, piCliRuntime } from "../../src/domains/providers/runtimes/external-cli-peers.js";
 import { verifyRunRecordReport } from "../../src/interactive/view/artifacts.js";
@@ -339,9 +340,12 @@ for (const event of [
 	settings.fleet.default.model = "opencode-cli-default";
 	settings.fleet.retry.maxRetries = 0;
 	settings.safety.autonomy = "default";
+	// OpenCode cannot hold a write root, so no task of its own has a boundary that leaves AGENTS.md out and
+	// it always reads its file. This one claims it can, so a task bound to `src` takes the overlay.
+	const scoped = { ...opencodeCliRuntime, enforcement: { ...UNMEDIATED_ENFORCEMENT, scopeEnforcement: true } };
 	const base = dispatchStubContext({
 		settings,
-		runtime: opencodeCliRuntime,
+		runtime: scoped,
 		agentTools: ["read", "write"],
 		useRuntimeDefaultAgentBudget: true,
 	});
@@ -384,7 +388,7 @@ for (const event of [
 		return { receipt, ...seen };
 	};
 	try {
-		const overlaid = await run("Round the cart total");
+		const overlaid = await run("Round the cart total", ["src"]);
 		ok(overlaid.agents.includes("Never write to the operator's real home from tests."), overlaid.agents);
 		ok(overlaid.agents.includes("Money is integer cents; see `src/cart.ts`."), overlaid.agents);
 		ok(overlaid.agents.includes("The test command is `pnpm run test`, from `package.json` `scripts.test`."));
@@ -406,14 +410,18 @@ for (const event of [
 		equal(execFileSync("git", ["-C", root, "show", `${worktree.commit}:AGENTS.md`], { encoding: "utf8" }), agents);
 		equal(readFileSync(join(root, "AGENTS.md"), "utf8"), agents);
 
-		// A task that names the file edits the real one, so the harness reads it as it is.
-		const named = await run("Tidy AGENTS.md and round the cart total");
-		equal(named.agents, agents);
-		equal(named.receipt.projectContext?.peerInstructions?.delivery, "coexist");
+		// A task with no write boundary may edit any file, so the harness reads its own as it is.
+		const legacy = await run("Round the cart total");
+		equal(legacy.agents, agents);
+		equal(legacy.receipt.projectContext?.peerInstructions?.delivery, "coexist");
 		// Only a run that read AGENTS.md as it is tells the operator about its stale rule.
 		deepStrictEqual(notices, [
 			"AGENTS.md has 1 rule that no longer matches the repository; OpenCode read it in this run.",
 		]);
+		// So does a task that names the file.
+		const named = await run("Tidy AGENTS.md and round the cart total", ["src"]);
+		equal(named.agents, agents);
+		equal(named.receipt.projectContext?.peerInstructions?.delivery, "coexist");
 		ok(named.stdin.includes("<project-rules>"), named.stdin);
 		// So does a task whose declared directory covers the file.
 		const covered = await run("Round the cart total", ["."]);
@@ -423,7 +431,7 @@ for (const event of [
 
 		// An overlay that cannot be written leaves the harness its own file and sends the rules in the message.
 		lockWorktree = true;
-		const unwritable = await run("Round the cart total");
+		const unwritable = await run("Round the cart total", ["src"]);
 		lockWorktree = false;
 		const locked = unwritable.receipt.worktree?.path;
 		ok(locked);

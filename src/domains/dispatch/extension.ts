@@ -6127,9 +6127,9 @@ export function createDispatchBundle(
 						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 						clioNames: clioOnlyNames(agents.listSpecs().map((entry) => entry.id)),
 						...(req.taskWorktree !== undefined ? { taskWorktree: req.taskWorktree.path } : {}),
-						// A declared scope with no write boundary (write root ".") names the whole workspace.
+						// A run with no write boundary, declared (write root ".") or not, may edit the whole workspace.
 						declaredPaths: [
-							...(pathScope.source === "declared" && pathScope.writeBoundaries.length === 0 ? ["."] : []),
+							...(pathScope.writeBoundaries.length === 0 ? ["."] : []),
 							...pathScope.workingContextPaths,
 							...pathScope.writeBoundaries,
 							...pathScope.inferredOnlyPaths,
