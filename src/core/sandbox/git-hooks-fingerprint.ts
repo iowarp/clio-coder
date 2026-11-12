@@ -164,6 +164,9 @@ function gitConfigValueRuns(key: string, value: string): boolean {
 			return sub !== null && (name === "uploadpack" || name === "receivepack" || name === "vcs");
 		case "pager":
 			return sub === null && !BOOLEAN_WORDS.has(trimmed.toLowerCase());
+		case "protocol":
+			// Allowing the ext transport lets a remote URL or insteadOf rewrite name a program git runs.
+			return name === "allow" && trimmed.toLowerCase() !== "never";
 		case "trailer":
 			return sub !== null && (name === "command" || name === "cmd");
 		case "submodule":

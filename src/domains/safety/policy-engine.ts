@@ -13,6 +13,7 @@ import {
 	createPathWalkMemo,
 	type PathWalkMemo,
 } from "../../core/path-canonical.js";
+import type { GitHookChange } from "../../core/sandbox/git-hooks-fingerprint.js";
 import {
 	mainSandboxGitControlPaths,
 	mainSandboxWritableRoots,
@@ -65,6 +66,7 @@ import {
 } from "./flow-policy-snapshot.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { classifyBashGit, splitGitChdir } from "./git-policy.js";
+import { commandInvokesGit, describeGitHookChange, type GitHookDriftGuard } from "./hook-drift.js";
 import type { FlowRestrictionSet, FlowSourceCall, InformationFlowPolicy } from "./information-flow.js";
 import { compileInformationFlowPolicy, flowRestrictionsForCall } from "./information-flow.js";
 import { inertQuotedMatch } from "./literal-exemption.js";
@@ -277,6 +279,13 @@ export interface OperatorYoloScope {
 	 * required` and cover every command the default contains plus every script.
 	 */
 	scriptSandbox?: YoloScriptSandboxState;
+	/**
+	 * The main session's git hook drift guard. Under a required sandbox an
+	 * outward git or gh line leaves it only while no hook file or executable
+	 * git config value changed since the operator's baseline: git would run
+	 * them outside, with the credentials the line keeps.
+	 */
+	hookDrift?: Pick<GitHookDriftGuard, "check">;
 }
 
 /**
@@ -3891,10 +3900,39 @@ function yoloRequiredSandbox(
 	const script = runsScriptFile(rawCall);
 	if (!script && reachesOutward(call, classification, verifyCommand)) {
 		const command = call.tool === ToolNames.Verify ? verifyCommand : commandArg(call.args);
-		if (command === null || outwardLineLeaves(command, places())) return "free";
+		if (command === null) return "free";
+		const where = places();
+		if (outwardLineLeaves(command, where)) {
+			const drift = commandInvokesGit(command) ? hookDriftHeld(scope, where.workspace) : null;
+			if (drift === null) return "free";
+			where.held?.push(drift);
+		}
 	}
 	if (call.args?.unsandboxed === true) return "unsandboxed";
 	return state;
+}
+
+/** Hook drift entries a held line's explanation names before it counts the rest. */
+const HELD_DRIFT_NAMED = 5;
+
+/**
+ * Why an outward git or gh line stays inside a required sandbox: the hook
+ * files and executable git config added or changed since the drift guard's
+ * baseline, or null when there are none or no guard is wired. A check that
+ * throws holds the line, since what git would run is then unknown.
+ */
+function hookDriftHeld(scope: OperatorYoloScope, workspace: string): string | null {
+	if (scope.hookDrift === undefined) return null;
+	let changes: ReadonlyArray<GitHookChange>;
+	try {
+		changes = scope.hookDrift.check({ silent: true })?.changes ?? [];
+	} catch {
+		return "the git hook fingerprint could not be read";
+	}
+	if (changes.length === 0) return null;
+	const named = changes.slice(0, HELD_DRIFT_NAMED).map((change) => describeGitHookChange(change, workspace));
+	const more = changes.length > HELD_DRIFT_NAMED ? `; and ${changes.length - HELD_DRIFT_NAMED} more` : "";
+	return `git hook files or executable git config changed since the session started, and git would run them outside the sandbox: ${named.join("; ")}${more}`;
 }
 
 /** A hard rule blocks; an `ask: true` rule asks. The same test matchSourcedRule ranks by. */

@@ -967,6 +967,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			? {
 					scratchRoots: deps.scratchRoots(),
 					...(deps.scriptSandbox !== undefined ? { scriptSandbox: deps.scriptSandbox() } : {}),
+					...(deps.hookDrift !== undefined ? { hookDrift: deps.hookDrift } : {}),
 				}
 			: undefined;
 	// The operator's own default exists only there too, beside its containment.
