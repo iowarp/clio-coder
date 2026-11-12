@@ -23,7 +23,7 @@ link_ref = product.get('linkRef') or docs_source['ref']
 source_tree = f"{repository}/tree/{link_ref}"
 doc_sources = {item["path"]: item["source"] for item in manifest["files"]}
 errors = []
-for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/research', 'content/drafts', 'review', 'vendor', 'cards'):
+for private in ('content/docs', 'content/doc-summaries', 'content/tutorials', 'content/research', 'content/drafts', 'review', 'vendor', 'cards', 'capture'):
     if (root / private).exists():
         errors.append(f'Private source directory entered the public output: {private}')
 for private in ('assets/brand/provenance.json', 'assets/logo.webp', 'assets/banner.webp'):
@@ -175,6 +175,13 @@ if origin + '/research.html' not in urls:
     errors.append('Research listing is missing from sitemap')
 if origin + '/404.html' in urls:
     errors.append('404 must not be listed in sitemap')
+# The page policy as published before recordings, byte for byte; only the theme script's hash varies.
+BASE_POLICY = ("default-src 'self'; script-src 'self' {theme} https://static.cloudflareinsights.com; style-src 'self'; "
+               "img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; "
+               "frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'")
+theme_script = re.search(r'<script>(.*?)</script>', (root / 'index.html').read_text(), re.S)
+base_policy = BASE_POLICY.format(theme="'sha256-" + base64.b64encode(hashlib.sha256((theme_script.group(1) if theme_script else '').encode()).digest()).decode() + "'")
+cast_pages = []
 for url in [*urls, origin + '/404.html']:
     path = urlsplit(url).path
     file = root / ('index.html' if path == '/' else path.lstrip('/'))
@@ -189,17 +196,26 @@ for url in [*urls, origin + '/404.html']:
     if public_copyright not in source:
         errors.append(f'{path}: public copyright wording is missing')
     policy = re.search(r'http-equiv="Content-Security-Policy" content="([^"]+)"', source)
+    # Only pages that embed a recording may compile WebAssembly; every other page keeps the base policy exactly.
+    has_cast = 'data-cast="' in source
+    expected_policy = base_policy.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'") if has_cast else base_policy
+    if not policy or policy.group(1) != expected_policy:
+        errors.append(f"{path}: the page policy is not the {'recording' if has_cast else 'base'} policy")
+    if has_cast:
+        cast_pages.append((path, source))
+    elif '/js/cast.js' in source or 'asciinema-player' in source:
+        errors.append(f'{path}: a page without a recording loads the player')
     for script in re.findall(r'<script>(.*?)</script>', source, re.S):
         digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
         if not policy or f"'sha256-{digest}'" not in policy.group(1) or 'unsafe-inline' in policy.group(1):
             errors.append(f'{path}: an inline script is not allowed by its exact hash in the page policy')
     # Published assets are cached by URL, so each reference names the bytes it expects.
-    assets = re.findall(r'\s(?:href|src|poster|data-src|data-light-src)="(/(?:css|js|assets)/[^"]+)"', source)
+    assets = re.findall(r'\s(?:href|src|poster|data-src|data-light-src|data-cast|data-player-src|data-player-css|data-cast-css)="(/(?:css|js|assets)/[^"]+)"', source)
     assets += re.findall(r'(?:srcset="|, )(/assets/\S+) \d+w', source)
     for ref in assets:
         asset, _, version = ref.partition('?v=')
         file = root / asset.lstrip('/')
-        if file.suffix in ('.css', '.js', '.woff2', '.png', '.webp', '.jpg', '.jpeg', '.svg', '.ico', '.mp4') and file.is_file() and version != hashlib.sha256(file.read_bytes()).hexdigest()[:10]:
+        if file.suffix in ('.css', '.js', '.woff2', '.png', '.webp', '.jpg', '.jpeg', '.svg', '.ico', '.mp4', '.cast') and file.is_file() and version != hashlib.sha256(file.read_bytes()).hexdigest()[:10]:
             errors.append(f'{path}: {ref} does not carry the hash of the published file')
     first_card = re.search(r'<a class="tutorial-card"[^>]*><img [^>]*>', source)
     if first_card and ('loading="lazy"' in first_card.group(0) or 'fetchpriority="high"' not in first_card.group(0)):
@@ -380,6 +396,28 @@ for name, text in (('llms.txt', llms), ('llms-full.txt', full)):
 for path in pages:
     if re.search(r'<p>:::', (root / ('index.html' if path == '/' else path.lstrip('/'))).read_text()):
         errors.append(f'{path}: an unconverted guide directive reached the page')
+# Recordings: the player, its stylesheet and font ship only with pages that embed a cast,
+# and the first press of Play on a page stays inside the media budget.
+player = root / 'assets/player'
+player_files = ['asciinema-player.min.js', 'asciinema-player.css', 'cast.css', 'cast-symbols.woff2']
+if not cast_pages and (player.exists() or (root / 'js/cast.js').exists() or (root / 'css/cast.css').exists()):
+    errors.append('The terminal player was published without a page that embeds a recording')
+if cast_pages:
+    sizes = {name: (root / ('css' if name == 'cast.css' else 'assets/player') / name).stat().st_size for name in player_files}
+    if sizes['asciinema-player.min.js'] + sizes['asciinema-player.css'] > 600_000:
+        errors.append('The terminal player exceeds its 600 KB budget')
+    if sizes['cast-symbols.woff2'] > 25 * 1024:
+        errors.append('Cast Symbols exceeds its 25 KB budget')
+    for path, source in cast_pages:
+        casts = [root / ref.partition('?')[0].lstrip('/') for ref in re.findall(r'\sdata-cast="([^"]+)"', source)]
+        for cast in casts:
+            if cast.stat().st_size > 300_000:
+                errors.append(f'{path}: {cast.name} exceeds the 300 KB recording budget')
+            header = json.loads(cast.read_text().split('\n', 1)[0])
+            if header.get('version') != 2 or {'env', 'command', 'timestamp'} & header.keys():
+                errors.append(f'{path}: {cast.name} must be asciicast v2 without env, command or timestamp')
+        if casts and sum(sizes.values()) + max(cast.stat().st_size for cast in casts) > 1_500_000:
+            errors.append(f'{path}: the first play exceeds the 1.5 MB recording media budget')
 if errors:
     print('\n'.join(errors))
     sys.exit(1)

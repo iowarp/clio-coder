@@ -1,0 +1,6 @@
+asciinema-player 3.18.0
+Source: https://registry.npmjs.org/asciinema-player/-/asciinema-player-3.18.0.tgz
+Tarball sha256: 18d9703510fae9209da9e26ce3d13c59f083b4abcff003a3bba958e03918a862
+Upstream: https://github.com/asciinema/asciinema-player/tree/v3.18.0
+License: Apache-2.0 (LICENSE in this directory)
+Files: dist/bundle/asciinema-player.min.js and dist/bundle/asciinema-player.css, copied unmodified.

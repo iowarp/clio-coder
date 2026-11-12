@@ -2002,6 +2002,54 @@
 	.guide-frame .tag {
 		margin-inline-start: auto;
 	}
+	/* Recorded captures: js/cast.js adds the Play control over the still and
+	   swaps in the player only when pressed. */
+	.cast-stage {
+		position: relative;
+	}
+	.cast-play {
+		position: absolute;
+		inset: auto auto var(--space-5) var(--space-5);
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		min-block-size: 2.5rem;
+		padding: var(--space-2) var(--space-4);
+		background: var(--code);
+		border: 1px solid var(--code-border);
+		border-radius: var(--radius-sm);
+		color: var(--code-ink);
+		font: 0.75rem var(--font-mono);
+		cursor: pointer;
+	}
+	.cast-play:hover,
+	.cast-play:focus-visible {
+		color: var(--clio-teal);
+		border-color: var(--clio-teal);
+	}
+	.cast-download {
+		font: 0.7rem var(--font-mono);
+	}
+	.cast-transcript {
+		margin-block-start: var(--space-3);
+	}
+	.cast-transcript summary {
+		cursor: pointer;
+		font: 0.7rem var(--font-mono);
+		color: var(--muted);
+	}
+	.cast-transcript-text {
+		max-block-size: 24rem;
+		overflow: auto;
+		margin-block-start: var(--space-3);
+		padding: var(--space-4);
+		background: var(--code);
+		border: 1px solid var(--code-border);
+		border-radius: var(--radius);
+		color: var(--code-ink);
+		font: 0.75rem / 1.5 var(--font-mono);
+		white-space: pre;
+	}
 	.guide-frames {
 		display: grid;
 		margin: 0;

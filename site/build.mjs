@@ -89,6 +89,17 @@ for (const [id, item] of Object.entries(captures)) {
 		throw new Error(`Capture ${id} must name a WebP image and its PNG original under assets/.`);
 	await readFile(join(root, item.image));
 	await readFile(join(root, item.original));
+	// A recorded capture: the still above is its poster, rendered from the cast at `posterAt`.
+	if (item.cast) {
+		if (
+			!/^assets\/casts\/[a-z0-9-]+\.cast$/.test(item.cast) ||
+			!/^assets\/casts\/[a-z0-9-]+\.txt$/.test(item.transcript ?? "") ||
+			![item.cols, item.rows, item.duration, item.posterAt].every((n) => Number.isFinite(n) && n >= 0)
+		)
+			throw new Error(`Capture ${id} names a cast without its transcript, size, duration, or poster time.`);
+		await readFile(join(root, item.cast));
+		item.transcriptText = (await readFile(join(root, item.transcript), "utf8")).trimEnd();
+	}
 }
 for (const item of articles) {
 	if (item.cover && !captures[item.cover]) throw new Error(`Tutorial ${item.slug} names an unknown cover capture.`);
@@ -222,6 +233,8 @@ const partials = await read("partials.html");
 const mast = partials.match(/<header class="mast">[\s\S]*?<\/header>/)[0];
 const footer = partials.match(/<footer class="colophon[\s\S]*?<\/footer>/)[0];
 const urls = [];
+// Pages that embed a recording; only they get the player, its stylesheet, and its policy.
+const castPages = [];
 
 function responsiveImages(html, path) {
 	return html.replace(/<img\b[^>]+>/g, (tag) => {
@@ -264,6 +277,11 @@ const themeHash = `'sha256-${createHash("sha256").update(themeScript).digest("ba
 // GitHub Pages sends no custom headers, so the policy nginx used to send rides
 // in a meta tag. frame-ancestors is not honored there and cannot be restored.
 const contentSecurityPolicy = `default-src 'self'; script-src 'self' ${themeHash} https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'`;
+// The terminal player compiles WebAssembly, which only pages embedding a recording allow.
+const castContentSecurityPolicy = contentSecurityPolicy.replace(
+	"script-src 'self'",
+	"script-src 'self' 'wasm-unsafe-eval'",
+);
 // Whitespace and comment removal only; strings are copied untouched, and spaces
 // around operators such as + and - stay, so calc() and selectors keep meaning.
 function minifyCss(css) {
@@ -325,7 +343,7 @@ function head(
 	title,
 	description,
 	type = "WebPage",
-	{ lastmod = null, published = null, preview = social.default } = {},
+	{ lastmod = null, published = null, preview = social.default, cast = false } = {},
 ) {
 	const url = `${product.origin}${path}`;
 	const article = articles.find((item) => item.url === path);
@@ -437,11 +455,11 @@ function head(
 	}
 
 	return `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="${cast ? castContentSecurityPolicy : contentSecurityPolicy}"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="${escapeHtml(brand.defaultTheme)}"><meta name="theme-color" content="${escapeHtml(brand.palette[brand.themes[brand.defaultTheme === "light" ? "light" : "dark"].paper])}">
 <link rel="canonical" href="${url}"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
 <link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/site.css"><script>${themeScript}</script>
+<link rel="stylesheet" href="/css/site.css"><script>${themeScript}</script>${cast ? `<script src="/js/cast.js" data-player-src="/assets/player/asciinema-player.min.js" data-player-css="/assets/player/asciinema-player.css" data-cast-css="/css/cast.css" defer></script>` : ""}
 <meta property="og:locale" content="en_US"><meta property="og:site_name" content="${escapeHtml(product.name)}"><meta property="og:type" content="${type === "Article" || type === "TechArticle" ? "article" : "website"}"><meta property="og:url" content="${url}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:image" content="${imageUrl}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="${image.width}"><meta property="og:image:height" content="${image.height}"><meta property="og:image:alt" content="${escapeHtml(imageAlt)}">${published && type !== "WebPage" ? `<meta property="article:published_time" content="${published}">` : ""}${lastmod && type !== "WebPage" ? `<meta property="article:modified_time" content="${lastmod}">` : ""}
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}"><meta name="twitter:image" content="${imageUrl}"><meta name="twitter:image:alt" content="${escapeHtml(imageAlt)}">
 <meta name="robots" content="${path === "/404.html" ? "noindex" : "index,follow,max-image-preview:large,max-snippet:-1"}"><script type="application/ld+json">${JSON.stringify(graph).replace(/</g, "\\u003c")}</script>`;
@@ -536,7 +554,17 @@ function captureFigure(id, { frame = false, index = 0 } = {}) {
 	const source = `<span class="tag">${escapeHtml(item.interface)} · v${escapeHtml(item.version)}</span>`;
 	if (frame)
 		return `<li class="guide-frame" id="frame-${escapeHtml(id)}" data-label="${escapeHtml(item.label)}">${image}<p class="caption"><span class="step-number">${String(index + 1).padStart(2, "0")}</span> ${escapeHtml(item.caption)} ${source}</p></li>`;
+	if (item.cast) {
+		// The still, the download, and the transcript work without scripts; js/cast.js
+		// adds a Play button that loads the player only when pressed.
+		const length = castLength(item.duration);
+		return `<figure class="guide-capture" data-cast="/${item.cast}" data-cast-cols="${item.cols}" data-cast-rows="${item.rows}" data-cast-poster="${item.posterAt}" data-cast-length="${length}">${image}<figcaption class="caption">${escapeHtml(item.caption)} ${source} <a class="cast-download" href="/${item.cast}" download>Recording · ${length}</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">${escapeHtml(item.transcriptText)}</pre></details></figure>`;
+	}
 	return `<figure class="guide-capture">${image}<figcaption class="caption">${escapeHtml(item.caption)} ${source}</figcaption></figure>`;
+}
+function castLength(seconds) {
+	const whole = Math.round(seconds);
+	return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 function guideDiagram(id) {
 	const item = guideDiagrams[id];
@@ -691,9 +719,12 @@ async function writePage(path, html, title, description, type, { sources = [], p
 			lastmod ? `<div><dt class="eyebrow">Updated</dt><dd>${updatedOn(lastmod)}</dd></div>` : "",
 		)
 		.replace("<!-- updated-line -->", lastmod ? `<span>Updated ${updatedOn(lastmod)}</span>` : "");
+	const cast = /<figure class="guide-capture[^"]*" data-cast="/.test(dated);
+	if (cast) castPages.push(path);
 	const result = shell(dated, path, title, description, type, {
 		lastmod,
 		published,
+		cast,
 		...(preview ? { preview } : {}),
 	});
 	if (/<!--\s*(?:site-|doc-|tutorial-|source-|version)/.test(result))
@@ -745,7 +776,7 @@ for (const name of [
 await mkdir(join(out, "assets/social"), { recursive: true });
 for (const item of Object.values(social.images)) await cp(join(root, item.path), join(out, item.path));
 for (const item of Object.values(captures))
-	for (const path of [item.image, item.original]) {
+	for (const path of [item.image, item.original, ...(item.cast ? [item.cast] : [])]) {
 		await mkdir(dirname(join(out, path)), { recursive: true });
 		await cp(join(root, path), join(out, path));
 	}
@@ -1019,7 +1050,16 @@ function plainDirectives(markdown) {
 					...args
 						.split(/\s+/)
 						.filter(Boolean)
-						.map((id) => `![${captures[id].alt}](/${captures[id].image})\n\n*${captures[id].caption}*`),
+						.map((id) =>
+							[
+								`![${captures[id].alt}](/${captures[id].image})\n\n*${captures[id].caption}*`,
+								...(captures[id].cast
+									? [
+											`[Recording (asciicast)](/${captures[id].cast}), ${castLength(captures[id].duration)}. Transcript:\n\n\`\`\`text\n${captures[id].transcriptText}\n\`\`\``,
+										]
+									: []),
+							].join("\n\n"),
+						),
 					...(body ? [body] : []),
 				].join("\n\n"),
 			diagram: () => {
@@ -1131,6 +1171,19 @@ console.log(
 const installerRoot = (await readdir(root)).includes("scripts") ? join(root, "scripts") : join(root, "..", "scripts");
 for (const name of ["install.sh", "install.ps1", "install.cmd"])
 	await cp(join(installerRoot, ...(name === "install.cmd" ? [] : ["installer-bootstrap"]), name), join(out, name));
+if (castPages.length) {
+	await mkdir(join(out, "assets/player"), { recursive: true });
+	for (const [from, to] of [
+		["vendor/asciinema-player/asciinema-player.min.js", "asciinema-player.min.js"],
+		["vendor/asciinema-player/asciinema-player.css", "asciinema-player.css"],
+		["vendor/asciinema-player/LICENSE", "asciinema-player-LICENSE.txt"],
+		["vendor/cast-symbols/cast-symbols.woff2", "cast-symbols.woff2"],
+		["vendor/cast-symbols/LICENSE", "cast-symbols-LICENSE.txt"],
+	])
+		await cp(join(root, from), join(out, "assets/player", to));
+	await writeFile(join(out, "css/cast.css"), minifyCss(await read("css/cast.css")));
+	await cp(join(root, "js/cast.js"), join(out, "js/cast.js"));
+}
 await writeFile(join(out, "CNAME"), `${new URL(product.origin).hostname}\n`);
 await writeFile(join(out, ".nojekyll"), "");
 await writeFile(
@@ -1200,7 +1253,7 @@ const versioned = (url, base = "/") => {
 	const hash = assetHashes.get(new URL(url, `${product.origin}${base}`).pathname);
 	return hash ? `${url}?v=${hash}` : url;
 };
-await hashAssets(/\.(?:woff2|png|webp|jpe?g|svg|ico|mp4)$/);
+await hashAssets(/\.(?:woff2|png|webp|jpe?g|svg|ico|mp4|cast)$/);
 for (const file of outputFiles.filter((name) => name.endsWith(".css")))
 	await writeFile(
 		join(out, file),
@@ -1215,7 +1268,7 @@ for (const file of outputFiles.filter((name) => name.endsWith(".html")))
 		join(out, file),
 		(await readFile(join(out, file), "utf8"))
 			.replace(
-				/(\s(?:href|src|poster|data-src|data-light-src)=")(\/[^"?#]*)"/g,
+				/(\s(?:href|src|poster|data-src|data-light-src|data-cast|data-player-src|data-player-css|data-cast-css)=")(\/[^"?#]*)"/g,
 				(_, attr, url) => `${attr}${versioned(url)}"`,
 			)
 			.replace(

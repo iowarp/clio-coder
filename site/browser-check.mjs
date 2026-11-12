@@ -291,6 +291,43 @@ try {
 		"URL override preserves the saved choice",
 	);
 	await themeContext.close();
+	// Recordings load the player only on Play, never advance on their own under
+	// reduced motion, and run under the page policy without errors.
+	let recordings = 0;
+	for (const reducedMotion of ["reduce", "no-preference"]) {
+		const castContext = await browser.newContext({ viewport: { width: 1024, height: 900 }, reducedMotion });
+		for (const path of primary) {
+			const castPage = await castContext.newPage();
+			const errors = [];
+			const player = [];
+			castPage.on("pageerror", (error) => errors.push(error.message));
+			castPage.on("console", (message) => {
+				if (message.type() === "error") errors.push(message.text());
+			});
+			castPage.on("request", (request) => {
+				if (/\/assets\/(?:player|casts)\//.test(request.url())) player.push(request.url());
+			});
+			await castPage.goto(`${values.url}${path}?__static=1`, { waitUntil: "load" });
+			const figures = castPage.locator("figure[data-cast]");
+			if (!(await figures.count())) {
+				assert.deepEqual(player, [], `${path} loads no player`);
+				await castPage.close();
+				continue;
+			}
+			recordings++;
+			assert.deepEqual(player, [], `${path} loads the player only on Play`);
+			await figures.first().locator(".cast-play").click();
+			await castPage.locator(".cast-player .ap-player").waitFor({ timeout: 10000 });
+			const poster = Number(await figures.first().getAttribute("data-cast-poster"));
+			await castPage.waitForTimeout(1500);
+			const time = await figures.first().evaluate((figure) => figure.castPlayer.getCurrentTime());
+			if (reducedMotion === "reduce") assert.equal(time, poster, `${path}: reduced motion keeps the recording paused`);
+			else assert.ok(time > 0, `${path}: Play starts the recording`);
+			assert.deepEqual(errors, [], `${path}: recording errors`);
+			await castPage.close();
+		}
+		await castContext.close();
+	}
 	const plain = await browser.newContext({
 		javaScriptEnabled: false,
 		colorScheme: "light",
@@ -317,8 +354,9 @@ try {
 	await plainPage.locator(".nav-more summary").click();
 	assert.ok(await plainPage.locator(".nav-more a").first().isVisible());
 	await plain.close();
+	console.log(`Recorded captures checked on ${recordings / 2} pages.`);
 	console.log(
-		"Interactions passed: menu keyboard, theme persistence, repeated copying, FAQ, screenshot viewer, search keyboard, active contents, redirects, runtime reduced motion, touch tablet rotation, 404, and no-JavaScript navigation.",
+		"Interactions passed: menu keyboard, theme persistence, repeated copying, FAQ, screenshot viewer, search keyboard, active contents, redirects, runtime reduced motion, touch tablet rotation, 404, no-JavaScript navigation, and recordings.",
 	);
 } finally {
 	await browser.close();

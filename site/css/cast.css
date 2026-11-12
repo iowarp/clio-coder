@@ -1,0 +1,20 @@
+/* Loaded with the terminal player, only on pages that embed a recording. */
+
+/* Cast Symbols: the arrows, shapes, marks, and braille spinner the TUI draws that
+   IBM Plex Mono lacks (site/vendor/cast-symbols). Box drawing the player draws itself. */
+@font-face {
+	font-family: "Cast Symbols";
+	font-style: normal;
+	font-weight: 400 700;
+	font-display: swap;
+	src: url("../assets/player/cast-symbols.woff2") format("woff2");
+}
+
+.cast-player .ap-player {
+	--term-font-family: "IBM Plex Mono", "Cast Symbols", monospace;
+}
+
+.cast-player {
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+}

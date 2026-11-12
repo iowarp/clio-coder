@@ -145,6 +145,14 @@ WebP images to `image-variants.py` and regenerate derivatives. A capture used
 as a guide cover also needs a social preview: run
 `python3 site/image-variants.py --social`.
 
+A terminal capture can carry its recording: `cast` (an asciicast v2 file in
+`assets/casts/`), `transcript` (the plain-text screens beside it), `cols`,
+`rows`, `duration` in seconds, and `posterAt`, the time the still shows. The
+page keeps the still, a download link and the transcript; a Play button loads
+the vendored asciinema player on request, and only pages with a recording allow
+`'wasm-unsafe-eval'` in their policy. `python3 site/capture/cast-symbols.py` rebuilds the symbol
+font the player falls back to for glyphs IBM Plex Mono lacks.
+
 ## Review builds
 
 `node site/build.mjs --review --out <directory>` adds the manuscripts in
