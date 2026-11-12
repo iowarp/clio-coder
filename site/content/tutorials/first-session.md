@@ -1,7 +1,7 @@
 CLIO Coder works in the repository you open. For your first session, give it a small, concrete task: explain how the project builds and runs its tests. That lets you see how it reads code and uses tools before asking it to make a change.
 
 ::: note Version scope
-This tutorial describes v0.8.0. The recordings on this page come from one session in a small JavaScript project with one failing test, using Qwen 3.8 27B through a model server that setup found on its own. The install step was not recorded.
+This tutorial describes v0.8.0. The recordings on this page come from a small JavaScript project with one failing test and Qwen 3.8 27B on a local model server. The first starts with no model configured. The install step was not recorded.
 :::
 
 ## 1. Install CLIO Coder
@@ -29,12 +29,15 @@ No model target is configured. Clio needs a model before it can do anything else
 
 Setup looks for a provider key in your environment, a stored sign-in and a local model server, and lists what it found. Pick one, or choose **Set up something else** and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Use a model that supports tool calling.
 
-CLIO Coder sends the model one short test request and saves only when it answers. In the recording, setup found a model server and saved it:
+CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the recording, setup found a model server and saved it:
 
 ```text
 ◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
 ◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
 ◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
 ```
 
 `clio-coder configure` runs setup again at any time. Its **Connect by endpoint** is the shortcut when you already know the URL. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. The [connection guide](/docs/guide/configuration-and-targets.html) covers setup and credentials.
@@ -65,19 +68,11 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. In the recording, it named the test command and both entry points, suggested the project's declared test check, and ran it. Its answer included:
-
-```text
-npm test → runs node --test calibration.test.mjs (package.json:7), i.e. Node's built-in node:test runner.
-… ran it to confirm, and it fails 1 of 7 — a genuine mismatch, not a flake:
-… but per your instruction I haven't changed anything.
-```
-
-If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. The recording ends as it starts reading. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
-Once you understand the project, ask for one change you can check. Name the problem, what to do and how to verify it. The recording below gave this request for the failing test from step 4:
+Once you understand the project, ask for one change you can check. Name the problem, what to do and how to verify it. The recording below gave this request for the project's one failing test:
 
 > The absolute-zero test fails. Find the cause, fix it, and run the test check.
 
