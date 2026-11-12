@@ -140,6 +140,9 @@
 		color: var(--ink-soft);
 		font-size: 1.08rem;
 	}
+	.section-heading > :where(p:not(.eyebrow)) + p {
+		margin-block-start: var(--space-4);
+	}
 	:where(.section-heading) .text-link {
 		margin-block-start: 1.5rem;
 	}
