@@ -1,8 +1,14 @@
 A small numerical task makes it easy to follow a change from code to a recorded check. This example converts temperatures between Celsius, Kelvin, and Fahrenheit, validates inputs, and tests physical boundaries without adding dependencies.
 
+::: needs
+- CLIO Coder installed, with a connected model that supports tool calling.
+- Node.js 18.1 or newer and npm on your `PATH`. The installer's private Node.js is not added to `PATH`, so install them yourself.
+- The example archive below, extracted into a project you can open.
+:::
+
 ## Open the example
 
-Download the [runnable temperature-calibration example](/assets/temperature-calibration.zip). It includes the actual implementation, seven tests, and a private package manifest. It uses only the built-in Node.js test runner, so it needs `node` and `npm` on your `PATH` and nothing else. The installer's private Node.js is not added to `PATH`.
+Download the [runnable temperature-calibration example](/assets/temperature-calibration.zip). It includes the actual implementation, seven tests, and a private package manifest. It uses only the built-in Node.js test runner and has no dependencies.
 
 Extract the archive into your project's `examples/` folder, so the files live in `examples/temperature-calibration/`. Open the project in the terminal:
 
