@@ -446,21 +446,41 @@ function toolResultObject(message: Extract<CoreMessage, { role: "toolResult" }>,
 	};
 }
 
+/**
+ * Replayed text cannot open or close a frame of the seed or the host-policy frame: `<user`, `</tool_result` and the
+ * rest (any case, whitespace after `<` or `</`) become `<\user`, `<\/tool_result`, the way `neutralizeFraming`
+ * treats `system-reminder`.
+ */
+function neutralizeSeedFrames(text: string): string {
+	return text.replace(
+		/<\s*(\/?)\s*(user|assistant|tool_call|tool_result|conversation-history|host-policy)(?![\w-])/giu,
+		(_, slash: string, tag: string) => `<\\${slash}${tag}`,
+	);
+}
+
+/** An attribute value that cannot end its quotes or its tag. */
+function seedAttribute(value: string): string {
+	return value.replace(/&/gu, "&amp;").replace(/"/gu, "&quot;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
+}
+
 function renderTranscript(messages: ReadonlyArray<CoreMessage>): string {
 	const lines: string[] = [];
 	for (const message of messages) {
 		if (message.role === "user") {
-			const text = textOf(message.content);
+			const text = neutralizeSeedFrames(textOf(message.content));
 			if (text.length > 0) lines.push(`<user>\n${text}\n</user>`);
 		} else if (message.role === "assistant") {
-			const text = textOf(message.content);
+			const text = neutralizeSeedFrames(textOf(message.content));
 			const calls = message.content
 				.filter((block): block is ToolCall => block.type === "toolCall")
-				.map((call) => `<tool_call id="${call.id}" name="${call.name}">${JSON.stringify(call.arguments)}</tool_call>`);
+				.map(
+					(call) =>
+						`<tool_call id="${seedAttribute(call.id)}" name="${seedAttribute(call.name)}">${neutralizeSeedFrames(JSON.stringify(call.arguments))}</tool_call>`,
+				);
 			lines.push(`<assistant>\n${[text, ...calls].filter((part) => part.length > 0).join("\n")}\n</assistant>`);
 		} else {
 			lines.push(
-				`<tool_result id="${message.toolCallId}" name="${message.toolName}"${message.isError ? ' error="true"' : ""}>\n${textOf(message.content)}\n</tool_result>`,
+				`<tool_result id="${seedAttribute(message.toolCallId)}" name="${seedAttribute(message.toolName)}"${message.isError ? ' error="true"' : ""}>\n${neutralizeSeedFrames(textOf(message.content))}\n</tool_result>`,
 			);
 		}
 	}
