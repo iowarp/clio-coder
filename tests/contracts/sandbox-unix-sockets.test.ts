@@ -110,6 +110,11 @@ test("the unix-socket seccomp program refuses AF_UNIX sockets under x86_64, x32,
 		["aarch64 io_uring_setup", AUDIT_ARCH_AARCH64, 425, 1n, EPERM],
 		["arm socket(AF_UNIX)", AUDIT_ARCH_ARM, 281, 1n, EPERM],
 		["arm socketpair(AF_UNIX)", AUDIT_ARCH_ARM, 288, 1n, ALLOW],
+		["x86_64 keyctl", AUDIT_ARCH_X86_64, 250, 11n, EPERM],
+		["x86_64 add_key", AUDIT_ARCH_X86_64, 248, 0n, EPERM],
+		["aarch64 keyctl", AUDIT_ARCH_AARCH64, 219, 11n, EPERM],
+		["i386 request_key", AUDIT_ARCH_I386, 287, 0n, EPERM],
+		["arm keyctl", AUDIT_ARCH_ARM, 311, 11n, EPERM],
 		["an uncovered arch", AUDIT_ARCH_RISCV64, 198, 1n, ALLOW],
 	];
 	for (const [name, arch, nr, arg0, expected] of cases) {
@@ -461,6 +466,49 @@ test("under bwrap a contained command cannot open a unix socket but keeps socket
 	);
 	const output = await runProbe(masked.file, masked.args);
 	assert.match(output, /unix=ConnectionRefusedError:111 tcp=connected/u, output);
+});
+
+test("under bwrap a contained command can neither read nor add to the login's session keyring", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	if (spawnSync("keyctl", ["--version"]).error !== undefined) {
+		t.skip("keyctl is not installed");
+		return;
+	}
+	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-keyring-")));
+	// A fresh session keyring for this test holds a key, as pam_keyinit leaves a login's.
+	const keyed = (file: string, args: string[]): Promise<string> =>
+		runProbe("keyctl", [
+			"session",
+			"-",
+			"sh",
+			"-c",
+			'k=$(keyctl add user clio-test stand-in-secret @s) || exit 9; "$@" "$k"; echo "after=$(keyctl rlist @s | wc -w)"',
+			"sh",
+			file,
+			...args,
+		]);
+	const argv = [
+		"sh",
+		"-c",
+		'keyctl print "$1" 2>&1 | sed "s/^/print=/"; keyctl add user clio-planted x @s >/dev/null 2>&1 && echo added=yes || echo added=no',
+		"sh",
+	];
+	const plan = planMainSandboxSpawn(
+		mainSandboxPolicy({ workspace, scratchRoots: [] }),
+		{ argv },
+		workspace,
+		availability,
+	);
+	assert.equal(plan.kind, "sandboxed");
+	if (plan.kind !== "sandboxed") return;
+	const output = await keyed(plan.file, plan.args);
+	assert.doesNotMatch(output, /stand-in-secret/u, output);
+	assert.match(output, /added=no/u, output);
+	assert.match(output, /after=1\b/u, output);
 });
 
 test("under bwrap owned masks the operator's own sockets and leaves a system daemon's reachable", async (t) => {

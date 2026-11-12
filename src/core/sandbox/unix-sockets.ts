@@ -55,12 +55,19 @@ const X32_SYSCALL_BIT = 0x40000000;
  * through it, and io_uring_setup, whose IORING_OP_SOCKET creates a socket
  * without the socket syscall. A 64-bit process can still enter the 32-bit
  * ABI (int 0x80 on x86_64), so each family's compat ABI is filtered too.
+ *
+ * `keys` are add_key, request_key and keyctl. A sandboxed process keeps the
+ * session keyring of the login that started Clio (pam_keyinit gives every
+ * ssh and console login one), so without these a contained command reads,
+ * adds and clears the operator's keys there: Kerberos tickets in a
+ * `KEYRING:session` cache, AFS tokens. The kernel still uses the keyring on
+ * the process's behalf, so NFS, CIFS and AFS file access keeps working.
  */
 const ABIS = [
-	{ label: "x86_64", arch: AUDIT_ARCH_X86_64, socket: 41, ioUringSetup: 425, x32: true },
-	{ label: "aarch64", arch: AUDIT_ARCH_AARCH64, socket: 198, ioUringSetup: 425 },
-	{ label: "i386", arch: AUDIT_ARCH_I386, socket: 359, socketcall: 102, ioUringSetup: 425 },
-	{ label: "arm", arch: AUDIT_ARCH_ARM, socket: 281, ioUringSetup: 425 },
+	{ label: "x86_64", arch: AUDIT_ARCH_X86_64, socket: 41, keys: [248, 249, 250], ioUringSetup: 425, x32: true },
+	{ label: "aarch64", arch: AUDIT_ARCH_AARCH64, socket: 198, keys: [217, 218, 219], ioUringSetup: 425 },
+	{ label: "i386", arch: AUDIT_ARCH_I386, socket: 359, socketcall: 102, keys: [286, 287, 288], ioUringSetup: 425 },
+	{ label: "arm", arch: AUDIT_ARCH_ARM, socket: 281, keys: [309, 310, 311], ioUringSetup: 425 },
 ] as const;
 
 /** Kernel machines whose native and compat ABIs the program covers. */
@@ -104,7 +111,8 @@ function assemble(steps: ReadonlyArray<Step>): Buffer {
  * Pure: the seccomp program bwrap loads, as the raw `struct sock_filter`
  * array in host byte order. Under the x86_64, x32, i386, aarch64 and arm
  * ABIs it returns EPERM for socket(AF_UNIX), for i386 socketcall(SYS_SOCKET)
- * (which cannot be read further) and for io_uring_setup, and allows
+ * (which cannot be read further), for io_uring_setup and for the keyring
+ * calls add_key, request_key and keyctl, and allows
  * everything else; any other ABI is allowed whole. Null on a big-endian
  * host, where the offsets differ and no covered ABI runs.
  */
@@ -133,6 +141,7 @@ export function unixSocketFilterProgram(byteOrder: "BE" | "LE" = endianness()): 
 		if ("x32" in abi) steps.push({ code: BPF_ALU_AND_K, k: ~X32_SYSCALL_BIT >>> 0 });
 		steps.push(jeq(abi.socket, "domain"));
 		if ("socketcall" in abi) steps.push(jeq(abi.socketcall, "socketcall"));
+		for (const key of abi.keys) steps.push(jeq(key, "deny"));
 		steps.push(jeq(abi.ioUringSetup, "deny", "allow"));
 	}
 	steps.push(
@@ -509,15 +518,15 @@ export function unixSocketLaunch(
 export function unixSocketStateLine(state: UnixSocketState): string {
 	switch (state.kind) {
 		case "allowed":
-			return "unix sockets: allowed (safety.sandboxUnixSockets is allow), so a contained command can reach any socket it sees";
+			return "unix sockets: allowed (safety.sandboxUnixSockets is allow), so a contained command can reach any socket it sees and the login's session keyring";
 		case "filter":
-			return "unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works)";
+			return "unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works) and the kernel keyring calls";
 		case "profile":
 			return "unix sockets: the seatbelt profile denies connecting to and binding them (unverified on macOS)";
 		case "owned":
-			return `unix sockets: safety.sandboxUnixSockets is owned, so only your own sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; other users' sockets (system daemons such as MUNGE), abstract sockets and sockets created later stay reachable`;
+			return `unix sockets: safety.sandboxUnixSockets is owned, so only your own sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; other users' sockets (system daemons such as MUNGE), abstract sockets, sockets created later and the login's session keyring stay reachable`;
 		case "masks":
-			return `unix sockets: the seccomp filter is unavailable (${state.reason}), so the user-owned sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; abstract sockets and sockets created later stay reachable`;
+			return `unix sockets: the seccomp filter is unavailable (${state.reason}), so the user-owned sockets found at launch are masked${state.capped ? " up to the search limit" : ""}; abstract sockets, sockets created later and the login's session keyring stay reachable`;
 	}
 }
 
