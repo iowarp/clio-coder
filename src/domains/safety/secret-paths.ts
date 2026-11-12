@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { clioConfigDir } from "../../core/xdg.js";
+import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 
 /**
  * Absolute path of Clio's provider secret store, when resolvable. The policy
@@ -12,6 +12,26 @@ export function clioCredentialStorePaths(): string[] {
 		return [path.join(clioConfigDir(), "credentials.yaml")];
 	} catch {
 		// An unresolvable config root has no credential store to protect.
+		return [];
+	}
+}
+
+/**
+ * Directories under Clio's state and cache roots whose files open a channel to
+ * a process running as the operator outside the sandbox. `<state>/gui` holds
+ * the desktop app's launch token (`background/server.json`), which answers the
+ * app's loopback challenge for a client credential. `<state>/mux/run` and
+ * `<cache>/run` are where a pane host puts its control socket when the runtime
+ * directory is unusable (mux/workspace/platform-posix.ts). Masked as whole
+ * directories, so a later rewrite of a file inside cannot drop the mask, and
+ * resolved without creating anything.
+ */
+export function clioControlPaths(): string[] {
+	try {
+		const { state, cache } = resolveClioDirs();
+		return [path.join(state, "gui"), path.join(state, "mux", "run"), path.join(cache, "run")];
+	} catch {
+		// An unresolvable state root holds no app state to protect.
 		return [];
 	}
 }
@@ -76,12 +96,12 @@ export const HOME_AGENT_SECRET_RELATIVE_PATHS: ReadonlyArray<string> = [
 	".mysql_history",
 ];
 
-/** Home-relative secret paths plus Clio's credential store, all absolute. */
+/** Home-relative secret paths plus Clio's credential store and control directories, all absolute. */
 export function workerSecretPaths(home: string = homedir()): string[] {
 	const paths = [...HOME_SECRET_RELATIVE_PATHS, ...HOME_AGENT_SECRET_RELATIVE_PATHS].map((relative) =>
 		path.join(home, relative),
 	);
-	return [...new Set([...paths, ...clioCredentialStorePaths()])];
+	return [...new Set([...paths, ...clioCredentialStorePaths(), ...clioControlPaths()])];
 }
 
 /**

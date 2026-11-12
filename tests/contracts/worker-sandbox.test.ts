@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
+import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../../src/core/sandbox/types.js";
 import { resolveWorkerSandboxSpec } from "../../src/core/sandbox/worker-policy.js";
 import {
@@ -13,6 +14,15 @@ import {
 	configureWorkerProcessSandbox,
 	planSandboxedSpawn,
 } from "../../src/core/sandbox/worker-process.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
+
+// A scratch Clio home for the whole file: the credential masks are built once per process,
+// so the desktop app's launch token must exist before the first sandboxed spawn.
+const clioHome = await isolateClioEnv("clio-worker-sandbox-");
+after(() => clioHome.restore());
+const appToken = join(clioHome.dir, "state", "gui", "background", "server.json");
+mkdirSync(join(appToken, ".."), { recursive: true });
+writeFileSync(appToken, '{"port":1,"token":"GUI_LAUNCH_TOKEN"}\n', { mode: 0o600 });
 
 function run(file: string, args: string[]): Promise<{ code: number | null; output: string }> {
 	return new Promise((resolve) => {
@@ -143,4 +153,36 @@ test("under bwrap a task worktree's worker cannot read the secrets of the checko
 	const bareResult = await run(barePlan.file, barePlan.args);
 	assert.match(bareResult.output, /^x$/mu, "the worker still reads its own tree");
 	assert.doesNotMatch(bareResult.output, /BARE_SOURCE_SECRET/u, bareResult.output);
+});
+
+test("under bwrap no contained command reads the desktop app's launch token", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-app-token-")));
+	t.after(() => rmSync(workspace, { recursive: true, force: true }));
+	const shell = `cat ${appToken} 2>&1; true`;
+	configureWorkerProcessSandbox(
+		resolveWorkerSandboxSpec({
+			mode: "auto",
+			readOnly: false,
+			cwd: workspace,
+			writeBoundaries: [],
+			allowedTools: ["bash"],
+			networkSetting: false,
+		}),
+	);
+	t.after(() => configureWorkerProcessSandbox(undefined));
+	const plans = {
+		worker: planSandboxedSpawn({ shell }, workspace),
+		main: planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), { shell }, workspace),
+	};
+	for (const [name, plan] of Object.entries(plans)) {
+		assert.equal(plan.kind, "sandboxed", name);
+		if (plan.kind !== "sandboxed") continue;
+		const result = await run(plan.file, plan.args);
+		assert.doesNotMatch(result.output, /GUI_LAUNCH_TOKEN/u, `${name}: ${result.output}`);
+	}
 });

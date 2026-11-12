@@ -132,7 +132,7 @@ import {
 	type ScriptReader,
 	type ScriptShell,
 } from "./script-shell.js";
-import { clioCredentialStorePaths } from "./secret-paths.js";
+import { clioControlPaths, clioCredentialStorePaths } from "./secret-paths.js";
 import {
 	invokesSettingsMutation,
 	SETTINGS_AUTHORITY_REASON,
@@ -814,11 +814,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 			? projectPolicy.pathPolicy
 			: mergePathPolicyInputs(defaults, projectPolicy.pathPolicy);
-		// Clio's own secret store and user skills, by absolute path.
+		// Clio's own secret store, the desktop app's launch token and user skills, by absolute path.
 		// Config directory expansion has to happen here because
 		// the list cannot call config helpers at module scope.
 		const expandedDefaults = mergePathPolicyInputs(mergePathPolicyInputs(pathPolicyInput, OPERATOR_PATH_POLICY), {
-			zeroAccessPaths: clioCredentialStorePaths(),
+			zeroAccessPaths: [...clioCredentialStorePaths(), ...clioControlPaths()],
 			readOnlyPaths: [...clioSkillsRootPaths(), path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
 		});
 		return compilePathPolicy(expandedDefaults, projectPolicyRoot);
