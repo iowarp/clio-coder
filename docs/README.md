@@ -30,7 +30,7 @@ current source.
 | Install CLIO Coder and connect the first model | [Installation and Lifecycle](guide/installation-and-lifecycle.md) → [Configuration and Targets](guide/configuration-and-targets.md) |
 | Install on an HPC cluster: no root, old glibc, proxies, airgapped mirrors | [HPC clusters](guide/hpc-clusters.md) |
 | Learn the interactive session and CLI | [Commands and Modes](guide/commands-and-modes.md) |
-| Understand what CLIO Coder may read, change, or execute | [Safety Model](architecture/safety-model.md) |
+| Understand what CLIO Coder may read, change, or execute | [Sandbox and Safety](guide/sandbox-and-safety.md) → [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Upgrade from 0.7: new `run` exit codes and the `run_end` frame, the required sandbox's outward-command rules, renamed slash commands, the `#ticket=` desktop launch link | [0.8.0 upgrade notes](../CHANGELOG.md#upgrade-notes) |
 | Upgrade from 0.6: removed runtime ids, retired settings keys, the `evals` manifest key and the retired `github-copilot` login | [Upgrading to 0.7.0](guide/installation-and-lifecycle.md#upgrading-to-070-removed-compatibility) |
@@ -58,7 +58,7 @@ current source.
 4. **Make one small change.** Name the finish line: which test must pass,
    which number must match. Approval cards appear for commands CLIO Coder cannot
    sandbox or recognize; see
-   [Operating posture and autonomy](guide/commands-and-modes.md#operating-posture-and-autonomy).
+   [Sandbox and safety](guide/sandbox-and-safety.md).
    `/view` shows the evidence it kept.
 5. **Write the finish line down.** `.clio-coder/quality.yaml` names the checks
    each changed path needs. See [Project quality policies](guide/quality-policy.md).
@@ -103,6 +103,7 @@ the [GUI guide](guide/gui.md) covers the browser interface.
 
 | Topic | Guide |
 | --- | --- |
+| What the sandbox allows and hides, when CLIO Coder asks, `/trust`, and what a project may change | [Sandbox and Safety](guide/sandbox-and-safety.md) |
 | Autonomy levels, shell containment, the safety judge, workspace snapshots and `/rewind`, the yolo floor, project policy, and damage-control rules | [Safety Model](architecture/safety-model.md) |
 | Source labels, approved destinations, worker admission, and refusal recovery | [Information Flow](guide/information-flow.md) |
 | What System One sends, where it can only tighten, and what it cannot tell you | [System One](guide/system-one.md) |
