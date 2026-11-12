@@ -65,7 +65,7 @@ Apply these changes? [y/N]
 ```
 :::
 
-Answer `n` and nothing changes. Answer `y` and it prints `Imported 1 target.` and one line per target: `lab: ready`, or what is still missing, such as `lab reads its key from LAB_API_KEY, which is not set in this shell.` 
+Answer `n` and nothing changes. Answer `y` and it prints `Imported 1 target.` and one line per target: `lab: ready`, or what is still missing, such as `lab reads its key from LAB_API_KEY, which is not set in this shell.`
 
 A plain `http` address to anything other than this machine or a private network address adds a warning that prompts and keys cross the network unencrypted.
 
@@ -88,7 +88,7 @@ Put the file at an `https` address or a path members can read. A fetched file mu
 A member who has never run CLIO Coder runs `clio-coder`. At **What do you have?** they choose **A setup file from my lab or team**, type the address at **Where is the setup file?**, and see the same preview under **This setup file will:** with **Apply** and **Back**. A member who already uses CLIO Coder runs:
 
 ```sh
-clio-coder configure --import https://hpc.example.edu/clio-coder/setup.yaml
+clio-coder configure --import https://lab.example.org/clio-coder/setup.yaml
 ```
 
 Only the `lab` target and the chat and fleet routes change. Their other targets, project settings and stored keys stay as they were.
