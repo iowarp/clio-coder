@@ -1,6 +1,6 @@
-# Clio Coder Architecture and Boundaries
+# CLIO Coder Architecture and Boundaries
 
-Clio Coder is a coding harness for terminal and browser sessions, with provider runtimes, mediated tools, and dispatched workers. CLI entry points, the interactive TUI, runtime adapters, worker subprocesses, and feature domains have separate ownership. These boundaries support local models and scientific-software workflows while keeping admission, safety, and persistence contracts explicit.
+CLIO Coder is a coding harness for terminal and browser sessions, with provider runtimes, mediated tools, and dispatched workers. CLI entry points, the interactive TUI, runtime adapters, worker subprocesses, and feature domains have separate ownership. These boundaries support local models and scientific-software workflows while keeping admission, safety, and persistence contracts explicit.
 
 ---
 
@@ -43,7 +43,7 @@ System One is not a loaded domain. The orchestrator builds it with `createSystem
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, run ledger, run settlement, route policy, worker spawning, admission. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution, trust projection. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit change manifests and their validation. |
-| extensions | `src/domains/extensions/**` | Extension packages, which are Clio code in their own process: discovery, capability envelope review, runtime api 2, and lifecycle. |
+| extensions | `src/domains/extensions/**` | Extension packages, which run code in their own process: discovery, capability envelope review, runtime api 2, and lifecycle. |
 | gateway | `src/domains/gateway/mcp/**` | The local stdio MCP client, strict configuration loading, and explicit trust. |
 | interop | `src/domains/interop/**` | The agent-kind registry, bounded detection of other coding agents, and consent to wire one as a delegation peer. |
 | lifecycle | `src/domains/lifecycle/**` | Doctor diagnostics, upgrade mechanics, migrations, Claude Agent SDK install, uninstallation. |
@@ -162,7 +162,7 @@ System One at `src/domains/system-one/` is the only decision layer, and it is of
 
 ## Session Routing vs. Persisted Settings
 
-Clio Coder maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state ([session-routing.ts](../../src/core/session-routing.ts)).
+CLIO Coder maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state ([session-routing.ts](../../src/core/session-routing.ts)).
 
 1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via explicit model-cycle keys) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
 2. **Lifecycle Flow**:
@@ -210,7 +210,7 @@ The codemap keeps its boot-time read surface separate from its build graph:
   run a codemap scan or an uninterruptible parser call on its render/input loop.
 - `coordinator.ts` owns production commits. One FIFO per workspace establishes
   generation order inside a process, and `withStateFileLock` extends that order
-  across Clio Coder processes. Each transaction rereads the artifact after acquiring
+  across CLIO Coder processes. Each transaction rereads the artifact after acquiring
   the lease, publishes atomically, and updates freshness state before releasing
   ownership.
 
@@ -278,7 +278,7 @@ and [dispatch.ts](../../src/tools/dispatch.ts) owns a separate cached dynamic im
 
 The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
-each overlapping helper and the Clio Coder deltas that must survive an SDK upgrade.
+each overlapping helper and the CLIO Coder deltas that must survive an SDK upgrade.
 
 Nine import rules apply. The same checker also runs rules 10 to 14, which hold telemetry accounting rather than imports and are described in [Telemetry](telemetry.md). Rules 1, 3, 4, 5, 7, 8, and 9 hold for every import form, type-only and dynamic included. Rule 2 and rule 6 treat a type-only import differently from a value import, because a type-only import erases at compile time. A dynamic `import()` always counts as a value import.
 
@@ -286,7 +286,7 @@ Nine import rules apply. The same checker also runs rules 10 to 14, which hold t
 
 Only files under `src/engine/**` may import `@earendil-works/pi-*` packages, including subpaths such as `@earendil-works/pi-ai/compat`. No file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from [types.ts](../../src/engine/types.ts).
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio Coder contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) dispatches by API through Pi's public lazy factories, supplies environment API keys, and lets Clio Coder's local-runtime adapters override API families. Clio Coder owns credential storage and the locked OAuth refresh lifecycle, delegating provider flows through [oauth.ts](../../src/engine/oauth.ts). The only `pi-ai/compat` edge is dynamic: when `integrations.runtimePlugins` is configured, Clio Coder joins Pi's process-global registry before an out-of-tree runtime evaluates and mirrors its overrides so plugins retain registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. The per-helper ownership, including the tool truncation, prompt-argument, and replay helpers derived from Pi sources, is in [pi-boundary.md](pi-boundary.md).
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against CLIO Coder contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) dispatches by API through Pi's public lazy factories, supplies environment API keys, and lets CLIO Coder's local-runtime adapters override API families. CLIO Coder owns credential storage and the locked OAuth refresh lifecycle, delegating provider flows through [oauth.ts](../../src/engine/oauth.ts). The only `pi-ai/compat` edge is dynamic: when `integrations.runtimePlugins` is configured, CLIO Coder joins Pi's process-global registry before an out-of-tree runtime evaluates and mirrors its overrides so plugins retain registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. The per-helper ownership, including the tool truncation, prompt-argument, and replay helpers derived from Pi sources, is in [pi-boundary.md](pi-boundary.md).
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 
@@ -314,7 +314,7 @@ Turn modules and state machine files in the chat loop (`src/session-control/turn
 
 The instant shell's Stage 0 owner is `src/interactive/terminal-lease.ts`. Its static value-import closure is what a cold `clio-coder` start pays before it can draw anything. Value importers outside that computed closure and outside the `src/interactive/**`, `src/session-control/**`, and `src/engine/**` trees may enter those protected trees only through a module declared in `STAGE0_SEAMS` in `tests/boundaries/check-boundaries.ts`. Every `src/cli/**` import into the protected trees needs a declaration, type-only included. Each declaration carries a reason. A declared seam may not lead back into the Stage 0 closure unless the existing composition-root overlap is explicitly recorded in its `allowStage0OverlapFrom` list, and each exception names its permitted composition-root importer.
 
-The rule exists because a second, disjoint reacher into a module in the closure makes esbuild split that module out of the chunk it shared with its neighbours. [instant-shell-import-graph.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/instant-shell-import-graph.test.ts) walks the built chunk that contains the Stage 0 owner and holds its static closure to 32 chunks, 1,400,000 total bytes, and 350,000 Clio Coder source bytes. That test fails only after a full build, so the lint-time rule is the early warning.
+The rule exists because a second, disjoint reacher into a module in the closure makes esbuild split that module out of the chunk it shared with its neighbours. [instant-shell-import-graph.test.ts](https://github.com/iowarp/clio-coder/blob/main/tests/contracts/instant-shell-import-graph.test.ts) walks the built chunk that contains the Stage 0 owner and holds its static closure to 32 chunks, 1,400,000 total bytes, and 350,000 CLIO Coder source bytes. That test fails only after a full build, so the lint-time rule is the early warning.
 
 ### Rule 7: `turn-control` is pure
 
@@ -369,7 +369,7 @@ graph TD
 
 Core data paths:
 
-1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY. When a newer Clio Coder last used the home, the terminal asks before continuing (default no), and `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set.
+1. `src/cli/index.ts` loads only argument parsing and boot tracing statically. Every subcommand is a dynamic import in its command table, so a bare start or `--version` pays for its own module graph. Interactive start, `run`, and `acp` all call `runClioCommand` in [clio.ts](../../src/cli/clio.ts), which settles the startup settings, detects or configures a chat route for an existing home, and opens the Stage 0 terminal lease for an interactive TTY. When a newer CLIO Coder last used the home, the terminal asks before continuing (default no), and `run` and ACP exit 2 unless `CLIO_CODER_ALLOW_OLDER=1` is set.
 2. `bootOrchestrator` initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts), then runs the domain loader described above. Each domain's `manifest.ts` dependency list sets its position. The dispatch domain's start recovers orphaned runs, and session bind and the session prompt share workspace probes ([Cold-start work](#cold-start-work)).
 3. The shared chat loop in `src/session-control/` resolves model/runtime state. `resolveSessionTools` in [agent-tools.ts](../../src/tools/agent-tools.ts) supplies the full resolved tool surface when the runtime supports tools, subject to explicit turn constraints. Task-ranked skills and capability advice enter reminder text; the task does not select a different session schema set.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
@@ -380,7 +380,7 @@ Core data paths:
 
 ## Event and accountability model
 
-Clio Coder uses one in-process telemetry hub for status and accountability surfaces, but safety is not delegated to events. The hard gate lives in code:
+CLIO Coder uses one in-process telemetry hub for status and accountability surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all. A tool-capable session gets the complete registry as one deterministic surface, with each tool placed `direct` (schema attached to every request) or behind the `gateway` tool (found and called on demand). Placement changes what the model sees and never what a call is allowed to do ([surface.ts](../../src/tools/surface.ts)).
 - [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Playbook step write boundaries are detect-and-rollback mechanisms (change tracking and rollbacks) with no OS-level confinement. The policy engine blocks writes outside dispatch `write_roots`.
@@ -390,7 +390,7 @@ Clio Coder uses one in-process telemetry hub for status and accountability surfa
 
 ## Interactive render transactions
 
-The interactive shell owns one concrete pi-tui renderer. Clio Coder's instrumented
+The interactive shell owns one concrete pi-tui renderer. CLIO Coder's instrumented
 subclasses bracket the renderer's protected `doRender()` seam, so one render
 transaction receives one `frameId` even when regular-screen cursor/IME work
 issues several terminal writes. Protocol, startup, and shutdown writes outside
@@ -442,7 +442,7 @@ The render trace is opt-in and content-free. `CLIO_CODER_RENDER_TRACE` names a J
 
 ## Command spec
 
-Interactive slash commands in Clio Coder are governed by a declarative command specification registry (`BUILTIN_SLASH_COMMANDS` in [slash-commands.ts](../../src/session-control/slash-commands.ts)). Each entry defines the name, flags, positionals, and subcommands of one command. The central registry is the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser turns an input string into a structured argument object and a canonical command representation using these specifications. The headless refusal in `src/cli/run.ts` and the ACP command projection read the same registry, so every surface agrees on which tokens name a command.
+Interactive slash commands in CLIO Coder are governed by a declarative command specification registry (`BUILTIN_SLASH_COMMANDS` in [slash-commands.ts](../../src/session-control/slash-commands.ts)). Each entry defines the name, flags, positionals, and subcommands of one command. The central registry is the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser turns an input string into a structured argument object and a canonical command representation using these specifications. The headless refusal in `src/cli/run.ts` and the ACP command projection read the same registry, so every surface agrees on which tokens name a command.
 
 ---
 

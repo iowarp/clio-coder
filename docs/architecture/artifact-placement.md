@@ -1,11 +1,11 @@
 # Artifact Placement
 
-Clio Coder assigns generated harness artifacts a home according to who reads them.
+CLIO Coder assigns generated harness artifacts a home according to who reads them.
 The placement convention is that **the repo working tree holds files a human asked for.**
 The `artifact` tool defaults to the project-local `.clio-coder/` directory; other
 harness stores use the project-local or XDG paths listed below. This convention
 does not constrain every file an admitted `write`, `bash`, or script call can create.
-Clio writes `.clio-coder/.gitignore` itself, so generated files stay out of Git and
+CLIO Coder writes `.clio-coder/.gitignore` itself, so generated files stay out of Git and
 what an operator authors there can be committed.
 
 This page is the contract. [artifact-paths.ts](../../src/core/artifact-paths.ts) is the code that
@@ -120,8 +120,8 @@ problem.
 | `tui/` | The terminal renderer's crash dump `pi-tui-crash.log` (every rendered row, so the transcript), in a directory created mode `0700` |
 | `context-observations/`, `context-seeds/` | Recallable observations and worker context seeds |
 | `protected-artifact-pending/<key>/` | Write-ahead records for pending protected artifacts |
-| `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. Clio Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
-| `mux/<hash>/`, `mux/locks/<hash>` | The private pane host of one project, keyed by a hash of its canonical Clio state root and project directory: `config/herdr/config.toml` with `clio-coder-workspace.json` (the managed herdr config, plus herdr's log and handoff socket, since herdr keeps its data beside its config), `state/` and the `pane-shell` shim; the lock serializes launches of that host. `mux/herdr-install-failed.json` records a failed launch-time herdr install (pinned version and time) so launches skip the download for a day or until the pin changes; a successful install removes it. Clio Coder rewrites the config on every launch, removes the whole root when the host stops, and never reads or writes the operator's own `~/.config/herdr`. The host socket and exit markers live in the runtime directory: on Linux `$XDG_RUNTIME_DIR/clio-coder/`, then `$TMPDIR/clio-coder-<uid>/`; on macOS `$TMPDIR/clio-coder/`; then `mux/run/` here and `run/` in the cache root, for a launch whose write fence makes the runtime directory read-only; else `/tmp/clio-coder-<uid>/`. A directory is skipped when the socket path in it would pass 100 bytes or it cannot be made owner-only and written. A clean quit's exit marker carries that Clio's exit summary to the launcher, which prints it after the host is gone. |
+| `cliamp/` | The `/music` player home: `config.toml`, `themes/clio.toml`, `playlists/clio.toml`, `plugins/clio-dock.lua`, `plugins/.trust.json`, `dock-taps`, and cliamp's own socket, log and history files. CLIO Coder rewrites its generated files on each open, and never reads or writes the operator's own `~/.config/cliamp`. |
+| `mux/<hash>/`, `mux/locks/<hash>` | The private pane host of one project, keyed by a hash of its canonical CLIO Coder state root and project directory: `config/herdr/config.toml` with `clio-coder-workspace.json` (the managed herdr config, plus herdr's log and handoff socket, since herdr keeps its data beside its config), `state/` and the `pane-shell` shim; the lock serializes launches of that host. `mux/herdr-install-failed.json` records a failed launch-time herdr install (pinned version and time) so launches skip the download for a day or until the pin changes; a successful install removes it. CLIO Coder rewrites the config on every launch, removes the whole root when the host stops, and never reads or writes the operator's own `~/.config/herdr`. The host socket and exit markers live in the runtime directory: on Linux `$XDG_RUNTIME_DIR/clio-coder/`, then `$TMPDIR/clio-coder-<uid>/`; on macOS `$TMPDIR/clio-coder/`; then `mux/run/` here and `run/` in the cache root, for a launch whose write fence makes the runtime directory read-only; else `/tmp/clio-coder-<uid>/`. A directory is skipped when the socket path in it would pass 100 bytes or it cannot be made owner-only and written. A clean quit's exit marker carries that session's exit summary to the launcher, which prints it after the host is gone. |
 | `gui/` | Graphical application state: `workspaces.json`, `children.json` with `<name>.locks/` directories, and `background/` (`server.json`, `owner.json` and the generated `clio-coder-gui-<id>.service` unit) |
 | `home.json`, `migration-reports/`, `workspace-conversions.json`, `restart-intent.json`, `restart-continuation.json` | Install metadata, migration reports, per-workspace layout conversions, a pending relaunch and the task it continues |
 | `live/`, `peer-inbox/`, `running-builds/`, `fleet-locks/` | Open-session heartbeats, messages between sessions, the builds running processes loaded, and fleet locks |
@@ -134,7 +134,7 @@ The verification slot is not under the state root. `dispatch-verification-slot.l
 lives in `CLIO_CODER_VERIFICATION_SLOT_DIR` when that is an absolute path, else in
 `$XDG_RUNTIME_DIR/clio-coder`, else in a per-user `clio-coder-<uid>` directory in the
 OS temp dir, so one host-verification check or base replay runs at a time per machine,
-across Clio homes. The directory must be the user's own with mode `0700`; otherwise
+across CLIO Coder homes. The directory must be the user's own with mode `0700`; otherwise
 checks run without the slot (`src/domains/dispatch/verification-slot.ts`).
 
 The clean-exit session summary is built from an in-memory snapshot and is not
@@ -148,7 +148,7 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `v8-compile-cache/` | Node compile cache |
 | `provider-target-models/<key>.json` | Per-target model discovery snapshots |
 | `provider-target-checks/<key>.json` | The last setup test request a target's model answered; read for 24 hours so a just-tested route starts as checked |
-| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when Clio closes the conversation |
+| `copilot-sdk/sessions/<session id>/` | The Copilot runtime's records for one live `copilot-sdk` conversation, written through the SDK's `sessionFs`; removed when CLIO Coder closes the conversation |
 | `mcp-catalogs/<key>.json` | Cached MCP tool catalogs |
 | `yazi/profile/` | The managed file-browser profile for the files pane |
 | `yazi/sessions/` | Per-pane DDS/chooser transports and owner receipts (host, PID and birth token). Removed on close; old receipts are swept only after their local owner is confirmed dead. |
@@ -158,9 +158,9 @@ persisted. Route history is a fold over `run.settled` records in the run journal
 | `data-readers/<package>@<version>/` | The HDF5, NetCDF and Parquet readers of the `data` tool, fetched as pinned npm tarballs on first use, with the same 10-minute retry window after a failure ([reader-assets.ts](../../src/tools/data/reader-assets.ts)) |
 | `sandbox-cache/` | The persistent cache of contained commands: the sandbox points `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` and `PLAYWRIGHT_BROWSERS_PATH` here, so a contained command does not write the operator's `~/.cache` or `~/.npm` |
 | `run/` | The pane host's socket directory when neither the runtime directory, `$TMPDIR` nor the state root's `mux/run/` can hold it (see `mux/<hash>/` above) |
-| `skill-frontmatter.json` | Parsed `SKILL.md` frontmatter keyed by file path, mtime and size; dropped whole when the Clio version changes ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)) |
+| `skill-frontmatter.json` | Parsed `SKILL.md` frontmatter keyed by file path, mtime and size; dropped whole when the CLIO Coder version changes ([frontmatter-cache.ts](../../src/domains/resources/skills/frontmatter-cache.ts)) |
 | `update-<fingerprint>.json` | Update-check state |
-| `fleet-install-*` | Temporary directories while a fleet node installs Clio Coder |
+| `fleet-install-*` | Temporary directories while a fleet node installs CLIO Coder |
 
 ## The project `.clio-coder/` directory
 
@@ -227,7 +227,7 @@ After each run, `sweepRunRecords` keeps the newest 100 completed records by comp
 
 ## `.clio-coder/` and git
 
-Clio writes `.clio-coder/.gitignore` the first time it generates a file there, and
+CLIO Coder writes `.clio-coder/.gitignore` the first time it generates a file there, and
 at session start for a `.clio-coder/` without one (`ensureProjectIgnore` in
 `src/core/project-root.ts`). It ignores everything except `settings.yaml`, `safety.yaml`,
 `hooks.yaml`, `mcp.yaml`, `verifiers.yaml`, `quality.yaml`, `validation.yaml`, `validation.yml`,
@@ -235,11 +235,11 @@ at session start for a `.clio-coder/` without one (`ensureProjectIgnore` in
 `skills/`, `prompts/`, `playbooks/`, `extensions/`, `plugins/` and `model-catalog.d/`, and `*.local.yaml`
 stays ignored inside those too. An allow-list means a generated path added later stays
 out of Git by default. The file ignores itself, so a project with only generated files
-shows nothing in `git status`. Clio never replaces an existing copy, so an edit is kept.
+shows nothing in `git status`. CLIO Coder never replaces an existing copy, so an edit is kept.
 The `grep` and `find` tools ignore this file for a search rooted inside `.clio-coder/`, because
 it keeps generated files out of Git rather than out of reach.
 
-Clio never edits the project's own `.gitignore`. A blanket `.clio-coder/` rule there, which
+CLIO Coder never edits the project's own `.gitignore`. A blanket `.clio-coder/` rule there, which
 earlier versions of `context init` added, still wins, because Git does not descend into an
 excluded parent. `context init` names such a rule; remove the line to commit authored files.
 

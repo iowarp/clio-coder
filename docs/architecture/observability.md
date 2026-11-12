@@ -1,6 +1,6 @@
 # /view
 
-`/view` is the interactive artifact viewer for a Clio Coder session. It keeps the live transcript compact while preserving a full inspection path for run records, evidence, task ledgers, decisions and successful workspace outputs. What it shows is recorded by [telemetry](telemetry.md) and the session ledger; the viewer only reads.
+`/view` is the interactive artifact viewer for a CLIO Coder session. It keeps the live transcript compact while preserving a full inspection path for run records, evidence, task ledgers, decisions and successful workspace outputs. What it shows is recorded by [telemetry](telemetry.md) and the session ledger; the viewer only reads.
 
 ```text
 /view

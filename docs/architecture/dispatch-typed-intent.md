@@ -227,7 +227,7 @@ normalization and compatibility boundary.
 The one input that is legitimately environmental is the *verification catalog*:
 `check` ids resolve from the project's `package.json` scripts and
 `.clio-coder/verifiers.yaml`, which are properties of the workspace, not of the
-Clio Coder installation. An undeclared id fails closed with
+CLIO Coder installation. An undeclared id fails closed with
 `verification_check_undeclared` naming both sources.
 
 ---
@@ -379,7 +379,7 @@ that resolution belongs to the admission controller that owns the catalog.
 Typed intent is accepted on a delegation request and is rendered into the
 approval artifact, so an operator sees the declared scope before an external
 agent starts. It grants nothing on that transport: the external agent runs its
-own tool surface, Clio Coder mediates no per-tool call, and any resolved `writeRoots`
+own tool surface, CLIO Coder mediates no per-tool call, and any resolved `writeRoots`
 is refused outright rather than accepted and left unenforced.
 
 ### 6.7 External Scout read

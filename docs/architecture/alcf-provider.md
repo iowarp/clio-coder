@@ -2,15 +2,15 @@
 
 The [configuration guide](../guide/configuration-and-targets.md) walks through choosing an ALCF target.
 
-Clio Coder can use Argonne's ALCF inference gateway as an OpenAI-compatible target backed by Globus OAuth. The runtime id is `alcf` (tier `cloud`, API family `openai-completions`, auth `oauth`); each configured target points at one gateway cluster URL, such as Sophia or Metis.
+CLIO Coder can use Argonne's ALCF inference gateway as an OpenAI-compatible target backed by Globus OAuth. The runtime id is `alcf` (tier `cloud`, API family `openai-completions`, auth `oauth`); each configured target points at one gateway cluster URL, such as Sophia or Metis.
 
 ## Login
 
 The login flow is SSH-friendly and needs no localhost callback. `clio-coder auth login alcf` prints a Globus authorize URL and asks you to paste back the displayed authorization code. A full redirect URL, a `code=` query string or the bare code are all accepted.
 
-[`alcf-oauth.ts`](../../src/engine/alcf-oauth.ts) implements the Globus native-app PKCE flow with the `S256` challenge, `access_type=offline` and a `session_required_single_domain` of `anl.gov,alcf.anl.gov`. The token response must carry a gateway grant and a refresh token, or the login fails. Clio Coder treats the access token as expired five minutes before the server's expiry. The refresh is a Globus `refresh_token` grant that keeps the previous refresh token when the response omits a new one.
+[`alcf-oauth.ts`](../../src/engine/alcf-oauth.ts) implements the Globus native-app PKCE flow with the `S256` challenge, `access_type=offline` and a `session_required_single_domain` of `anl.gov,alcf.anl.gov`. The token response must carry a gateway grant and a refresh token, or the login fails. CLIO Coder treats the access token as expired five minutes before the server's expiry. The refresh is a Globus `refresh_token` grant that keeps the previous refresh token when the response omits a new one.
 
-The credential is stored under the provider id `alcf` in `credentials.yaml` in the config directory, mode `0600`, through `openAuthStorage()`. Storage and refresh are Clio Coder's own, the same path every OAuth runtime uses, as described in [auth](../guide/configuration-and-targets.md#auth): a request refreshes the stored credential once it is within 5 minutes of that expiry, and a gateway 401 forces one refresh and retries the rejected call once.
+The credential is stored under the provider id `alcf` in `credentials.yaml` in the config directory, mode `0600`, through `openAuthStorage()`. Storage and refresh are CLIO Coder's own, the same path every OAuth runtime uses, as described in [auth](../guide/configuration-and-targets.md#auth): a request refreshes the stored credential once it is within 5 minutes of that expiry, and a gateway 401 forces one refresh and retries the rejected call once.
 
 ## Configure
 
@@ -40,7 +40,7 @@ clio-coder configure \
   --max-tokens 4096
 ```
 
-Sophia uses the `vllm` framework in the URL and serves `openai/`-prefixed model ids. Metis uses `api` and serves bare model ids. The runtime reads the cluster from the `/resource_server/<cluster>/` segment of the URL and picks the framework from it: `api` for `metis`, `vllm` for every other cluster. Clio Coder sends the configured wire model id literally and does not rewrite it.
+Sophia uses the `vllm` framework in the URL and serves `openai/`-prefixed model ids. Metis uses `api` and serves bare model ids. The runtime reads the cluster from the `/resource_server/<cluster>/` segment of the URL and picks the framework from it: `api` for `metis`, `vllm` for every other cluster. CLIO Coder sends the configured wire model id literally and does not rewrite it.
 
 Set a target as the chat default when you are ready:
 
@@ -74,9 +74,9 @@ ALCF reports no per-token price. A target's cost provenance is `unknown` until i
 The runtime uses these components:
 
 - [alcf-oauth.ts](../../src/engine/alcf-oauth.ts) implements the Globus PKCE paste-code OAuth flow.
-- [oauth.ts](../../src/engine/oauth.ts) registers the Clio Coder-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic and OpenAI Codex flows.
+- [oauth.ts](../../src/engine/oauth.ts) registers the CLIO Coder-owned OAuth provider through the engine boundary, next to the Pi-provided Anthropic and OpenAI Codex flows.
 - [alcf.ts](../../src/domains/providers/runtimes/cloud/alcf.ts) implements Sophia and Metis discovery and reuses the generic OpenAI-compatible chat synthesis.
 - `ProbeContext.authToken` carries a resolved stored, API or OAuth bearer into live probes.
-- Sophia serves gpt-oss through vLLM with server flags the operator does not control, so tool calls and reasoning can arrive as raw Harmony frames in the text. The gpt-oss ids resolve to Clio Coder's Harmony parser, which recovers text, thinking and tool calls from those frames, as the [provider adapter cookbook](provider-adapter-cookbook.md#31-stream-filters-and-sentinel-stripping) describes. Probe a Sophia target with `clio-coder targets --probe --tools` before relying on tool loops.
+- Sophia serves gpt-oss through vLLM with server flags the operator does not control, so tool calls and reasoning can arrive as raw Harmony frames in the text. The gpt-oss ids resolve to CLIO Coder's Harmony parser, which recovers text, thinking and tool calls from those frames, as the [provider adapter cookbook](provider-adapter-cookbook.md#31-stream-filters-and-sentinel-stripping) describes. Probe a Sophia target with `clio-coder targets --probe --tools` before relying on tool loops.
 - Metis returns structured tool calls and a reasoning field, but answers a bare 400 to an assistant turn that carries content, reasoning and tool calls together, so those tool turns replay as one analysis message.
 - ALCF rejects non-standard `chat_template_kwargs` request fields. The runtime marks synthesized models with `clioCoder.chatTemplateKwargsUnsupported`, and the OpenAI-compatible engine adapter reads that marker and omits the family-derived `chat_template_kwargs`. The accepted top-level `reasoning_effort` is independent of the marker.

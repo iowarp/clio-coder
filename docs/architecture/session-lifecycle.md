@@ -2,7 +2,7 @@
 
 The [context continuity guide](../guide/context-continuity.md) explains operator recovery after a paused handoff.
 
-This page describes the implemented Clio Coder interactive, headless and ACP session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
+This page describes the implemented CLIO Coder interactive, headless and ACP session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
 
 Source implementations: [session.ts](../../src/engine/session.ts) and `src/domains/session/`.
 
@@ -22,7 +22,7 @@ Sessions are persisted durably on disk under the platform state root (`clioState
 - `<cwdHash>`: First 16 hexadecimal characters of SHA-256 of the absolute resolved working-directory path (`createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)`).
 - `<sessionId>`: UUIDv7 generated at session initialization.
 - Per-turn token accounting and prompt compiles are not session files. Each turn's context snapshot is a `context.snapshotted` record and each prompt compile a `prompt.compiled` record in the session's telemetry journal, `<stateDir>/telemetry/sessions/<sessionId>/journal.jsonl` ([Telemetry](telemetry.md#journals), [Context Engine](context-engine.md#token-accounting--ledger-snapshots)). A prompt compile records prompt hashes, section token estimates, fragment content hashes and the thinking level ([prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts)), never prompt text.
-- Session directories are created mode `0700` and `meta.json`, `current.jsonl` and `tree.json` mode `0600`, whatever the umask. Boot also closes Clio Coder's existing state subdirectories that are open to group or other users.
+- Session directories are created mode `0700` and `meta.json`, `current.jsonl` and `tree.json` mode `0600`, whatever the umask. Boot also closes CLIO Coder's existing state subdirectories that are open to group or other users.
 - Deleting a session removes the directory. `deleteSession` with `keepFiles` keeps `current.jsonl` and `tree.json` and renames `meta.json` to `meta.deleted.json`, which drops the session from listings. The open session cannot be deleted. A delete takes the same lock on `meta.json` that a resume takes, and refuses a session that has not ended or whose owner process is still alive; ACP `session/delete` reports that refusal as `session_open`.
 
 `openSession` and `resumeSession` locate a session by id under any `<cwdHash>` bucket, after rejecting ids that could traverse out of the sessions root.
@@ -64,7 +64,7 @@ payloads on compaction summaries; version 6 adds eviction reasons, the `reread`
 recall trigger, and optional evicted-body content hashes.
 
 A missing format or a version below 3 is refused with guidance to remove the
-incompatible session directory. Versions above 6 require a newer Clio Coder. Older
+incompatible session directory. Versions above 6 require a newer CLIO Coder. Older
 binaries may refuse a session after its metadata is restamped; upgrade clients
 before reopening shared sessions.
 
@@ -144,7 +144,7 @@ export interface MessageEntry {
 
 ## 4. Conversation Tree Graph (`tree.json`) & Lineage
 
-Clio Coder tracks all conversation turns as a directed tree graph, enabling non-destructive branching, navigation, and message forking.
+CLIO Coder tracks all conversation turns as a directed tree graph, enabling non-destructive branching, navigation, and message forking.
 
 ### Tree Structure
 
@@ -190,7 +190,7 @@ the task-memory bank.
 
 The goal must be at least 12 characters and cannot be one of `continue`, `keep going`, `same`, `next`, `go on`, `proceed` or `resume`. A turn in flight refuses the command. The service is shared with other hosts in [handoff-service.ts](../../src/domains/session/handoff-service.ts), and the pure rules are in [handoff.ts](../../src/domains/session/handoff.ts).
 
-The rule that makes the document trustworthy is read-ledger validation. Clio folds
+The rule that makes the document trustworthy is read-ledger validation. CLIO Coder folds
 this session's persisted `read`, `edit`, `write`, `ls`, `find`, `grep`, and
 `artifact` tool calls (plus its `fileEntry` records) into a set of
 workspace-relative paths, through `filterEntriesToActivePath` so an abandoned
@@ -223,7 +223,7 @@ reported to `/usage` under a handoffs row and excluded from the turn count.
 
 ### Streaming Turn Settlement During Session Transitions
 
-When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming, `settleChatBeforeSessionSwitch` cancels and awaits the in-flight turn so partial assistant records and completed tools settle before replacing the writer. A busy `/new` says it is cancelling the active run, and any follow-up queued behind that run goes back into the editor instead of being dropped, including one still expanding when the session changed. A slash command typed while a run is active cannot be queued or sent now with `Alt+S`, because the model would receive it as text. Clio refuses it with a notice and keeps the draft, and `Enter` runs it now, cancelling the active run. Shutdown separately stops shell admission and drains the active operator command. Shutdown hooks default to 500 ms each; the operator-shell hook allows six seconds for its five-second TERM-to-KILL escalation, and worker process-group escalation uses a 500 ms grace. Descendants in the owned process group are signaled with it. Processes that daemonize or leave the group are not covered.
+When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming, `settleChatBeforeSessionSwitch` cancels and awaits the in-flight turn so partial assistant records and completed tools settle before replacing the writer. A busy `/new` says it is cancelling the active run, and any follow-up queued behind that run goes back into the editor instead of being dropped, including one still expanding when the session changed. A slash command typed while a run is active cannot be queued or sent now with `Alt+S`, because the model would receive it as text. CLIO Coder refuses it with a notice and keeps the draft, and `Enter` runs it now, cancelling the active run. Shutdown separately stops shell admission and drains the active operator command. Shutdown hooks default to 500 ms each; the operator-shell hook allows six seconds for its five-second TERM-to-KILL escalation, and worker process-group escalation uses a 500 ms grace. Descendants in the owned process group are signaled with it. Processes that daemonize or leave the group are not covered.
 
 ---
 
@@ -238,7 +238,7 @@ When an operator issues `/new`, `/resume`, `/tree`, or `/fork` during streaming,
 | `clio-coder run --session <id>`, `clio-coder run --continue` | Headless resume. `--continue` takes the most recent session for the working directory. A session that cannot be resumed fails the run with exit code 2 instead of answering without its history. The two flags together, or either with `--agent`, are usage errors. Neither uses the picker filter. |
 | `clio-coder --resume`, `--continue`, `-r`, `-c` | Refused as unknown global options with exit code 2 (#191) by `src/cli/argv.ts`. The error names `/resume` inside the app. Sessions resume from inside the app, or through `run` for headless work. |
 
-On a clean interactive exit Clio Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. `clio-coder --session-file <path>` keeps a live JSON record of the interactive session at `<path>`: it is rewritten at every turn boundary and on every move into or out of a wait (`working`, `idle`, `awaiting-approval`, `awaiting-answer`), and the exit record (`state: "ended"`, with the outcome, exit code, usage and models) replaces it when the session ends ([session-file.ts](../../src/interactive/session-file.ts)). The flag is refused with a subcommand. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
+On a clean interactive exit CLIO Coder prints a session summary whose last line is `To resume: clio-coder, then /resume <sessionId>`. `interface.exitSummary` (`auto`, `brief`, `standard`, `report`, `off`; default `auto`) sets its detail. `auto` follows `interface.outputDetail`: compact selects brief, standard selects standard, and detailed selects report. Legacy `full` reads as standard. `off` prints only the resume line ([defaults.ts](../../src/core/defaults.ts)). A session with no model turn prints nothing. `clio-coder --session-file <path>` keeps a live JSON record of the interactive session at `<path>`: it is rewritten at every turn boundary and on every move into or out of a wait (`working`, `idle`, `awaiting-approval`, `awaiting-answer`), and the exit record (`state: "ended"`, with the outcome, exit code, usage and models) replaces it when the session ends ([session-file.ts](../../src/interactive/session-file.ts)). The flag is refused with a subcommand. The snapshot is kept by [exit-summary-collector.ts](../../src/interactive/exit-summary-collector.ts) and formatted by [exit-summary.ts](../../src/interactive/exit-summary.ts); the key is listed in [Commands and modes](../guide/commands-and-modes.md).
 
 When resuming a session via `/resume` or a headless `clio-coder run --session <id>` / `--continue`:
 1. `src/domains/session/manager.ts:resumeSessionState` loads `meta.json` and runs migrations.
@@ -263,7 +263,7 @@ When resumed or forked session history is replayed to the model, compaction summ
 
 ## How new sessions, resume and fork differ in history and workspace
 
-Clio Coder provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:
+CLIO Coder provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:
 
 | Operation | Session ID & Ledger | History Lineage | Workspace (`cwd`) Behavior |
 | --- | --- | --- | --- |
@@ -276,7 +276,7 @@ Clio Coder provides distinct lifecycle operations for managing conversation cont
 
 ## 6. Session Export
 
-`/export` replays the active branch through the same transcript projection used by the live TUI and `/resume`. With no path, it writes `.clio-coder/exports/<sessionId>-<local-date>.html`. The HTML document is self-contained, carries the active Clio Coder theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.
+`/export` replays the active branch through the same transcript projection used by the live TUI and `/resume`. With no path, it writes `.clio-coder/exports/<sessionId>-<local-date>.html`. The HTML document is self-contained, carries the active CLIO Coder theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.
 
 An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC export instant, and a terminal-control-free fenced transcript. Export never changes the ledger or the active tree pin. Both formats follow the pinned active leaf and omit abandoned sibling turns.
 
@@ -302,7 +302,7 @@ The interactive editor provides process-local prompt history via `Ctrl+P` (previ
 
 ## 9. Protected-Artifact Write-Ahead Journal
 
-To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal ([protected-artifact-journal.ts](../../src/domains/session/protected-artifact-journal.ts)):
+To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, CLIO Coder maintains a write-ahead journal ([protected-artifact-journal.ts](../../src/domains/session/protected-artifact-journal.ts)):
 
 - Location: `<stateDir>/protected-artifact-pending/<sha256(sessionId)>/<recordId>.json`
 - Lifecycle:

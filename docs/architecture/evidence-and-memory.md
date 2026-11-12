@@ -2,7 +2,7 @@
 
 The [proactive memory guide](../guide/proactive-memory.md) explains when memory is offered and restored.
 
-Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. A finished run's evidence is its sealed telemetry scope: when a dispatched run settles, the run's journal owner assesses it and journals an `evidence.assessed` record after `run.settled` and before `run.sealed`, so the seal covers the assessment. There is no evidence directory to build and no evidence index; every reader reads the read model's run DTO. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md#view) command for interactive inspection of runs, dispatch output, durable tool output, compaction summaries, and session accountability before citing evidence.
+CLIO Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. A finished run's evidence is its sealed telemetry scope: when a dispatched run settles, the run's journal owner assesses it and journals an `evidence.assessed` record after `run.settled` and before `run.sealed`, so the seal covers the assessment. There is no evidence directory to build and no evidence index; every reader reads the read model's run DTO. Long-term memory records are local and evidence-linked, and only an approved record reaches prompt selection. Approval comes from the operator or the narrow repository-knowledge gate described below. Proactive task memory is a separate tier that runs by default on session task banks, and its model-tier reminders can propose durable records whose approval remains governed separately. Use the TUI [`/view`](observability.md#view) command for interactive inspection of runs, dispatch output, durable tool output, compaction summaries, and session accountability before citing evidence.
 
 Source of truth: `src/domains/evidence/`, `src/domains/memory/`, `src/domains/evolution/`, `src/domains/claims/`, [evidence.ts](../../src/cli/evidence.ts), [memory.ts](../../src/cli/memory.ts), [claims.ts](../../src/cli/claims.ts), and [evolve.ts](../../src/cli/evolve.ts). The journal, seal and bundle format are specified in [Telemetry](telemetry.md#evidence).
 
@@ -81,7 +81,7 @@ The `assignment` pattern reads `key=value`, `key: value` and `"key": "value"` sh
 
 ### Command output
 
-What `bash`, `run_script`, an operator shell line (`!cmd`, `!!cmd` and ACP's shell line) and a `panes` read print is masked before the model, the transcript, a live frame, a bash offload or a `run_script` log sees it ([output-mask.ts](../../src/domains/evidence/output-mask.ts)). A credential value of 8 or more characters that the command's environment holds or that Clio resolved becomes `[redacted:known]`. These kinds from the table above are masked by shape: `url-userinfo`, `url-username`, `pem`, `aws-access-key`, `github-token`, `sk-key` when it holds a digit, `slack-token`, `google-api-key`, `gitlab-token`, `slack-webhook`, `discord-webhook`, `telegram-bot-token`, `jwt`, `authorization`, and `url-param` when its value is 8 or more plain URL characters, so printed source such as `"?token=" + value` keeps its quote. `assignment` stays out, since build and test output is full of lines such as `max_tokens: 128000000` that it would blank, and so does `aws-secret-key`, whose randomness check is a guess that output such as base64 blobs would trip.
+What `bash`, `run_script`, an operator shell line (`!cmd`, `!!cmd` and ACP's shell line) and a `panes` read print is masked before the model, the transcript, a live frame, a bash offload or a `run_script` log sees it ([output-mask.ts](../../src/domains/evidence/output-mask.ts)). A credential value of 8 or more characters that the command's environment holds or that CLIO Coder resolved becomes `[redacted:known]`. These kinds from the table above are masked by shape: `url-userinfo`, `url-username`, `pem`, `aws-access-key`, `github-token`, `sk-key` when it holds a digit, `slack-token`, `google-api-key`, `gitlab-token`, `slack-webhook`, `discord-webhook`, `telegram-bot-token`, `jwt`, `authorization`, and `url-param` when its value is 8 or more plain URL characters, so printed source such as `"?token=" + value` keeps its quote. `assignment` stays out, since build and test output is full of lines such as `max_tokens: 128000000` that it would blank, and so does `aws-secret-key`, whose randomness check is a guess that output such as base64 blobs would trip.
 
 Output is masked as it arrives. A live frame holds back a run that may still become a credential, so a token split across writes never shows, and a tail window that lost its head drops the token the cut landed in and the one after it, counting their bytes in its `[... N bytes omitted ...]` marker. `run_script` writes `stdout.log` and `stderr.log` through the same mask, byte for byte except where it replaces a credential, and `run.json` still counts the bytes the script wrote.
 
@@ -116,7 +116,7 @@ Decision refs a run cited are resolved once, at assessment, against the decision
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run using a closed set of 22 canonical tags (`EVIDENCE_TAGS`, exported from `src/domains/evidence/types.ts`). These tags distinguish general execution characteristics from actual failure causes.
+CLIO Coder classifies every run using a closed set of 22 canonical tags (`EVIDENCE_TAGS`, exported from `src/domains/evidence/types.ts`). These tags distinguish general execution characteristics from actual failure causes.
 
 ### Complete Taxonomy
 
@@ -132,7 +132,7 @@ Clio Coder classifies every run using a closed set of 22 canonical tags (`EVIDEN
 | `destructive-cleanup`| Precaution | Clean-up rules triggered to prevent workspace pollution or damage. |
 | `blocked-tool` | Failure | The safety net blocked a tool call requested by the model. |
 | `escalation` | Precaution | A worker permission escalation timed out or was denied. |
-| `external-bypass` | Security | An external runner used its own permissions outside Clio Coder policy. |
+| `external-bypass` | Security | An external runner used its own permissions outside CLIO Coder policy. |
 | `external-approximation` | Historical | Reserved in the vocabulary. Current builds do not emit it. |
 | `independent-review` | Validation | The canonical independent-review axis: a failed or correlated review is a warning; an inconclusive review, or a successful run with no review at all, is an info row saying its result rests on its own record. |
 | `context-provenance` | Provenance | The canonical context-provenance axis read `invalid`, or a cited decision ref resolved (info) or did not resolve (warning). |
@@ -340,7 +340,7 @@ clio-coder evolve manifest summarize <path>
 | `changes[].predictedFixes`, `validationPlan` | String arrays. |
 | `changes[].expectedBudgetImpact` | Optional; `risk` is `lower`, `same` or `higher`, with optional finite `tokenDelta` and `wallTimeDeltaMs`. |
 
-Nothing enforces a manifest at edit time. The self-edit gate that would require a validated manifest before Clio Coder edits its own high-authority paths is designed but not built; `src/domains/evolution/SELF_EDIT_GATE.md` records why it is deferred.
+Nothing enforces a manifest at edit time. The self-edit gate that would require a validated manifest before CLIO Coder edits its own high-authority paths is designed but not built; `src/domains/evolution/SELF_EDIT_GATE.md` records why it is deferred.
 
 ---
 
@@ -443,7 +443,7 @@ Explicit overlay and handoff promotion leave proposals unapproved. Automatic tas
 
 ### Host-evidence approval for repository knowledge
 
-Clio Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) can approve repository-scoped `task-bank-entry` knowledge after one session records `held`, provided there is no contradiction or regression, the record cites a `command:` ref and not only `source:` refs (a file quote is provenance, not proof, so a record backed by quotes alone waits for the operator), and no other approved, unrejected record of the same repository already carries one of its `command:` evidence refs; such a record waits for the operator, and nothing merges by command. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
+CLIO Coder's durable-memory gate in [guardian-gate.ts](../../src/domains/memory/guardian-gate.ts) can approve repository-scoped `task-bank-entry` knowledge after one session records `held`, provided there is no contradiction or regression, the record cites a `command:` ref and not only `source:` refs (a file quote is provenance, not proof, so a record backed by quotes alone waits for the operator), and no other approved, unrejected record of the same repository already carries one of its `command:` evidence refs; such a record waits for the operator, and nothing merges by command. Procedural proposals and global, runtime and agent scopes still require operator approval. Operator approvals and rejections, including legacy unstamped approvals, are never reversed by the gate. A later contradiction demotes a guardian-approved record, removes its approval stamp and records a regression.
 
 The claims log is the other regression producer ([record.ts](../../src/domains/claims/record.ts)). When a judged check that agreed disagrees with the same pinned conditions (for `numeric-compare`, possibly with a different working tree at the same commit), every memory record whose evidence refs cite one of the overturned agreeing claims (`claim:<id>`, or the run id whose host verification produced it) gets a regression naming both claims and what matched between them, appended inside the store's locked mutation. Approval is left as it was, the suppression filter keeps the record out of the prompt and recall, and `approve` clears the regression.
 
@@ -451,7 +451,7 @@ A new durable lesson earns a host-held observation only through [lesson-evidence
 
 ### Session task-bank snapshots
 
-The active Clio Coder task bank is session-local, but [task-bank-store.ts](../../src/domains/memory/task-bank-store.ts) saves its version-1 snapshot at `<stateDir>/memory/banks/<sessionId>.json` when the session is parked and on the headless completion path. Only that same session can restore it on resume. The loader caps snapshots at 512 KiB; missing, oversized or invalid files yield an empty bank. Saving an empty bank removes an older snapshot, and best-effort pruning keeps the newest 64 by mtime. Resume consumes the snapshot before restoring it, and session navigation discards stale snapshots ([orchestrator.ts](../../src/entry/orchestrator.ts)). This is separate from approved durable lessons in `records.json` and explicit handoff exports.
+The active CLIO Coder task bank is session-local, but [task-bank-store.ts](../../src/domains/memory/task-bank-store.ts) saves its version-1 snapshot at `<stateDir>/memory/banks/<sessionId>.json` when the session is parked and on the headless completion path. Only that same session can restore it on resume. The loader caps snapshots at 512 KiB; missing, oversized or invalid files yield an empty bank. Saving an empty bank removes an older snapshot, and best-effort pruning keeps the newest 64 by mtime. Resume consumes the snapshot before restoring it, and session navigation discards stale snapshots ([orchestrator.ts](../../src/entry/orchestrator.ts)). This is separate from approved durable lessons in `records.json` and explicit handoff exports.
 
 ### Explicit scope selection
 
@@ -497,7 +497,7 @@ Capture runs in the main session only. A main-thread `verify` result is recorded
 
 ### Edges and statuses
 
-Edges are derived under the lock at append time and compare no text ([edges.ts](../../src/domains/claims/edges.ts)). Each kind pins its conditions: for `numeric-compare` the commit, argv, reference and tolerance; for `reproduce` the commit, argv and working directory, reference, input digests, tolerance, comparison, seed, environment and platform (kernel release and Clio version excluded). The judged output is never pinned. A new claim:
+Edges are derived under the lock at append time and compare no text ([edges.ts](../../src/domains/claims/edges.ts)). Each kind pins its conditions: for `numeric-compare` the commit, argv, reference and tolerance; for `reproduce` the commit, argv and working directory, reference, input digests, tolerance, comparison, seed, environment and platform (kernel release and CLIO Coder version excluded). The judged output is never pinned. A new claim:
 
 - `contradicts` the latest earlier claim with equal pins when the two verdicts differ. Only a flip adds an edge, so several agreements followed by one disagreement add one edge. The working tree of a `numeric-compare` claim is not pinned, so an uncommitted edit at the same commit can still contradict, and the edge sentence says how the trees differed.
 - `supersedes` every earlier claim of the same check, run and kind whose pins differ, such as a new commit or new input digests, unless it is already superseded.

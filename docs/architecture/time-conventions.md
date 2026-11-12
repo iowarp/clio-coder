@@ -1,6 +1,6 @@
 # Time and Clock Conventions
 
-This document describes the time practices implemented in the current Clio Coder
+This document describes the time practices implemented in the current CLIO Coder
 source tree. The code distinguishes process-local elapsed spans from
 durable instants, but it does not impose one clock primitive on every module.
 
