@@ -13,6 +13,24 @@ Both commands work headless with `--json`. Both build on the project verifier ca
 so the same safety policy, cost accounting and run evidence apply, and your checkout is never edited. Every flag is
 listed in [Commands and modes](commands-and-modes.md); this page explains how to use them and how they decide.
 
+## Quick start
+
+To compare models on one task, name two `<target>/<model>` pairs from
+`clio-coder targets` and give them a prompt:
+
+```bash
+clio-coder arena run --contender <target>/<model> --contender <target>/<model> \
+  -- "Fix the bug in calc.py so test_calc.py passes."
+clio-coder arena show <match-id>          # the id run printed; answers and diffs under blind labels
+clio-coder arena vote <match-id> A        # or B, tie, both-bad
+```
+
+To improve a number, declare a check that prints it as JSON in
+`.clio-coder/verifiers.yaml` ([below](#declare-the-objective-and-the-gates)),
+commit it, then run
+`clio-coder research start --check <id> --metric <key> --direction min --max-iterations 3`.
+A kept change lands on the branch `clio/research/<id>`, never on yours.
+
 ## When to use which
 
 | You want to | Use |
