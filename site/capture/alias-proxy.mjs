@@ -16,6 +16,8 @@ export const DEFAULT_PORT = 43130;
 const CHAT_PATHS = new Set(["/v1/chat/completions", "/chat/completions"]);
 const LIST_PATHS = new Set(["/v1/models", "/models"]);
 const INFO_PATHS = new Set(["/v1/model/info", "/model/info"]);
+// LiteLLM's liveness path, answered here so local-server detection can name the gateway.
+const HEALTH_PATHS = new Set(["/health/liveliness", "/health/liveness"]);
 // Capability fields the litellm runtime reads; anything else (deployment ids,
 // upstream addresses) stays behind the proxy.
 const INFO_KEYS = /^(?:max_(?:input_|output_)?tokens|supports_[a-z_]+|mode)$/;
@@ -45,6 +47,11 @@ export function startAliasProxy({ gateway, apiKey, port = DEFAULT_PORT, log = ()
 			if (request.method === "GET" && LIST_PATHS.has(path)) {
 				response.writeHead(200, { "content-type": "application/json" });
 				response.end(JSON.stringify({ object: "list", data: [{ id: ALIAS, object: "model", owned_by: "capture" }] }));
+				return;
+			}
+			if (request.method === "GET" && HEALTH_PATHS.has(path)) {
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end(JSON.stringify("I'm alive!"));
 				return;
 			}
 			if (request.method === "GET" && INFO_PATHS.has(path)) {
@@ -91,7 +98,9 @@ export function startAliasProxy({ gateway, apiKey, port = DEFAULT_PORT, log = ()
 	});
 	return new Promise((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(port, "127.0.0.1", () => resolve(server));
+		// A string port is a unix socket path, for a recording in its own network namespace.
+		if (typeof port === "string") server.listen(port, () => resolve(server));
+		else server.listen(port, "127.0.0.1", () => resolve(server));
 	});
 }
 

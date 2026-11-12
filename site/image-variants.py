@@ -35,6 +35,7 @@ INPUTS = {
     "assets/guides/cli-interop-inspect.webp": [640, 1024, 1600],
     "assets/guides/cli-doctor.webp": [640, 1024, 1600],
     "assets/guides/cast-first-task.webp": [640, 1024, 1600],
+    "assets/guides/cast-first-launch.webp": [640, 1024, 1600],
     "assets/guides/cast-headless-run.webp": [640, 1024, 1600],
     "assets/guides/cast-sandbox.webp": [640, 1024, 1600],
     "assets/guides/cast-let-it-work.webp": [640, 1024, 1600],

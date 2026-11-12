@@ -25,27 +25,27 @@
     ]
   },
   "assets/tui-boot.webp": {
-    "width": 2240,
-    "height": 886,
-    "sha256": "475eb28e4675e342c1983dda75473ebe384d05996583c9a56d6bebd310a29885",
+    "width": 2268,
+    "height": 722,
+    "sha256": "632b3a2358c60d5838b4f5c9386e4cd2e41d651224272e71a407b5e560aecba1",
     "variants": [
       {
         "path": "assets/responsive/tui-boot-640.webp",
         "width": 640,
-        "height": 253,
-        "sha256": "8a6b1a1363133f1696a719136152c65969a7af44a48f94d32569cad6289fdab9"
+        "height": 204,
+        "sha256": "dff68b0716dd77fe507a0e118b1bf81946cc9867d0844a4607f94b45badbd6cc"
       },
       {
         "path": "assets/responsive/tui-boot-960.webp",
         "width": 960,
-        "height": 380,
-        "sha256": "b4fe77f6836be4dec3eee102a6dccf927c5addaeb717093e43f529b1b0373c69"
+        "height": 306,
+        "sha256": "5a71a2238810e0a91af0f05c61707eb8e9137110d3d4108d6e760ecc1f1ba87f"
       },
       {
         "path": "assets/responsive/tui-boot-1280.webp",
         "width": 1280,
-        "height": 506,
-        "sha256": "b8879e048a563a75a26b8fb8b8b61a0b45c777b20a8a63305c2114765d68df1a"
+        "height": 407,
+        "sha256": "23689ae474701d74a3e6709b1eeeed2ef41e0df41c33240d50160e3f292a9bfb"
       }
     ]
   },
@@ -521,6 +521,31 @@
         "width": 1600,
         "height": 1092,
         "sha256": "48a2a0009ee769189e083f6de9ff26d97144e43fe0a7dc7cfcdf97bb6b698b0c"
+      }
+    ]
+  },
+  "assets/guides/cast-first-launch.webp": {
+    "width": 2268,
+    "height": 1548,
+    "sha256": "1909f6be449f5be22bad793bf98f9130ba90abb2a4bb4b9b0231b0b7d58e5fff",
+    "variants": [
+      {
+        "path": "assets/responsive/cast-first-launch-640.webp",
+        "width": 640,
+        "height": 437,
+        "sha256": "a5ed8c031684192f6ed368cbdad5b2777d3b566dd118d14d16ba9b56c3164e74"
+      },
+      {
+        "path": "assets/responsive/cast-first-launch-1024.webp",
+        "width": 1024,
+        "height": 699,
+        "sha256": "d3df0b03c220ea9850a9add959aa22e4d25512d25b5d0064197632df93bcc0a4"
+      },
+      {
+        "path": "assets/responsive/cast-first-launch-1600.webp",
+        "width": 1600,
+        "height": 1092,
+        "sha256": "b7a884bed97267ec8774fe9dfbf122f42ccdeeb36b0d48207927d12f59d4e091"
       }
     ]
   },

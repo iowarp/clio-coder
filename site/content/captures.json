@@ -5,15 +5,15 @@
 		"tui-boot": {
 			"image": "assets/tui-boot.webp",
 			"original": "assets/tui-boot.png",
-			"width": 2240,
-			"height": 886,
-			"label": "Ready",
-			"alt": "CLIO Coder terminal at start: the CLIO Coder mark beside the model, autonomy, workspace and Git state, and the composer reporting the Qwen 3.8 model ready.",
-			"caption": "The terminal at start, with the project, its Git state, and the selected model.",
+			"width": 2268,
+			"height": 722,
+			"label": "Setup",
+			"alt": "CLIO Coder setup on first launch: no model target is configured, so setup starts, explains that it sends one short test message before saving, and offers the model server it found at http://127.0.0.1:4000 (LiteLLM gateway, model qwen3.8-27b) or setting up something else.",
+			"caption": "On first launch with no model configured, setup offers the local model server it found.",
 			"interface": "Terminal",
-			"version": "0.7.0-rc.1",
-			"capturedAt": "2026-11-07",
-			"source": "clio-coder 0.7.0-rc.1 (commit d84913de3) built from the repository, in an isolated profile with interface.outputDetail set to detailed and COLORFGBG declaring a dark background. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane, rendered to HTML in DejaVu Sans Mono and captured with headless Chrome at 2x. Chat: Qwen 3.8 27B through a LiteLLM gateway. Fresh clio-coder launch in ~/projects/calibration-lab, no prompt sent; the welcome panel, composer and footer (rows 1-23)."
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-launch) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-boot\" marker, rows 1-16, rendered by the site's player at 2x."
 		},
 		"tui-verify": {
 			"image": "assets/tui-verify.webp",
@@ -460,6 +460,25 @@
 			"version": "0.6.0-dev",
 			"capturedAt": "2026-10-01",
 			"source": "clio-coder 0.6.0-dev (commit 9ade954) installed with scripts/install.sh from an npm pack of the v060 tree, in an isolated profile (user researcher) under bubblewrap. TUI in a fixed 120x44 tmux window; ANSI captured with tmux capture-pane and rendered with xterm.js. Chat and workers: Nemotron 3.5 Lightning through a LiteLLM gateway. Request typed in a new session; the full screen at the end of the turn."
+		},
+		"cast-first-launch": {
+			"image": "assets/guides/cast-first-launch.webp",
+			"original": "assets/guides/cast-first-launch.png",
+			"width": 2268,
+			"height": 1548,
+			"label": "First launch",
+			"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
+			"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt.",
+			"interface": "Terminal",
+			"version": "0.8.0-rc.1",
+			"capturedAt": "2026-11-12",
+			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-launch) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it.",
+			"cast": "assets/casts/cast-first-launch.cast",
+			"transcript": "assets/casts/cast-first-launch.txt",
+			"cols": 120,
+			"rows": 36,
+			"duration": 15.4,
+			"posterAt": 2.431
 		}
 	}
 }

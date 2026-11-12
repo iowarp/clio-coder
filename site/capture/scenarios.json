@@ -73,6 +73,108 @@
 			"cols": 120
 		},
 		{
+			"id": "cast-first-launch",
+			"summary": "a live first launch: setup finds the local model server, tests it, saves, chat opens, and the first prompt is sent",
+			"title": "First launch of CLIO Coder: setup finds a local model and chat opens",
+			"live": true,
+			"privateNet": {
+				"port": 4000
+			},
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"poster": "tui-boot",
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.8
+				},
+				{
+					"type": "clio-coder"
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Clio found a way to reach a model",
+					"timeout": 30,
+					"pause": 2.5
+				},
+				{
+					"shot": "tui-boot",
+					"rows": [1, 16]
+				},
+				{
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is ready",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"marker": "chat"
+				},
+				{
+					"type": "Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.",
+					"delay": 30
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Qwen3\\.8 is (?:waiting|thinking)",
+					"timeout": 60,
+					"pause": 2
+				},
+				{
+					"marker": "sent"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 3
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.6
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"capture": {
+				"label": "First launch",
+				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
+				"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt."
+			},
+			"shots": {
+				"tui-boot": {
+					"image": "assets/tui-boot.webp",
+					"label": "Setup",
+					"alt": "CLIO Coder setup on first launch: no model target is configured, so setup starts, explains that it sends one short test message before saving, and offers the model server it found at http://127.0.0.1:4000 (LiteLLM gateway, model qwen3.8-27b) or setting up something else.",
+					"caption": "On first launch with no model configured, setup offers the local model server it found."
+				}
+			},
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"endAt": "sent"
+		},
+		{
 			"id": "cast-first-task",
 			"summary": "a live first task: the model finds the absolute-zero bug, fixes it, and runs the declared test check",
 			"title": "A first task in CLIO Coder: fix a failing test and verify",

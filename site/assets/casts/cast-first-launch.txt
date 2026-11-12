@@ -1,0 +1,99 @@
+First launch of CLIO Coder: setup finds a local model and chat opens
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== tui-boot
+
+~/projects/calibration-lab $ clio-coder
+No model target is configured. Clio needs a model before it can do anything else, so setup starts now.
+
+┌  Welcome to Clio Coder
+│
+│  Choose what you already use. Clio checks the endpoint and model list when the provider allows it.
+│  Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).
+│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
+│  only after the test message, except a browser sign-in you complete.
+│
+│  Clio found a way to reach a model:
+│
+│  ❯ A model server at http://127.0.0.1:4000 (LiteLLM gatewa…  model qwen3.8-27b, run by user researcher
+│    Set up something else                                     an API key, a subscription, or a server
+│
+│  ↑↓ move · Enter select · Esc cancel · q quit
+
+== chat
+
+┌  Welcome to Clio Coder
+│
+│  Choose what you already use. Clio checks the endpoint and model list when the provider allows it.
+│  Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).
+│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
+│  only after the test message, except a browser sign-in you complete.
+│
+●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
+│
+│  Testing litellm / qwen3.8-27b ...
+│
+◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
+◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
+◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
+│
+│  Change any of this later:
+●    clio-coder configure
+│
+└  Done
+
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      litellm · qwen3.8-27b                                                                                     │
+│ Autonomy   Default · reviewed approvals                                                                              │
+│ Awareness  Not indexed yet                                                                                           │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                                     200K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
+
+== sent
+
+│  only after the test message, except a browser sign-in you complete.
+│
+●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
+│
+│  Testing litellm / qwen3.8-27b ...
+│
+◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
+◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
+◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
+│
+│  Change any of this later:
+●    clio-coder configure
+│
+└  Done
+
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+>C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+
+▌ Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification
+▌ task. Do not change files yet.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ bash `ls -la /home/researcher/projects/calibration-lab && echo --- && cat package.json 2>/dev/null` ◌ preparing
+▸ find ◌ preparing
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is preparing a tool · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                11.1K/200K (5.6%) · ≈71 tok/s
+Type to steer · Esc stops the run · Alt+U Dashboard

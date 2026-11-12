@@ -3,14 +3,18 @@
 // recording, a plain-text transcript, and stills rendered from the recording by
 // the same player the site embeds. One command reruns any of them:
 //
-//   node site/capture/run.mjs --scratch <dir> [--only id,id] [--clio <path>] [--publish]
+//   node site/capture/run.mjs --scratch <dir> [--only id,id] [--clio <path>] [--build-note <text>] [--publish]
 //
 // --clio names the build to record: a repository checkout with dist/ built, or a
 // prefix from `npm install -g --prefix <dir> @iowarp/clio-coder@beta` (or a packed
-// candidate), which doctor reports as an npm global install. Live
+// candidate), which doctor reports as an npm global install. --build-note says
+// where a build that is not a release came from. Live
 // scenarios need CLIO_CAPTURE_GATEWAY_URL, LITELLM_API_KEY and CLIO_CAPTURE_LOCK
 // (the lock file that serializes use of the model host). The key stays in this
 // process; the recorded session sees only the loopback alias and a placeholder.
+// A scenario with privateNet runs in its own network namespace: the alias proxy
+// listens on a unix socket, and a forwarder inside the sandbox serves it on the
+// given port, so a default model port such as 4000 never opens on the host.
 // Without --publish, output stays in <scratch>/<id>/out for review. Casts are
 // compacted losslessly before stills are rendered; compact.mjs says how.
 
@@ -33,6 +37,8 @@ const { values } = parseArgs({
 		scratch: { type: "string" },
 		only: { type: "string" },
 		clio: { type: "string", default: repo },
+		// Where the build under capture came from, when it is not a release (published in each source line).
+		"build-note": { type: "string" },
 		publish: { type: "boolean", default: false },
 		list: { type: "boolean", default: false },
 		chrome: { type: "string", default: process.env.CLIO_CODER_CHROME ?? "/usr/bin/google-chrome" },
@@ -110,6 +116,7 @@ function prepareHome(dir, scenario) {
 		`root:x:0:0:root:/root:/bin/sh\nresearcher:x:${uid}:${gid}:Researcher:/home/researcher:/bin/bash\n`,
 	);
 	writeFileSync(join(dir, "group"), `root:x:0:\nresearcher:x:${gid}:\n`);
+	if (scenario.privateNet) mkdirSync(join(dir, "net"));
 	if (scenario.repo) seedRepo(join(home, "projects", scenario.repo), scenario.fixture ?? scenario.repo, scenario);
 	// After the repository, so a file such as an untracked .env can sit inside it.
 	for (const [path, text] of Object.entries(scenario.homeFiles ?? {})) {
@@ -121,7 +128,7 @@ function prepareHome(dir, scenario) {
 			join(home, ".config/clio-coder/settings.yaml"),
 			[
 				"version: 2",
-				`targets: [ { id: litellm, runtime: litellm, url: "http://127.0.0.1:${scenario.proxyPort ?? spec.proxyPort}", defaultModel: ${ALIAS}, auth: { apiKeyEnvVar: LITELLM_API_KEY } } ]`,
+				`targets: [ { id: litellm, runtime: litellm, url: "http://127.0.0.1:${scenario.privateNet?.port ?? scenario.proxyPort ?? spec.proxyPort}", defaultModel: ${ALIAS}, auth: { apiKeyEnvVar: LITELLM_API_KEY } } ]`,
 				`chat: { target: litellm, model: ${ALIAS} }`,
 				`fleet: { default: { target: litellm, model: ${ALIAS} } }`,
 				...(scenario.settings ?? []),
@@ -239,6 +246,7 @@ function sandboxScript(dir, scenario) {
 		"--ro-bind",
 		clio.root,
 		"/opt/clio-coder",
+		...(scenario.privateNet ? ["--bind", join(dir, "net"), "/opt/net", "--unshare-net", "--unshare-pid"] : []),
 		"--unshare-uts",
 		"--unshare-ipc",
 		"--hostname",
@@ -254,6 +262,22 @@ function sandboxScript(dir, scenario) {
 		"/home/researcher/.bashrc",
 		"-i",
 	];
+	if (scenario.privateNet) {
+		// Inside the sandbox's own network namespace, the model port forwards to the
+		// alias proxy's socket; nothing listens on the host's loopback.
+		const forward = [
+			'import { connect, createServer } from "node:net";',
+			"createServer((client) => {",
+			'\tconst server = connect("/opt/net/alias.sock");',
+			"\tclient.pipe(server).pipe(client);",
+			'\tfor (const end of [client, server]) end.on("error", () => { client.destroy(); server.destroy(); });',
+			`}).listen(${scenario.privateNet.port}, "127.0.0.1");`,
+			"",
+		].join("\n");
+		writeFileSync(join(dir, "net/forward.mjs"), forward);
+		const at = args.lastIndexOf("/bin/bash");
+		args.splice(at, 0, "/bin/sh", "-c", 'node /opt/net/forward.mjs & exec "$@"', "sh");
+	}
 	const script = join(dir, "sandbox.sh");
 	writeFileSync(script, `#!/bin/sh\nexec ${args.map(quote).join(" ")}\n`, { mode: 0o700 });
 	return script;
@@ -391,7 +415,8 @@ class Session {
 }
 
 // Fixed header, idle gaps capped, markers placed on the same compressed clock.
-function finishCast(session) {
+// endAt names a marker where the published recording ends; what follows it is dropped.
+function finishCast(session, endAt) {
 	const [, ...lines] = readFileSync(session.cast, "utf8").trimEnd().split("\n");
 	const cap = spec.idleCap;
 	const events = lines.map((line) => JSON.parse(line)).filter(([, kind]) => kind === "o" || kind === "r");
@@ -408,25 +433,32 @@ function finishCast(session) {
 		last = event[0];
 		event[0] = Math.round((event[0] - shift) * 1e6) / 1e6;
 	}
-	const markers = session.markers.map((marker) => {
+	let markers = session.markers.map((marker) => {
 		// A marker sits just after the last output it waited for, so the frame is
 		// complete. Scenarios pause before each marker; the margin absorbs clock skew.
 		const at = marker.time - offset - 0.15;
 		const index = raw.findLastIndex((time) => time <= at);
 		const time = Math.round(((events[index]?.[0] ?? 0) + 0.05) * 1000) / 1000;
-		return { ...marker, time };
+		return { ...marker, time, index };
 	});
+	if (endAt) {
+		const end = markers.find((marker) => marker.label === endAt);
+		if (!end) throw new Error(`${session.id}: the end marker ${endAt} was not reached`);
+		events.splice(end.index + 1);
+		markers = markers.slice(0, markers.indexOf(end) + 1);
+	}
 	const all = compactEvents(
 		[...events, ...markers.map((marker) => [marker.time, "m", marker.label])].sort((a, b) => a[0] - b[0]),
 	);
 	const header = { version: 2, width: session.cols, height: session.rows, theme: spec.theme };
 	const text = `${[JSON.stringify(header), ...all.map((event) => JSON.stringify(event))].join("\n")}\n`;
-	const duration = events.at(-1)?.[0] ?? 0;
+	const duration = endAt ? markers.at(-1).time : (events.at(-1)?.[0] ?? 0);
 	return { text, markers, duration, events };
 }
 
 function transcript(session, scenario) {
-	const chapters = session.chapters.map(({ label, text }) => {
+	const end = session.chapters.findIndex((chapter) => chapter.label === scenario.endAt);
+	const chapters = session.chapters.slice(0, end < 0 ? undefined : end + 1).map(({ label, text }) => {
 		const lines = text.split("\n").map((line) => line.trimEnd());
 		while (lines.length && !lines.at(-1)) lines.pop();
 		return `== ${label}\n\n${lines.join("\n")}`;
@@ -552,7 +584,7 @@ for (const scenario of scenarios) {
 			proxy = await startAliasProxy({
 				gateway: process.env.CLIO_CAPTURE_GATEWAY_URL,
 				apiKey: process.env.LITELLM_API_KEY,
-				port: scenario.proxyPort ?? spec.proxyPort,
+				port: scenario.privateNet ? join(dir, "net/alias.sock") : (scenario.proxyPort ?? spec.proxyPort),
 				log: (line) => writeFileSync(join(scratch, "alias-proxy.log"), `${line}\n`, { flag: "a" }),
 			});
 		}
@@ -566,7 +598,7 @@ for (const scenario of scenarios) {
 			if (session.alive()) session.tmux("kill-server");
 			throw error;
 		}
-		const cast = finishCast(session);
+		const cast = finishCast(session, scenario.endAt);
 		const text = transcript(session, scenario);
 		// Stills are rendered from this cast alone, so scanning it covers them too.
 		const hits = [
@@ -602,13 +634,17 @@ for (const scenario of scenarios) {
 				still.path,
 				still.path.replace(/\.png$/, ".webp"),
 			]);
-		const source = `CLIO Coder ${clioVersion} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${
+		const source = `CLIO Coder ${clioVersion}${values["build-note"] ? ` (${values["build-note"]})` : ""} ${installed} recorded by site/capture/run.mjs (scenario ${scenario.id}) in a fresh profile: home /home/researcher, host lab, ${session.cols}x${session.rows} terminal, asciinema v2, idle capped at ${spec.idleCap}s.${
 			scenario.env
 				? ` Environment: ${Object.entries(scenario.env)
 						.map(([key, value]) => `${key}=${value}`)
 						.join(", ")}.`
 				: ""
-		}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}`;
+		}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
+			scenario.privateNet
+				? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
+				: ""
+		}`;
 		const entries = {};
 		for (const still of rendered) {
 			const isCast = still.id === scenario.id;

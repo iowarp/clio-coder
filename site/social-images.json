@@ -27,7 +27,7 @@
 			"path": "assets/social/tui-boot.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "e3881748dddcf3764b6eacf72d0ebb1bb56bbe75127c2647cf5abe6222bc3c78"
+			"sha256": "31638dc6109dd4412e9cf94e68d7cf60de0ae0bbe918628bef47fd1d9298001e"
 		},
 		"tui-configure-review": {
 			"source": "assets/guides/tui-configure-review.png",

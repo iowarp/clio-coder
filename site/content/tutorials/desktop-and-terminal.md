@@ -9,7 +9,7 @@ cd /path/to/your/project
 clio-coder
 ```
 
-![CLIO Coder terminal at start, with the project, its Git state, the selected model, and the composer](/assets/tui-boot.webp)
+![CLIO Coder starting in the terminal with no model configured: setup offers the local model server it found at 127.0.0.1:4000, or setting up something else](/assets/tui-boot.webp)
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
