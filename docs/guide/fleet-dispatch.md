@@ -10,36 +10,25 @@ Source of truth: `src/domains/dispatch/`, [cluster.ts](../../src/domains/schedul
 [monitor.ts](../../src/tools/monitor.ts), [fleet.ts](../../src/cli/fleet.ts), and the contract tests under
 `tests/contracts/`.
 
-### Your first worker
+## Quick start
 
-A worker is a separate agent that does one bounded task and returns a result
-with a sealed run record. You need no fleet setup: workers run on this machine
-by default.
+A worker is a separate agent that does one bounded task on this machine and
+returns a result with a sealed run record. No fleet setup is needed.
 
-1. List the agents you can start: `clio-coder agents`. `coder` makes code
-   changes, `tester` adds tests, `debugger` and `verifier` only check.
-2. In a session, start one:
+1. `clio-coder agents` lists the workers: `coder` edits code, `tester` adds
+   tests, `debugger` and `verifier` only check.
+2. In a session, run `/run verifier Run the test and lint checks and report
+   each result.` Add `--worktree` to give an editing worker its own branch,
+   or `--read-only` to keep it from changing anything.
+3. Alt+W shows it running. `/fleet share` brings its answer into the
+   conversation; `clio-coder fleet status` and `fleet view <runId>` show it
+   from another terminal.
 
-   ```text
-   /run verifier Run the test and lint checks and report each result.
-   ```
+Workers use `fleet.default`, the Workers area of `/settings`; each runs in its
+own sandbox ([Workers at each level](../architecture/safety-model.md#workers-at-each-level)).
+To run them on another machine, see [Node setup](#node-setup).
 
-   Add `--worktree` to let an editing worker work on its own branch, or
-   `--read-only` to make sure it changes nothing.
-3. Press Alt+W to watch it. Its answer stays out of the main conversation
-   until you share it with `/fleet share <runId>`, or start the run with
-   `--share`.
-4. From a shell, the same worker runs with
-   `clio-coder run --agent verifier "Run the test and lint checks."`, and
-   `clio-coder fleet status` and `clio-coder fleet view <runId>` show what ran.
-
-You can also ask the main agent in plain words to hand a task to a worker.
-Workers use `fleet.default` (the Workers area of `/settings`); with nothing
-set, CLIO Coder picks the best available route and says which. Each worker
-runs in its own sandbox; see
-[Workers at each level](../architecture/safety-model.md#workers-at-each-level).
-
-### Start here
+## Start here
 
 | If you want to | Go to |
 | --- | --- |
