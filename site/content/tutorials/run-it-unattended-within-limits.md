@@ -27,7 +27,7 @@ clio-coder run --max-cost-usd 2 --timeout 1800 \
 clio-coder run --read-only "Which modules have no tests? Report paths."
 ```
 
-`--read-only` is an enforced ceiling on the main agent, not a request. It denies calls other than reads inside the workspace.
+`--read-only` is an enforced ceiling on the main agent, not a request. No file outside CLIO Coder's home changes: writes are refused, and shell commands run only in a read-only sandbox.
 
 ### Stream it to another program
 
@@ -65,7 +65,7 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 :::
 
 ::: limits Boundaries
-- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews.
+- A contained command starts without credential variables and cannot open secret files, so name tools that need them. CLIO Coder may rerun with `unsandboxed: true`, which the judge reviews. Under `safety.sandbox: required` at `yolo`, that retry is refused.
 - `yolo` does not carry over from `settings.yaml` to a headless run. It comes only from that run's own `--autonomy yolo`, and it exits 2 as root outside a detected container.
 :::
 

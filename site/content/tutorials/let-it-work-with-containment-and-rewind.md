@@ -83,7 +83,7 @@ Unconfined yolo is the skip-permissions mode for a container or another disposab
 :::
 
 ::: limits What this does not protect
-- The sandbox contains `bash` and `run_script`. Typed `write` and `edit` calls follow the rules instead.
+- The sandbox contains `bash`, `run_script` and checks that run commands through `verify`. Typed `write` and `edit` calls follow the rules instead.
 - Ignored files, untracked files over 16 MiB, and nested repositories are not in a snapshot.
 - `/rewind` restores files. It never moves refs: it prints the commands that bring a moved branch back.
 - The judge is a model. It can be wrong, and a route error means no verdict, so the call parks or is denied.

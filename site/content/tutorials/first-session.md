@@ -65,7 +65,7 @@ Use your project's real test name. Read the command and its output before decidi
 
 ## Keep going
 
-In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens configuration, and `/config` opens your connections, where **Add a target** runs setup again without leaving the session.
+In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens the settings center, and `/config` opens your connections, where **Add a target** runs setup again without leaving the session.
 
 When you quit, CLIO Coder prints a summary of the session and a `/resume <id>` line. Start `clio-coder` again and type that line to return to the conversation, or use `/resume` alone to pick from a list.
 

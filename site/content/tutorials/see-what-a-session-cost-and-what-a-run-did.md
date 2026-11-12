@@ -69,7 +69,7 @@ Figures labelled by provenance, and a `verify` result that names any gap. A clea
 
 ## Control what is kept
 
-`telemetry.mode` defaults to `standard`, which keeps accountability and operational records without prompt content. `research` mode, `telemetry.research.content: true`, and `clio-coder telemetry consent` in the workspace are all required before prompts and request bodies are kept.
+`telemetry.mode` defaults to `standard`, which keeps accountability and operational records without prompt content. `research` mode, `telemetry.research.content: true`, and `clio-coder telemetry consent` for the workspace are all required before prompts and request bodies are kept.
 
 `clio-coder telemetry prune` is a dry run unless you pass `--apply`.
 
