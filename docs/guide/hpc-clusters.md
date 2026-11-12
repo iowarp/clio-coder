@@ -5,6 +5,30 @@ or 20 through `module load nodejs`, run an old glibc (RHEL and CentOS 7 ship
 2.17, while official Node 22 and 24 builds need 2.28), sit behind a proxy, or
 have no internet at all. The installer handles each of these without root.
 
+## Quick start on a login node
+
+1. **Install** without root: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`,
+   then `clio-coder doctor`. See [Install on a login node](#install-on-a-login-node).
+2. **Connect a model**: a site setup file, a provider key, or a server you
+   run on a compute node. Export your proxy first if the cluster has one. See
+   [Connect a model](#connect-a-model).
+3. **Use the scheduler** by asking in words, such as "submit job.sh and tell
+   me when it starts". `sbatch`, `squeue` and the other clients are reviewed by
+   the safety judge before they run, so name the action you want. See
+   [Scheduler clients](#scheduler-clients).
+4. **Let it write to scratch.** Shell commands may write only to the project
+   and the temp folders without asking. Add your scratch space in user
+   settings, with an absolute path:
+
+   ```yaml
+   safety:
+     scratchRoots: [/scratch/alice]
+   ```
+
+5. **Keep results out of Git** with the store:
+   `clio-coder store put results run-042.h5`. Every checkout of the project
+   sees it. See [Store](store.md).
+
 ## Install on a login node
 
 ```bash
