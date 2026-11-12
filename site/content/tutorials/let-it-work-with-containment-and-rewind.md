@@ -30,7 +30,7 @@ On a scratch branch, type this:
 Delete the build output directory, regenerate it, and run the project's test check. Report what you ran.
 ```
 
-Workspace edits and contained commands run without a card. A delete inside the workspace runs after a snapshot, because the snapshot can undo it. A push or a command that leaves the sandbox goes to the judge first.
+Workspace edits and contained commands run without a card. A delete inside the workspace runs after a snapshot is taken. Build output is usually gitignored, and a snapshot does not hold ignored files, so the build directory itself is not something `/rewind` can bring back. A push or a command that leaves the sandbox goes to the judge first.
 
 ### Undo it with /rewind
 
@@ -38,7 +38,15 @@ Workspace edits and contained commands run without a card. A delete inside the w
 /rewind
 ```
 
-The list shows this session's snapshots, newest first, with how many files each differs by. `Enter` previews a restore before anything is written. Confirming takes one more snapshot, so the rewind itself can be rewound.
+The list shows this session's snapshots, newest first, with how many files each differs by. `Enter` previews a restore before anything is written. Confirming takes one more snapshot, so the rewind itself can be rewound. `Esc` goes back without writing anything.
+
+In the recorded session behind this guide, the regenerated build was gitignored and nothing tracked had changed, so the preview read:
+
+```text
+The workspace already matches this snapshot. Nothing would change.
+```
+
+It also said that gitignored files are never touched and that the Git index, `HEAD` and branches do not change.
 
 ### Tell the judge about your machine
 
