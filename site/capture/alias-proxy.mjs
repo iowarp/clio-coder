@@ -82,7 +82,9 @@ export function startAliasProxy({ gateway, apiKey, port = DEFAULT_PORT, log = ()
 			}
 			response.end(toAlias(pending + decoder.decode()));
 		} catch (error) {
-			log(`error ${error instanceof Error ? error.message : String(error)}`);
+			// Messages can carry the gateway address; name and code cannot.
+			const cause = error?.cause;
+			log(`error ${error?.name ?? "Error"} ${error?.code ?? cause?.code ?? ""}`.trimEnd());
 			if (!response.headersSent) refuse(response, 502, "The capture alias could not reach the gateway.");
 			else response.destroy();
 		}
