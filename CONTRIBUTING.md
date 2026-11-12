@@ -324,15 +324,19 @@ The README is the GitHub and npm landing page. Keep installation, capabilities,
 interface captures, model choices, and references easy to scan. Details belong
 in the guides; command-heavy material and agent orientation use foldable blocks.
 
-- Sections: Get started, See Clio in action, Why Clio Coder, Capabilities,
-  Interfaces, Models, Control and inspect the work, Extend Clio, Documentation,
-  Contribute and get help, Acknowledgements.
-- Lead with a real task and recorded checks. Retain terminal and desktop captures
-  in a collapsible gallery, label older layouts, and use absolute HTTPS image
-  URLs so npm can render them.
+- Sections, in order: Get started, What you can do (ending with a short "New in"
+  list for the current release), Models, Interfaces, Safety and control,
+  No call-home, For AI agents, Documentation, Contribute and get help,
+  Acknowledgements.
+- Open with what Clio Coder is and who it is for in two sentences, then the
+  three-step start. Use absolute HTTPS image URLs so npm can render them.
 - Keep the release-tag source installation under Get started, including launcher
-  path verification. Release chronology belongs in `CHANGELOG.md`.
-- Keep a collapsed **For agents** block under Documentation with source and
-  installed-documentation lookup guidance.
+  path verification. Release chronology belongs in `CHANGELOG.md`. While a
+  release candidate is out, a note under the install commands says which
+  version they install and how to get the candidate; drop it at the stable
+  release.
+- Keep the **For AI agents** section exact and machine-friendly: commands that
+  run as written, the `run` flags and exit codes, the files to read, and what
+  to leave to the human.
 - Update this layout contract when changing the landing page structure.
   Routine hygiene checks installation correctness and links, not editorial layout.
