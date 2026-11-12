@@ -218,6 +218,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - `clio-coder run --model` with a pattern that matches no model exits 2 with a `clio-coder run:` usage message, like other bad `run` input, instead of 1.
 - In setup, the warning about a refused credential clears once you enter a new one, and the first-run offer calls a Copilot login "signed in" instead of "stored key".
 - The setup review lists automatic local workers only for a target on this machine.
+- Setup never offers a probed model id that holds control or format characters, and reads at most 1 MiB of a probe's answer.
 
 ### Shared folders and sessions
 
@@ -314,6 +315,12 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Every sandbox hides Clio Coder's config directory behind one mount and binds back only what a contained command reads (skills, plugins, extensions, agents, playbooks, prompts, and `settings.yaml` where it is not masked), so a credential store Clio Coder rewrites during an OAuth refresh never becomes readable to a running command.
 - Under `safety.sandbox: required`, an outward git or gh line stays in the sandbox once the repository's hook files or executable git config differ from the session's start, or when git would push to a local repository, whose hooks would run as you; the refusal names what changed. An added remote does not count.
 - `web_fetch` and `web_read` clean fetched HTML with forward scans, so a page full of unclosed comments or tags can no longer freeze the session.
+- The sandbox hides the token and key files of local Jupyter, IPython, ipyparallel and code-server services, which a contained command could otherwise use over loopback to run code as you; a kernel started inside the sandbox still runs.
+- The sandbox hides browser profiles (Firefox, including its snap and flatpak copies, Chrome, Chromium, Brave and Edge), VS Code's global storage and more cloud, registry and agent token files, and typed tools refuse them.
+- The sandbox hides your Kerberos ticket caches in the shared temp directories and the one `KRB5CCNAME` names, and under bubblewrap the seccomp filter refuses the kernel keyring calls, so a contained command can no longer read, add to or clear the session keyring of the login that started Clio Coder.
+- Typed reads refuse `settings.yaml` while it names a target that authenticates with `auth.headers`, and `mcp.yaml` while it gives a server an `env` map, matching what the sandbox already hides.
+- When the Copilot route rebuilds its session, text a tool returned earlier can no longer close its frame in the replayed transcript or pose as host policy or your own turn.
+- ACP: a prompt made only of an attached file no longer counts as your words for the safety judge and the approval card, and an attached file's body cannot open or close its own block.
 
 ### Desktop app
 
@@ -587,6 +594,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - Uninstall keeps a data or cache directory set with `CLIO_CODER_DATA_DIR` or `CLIO_CODER_CACHE_DIR` when it carries no `.clio-coder-root` marker and is not named `clio-coder`, or a `data` or `cache` directory under `CLIO_CODER_HOME` that holds files Clio Coder did not create, and then exits 1.
 - A fleet action step that is not a check, a gate or a commit runs as you outside the sandbox, even when it runs code a worker wrote.
 - A secret file inside a wholly untracked directory that the workspace secret scan reaches only after 20,000 entries stays readable in the sandbox; `clio-coder doctor` warns when the scan stopped at that limit, and a session does not.
+- The main session's sandbox shares the host's `/tmp`. It hides the secrets Clio Coder knows to look for there, such as Kerberos ticket caches, but other files in `/tmp` stay readable and writable to a contained command, including files that programs on the host later load.
+- On macOS, whether renaming a writable parent directory gets past the sandbox's path masks has not been tested.
 
 ## 0.7.0 - 2026-11-08
 
