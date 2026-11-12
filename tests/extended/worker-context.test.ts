@@ -176,7 +176,7 @@ test("wire validation and stored evidence bind both source metadata and exact tr
 	}
 });
 
-test("admission captures once for a mixed batch and preserves the seed while parent and arguments change", () => {
+test("admission reads the operator turn once, captures the seed once and preserves it while parent and arguments change", () => {
 	let captures = 0;
 	const parent = history();
 	const admission = createDispatchAdmissionController({
@@ -194,7 +194,8 @@ test("admission captures once for a mixed batch and preserves the seed while par
 		context: { mode: "fork" },
 	});
 	equal(args[DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT], undefined);
-	equal(captures, 1);
+	// One read of the operator turn and one capture of the inheriting seed, as the production dispatch test counts.
+	equal(captures, 2);
 	const snapshot = admission.state.trustedExecutionSnapshots.get(args);
 	ok(snapshot?.kind === "dispatch");
 	const before = JSON.stringify(snapshot.requests);
