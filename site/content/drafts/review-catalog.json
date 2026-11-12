@@ -37,6 +37,24 @@
         "guide/configuration-and-targets.md",
         "guide/hpc-clusters.md"
       ]
+    },
+    {
+      "slug": "share-a-folder-with-a-teammate-or-a-second-terminal",
+      "title": "Share a folder with a teammate or a second terminal",
+      "description": "Run two sessions in one project, keep each person's state private, and commit project settings that can only make CLIO Coder stricter.",
+      "category": "Terminal workspace",
+      "time": "6 min",
+      "author": "The CLIO Coder team",
+      "source": "share-a-folder-with-a-teammate-or-a-second-terminal.md",
+      "basis": "Documented workflow",
+      "versionScope": "0.8.0",
+      "interfaces": [
+        "Terminal"
+      ],
+      "guides": [
+        "guide/configuration-and-targets.md",
+        "guide/panes-and-files.md"
+      ]
     }
   ]
 }
