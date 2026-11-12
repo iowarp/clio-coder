@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import path from "node:path";
@@ -549,20 +550,117 @@ const GIT_PUSH_OPTIONS: OptionList = {
 	optionalValues: ["--force-with-lease"],
 };
 
-/** A push remote that is a configured remote's name or a network URL, not a local repository or a remote helper. */
-function networkRemote(remote: string, here: string): boolean {
+/** An `https`, `ssh` or `git` URL, or an scp-style address, on a host that is not this machine. */
+function networkUrl(remote: string): boolean {
 	if (remote.includes("::")) return false;
-	if (/^[A-Za-z0-9_][\w.-]*$/u.test(remote)) return !existsSync(path.resolve(here, remote));
 	const url = /^([A-Za-z][\w+.-]*):\/\/(?:[^@/]*@)?(\[[^\]]*\]|[^:/]*)/u.exec(remote);
 	if (url !== null) return /^(?:https?|ssh|git)$/iu.test(url[1] ?? "") && !hostRefused(url[2] ?? "");
 	const scp = /^(?:[\w.-]+@)?([\w.-]+):/u.exec(remote);
 	return scp !== null && !hostRefused(scp[1] ?? "");
 }
 
+/** Git's exit status and output for `args` in `dir`; status null when it timed out or said too much. Reads config, runs nothing. */
+function runGit(dir: string, args: ReadonlyArray<string>): { status: number | null; stdout: string } {
+	const result = spawnSync("git", args, {
+		cwd: dir,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "ignore"],
+		timeout: 2_000,
+		maxBuffer: 1 << 20,
+		env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+	});
+	return {
+		status: result.error === undefined ? result.status : null,
+		stdout: typeof result.stdout === "string" ? result.stdout : "",
+	};
+}
+
+/** Git's output for `args` in `dir`, or null when it failed. */
+function gitRead(dir: string, args: ReadonlyArray<string>): string | null {
+	const { status, stdout } = runGit(dir, args);
+	return status === 0 ? stdout : null;
+}
+
+/**
+ * Every URL git would fetch from or push to for each configured remote, `pushurl`, `insteadOf` and
+ * `pushInsteadOf` applied, by remote name; null when git cannot list them.
+ */
+function remoteUrls(dir: string): Map<string, string[]> | null {
+	const listing = gitRead(dir, ["remote", "-v"]);
+	if (listing === null) return null;
+	const urls = new Map<string, string[]>();
+	for (const line of listing.split("\n")) {
+		if (line === "") continue;
+		const parsed = /^([^\t]+)\t(.*) \((?:fetch|push)\)$/u.exec(line);
+		if (parsed === null) return null;
+		const [, name = "", url = ""] = parsed;
+		urls.set(name, [...(urls.get(name) ?? []), url]);
+	}
+	return urls;
+}
+
+/**
+ * The remote a `git push` with no remote operand pushes to, as git picks it: the branch's `pushRemote`, then
+ * `remote.pushDefault`, then the branch's `remote`, then `origin`. Null when git cannot say.
+ */
+function defaultPushRemote(dir: string): string | null {
+	const head = gitRead(dir, ["symbolic-ref", "-q", "--short", "HEAD"])?.trim();
+	const keys = [
+		...(head ? [`branch.${head}.pushRemote`] : []),
+		"remote.pushDefault",
+		...(head ? [`branch.${head}.remote`] : []),
+	];
+	for (const key of keys) {
+		const result = runGit(dir, ["config", "--get", key]);
+		// Exit 1 is "not set"; anything else is an answer git could not give.
+		if (result.status === 1) continue;
+		if (result.status !== 0) return null;
+		const value = result.stdout.trim();
+		if (value !== "") return value;
+	}
+	return "origin";
+}
+
+/** True when every `url.<base>.insteadOf` or `pushInsteadOf` rewrite that matches `url` leads to a network URL. */
+function rewritesStayNetwork(dir: string, url: string): boolean {
+	const result = runGit(dir, ["config", "-z", "--get-regexp", "^url\\..*\\.(push)?insteadof$"]);
+	// Exit 1 is "no such key": no rewrite is configured.
+	if (result.status === 1) return true;
+	if (result.status !== 0) return false;
+	for (const entry of result.stdout.split("\0")) {
+		if (entry === "") continue;
+		const newline = entry.indexOf("\n");
+		const key = newline === -1 ? entry : entry.slice(0, newline);
+		const prefix = newline === -1 ? "" : entry.slice(newline + 1);
+		const base = key.replace(/^url\./u, "").replace(/\.(?:push)?insteadof$/iu, "");
+		if (prefix !== "" && url.startsWith(prefix) && !networkUrl(base)) return false;
+	}
+	return true;
+}
+
+/**
+ * A push remote that is a network URL, or a configured remote's name whose every URL, as git rewrites it, is one:
+ * not a local repository or a remote helper. A name with no remote behind it is a path to git.
+ */
+function networkRemote(remote: string | undefined, here: string): boolean {
+	if (remote !== undefined && !/^[A-Za-z0-9_][\w.-]*$/u.test(remote))
+		return networkUrl(remote) && rewritesStayNetwork(here, remote);
+	if (remote !== undefined && existsSync(path.resolve(here, remote))) return false;
+	const name = remote ?? defaultPushRemote(here);
+	const urls = name === null ? undefined : remoteUrls(here)?.get(name);
+	return urls !== undefined && urls.length > 0 && urls.every(networkUrl);
+}
+
+/** True when every configured remote of the repository at `here` fetches from and pushes to network URLs only. */
+function everyRemoteNetwork(here: string): boolean {
+	const urls = remoteUrls(here);
+	return urls !== null && [...urls.values()].every((list) => list.every(networkUrl));
+}
+
 /**
  * True when a `git` argv pushes and may leave: global options `-C` and `--no-pager` only, `-C` into the
- * workspace repository, push options from {@link GIT_PUSH_OPTIONS}, and a remote that is a name or a
- * network URL.
+ * workspace repository, push options from {@link GIT_PUSH_OPTIONS}, and a remote whose every push URL, as git
+ * resolves and rewrites it, is a network URL.
  */
 function gitPushLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): boolean {
 	let here = places.cwd;
@@ -579,8 +677,7 @@ function gitPushLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): bool
 	if (args[index] !== "push" || !inWorkspaceRepository(here, places, true)) return false;
 	const operands = listedOperands(args.slice(index + 1), GIT_PUSH_OPTIONS, places);
 	if (operands === null) return false;
-	const remote = operands[0];
-	return remote === undefined || networkRemote(remote, here);
+	return networkRemote(operands[0], here);
 }
 
 /** ssh `-o` keys that name no file, program or config, with a plain value. */
@@ -667,7 +764,9 @@ function ghLeaves(args: ReadonlyArray<string>, places: OutwardPlaces): boolean {
 	// A URL names the host gh sends its token to.
 	if (operands === null || operands.some((word) => word.includes("://") && !word.startsWith("https://github.com/")))
 		return false;
-	return noun === "api" ? operands.length >= 1 : GH_VERBS.get(noun)?.includes(operands[0] ?? "") === true;
+	if (!(noun === "api" ? operands.length >= 1 : GH_VERBS.get(noun)?.includes(operands[0] ?? "") === true)) return false;
+	// gh picks its own remote and can push the branch to it.
+	return everyRemoteNetwork(places.cwd);
 }
 
 const KUBECTL_SUBCOMMANDS: ReadonlyArray<string> = listed(
