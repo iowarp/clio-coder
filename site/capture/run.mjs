@@ -619,7 +619,13 @@ body{margin:0;background:${spec.theme.bg}}
 		const term = await page.$(".ap-term");
 		let clip = null;
 		if (still.crop) {
-			const box = await term.boundingBox();
+			let box = await term.boundingBox();
+			// A clip is cut at the viewport edge; grow the viewport to hold the whole terminal.
+			const needed = Math.ceil(box.y + box.height + 32);
+			if (needed > page.viewportSize().height) {
+				await page.setViewportSize({ width: page.viewportSize().width, height: needed });
+				box = await term.boundingBox();
+			}
 			const [from, to] = still.crop;
 			// Measured per row: the player's line boxes, not the terminal height divided evenly.
 			const lines = await page.$$eval(".ap-term .ap-line", (els) =>
