@@ -24,7 +24,7 @@ The same request in the temperature-calibration example, with the check's workin
 
 Read the resolved command and working directory before approving execution. `verify` is subject to command admission: naming a check does not grant permission to run it, and a denied command is not a validation result.
 
-When a command needs your approval, the terminal card names the tool, the exact command, and, for commands it recognizes, an **Effect** line in plain words.
+When a command needs your approval, the terminal card names the tool and the exact command. Its **effect** row says in plain words what a recognized command changes, and warns when Clio cannot classify the command at all.
 
 ::: capture tui-approval-effect
 :::

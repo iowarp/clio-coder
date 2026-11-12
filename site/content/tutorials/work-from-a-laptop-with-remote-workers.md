@@ -33,7 +33,7 @@ The implicit `local` node already exists. Adding a node keeps unpinned work loca
 
 Use an existing SSH alias to select the user, port and identity. You can also pass `--user`, `--port` and `--identity-file` explicitly. `--labels cpu,build` adds operator declarations. Start with one slot until you know the node's workload and resource limits.
 
-In the terminal, open `/settings fleet` and choose **Add SSH node**. The guided flow asks for a name and host, then offers to test and record readiness or to preview an installation. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry. A test started here always records its result.
+In the terminal, `/settings fleet` opens the **Workers** area; choose **Add SSH node** under **Machines**. The guided flow asks for a name and host, then offers to test and record readiness or preview an install. Open a node row to see evidence and timestamps, test it, preview an install or remove its saved entry. A test started here always records its result.
 
 ::: capture tui-settings-fleet
 :::
@@ -124,7 +124,7 @@ Before dispatching, ask me once where to run it, offering local and suitable ver
 
 When a verified node suits substantial work and no preference or pin exists, CLIO Coder asks once for the session. The choice remembers the exact node id for later unpinned work. The question does not replace the existing dispatch-plan approval. If you explicitly request `build-node`, it can be pinned directly.
 
-A **Standing worker node preference** in Fleet settings persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
+A **Standing worker node preference**, under **Machines** in the Workers area of `/settings`, persists across sessions. Placement priority is an explicit task node, a profile pin, the session choice, the standing preference, then local. Headless runs never ask; configure a preference or explicit pin before running them.
 
 Remote workers run under their own permits. The safety judge does not answer for a remote placement, so at `default` a remote worker's ordinary ask is denied. Worker slots limit concurrency; they do not create a scheduler allocation. On a university or laboratory cluster, use an approved execution environment. The [Slurm guide](/docs/guide/slurm.html) describes separate allocation-aware tooling.
 
