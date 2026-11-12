@@ -46,6 +46,11 @@ describe("safety gate findings", () => {
 		for (const secret of [
 			...workerSecretPaths(home),
 			join(home, ".config", "gh", "hosts.yml"),
+			// Local services' tokens and keys, which reach a process running as the operator over loopback.
+			join(home, ".local", "share", "jupyter", "runtime", "kernel-1.json"),
+			join(home, ".jupyter", "jupyter_server_config.json"),
+			join(home, ".ipython", "profile_default", "security", "ipcontroller-client.json"),
+			join(home, ".config", "code-server", "config.yaml"),
 			"/proc/self/environ",
 			`/proc/self/task/${process.pid}/environ`,
 		]) {

@@ -136,6 +136,12 @@ export const HOME_SECRET_RELATIVE_PATHS: ReadonlyArray<string> = [
 	".config/gcloud",
 	".password-store",
 	".local/share/keyrings",
+	// Local services listening on loopback: a Jupyter kernel's connection file (ports and HMAC key) or a server's
+	// token, the ipyparallel controller keys and the code-server password each let a holder run code as the operator.
+	".local/share/jupyter/runtime",
+	".jupyter",
+	".ipython/profile_default/security",
+	".config/code-server",
 ];
 
 /**
