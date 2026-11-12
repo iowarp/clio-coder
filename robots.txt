@@ -1,4 +1,4 @@
-# Clio Coder public site: https://coder.iowarp.ai
+# CLIO Coder public site: https://coder.iowarp.ai
 # Discovery is the goal. Search engines and AI crawlers, including model
 # training and AI search crawlers, are welcome and named below so the policy
 # is explicit. Every agent follows the same rules: the whole site, styles and

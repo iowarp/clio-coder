@@ -1,9 +1,9 @@
 [
   {
     "path": "README.md",
-    "title": "Install Clio Coder",
+    "title": "Install CLIO Coder",
     "group": "Start",
-    "excerpt": "Install, update, and launch Clio Coder on your machine.",
+    "excerpt": "Install, update, and launch CLIO Coder on your machine.",
     "headings": [
       "Install",
       "macOS, Linux and WSL",
@@ -14,7 +14,7 @@
       "Confirm the installation",
       "Open a project",
       "Update, roll back and remove",
-      "Give Clio Coder a useful first task",
+      "Give CLIO Coder a useful first task",
       "Keep going",
       "When you need more detail"
     ],
@@ -24,7 +24,7 @@
     "path": "guide/hpc-clusters.md",
     "title": "Install on a cluster",
     "group": "Start",
-    "excerpt": "Install Clio Coder on a login node with an old glibc, a proxy, or no internet.",
+    "excerpt": "Install CLIO Coder on a login node with an old glibc, a proxy, or no internet.",
     "headings": [
       "Install without root",
       "Old glibc, proxies, and quotas",
@@ -62,7 +62,7 @@
     "path": "guide/tool-usage.md",
     "title": "Tools and permissions",
     "group": "Everyday use",
-    "excerpt": "Read, search, edit, and run commands with Clio Coder's repository tools.",
+    "excerpt": "Read, search, edit, and run commands with CLIO Coder's repository tools.",
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
@@ -88,7 +88,7 @@
     "path": "guide/proactive-memory.md",
     "title": "Memory and lessons",
     "group": "Everyday use",
-    "excerpt": "See what Clio Coder remembers, approve lessons, or turn memory off.",
+    "excerpt": "See what CLIO Coder remembers, approve lessons, or turn memory off.",
     "headings": [
       "What memory does",
       "See and approve lessons",
@@ -127,7 +127,7 @@
   {
     "path": "guide/fleet-dispatch.md",
     "title": "Workers and fleets",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Assign focused tasks and combine workers into a workflow.",
     "headings": [
       "Delegate a focused task",
@@ -142,7 +142,7 @@
   {
     "path": "guide/resource-library.md",
     "title": "Skills and resources",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
     "headings": [
       "Find a useful skill",
@@ -156,8 +156,8 @@
   {
     "path": "guide/plugins.md",
     "title": "Install plugins",
-    "group": "Extend Clio Coder",
-    "excerpt": "Add reusable resources to your Clio Coder installation.",
+    "group": "Extend CLIO Coder",
+    "excerpt": "Add reusable resources to your CLIO Coder installation.",
     "headings": [
       "Install a bundle of resources",
       "Keep the installed copy under control",
@@ -168,7 +168,7 @@
   {
     "path": "guide/harness-extensions.md",
     "title": "Write and install extensions",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Install and write extensions that declare what they may do.",
     "headings": [
       "Plugin or extension",
@@ -182,7 +182,7 @@
   {
     "path": "guide/interop.md",
     "title": "Editors and other agents",
-    "group": "Extend Clio Coder",
+    "group": "Extend CLIO Coder",
     "excerpt": "Use supported agent connections and editor integrations.",
     "headings": [
       "Bring an installed coding agent",
@@ -195,8 +195,8 @@
   {
     "path": "guide/slurm.md",
     "title": "Slurm workflows",
-    "group": "Extend Clio Coder",
-    "excerpt": "Connect Clio Coder to supported Slurm tools for cluster work.",
+    "group": "Extend CLIO Coder",
+    "excerpt": "Connect CLIO Coder to supported Slurm tools for cluster work.",
     "headings": [
       "Work with a scheduler",
       "Set up the server",
@@ -241,7 +241,7 @@
     "group": "Everyday use",
     "excerpt": "Choose the declared checks a change requires and inspect verification freshness.",
     "headings": [
-      "Tell Clio Coder what “checked” means in your project",
+      "Tell CLIO Coder what “checked” means in your project",
       "Run the declared checks",
       "Review freshness"
     ],

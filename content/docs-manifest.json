@@ -12,61 +12,61 @@
     {
       "path": "README.md",
       "source": "README.md",
-      "sha256": "c46ea51a79c0474bf6cb7c412ec77b9c96b5fc101bc239d768332ef2491b8ccb",
+      "sha256": "5cffdb62d8a2244e9ead188a68808068c307c3b22553c43d958fb9077c9c6e39",
       "sourceSha256": "370cd3250c42204eab35deec86d42cf3b1793daaac00a894dd6289a928407940"
     },
     {
       "path": "guide/hpc-clusters.md",
       "source": "docs/guide/hpc-clusters.md",
-      "sha256": "58dfa1e43996e559df8bb0392e063a7f54b64319070042d06abe4ef2e2637263",
+      "sha256": "6f4f91268f7a16dc024608bd59562202b276937ce4fa3accf46bd363411ff4ce",
       "sourceSha256": "124cb675e5882712ea6a490d92291adb6a5571c9e3e7234293562df6fb8ff7e8"
     },
     {
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
-      "sha256": "79985f28c79426c8bd86717c2ea6b7204ae05f6cac1d0c433f95518eee8d4e3d",
+      "sha256": "2242ae916c8f28dd88044635478ac0edf646ebccc226c3b2da1be50a2040ef4a",
       "sourceSha256": "c23cc774114424857daf3d79dba84bfda4d828ce9283a683239fded366a088a9"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
-      "sha256": "061eec3a7cc09c06cb5159e7b80df832650b72e2937fd430898f614177cf5466",
+      "sha256": "a888570fef5198b4560b09f871bbddd30abc55324dbd54b5ebdfc289cae6a0bf",
       "sourceSha256": "d6457f623ce2edad599191d7088b3257e693561d2622249239b26c5ebfe84dde"
     },
     {
       "path": "guide/tool-usage.md",
       "source": "docs/guide/tool-usage.md",
-      "sha256": "ac8b7482a44603fddeef6d67a1053723aacc11a9b6b53e59da2188c9cf1bd1e6",
+      "sha256": "36e851cd006c9faada597cea7cab7bb86e8778c30b1d26608cefa8282bc13415",
       "sourceSha256": "d323a3d98db625657894b7ab5a35e7c4611194d4240a9f6bf84070712971d045"
     },
     {
       "path": "guide/context-continuity.md",
       "source": "docs/guide/context-continuity.md",
-      "sha256": "cf7497cb3c5adae43db564179a558c2bea35169e81834346a4dbfec15a07aed4",
+      "sha256": "6e8eb9990d50cc9d5107ab71dacec760679fb9ccd03e045b5a23eec02e22cdf3",
       "sourceSha256": "b802149b5a9937a521e0602bd6e61772df59af2dc3220671989fd38b868c357e"
     },
     {
       "path": "guide/proactive-memory.md",
       "source": "docs/guide/proactive-memory.md",
-      "sha256": "adbf374ae76aa018dc44e46b2024a7691145c2cc84e314cdc107292c82c57767",
+      "sha256": "a85bdfbffda4cff549949e3eaef6459139d4aa2a19703203603ffdb220d3e65f",
       "sourceSha256": "da476e6850b14878fac6c56a8d34524469973f5e9dbaae6a9a629cf170f3b138"
     },
     {
       "path": "guide/panes-and-files.md",
       "source": "docs/guide/panes-and-files.md",
-      "sha256": "d9b77f0cb11ec5978aa933911867f30b04edf318e3fe1950e687f290f7441e31",
+      "sha256": "8b9604a5c0600f783960ac3f5864fba1e58ea6ae88cd8b3df5b5b30d9ef3315a",
       "sourceSha256": "b0ad3b8e342893d0ee7a1b809af06a97b72b4c7b2c051b90424c1e7ce6a848ec"
     },
     {
       "path": "guide/gui.md",
       "source": "docs/guide/gui.md",
-      "sha256": "11ac762deec6e1ebbb369d21054c942909241e89fc4e9419aef747eae73e6a7d",
+      "sha256": "4a145515737f158ffc54f05aa32db68683be764ccc034bf7475bca3e9007f7f1",
       "sourceSha256": "edb1c8450204380547c74f3a7482e43caee1eef789976005c08e6ae8f3ee2446"
     },
     {
       "path": "guide/fleet-dispatch.md",
       "source": "docs/guide/fleet-dispatch.md",
-      "sha256": "f1fd88ebeebcf03959e4c03316dc7f8f2b1749a21ee20659b5ff0b5c694fafc7",
+      "sha256": "51d12f2cafbe4327fb08636082502b1d3ef94a2b6daeb14e6682e4d676f88b18",
       "sourceSha256": "fd2ddc0463c4cdff2d20f93709d67196a1a971877faf1dc640237ef94d73e452"
     },
     {
@@ -78,85 +78,85 @@
     {
       "path": "guide/plugins.md",
       "source": "docs/guide/plugins.md",
-      "sha256": "d964e17b3fae47e204f2edb0a76beaf9e7b9a56e5f1e4399162ee516449097e9",
+      "sha256": "b78e4e25e7bb582fe446f5615ec68a7556de9bbf5449bd7f6bcd51a8c497ba68",
       "sourceSha256": "8bab534c710badf2fe02bd0eafd597dda18881d31e4525e0ac697a6ebc2e4331"
     },
     {
       "path": "guide/harness-extensions.md",
       "source": "docs/guide/harness-extensions.md",
-      "sha256": "61ce4dd8e1f288f96c04714b9db27a9c4c071a3b35bce6bb90a69749aa3a90cf",
+      "sha256": "3edb23be4384cabcd385f6cef5ccfb730f8ec84731dfe54e50bfcf0cae835843",
       "sourceSha256": "d50d9fed346e381083ac2d11fef3cb23a64aabec466812881859420842ec18fd"
     },
     {
       "path": "guide/interop.md",
       "source": "docs/guide/interop.md",
-      "sha256": "e868c52f625fe101c2b30305f00fdf33665e4d52c9ab49d4722ba53dfe89e560",
+      "sha256": "4c33288819e8cc1931e9c1962087535ec9d9515a70ab82ea288af989631d7c97",
       "sourceSha256": "01a2fbda2db84239da5b39d085230a9d6649b0e32281cbbc30cd0816623a0b52"
     },
     {
       "path": "guide/slurm.md",
       "source": "docs/guide/slurm.md",
-      "sha256": "f212ca35764fda8b09c677cdd22442ff515121119ab9ced130e8fdfe23c8c2df",
+      "sha256": "30ceb8a1d9b875a309e86790065c7359841902eafa5ca14c75b3277dc94d1121",
       "sourceSha256": "c47a7427758899bf80ea7556d44b26f7abe740fbf47f107024d7fd1a77073076"
     },
     {
       "path": "guide/doctor.md",
       "source": "docs/guide/doctor.md",
-      "sha256": "ca644aac927464ee6e96d679eb55ab296865c7f62b6561942a35689ee986cc64",
+      "sha256": "cad3ed30652548d72bfc5889f2c4c7b9d213c9242a928a5495d8936f8d85a918",
       "sourceSha256": "4a73625491bab5f3e82bd8e497eeb5705285f295058ad37eaa3413e8bfe3eec4"
     },
     {
       "path": "guide/troubleshooting.md",
       "source": "docs/guide/troubleshooting.md",
-      "sha256": "4bc61b5597875bc9a604eb663019a7bfce387d5719bb6892719a4e49aeeb5af0",
+      "sha256": "71ae7f0a83eac133c2d24a1b2ce52b409929e77ba9360652aaefdcb2f1b7e705",
       "sourceSha256": "881fa0898ed39eb1e30a655559e80f2bd8c83e30460037791b9d25ad24ac2bb3"
     },
     {
       "path": "guide/quality-policy.md",
       "source": "docs/guide/quality-policy.md",
-      "sha256": "297c56d69bc1538aab078b0e2676c3b3c491d7bede9817200b20619ed4820cb3",
+      "sha256": "507da0be9e710a87cff4f9212af6ed737b3d9da02d8246158694c3ac2896f6ac",
       "sourceSha256": "ce441564d4770511dcc54cf4674764b80b42c94d05ab53f8f3ce4eecbf711695"
     },
     {
       "path": "guide/research-and-arena.md",
       "source": "docs/guide/research-and-arena.md",
-      "sha256": "8ad239762fde78abd23702f59b18547cf19bada67369cc655b83b3c0595b0fda",
+      "sha256": "ad1b42ff6eac83b2cc13993f2ce1c3a3dfe7e862b2337ec7e0f735f0c040305c",
       "sourceSha256": "595fe72065cb5be42e786e887697a0462d92c243d9634c2b38356ab4fb55f99f"
     },
     {
       "path": "guide/configuration-reference.md",
       "source": "docs/guide/configuration-reference.md",
-      "sha256": "701d352f511ac8c659bd520ea43cb7dc7e58a34bcc7552a5ed857d5e9dc38f39",
+      "sha256": "1682a83494c3dc5c3b1dec934a3b4b4cdbd1e55e4e5f3f5e418177f454938b56",
       "sourceSha256": "11d12047012f743d91ae677e2167a263ff49900c0b3557a5851f23d54f3b859b"
     },
     {
       "path": "guide/environment-variables.md",
       "source": "docs/guide/environment-variables.md",
-      "sha256": "c76ca4bb44cabf5115b5f00b73aec7611817e42b9bf7fb958e72797185a6cb08",
+      "sha256": "3462d7aa0f6f485ea3c5db4d914c7b292cb587ca9035ec390035a828624f0b8f",
       "sourceSha256": "c0018e4d66058aef53e3c880f296b464d4fa501506873cbd666f5143b600be8d"
     },
     {
       "path": "guide/system-one.md",
       "source": "docs/guide/system-one.md",
-      "sha256": "7143604201b4ab6180185f2bf942f17260823e30622b13a36a63453cca342d76",
+      "sha256": "094fb3f9830c63f204818d0069afba8ff9fd42a99acba8d5112d0e776cac2b63",
       "sourceSha256": "3f5365729f4fbe1aeb9de8f0ccdb610fc5075771c1cb9b3303552446d48a650c"
     },
     {
       "path": "guide/information-flow.md",
       "source": "docs/guide/information-flow.md",
-      "sha256": "b7c385d486d5d7bbb6be01f379f1e05ac579be46b767e02c1e9c0aedc986d166",
+      "sha256": "1e44421971dbacb4033a1f6bc19b3bdc85acc9e46d25f4b9f3851e466ca0c1aa",
       "sourceSha256": "0dd252c8c132693c506a9bd79cd8917bf9571cf14236780b476903c499877ac7"
     },
     {
       "path": "guide/semantic-context.md",
       "source": "docs/guide/semantic-context.md",
-      "sha256": "1a63a080df2afae71c3a037464faca4719d41bbc41ef61c6f21a1ee83e7e0fc5",
+      "sha256": "a9fd69338e7183772e1e359aa3a698e09d4bc257737b96d465b53729bd2c71b7",
       "sourceSha256": "1dd468d8322dfd1583f90ba01006eae4921f40a2fd40b41aea3321ba3c3b2da4"
     },
     {
       "path": "guide/built-in-agents.md",
       "source": "docs/guide/built-in-agents.md",
-      "sha256": "dfa5974775ca7136842464605fcadfcdc392b2fb4e15546201075a73244fa1ec",
+      "sha256": "7e04e62ed558fbd6dfc8debbd6ec623201081808510911487b585466827d46d2",
       "sourceSha256": "f686063a20d623d84aa0222f2e097144542f7798ab02128f57372cd142b4f783"
     }
   ]
