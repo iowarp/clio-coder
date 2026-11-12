@@ -385,6 +385,10 @@
 	.feature-list a > span:last-child {
 		color: var(--accent);
 	}
+	/* Keep a link's arrow with its own label when two links share a line. */
+	.text-link:has(+ .text-link) {
+		margin-inline-end: var(--space-6);
+	}
 	.status-dot {
 		display: inline-block;
 		inline-size: 0.4rem;
