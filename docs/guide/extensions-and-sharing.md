@@ -8,6 +8,21 @@ Source of truth: `src/domains/resources/`, `src/domains/plugins/`, `src/domains/
 
 ---
 
+## Quick start
+
+- **Save a prompt you reuse.** Write `.clio-coder/prompts/bugfix.md`; in a
+  session it runs as `/bugfix`. See [Prompt templates](#prompt-templates).
+- **Teach a procedure.** Put a `SKILL.md` with a `description` in
+  `.clio-coder/skills/<name>/`, then load it with `/skill <name>`. See
+  [Skills](#skills).
+- **Reuse what other agents have.** Prompts and skills in `~/.claude`,
+  `~/.codex` and OpenCode's folders are found without copying. Copies inside
+  a project are not trusted until you import and approve them.
+- **Move your setup to another machine.**
+  `clio-coder share export --out project.clio-coder-share.json --project`,
+  then `clio-coder share import project.clio-coder-share.json --dry-run` on
+  the other machine. See [Share archives](#share-archives).
+
 ## Resource roots and precedence
 
 Prompts and skills are loaded from package, user, and project roots. Higher-ranked roots override lower-ranked resources with the same name.

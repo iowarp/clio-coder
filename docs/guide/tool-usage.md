@@ -2,6 +2,25 @@
 
 Operational reference for agents and operators. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section through `gateway(op="call", capability="clio_docs", args={query: ...})`.
 
+### Quick start
+
+You never call these tools yourself. Ask in plain words, and the agent picks
+the tool:
+
+- A main session starts with `read`, `bash`, `edit`, `write`, `verify`,
+  `ask_user` and `gateway` attached, plus `dispatch` when workers are
+  available. Everything else is one `gateway` call away.
+- To limit what the agent may use, start it with
+  `clio-coder --allow-tools read,grep,find,ls`; `--delegate-tools` limits its
+  workers. See
+  [Operator tool allowlists](commands-and-modes.md#operator-tool-allowlists-in-interactive-sessions).
+- A cut result ends with one notice that says how much was shown and how to
+  read the next part.
+- `/view` browses what the tools produced: the transcript, tool output, finished
+  runs and evidence. A cut result stays readable there in full.
+- What a call may do without asking is in
+  [Sandbox and safety](sandbox-and-safety.md).
+
 ### The tool surface at a glance
 
 | Purpose | Tools |
