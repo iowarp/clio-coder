@@ -4,7 +4,7 @@ See what CLIO Coder remembers, approve lessons, or turn memory off.
 
 ## What memory does
 
-CLIO Coder keeps task memory for a session: requirements, environment facts, failed attempts, and diagnoses. A rules tier runs without model calls. With no memory route of its own, the model tier uses your chat route within that route's cost, quota, or speed budget, so a default install spends some model calls on memory.
+Memory is on by default and needs no setup. CLIO Coder keeps task memory for a session: requirements, environment facts, failed attempts, and diagnoses. A rules tier runs without model calls. With no memory route of its own, the model tier uses your chat route within that route's cost, quota, or speed budget, so a default install spends some model calls on memory.
 
 ## See and approve lessons
 

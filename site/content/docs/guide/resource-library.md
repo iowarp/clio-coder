@@ -25,6 +25,17 @@ Then activate it in the terminal:
 /skill tdd Add coverage for this parser before changing its behavior.
 ```
 
+## Write your own prompts and skills
+
+A file such as `.clio-coder/prompts/bugfix.md` runs as `/bugfix`. A `SKILL.md` with a `description` in `.clio-coder/skills/<name>/` loads with `/skill <name>`. Prompts and skills that Claude Code, Codex or OpenCode keep in your home folder are found without copying; copies inside a project wait until you trust them.
+
+Move your prompts, skills and settings to another machine with a share archive:
+
+```sh
+clio-coder share export --out project.clio-coder-share.json --project
+clio-coder share import project.clio-coder-share.json --dry-run
+```
+
 ## Command reference
 
 | Command | What it does |

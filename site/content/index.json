@@ -31,6 +31,7 @@
     "summary": "hpc.md",
     "headings": [
       "Install without root",
+      "Work on the cluster",
       "Old glibc, proxies, and quotas",
       "Verified downloads",
       "Airgapped sites and your own Node"
@@ -45,6 +46,7 @@
     "summary": "connect-model.md",
     "headings": [
       "Connect the way you already work",
+      "Use a local model server",
       "Settings Center",
       "Check the connection",
       "Servers without a built-in runtime"
@@ -77,7 +79,25 @@
       "Understand permission requests",
       "What the sandbox hides",
       "Verify using your project's checks",
-      "How tools reach the model"
+      "How tools reach the model",
+      "Limit what the agent may use"
+    ]
+  },
+  {
+    "path": "guide/sandbox-and-safety.md",
+    "source": "docs/guide/sandbox-and-safety.md",
+    "title": "Sandbox and safety",
+    "group": "Everyday use",
+    "excerpt": "What a sandboxed command may do, what it hides, and when CLIO Coder asks you.",
+    "description": "What CLIO Coder's sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change.",
+    "summary": "sandbox.md",
+    "headings": [
+      "Check your machine first",
+      "What a sandboxed command may do",
+      "What the sandbox hides",
+      "Commands that leave the sandbox",
+      "Stricter or looser",
+      "Project configuration and /trust"
     ]
   },
   {
@@ -153,6 +173,7 @@
       "Permissions, sandbox, and merges",
       "Run a playbook when you need one",
       "Give workers MCP tools",
+      "Run workers on another machine",
       "When a worker stops or fails"
     ]
   },
@@ -165,6 +186,7 @@
     "summary": "library.md",
     "headings": [
       "Find a useful skill",
+      "Write your own prompts and skills",
       "Command reference",
       "Review before installing",
       "Trust project packages",
@@ -254,6 +276,7 @@
     "description": "Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes.",
     "summary": "troubleshooting.md",
     "headings": [
+      "First problems",
       "A connection is unavailable",
       "Settings fail to load",
       "A terminal shortcut does not arrive",
@@ -288,6 +311,22 @@
       "Budgets and stopping",
       "Where results go",
       "Compare models blind"
+    ]
+  },
+  {
+    "path": "guide/store.md",
+    "source": "docs/guide/store.md",
+    "title": "Keep results in the store",
+    "group": "Everyday use",
+    "excerpt": "Keep datasets and results outside the working tree, with a record of where each came from.",
+    "description": "Keep datasets and results outside the working tree with clio-coder store, with a record of where each file came from and whether it changed.",
+    "summary": "store.md",
+    "headings": [
+      "Keep results out of your working tree",
+      "Store a file from your shell",
+      "Ask CLIO Coder to use it",
+      "Let workers write",
+      "Limits"
     ]
   },
   {
@@ -364,6 +403,22 @@
       "Example policy",
       "What acquires a label",
       "Read a refusal and recover"
+    ]
+  },
+  {
+    "path": "guide/glossary.md",
+    "source": "docs/guide/glossary.md",
+    "title": "Glossary",
+    "group": "Reference",
+    "excerpt": "Plain-language meanings of the words CLIO Coder uses, from target to worktree.",
+    "description": "Plain-language meanings of the terms CLIO Coder uses, such as target, sandbox, worker, worktree and run record, with the guide for each.",
+    "summary": "glossary.md",
+    "headings": [
+      "Words you meet first",
+      "Sessions and models",
+      "Safety",
+      "Workers and results",
+      "Packages"
     ]
   },
   {
