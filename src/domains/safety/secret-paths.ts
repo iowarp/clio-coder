@@ -80,33 +80,39 @@ function configFileHoldsSecret(file: string, field: RegExp, holds: (document: un
 }
 
 /**
- * Clio's config files that hold a secret now, as zero-access path entries, by the rules the sandbox masks them on:
+ * The files that hold a secret now, as zero-access path entries, by the rules the sandbox masks them on: Clio's
  * settings.yaml and the copies beside it (`settingsFileMasks()`) when a target authenticates with `auth.headers`,
- * and mcp.yaml when a server declares an `env` map, the one place a user-scope server's token goes. Otherwise both
- * stay readable. Two stat calls per use; the files are read again only when one changes.
+ * mcp.yaml when a server declares an `env` map, the one place a user-scope server's token goes, and the build-tool
+ * settings `buildToolSecretPaths()` names. Otherwise all stay readable. A stat call per file and use; the files are
+ * read again only when one changes.
  */
-export function clioConfigSecretPaths(): string[] {
-	let config: string;
+export function conditionalSecretPaths(): string[] {
+	let config: string | null;
 	try {
 		config = clioConfigDir();
 	} catch {
-		return [];
+		config = null;
 	}
-	const settings = path.join(config, "settings.yaml");
-	const mcp = path.join(config, "mcp.yaml");
-	const signature = `${config}|${fileSignature(settings)}|${fileSignature(mcp)}`;
+	const home = homedir();
+	const settings = config === null ? null : path.join(config, "settings.yaml");
+	const mcp = config === null ? null : path.join(config, "mcp.yaml");
+	const watched = [settings, mcp, ...BUILD_TOOL_CREDENTIAL_FILES.map(({ relative }) => path.join(home, relative))];
+	const signature = `${config}|${home}|${watched.map((file) => (file === null ? "-" : fileSignature(file))).join("|")}`;
 	if (configSecretCache?.signature === signature) return configSecretCache.paths;
 	const paths: string[] = [];
-	const headers = (document: unknown) =>
-		yamlEntries(document, "targets").some((target) =>
-			nonEmptyMap((target as { auth?: { headers?: unknown } } | null)?.auth?.headers),
-		);
-	if (configFileHoldsSecret(settings, /\bheaders\s*:/u, headers)) {
-		paths.push(path.join(config, "settings.yaml*"), path.join(config, ".settings.yaml.tmp-*"));
+	if (settings !== null && mcp !== null) {
+		const headers = (document: unknown) =>
+			yamlEntries(document, "targets").some((target) =>
+				nonEmptyMap((target as { auth?: { headers?: unknown } } | null)?.auth?.headers),
+			);
+		if (configFileHoldsSecret(settings, /\bheaders\s*:/u, headers)) {
+			paths.push(path.join(config as string, "settings.yaml*"), path.join(config as string, ".settings.yaml.tmp-*"));
+		}
+		const env = (document: unknown) =>
+			yamlEntries(document, "servers").some((server) => nonEmptyMap((server as { env?: unknown } | null)?.env));
+		if (configFileHoldsSecret(mcp, /\benv\s*:/u, env)) paths.push(mcp);
 	}
-	const env = (document: unknown) =>
-		yamlEntries(document, "servers").some((server) => nonEmptyMap((server as { env?: unknown } | null)?.env));
-	if (configFileHoldsSecret(mcp, /\benv\s*:/u, env)) paths.push(mcp);
+	paths.push(...buildToolSecretPaths(home));
 	configSecretCache = { signature, paths };
 	return paths;
 }
@@ -175,14 +181,78 @@ export const HOME_AGENT_SECRET_RELATIVE_PATHS: ReadonlyArray<string> = [
 	".node_repl_history",
 	".psql_history",
 	".mysql_history",
+	// Browser profiles (session cookies, saved logins and their key), including the snap and flatpak Firefox and
+	// Chromium-family installs. Playwright, Puppeteer and Selenium launch on a temporary profile and never read these.
+	".mozilla",
+	"snap/firefox/common/.mozilla",
+	".var/app/org.mozilla.firefox/.mozilla",
+	".config/google-chrome",
+	".config/chromium",
+	"snap/chromium/common/chromium",
+	".config/BraveSoftware",
+	".config/microsoft-edge",
+	// Editor secret stores: extension logins and tokens live in globalStorage's state database.
+	".config/Code/User/globalStorage",
+	".vscode-server/data/User/globalStorage",
+	".gem/credentials",
+	".config/glab-cli",
+	".oci",
+	".config/doctl",
+	".s3cfg",
+	".boto",
+	".config/containers/auth.json",
+	".config/litellm",
+	".wakatime.cfg",
+	".m2/settings-security.xml",
+	".copilot/config.json",
+	".local/share/opencode/auth.json",
+	".aider.conf.yml",
+	".continue/config.yaml",
+	".continue/config.json",
+	".qwen/oauth_creds.json",
+	".factory",
+	".local/share/amp/secrets.json",
+	".grok/user-settings.json",
+	".mcp-auth",
+	// The API key of syncthing's loopback GUI, and the key ollama signs registry pushes with.
+	".config/syncthing/config.xml",
+	".ollama/id_ed25519",
 ];
+
+/**
+ * Build-tool settings every Maven, Gradle or pip run reads, for a mirror, a proxy or a repository, so they are
+ * masked only while they hold a credential: a Maven server `<password>`, `<passphrase>` or `<privateKey>`, a Gradle
+ * property whose name says password, secret, token, key or credentials, a pip index URL with a user part.
+ */
+const BUILD_TOOL_CREDENTIAL_FILES: ReadonlyArray<{ relative: string; holds: RegExp }> = [
+	{ relative: ".m2/settings.xml", holds: /<(?:password|passphrase|privateKey)>\s*[^<\s]/iu },
+	{
+		relative: ".gradle/gradle.properties",
+		holds:
+			/^[ \t]*[^#!\s=:][^=:\n]*?(?:password|passwd|secret|token|api[._-]?key|credentials?|signing\.?key)[^=:\n]*[=:][ \t]*\S/imu,
+	},
+	{ relative: ".config/pip/pip.conf", holds: /:\/\/[^\s/@]+@/u },
+	{ relative: ".pip/pip.conf", holds: /:\/\/[^\s/@]+@/u },
+];
+
+/** The build-tool settings files under `home` that hold a credential now, absolute. */
+export function buildToolSecretPaths(home: string = homedir()): string[] {
+	const paths: string[] = [];
+	for (const { relative, holds } of BUILD_TOOL_CREDENTIAL_FILES) {
+		const file = path.join(home, relative);
+		try {
+			if (holds.test(readFileSync(file, "utf8"))) paths.push(file);
+		} catch {}
+	}
+	return paths;
+}
 
 /** Home-relative secret paths plus Clio's credential store and control directories, all absolute. */
 export function workerSecretPaths(home: string = homedir()): string[] {
 	const paths = [...HOME_SECRET_RELATIVE_PATHS, ...HOME_AGENT_SECRET_RELATIVE_PATHS].map((relative) =>
 		path.join(home, relative),
 	);
-	return [...new Set([...paths, ...clioCredentialStorePaths(), ...clioControlPaths()])];
+	return [...new Set([...paths, ...buildToolSecretPaths(home), ...clioCredentialStorePaths(), ...clioControlPaths()])];
 }
 
 /**

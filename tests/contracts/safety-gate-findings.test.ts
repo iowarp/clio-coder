@@ -1,5 +1,5 @@
 import { strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -8,7 +8,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import type { ClassifierCall } from "../../src/domains/safety/action-classifier.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
-import { workerSecretPaths } from "../../src/domains/safety/secret-paths.js";
+import { buildToolSecretPaths, workerSecretPaths } from "../../src/domains/safety/secret-paths.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("safety gate findings", () => {
@@ -51,11 +51,73 @@ describe("safety gate findings", () => {
 			join(home, ".jupyter", "jupyter_server_config.json"),
 			join(home, ".ipython", "profile_default", "security", "ipcontroller-client.json"),
 			join(home, ".config", "code-server", "config.yaml"),
+			// Browser profiles, editor secret stores and other tools' and agents' token files.
+			join(home, ".mozilla", "firefox", "abcd.default-release", "cookies.sqlite"),
+			join(home, "snap", "firefox", "common", ".mozilla", "firefox", "abcd.default", "logins.json"),
+			join(home, ".config", "google-chrome", "Default", "Cookies"),
+			join(home, ".config", "chromium", "Default", "Login Data"),
+			join(home, ".config", "BraveSoftware", "Brave-Browser", "Default", "Cookies"),
+			join(home, ".config", "microsoft-edge", "Default", "Cookies"),
+			join(home, ".config", "Code", "User", "globalStorage", "state.vscdb"),
+			join(home, ".vscode-server", "data", "User", "globalStorage", "state.vscdb"),
+			join(home, ".gem", "credentials"),
+			join(home, ".config", "glab-cli", "config.yml"),
+			join(home, ".oci", "config"),
+			join(home, ".config", "doctl", "config.yaml"),
+			join(home, ".s3cfg"),
+			join(home, ".boto"),
+			join(home, ".config", "containers", "auth.json"),
+			join(home, ".config", "litellm", "config.yaml"),
+			join(home, ".wakatime.cfg"),
+			join(home, ".copilot", "config.json"),
+			join(home, ".local", "share", "opencode", "auth.json"),
+			join(home, ".aider.conf.yml"),
+			join(home, ".continue", "config.yaml"),
+			join(home, ".qwen", "oauth_creds.json"),
+			join(home, ".factory", "auth.json"),
+			join(home, ".local", "share", "amp", "secrets.json"),
+			join(home, ".grok", "user-settings.json"),
+			join(home, ".mcp-auth", "tokens.json"),
+			join(home, ".config", "syncthing", "config.xml"),
+			join(home, ".ollama", "id_ed25519"),
 			"/proc/self/environ",
 			`/proc/self/task/${process.pid}/environ`,
 		]) {
 			strictEqual(kind({ tool: ToolNames.Read, args: { path: secret } }), "block", secret);
 		}
+	});
+
+	it("build-tool settings are refused and masked only while they hold a credential", () => {
+		const read = (file: string) => kind({ tool: ToolNames.Read, args: { path: file } });
+		const files = [
+			{
+				file: join(home, ".m2", "settings.xml"),
+				plain: "<settings><mirrors><mirror><url>https://mirror.example</url></mirror></mirrors></settings>",
+				secret: "<settings><servers><server><id>r</id><password>hunter2</password></server></servers></settings>",
+			},
+			{
+				file: join(home, ".gradle", "gradle.properties"),
+				plain: "org.gradle.jvmargs=-Xmx2g\nsystemProp.http.proxyHost=proxy\n",
+				secret: "org.gradle.jvmargs=-Xmx2g\nmavenCentralPassword = hunter2\n",
+			},
+			{
+				file: join(home, ".config", "pip", "pip.conf"),
+				plain: "[global]\nindex-url = https://mirror.example/simple\n",
+				secret: "[global]\nindex-url = https://user:hunter2@mirror.example/simple\n",
+			},
+		];
+		for (const { file, plain } of files) {
+			mkdirSync(join(file, ".."), { recursive: true });
+			writeFileSync(file, plain);
+			strictEqual(read(file), "allow", file);
+		}
+		strictEqual(buildToolSecretPaths(home).length, 0);
+		for (const { file, secret } of files) {
+			writeFileSync(file, secret);
+			strictEqual(read(file), "block", file);
+			strictEqual(workerSecretPaths(home).includes(file), true, file);
+		}
+		for (const { file } of files) rmSync(file);
 	});
 
 	it("a shell read of a thread's environ is refused", () => {

@@ -135,7 +135,7 @@ import {
 	type ScriptReader,
 	type ScriptShell,
 } from "./script-shell.js";
-import { clioConfigSecretPaths, clioControlPaths, clioCredentialStorePaths } from "./secret-paths.js";
+import { clioControlPaths, clioCredentialStorePaths, conditionalSecretPaths } from "./secret-paths.js";
 import {
 	invokesSettingsMutation,
 	SETTINGS_AUTHORITY_REASON,
@@ -824,7 +824,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 			? projectPolicy.pathPolicy
 			: mergePathPolicyInputs(defaults, projectPolicy.pathPolicy);
-		// Clio's own secret store, the desktop app's launch token, the config files that hold a secret now and user
+		// Clio's own secret store, the desktop app's launch token, the config and build-tool files that hold a secret now and user
 		// skills, by absolute path.
 		// Config directory expansion has to happen here because
 		// the list cannot call config helpers at module scope.
@@ -834,7 +834,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		});
 		return compilePathPolicy(expandedDefaults, projectPolicyRoot);
 	};
-	let configSecrets = clioConfigSecretPaths();
+	let configSecrets = conditionalSecretPaths();
 	let pathPolicy = compileEnginePathPolicy(DEFAULT_DAMAGE_CONTROL_PATH_POLICY);
 	// The operator's own session deletes build outputs and never hand-edits them
 	// (#419), so its deletes are judged without the default build-output
@@ -886,11 +886,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	});
 	let zeroAccessPolicy = zeroAccessOf(pathPolicy);
 	/**
-	 * settings.yaml and mcp.yaml turn secret when the operator adds a header target or a server token mid-session, so
-	 * a call that can read checks them again. A write or edit skips it: its fs calls are pinned (admission-fs-ops).
+	 * settings.yaml, mcp.yaml and the build-tool settings turn secret when the operator adds a header target, a server
+	 * token or a repository password mid-session, so a call that can read checks them again. A write or edit skips it: its fs calls are pinned (admission-fs-ops).
 	 */
 	const refreshConfigSecrets = (): void => {
-		const next = clioConfigSecretPaths();
+		const next = conditionalSecretPaths();
 		if (next === configSecrets) return;
 		configSecrets = next;
 		pathPolicy = compileEnginePathPolicy(DEFAULT_DAMAGE_CONTROL_PATH_POLICY);
