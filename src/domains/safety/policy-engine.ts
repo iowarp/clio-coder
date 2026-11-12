@@ -1844,9 +1844,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const base = baseDecision(call, classify(call), callCwd, posture, judgedCommand);
 		const floor = floorBlock(call, callCwd, judgedCommand);
 		if (floor !== null) return blockDecision(base, floor);
-		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope, () =>
-			outwardPlaces(scope, callCwd),
-		);
+		const held: string[] = [];
+		const required = yoloRequiredSandbox(rawCall, call, base.classification, judgedCommand, scope, () => ({
+			...outwardPlaces(scope, callCwd),
+			held,
+		}));
 		if (required === "refused" || required === "unsandboxed") {
 			return blockDecision(base, {
 				ruleId: YOLO_SANDBOX_REQUIRED_RULE_ID,
@@ -1855,7 +1857,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					required === "unsandboxed"
 						? YOLO_SANDBOX_NOT_LEFT
 						: reachesOutward(call, base.classification, judgedCommand)
-							? YOLO_SANDBOX_REFUSED_OUTWARD
+							? `${YOLO_SANDBOX_REFUSED_OUTWARD}${held.length > 0 ? `; this one stays inside because ${held.join("; ")}` : ""}`
 							: YOLO_SANDBOX_REFUSED,
 				],
 				policySource: "builtin-classifier",

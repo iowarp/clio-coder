@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import path from "node:path";
 import { canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
+import { discoverSecretMasks, isSecretPath } from "../../core/sandbox/secret-files.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { isRelativeCommandPath, type ShellCommandStep, shellCommandSteps } from "./protected-artifacts.js";
@@ -326,6 +327,8 @@ export interface OutwardPlaces {
 	readonly cwd: string;
 	/** The PATH the line runs with; null when it is not known yet, which keeps every line inside. */
 	readonly searchPath: string | null;
+	/** When given, receives why a secret the sandbox masks kept the line inside. */
+	readonly held?: string[];
 }
 
 /** True when `target` lies in a tree a contained command can write, as written or once links resolve. */
@@ -343,6 +346,48 @@ function insideWritableRoots(value: string, places: OutwardPlaces): boolean {
 	const real = canonicalizeRawPath(value, places.cwd);
 	const inside = (target: string) => places.fileRoots.some((root) => isSameOrDescendant(target, root));
 	return real !== null && inside(written) && inside(real);
+}
+
+/** `target` as the operator reads it: relative to the workspace when inside it. */
+function shownPath(target: string, places: OutwardPlaces): string {
+	const relative = path.relative(places.workspace, target);
+	if (relative === "") return ".";
+	return relative.startsWith("..") || path.isAbsolute(relative) ? target : relative;
+}
+
+/**
+ * True when the local input `value`, already inside a writable tree, would hand the CLI a secret the sandbox masks:
+ * a secret file by its name as written or once links resolve, or a directory under which the sandbox's own cached
+ * secret scan finds a masked file or ran out of budget. Outside the sandbox nothing masks it, so such a line stays
+ * inside, and `places.held` learns which path held it.
+ */
+function heldBySecret(value: string, places: OutwardPlaces): boolean {
+	const written = path.resolve(places.cwd, value);
+	const real = canonicalizeRawPath(value, places.cwd);
+	if (real === null) return false;
+	let directory: boolean;
+	try {
+		directory = statSync(real).isDirectory();
+	} catch {
+		// A missing input hands the CLI nothing to send.
+		return false;
+	}
+	const hold = (reason: string): true => {
+		places.held?.push(reason);
+		return true;
+	};
+	for (const target of new Set([written, real])) {
+		const root = places.fileRoots.find((entry) => isSameOrDescendant(target, entry));
+		if (root === undefined) continue;
+		const relative = path.relative(root, target).split(path.sep).join("/");
+		if (relative !== "" && isSecretPath(relative, real, directory))
+			return hold(`${shownPath(target, places)} is a secret file the sandbox masks`);
+	}
+	if (!directory) return false;
+	const scan = discoverSecretMasks({ workspaceRoots: [real] });
+	if (scan.capped) return hold(`the secret scan of ${shownPath(real, places)} was capped`);
+	const masked = scan.masks[0];
+	return masked !== undefined && hold(`${shownPath(masked.path, places)} is a secret file the sandbox masks`);
 }
 
 /**
@@ -490,7 +535,7 @@ function listedOperands(args: ReadonlyArray<string>, list: OptionList, places: O
 		}
 		// A value read as an option would hide the word after it from this reading.
 		if (value === undefined || value.startsWith("-")) return null;
-		if (input && !insideWritableRoots(value, places)) return null;
+		if (input && (!insideWritableRoots(value, places) || heldBySecret(value, places))) return null;
 		if (list.value !== undefined && !list.value(option, value)) return null;
 	}
 	return operands;
@@ -564,11 +609,15 @@ function remoteOperandHost(operand: string): string | null {
 	return /^([^/:]*):/u.exec(operand)?.[1] ?? null;
 }
 
-/** rsync: every remote operand on another host, every local one in a writable tree. */
+/**
+ * rsync: every remote operand on another host, every local one in a writable tree, and no local source a secret the
+ * sandbox masks or a directory holding one. The last operand is the destination, which rsync writes and never sends.
+ */
 function copyOperandsStay(operands: ReadonlyArray<string>, places: OutwardPlaces): boolean {
-	return operands.every((operand) => {
+	return operands.every((operand, index) => {
 		const host = remoteOperandHost(operand);
-		return host !== null ? !hostRefused(host) : insideWritableRoots(operand, places);
+		if (host !== null) return !hostRefused(host);
+		return insideWritableRoots(operand, places) && (index === operands.length - 1 || !heldBySecret(operand, places));
 	});
 }
 
@@ -634,9 +683,12 @@ const KUBECTL_OPTIONS: OptionList = {
 	value: (option, value) => !(option === "-o" || option === "--output") || !/file/iu.test(value),
 };
 
-/** curl: no output, upload, form, config or `@file` value, and an HTTP URL. */
+/**
+ * curl: no output, upload, form, config or `@file` value, and an HTTP URL. No `-L`: a redirect could send the
+ * request to this machine, which the URL check never saw.
+ */
 const CURL_OPTIONS: OptionList = {
-	flags: listed("-s --silent -S --show-error -f --fail --fail-with-body -L --location -i --include --compressed"),
+	flags: listed("-s --silent -S --show-error -f --fail --fail-with-body -i --include --compressed"),
 	values: listed(
 		"-X --request -H --header -d --data --data-raw --json -u --user -m --max-time --connect-timeout --retry -A --user-agent",
 	),
@@ -772,8 +824,8 @@ const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: Ou
  * Under `safety.sandbox: required`, true when an outward line may leave the sandbox: the whole line is one
  * simple command with literal arguments ({@link literalSimpleCommand}), run from the workspace repository,
  * with a PATH on which no directory is writable; its CLI has an option list here, every option is on it, its
- * operands name no local repository, file outside the writable trees or this machine, and its argv reaches
- * outward on its own. Any other line runs inside the sandbox.
+ * operands name no local repository, file outside the writable trees, input holding a secret the sandbox masks or
+ * this machine, and its argv reaches outward on its own. Any other line runs inside the sandbox.
  */
 export function outwardLineLeaves(command: string, places: OutwardPlaces): boolean {
 	if (outwardShellReason(command) === null) return false;

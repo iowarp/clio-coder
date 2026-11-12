@@ -323,6 +323,19 @@ function secretAncestor(relative: string): string | null {
 	return null;
 }
 
+/**
+ * Impure: whether the scan would hide the path by its name, by a secret directory it sits in, or for a file whose
+ * kind needs one, by its content. `relative` is `/`-separated from the root it was found under; `absolute` is read
+ * for the content check. A clean tracked file counts too, unlike in the scan: this answers what the file is, not
+ * whether a mount over it would break git.
+ */
+export function isSecretPath(relative: string, absolute: string, directory: boolean): boolean {
+	if (secretAncestor(relative) !== null || secretPathKind(relative, true) !== null) return true;
+	if (directory) return false;
+	const kind = secretPathKind(relative);
+	return kind !== null && contentIsSecret(kind, absolute);
+}
+
 function scanRoot(root: string, exclude: ReadonlySet<string>): RootScan {
 	const candidates: SecretCandidate[] = [];
 	const state: WalkState = { visited: 0, capped: false, exclude };
