@@ -388,9 +388,13 @@ const OFFERED_STEP: Step = {
 		answers.apiKeyEnv = route.target.auth?.apiKeyEnvVar;
 		answers.credential = answers.apiKeyEnv ? "env" : route.target.auth?.apiKeyRef ? "keep" : undefined;
 		answers.contextWindow = route.target.capabilities?.contextWindow;
-		answers.probe = route.kind === "local-server" ? { ok: true, models: route.model ? [route.model] : [] } : undefined;
-		answers.inventory = { models: route.model ? [route.model] : [], source: answers.probe ? "probe" : "catalog" };
+		answers.inventory = {
+			models: route.model ? [route.model] : [],
+			source: route.kind === "local-server" ? "probe" : "catalog",
+		};
 		wizard.answer("Using", offeredRow(route).label);
+		// Detection read only the model list; the window the server publishes comes from the probe a typed address gets.
+		if (route.kind === "local-server") await readModelCapabilities(answers, route.runtime);
 		// A detected Copilot login is re-read here, so the line naming the account it uses is shown.
 		if (route.runtime.id === "copilot-sdk") {
 			const ready = await COPILOT_STEP.run(wizard, answers);

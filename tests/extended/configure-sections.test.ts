@@ -754,6 +754,53 @@ describe("contracts/configure-onboarding", () => {
 		}
 	});
 
+	it("reads the context window of a detected local server and warns only when it publishes none", async (t) => {
+		let published: number | undefined;
+		const server: Server = createServer((req, res) => {
+			if (req.url === "/health") {
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ status: "ok" }));
+				return;
+			}
+			if (req.url === "/v1/models") {
+				res.writeHead(200, { "content-type": "application/json" });
+				const row = { id: "served-model", ...(published === undefined ? {} : { context_window: published }) };
+				res.end(JSON.stringify({ object: "list", data: [row] }));
+				return;
+			}
+			res.writeHead(404).end();
+		});
+		// Detection reads only the default loopback ports; llama.cpp's is read first, so its row leads the list.
+		const bound = await new Promise<boolean>((resolve) => {
+			server.once("error", () => resolve(false));
+			server.listen(8080, "127.0.0.1", () => resolve(true));
+		});
+		if (!bound) {
+			t.skip("127.0.0.1:8080 is already in use");
+			return;
+		}
+		try {
+			for (const window of [131_072, undefined]) {
+				published = window;
+				const testEnv = unconfiguredEnv();
+				try {
+					const result = await runWizard(testEnv.env, [
+						{ waitFor: "Clio found a way to reach a model:", keys: [ENTER] },
+						{ waitFor: "Review what Clio could verify", keys: [ENTER] },
+					]);
+					strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
+					const screen = plainText(result.transcript());
+					match(screen, /❯ A model server at http:\/\/127\.0\.0\.1:8080/u);
+					strictEqual(screen.includes("reported no context window"), window === undefined, screen);
+				} finally {
+					testEnv.cleanup();
+				}
+			}
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	});
+
 	it("offers to store an environment key for the desktop app only when the app is installed", async () => {
 		const answered: SendChatTest = async () => ({ ok: true, latencyMs: 800 });
 		const QUESTION = "Store it for the app too?";
