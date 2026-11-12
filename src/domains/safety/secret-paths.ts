@@ -1,5 +1,7 @@
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { parse as parseYaml } from "yaml";
 import { clioConfigDir, resolveClioDirs } from "../../core/xdg.js";
 
 /**
@@ -34,6 +36,79 @@ export function clioControlPaths(): string[] {
 		// An unresolvable state root holds no app state to protect.
 		return [];
 	}
+}
+
+let configSecretCache: { signature: string; paths: string[] } | null = null;
+
+function fileSignature(file: string): string {
+	try {
+		const stat = statSync(file);
+		return `${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+	} catch {
+		return "-";
+	}
+}
+
+/** Entries of a YAML list, or the values of a YAML map, under `key`; a malformed file still names its entries. */
+function yamlEntries(document: unknown, key: string): unknown[] {
+	if (document === null || typeof document !== "object") return [];
+	const value = (document as Record<string, unknown>)[key];
+	if (Array.isArray(value)) return value;
+	return value !== null && typeof value === "object" ? Object.values(value) : [];
+}
+
+function nonEmptyMap(value: unknown): boolean {
+	return value !== null && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+/**
+ * Whether a config file holds a secret by the rule given, read from disk. A file YAML cannot parse counts when its
+ * text names the field, so a broken file is not readable just for being broken.
+ */
+function configFileHoldsSecret(file: string, field: RegExp, holds: (document: unknown) => boolean): boolean {
+	let text: string;
+	try {
+		text = readFileSync(file, "utf8");
+	} catch {
+		return false;
+	}
+	try {
+		return holds(parseYaml(text));
+	} catch {
+		return field.test(text);
+	}
+}
+
+/**
+ * Clio's config files that hold a secret now, as zero-access path entries, by the rules the sandbox masks them on:
+ * settings.yaml and the copies beside it (`settingsFileMasks()`) when a target authenticates with `auth.headers`,
+ * and mcp.yaml when a server declares an `env` map, the one place a user-scope server's token goes. Otherwise both
+ * stay readable. Two stat calls per use; the files are read again only when one changes.
+ */
+export function clioConfigSecretPaths(): string[] {
+	let config: string;
+	try {
+		config = clioConfigDir();
+	} catch {
+		return [];
+	}
+	const settings = path.join(config, "settings.yaml");
+	const mcp = path.join(config, "mcp.yaml");
+	const signature = `${config}|${fileSignature(settings)}|${fileSignature(mcp)}`;
+	if (configSecretCache?.signature === signature) return configSecretCache.paths;
+	const paths: string[] = [];
+	const headers = (document: unknown) =>
+		yamlEntries(document, "targets").some((target) =>
+			nonEmptyMap((target as { auth?: { headers?: unknown } } | null)?.auth?.headers),
+		);
+	if (configFileHoldsSecret(settings, /\bheaders\s*:/u, headers)) {
+		paths.push(path.join(config, "settings.yaml*"), path.join(config, ".settings.yaml.tmp-*"));
+	}
+	const env = (document: unknown) =>
+		yamlEntries(document, "servers").some((server) => nonEmptyMap((server as { env?: unknown } | null)?.env));
+	if (configFileHoldsSecret(mcp, /\benv\s*:/u, env)) paths.push(mcp);
+	configSecretCache = { signature, paths };
+	return paths;
 }
 
 /**

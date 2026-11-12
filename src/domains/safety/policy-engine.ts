@@ -135,7 +135,7 @@ import {
 	type ScriptReader,
 	type ScriptShell,
 } from "./script-shell.js";
-import { clioControlPaths, clioCredentialStorePaths } from "./secret-paths.js";
+import { clioConfigSecretPaths, clioControlPaths, clioCredentialStorePaths } from "./secret-paths.js";
 import {
 	invokesSettingsMutation,
 	SETTINGS_AUTHORITY_REASON,
@@ -824,16 +824,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		const pathPolicyInput = projectPolicy.disableDefaultPathPolicy
 			? projectPolicy.pathPolicy
 			: mergePathPolicyInputs(defaults, projectPolicy.pathPolicy);
-		// Clio's own secret store, the desktop app's launch token and user skills, by absolute path.
+		// Clio's own secret store, the desktop app's launch token, the config files that hold a secret now and user
+		// skills, by absolute path.
 		// Config directory expansion has to happen here because
 		// the list cannot call config helpers at module scope.
 		const expandedDefaults = mergePathPolicyInputs(mergePathPolicyInputs(pathPolicyInput, OPERATOR_PATH_POLICY), {
-			zeroAccessPaths: [...clioCredentialStorePaths(), ...clioControlPaths()],
+			zeroAccessPaths: [...clioCredentialStorePaths(), ...clioControlPaths(), ...configSecrets],
 			readOnlyPaths: [...clioSkillsRootPaths(), path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
 		});
 		return compilePathPolicy(expandedDefaults, projectPolicyRoot);
 	};
-	const pathPolicy = compileEnginePathPolicy(DEFAULT_DAMAGE_CONTROL_PATH_POLICY);
+	let configSecrets = clioConfigSecretPaths();
+	let pathPolicy = compileEnginePathPolicy(DEFAULT_DAMAGE_CONTROL_PATH_POLICY);
 	// The operator's own session deletes build outputs and never hand-edits them
 	// (#419), so its deletes are judged without the default build-output
 	// entries, at default and at yolo alike. A project's own entries still
@@ -877,10 +879,23 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	);
 	// Bash-read scanning tests argument tokens against zero-access entries only:
 	// read-only paths stay readable from bash by design, secrets do not.
-	const zeroAccessPolicy: CompiledPathPolicy = {
-		root: pathPolicy.root,
-		entries: pathPolicy.entries.filter((entry) => entry.kind === "zeroAccessPaths"),
+	const zeroAccessOf = (policy: CompiledPathPolicy): CompiledPathPolicy => ({
+		root: policy.root,
+		entries: policy.entries.filter((entry) => entry.kind === "zeroAccessPaths"),
 		diagnostics: [],
+	});
+	let zeroAccessPolicy = zeroAccessOf(pathPolicy);
+	/**
+	 * settings.yaml and mcp.yaml turn secret when the operator adds a header target or a server token mid-session, so
+	 * a call that can read checks them again. A write or edit skips it: its fs calls are pinned (admission-fs-ops).
+	 */
+	const refreshConfigSecrets = (): void => {
+		const next = clioConfigSecretPaths();
+		if (next === configSecrets) return;
+		configSecrets = next;
+		pathPolicy = compileEnginePathPolicy(DEFAULT_DAMAGE_CONTROL_PATH_POLICY);
+		zeroAccessPolicy = zeroAccessOf(pathPolicy);
+		operatorDeletePathPolicy = null;
 	};
 
 	// Base pack rules apply at every posture, so they are sourced once at
@@ -1997,6 +2012,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 
 	const engine: SafetyPolicyEngine = {
 		evaluate(rawCall, posture, scope) {
+			if (!WRITE_ROOT_TOOLS.has(rawCall.tool)) refreshConfigSecrets();
 			const oversized = oversizedPathToken(rawCall.args);
 			if (oversized !== null) {
 				return blockDecision(baseDecision(rawCall, classify(rawCall), cwd, posture, commandArg(rawCall.args)), {
@@ -2039,6 +2055,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			return writeRootViolation(writeRoots, target, canonicalizeRawPath(target, writeRootCwd, memo), memo);
 		},
 		readablePath(target) {
+			refreshConfigSecrets();
 			return evaluatePathPolicy(zeroAccessPolicy, "read", target, cwd).kind === "allow";
 		},
 		informationFlow: () => informationFlow,

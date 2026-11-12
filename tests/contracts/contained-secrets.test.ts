@@ -10,6 +10,7 @@ import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/en
 import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -285,4 +286,36 @@ test("under bwrap a contained command cannot read .env or credential variables, 
 	const unsandboxed = await runBashCommand(command, { cwd });
 	match(unsandboxed.stdout, /fake-file-value/u);
 	match(unsandboxed.stdout, /fake-dsn-pass/u);
+});
+
+test("typed read and grep refuse Clio's settings and MCP files while they hold a secret, as the sandbox hides them", async (t) => {
+	const isolated = await isolateClioEnv("clio-config-secrets-");
+	t.after(() => isolated.restore());
+	const config = join(isolated.dir, "config");
+	mkdirSync(config, { recursive: true });
+	const settings = join(config, "settings.yaml");
+	const backup = join(config, "settings.yaml.bak");
+	const mcp = join(config, "mcp.yaml");
+	const secretSettings = "targets:\n  - id: lab\n    auth:\n      headers:\n        X-Api-Key: HEADER_MARKER\n";
+	writeFileSync(settings, secretSettings);
+	writeFileSync(backup, secretSettings);
+	writeFileSync(
+		mcp,
+		"version: 1\nservers:\n  - id: gh\n    command: gh-mcp\n    env:\n      GITHUB_TOKEN: MCP_MARKER\n",
+	);
+	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-config-secrets-ws-")));
+	const engine = createSafetyPolicyEngine({ cwd: workspace });
+	const scope = { level: "default", scratchRoots: [], sandbox: true, snapshots: true } as never;
+	const verdicts = () =>
+		[settings, backup, mcp].flatMap((file) => [
+			engine.evaluate({ tool: ToolNames.Read, args: { path: file } }, "default", scope).kind,
+			engine.evaluate({ tool: ToolNames.Grep, args: { pattern: "MARKER", path: file } }, "default", scope).kind,
+		]);
+	deepStrictEqual(verdicts(), ["block", "block", "block", "block", "block", "block"]);
+	strictEqual(engine.readablePath(settings), false, "a listing withholds settings.yaml");
+	// Without a header target or a server token the same engine reads both again, so an agent can help with them.
+	writeFileSync(settings, "targets:\n  - id: lab\n    auth:\n      apiKeyEnvVar: LAB_KEY\n");
+	writeFileSync(backup, "targets: []\n");
+	writeFileSync(mcp, "version: 1\nservers:\n  - id: gh\n    command: gh-mcp\n");
+	deepStrictEqual(verdicts(), ["allow", "allow", "allow", "allow", "allow", "allow"]);
 });
