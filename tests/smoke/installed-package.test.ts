@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	copyFileSync,
 	existsSync,
@@ -21,6 +22,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { launcherProof } from "../../apps/clio-coder-gui/server/launch-proof.js";
+import { backgroundPaths, backgroundUnit } from "../../apps/clio-coder-gui/server/launcher/background-config.js";
 import { checkInstalledBrowser } from "../../apps/clio-coder-gui/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -608,8 +610,8 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	ok(existsSync(join(packageRoot, "docs/corpus.json")), "the offline corpus ships");
 	ok(readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8").includes("#"));
 
-	// Service-configuration mode: the same file a background install would write,
-	// consumed by the installed CLI directly. No systemd, no browser.
+	// Service-configuration mode: the files a background install writes (launch file, unit and the
+	// manifest that blesses both), consumed by the installed CLI directly. No systemd, no browser.
 	const serviceDir = join(work, "gui-service");
 	const serviceHome = join(work, "gui-service-home");
 	mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
@@ -624,19 +626,26 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	await new Promise<void>((resolve) => reserve.listen(0, "127.0.0.1", resolve));
 	const port = (reserve.address() as AddressInfo).port;
 	await new Promise<void>((resolve) => reserve.close(() => resolve()));
-	const configFile = join(serviceDir, "server.json");
+	const serviceFiles = backgroundPaths(serviceDir);
+	const configFile = serviceFiles.config;
+	const serviceConfig = {
+		v: 1 as const,
+		port,
+		token: GUI_TEST_TOKEN,
+		roots,
+		packageRoot,
+		path: process.env.PATH ?? "",
+		launch: { node: process.execPath, entry },
+		desktopPrefix: serviceDir,
+	};
+	const serviceConfigText = `${JSON.stringify(serviceConfig, null, 2)}\n`;
+	const serviceUnit = backgroundUnit(serviceConfig, serviceDir);
+	const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+	writeFileSync(configFile, serviceConfigText, { mode: 0o600 });
+	writeFileSync(serviceFiles.unitFile, serviceUnit, { mode: 0o600 });
 	writeFileSync(
-		configFile,
-		JSON.stringify({
-			v: 1,
-			port,
-			token: GUI_TEST_TOKEN,
-			roots,
-			packageRoot,
-			path: process.env.PATH ?? "",
-			launch: { node: process.execPath, entry },
-			desktopPrefix: serviceDir,
-		}),
+		serviceFiles.manifest,
+		`${JSON.stringify({ v: 2, owner: "clio-coder-gui-background", config: sha256(serviceConfigText), unit: sha256(serviceUnit) })}\n`,
 		{ mode: 0o600 },
 	);
 	const service = await startInstalledWeb(
@@ -649,7 +658,20 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const { origin } = service;
 		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
-		const credential = await proveLaunchToken(origin, GUI_TEST_TOKEN);
+		// Every start draws a new launch token, so the one written before it opens nothing.
+		const liveToken = (JSON.parse(readFileSync(configFile, "utf8")) as { token: string }).token;
+		notDeepStrictEqual(liveToken, GUI_TEST_TOKEN, "the service rotates its launch token on start");
+		strictEqual(readFileSync(serviceFiles.unitFile, "utf8"), serviceUnit, "rotation leaves the unit untouched");
+		const stale = await webRequest(origin, undefined, "/api/auth/challenge", {});
+		const { challenge: staleChallenge } = (await stale.json()) as { challenge: string };
+		const staleProof = launcherProof(GUI_TEST_TOKEN, staleChallenge, port);
+		const refused = await webRequest(origin, undefined, "/api/auth/clients", {
+			label: "Installed package smoke",
+			challenge: staleChallenge,
+			proof: staleProof,
+		});
+		notDeepStrictEqual(refused.status, 200, "the launch token written before the start opens nothing");
+		const credential = await proveLaunchToken(origin, liveToken);
 		const request = (path: string) => webRequest(origin, credential, path);
 		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
 		strictEqual(meta.pwa, true, "service configuration enables the installable app");
@@ -670,7 +692,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 			const response = await request(path);
 			strictEqual(response.status, 200, `${path} is served in service mode`);
 			match(response.headers.get("content-type") ?? "", type, `${path} content type`);
-			if (!path.endsWith(".png")) ok(!(await response.text()).includes(GUI_TEST_TOKEN), `${path} carries no token`);
+			if (!path.endsWith(".png")) ok(!(await response.text()).includes(liveToken), `${path} carries no token`);
 		}
 		const manifest = (await (await request("/manifest.webmanifest")).json()) as {
 			start_url: string;
