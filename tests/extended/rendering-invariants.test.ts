@@ -1469,39 +1469,41 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
-	it("does not measure a regular-mode transcript again when a settled turn hands back the same rows", () => {
-		const rows = Array.from(
-			{ length: 40_000 },
-			(_, i) => `\x1b[1mrow ${i}\x1b[22m ${"lorem ipsum dolor sit amet ".repeat(2)}${"x".repeat(i % 7)}`,
-		);
-		const overwide = "y".repeat(120);
-		rows[3] = overwide;
+	it("keeps every regular-mode frame equal to a fresh render while rows in place skip measuring", () => {
+		const rows = Array.from({ length: 40 }, (_, i) => `\x1b[1mrow ${i}\x1b[22m ${"w".repeat(70 + (i % 9))}`);
 		const chat = {
 			render: () => rows,
+			// A settled turn hands back a new prefix array of the same rows.
 			renderRegions: () => ({ prefix: rows.slice(), tail: [] }),
 			invalidate() {},
 		};
-		const root = buildLayout(
-			{ banner: new Text("", 0, 0), chat, editor: new Text("editor", 0, 0), footer: new Text("footer", 0, 0) },
-			{ mode: "regular" },
-		);
-		const frame = (width: number): number => {
-			const start = performance.now();
-			const out = root.render(width);
-			const took = performance.now() - start;
-			const cut = out.find((row) => row.startsWith("yyy")) ?? "";
-			ok(visibleWidth(cut) > 0 && visibleWidth(cut) <= width, "an overwide row is still cut to the width");
-			return took;
+		const parts = () => ({
+			banner: new Text("", 0, 0),
+			chat,
+			editor: new Text("editor", 0, 0),
+			footer: new Text("footer", 0, 0),
+		});
+		const root = buildLayout(parts(), { mode: "regular" });
+		const frame = (width: number): string[] => {
+			const out = root.render(width).slice();
+			deepStrictEqual(out, buildLayout(parts(), { mode: "regular" }).render(width), `frame at ${width} columns`);
+			for (const row of out) ok(visibleWidth(row) <= width, `a row fits ${width} columns`);
+			return out;
 		};
 		frame(100);
-		let remeasured = Number.POSITIVE_INFINITY;
-		let kept = Number.POSITIVE_INFINITY;
-		for (let repeat = 0; repeat < 5; repeat += 1) {
-			remeasured = Math.min(remeasured, frame(101));
-			frame(100);
-			kept = Math.min(kept, frame(100));
-		}
-		ok(kept < remeasured / 3, `a same-width frame took ${kept.toFixed(2)} ms against ${remeasured.toFixed(2)} ms`);
+		frame(100);
+		rows[5] = "y".repeat(140);
+		ok(
+			frame(100).some((row) => row.startsWith("y".repeat(90)) && visibleWidth(row) === 100),
+			"a row replaced at the same width by an overwide one is cut",
+		);
+		const shrunk = frame(60).filter((row) => row.includes("row "));
+		ok(
+			shrunk.length === 39 && shrunk.every((row) => visibleWidth(row) === 60),
+			"a width shrink cuts rows that fit before",
+		);
+		frame(60);
+		frame(100);
 	});
 
 	it("returns a scrolled-up fullscreen transcript to its live edge when the operator submits", async () => {
