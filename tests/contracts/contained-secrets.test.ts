@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,11 +7,13 @@ import { test } from "node:test";
 import { runBashCommand } from "../../src/core/bash-exec.js";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { holdsNamedCredential, scrubSandboxEnv } from "../../src/core/sandbox/env-scrub.js";
+import { mainSandboxPolicy, planMainSandboxSpawn } from "../../src/core/sandbox/main-session.js";
 import { discoverSecretMasks } from "../../src/core/sandbox/secret-files.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -207,6 +209,38 @@ test("a secret the write tool creates is masked on the next scan inside the reus
 		discoverSecretMasks({ workspaceRoots: [root] }, [], t0 + 1_000).masks.map((mask) => mask.path.slice(root.length + 1)),
 		["sub/x.pem"],
 	);
+});
+
+test("under bwrap a secret whose parent a verify script renamed is masked at its new path in the next command", async (t) => {
+	const availability = sandboxAvailability();
+	if (!availability.available || availability.backend !== "bwrap") {
+		t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+		return;
+	}
+	const isolated = await isolateClioEnv("clio-secret-rename-");
+	t.after(() => isolated.restore());
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-secret-rename-ws-")));
+	execFileSync("git", ["init", "-q"], { cwd: root });
+	writeFileSync(join(root, ".gitignore"), ".env.local\n");
+	mkdirSync(join(root, "apps", "web"), { recursive: true });
+	writeFileSync(join(root, "apps", "web", ".env.local"), "FAKE_DEEP=fake-deep-value\n");
+	// The script renames the secret's parent from inside verify's own launch, which leaves the cached scan in place.
+	writeFileSync(
+		join(root, "package.json"),
+		JSON.stringify({ name: "p", private: true, scripts: { lint: "mv apps/web apps/w2 && echo lint-ok" } }),
+	);
+	const saved = process.cwd();
+	process.chdir(root);
+	t.after(() => process.chdir(saved));
+	const policy = mainSandboxPolicy({ workspace: root, scratchRoots: [] });
+
+	const verified = await verifyTool.run({ check: "lint" }, { shellSandbox: policy });
+	strictEqual(verified.kind, "ok", verified.kind === "error" ? verified.message : "");
+	const plan = planMainSandboxSpawn(policy, { shell: "cat apps/w2/.env.local" }, root);
+	strictEqual(plan.kind, "sandboxed");
+	const read = plan.kind === "sandboxed" ? spawnSync(plan.file, plan.args, { encoding: "utf8" }) : undefined;
+	ok(!`${read?.stdout}`.includes("fake-deep-value"), read?.stdout);
+	match(`${read?.stderr}`, /Permission denied/u);
 });
 
 test("under bwrap a contained command cannot read .env or credential variables, and an unsandboxed one still can", async (t) => {

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { type Dirent, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { HOME_SECRET_RELATIVE_PATHS, WORKSPACE_SECRET_PATHS } from "../../domains/safety/secret-paths.js";
 import { internalGitArgv } from "../internal-git.js";
@@ -407,6 +407,47 @@ interface CachedScan {
 	index: string | null;
 	workspace: boolean;
 	scan: RootScan;
+	/** Identity of each candidate and every directory between it and the root, as found. */
+	identities: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * Device, inode and change time of a path, not following a link. A contained
+ * command can restore an mtime (`touch -d`) but not these, so a rename, a
+ * decoy put in a moved entry's place, or a link to where it went all differ.
+ */
+function pathIdentity(entry: string): string | null {
+	try {
+		const stats = lstatSync(entry, { bigint: true });
+		return `${stats.dev}:${stats.ino}:${stats.ctimeNs}`;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The masks are bind mounts made per launch at the paths a scan found, so a
+ * secret whose parent was renamed since is masked nowhere. A cached scan is
+ * reused only while every candidate and directory above it is still the one
+ * found; a candidate already gone when recorded never matches.
+ */
+function scanIdentities(root: string, scan: RootScan): Map<string, string | null> {
+	const identities = new Map<string, string | null>();
+	for (const candidate of scan.candidates) {
+		let entry = candidate.path;
+		while (isInside(root, entry) && !identities.has(entry)) {
+			identities.set(entry, pathIdentity(entry));
+			entry = path.dirname(entry);
+		}
+	}
+	return identities;
+}
+
+function identitiesHold(identities: ReadonlyMap<string, string | null>): boolean {
+	for (const [entry, identity] of identities) {
+		if (identity === null || pathIdentity(entry) !== identity) return false;
+	}
+	return true;
 }
 
 const scanCache = new Map<string, CachedScan>();
@@ -445,10 +486,10 @@ function cachedScan(root: string, workspace: boolean, exclude: ReadonlySet<strin
 	if (cached !== undefined && cached.stamp === stamp) {
 		const stable = index !== null && cached.index === index;
 		const ttl = !workspace ? SCRATCH_SCAN_TTL_MS : stable ? WORKSPACE_STABLE_INDEX_TTL_MS : WORKSPACE_SCAN_TTL_MS;
-		if (now - cached.at < ttl) return cached.scan;
+		if (now - cached.at < ttl && identitiesHold(cached.identities)) return cached.scan;
 	}
 	const scan = scanRoot(root, exclude);
-	scanCache.set(key, { at: now, stamp, index, workspace, scan });
+	scanCache.set(key, { at: now, stamp, index, workspace, scan, identities: scanIdentities(root, scan) });
 	return scan;
 }
 
