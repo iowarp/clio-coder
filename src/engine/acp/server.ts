@@ -593,6 +593,8 @@ export interface ClioAcpServerOptions {
 	 */
 	hostToolEvents?: { onEvent(handler: (event: AcpServerEvent) => void): () => void };
 	mcpCapabilities?: Pick<McpCapabilitySource, "attachClientServers" | "detachClientServers">;
+	/** `acp --read-only`: every session is read-only, whatever ceiling its client sends. */
+	operatorReadOnly?: boolean;
 	bus?: TelemetryHub;
 	autonomy?: () => AutonomyLevel;
 	/** Shared with the deferred front when the workspace binds after initialize. */
@@ -4874,13 +4876,19 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (sessionCwd !== canonicalCwd) throw mismatch();
 		return sessionCwd;
 	};
-	const attachClientMcpServers = async (servers: ReadonlyArray<McpClientServerSpec>): Promise<void> => {
+	const attachClientMcpServers = async (
+		servers: ReadonlyArray<McpClientServerSpec>,
+		ceiling: TurnConstraints | undefined,
+	): Promise<void> => {
 		if (servers.length === 0) return;
 		if (!options.mcpCapabilities) {
 			throw new AcpRequestError(-32602, "client MCP servers are unavailable in this host", { code: "invalid_params" });
 		}
 		try {
-			await options.mcpCapabilities.attachClientServers(servers);
+			// A read-only session starts no client server: what one does is unknown until it runs.
+			await options.mcpCapabilities.attachClientServers(servers, {
+				readOnly: options.operatorReadOnly === true || ceiling?.readOnly === true,
+			});
 		} catch (error) {
 			await options.mcpCapabilities.detachClientServers();
 			options.diagnostics?.(`client MCP launch failed: ${acpErrorMessage(error)}`);
@@ -5129,7 +5137,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const createInput: { cwd: string; target?: string; model?: string } = { cwd: sessionCwd };
 			if (route.target !== null) createInput.target = route.target;
 			if (route.model !== null) createInput.model = route.model;
-			await attachClientMcpServers(clientMcpServers);
+			await attachClientMcpServers(clientMcpServers, ceiling);
 			let meta: SessionMeta | undefined;
 			try {
 				meta = options.session?.create(createInput);
@@ -5307,7 +5315,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 			}
 			const recordedRoute = resumedSessionRoute(stored, entries);
-			await attachClientMcpServers(clientMcpServers);
+			await attachClientMcpServers(clientMcpServers, ceiling);
 			try {
 				const restored = restoreControlledSession(
 					{

@@ -122,3 +122,85 @@ test("ACP client stdio MCP server is callable through gateway and closes with it
 		env.restore();
 	}
 });
+
+test("a read-only ACP session registers client stdio MCP servers without starting them", async () => {
+	const env = await isolateClioEnv("acp-client-mcp-ro-");
+	const cwd = process.cwd();
+	const fixture = resolve("tests/fixtures/mcp-fake-server.mjs");
+	const mcpServers = [{ name: "fixture", command: process.execPath, args: [fixture], env: [] }];
+	const sessions = [
+		{ operatorReadOnly: true, extra: {} },
+		{ operatorReadOnly: false, extra: { _meta: { "clio-coder/ceiling": { readOnly: true } } } },
+	];
+	try {
+		for (const { operatorReadOnly, extra } of sessions) {
+			const registry = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "yolo" });
+			const source = createMcpCapabilitySource({ cwd, registry, configDir: env.dir, requestTimeoutMs: 5_000 });
+			const handlers = new Map<string, (params: unknown) => Promise<unknown> | unknown>();
+			let stop: () => void = () => {};
+			const transport: AcpJsonRpcPeerTransport = {
+				closed: false,
+				request: async () => ({}) as never,
+				notify: () => {},
+				onNotification: () => () => {},
+				onRequest: (method, handler) => {
+					handlers.set(method, handler);
+					return () => handlers.delete(method);
+				},
+				onClose: (handler) => {
+					stop = handler;
+					return () => {};
+				},
+				close: () => stop(),
+			};
+			let current: { id: string; cwd: string; createdAt: string; endedAt: string | null } | null = null;
+			const session = {
+				current: () => current,
+				history: () => (current ? [current] : []),
+				create: () => {
+					current = { id: "acp-mcp-ro", cwd, createdAt: new Date().toISOString(), endedAt: null };
+					return current;
+				},
+				tree: () => ({ leafId: null }),
+				leafId: () => null,
+				close: async () => {
+					current = null;
+				},
+			} as unknown as SessionContract;
+			const done = serveClioAcpAgent({
+				transport,
+				cwd,
+				session,
+				toolRegistry: registry,
+				mcpCapabilities: source,
+				operatorReadOnly,
+				readSessionEntries: () => [],
+				buildReplayMessages: () => [],
+				chat: {
+					submit: async () => {},
+					cancel: () => {},
+					onEvent: () => () => {},
+					isStreaming: () => false,
+					getSessionId: () => current?.id ?? null,
+					resetForSession: () => {},
+					setToolCeiling: () => ({ readOnly: true }),
+				},
+			});
+			try {
+				await handlers.get("initialize")?.({ protocolVersion: 1 });
+				await handlers.get("session/new")?.({ cwd, mcpServers, ...extra });
+				deepStrictEqual(source.connectedIds(), [], `operatorReadOnly=${operatorReadOnly}`);
+				const ensured = await source.ensure("mcp_acp_fixture__echo", { readOnly: true });
+				strictEqual(ensured.spec, null);
+				ok(ensured.reason?.includes("a read-only turn starts only servers trusted as read"), ensured.reason);
+				deepStrictEqual(source.connectedIds(), []);
+			} finally {
+				transport.close();
+				await done;
+				await source.close();
+			}
+		}
+	} finally {
+		env.restore();
+	}
+});

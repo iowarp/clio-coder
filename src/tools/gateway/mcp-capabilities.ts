@@ -218,8 +218,11 @@ export interface McpCapabilitySourceOptions {
 }
 
 export interface McpCapabilitySource {
-	/** Connect client supplied stdio servers without persisting their declarations or catalogs. */
-	attachClientServers(servers: ReadonlyArray<McpClientServerSpec>): Promise<void>;
+	/**
+	 * Connect client supplied stdio servers without persisting their declarations or catalogs. A read-only
+	 * session registers them unstarted: their trust is unknown, so a read-only turn refuses to start them.
+	 */
+	attachClientServers(servers: ReadonlyArray<McpClientServerSpec>, options?: { readOnly?: boolean }): Promise<void>;
 	/** Tear down only the servers supplied by the ACP client for this session. */
 	detachClientServers(): Promise<void>;
 	/** Launch every trusted server not yet launched, register its tools, and describe every declared server. */
@@ -1054,7 +1057,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	};
 
 	return {
-		async attachClientServers(servers) {
+		async attachClientServers(servers, attachOptions) {
 			if (closed) throw new Error("MCP capability source is closed");
 			if (servers.length > 0 && !registry.unregister) {
 				throw new Error("MCP registry cannot remove session scoped tools");
@@ -1100,7 +1103,10 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				all.set(id, state);
 				added.push(state);
 			}
-			await Promise.all(added.map((state) => discover(state)));
+			const startable = added.filter(
+				(state) => readOnlyLaunchRefusal(state.declaration, attachOptions?.readOnly) === null,
+			);
+			await Promise.all(startable.map((state) => discover(state)));
 		},
 		async detachClientServers() {
 			if (states === null) return;

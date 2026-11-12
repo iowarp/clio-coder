@@ -4135,6 +4135,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					return { generation: event.generation, previousGeneration: event.previousGeneration, changed: event.changed };
 				},
 				...(toolBootstrap.mcpCapabilities ? { mcpCapabilities: toolBootstrap.mcpCapabilities } : {}),
+				operatorReadOnly: options.toolLimits?.readOnly === true,
 				bus,
 				autonomy: resolveBaselineAutonomy,
 				routing: () => {
