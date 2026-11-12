@@ -273,8 +273,8 @@
     "author": "The CLIO Coder team",
     "source": "semantic-context-and-recordings.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.8",
-    "status": "Beta, off by default, new in 0.6.2",
+    "versionScope": "0.8.0",
+    "status": "Beta, off by default",
     "interfaces": [
       "Terminal"
     ],
