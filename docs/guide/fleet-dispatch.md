@@ -328,6 +328,18 @@ does both. After saving the new entry, installation removes earlier install
 directories that are a week old and not among the newest three, because every
 rebuild of a `-dev` client installs a new one.
 
+The optional SDK components are installed separately. A run placed on a node
+that lacks the SDK its runtime needs fails once, without a retry, and names the
+command that adds it from this client:
+
+```sh
+clio-coder fleet nodes tools install node-a claude-sdk         # preview only
+clio-coder fleet nodes tools install node-a copilot-sdk --yes  # execute
+```
+
+The node's own Clio installs the SDK version it pins, at user level. The same
+command accepts `asciinema`.
+
 For an independently managed install, the default invocation is
 `clio-coder worker`. A custom `clioCoderEntry` that ends in ` worker` is version
 checked through `<base> --version`. Any other custom entry needs an explicit
@@ -427,6 +439,7 @@ The probe also reads the node's machine id (`/etc/machine-id`, the dbus copy,
 or the macOS platform UUID) and stores only a salted hash. A recorded check
 fails for a node whose machine another registered node already holds with a
 passing record, because two entries for one machine double its worker capacity.
+`fleet nodes setup` does not keep an entry it added for such a machine.
 A node that is the client's own machine passes with a note. Dispatch additionally
 rechecks project authority at launch. Failed nodes can remain doctor warnings
 while local work stays usable.
@@ -660,6 +673,12 @@ task worktree (`worktree: true`) or run host verification checks (`intent.verifi
 | Agent automation | `agent: "auto"` | Picks the agent from the task shape through a shared classifier: `coder` (write, debug, refactor, config), `tester`, `documenter`, `verifier` (review), `researcher`, `world-knowledge` and `scout` (read, unknown). That baseline is the agent that runs; the router's alternative stays shadow-only unless `fleet.adaptiveRouting.agentRoles` activates the pair. |
 | Scout split | `from_scout: {run_id, run_digest}` | Second call of the Scout continuation. A terminal Scout run either settles with findings or proposes at most four typed subtasks; this call compiles the proposal into one approval-gated dependency plan. Pass no other argument. |
 
+Native workers of one batch that share a prompt prefix do not all start at once. The
+first one starts, and the others start when it streams its first token, when it settles
+or after 15 seconds, whichever comes first, so they read the prompt cache it wrote. Every
+handle of the batch still returns at once. `fleet.staggerSharedPrefix: false` turns the
+wait off ([configuration-and-targets.md](configuration-and-targets.md)).
+
 ### Single-writer token
 
 A parallel dispatch may declare `writers: 1`. One is the only accepted value, the
@@ -716,6 +735,13 @@ parent checkout as the merge destination. The host commits the task worktree
 when the worker finishes. A worker in an attested task worktree can also use
 typed `git add` and `git commit` on its task branch when its permit admits those
 operations.
+
+A sandboxed worker in a task worktree cannot read the secret files of the checkout
+the worktree was cut from. Its sandbox masks the secret files of the worktree, of
+that source checkout and of every other worktree linked to the same repository,
+whatever the repository layout: a plain checkout, a bare repository with
+worktrees, or a submodule
+([safety-model.md](../architecture/safety-model.md) lists the names that count as secret files).
 
 The host commit takes changes to tracked files, whatever the worker staged, and the
 new files the run's own edit and write calls made. Any other new file, such as bytecode
@@ -784,7 +810,10 @@ A merge-mode run whose host verification rejected the tree fails with
 names the `clio-coder fleet land` command that applies it. That detail, the run's evidence line for the
 check, and the merge card all say whether Clio Coder ran the failing check on the task base.
 A failing whole-repo command check is replayed once, inside a bubblewrap sandbox over a
-throwaway archive of the base commit, under the check's own declared timeout. The result is
+throwaway archive of the base commit, under the check's own declared timeout. The replay
+sandbox hides credentials, Clio's settings file and its backups, and the secret files of the
+task worktree and of the checkout it was cut from; when the host's mount table cannot be read
+the check is not run on the base and is reported as not compared. The result is
 kept per base commit under the state root (`dispatch-verification-base/`, the newest 64), so
 tasks cut from one base, in this session or another on the machine, pay for the replay once.
 How long the check took on the task does not matter. A failing check fails the same way on the
@@ -1034,6 +1063,14 @@ per list, 8 verification entries) and every refusal reason code, including
 `intent_write_roots_contradiction`, are specified in
 [dispatch-typed-intent.md](../architecture/dispatch-typed-intent.md).
 
+Paths in an intent are repository-relative, with one exception. A task that works
+in its own workspace may list absolute directories outside it in
+`intent.read_roots`, and its native worker may read them and never write them. A
+missing directory, the filesystem root, a system tree, the home directory, an
+ancestor of the workspace, a credential store or a directory holding one is
+refused as `external_read_root_invalid`, and an absolute path inside the workspace
+as `intent_path_absolute`.
+
 A task works in one repository. When its `cwd` and declared paths fall in two,
 such as a nested checkout and its parent, it is refused as
 `task_spans_repositories`; dispatch one task per repository with that repository
@@ -1129,7 +1166,8 @@ have written the tests and helpers a check runs, so each check, a sealed
 `reproduce` run included, runs inside the main-session sandbox rooted at the
 run's workspace, as the operator's own `bash` would at `default`: writes stay in
 the workspace, scratch roots and package caches, Clio's directories stay
-read-only, and credentials and secret files are hidden. `safety.sandbox: off`
+read-only, and credentials and secret files are hidden, including the secret
+files of the checkout a task worktree was cut from. `safety.sandbox: off`
 runs the checks bare, as does `auto` on a host with no backend; `required`
 without a backend records each check as `spawn-failed`. Logs are written
 under the run artifact directory. Successful evidence is memoized by the
@@ -1337,7 +1375,9 @@ members that name no agent of their own and `--deadline` (dispatch arg `member_d
 bounds each member's run: a member still running at the deadline is stopped, the council returns the other members'
 answers, and the report marks itself partial and names who timed out. While members run, each board column shows its
 elapsed time and an estimate of the output it has streamed (`~N tok out`), then the measured output once it settles. Without
-`--roster` the roster named `default` is used. With no `--roster` and no `default` roster, `/council` prints
+`--roster` the roster named `default` is used. `/poll [--options <a|b|c>] [--models <target[/model]>,...] [--rationale] [--deadline <N|Ns|Nm>] <n> <question>`
+asks 2 to 5 participants the same question as a one-round vote council and shows the vote distribution
+([commands-and-modes.md](commands-and-modes.md#interactive-slash-commands)). With no `--roster` and no `default` roster, `/council` prints
 `/council needs a roster. Declare one under fleet.rosters in settings.yaml, ...`, and a `--roster` name that is not
 configured is refused with `no roster named "<name>" in fleet.rosters (<configured rosters>)`. A member whose route resolves to
 an SSH fleet node is refused before approval (`council_member_remote_node`), as is a runtime
@@ -1579,6 +1619,7 @@ Deterministic code steps (`kind: code`) execute known commands directly as subpr
 - Sandbox: A loop check, a gate check and a gate's baseline run execute what the workers before them wrote, so they run inside the main-session sandbox rooted at the run's workspace, as host verification's checks do: credentials and secret files are hidden and writes stay in the workspace, scratch roots and package caches. `safety.sandbox: off` runs them bare, as does `auto` on a host with no backend; `required` without a backend records the step as a spawn failure. Known limit: commit steps and plain action code steps run the operator's command bare on the host, so one that executes files a worker changed (a build script, a package script) runs that code as the operator.
 - Missing registry diagnostic: If a playbook declares code steps but `.clio-coder/playbooks/commands.yaml` is missing in the repository, `clio-coder playbook list` reports the playbook state as `setup` and provides the remedy: ``needs .clio-coder/playbooks/commands.yaml declaring <id>; declare each id there under `commands:` with an `argv` list; see bundled `docs/guide/fleet-dispatch.md` for the schema``.
 - Commit message sources: A code step with `commitFrom` populates its `commitMessage` placeholder from the output of preceding agent steps. A commit step stages everything git reports as changed since the last commit point.
+- `Tested-by` trailer: With `integrations.git.commitAttribution` on, a commit step's `Tested-by:` trailer needs a passing loop check that proves something. A check whose command cannot fail (`true`, `:`, or a shell that runs only that) earns none. Neither does a check whose own files a worker step of the run changed: a package manifest or package-manager config, a runner or build config, a file the command names, a file named by the package script it runs, or a test its runner picks up (for example `pnpm test` running `node --test`). The runner is recognized behind `NAME=value` prefixes, `uv run`, `poetry run` and `sh -c`. Such a check still counts as passed, and the run prints `step <id>: check passed without Tested-by:` with the worker steps and the files they changed.
 - Cost and route: Code steps run no model, so they record no tokens, cost or route. Each step settles as a `code_step.settled` record in the fleet root's run journal, which `clio-coder fleet code-steps <rootId>` lists, rather than a run record, route decision, or quality label. Captured output stays in the step's log under `<stateDir>/code-steps/<rootId>/`.
 
 #### Command Registry Schema (`.clio-coder/playbooks/commands.yaml`)
@@ -1860,7 +1901,7 @@ A finished run's record is its own telemetry scope at `<stateDir>/telemetry/runs
   `worker_partial_work` (an edit worker changed files but its report opens by saying
   it could not finish),
   `worker_mutation_blocked`, `merge_withheld` (a task worktree was preserved instead
-  of merged because of one of the four gate cases above), `worker_removed_tests` (a
+  of merged because of one of the five gate cases above), `worker_removed_tests` (a
   run in the current checkout removed existing test cases that the task did not ask to
   remove) and `information_flow_blocked`. Every code except `result_contract_invalid` and `worker_final_output_missing` suppresses automatic retry. `result_contract_invalid` is retried on another agent or model. `worker_final_output_missing` has no retry class of its own, so the run's other evidence classifies it, usually as a worker runtime failure that is retried on another runtime.
 - `routingIntent`, `routeDecision`, and `quality`: the normalized hard bounds,
@@ -2283,7 +2324,7 @@ For an independent helper task, use `detach:true` and continue useful work; coll
 
 The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. Grounding counts the spans a read returned and the lines a grep result showed, whether the call was direct or a settled step of a gateway chain; a pending, failed or refused step grounds nothing, and a chain step cut to its share of the aggregate grounds only the lines that survived the cut. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
 
-Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, the session cost ceiling `safety.limits.sessionCostUsd` (default $5, `0` turns it off), which stops every running worker in every mode once settled and in-flight session spend reaches it, so spend passes it only by calls already in flight, and, for native and Claude SDK workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. The built-in coder recipe defaults to 50 tool calls with a maximum of 150, so a larger estimate can lift its ceiling. A native worker stopped at its ceiling (`worker_tool_call_cap_exhausted`) in a task worktree has its changes committed on the preserved task branch as a partial result: the run still fails and nothing is merged, and the failure detail names the branch so the dispatcher can review it, continue it, or land it with `clio-coder fleet land <branch>`. An edit worker that changed files but whose report opens by saying it could not finish (`Could not finish everything`, `Partially done`, `Unable to complete ...`) gets the same treatment under `worker_partial_work`. A report that only could not check its work (`Unable to run the tests here; implemented ...`) is a finish, not a partial result. A partial result's commit subject is `partial: <task>`, never the worker's own commit message or summary, so landing it later does not read as a finished change. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 900000 ms) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+Planning time estimates and the dispatch `budget` are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, capacity rules, the session cost ceiling `safety.limits.sessionCostUsd` (default $5, `0` turns it off), which stops every running worker on a priced route in every mode once settled and in-flight session spend reaches it, so spend passes it only by calls already in flight (workers on unpriced or zero-rate routes and ACP delegations keep running), and, for native and Claude SDK workers, the hard tool-call ceiling described in [Worker prompt and budget admission](#worker-prompt-and-budget-admission). Subprocess runtimes and ACP peers do not enforce per-tool counts. In advisory dispatch `fleet.limits.toolCallsPerRun` lowers that ceiling for recipes with a larger maximum but never below the admitted estimate. The built-in coder recipe estimates 150 tool calls and the tester 100; neither declares a maximum, so each runs up to `fleet.limits.toolCallsPerRun`, and a larger estimate lifts the ceiling. A native worker stopped at its ceiling (`worker_tool_call_cap_exhausted`) in a task worktree has its changes committed on the preserved task branch as a partial result: the run still fails and nothing is merged, and the failure detail names the branch so the dispatcher can review it, continue it, or land it with `clio-coder fleet land <branch>`. An edit worker that changed files but whose report opens by saying it could not finish (`Could not finish everything`, `Partially done`, `Unable to complete ...`) gets the same treatment under `worker_partial_work`. A report that only could not check its work (`Unable to run the tests here; implemented ...`) is a finish, not a partial result. A partial result's commit subject is `partial: <task>`, never the worker's own commit message or summary, so landing it later does not read as a finished change. Repetition guards still apply. The `fleet.limits.internalRunTimeoutMs` setting (default 2700000 ms, 45 minutes) bounds internal CLI dispatch such as the wiki documenter and the bootstrap scout; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own run record and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.
 

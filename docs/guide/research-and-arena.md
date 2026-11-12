@@ -1,6 +1,6 @@
 # Research campaigns and the arena
 
-Clio Coder 0.7.0 has two ways to compare work by evidence instead of by impression:
+Clio Coder has two ways to compare work by evidence instead of by impression:
 
 - **`clio-coder research`** improves one measured number in your project, such as wall time, an error or a score. It
   runs Clio's own agent again and again and keeps a change only when the measurement shows a real improvement and every
@@ -81,7 +81,7 @@ clio-coder research start --check bench --metric wall_ms --direction min \
 model. The campaign prints one line per step and ends with a summary:
 
 ```text
-A/A: quiet; unchanged, median delta +5.15%, 95% CI [-14.69%, +21.51%]
+A/A: inconclusive (too few trials to judge the noise; raise --trials); inconclusive, median delta +5.15%, 95% CI [-14.69%, +21.51%]
   it-0001  ratcheted; improved, median delta -99.43%, 95% CI [-99.58%, -99.37%]; gates correct pass; cost unknown
   it-0002  not-improved; unchanged, median delta -3.28%, 95% CI [-20.43%, +33.28%]; gates correct pass; cost unknown
 stopped: max-iterations: ran 2 of 2 iterations
@@ -98,7 +98,9 @@ git diff HEAD clio/research/<id>
 
 1. **A/A check.** Before the first iteration, the base is measured against itself with the same number of trials. If
    that already looks like a change, the measurement is too noisy to trust, and the campaign stops unless you pass
-   `--allow-noisy`.
+   `--allow-noisy`. The A/A line reads `quiet` only when the two medians stay inside `--min-improvement`. A larger
+   move whose interval still spans zero reads `inconclusive (too few trials to judge the noise; raise --trials)`, and
+   the campaign goes on.
 2. **Agent run.** Each iteration runs `clio-coder run` at the campaign's `--autonomy` (`default` unless you choose
    `yolo`), with dispatch off, in a fresh worktree at the current best commit. The agent is told the objective, the
    gates, the scope and what earlier iterations tried.
@@ -252,7 +254,7 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 - Started from the bash of a session below yolo (`CLIO_CODER_AUTONOMY_CEILING` is set), `--autonomy yolo` is refused with exit 2: a delegated run never gets more autonomy than its dispatcher.
 - Arena contenders do not inherit your whole environment. Each gets the safe command variables (`PATH`, `HOME`, `USER`,
   `LANG`, `TMPDIR`, the XDG base dirs), Clio's own `CLIO_CODER_*`, `LC_*`, `TERM`, `SHELL`, `TZ`, `NODE_OPTIONS`, proxy
-  and CA variables, git author and committer names, and the names in `safety.sandboxPassEnv`. From the credentials it
+  and CA variables, git author and committer names and emails, and the names in `safety.sandboxPassEnv`. From the credentials it
   gets only its own target's: the target's `auth.apiKeyEnvVar`, its runtime's default key variable, and that runtime's
   own variables (`CLAUDE_CONFIG_DIR` and the Anthropic selectors for `claude-code`, also every `ANTHROPIC_*` and
   `CLAUDE_CODE_*` for `claude-sdk`; `CODEX_HOME` for `codex-cli`; `OPENCODE_CONFIG*` and the keys its config names for

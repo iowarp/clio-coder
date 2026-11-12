@@ -4,6 +4,8 @@
 
 The store keeps files as blobs in named tags outside the working tree, with a record of who put each one, from where, and with which hash. Every checkout and task worktree of one project sees the same store.
 
+The model reaches the same store through the `store` tool. Its eight ops (`tags`, `create`, `list`, `stat`, `get`, `put`, `note` and `remove`) and the admission each one gets are in [tool-usage.md](tool-usage.md#store-keep-results-and-datasets-outside-the-working-tree). `stat` reports drift as `none`, `changed`, `missing` or `unrecorded`. A tag name holds letters, digits, `.`, `_`, `-` and `/`, up to 200 bytes, and no segment starts with `.`. A blob name holds printable ASCII other than `#` and `\`, up to 480 bytes.
+
 ## Commands
 
 | Command | What it does |
@@ -14,13 +16,17 @@ The store keeps files as blobs in named tags outside the working tree, with a re
 | `clio-coder store get <tag>:<blob> [--to <path>]` | Print a path to a read-only copy of the blob, or copy it to `--to`. Edits to that path never reach the stored blob. |
 | `clio-coder store stat\|history <tag>:<blob>` | Show the blob and its record, or every record for it. |
 | `clio-coder store verify <tag> [pattern] [--hash-large]` | Compare blobs with their records; exit 1 unless every blob is ok. `pattern` follows the `ls` limits. |
-| `clio-coder store rm <tag>:<blob> --yes` | Delete one blob; without `--yes` it only prints what it would delete. |
+| `clio-coder store rm <tag>:<blob> --yes` | Delete one blob; without `--yes` it only prints what it would delete and exits 0. Its records remain. |
 | `clio-coder store rm-tag <tag> --yes` | Delete a tag; without `--yes` it only prints what it would delete and exits 0. |
 | `clio-coder store adopt [<projectKey>]` | List or adopt store directories whose project moved. |
 | `clio-coder store where` | Print where this project's store lives. |
 | `clio-coder store backend [local\|clio-core ...]` | Show or choose the backend (below). |
 
-Every command takes `--json`. Exit codes: 0 success, 1 operational failure, 2 invalid usage.
+Every command takes `--json`. Exit codes: 0 success, 1 operational failure, such as a tag or blob that does not exist, 2 invalid usage.
+
+On the local backend the store lives under the Clio data directory at `store/projects/<key>/tags/`, keyed by the main checkout's real path; `clio-coder store where` prints this project's key and directory. Its files are owner-only: 0600 files and 0700 directories. `clio-coder reset --data`, `reset --all` and `uninstall` without `--keep-data` remove it with the data root, and nothing recovers it afterwards.
+
+Known limits: the local backend lives on one host, so a worker on an SSH fleet node sees that node's own store. `put` copies bytes rather than linking. Neither backend keeps earlier versions of a blob. The store has been exercised on Linux only.
 
 ## Workers and tags
 
@@ -42,7 +48,7 @@ The **clio-core** backend is **experimental** in 0.8.0. It keeps blobs in an IOW
 clio-coder store backend clio-core --python /path/to/venv/bin/python3 --config /path/to/clio.yaml --pool 570.0
 ```
 
-The command probes the interpreter, the daemon and its version, the host and a durable tier, and records the choice only when every row passes. `clio-coder store backend` shows the current choice; `clio-coder store backend local` switches back. Switching never moves data, and a clio-core selection never falls back to local: while the runtime is unavailable, store operations fail with a clear message instead.
+Every flag is optional. Without `--python`, Clio uses the interpreter beside a `clio_run` on `PATH`. `--mount <dir>` names a clio-core FUSE mount over the same pool, and `--stop-if-last` stops the daemon when the last Clio process using it exits. The command probes the interpreter, the daemon and its version, the host and a durable tier, and records the choice only when every row passes. `clio-coder store backend` shows the current choice; `clio-coder store backend local` switches back. Switching never moves data, and a clio-core selection never falls back to local: while the runtime is unavailable, store operations fail with a clear message instead.
 
 ### clio-core notes
 

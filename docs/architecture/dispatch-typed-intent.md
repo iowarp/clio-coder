@@ -1,6 +1,6 @@
 # Typed Dispatch Intent: Migration and Refusal Policy
 
-Typed dispatch intent declares a worker's context paths, write boundary, expected outputs and host verification requirements. Read roots select context and project rules; they do not grant extra filesystem read access. When supplied, it provides structured scope instead of inferring scope from
+Typed dispatch intent declares a worker's context paths, write boundary, expected outputs and host verification requirements. Repository-relative read roots select context and project rules; they do not grant extra filesystem read access. An absolute read root outside the workspace is a read-only grant ([6.8](#68-granted-read-roots)). When supplied, it provides structured scope instead of inferring scope from
 optional `writeRoots` and path-like tokens in task and briefing prose.
 
 This page is the migration contract. It names every dispatch producer and every
@@ -34,7 +34,8 @@ An intent object may carry only `version`, `read_roots`, `write_roots`, `relevan
 the repository-relative POSIX boundary grammar in [path-boundary.ts](../../src/core/path-boundary.ts).
 A trailing `/` means the subtree; no trailing `/` means that exact file.
 Absolute paths, `..` segments, interior `.` segments, backslashes, and globs
-are refused in those fields. An entry that is exactly `.` or `./` is accepted
+are refused in those fields, except an absolute `read_roots` directory outside the
+workspace ([6.7](#67-external-scout-read), [6.8](#68-granted-read-roots)). An entry that is exactly `.` or `./` is accepted
 as the repository root and normalizes out of the list. Expected outputs use a
 separate normalizer: it rejects absolute paths, backslashes, root escapes, and
 an empty normalized path, but it normalizes interior `.` and repeated `/`
@@ -253,9 +254,9 @@ producer.
 | `intent_outputs_outside_write_roots` | refuse | A declared output lies outside every declared write root. The diagnostic tells the caller to list file paths within the roots, never an action such as commit. |
 | `intent_write_without_authority` | refuse | Write roots declared on a read-only request. |
 | `intent_scope_widening` | refuse | A narrowed intent reaches outside the intent it narrows. |
-| `intent_path_absolute` | refuse | A declared path is absolute rather than repository-relative, or an outside-checkout read was requested from an agent other than a read-only `scout`. See [6.7](#67-external-scout-read). |
+| `intent_path_absolute` | refuse | A declared path other than a granted read root is absolute rather than repository-relative, an absolute `read_roots` entry lies inside the workspace, or a `cwd` outside the workspace was requested for an agent other than a read-only `scout`. See [6.7](#67-external-scout-read) and [6.8](#68-granted-read-roots). |
 | `external_read_write_scope` | refuse | An external Scout declared write roots, expected outputs, verification, a gate or a task worktree. |
-| `external_read_root_invalid` | refuse | The external read root is not an existing directory, or it cannot be resolved. |
+| `external_read_root_invalid` | refuse | The external read root is not an existing directory, or it cannot be resolved. A granted read root also gets this code when it names the filesystem root, a system tree, the home directory, an ancestor of the workspace, or a credential store or a directory holding one. |
 | `external_read_mode_unsupported` | refuse | An external Scout was detached, or its dispatch is not independent parallel tasks without review. |
 | `external_read_approval_required` | refuse | The operator did not approve the external root for this run, or no approval was available. |
 | `intent_path_escapes_root` | refuse | A declared path escapes the repository root. |
@@ -383,13 +384,19 @@ is refused outright rather than accepted and left unenforced.
 
 ### 6.7 External Scout read
 
-A read-only `scout` task can inspect one checkout outside the workspace. The task names one absolute POSIX directory in `intent.read_roots` (at most 512 bytes, no backslashes) or sets a `cwd` outside the workspace. The host resolves the real path, requires an existing directory, rebases every declared `read_roots` and `relevant_paths` entry to a path relative to that root, and runs the Scout read-only with the root as its working directory. A declared path that leaves the root is refused with `Use one external checkout per Scout task`. Any other agent, or a Scout that is not read-only, gets `intent_path_absolute`.
+A read-only `scout` task can inspect one checkout outside the workspace. The task names one absolute POSIX directory in `intent.read_roots` (at most 512 bytes, no backslashes) or sets a `cwd` outside the workspace. The host resolves the real path, requires an existing directory, rebases every declared `read_roots` and `relevant_paths` entry to a path relative to that root, and runs the Scout read-only with the root as its working directory. A declared path that leaves the root is refused with `Use one external checkout per Scout task`. Any other agent, or a Scout that is not read-only, gets `intent_path_absolute` for a `cwd` outside the workspace; its absolute `read_roots` are handled as [granted read roots](#68-granted-read-roots).
 
 An external Scout cannot declare `write_roots`, `expected_outputs` or `verification`, cannot ask for a task worktree, and cannot carry a `gate` (`external_read_write_scope`). It must be an attached `mode: parallel` task without `review`, so a detached or reviewed dispatch is refused with `external_read_mode_unsupported`.
 
 The host then asks the operator once per run and root, whatever the session's autonomy level: `Allow one read-only Scout run to inspect external root "<root>"? This grants no writes, commands, or access to other external roots.` The TUI or an ACP permission request answers it, and the approval expires with that run. A headless run, a worker and any host without a permission listener cannot approve, so the task is rejected with `external_read_approval_required: Scout root <root> was not approved for this run; approve it in the TUI or ACP permission request. Headless runs cannot approve external roots.` In a batch the approved tasks still run and each rejected one is listed by position, and when every task is rejected the call returns the error with `rejectedTasks`. Admission re-checks that the approval names this run and the canonical root, and refuses a request without it with the same code.
 
 The external Scout gets that checkout's own handbook as bounded project context, filtered by that repository's `handbook` trust, and nothing of the session's. A task whose declared paths fall in two repositories is refused with `task_spans_repositories`. See [Sister repositories](worker-context.md#sister-repositories).
+
+### 6.8 Granted read roots
+
+A task that works in its own workspace, with any agent other than the external Scout above, may list absolute directories in `intent.read_roots`. Each must be an existing directory outside the workspace, at most 512 bytes, with no backslashes. The host resolves each real path, removes the entry from the typed intent, whose paths stay repository-relative, and adds the directory to the native worker's read-only roots: the worker may read it and never write it. No operator question is asked for the grant itself.
+
+A missing path or a file is refused with `external_read_root_invalid`. So is the filesystem root, a path under `/proc`, `/sys`, `/dev`, `/run` or `/etc`, the home directory, a directory that contains the workspace, a credential store, and a directory that holds one within four levels (a tree too large to scan counts as holding one). An absolute entry inside the workspace is refused with `intent_path_absolute` and the advice to name it repository-relative. Granted roots take no part in the one-repository-per-task rule ([scout-workspace.ts](../../src/domains/dispatch/scout-workspace.ts)).
 
 ---
 
