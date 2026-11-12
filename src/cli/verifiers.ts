@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { readSettings } from "../core/config.js";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../core/safe-exec.js";
+import { hostVerificationSandbox } from "../domains/dispatch/host-verification.js";
 import {
 	createVerifierDraft,
 	discoverVerifierAuthoring,
@@ -439,6 +441,15 @@ function mutationRevision(parsed: ParsedAuthoringArgs): VerifierRevision | Error
 	return new Error(`unknown verifiers command: ${command ?? "(none)"}`);
 }
 
+/**
+ * Run a check as the verify tool does in a session: its command runs project code, which a model may have written (an
+ * arena contender's worktree is scored this way), so it runs in the sandbox host verification uses for the project.
+ */
+function dryRunCheck(id: string): ReturnType<typeof verifyTool.run> {
+	const shellSandbox = hostVerificationSandbox(readSettings(), process.cwd());
+	return verifyTool.run({ check: id }, shellSandbox !== undefined ? { shellSandbox } : undefined);
+}
+
 function printDryRun(id: string, result: Awaited<ReturnType<typeof verifyTool.run>>): number {
 	if (result.kind === "error") {
 		printError(`dry-run '${id}' failed: ${result.message}`);
@@ -457,6 +468,7 @@ async function executeWorkflow(
 	const result = await runVerifierAuthoringWorkflow({
 		includeProposals: options.includeProposals,
 		initialRevisions: options.revisions,
+		runCheck: dryRunCheck,
 		confirmed: parsed.yes,
 		decide(context) {
 			process.stdout.write(`${context.preview}\n`);
@@ -576,7 +588,7 @@ export async function runVerifiersCommand(argv: string[]): Promise<number> {
 			printError("dry-run requires a check ID");
 			return 2;
 		}
-		return printDryRun(id, await verifyTool.run({ check: id }));
+		return printDryRun(id, await dryRunCheck(id));
 	}
 	if (command === "author") {
 		const revisions = authorRevisions(parsed);

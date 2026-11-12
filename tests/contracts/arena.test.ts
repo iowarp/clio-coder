@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { runArenaCommand } from "../../src/cli/arena.js";
 import { parseRunCliArgs } from "../../src/cli/args.js";
+import { runVerifiersCommand } from "../../src/cli/verifiers.js";
+import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import {
 	ArenaCheckError,
 	type ArenaMatch,
@@ -947,6 +949,43 @@ checks:
 		for (const line of finished) assert.match(line, /^contender [A-D] \w+$/);
 		const labels = finished.map((line) => line.split(" ")[1]).sort();
 		assert.deepEqual(labels, ["A", "B", "C"]);
+	});
+});
+
+describe("arena scoring checks", () => {
+	it("dry-runs a contender's check in the sandbox, so code the contender wrote cannot read the project's secrets", async (t) => {
+		const availability = sandboxAvailability();
+		if (!availability.available || availability.backend !== "bwrap") {
+			t.skip(`bubblewrap sandbox unavailable: ${availability.reason ?? "unsupported platform"}`);
+			return;
+		}
+		const { repo } = scratchRepo();
+		mkdirSync(join(repo, ".clio-coder"));
+		writeFileSync(join(repo, ".clio-coder/verifiers.yaml"), UNIT_CATALOG.replace('[node, -e, "0"]', "[node, check.js]"));
+		// The script a contender edited: the arena's `verifiers dry-run` executes it as written.
+		writeFileSync(
+			join(repo, "check.js"),
+			'try { console.log("read " + require("node:fs").readFileSync(".env", "utf8")); } catch (e) { console.log("refused " + e.code); }\n',
+		);
+		writeFileSync(join(repo, ".env"), "ARENA_SECRET=contender-must-not-see\n");
+		const cwd = process.cwd();
+		const write = process.stdout.write;
+		let output = "";
+		process.chdir(repo);
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			output += String(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		let code: number;
+		try {
+			code = await runVerifiersCommand(["dry-run", "unit"]);
+		} finally {
+			process.stdout.write = write;
+			process.chdir(cwd);
+		}
+		assert.equal(code, 0, output);
+		assert.match(output, /refused EACCES/u);
+		assert.doesNotMatch(output, /ARENA_SECRET/u);
 	});
 });
 

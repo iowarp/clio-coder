@@ -190,7 +190,7 @@ contender runs in its own worktree from `HEAD`. Uncommitted changes are not part
 removed after each contender's diff is saved. Outside Git, or with `--read-only`, contenders only read. Put `--` before a
 prompt that starts with `-`.
 
-`--check <id>` dry-runs one verifier in each contender's worktree when it finishes. An id the project cannot resolve is
+`--check <id>` dry-runs one verifier in each contender's worktree when it finishes. The check runs in the sandbox host verification uses, rooted at the worktree, since it executes what the contender wrote. An id the project cannot resolve is
 refused before any contender starts. A sweep check takes one run, `--check <sweep>/<run>`. The project's
 `.clio-coder/verifiers.yaml` is copied into each worktree, committed or not, and replaces any copy a contender wrote. So
 are the uncommitted files the check names: untracked or changed files under each path on its command (the run
