@@ -1,5 +1,5 @@
 {
-	"note": "Output chunks for the privacy scan. The allowed cases are fragments streamed in the cast-first-launch take: each chunk stops partway through /home/researcher and the next chunk repaints the line. The last allowed case is from a stills take, where the label and its preparing spinner arrive in one chunk.",
+	"note": "Output chunks for the privacy scan. The allowed cases are fragments streamed in the cast-first-launch take: each chunk stops partway through /home/researcher and the next chunk repaints the line. The last allowed case is from a stills take, where the label and its preparing spinner arrive in one chunk, and an answer line whose chunk closes its styles and link after the fragment.",
 	"allowed": [
 		[
 			"\u001b[?2026h\u001b[3A\r\u001b[2K│ - `at kelvinToCelsius (/home/r",
@@ -9,6 +9,10 @@
 		["\r▸ read /home/resea", " ◌ preparing", "\r▸ read /home/researcher/projects/calibration-lab/package.json"],
 		["/home/researche", "\u001b[?2026l"],
 		["cd /home/researcher && ls"],
+		[
+			"\u001b[38;2;238;234;226m (a local bare repo at `/home/researc\u001b[0m\u001b[0m\u001b]8;;\u0007\u001b[?2026l",
+			"\r\u001b[2K  /home/researcher/remotes/lab-tools.git)"
+		],
 		[
 			"\u001b[1;38;2;85;190;198mread\u001b[0m \u001b[38;2;194;185;170m/home/resea\u001b[0m \u001b[38;2;177;165;146m◌\u001b[0m preparing"
 		]
@@ -20,6 +24,7 @@
 		{ "why": "a home split across chunks", "chunks": ["/home/ako", "ugkas/x"] },
 		{ "why": "a longer name that starts with researcher", "chunks": ["/home/researchers/x"] },
 		{ "why": "a strict prefix of another name", "chunks": ["/home/ra", "\u001b[0m"] },
+		{ "why": "a prefix followed by text in the same chunk", "chunks": ["/home/researc\u001b[0m x"] },
 		{ "why": "another name before the preparing spinner", "chunks": ["read /home/rob ◌ preparing"] }
 	]
 }
