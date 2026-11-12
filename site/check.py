@@ -410,6 +410,8 @@ if cast_pages:
         errors.append('Cast Symbols exceeds its 25 KB budget')
     for path, source in cast_pages:
         casts = [root / ref.partition('?')[0].lstrip('/') for ref in re.findall(r'\sdata-cast="([^"]+)"', source)]
+        for cast in sorted({cast for cast in casts if casts.count(cast) > 1}):
+            errors.append(f'{path}: embeds {cast.name} more than once (a cover is already a recording figure)')
         for cast in casts:
             if cast.stat().st_size > 450_000:
                 errors.append(f'{path}: {cast.name} exceeds the 450 KB recording budget')
