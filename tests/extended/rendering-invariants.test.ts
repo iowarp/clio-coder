@@ -1273,6 +1273,33 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("steps the wheel past an overlay as far as the viewport's own wheel step", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, { wheelScrollLines: 3 });
+		const text = Array.from({ length: 200 }, (_, row) => `row ${row}`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true, follow: "end" }));
+		tui.start();
+		const moved = (report: string) => {
+			const before = tui.viewportTop;
+			terminal.input(report);
+			tui.renderNow(true);
+			return before - tui.viewportTop;
+		};
+		try {
+			tui.renderNow(true);
+			strictEqual(moved("\x1b[<64;2;2M"), 3, "the viewport's own step");
+			tui.showOverlay(new Text("overlay", 0, 0));
+			tui.renderNow(true);
+			strictEqual(moved("\x1b[<64;2;2M"), 3, "the same step past an overlay");
+			strictEqual(moved("\x1b[<72;2;2M"), 15, "Alt moves five steps");
+			tui.setWheelScrollLines(2);
+			strictEqual(moved("\x1b[<64;2;2M"), 2, "a changed step reaches the overlay path");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("copies a wrapped fullscreen paragraph as one line without the turn glyph or the gutter (#453)", async () => {
 		const copies: string[] = [];
 		const terminal = new RenderingTerminal();

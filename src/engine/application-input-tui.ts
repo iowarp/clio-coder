@@ -10,8 +10,9 @@
  * lets through.
  */
 
-import type { TUI, TuiInputListener, TuiInputListenerResult } from "@earendil-works/pi-tui";
+import type { TUI, TuiInputListener, TuiInputListenerResult, WheelScrollLines } from "@earendil-works/pi-tui";
 import { isKeyRelease, TuiAltScreen, TuiMainScreen } from "@earendil-works/pi-tui";
+import { WheelScrollAccelerator } from "@earendil-works/pi-tui/dist/wheel-scroll.js";
 
 export type ApplicationInputPolicy = (data: string) => TuiInputListenerResult;
 
@@ -75,6 +76,19 @@ function replacePolicy(gate: Gate, policy: ApplicationInputPolicy): () => void {
 }
 
 export class ApplicationInputTuiAltScreen extends TuiAltScreen implements ApplicationInputHost {
+	/** The wheel step past an overlay, set from the same option as Pi's own viewport step. */
+	private readonly overlayWheel: WheelScrollAccelerator;
+
+	constructor(...args: ConstructorParameters<typeof TuiAltScreen>) {
+		super(...args);
+		this.overlayWheel = new WheelScrollAccelerator(args[3]?.wheelScrollLines ?? 1);
+	}
+
+	override setWheelScrollLines(lines: WheelScrollLines): void {
+		super.setWheelScrollLines(lines);
+		this.overlayWheel.setLines(lines);
+	}
+
 	override addInputListener(listener: TuiInputListener): () => void {
 		gateFor(
 			this,
@@ -99,12 +113,15 @@ export class ApplicationInputTuiAltScreen extends TuiAltScreen implements Applic
 	 * Pi offers a wheel event to the overlay under the pointer first, and its
 	 * SelectList and SettingsList turn the wheel into selection moves. Clio is
 	 * keyboard first: while an overlay is up the wheel scrolls the transcript
-	 * at Pi's step (one line, five with Alt), and choices move only on keys.
+	 * at the viewport's step (five times it with Alt), and choices move only
+	 * on keys.
 	 */
 	private scrollTranscriptPastOverlay(data: string): boolean {
 		const button = Number(SGR_MOUSE.exec(data)?.[1] ?? Number.NaN);
 		if ((button & 64) === 0 || (button & 3) > 1 || !this.hasOverlay()) return false;
-		this.scrollBy(((button & 3) === 0 ? -1 : 1) * ((button & 8) !== 0 ? 5 : 1));
+		const direction = (button & 3) === 0 ? -1 : 1;
+		const lines = this.overlayWheel.next(direction, performance.now());
+		this.scrollBy(direction * ((button & 8) !== 0 ? lines * 5 : lines));
 		return true;
 	}
 

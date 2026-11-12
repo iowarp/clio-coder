@@ -377,6 +377,8 @@ export function createProcessInteractiveShell(
 							undefined,
 							logDirectory,
 							{
+								// A fast wheel spin moves up to six rows per report; an isolated notch moves one.
+								wheelScrollLines: "auto",
 								// #437: confirm copies through a system clipboard tool instead of a bare OSC 52.
 								copySelection: (text) =>
 									import("../engine/clipboard.js")
