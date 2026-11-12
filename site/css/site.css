@@ -1703,6 +1703,18 @@
 		.faq-items summary {
 			min-block-size: 2.75rem;
 		}
+		/* Each link gets a 44px touch area; the padding stays inside its own line box. */
+		.path-strip li {
+			gap: 0 var(--space-6);
+			padding-block: 0;
+		}
+		.path-strip-path {
+			padding-block: 0.85rem;
+		}
+		.path-strip li > span,
+		.path-strip li > span a {
+			padding-block: 0.75rem;
+		}
 	}
 	@media (prefers-reduced-motion: reduce) {
 		[data-reveal] {

@@ -938,7 +938,7 @@ for (const item of articles) {
 							const target = articles.find((article) => article.collection === item.collection && article.slug === slug);
 							return `<span>${label}: <a href="${target.url}">${escapeHtml(target.title)}</a></span>`;
 						};
-						return `<li><a class="path-strip-path" href="/learn.html#${path.id}">${escapeHtml(path.label)} · step ${step + 1} of ${path.steps.length}</a>${step > 0 ? link(path.steps[step - 1], "Previous") : ""}${step < path.steps.length - 1 ? link(path.steps[step + 1], "Next") : `<span>Last step, <a href="/learn.html#learning-paths">back to the paths</a></span>`}</li>`;
+						return `<li><a class="path-strip-path" href="${item.collection.listing}#${path.id}">${escapeHtml(path.label)} · step ${step + 1} of ${path.steps.length}</a>${step > 0 ? link(path.steps[step - 1], "Previous") : ""}${step < path.steps.length - 1 ? link(path.steps[step + 1], "Next") : `<span>Last step, <a href="${item.collection.listing}#learning-paths">back to the paths</a></span>`}</li>`;
 					})
 			: [];
 	const pathStrip = pathRows.length

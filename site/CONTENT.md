@@ -69,6 +69,13 @@ review, move approved Markdown to `content/tutorials/`, supply actual image
 metadata and reading-time estimates, register it, and run the existing site
 checks. Do not claim a tutorial was tested until its recorded workflow ran.
 
+Learning paths live in `content/paths.json`. Each path serves one kind of reader
+and orders three to five published tutorials as its steps; the build stops if a
+path has fewer or more steps, or names a tutorial that is not published. The
+learn page renders the paths, and every step page gets a path strip with its
+place in the path and Previous and Next links. A step's next list should lead
+to its path successor.
+
 ## Creator history and dates
 
 Anthony's September 27, 2026 account dates the exploration to December 2023,
