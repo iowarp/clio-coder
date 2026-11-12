@@ -1383,6 +1383,33 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("drops a fullscreen selection when the width changes and keeps it across a height change", () => {
+		const terminal = new RenderingTerminal();
+		const observer = { beginFrame() {}, endFrame() {}, beginPhase() {}, endPhase() {} };
+		const tui = new InstrumentedTuiAltScreen(terminal, observer, undefined, undefined, {
+			copySelection: async () => true,
+		});
+		const text = Array.from({ length: 12 }, (_, row) => `row ${row} ${"word ".repeat(20)}`).join("\n");
+		tui.setLayoutRoot(new ScrollView(new Text(text, 0, 0), { primary: true }));
+		tui.start();
+		try {
+			tui.renderNow(true);
+			terminal.input("\x1b[<0;1;2M");
+			terminal.input("\x1b[<32;9;2M");
+			terminal.input("\x1b[<0;9;2m");
+			tui.renderNow();
+			ok(tui.hasActiveSelection());
+			terminal.rows -= 4;
+			tui.renderNow(true);
+			ok(tui.hasActiveSelection(), "a height-only change keeps the selection");
+			terminal.columns -= 30;
+			tui.renderNow(true);
+			strictEqual(tui.hasActiveSelection(), false, "a re-wrap would move the highlight onto other text");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("preserves themed scrollbars, wheel scrolling, follow-end, and the fixed dock", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

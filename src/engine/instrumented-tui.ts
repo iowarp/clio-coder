@@ -266,6 +266,7 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 		};
 	}
 	private currentFrame: unknown | undefined;
+	private paintedColumns: number | undefined;
 
 	constructor(
 		terminal: Terminal,
@@ -286,6 +287,12 @@ export class InstrumentedTuiAltScreen extends ApplicationInputTuiAltScreen {
 
 	protected override doRender(): void {
 		this.deferredAdmission.settled();
+		// pi-tui keeps a selection as content row and column, and a new width re-wraps
+		// every row, so the old selection would highlight text the operator never chose.
+		// A height-only change moves no content row and keeps it.
+		const columns = this.terminal.columns;
+		if (this.paintedColumns !== undefined && columns !== this.paintedColumns) this.resetTextSelection();
+		this.paintedColumns = columns;
 		if (this.renderObserver.isEnabled?.() === false) {
 			super.doRender();
 			return;
