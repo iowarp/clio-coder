@@ -4,6 +4,21 @@ A plugin is an Agent Plugin: a complete, versioned package of content with a por
 
 This page is the concept map. Each contract is stated once, in the page named in the last table. A library plugin is unrelated to `integrations.runtimePlugins`, which lists pi-ai compatibility plugins loaded by the engine; see [pi-boundary.md](../architecture/pi-boundary.md). A runtime plugin is imported into CLIO Coder's own process, so an entry must be a bare npm package name or an absolute path under `<configDir>/runtimes/`, and the list is read from user settings only: a project value is ignored with a warning.
 
+## Which page do I need
+
+Seven pages cover extending CLIO Coder. Start from what you want to do:
+
+| I want to | Read |
+| --- | --- |
+| Reuse a prompt I type often, or teach the agent a procedure as a skill | [Prompts, skills, and share archives](extensions-and-sharing.md) |
+| Use the prompts and skills Claude Code, Codex or OpenCode already have | [Trust and compatibility roots](extensions-and-sharing.md#trust-and-compatibility-roots), then [Adopt foreign resources](interop.md#inbound-review-and-adopt-foreign-resources) to adopt them |
+| Find and install a skill, agent or plugin someone published | [Skills in the library](skills-marketplace.md) and [Library packages](resource-library.md) |
+| Package my skills, prompts and agents for others to install | [Authoring plugins](authoring-plugins.md) |
+| Add code that changes CLIO Coder: hooks, tools, commands, a workspace | [Extensions](harness-extensions.md) |
+| Hand a task to Claude Code, Codex or OpenCode | [Coding agent interoperability](interop.md) |
+| Move my prompts, skills and settings to another machine | [Share archives](extensions-and-sharing.md#share-archives) |
+| Tell a plugin from an extension, or find which page owns a contract | [Plugins](plugins.md) |
+
 ## Package kinds
 
 The library distributes six package kinds. The five content kinds share one engine, one state file per scope, and one lifecycle. The sixth, `extension`, is code that runs in its own process and has its own manifest, state file, and consent. A kind names what a package exposes.

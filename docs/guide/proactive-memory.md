@@ -31,14 +31,14 @@ reminds the agent of them when they matter again.
   repository, and `g` for every project. `clio-coder memory` reviews the
   proposals.
 - Memory uses your chat model unless you give it a route of its own in
-  `/settings` → **Context & Memory** → **Proactive memory**, where you can
+  `/settings` → **Context and memory** → **Proactive memory**, where you can
   also turn it off.
 
 ## Inspect or configure memory
 
 ### Turn memory off
 
-To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context & Memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
+To turn memory off, set `context.memory.enabled: false` in settings, or use `/settings` → **Context and memory** → **Proactive memory**. This stops observation, bank writes, model calls, the `# Memory` section and reminders, along with handoff offers and seeding. Dispatched workers lose the section too. An explicit context-handoff request carries no task-memory block, `/memory` lists each eligible lesson as `off`, and `memory_recall` refuses with `memory is off`. A session records a `clio_coder_memory_off` ledger marker on its active path before its first turn or operator shell line with memory off, and history review, completed-task retention and observation read nothing past that marker, even after memory comes back on. A session recorded before this marker existed carries none and stays reviewable. Leaving the memory model unset uses the chat route when available; it does not turn memory off.
 
 ### Inspect the memory bank
 
@@ -48,7 +48,7 @@ To turn memory off, set `context.memory.enabled: false` in settings, or use `/se
 | Propose a bank entry for durable review | `/memory`, then `p` (repository scope) or `g` (global scope) on a selected knowledge or procedural row; over ACP, `_clio-coder/memory/propose` (see [ACP](../architecture/acp.md)) |
 | Import the newest handoff's task memory | `/memory seed` |
 | List, approve, reject or prune durable records | `clio-coder memory`, see [Memory CLI](../architecture/evidence-and-memory.md#memory-cli) |
-| Select a background model or change memory controls | `/settings` → **Context & Memory** → **Proactive memory** |
+| Select a background model or change memory controls | `/settings` → **Context and memory** → **Proactive memory** |
 | Review recorded cost | `/usage` or `clio-coder usage report` |
 | Look up the default values and routing example | [Operator setup](#operator-setup) |
 | Understand what survives a handoff | [Handoff continuity](#handoff-continuity) |
@@ -727,7 +727,7 @@ trajectory text.
 
 `/settings` exposes controls for every key above, with shorter operator-facing
 row labels. The saved background-memory target is the Memory connection row in
-Settings → Context & Memory, independent of the chat target and the fleet default.
+Settings → Context and memory, independent of the chat target and the fleet default.
 The memory target and model belong to the session's live routing: a change made in
 the running session applies at once and is saved for new sessions, while an external
 edit to `settings.yaml` changes the default for new sessions only. Each step
