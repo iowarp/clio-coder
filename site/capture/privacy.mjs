@@ -30,8 +30,9 @@ const patterns = [
 
 // `ends` holds offsets in `text` where an output chunk ended. A streamed line can
 // stop partway through the sandbox home; such a fragment is allowed only when it is
-// a strict prefix of /home/researcher, ends exactly where a chunk ends, and the
-// text after it does not continue the name. Every other home path is refused.
+// a strict prefix of /home/researcher and either ends exactly where a chunk ends
+// or is a streamed tool argument followed by the preparing spinner ("/home/resea ◌"),
+// and the text after it does not continue the name. Every other home path is refused.
 export function privacyHits(text, secrets = [], ends = new Set()) {
 	const hits = secrets
 		.filter((value) => value && value.length >= 3 && text.includes(value))
@@ -39,7 +40,8 @@ export function privacyHits(text, secrets = [], ends = new Set()) {
 	for (const match of text.matchAll(homePath)) {
 		const word = text.slice(match.index).match(/^\/home\/[\w.-]*/)[0];
 		const end = match.index + word.length;
-		if (word.length < HOME.length && HOME.startsWith(word) && ends.has(end)) continue;
+		const preparing = plain(text.slice(end, end + 120)).startsWith(" ◌");
+		if (word.length < HOME.length && HOME.startsWith(word) && (ends.has(end) || preparing)) continue;
 		hits.push(`a home path (${JSON.stringify(word.slice(0, 40))})`);
 		break;
 	}
