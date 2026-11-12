@@ -42,9 +42,11 @@ current source.
 ## Your first hour
 
 1. **Install and connect.** Run the installer, then `clio-coder` in a project.
-   Until a model is chosen, the first launch sets one up, offering any key,
-   sign-in or local model server it found first; the first connection you save
-   (a *target*) serves chat and workers.
+   Until a model is chosen, the first launch runs setup. It lists any key,
+   sign-in or model server it found for you to choose, or asks what you have,
+   then sends one short test request before saving. A model server on a local
+   port is used only after you say yes. The first connection you save (a
+   *target*) serves chat and workers.
    Read [First-run flow](guide/configuration-and-targets.md#first-run-flow);
    if it fails, see [Install and startup](guide/troubleshooting.md#install-and-startup).
 2. **Check the install.** `clio-coder doctor` lists problems first and

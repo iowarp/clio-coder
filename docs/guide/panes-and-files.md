@@ -7,9 +7,9 @@ beside a CLIO Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
 says at each stage, and how to resolve a missing dependency or unavailable pane host.
 
-Panes come with the install. Bare `clio-coder` in an interactive terminal opens
-its own private pane host, on the pinned herdr the installer
-provisioned, with no setup question. When the host cannot start, CLIO Coder prints
+The installer sets up panes; after an npm, pnpm or Bun install, run
+`clio-coder panes install` once. Bare `clio-coder` in an interactive terminal then opens
+its own private pane host, on that pinned herdr, with no setup question. When the host cannot start, CLIO Coder prints
 one line and runs in the plain terminal, as it does for headless, non-terminal
 and `TERM=dumb` runs and inside tmux, Zellij or screen. Only the interactive
 session activates panes. `clio-coder run`, `clio-coder acp` and dispatched
@@ -97,12 +97,12 @@ Coder's own private pane host: it starts its pinned herdr, runs the session in
 one of its panes and hands the terminal back when you quit. Each project gets
 its own host. There is no question to answer and no setting to change. A
 missing herdr is not downloaded at launch in a home that never had panes: the
-launch prints ``CLIO Coder: terminal panes are not installed. Install them with
+launch prints ``Clio Coder: terminal panes are not installed. Install them with
 `clio-coder panes install`.`` once per pinned version and the session runs in
 the plain terminal; `clio-coder panes install` adds them. A home that already
-has panes updates them when the pinned version moves: the launch prints `CLIO
+has panes updates them when the pinned version moves: the launch prints `Clio
 Coder: setting up terminal panes (one time)...` and downloads the new pin,
-waiting at most 30 seconds. If that fails, it prints ``CLIO Coder: terminal
+waiting at most 30 seconds. If that fails, it prints ``Clio Coder: terminal
 panes unavailable (<reason>). Continuing in this terminal; run `clio-coder
 panes install` to retry.`` and the session runs in the plain terminal. Later
 launches skip that update for a day, or until the pinned version changes, and
