@@ -21,7 +21,7 @@ Use [Configuration essentials](/docs/guide/configuration-reference.html) to find
 
 Open **Ctrl+G** and choose the corresponding menu action. A terminal or multiplexer may intercept Alt shortcuts. **Ctrl+J** is the portable newline; `/help` shows your effective bindings.
 
-If a files or companion pane is unavailable, check that Clio Coder is running inside a reachable Herdr session and that the requested tools are installed. See [files and terminal panes](/docs/guide/panes-and-files.html).
+If a files or companion pane is unavailable, run `clio-coder doctor` and read its `panes` and `external tool` rows. `clio-coder panes install` adds a missing pane host, and `clio-coder tools install yazi` adds the file browser. See [files and terminal panes](/docs/guide/panes-and-files.html).
 
 ## Work stopped or a check failed
 
@@ -42,6 +42,7 @@ Every `clio-coder` command uses the same exit codes, so a script can tell why a 
 | `4` | The priced spend ceiling was reached: `safety.limits.sessionCostUsd` (5 USD by default) or `run --max-cost-usd`. |
 | `75` | An install or upgrade is busy; nothing changed, so retry later. |
 | `124` | `clio-coder run --timeout` elapsed. |
+| `141` | The reader of a `clio-coder run` stdout closed, as in `clio-coder run ... \| head -1`. |
 | `129`, `130`, `143` | Stopped by SIGHUP, SIGINT, or SIGTERM. |
 
 A few commands, such as `fleet events`, `telemetry verify`, `research start`, and `arena run`, give small codes their own meaning; the full guide lists them. In a headless `clio-coder run`, the answer or JSON stream goes to stdout, while progress and diagnostics go to stderr. The [exit codes and output reference](exit-codes-and-output.md) has the details.

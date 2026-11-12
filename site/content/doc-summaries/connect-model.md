@@ -1,15 +1,15 @@
 ## Connect the way you already work
 
-Run `clio-coder configure`, or choose **Guided setup** in the desktop alpha. Pick the source you recognize: an app on this computer, a model server, an AI subscription, or a provider account/API.
+Run `clio-coder configure`, or choose **Guided setup** in the desktop alpha. First-time setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. When Clio Coder finds a route first, such as a provider key in your environment, it lists that route for you to choose.
 
-1. Choose the app or provider. Enter a key or complete browser sign-in when required.
-2. Confirm the endpoint if the provider uses one. Clio Coder checks reachability and the model catalog where supported.
-3. Select a model from the available list. For a local server with no models, load one and choose **Check again**.
-4. Review the connection evidence, then save. The first connection supplies the chat and worker defaults.
+1. Provide what the row asks for: paste a key, sign in to a subscription in the browser, or enter a server's address.
+2. For a model server or gateway, Clio Coder checks reachability and reads the model list.
+3. Clio Coder takes the provider's recommended model, or the only model a server lists. Otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
+4. Clio Coder sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults.
 
-Setup checks do not send a generation request or establish model quality. Live, cached, and provider-catalog model lists are labeled separately. Choose a model that supports tool calling for repository work.
+The test request shows that the model answers. It does not establish model quality or tool calling, and `--no-verify` skips it. Live, cached, and provider-catalog model lists are labeled separately. Choose a model that supports tool calling for repository work.
 
-Already know the URL? Use `clio-coder configure --quick` for endpoint-first setup.
+Already know the URL? Use `clio-coder configure --quick` for endpoint-first setup. A lab or team can publish one setup file: `clio-coder configure --import <path-or-https-url>` reads it, prints where prompts will go, and asks once before saving.
 
 ## Settings Center
 
@@ -26,7 +26,7 @@ Run `clio-coder configure --settings` or choose **Settings** on the desktop. Bot
 | Integrations | Agents, libraries, plugins, and Git |
 | Advanced | Diagnostics and the full settings editor |
 
-Terminal `/settings` arranges the same controls into finer areas, adding Recent & Pinned, Models & Inference, Agents & Delegation, and Workspace & Files.
+Terminal `/settings` groups the same controls into its own areas: Recent & Pinned, Models, Chat and display, Workers, Context and memory, Safety and limits, Workspace, and Advanced.
 
 **Use connection default** lets a route inherit its connection's model. In the terminal, save to the session, project, or global scope where offered. Configure edits global defaults; desktop saved settings apply to new conversations. Active conversation controls have their own scope.
 

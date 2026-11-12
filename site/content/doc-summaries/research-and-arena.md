@@ -64,4 +64,4 @@ clio-coder arena show <match-id> --reveal
 
 Before a vote, `show` hides each target, model, cost, and duration, and `--reveal` is refused. Vote with a label, `tie`, or `both-bad`; `--replace` changes your vote.
 
-Research and the arena are new in 0.7.0. With `--autonomy yolo` both run contained yolo: the sandbox, the safety judge, and your autonomous caps stay on, and unconfined yolo is refused. A stopped campaign cannot be resumed in 0.7.0.
+Research and the arena are new in 0.7.0. With `--autonomy yolo` both run contained yolo: the sandbox, the safety judge, and your autonomous caps stay on, and unconfined yolo is refused. `clio-coder research resume <id>` continues a stopped campaign from its journal with the same spec and budget.

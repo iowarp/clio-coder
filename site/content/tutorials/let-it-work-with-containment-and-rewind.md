@@ -3,7 +3,7 @@ Most of a coding task should not need you. At the `default` level, Clio Coder ru
 This guide shows how to check that setup, undo a change, and choose when to step up to `yolo`.
 
 ::: note Version scope
-This guide describes v0.6.8. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental `sandbox-exec` profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what `doctor` reports on your host.
+This guide describes v0.8.0. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental `sandbox-exec` profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what `doctor` reports on your host.
 :::
 
 ::: needs
@@ -62,7 +62,7 @@ Some decisions never go to the judge: `ask_user` questions, Clio Coder's own set
 
 ## When to use yolo
 
-`yolo` is a skip-permissions mode for long jobs in a container or another disposable environment. Nothing asks, and commands run unsandboxed with your credentials.
+`yolo` is for long jobs you leave running: nothing waits for you. It is contained by default. The sandbox, snapshots, and safety judge work as at `default`, and a call that would have asked you is refused back to Clio Coder, so the job keeps going without it.
 
 ```sh
 clio-coder --autonomy yolo
@@ -70,14 +70,16 @@ clio-coder --autonomy yolo
 
 The first interactive activation shows a one-time acceptance card, and yolo is refused as root outside a detected container. A short floor still blocks deleting your home directory or a system tree, `mkfs`, writes to a block device, fork bombs, and reads of Clio Coder's credential store. Your project's approved rules and the run's ceilings also hold. Snapshots stay on.
 
+Unconfined yolo is the skip-permissions mode for a container or another disposable environment: nothing asks, and commands run unsandboxed with your credentials. It takes effect only with `safety.yoloConfinement: unconfined` in your user settings and its own one-time acceptance. The footer shows which one is active.
+
 ::: compare
-| | `default` | `yolo` |
-| --- | --- | --- |
-| Shell commands | In the OS sandbox when a backend exists | Unsandboxed as you |
-| Would-be approvals | Judge first, then you | None |
-| Your questions | Wait, then resolve after the timeout | Answered at once |
-| Workers | Own sandbox, asks go to the judge | Own sandbox, run the yolo way in their scope |
-| `/rewind` | Available | Available |
+| | `default` | `yolo`, contained | `yolo`, unconfined |
+| --- | --- | --- | --- |
+| Shell commands | In the OS sandbox when a backend exists | As at `default` | Unsandboxed as you |
+| Would-be approvals | Judge first, then you | Judge first, then refused back to Clio Coder | None |
+| Your questions | Wait, then resolve after the timeout | Answered at once | Answered at once |
+| Workers | Own sandbox, asks go to the judge | Dispatched as at `default` | Own sandbox, run the yolo way in their scope |
+| `/rewind` | Available | Available | Available |
 :::
 
 ::: limits What this does not protect

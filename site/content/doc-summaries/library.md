@@ -48,16 +48,16 @@ clio-coder config trust plugins
 clio-coder config trust plugins --hash <sha256>
 ```
 
-The first is a read-only review; the second approves what you reviewed, and `--revoke` withdraws it. `/library reload` applies it to a running session. A changed package identity needs a new review, and an import never approves one.
+The first is a read-only review; the second approves what you reviewed, and `--revoke` withdraws it. `/reload library` applies it to a running session. A changed package identity needs a new review, and an import never approves one.
 
 ## Refresh a running session
 
 After changing recipes through another process, run:
 
 ```text
-/library reload
+/reload library
 ```
 
-Disabling a package prevents subsequent discovery; it does not stop an in-flight tool or erase instructions already read. Disable deletes no files; `library enable <ref>` restores the package. Disabling and removal apply without a reload, while installs from another process need `/library reload`. `/skill off` clears an active skill's armed tool surface without erasing earlier context.
+Disabling a package prevents subsequent discovery; it does not stop an in-flight tool or erase instructions already read. Disable deletes no files; `library enable <ref>` restores the package. Disabling and removal apply without a reload, while installs from another process need `/reload library`. `/skill off` clears an active skill's armed tool surface without erasing earlier context.
 
 For bundles of related resources, see [plugins](/docs/guide/plugins.html). To review resources from other coding agents, see [interoperability](/docs/guide/interop.html).

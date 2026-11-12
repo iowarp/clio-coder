@@ -1,7 +1,7 @@
 You can start a task and leave. Headless `clio-coder run` does one turn with nobody attached, and the limits you set are enforced. This guide covers a bounded headless run, a read-only one, the timeouts that apply when you walk away from an open session, and scheduled turns.
 
 ::: note Version scope
-This guide describes v0.6.8. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
+This guide describes v0.8.0. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
 :::
 
 ::: needs
@@ -35,7 +35,7 @@ clio-coder run --read-only "Which modules have no tests? Report paths."
 clio-coder run --json "Summarize the last five commits."
 ```
 
-The stream opens with a `session` header carrying its schema version, and a run that fails before any output still ends with a `turn_end` frame. Continue later with `--continue` or `--session <id prefix>`.
+The stream opens with a `session` header carrying its schema version and ends with one `run_end` frame carrying the exit code and outcome. Read the result from that frame. Continue later with `--continue` or `--session <id prefix>`.
 
 ### Walk away from an open session
 
@@ -46,10 +46,10 @@ In the terminal, an unanswered permission card is denied after `safety.unattende
 ```text
 /loop 30m Check the nightly build log and report anything new.
 /loop 5m --command make check
-/loop list
+/loop
 ```
 
-A loop runs only while its conversation is idle and never replays missed runs. The `--command` form polls a program directly, with no shell.
+A bare `/loop` lists the jobs. A loop runs only while its conversation is idle and never replays missed runs. The `--command` form polls a program directly, with no shell.
 :::
 
 ::: result What you should see
@@ -60,7 +60,7 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 | When you want | Use | What still stops it |
 | --- | --- | --- |
 | One bounded task | `clio-coder run` at `default` | Judge, sandbox, cost ceiling, timeout |
-| A long job in a container | `clio-coder run --autonomy yolo` | The floor, your rules, ceilings, the loop guard, the tool budget |
+| A long job you leave running | `clio-coder run --autonomy yolo` | Contained by default: the sandbox and judge stay on, and a call the judge does not allow is refused back to the run. Ceilings, timeout, the loop guard, and the tool budget also stop it |
 | A recurring check | `/loop` in an open session | Pause or stop it; needs the session to stay open |
 :::
 

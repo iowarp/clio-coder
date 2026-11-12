@@ -40,7 +40,7 @@ Hooks at prompt submit and around tool calls, runtime tools the model can call, 
 
 Approval covers the manifest's `runtime` block, the capability envelope: commands, hooks, tools with their action class, interface slots, content the runtime may see (`prompt`, `tool-args`, `tool-results`, `assistant-text`), file roots, and whether it may run programs or use the network.
 
-Command tools under `capabilities.tools` run a `node` or `python3` script per call with no OS sandbox in 0.7.0; prefer a runtime tool when confinement matters.
+Command tools under `capabilities.tools` run a `node` or `python3` script per call. The command runs inside your session's OS sandbox when admission contains the call, as it contains `bash` at `default`; otherwise it runs with your access. Prefer a runtime tool when confinement matters.
 
 ## Write one
 
@@ -63,4 +63,4 @@ runtime:
     - { name: protect, description: Protect a path against write and edit calls. }
 ```
 
-The code must register exactly what the manifest declares, and Clio Coder never installs dependencies. Run `validate` and `test`, then `install`; a running session picks it up after `/extensions reload`.
+The code must register exactly what the manifest declares, and Clio Coder never installs dependencies. Run `validate` and `test`, then `install`; a running session picks it up after `/reload extensions`.

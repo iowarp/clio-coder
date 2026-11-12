@@ -14,7 +14,7 @@ It needs `curl` or `wget`, `tar` with `xz` or `gzip`, and a SHA-256 tool. The ru
 
 The installer picks a Node build for the host. Official builds cover Linux with glibc 2.28 or newer, macOS, and Alpine on x64. An unofficial build covers x64 hosts with glibc 2.17 to 2.27, the RHEL and CentOS 7 class. Linux arm64 with an older glibc has no build; use conda-forge Node and npm instead.
 
-Export `https_proxy` before running the installer behind a proxy. A version takes about 190 MB, or 460 MB with `--include-claude-sdk`, and Node adds about 210 MB. On a small home quota, move the install root:
+Export `https_proxy` before running the installer behind a proxy. Node adds about 210 MB to a version, and the optional Claude Agent SDK is about 224 MB. The installer refuses to start with under about 732 MB free at the install root. On a small home quota, move the install root:
 
 ```sh
 curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --install-dir /project/$USER/clio-coder
@@ -22,7 +22,9 @@ curl -fsSL https://coder.iowarp.ai/install.sh | sh -s -- --install-dir /project/
 
 ## Verified downloads
 
-Every Node download is checked against its release `SHASUMS256.txt`, and a mismatch stops the install. When `gpgv` or `gpg` is present, the installer also verifies the OpenPGP signature on official builds. Set `CLIO_CODER_REQUIRE_SIGNATURE=1` to fail when no signature verifies.
+Every Node download is checked against its release `SHASUMS256.txt`, and a mismatch stops the install. When `gpgv` or `gpg` is present, the installer also verifies the OpenPGP signature on official builds, and it stops when nodejs.org serves no signature or a key outside the Node.js release keyring signed it.
+
+A mirror without a signature file still installs on the checksum. Set `CLIO_CODER_REQUIRE_SIGNATURE=1` to fail when no signature verifies.
 
 ## Airgapped sites and your own Node
 

@@ -23,11 +23,11 @@ Memory also keeps commands a completed task proved to work, from its own run rec
 
 ## Turn it off or route it elsewhere
 
-Set `context.memory.enabled: false`, or use `/settings` → **Context & Memory** → **Proactive memory**. Off means off: the `# Memory` section leaves main and worker prompts, and history review reads nothing from a session that ran with memory off. To run memory on its own route, set both `context.memory.target` and `context.memory.model`.
+Set `context.memory.enabled: false`, or use `/settings` → **Context and memory** → **Proactive memory**. Off means off: the `# Memory` section leaves main and worker prompts, and history review reads nothing from a session that ran with memory off. To run memory on its own route, set both `context.memory.target` and `context.memory.model`.
 
 ## Settings
 
-All keys live under `context.memory` in `settings.yaml`, and `/settings` has a control for each.
+All keys live under `context.memory` in `settings.yaml`. `/settings` has rows for `enabled`, the route, and `cadenceToolCalls`; set the others in the file.
 
 | Key | Default | Effect |
 | --- | --- | --- |

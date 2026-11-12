@@ -56,7 +56,7 @@ With the server declared as `slurm`, Clio Coder classifies the `mcp_slurm__` too
 | Capability | Class | At `default` | At `yolo` |
 | --- | --- | --- | --- |
 | `slurm_list`, `slurm_describe`, `slurm_cluster` | `read` | Runs | Runs |
-| `slurm_submit`, `slurm_cancel` | `execute` | Safety judge reviews; you decide when it has no verdict | Runs |
+| `slurm_submit`, `slurm_cancel` | `execute` | Safety judge reviews; you decide when it has no verdict | Contained, the default: the judge reviews, and a call with no verdict is refused. Unconfined: runs |
 
 In a headless `clio-coder run` at `default`, a submission or cancellation runs only when the safety judge allows it.
 
@@ -70,6 +70,6 @@ The `hpc-sweep` skill in the `hpc` plugin runs a sweep as one job array:
 clio-coder library install plugin:hpc --project
 ```
 
-Run `/library reload`, then `/skill hpc-sweep dry run sweeps/decay.yaml`. The sweep file names `parameters`, a `mode` (`grid` or `sample`), a run `template`, `resources`, a `concurrency` cap, and a verify `check`. The skill submits only on your word, checks each run, and writes verdicts to `sweeps/<name>/results.md`.
+Run `/reload library`, then `/skill hpc-sweep dry run sweeps/decay.yaml`. The sweep file names `parameters`, a `mode` (`grid` or `sample`), a run `template`, `resources`, a `concurrency` cap, and a verify `check`. The skill submits only on your word, checks each run, and writes verdicts to `sweeps/<name>/results.md`.
 
-For 0.7.0 this path was checked against fake Slurm clients only, not a live controller.
+For this release, this path was checked against fake Slurm clients only, not a live controller.

@@ -59,6 +59,6 @@ clio-coder doctor --deep
 
 Deep checks send model requests and may consume tokens. Allow more time for a cold local model with `--tools-timeout <seconds>`. Use `--json` for structured findings.
 
-A `tools <target>` row is `OK` when the model streamed a valid tool call and `WARN` when the call was malformed or the target did not answer. A `validator <n>` row says whether each validator command would run without an approval ask; nothing is executed. In a session, use `/doctor deep`.
+A `tools <target>` row is `OK` when the model streamed a valid tool call and `WARN` when the call was malformed or the target did not answer. A `validator <n>` row says whether each validator command would run without an approval ask; nothing is executed. In a session, use `/doctor --deep`.
 
 If a connection remains unavailable, follow [troubleshooting](/docs/guide/troubleshooting.html).

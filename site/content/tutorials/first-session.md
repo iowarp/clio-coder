@@ -17,13 +17,13 @@ clio-coder configure
 
 ## 2. Connect a model
 
-Choose **Guided setup**, then select an app on this computer, a model server, an AI subscription, or a provider account. Clio Coder helps you choose a model and review the connection before saving. Choose a model that supports tool calling.
+Choose **Guided setup** and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Clio Coder sends the model one short test request and saves when it answers. Use a model that supports tool calling.
 
 **Connect by endpoint** is the shortcut when you already know the URL. LM Studio commonly serves at `http://localhost:1234`; Ollama commonly serves at `http://localhost:11434`. The [connection guide](/docs/guide/configuration-and-targets.html) covers setup and credentials.
 
 If you have used Clio Coder before, you can skip this step. A chat route you already chose stays in use, and Clio Coder will not swap it for another when it stops working.
 
-With no route chosen, starting `clio-coder` looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server, and opens chat with the first one that has a model.
+With no route chosen, starting `clio-coder` looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server. A new installation lists what it found in setup. Otherwise it opens chat with the first one that has a model, and it uses a local model server only after you say yes.
 
 If a connection fails, run:
 
@@ -65,7 +65,7 @@ Use your project's real test name. Read the command and its output before decidi
 
 ## Keep going
 
-In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens configuration, and `/config` runs guided setup again without leaving the session.
+In the terminal, `/help` lists commands, `/model` selects a model, `/settings` opens configuration, and `/config` opens your connections, where **Add a target** runs setup again without leaving the session.
 
 When you quit, Clio Coder prints a summary of the session and a `/resume <id>` line. Start `clio-coder` again and type that line to return to the conversation, or use `/resume` alone to pick from a list.
 

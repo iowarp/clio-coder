@@ -20,7 +20,7 @@ The library has research skills. `experiment-protocol` pre-registers a performan
 
 `scientific-debugging`, `slurm-jobs`, and `arxiv-literature` are also there, and the `materio` plugin supports materials-science research.
 
-For clusters, Clio Coder installs without root on a login node, and it reaches Slurm through the clio-kit MCP server, with each job action going through your approval. Clio Coder does not submit its own workers through a scheduler.
+For clusters, Clio Coder installs without root on a login node, and it reaches Slurm through the clio-kit MCP server, with each submission and cancellation confirmed before it reaches the scheduler. Clio Coder does not submit its own workers through a scheduler.
 
 The one worked example is [a temperature-calibration change](/tutorials/temperature-calibration.html), recorded from a real session with seven tests. It is a demonstration on a small task. No study covers real solvers, a domain expert's judgment, or how often an oracle catches an agent's error.
 

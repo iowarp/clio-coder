@@ -10,7 +10,7 @@ Use `/settings`, desktop **Settings**, or:
 clio-coder configure --settings
 ```
 
-Configure and desktop Settings share eight sections: Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced. Terminal `/settings` arranges the same controls into finer areas. The guided controls help you select a discovered model instead of typing a model ID. See [Connect a model](/docs/guide/configuration-and-targets.html) for the walkthrough.
+Configure and desktop Settings share eight sections: Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced. Terminal `/settings` groups the same controls into its own areas and lists the settings people change; every key still works in `settings.yaml`. The guided controls help you select a discovered model instead of typing a model ID. See [Connect a model](/docs/guide/configuration-and-targets.html) for the walkthrough.
 
 ## Know where a change is saved
 

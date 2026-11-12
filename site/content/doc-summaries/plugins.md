@@ -29,7 +29,7 @@ clio-coder library enable materio
 
 Installation records a verified pin covering the complete package tree. Drifted content is blocked from loading; `pin` verifies the recorded pin rather than approving edits. Review an update before replacing a modified copy.
 
-In the terminal, open **Library → Plugins** to browse members and review lifecycle actions. Run `/library reload` after changing recipes externally.
+In the terminal, open **Library → Plugins** to browse members and review lifecycle actions. Run `/reload library` after changing recipes externally.
 
 ## Choose the right kind of extension
 

@@ -1,12 +1,12 @@
-Clio Coder can submit and follow a Slurm job for you through the clio-kit MCP server, and it asks you before each submission or cancellation. Use this when a task needs real compute and you want the job's outcome reported back into the session.
+Clio Coder can submit and follow a Slurm job for you through the clio-kit MCP server. Each submission or cancellation is confirmed first: the safety judge reviews it against your own messages, and you decide when it has no verdict. Use this when a task needs real compute and you want the job's outcome reported back into the session.
 
 ::: note Version scope
-This guide describes v0.6.8. Clio Coder has no scheduler tier of its own: the agent calls the server's tools, and Slurm does the rest. Fleet workers do not submit through Slurm.
+This guide describes v0.8.0. Clio Coder has no scheduler tier of its own: the agent calls the server's tools, and Slurm does the rest. Fleet workers do not submit through Slurm.
 :::
 
 ::: needs
 - A host where `sbatch`, `squeue`, `scontrol`, and `scancel` reach your cluster.
-- An interactive session, since a headless run denies submissions.
+- An interactive session. A headless run submits only when the safety judge allows it.
 - A job script you are willing to run under your allocation.
 :::
 
@@ -57,7 +57,9 @@ clio-coder library install skill:slurm-jobs --project
 /skill slurm-jobs Run scripts/smoke.sbatch on the debug partition with 2 cores for 5 minutes. Report the exit code and the last lines of stdout.
 :::
 
-The skill checks that the server is declared, looks at the partition, and submits once. A permission card appears before the job reaches the scheduler, so read the script, cores, memory, and time limit before you press Enter. It then polls with a growing wait until the job reaches a terminal state, and fetches bounded output.
+The skill checks that the server is declared, looks at the partition, and submits once. The submission is confirmed before the job reaches the scheduler. When the safety judge has no verdict, a permission card appears, so read the script, cores, memory, and time limit before you press Enter.
+
+The skill then polls with a growing wait until the job reaches a terminal state, and fetches bounded output.
 
 ::: result What you should see
 The answer ends with a line in this form: `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. Check that job id against `squeue` or `sacct` if the result matters.
@@ -65,11 +67,11 @@ The answer ends with a line in this form: `Slurm job <id>: <state>, exit <code>,
 
 ## Cancel a job
 
-Ask the agent to cancel the job by id. Cancelling also asks first, and the server refuses unless the job id is repeated exactly.
+Ask the agent to cancel the job by id. Cancelling is confirmed the same way, and the server refuses unless the job id is repeated exactly.
 
 ::: limits
-- In a headless `clio-coder run`, the ask is denied, so a submission or cancellation never runs there.
-- A trust setting cannot make a submission run unasked. The confirmation is attached to the tool name.
+- In a headless `clio-coder run` at `default`, a submission or cancellation runs only when the safety judge allows it. With no verdict it is denied.
+- At `default`, a trust setting cannot make a submission skip the confirmation, which is attached to the tool name.
 - Your site's allocation rules and data policies still apply. A login node is not a compute node.
 - This repository ships no copy of the server's schema, so the installed clio-kit version is the authority on tool parameters.
 :::

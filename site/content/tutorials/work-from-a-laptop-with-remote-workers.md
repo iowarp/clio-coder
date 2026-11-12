@@ -138,7 +138,7 @@ Transfer, verification and application failures preserve the node branch for rec
 
 ## Follow the result
 
-Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. Inside Herdr with panes on, the same key opens a [live dashboard](/tutorials/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
+Open **Workers** with Alt+W to see queued, active, failed and completed work with its actual node. In a session with panes, the same key opens a [live dashboard](/tutorials/panes-and-docks.html) beside the conversation. Review the worker result, receipt and project changes. The CLI's `clio-coder fleet status` and `clio-coder fleet view <runId>` expose durable results from another terminal.
 
 SSH nodes and delegated peers are separate execution paths. A delegated peer is not an SSH machine whose resources or project access Clio Coder has verified.
 
@@ -152,7 +152,7 @@ The installer needs no root, refuses to run under sudo, and brings a private Nod
 
 That private Node.js is not added to `PATH`. A node installed this way already has Clio Coder, so skip `fleet nodes install` there and keep its version equal to your client's.
 
-Clio Coder does not submit jobs for its own workers. Scheduler work goes through the clio-kit Slurm tools, which the agent calls to submit, list, describe, and cancel jobs, each with your approval.
+Clio Coder does not submit jobs for its own workers. Scheduler work goes through the clio-kit Slurm tools, which the agent calls to submit, list, describe, and cancel jobs, with each submission and cancellation confirmed first.
 
 ::: limits
 - SSH access, exact Clio Coder version and the same absolute project path remain prerequisites.

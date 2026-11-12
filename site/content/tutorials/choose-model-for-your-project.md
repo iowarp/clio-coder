@@ -1,7 +1,7 @@
 Clio Coder lets you choose the model connection around your project. Start with the place your code is allowed to go, then choose a model and runtime that can do the task. A local GPU, a model server, an institutional gateway, and a cloud API are different deployment choices.
 
 ::: note Version scope
-This guide describes v0.6.8. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
+This guide describes v0.8.0. A working connection does not establish a model's coding quality, and routes differ in the tools and images they carry.
 :::
 
 ::: needs
@@ -12,18 +12,18 @@ This guide describes v0.6.8. A working connection does not establish a model's c
 
 ## Decide where inference may run
 
-On first setup, Guided setup offers four kinds of route. Choose by where the model input may go, then by what you already run.
+On first setup, Guided setup asks what you have. Choose by where the model input may go, then by what you already run.
 
 ::: compare
-| Route | Where inference runs | What the wizard lists |
+| Answer | Where inference runs | What it covers |
 | --- | --- | --- |
-| An app on this computer | Your machine | Ollama, LM Studio, or Lemonade, with a model loaded |
-| A model server | The server you name | llama.cpp, vLLM, SGLang, LiteLLM, or a compatible server |
-| An AI subscription | The provider | ChatGPT Plus or Pro, Claude Pro or Max, or an installed Claude tool |
-| A provider account or API | The provider | Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, Bedrock, ALCF, or a compatible API |
+| An API key | The provider | Anthropic, OpenAI, Google, OpenRouter, Groq, Mistral, DeepSeek, and others |
+| A subscription | The provider | ChatGPT Plus or Pro, Claude Pro or Max, or GitHub Copilot |
+| A model server or gateway | The server you name | Ollama, LM Studio, llama.cpp, vLLM, LiteLLM, or any OpenAI-compatible address |
+| A setup file from my lab or team | The targets the file names | A path or https address someone gave you |
 :::
 
-The wizard shows these providers after you choose the route. A subscription-backed route has its own authentication and usage conditions; it is not interchangeable with an API account. The [connection guide](/docs/guide/configuration-and-targets.html) covers each route.
+When setup finds a route first, such as a provider key in your environment or a model server on a default local port, it lists that route before asking. A subscription-backed route has its own authentication and usage conditions; it is not interchangeable with an API account. The [connection guide](/docs/guide/configuration-and-targets.html) covers each route.
 
 ::: diagram model-placement
 :::
@@ -44,15 +44,15 @@ cd /path/to/your/project
 clio-coder configure
 ```
 
-Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-coder gui --open`, and `/config` runs it inside a terminal session and applies the result to that session.
+Choose **Guided setup**. The desktop alpha offers the same wizard after `clio-coder gui --open`. In a terminal session, `/config` opens your connections, where **Add a target** runs the wizard without leaving the session.
 
 ### Pick the route and the model
 
-Choose the kind of route, then the app or provider. Confirm the endpoint if it has one, then select a model that supports tool calling. For a local server with no models, load one and choose **Check again**.
+Answer what you have, then provide the key, sign-in, or server address it asks for. Setup takes the provider's recommended model, or the only model a server lists; otherwise you pick from the list. For a local server with no models, load one and choose **Check again**.
 
 ### Review the connection, then save
 
-The review shows what setup established. The first connection supplies the chat and worker defaults.
+Setup sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults, and `/model` changes the model later.
 :::
 
 ::: capture tui-configure-source tui-configure-models tui-configure-review
@@ -60,7 +60,7 @@ Guided setup in the terminal, from the route to the review.
 :::
 
 ::: result
-The model list says whether it is live, cached, or the provider's catalog. Setup checks reachability and the catalog where supported; it does not send a generation request or test tool calling. Reachability is useful, but it is not a coding benchmark.
+The model list says whether it is live, cached, or the provider's catalog. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
 :::
 
 
@@ -74,7 +74,7 @@ Read the tool activity and compare the answer with the project. If it fails, che
 
 ## Separate conversation from worker models
 
-The model answering you need not handle every delegated task. The terminal `/settings` lists the conversation model under **Models & Inference** and worker defaults under **Fleet**; `clio-coder configure --settings` opens the same menu from the shell. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
+The model answering you need not handle every delegated task. The terminal `/settings` lists the conversation model under **Models** and worker defaults under **Workers**; `clio-coder configure --settings` opens the same menu from the shell. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
 ::: capture tui-settings-models tui-settings-fleet
 Terminal settings keep the conversation model and the worker defaults apart.

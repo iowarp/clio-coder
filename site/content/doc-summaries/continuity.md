@@ -2,7 +2,7 @@
 
 In the terminal, use `/resume` to choose a previous session, or `/rename` first so you can resume it by name. On the desktop, open a saved conversation from **Overview** or **Sessions**. Saved history lets you continue with the context of earlier work.
 
-Use `/tree` to inspect terminal conversation branches, `/fork` to branch from an assistant turn, and `/branch [name]` to start a separate session at the newest turn without a picker. `/tree` rewinds the conversation; `/rewind` restores files. On the desktop, open **Branches** in the Session column. Branches let you explore another direction while preserving the earlier conversation.
+Use `/tree` to inspect terminal conversation branches and `/fork [name]` to fork from an assistant turn into a new session, optionally named. `/tree` rewinds the conversation; `/rewind` restores files. On the desktop, open **Branches** in the Session column. Branches let you explore another direction while preserving the earlier conversation.
 
 ## Find sessions from the shell
 

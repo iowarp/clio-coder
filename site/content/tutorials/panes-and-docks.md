@@ -1,24 +1,24 @@
-When Clio Coder runs inside Herdr, a terminal multiplexer, it can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running.
+Clio Coder in the terminal can open panes of its own beside the conversation: a file browser below, a live view of workers on the right, and a small radio. Each is a dock. One key shows or hides it, and hiding keeps it running. Herdr, a terminal multiplexer, hosts the panes.
 
-::: note Experimental in v0.6.8
-Panes need the Herdr pane host. On Linux and macOS the first bare `clio-coder` asks once whether to open a workspace, and `interface.panes.enabled: off` stops asking. Music is off until you enable it. Keys, commands, and settings may change. Herdr has no Windows build.
+::: note Version scope
+This guide describes v0.8.0. Bare `clio-coder` in an interactive terminal opens its own private pane host, with no question to answer. The files and music docks are off until you enable them. Keys, commands, and settings may change. The pane host has builds for Linux, macOS, and Windows x64; elsewhere Clio Coder runs in the plain terminal.
 :::
 
 ::: needs
-- Herdr, installed with `clio-coder tools install herdr`, and a Herdr session to start Clio Coder in.
+- The pane host. The installer provisions it; after an npm or bun install, run `clio-coder panes install`.
 - Yazi for the files dock: `clio-coder tools install yazi`.
 - cliamp for music: `clio-coder tools install cliamp`.
 :::
 
 ## Turn panes on
 
-Start one session with panes, from a terminal inside Herdr:
+Panes are on whenever the terminal allows them. Start Clio Coder in your project:
 
 ```sh
-clio-coder --with-panes
+clio-coder
 ```
 
-To keep them on, set `interface.panes.enabled: auto` and restart. `--no-panes` turns them off for one session. Outside Herdr, including in tmux, there are no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside Clio Coder.
+It opens its own pane host and hands the terminal back when you quit. From a pane of your own Herdr session, `clio-coder --with-panes` joins that session as a guest instead. A session started inside tmux, Zellij, or screen stays in the plain terminal with no docks: `/files` becomes a one-time full-screen picker and Alt+W opens the worker list inside Clio Coder.
 
 ## Three docks, one habit
 
@@ -62,9 +62,9 @@ Move with the arrow keys and press Enter to fill the dock with one worker's live
 The model cannot touch the player unless you also set `integrations.music.agentControl: true` and restart. Then a `music` tool can play, pause, skip, and stop, but not choose stations. When to use it is up to your project instructions.
 
 ::: limits
-- Docks need Herdr with a recent protocol; an older Herdr can open panes but cannot hide them.
+- As a guest in your own Herdr, docks need a recent protocol; an older Herdr can open panes but cannot hide them.
 - Station lookup by name and the streams themselves use the network.
-- `/peer` opens another coding agent in a pane for you to work in. It is a handoff with no run record.
+- `/panes peer <agent> [brief]` opens another coding agent in a pane for you to work in. It is a handoff with no run record.
 :::
 
 ::: next

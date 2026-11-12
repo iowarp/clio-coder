@@ -39,7 +39,7 @@ Up to four turns run at once by default, set by `interface.guiTurnCapacity` from
 
 With the default **Ask first** setting, Clio reads, edits files in the workspace, and runs commands it recognizes, such as read-only inspection and the project's test runners, without stopping. An unrecognized shell command, a large dispatch plan, or anything that publishes outside the project waits for you. The approval names the call, what allowing it authorizes, and what it can affect.
 
-The same control can be switched to **Run without asking** for one task after a second confirmation. A turn that changed files ends with a card that opens the changes for review. Type `/` in the composer to list session commands.
+The same control can be switched to **Run without asking** for one task after a second confirmation. The cards stop, and by default the sandbox, snapshots, and safety judge stay on. A turn that changed files ends with a card that opens the changes for review. Type `/` in the composer to list session commands.
 
 A first run with no model connection opens on guided setup, which asks the same questions as `clio-coder configure`.
 

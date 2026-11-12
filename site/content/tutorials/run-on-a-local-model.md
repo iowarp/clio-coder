@@ -1,7 +1,7 @@
 You can run Clio Coder with a model on your own machine, with no account and no API key. This guide connects a local server, checks what Clio Coder learned about it, and shows what else to look at if your code must not leave the machine.
 
 ::: note Version scope
-This guide describes v0.6.8. Supported local servers include Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade. Whether a given model handles long agentic work is yours to test, and setup does not test it for you.
+This guide describes v0.8.0. Supported local servers include Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade. Whether a given model handles long agentic work is yours to test, and setup does not test it for you.
 :::
 
 ::: needs
@@ -16,9 +16,9 @@ cd /path/to/your/project
 clio-coder configure
 ```
 
-Choose **Guided setup**, then **An app on this computer**, or **A model server** for a server elsewhere. Choose **Connect by endpoint** when you already know the URL. LM Studio commonly serves at `http://localhost:1234`, and Ollama at `http://localhost:11434`.
+Choose **Guided setup**. A server already running on a default local port is listed first, under **Clio found a way to reach a model**. Otherwise choose **A model server or gateway** and enter its address, or choose **Connect by endpoint** when you already know the URL. LM Studio commonly serves at `http://localhost:1234`, and Ollama at `http://localhost:11434`.
 
-Then select a model that supports tool calling. Setup checks that the server is reachable and reads its catalog. It does not send a generation request or test tool calling, so the first real test comes next.
+Setup may pick the model for you: a detected server comes with the first model it lists. Use `/model` afterwards to choose one that supports tool calling. Setup checks that the server is reachable, reads its model list, and sends one short test request before saving. It does not test tool calling, so the first real test comes next.
 
 ## Check what Clio Coder learned
 
@@ -55,7 +55,7 @@ To enforce a boundary for named files, use [information-flow rules](/tutorials/i
 ::: limits
 - Local inference costs no provider fee, though hardware and power still cost money. `clio-coder usage report` shows these calls as free.
 - Local servers vary in how they handle tool calls, cache, and long context. Expect to try more than one model.
-- Automatic discovery at startup checks default ports only and takes the first model listed. Set a route with `clio-coder configure` to choose one.
+- Automatic discovery at startup checks default ports only, takes the first model listed, and uses a server it finds only after you say yes. Set a route with `clio-coder configure` to choose one.
 :::
 
 ::: next

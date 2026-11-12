@@ -1,7 +1,7 @@
 Clio Coder records what each process, session, and worker run did in local journals, and every usage figure on every surface comes from those journals. This guide shows how to read a session's cost, find out why it stopped, check a run's record, and prepare an archive for a maintainer.
 
 ::: note Version scope
-This guide describes v0.6.8. Costs are shown with their provenance: a measured figure, an estimate, and an unknown value stay separate. An unknown stays unknown rather than becoming zero.
+This guide describes v0.8.0. Costs are shown with their provenance: a measured figure, an estimate, and an unknown value stay separate. An unknown stays unknown rather than becoming zero.
 :::
 
 ::: needs
@@ -15,10 +15,10 @@ This guide describes v0.6.8. Costs are shown with their provenance: a measured f
 ```text
 /usage
 /context
-/health
+/usage health
 ```
 
-`/usage` covers session usage and supported subscription quotas. `/context` shows context use and the newest call's cache evidence. `/health` shows process health and route state.
+`/usage` covers session usage and supported subscription quotas. `/context` shows context use and the newest call's cache evidence. `/usage health` shows process health and route state.
 
 ### Read it from the shell
 
@@ -57,7 +57,7 @@ clio-coder telemetry share --session <id> --profile content-free --dry-run
 clio-coder telemetry share --session <id> --profile content-free --out report.tar.gz
 ```
 
-`share` writes an archive and uploads nothing. `content-free` is the default profile, with structural records and no objects or content. `structural` adds objects that hold structure, such as prompt manifests. Read the dry run before you send anything.
+Without `--send`, `share` writes an archive and uploads nothing. `content-free` is the default profile, with structural records and no objects or content. `structural` adds objects that hold structure, such as prompt manifests. Read the dry run before you send anything.
 :::
 
 ::: capture cli-telemetry-session

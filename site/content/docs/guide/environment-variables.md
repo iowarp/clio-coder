@@ -61,6 +61,8 @@ Supported providers can read their conventional credential variables, such as `O
 
 Google Vertex uses its application credentials. The managed alternative is `clio-coder auth`, with `auth login` and `auth status` per target.
 
+`HTTPS_PROXY`, `HTTP_PROXY`, and their lowercase forms apply to model requests, discovery probes, sign-in refreshes, and web fetches. `localhost` and `127.0.0.1` always go direct; name any other local model server in `NO_PROXY`. `clio-coder doctor` shows the proxy in effect.
+
 `VISUAL` and `EDITOR` select an external editor, with `VISUAL` taking precedence. Terminal variables such as `TERM` and `COLORTERM` describe the environment; they do not grant tool permissions.
 
 ## Collect a trace

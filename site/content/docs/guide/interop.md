@@ -11,11 +11,11 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-In the terminal, `/interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, and OpenCode have ACP recipes; other peers may use a headless CLI or a pane.
+In the terminal, `/library interop` shows available connections. Supported managed modes vary by peer: Claude Code, Codex, and OpenCode have ACP recipes; other peers may use a headless CLI or a pane.
 
-- `/delegate <peer> <task>` uses a configured ACP connection.
+- `/run <agent-id> <task>` uses a configured ACP connection; `/run acp:<id> <task>` names one explicitly.
 - `/run --target <target> <agent> <task>` uses a configured headless target.
-- `/peer <peer> <brief>` opens an interactive Herdr pane.
+- `/panes peer [--cwd <path>] <agent> [brief]` opens an interactive pane beside the conversation.
 
 Managed ACP and headless runs record results in sealed run records. A pane is an interactive handoff and does not produce a run record. For a headless task, `--worktree` preserves a Git task branch for review; it does not confine the peer's filesystem or network access.
 

@@ -4,16 +4,18 @@ Attach files and open companion terminal panes.
 
 ## Add a file browser or companion shell
 
-The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation. Panes are experimental and need the **Herdr** pane host. On Linux and macOS, the first bare `clio-coder` in an interactive terminal asks once whether to open a workspace, and nothing is downloaded or opened before you answer yes. Set `interface.panes.enabled: off` to stop asking; the normal terminal works without panes.
+The terminal can open a files pane, a live workers dashboard, logs, a shell, music, or an installed coding peer beside the conversation.
 
-Install the pane host and file browser explicitly:
+Bare `clio-coder` in an interactive terminal opens its own private pane host with no question to answer. The host is a pinned copy of **Herdr** that the installer provisions. When it cannot start, Clio Coder says so in one line and runs in the plain terminal.
+
+After an npm or bun install, add the pane host yourself. The file browser is a separate install either way:
 
 ```sh
-clio-coder tools install herdr
+clio-coder panes install
 clio-coder tools install yazi
 ```
 
-To join a Herdr session you already started, open a pane in your project, then run:
+To join a Herdr session of your own as a guest, open a pane in your project, then run:
 
 ```sh
 clio-coder --with-panes
@@ -24,7 +26,6 @@ The option joins the current Herdr session. It does not create a pane host from 
 ```yaml
 interface:
   panes:
-    enabled: auto
     files:
       enabled: true
 ```
@@ -46,6 +47,6 @@ The files, workers, and music panes are docks with fixed places. **Alt+E**, **Al
 | `/panes open shell` | A login shell in the workspace |
 | `/panes open logs` | The newest dispatched run's event journal |
 | `/panes show <run-or-agent>` | A live worker view |
-| `/peer <peer> <brief>` | An interactive coding-agent handoff |
+| `/panes peer <agent> [brief]` | An interactive coding-agent handoff |
 
-Use `clio-coder --no-panes` to turn integration off for one terminal session. For editor and agent connections, see [interoperability](/docs/guide/interop.html).
+A session started inside tmux, Zellij, or screen stays in the plain terminal without panes. For editor and agent connections, see [interoperability](/docs/guide/interop.html).

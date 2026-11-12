@@ -7,7 +7,7 @@ clio-coder agents
 clio-coder run "Inspect the parser's test coverage and report gaps. Do not edit files." --agent verifier
 ```
 
-Use an agent ID from your installed catalog. In the terminal, `/run` starts a worker; `/delegate` selects a configured ACP peer. **Fleet** in Settings chooses worker defaults without changing the chat model.
+Use an agent ID from your installed catalog. In the terminal, `/run <agent-id> <task>` starts a worker. The same command with a configured ACP peer's id, or `acp:<id>`, delegates to that peer. **Fleet** in Settings chooses worker defaults without changing the chat model.
 
 ## Follow the work
 
@@ -21,7 +21,9 @@ A steering message first reports queued, then received when the worker acknowled
 
 ## Permissions, sandbox, and merges
 
-Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental `sandbox-exec` profile on macOS. With the default `safety.sandbox: auto`, they run unsandboxed when no sandbox works; `required` refuses them instead, and `off` disables it. `safety.sandboxNetwork: true` allows network access. At `default` your own session's shell commands run in the same kind of sandbox; at `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
+Native workers run their shell, script, and verification commands in an OS sandbox: bubblewrap on Linux, or an experimental `sandbox-exec` profile on macOS. With the default `safety.sandbox: auto`, they run unsandboxed on a host with no sandbox backend; `required` refuses them instead, and `off` disables it. `safety.sandboxNetwork: true` allows network access.
+
+Your own session's shell commands run in the same kind of sandbox at `default` and at contained `yolo`, which is yolo's default. At unconfined `yolo` they do not, and workers keep theirs. A worker's ordinary asks go to the safety judge by default (`fleet.permissions.mode: judge`).
 
 When a worker's task branch would merge with a failing or unrun check, the terminal asks first with a **Merge task branch?** card showing the branch, changed paths, and the check. The card opens on **Keep branch**. Headless and ACP runs always keep the branch.
 

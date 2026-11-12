@@ -1,7 +1,7 @@
 You can use Clio Coder to coordinate the coding agents you already have installed. Give a peer a focused assignment, follow a managed run where the connector supports it, and review its output before accepting the change.
 
 ::: note Version scope
-In v0.6.8 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
+In v0.8.0 the supported peer family includes Claude Code, Codex, OpenCode, Pi, and Antigravity. Their modes and controls differ. Install and authenticate each peer's own CLI before configuring it in Clio Coder.
 :::
 
 ::: needs
@@ -17,7 +17,7 @@ clio-coder interop inspect --json
 clio-coder configure --interop
 ```
 
-The first command reports what Clio can find; the second configures interoperability. In a terminal conversation, `/interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
+The first command reports what Clio can find; the second configures interoperability. In a terminal conversation, `/library interop` shows the available connections. The [interoperability guide](/docs/guide/interop.html) covers the mode for each peer.
 
 ::: capture tui-interop cli-interop-inspect
 What Clio Coder detected on a machine with three peer CLIs installed but not signed in.
@@ -30,12 +30,12 @@ The three commands answer different needs. Pick by whether you want a recorded r
 ::: compare
 | Command | What happens | What Clio Coder records |
 | --- | --- | --- |
-| `/delegate <peer> <task>` | A configured ACP peer runs the task | The result and a sealed run record |
+| `/run <agent-id> <task>` | A configured ACP peer runs the task; `acp:<id>` names one explicitly | The result and a sealed run record |
 | `/run --target <target> <agent> <task>` | A configured headless target runs it | The result and a sealed run record |
-| `/peer <peer> <brief>` | A Herdr pane opens for you to work in (start Clio Coder inside Herdr with `--with-panes`) | No run record |
+| `/panes peer <agent> [brief]` | A pane opens beside the conversation for you to work in | No run record |
 :::
 
-Panes are [experimental](/tutorials/panes-and-docks.html). Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
+The [panes guide](/tutorials/panes-and-docks.html) covers the pane host. Do not infer that a pane completed a task because it opened. Do not infer that a run record contains every internal reasoning step or mediates every operation inside a peer-owned loop.
 
 ## Give one bounded assignment
 
@@ -43,25 +43,27 @@ Panes are [experimental](/tutorials/panes-and-docks.html). Do not infer that a p
 Inspect the parser's handling of empty input. Identify the existing tests and propose a regression test. Do not edit files.
 :::
 
-That last sentence is a task instruction, not an enforced boundary. Where the peer supports it, add `--read-only` to `/run` or `/delegate`, then confirm in the run's record that the restriction applied. A connector that cannot enforce a restriction is not equivalent to one that can.
+That last sentence is a task instruction, not an enforced boundary. For an enforced one, add `--read-only` to `/run`. Clio Coder admits a read-only run only on a peer whose own sandbox refuses every write, and refuses it before launch on every other peer, ACP peers included.
 
 ## Keep worker authority separate
 
-A native worker inherits the main session's level inside its own permit and OS sandbox, so at `yolo` a mediated worker runs the yolo way within its dispatch scope. A read-only worker stays at `default`. Managed peer dispatches run at default permissions, even when the main session uses `yolo`, and each external agent runs its own tool loop.
+A native worker inherits the main session's level inside its own permit and OS sandbox. At contained `yolo`, which is yolo's default, workers are dispatched as at `default`; at unconfined `yolo` a mediated worker runs the yolo way within its dispatch scope. A read-only worker stays at `default`.
 
-Each peer enforces read-only through its own mechanism. Check the mode you select instead of assuming one contract for all of them.
+Managed peer dispatches run at default permissions, even when the main session uses `yolo`, and each external agent runs its own tool loop.
+
+A read-only run must leave every file outside Clio Coder's home unchanged. It is admitted only where the peer's own sandbox guarantees that, so check the peer before you rely on it.
 
 ::: compare
-| Peer | Read-only headless run in v0.6.8 |
+| Peer | Read-only headless run in v0.8.0 |
 | --- | --- |
-| Codex | Its read-only sandbox mode |
-| Claude Code | Plan mode with read tools |
-| Antigravity | Its plan and sandbox route |
-| Pi | Read tools |
+| Codex | Runs under its read-only sandbox mode |
+| Claude Code | Refused before launch |
+| Antigravity | Refused before launch |
+| Pi | Refused before launch |
 | OpenCode | Refused before launch |
 :::
 
-ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. Clio Coder's own session is not an operating-system sandbox. Native workers run their commands in one when it is available, and external peers keep their own authority.
+ACP peers may own their tools. Explicitly permitting peer-owned tools changes what Clio can observe and mediate, so read the guide's permission limits before using such a peer on sensitive work. Clio Coder's own shell commands and native workers' commands run in an OS sandbox when one is available. External peers keep their own authority.
 
 ## Separate changes with a worktree
 

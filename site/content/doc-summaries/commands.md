@@ -24,13 +24,13 @@ Add `--json` when you need machine-readable events. A request to avoid edits is 
 | `/help` | Commands and effective keybindings |
 | `/model` | Model picker; apply to this session or save for the project or globally |
 | `/settings` | Settings, grouped by area |
-| `/config` | Guided setup, applied to this session |
+| `/config` | Connections in Settings; **Add a target** runs setup inside the session |
 | `/library` | Skills, prompts, agents, playbooks, and plugins |
 | `/context` | Context usage and pending handoffs |
 | `/usage` | Session usage and supported subscription quotas |
 | `/rewind` | Preview and restore this session's file snapshots |
 | `/rename [name]` | Name the session so `/resume` can find it |
-| `/branch [name]` | Start a separate session at the newest assistant turn |
+| `/fork [name]` | Fork from an assistant turn into a new session, optionally named |
 | `/loop <interval> <task>` | Run a task as a fresh turn on a schedule while the session is idle |
 | `/reload` | Reload settings, Library resources, and extension runtimes |
 | `/restart` | Save the session and restart into it |
@@ -56,6 +56,6 @@ Alt+letter runs a Clio action, and **Ctrl+G** then the same letter runs it in an
 
 Ctrl+C closes an active overlay, cancels a running turn, or clears an idle draft. When idle with an empty draft and no queued messages, two presses within about 1.2 seconds exit.
 
-For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**), or use `/interrupt <text>`. Work already completed remains in the session record. Ctrl+Q no longer queues a follow-up; in the queue, `t` moves a message to the end of the turn.
+For a course correction, type it in the composer and press **Alt+S** (or **Ctrl+G s**). Work already completed remains in the session record. In the queue, `t` moves a message to the end of the turn.
 
 A clean exit prints a summary of the session and the `/resume <id>` line that reopens it. Sessions are resumed from inside the app, not with a command-line flag.

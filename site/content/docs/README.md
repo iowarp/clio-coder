@@ -86,9 +86,11 @@ clio-coder configure
 clio-coder
 ```
 
-On first launch, **Guided setup** helps you connect a local app, a model server, an AI subscription, or a provider account. Choose a model, review the connection, and save. Clio Coder has no account of its own; your provider may require credentials and charge for inference.
+On first launch, **Guided setup** asks what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. It sends the model one short test request and saves when the model answers. Clio Coder has no account of its own; your provider may require credentials and charge for inference.
 
-A new installation starts guided setup by itself, so `clio-coder configure` is optional. If you have used Clio Coder before and your saved chat route is missing, it looks for a route it can use, such as a provider key in your environment or a local model server, and opens chat with it. `/config` runs setup again from inside a session.
+A new installation starts guided setup by itself, so `clio-coder configure` is optional. If you have used Clio Coder before and no chat route is saved, it looks for a route it can use, such as a provider key in your environment, and opens chat with it. A model server found on a local port is used only after you say yes.
+
+`/config` opens your connections inside a session, where **Add a target** runs setup again.
 
 Prefer the desktop alpha? It is served from your own machine, opens in your browser, and shares the terminal's saved connections and settings. See [the desktop app](/docs/guide/gui.html):
 

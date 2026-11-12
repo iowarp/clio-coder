@@ -1,7 +1,7 @@
 Clio Coder's Library contains skills, agents, prompts, playbooks, and plugins. You can add a procedure to one project or install it for your user. Preview what will be written, inspect the resource, and load it when a task needs it.
 
 ::: note Version scope
-This guide describes v0.6.8. Library recipes and extensions have different roles, and installing either is not a grant of authority.
+This guide describes v0.8.0. Library recipes and extensions have different roles, and installing either is not a grant of authority.
 :::
 
 ::: diagram library-flow
@@ -87,7 +87,7 @@ A large Library should not mean every resource enters every model request. The c
 
 Write clear resource descriptions and narrow procedures. A skill that explains one project's numerical-test conventions is easier to select and inspect than a bundle that promises to solve every task.
 
-After changes made by another process, `/library reload` refreshes recipes and `/skill off` clears an active skill's armed tool surface. Neither erases earlier instructions from the conversation, and disabling a resource does not stop a tool already running.
+After changes made by another process, `/reload library` refreshes recipes and `/skill off` clears an active skill's armed tool surface. Neither erases earlier instructions from the conversation, and disabling a resource does not stop a tool already running.
 
 ## Know when you need an extension
 

@@ -11,7 +11,7 @@ clio-coder systemone check jev --live
 clio-coder systemone off
 ```
 
-The choice takes effect on the next start. A list such as `jev,memory` is a failover order, and a route you did not name is never used. `run --systemone <route>` sets one headless run, and `/systemone` shows the status in a session.
+The choice takes effect on the next start. A list such as `jev,memory` is a failover order, and a route you did not name is never used. `run --systemone <route>` sets one headless run, and `/usage health` shows the status in a session.
 
 | Route | What answers | What it needs |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ You run the server. Name a profile: a `generic` engine never screens.
 
 ## When it fails
 
-A failed ask returns nothing and the agent proceeds alone. Three timeouts in a row open a five-minute breaker; see `/health`.
+A failed ask returns nothing and the agent proceeds alone. Three timeouts in a row open a five-minute breaker; see `/usage health`.
 
 ## What to expect
 

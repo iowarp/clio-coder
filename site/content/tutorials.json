@@ -38,7 +38,7 @@
     "author": "The Clio Coder team",
     "source": "let-it-work-with-containment-and-rewind.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/tool-usage.md"
     ]
@@ -67,7 +67,7 @@
     "author": "The Clio Coder team",
     "source": "run-it-unattended-within-limits.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/commands-and-modes.md",
       "guide/tool-usage.md"
@@ -82,7 +82,7 @@
     "author": "The Clio Coder team",
     "source": "see-what-a-session-cost-and-what-a-run-did.md",
     "basis": "Documented workflow with 0.6.8 captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/doctor.md"
     ]
@@ -111,7 +111,7 @@
     "source": "choose-model-for-your-project.md",
     "cover": "tui-configure-review",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/configuration-and-targets.md"
     ]
@@ -126,7 +126,7 @@
     "source": "coordinate-your-coding-agents.md",
     "cover": "tui-interop",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/interop.md",
       "guide/fleet-dispatch.md"
@@ -173,7 +173,7 @@
     "source": "add-skills-and-plugins-deliberately.md",
     "cover": "tui-library-installed",
     "basis": "Documented workflow with 0.6.0 development captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/resource-library.md",
       "guide/plugins.md"
@@ -204,7 +204,7 @@
     "author": "The Clio Coder team",
     "source": "write-an-extension-with-declared-capabilities.md",
     "basis": "Documented workflow with 0.6.8 captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "guides": [
       "guide/harness-extensions.md",
       "guide/plugins.md"
@@ -231,13 +231,13 @@
   {
     "slug": "panes-and-docks",
     "title": "Panes and docks: files, workers, and music",
-    "description": "Inside Herdr, show and hide a file browser, a live worker dashboard, and a focus radio beside the conversation with one key each.",
+    "description": "Show and hide a file browser, a live worker dashboard, and a focus radio beside the terminal conversation with one key each.",
     "category": "Terminal workspace",
     "time": "5 min",
     "author": "The Clio Coder team",
     "source": "panes-and-docks.md",
     "basis": "Documented workflow",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "status": "Experimental, off by default, needs Herdr",
     "interfaces": [
       "Terminal"
@@ -291,7 +291,7 @@
     "source": "run-on-a-local-model.md",
     "author": "The Clio Coder team",
     "basis": "Documented workflow with 0.6.8 captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
@@ -302,13 +302,13 @@
   {
     "slug": "submit-a-slurm-job",
     "title": "Submit a Slurm job through Clio Coder",
-    "description": "Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with your approval before it reaches the scheduler.",
+    "description": "Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with a confirmation before it reaches the scheduler.",
     "category": "Scientific software",
     "time": "5 min",
     "source": "submit-a-slurm-job.md",
     "author": "The Clio Coder team",
     "basis": "Documented workflow with 0.6.8 captures",
-    "versionScope": "0.6.8",
+    "versionScope": "0.8.0",
     "interfaces": [
       "Terminal"
     ],
