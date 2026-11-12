@@ -299,6 +299,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - `clio-coder verifiers dry-run` and `author --dry-run`, which the arena runs in a contender's worktree, run in the sandbox host verification uses.
 - The workspace secret scan reads task worktrees under `.clio-coder/worktrees` as roots of their own and judges every listed entry before it walks an untracked directory, so a large checkout, or one holding task worktrees, keeps its own secret files masked.
 - A cached secret scan is reused only while every secret it found, and each directory above it, is still where the scan saw it, so a rename by a tool that does not refresh the scan cannot unmask a secret for the next command.
+- No sandbox can read the desktop app's launch token or the pane-host sockets: every sandbox hides `<state>/gui` as a directory along with `<state>/mux/run` and `<cache>/run`, and typed tools refuse them. Before this a contained command could read the token and reach the app on loopback.
 
 ### Desktop app
 
@@ -388,6 +389,8 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people, other agents 
 - The installation guide explains npm's install-scripts warning for `@google/genai` and `protobufjs`: both scripts are safe to skip, and it shows how to silence the warning.
 - A truncated `install.sh` download no longer runs the installer without its arguments.
 - An interrupted uninstall or prune no longer leaves an install lock that blocks every later install.
+- The installer fails closed when the nodejs.org signature file holds no valid signature, unless `CLIO_CODER_REQUIRE_SIGNATURE=0`.
+- `install.sh`, `install.ps1` and `clio-coder upgrade` resolve the release channel outside the current directory, so a repository's `.npmrc` cannot pick the version, and a channel that resolves below the installed version is refused.
 
 ### Windows
 
