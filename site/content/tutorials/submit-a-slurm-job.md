@@ -39,7 +39,16 @@ clio-coder doctor --verbose
 clio-coder mcp list
 ```
 
-`doctor --verbose` shows `slurm clio-kit`, `slurm mcp server`, and `slurm scheduler` rows. Those rows are informational or warnings, and they never fail the check.
+Plain `doctor` folds the Slurm checks into one row while none of them needs attention:
+
+```text
+OK   slurm                  ready: clio-kit, mcp server, scheduler
+INFO scheduler commands     sbatch is on PATH: scheduler commands run outside the shell sandbox with approval
+```
+
+`doctor --verbose` prints the `slurm clio-kit`, `slurm mcp server` and `slurm scheduler` rows separately, and a row with a warning always keeps its own line.
+
+The server row names the `mcp.yaml` that declares it and its trust. The scheduler row means only that `sbatch` and `squeue` answered `--version`; it does not contact the controller. None of these rows fails the check.
 
 ## Install the skill
 
@@ -64,6 +73,16 @@ The skill then polls with a growing wait until the job reaches a terminal state,
 ::: result What you should see
 The answer ends with a line in this form: `Slurm job <id>: <state>, exit <code>, stdout <path>, stderr <path>`. Check that job id against `squeue` or `sacct` if the result matters.
 :::
+
+To keep a job's output beside its record rather than in scratch space, ask the agent to put it into the project store, or run `clio-coder store put results <stdout path> --note "Slurm job <id>"` yourself. The store lives on the host where CLIO Coder runs, here the login node, and records where each file came from.
+
+## Without the server
+
+The agent can also run `sbatch`, `squeue`, `scancel` and the other Slurm, PBS, LSF and Flux clients through `bash`. They run outside the shell sandbox, because they reach the scheduler through a host daemon the sandbox blocks, and they get the same review as `ssh`.
+
+At `default` the safety judge decides first and asks you when it has no verdict. Contained `yolo` runs one only when your own message names it, and unconfined `yolo` runs it.
+
+A script that calls `sbatch` itself stays inside the sandbox and fails there, and so does a workspace file named like a client, such as `./sbatch`. Submit from the command line the agent runs, not from a wrapper. With `safety.sandbox: required` at unconfined `yolo`, only a one-line `sbatch`, `squeue`, `scancel`, `sacct` or `sinfo` with listed options leaves the sandbox; `srun`, `salloc` and `flux` stay inside.
 
 ## Cancel a job
 
