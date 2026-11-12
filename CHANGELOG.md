@@ -210,6 +210,7 @@ Clio Coder 0.8.0 makes Clio Coder safe to run beside other people and other tool
 - A loop or job that runs until stopped no longer restarts a turn the loop guard stopped right away once it is past the three continuations the cap would allow: each further continuation waits 1, 5, then 15 minutes, so a free local route cannot spin.
 - Headless runs and yolo sessions tell the model to open its final reply with where the task stands against the request (done, partly done or not done) and to name any unmet part; "Done" is reserved for a fully met request.
 - Yolo's floor refuses deleting your home directory spelled `~yourname`, as it already did for `~` and `$HOME`.
+- Yolo's floor also reads a line holding a command substitution as raw text, so a destructive command inside a here-document, a here-string, a comment, a `case` arm or an ANSI-C quoted word no longer slips past it, and the block names the raw-text rule. It judges a delete or `shred` after a literal `cd` from that directory, and after a `cd` it cannot place as if the directory were unknown.
 - A scheduled `job` command is judged as the uncontained call it is, so a command its direct `bash` call may run is no longer refused, and a refusal no longer talks about host verification.
 
 ### Security and sandbox
