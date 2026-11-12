@@ -41,14 +41,14 @@
 			"path": "assets/social/tui-context.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "18cab25f81b1458ee01703638d2199545fb340358e7af1708a2cbf5f133537c0"
+			"sha256": "962aef0a0095ce1e011977f97b5ce08f2185b9d3115c43ea3615bd01fa808afc"
 		},
 		"tui-interop": {
 			"source": "assets/guides/tui-interop.png",
 			"path": "assets/social/tui-interop.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "ac07ec599aae9122946c75e7510e5504d3b57f2cbc58ac5ce8eb99f0be9a8f37"
+			"sha256": "a89d295f4f932de791ca7d85938be22691e0c213ee6c9a46002f047d5f4a76ff"
 		},
 		"tui-library-installed": {
 			"source": "assets/guides/tui-library-installed.png",

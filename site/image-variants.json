@@ -127,25 +127,25 @@
   "assets/guides/tui-settings-models.webp": {
     "width": 2268,
     "height": 784,
-    "sha256": "93b54dbd5c022d56d5d6abddcf30694df7980afe9ff2da290d626e5104cb30e2",
+    "sha256": "be013b997331925504eba11487ef5c2f89f15878159c5e6461d21266ccf5229b",
     "variants": [
       {
         "path": "assets/responsive/tui-settings-models-640.webp",
         "width": 640,
         "height": 221,
-        "sha256": "8fbd4a66e8d935d7c094c5d1bc2b25f5cb0bbe1998c3646523a2db6a00d19783"
+        "sha256": "3d6ca4ef1145a9d24604ac073a118f75f7f951029f459e6e407c292b911edccb"
       },
       {
         "path": "assets/responsive/tui-settings-models-1024.webp",
         "width": 1024,
         "height": 354,
-        "sha256": "8c86aec85e50aea3685bcc505167a6187b15e4cbe004bf301b0a6426db16fc0d"
+        "sha256": "aa0793f42c12768d1cf5fbe371ce7b09f54e412a14fdb236ba54589020c709c9"
       },
       {
         "path": "assets/responsive/tui-settings-models-1600.webp",
         "width": 1600,
         "height": 553,
-        "sha256": "dbaae65a6b7681191e6e16bf44948d2268d69e23cc418ced62546e62b74d1bfc"
+        "sha256": "cf047ca3a9d0483e2d0091e2033d4e4fb704d68e5ed32e8787497daaeb53f3e8"
       }
     ]
   },
@@ -302,25 +302,25 @@
   "assets/guides/tui-context.webp": {
     "width": 2268,
     "height": 784,
-    "sha256": "ecbb63d1f1e3a0d5e84efe706677eeea1c974842b1832150895c934d897ed853",
+    "sha256": "0cdbc0b7ee8e54e9ac9a11e211a3cd062c6ebf49bfe9f6dc6a60e0b3210da2eb",
     "variants": [
       {
         "path": "assets/responsive/tui-context-640.webp",
         "width": 640,
         "height": 221,
-        "sha256": "457f526a0260f2cf4c8d566279b4c6acd35f4ab466caddf60fc7fe157330e31f"
+        "sha256": "58ec21d5f820a58cef93665c26e315b8e67d2c9579421283da8d96b4fb397e09"
       },
       {
         "path": "assets/responsive/tui-context-1024.webp",
         "width": 1024,
         "height": 354,
-        "sha256": "4e924ca9f65cd8576c0bf5755bc17454e2c2b1fff86872027debe29497e93319"
+        "sha256": "b918f17a0f03f906f48a83c03681df4d373f40986fbc76fe7b7d91a7d6fef7ba"
       },
       {
         "path": "assets/responsive/tui-context-1600.webp",
         "width": 1600,
         "height": 553,
-        "sha256": "f1e5fba1559a180c7d54072d6acf7366b3218b32268bd8e15b23e8de15d79000"
+        "sha256": "18823628717992e0d21c7d6627a9daeb86c7d670f55d2ab1f8b282734e956f89"
       }
     ]
   },
@@ -452,25 +452,25 @@
   "assets/guides/tui-interop.webp": {
     "width": 2268,
     "height": 784,
-    "sha256": "c35d2370098ac148d8ffb78e42dc1d4ef68ef2c1be0efe22a894fd7d1dd58fad",
+    "sha256": "efbcf1dad6ebe796340aaf05c0d58199766bd9e269479e20d06ff89229d1be4f",
     "variants": [
       {
         "path": "assets/responsive/tui-interop-640.webp",
         "width": 640,
         "height": 221,
-        "sha256": "21770ecc98aaff7e005dea221075449c79cf858ae5e0adf3ee19524bce4d7724"
+        "sha256": "0fe4d4acdee309140ae9177013fe0e6c6b3b7d8e1645ef40dc03370297b86abf"
       },
       {
         "path": "assets/responsive/tui-interop-1024.webp",
         "width": 1024,
         "height": 354,
-        "sha256": "ddfdc301e747b0badf0c10cd07721058161d2a382c8269e89f1c9afd5e22bb37"
+        "sha256": "bf4b8a6d854fa1aefe88612c00e0a5cb240e70b649425ea0e0e12e416797e7d9"
       },
       {
         "path": "assets/responsive/tui-interop-1600.webp",
         "width": 1600,
         "height": 553,
-        "sha256": "ab82d1f89560102caf9cd009f1d9a109f3c35da4afc8b1807a6755ad8f39c665"
+        "sha256": "c949ac3cf6ff658041e6e4b711725c1465e4eccd068c75a25270380f9b1fa61d"
       }
     ]
   },
