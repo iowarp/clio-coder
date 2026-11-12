@@ -10,7 +10,7 @@ Music plays only when all three of these hold. `/music` reports each one that is
 
 | Requirement | How to satisfy it | Reason `/music` reports when missing |
 | --- | --- | --- |
-| The setting is on | Set `integrations.music.enabled: true` in `settings.yaml`, or in `/settings` under Appearance, Panes (the row is named `Music pane`). | `integrations.music.enabled is false in settings.yaml` |
+| The setting is on | Set `integrations.music.enabled: true` in `settings.yaml`, or in `/settings` under Workspace, Panes (the row is named `Music pane`). | `integrations.music.enabled is false in settings.yaml` |
 | A pane host answers | Run Clio Coder in a Herdr pane with the pane layer active. Bare `clio-coder` opens its own private pane host, and `clio-coder --with-panes` started inside a Herdr pane joins that host. Herdr must set `HERDR_ENV=1` and answer a ping on its socket within one second. | `herdr panes are not available (<detection reason>)`, for example `HERDR_ENV is not 1, so Clio is not running inside a pane host` or `no herdr socket answered a ping: tried <socket paths>` |
 | cliamp resolves | A `cliamp` on `PATH` at version 1.63.2 or newer, or the vendored copy from `clio-coder tools install cliamp`. | `cliamp <resolution>; install it yourself with ...`, naming the install commands below |
 

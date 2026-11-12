@@ -42,7 +42,7 @@ closes its docks and leaves utility panes open:
   Interoperability](interop.md).
 - **The workers dock.** `Alt+W` shows the workers dashboard in a dock to the right of the session. The dashboard, its keys and the per-run
   takeover are documented with the fleet in [Fleet Dispatch](fleet-dispatch.md). This page covers the utility panes and the dock contract below.
-- **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings interface` under Panes), and it needs the Herdr pane layer and a cliamp at 1.63.2 or newer, either on `PATH` or vendored by `clio-coder tools install cliamp`. See [Music](music.md).
+- **The music pane.** `/music` or `Alt+A` shows cliamp in a dock below the session for focus radio. It is off until `integrations.music.enabled` is `true` (default `false`, in `/settings workspace` under Panes), and it needs the Herdr pane layer and a cliamp at 1.63.2 or newer, either on `PATH` or vendored by `clio-coder tools install cliamp`. See [Music](music.md).
 - **Status and toasts.** In guest mode Clio reports session state on the hosting pane as agent `clio-coder`: `working`, `blocked` while a tool call waits on an approval, and `idle`. A finished dispatch can raise a herdr toast per `interface.panes.notifications`, and a failed run also leaves a transcript notice.
 
 Clio acts only on panes it created, which carry a `clio_coder_owner` metadata token. A pane you opened yourself in herdr is never closed, zoomed, or retargeted. The hosting pane is the one exception: Clio reports status on it, returns keyboard focus to it, and leaves zoom on its tab.
@@ -157,7 +157,7 @@ private host, herdr sets `HERDR_SOCKET_PATH` to the host's own socket.
 
 ### A second terminal in the same folder gets its own panes
 
-Opening Clio Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `Clio Coder: this folder already has a Clio in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose Clio no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``Clio Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session (#420).
+Opening Clio Coder in a folder whose pane host another open terminal still shows never joins that terminal's session. The second launch prints `Clio Coder: this folder already has a Clio in another terminal; this one has its own panes.` and starts its own private host with its own session and full panes. A folder has up to four hosts. A launch takes them in slot order and rejoins the first one whose Clio no open terminal shows, which is a host you detached from. When all four are shown in other terminals, the launch prints ``Clio Coder: terminal panes unavailable (this folder's pane host is in use by another terminal, pid N, so this terminal starts its own session). Continuing in this terminal.`` and runs without panes, with its own session, until one of the four exits (#420). A pane host per launch is verified on Linux only.
 
 The host key includes the canonical project and state directories: symlink aliases reuse the host, while separate Clio roots and separate git worktrees get separate hosts, including on Windows. Older cwd-only host identities are not adopted. Non-terminal stdin or `TERM=dumb` skips hosting. This is implemented in [workspace launch](../../src/domains/mux/workspace/launch.ts).
 
@@ -186,7 +186,7 @@ OK   panes journal dir      /home/you/.local/state/clio-coder/telemetry/runs is 
 
 The plain report folds quiet `naming` rows into one summary row; `--verbose` and `--json` keep every row.
 
-A missing pinned herdr is a WARN that names `clio-coder panes install`, and the next bare launch installs it anyway;
+A missing pinned herdr is a WARN that names `clio-coder panes install`; a bare launch installs it only in a home that already had panes, when the pinned version moved;
 on a platform with no pinned herdr the row is INFO. A missing yazi is a WARN only while the files pane is enabled;
 otherwise `files pane profile` reads `disabled by settings`. A missing croc or cliamp is always INFO. Outside a pane host,
 doctor prints only `panes mode` and `panes layout` and does not probe a socket. Run inside a pane host, it adds
@@ -334,8 +334,8 @@ A divider you drag in herdr becomes the dock's new target share, and a dock you 
 | `interface.keybindings."clio-coder.files.toggle"` | `alt+e` | Rebind the files key. The leader entry `Ctrl+G` then `e` is fixed. |
 | `interface.keybindings."clio-coder.music.toggle"` | `alt+a` | Rebind the music key. The leader entry `Ctrl+G` then `a` is fixed. |
 
-Every `interface.panes.*` key except `enabled` and `layout` applies without a restart. In `/settings`, the files keys are under Workspace & Files, group Files pane
-(`/settings workspace`), and the other pane keys are under Appearance, group Panes (`/settings interface`). The keys are also in the
+Every `interface.panes.*` key except `enabled` and `layout` applies without a restart. In `/settings`, the files keys are under Workspace, group Files pane,
+and the other pane keys are in the same area, group Panes (`/settings workspace`). The keys are also in the
 [Configuration Reference](configuration-reference.md).
 
 ## Theme
