@@ -2,6 +2,7 @@ import { lstatSync, mkdirSync, rmdirSync } from "node:fs";
 import path from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { sandboxAvailability } from "../../core/sandbox/availability.js";
+import { discoverSecretMasks } from "../../core/sandbox/secret-files.js";
 import {
 	type SandboxAvailability,
 	type SandboxBackend,
@@ -159,6 +160,23 @@ function settingsMasks(roots: ExtensionLaunchRoots, writable: Iterable<string>):
 }
 
 /**
+ * Secret files (`.env`, private keys, token files) in the workspace and in each other directory the manifest declares
+ * readable, masked as a dispatched worker's are. `home` is left to the home credential masks; a scan of the whole home
+ * would hit the scan cap long before it found anything those masks miss.
+ */
+function workspaceSecretMasks(
+	declaration: ExtensionRuntimeDeclarationV2,
+	workspace: string,
+	base: ReadonlyArray<SandboxMaskedPath>,
+): SandboxMaskedPath[] {
+	const workspaceRoots = [workspace];
+	for (const entry of declaration.permissions.fs.read)
+		if (entry !== "workspace" && entry !== "home")
+			workspaceRoots.push(path.isAbsolute(entry) ? entry : path.join(workspace, entry));
+	return discoverSecretMasks({ workspaceRoots }, base).masks;
+}
+
+/**
  * Compose the child's launch. With an OS sandbox the child runs read-only
  * outside its declared write roots, with secrets masked, Clio-managed paths
  * re-bound read-only, new Unix-domain sockets refused unless the operator
@@ -195,6 +213,8 @@ export function planExtensionLaunch(input: {
 	for (const entry of declaration.permissions.fs.write) if (entry !== "store") writable.add(path.join(workspace, entry));
 	let invocation: ReturnType<typeof composeWorkerSandboxInvocation>;
 	try {
+		// An extension never reads Clio's settings, which can hold target auth headers, so they are masked always.
+		const base = [...workerSandboxMasks(), ...settingsMasks(roots, writable)];
 		invocation = composeWorkerSandboxInvocation(
 			{
 				version: WORKER_SANDBOX_SPEC_VERSION,
@@ -211,8 +231,7 @@ export function planExtensionLaunch(input: {
 			{ argv },
 			workspace,
 			availability,
-			// An extension never reads Clio's settings, which can hold target auth headers, so they are masked always.
-			[...workerSandboxMasks(), ...settingsMasks(roots, writable)],
+			[...base, ...workspaceSecretMasks(declaration, workspace, base)],
 		);
 	} catch (error) {
 		return {

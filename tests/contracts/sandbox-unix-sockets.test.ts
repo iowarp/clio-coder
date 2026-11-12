@@ -236,6 +236,34 @@ test("the extension runtime launch masks Clio's config directory, or its setting
 	for (const file of settingsFiles) assert.ok(fallback.includes(realpathSync(file)), `${file} is not masked`);
 });
 
+test("the extension runtime launch masks secret files in the workspace and declared read roots", async (t) => {
+	const home = await isolateClioEnv("clio-extension-secret-mask-");
+	t.after(() => home.restore());
+	const roots = {
+		workspace: join(home.dir, "workspace"),
+		packageCopy: join(home.dir, "runtime", "package"),
+		storeDir: join(home.dir, "store"),
+		bootstrap: join(home.dir, "bootstrap", "runtime-child-v2.mjs"),
+	};
+	const shared = join(home.dir, "shared");
+	for (const directory of [roots.workspace, roots.packageCopy, roots.storeDir, shared, join(home.dir, "bootstrap")])
+		mkdirSync(directory, { recursive: true });
+	writeFileSync(join(roots.workspace, ".env"), "SUPER_SECRET_KEY=hunter2\n");
+	writeFileSync(join(shared, ".env"), "SHARED_SECRET_KEY=hunter3\n");
+	const launch = planExtensionLaunch({
+		declaration: {
+			permissions: { fs: { read: ["workspace", shared], write: [] }, exec: false, net: false },
+		} as unknown as ExtensionRuntimeDeclarationV2,
+		roots,
+		argv: [process.execPath, roots.bootstrap],
+		availability: { available: true, backend: "seatbelt", executable: "/usr/bin/sandbox-exec", reason: null },
+	});
+	assert.equal(launch.report.backend, "seatbelt", launch.report.reason);
+	const args = launch.args.join("\n");
+	for (const file of [join(roots.workspace, ".env"), join(shared, ".env")])
+		assert.ok(args.includes(realpathSync(file)), `${file} is not masked`);
+});
+
 test("under bwrap the extension runtime's settings mask survives a save by rename and covers later backups", async (t) => {
 	const availability = sandboxAvailability();
 	if (!availability.available || availability.backend !== "bwrap") {
