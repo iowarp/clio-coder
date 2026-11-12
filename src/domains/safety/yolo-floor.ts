@@ -113,35 +113,95 @@ export function yoloFloorExecutableHit(command: string): YoloFloorHit | null {
 const RAW_TEXT_START_WORD =
 	/^(?:rm|rmdir|unlink|shred|find|rsync|dd|tee|tar|cp|mv|ln|install|truncate|wipefs|mkfs(?:\.[\w.-]+)?|mke2fs|newfs(?:_\w+)?)$/u;
 
-/** Most raw-text candidates the floor reads; a line that yields more is blocked. */
-const MAX_RAW_TEXT_CANDIDATES = 16_384;
+/**
+ * Most text the raw-text candidates of one line may hold together. Every candidate runs through the floor's
+ * judgments, so the work grows with this sum; a line whose candidates exceed it is blocked.
+ */
+const MAX_RAW_TEXT_BYTES = 32 * 1024;
+
+const ANSI_C_ESCAPES: Readonly<Record<string, string>> = {
+	a: "\x07",
+	b: "\b",
+	e: "\x1b",
+	E: "\x1b",
+	f: "\f",
+	n: "\n",
+	r: "\r",
+	t: "\t",
+	v: "\v",
+};
+
+/** The text of a `$'...'` body as bash decodes it. */
+function decodeAnsiCBody(body: string): string {
+	return body.replace(
+		/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|([0-7]{1,3})|c(.)|([\s\S]))/gu,
+		(_all, hex: string, u4: string, u8: string, octal: string, control: string, other: string) => {
+			const code =
+				hex !== undefined
+					? Number.parseInt(hex, 16)
+					: u4 !== undefined
+						? Number.parseInt(u4, 16)
+						: u8 !== undefined
+							? Number.parseInt(u8, 16)
+							: octal !== undefined
+								? Number.parseInt(octal, 8)
+								: control !== undefined
+									? control.charCodeAt(0) & 0x1f
+									: null;
+			if (code !== null) return code <= 0x10ffff ? String.fromCodePoint(code) : "";
+			return ANSI_C_ESCAPES[other] ?? other;
+		},
+	);
+}
 
 /**
- * The raw-text reading of a line the shared scanners may not follow into every command (A-M54): one holding a
- * command substitution beside a here-document, a here-string or a `#`. The scanners place a here-document's end,
- * a comment and a substitution's close by bash's rules, and where they read a step as data the floor never judges
- * it. This reading does not parse: it drops every quote, cuts the text at newlines, operators, parentheses, braces
- * and backticks, and yields each piece, the piece without its first word (a here-document delimiter bash reads as
- * the end), and the piece from every floor command word on, for the floor's judgments to read like commands.
- * Fail-closed: a floor command quoted as data in such a line blocks too. Null when the line has no such shape;
- * `overflow` when it yields more than the floor reads.
+ * The raw-text reading of a line the shared scanners may not follow into every command: one holding a command
+ * substitution beside a here-document, a here-string or a `#` (a `#` only beside `$(`, since the scanners follow
+ * backticks there). The scanners place a here-document's end, a comment and a substitution's close by bash's rules,
+ * and where they read a step as data the floor never judges it. This reading does not parse: it joins
+ * backslash-newlines, decodes `$'...'` and `$"..."`, drops every quote, cuts the text at newlines, operators,
+ * parentheses, braces and backticks, and yields each piece, the piece without its first word (a here-document
+ * delimiter bash reads as the end), and the piece from every floor command word on, for the floor's judgments to
+ * read like commands. Every literal `cd` piece of the line is put in front of each candidate, so a relative delete
+ * is placed where such a cd can leave the shell. Fail-closed: a floor command quoted as data in such a line blocks
+ * too. Null when the line has no such shape; `overflow` when its candidates hold more text than the floor reads.
  */
 export function yoloFloorRawCandidates(command: string): { candidates: string[]; overflow: boolean } | null {
-	if (!/\$\(|`/u.test(command) || !/<<|#/u.test(command)) return null;
-	const stripped = command.replace(/["']/gu, "");
-	const candidates = new Set<string>([stripped]);
-	for (const piece of stripped.split(/[\n\r;&|(){}`]/u)) {
-		const words = piece
+	const substitution = /\$\(/u.test(command);
+	if (!(substitution || command.includes("`")) || !(command.includes("<<") || (substitution && command.includes("#"))))
+		return null;
+	const decoded = command
+		.replace(/\\\r?\n/gu, "")
+		.replace(/\$'((?:[^'\\]|\\[\s\S])*)'/gu, (_all, body: string) => decodeAnsiCBody(body))
+		.replace(/\$"/gu, '"');
+	const stripped = decoded.replace(/["']/gu, "");
+	const pieces = stripped.split(/[\n\r;&|(){}`]/u).map((piece) =>
+		piece
 			.trim()
 			.split(/\s+/u)
-			.filter((word) => word !== "");
+			.filter((word) => word !== ""),
+	);
+	const cds = new Set<string>();
+	for (const words of pieces) {
+		for (const at of [0, 1]) {
+			if (words[at] === "cd" || words[at] === "pushd") cds.add(`cd ${words[at + 1] ?? "~"}`);
+		}
+	}
+	const prefix = cds.size === 0 ? "" : `${[...cds].join(" && ")} && `;
+	const candidates = new Set<string>([stripped]);
+	let bytes = stripped.length;
+	for (const words of pieces) {
 		if (words.length === 0) continue;
 		const starts = words.flatMap((word, index) => (RAW_TEXT_START_WORD.test(word) ? [index] : []));
-		if (starts.length === 0 && !/[/~$>]/u.test(piece)) continue;
+		if (starts.length === 0 && !words.some((word) => /[/~$>]/u.test(word))) continue;
 		for (const start of new Set([0, 1, ...starts])) {
-			if (start < words.length) candidates.add(words.slice(start).join(" "));
+			if (start >= words.length) continue;
+			const candidate = `${prefix}${words.slice(start).join(" ")}`;
+			if (candidates.has(candidate)) continue;
+			candidates.add(candidate);
+			bytes += candidate.length;
+			if (bytes > MAX_RAW_TEXT_BYTES) return { candidates: [], overflow: true };
 		}
-		if (candidates.size > MAX_RAW_TEXT_CANDIDATES) return { candidates: [], overflow: true };
 	}
 	return { candidates: [...candidates], overflow: false };
 }

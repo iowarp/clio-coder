@@ -1188,8 +1188,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const hit =
 				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
-				return held(hit, [
-					`${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file first and pass the file`,
+				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file with the write tool and pass the file`;
+				return held({ match: { ...hit.match, ruleId: YOLO_FLOOR_RULE_IDS.rawText, reason }, source: hit.source }, [
+					hit.match.reason,
 				]);
 			}
 		}
@@ -3436,7 +3437,7 @@ function blockDecision(
 	return { ...base, ...input, kind: "block", rejection };
 }
 
-/** Why the floor reads a line as raw text (A-M54). */
+/** Why the floor reads a line as raw text. */
 const RAW_TEXT_REASON =
 	"a line holding a command substitution beside a here-document, a here-string or a # is also read as raw text, quotes dropped";
 

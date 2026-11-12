@@ -985,7 +985,7 @@ test("the yolo floor blocks a destructive command in every wrapper the outward r
 	}
 });
 
-// Shapes whose substitution the shared scanners do not follow into every command (A-M54).
+// Shapes whose substitution the shared scanners do not follow into every command.
 const RAW_TEXT_SHAPES: ReadonlyArray<(run: string) => string> = [
 	(run) => `: "$(cat <<'EOF'\nx\nEOF ${run})\nEOF\n)"`,
 	(run) => `: "$(cat <<'EOF'\nx\nEOF2>&1; ${run})\nEOF\n)"`,
@@ -1023,6 +1023,39 @@ test("the yolo floor reads a line with a here-document or here-string and a subs
 	strictEqual(quoted.kind, "block");
 	match(quoted.reasons.join("\n"), /raw text/u);
 	match(quoted.reasons.join("\n"), /even if it is only quoted data \(fail-closed\)/u);
+	match(quoted.reasons.join("\n"), /with the write tool/u);
+	strictEqual(quoted.ruleId, "yolo-floor-raw-text");
+	strictEqual(quoted.reasonCode, "yolo-floor:yolo-floor-raw-text");
+	match(quoted.rejection?.detail ?? "", /^rule: yolo-floor-raw-text$/mu);
+	match(quoted.reasons.join("\n"), /matched yolo-floor-delete-target/u);
+});
+
+test("the raw-text reading follows a literal cd, joins and decodes its words, and blocks over its byte budget", async (t) => {
+	const cwd = workspace("clio-yolo-floor-raw-review-");
+	const home = await isolateClioEnv("clio-yolo-floor-raw-review-home-");
+	t.after(() => home.restore());
+	const engine = engineFor(cwd);
+	const judge = (command: string) => engine.evaluate({ tool: ToolNames.Bash, args: { command } }, "yolo", OPERATOR_YOLO);
+	for (const command of [
+		': "$(cat <<X\nx\nX\ncd /usr && rm -r lib\n)"',
+		": \"$(cat <<'EOF'\nx\nEOF cd / && rm -r usr)\nEOF\n)\"",
+		`cat <<< "$($'\\x77ipefs' -a /dev/sdz)"`,
+		`: "$(cat <<EOF\nx\nEOF $'wipefs' -a /dev/sdz)\nEOF\n)"`,
+		`: "$(cat <<EOF\nx\nEOF $"wipefs" -a /dev/sdz)\nEOF\n)"`,
+		`: "$(cat <<-'EOF'\nx\n\tEOF; w\\\nipefs -a /dev/sdz)\nEOF\n)"`,
+		`: "$(cat <<EOF\nx\nEOF w\\\nipefs -a /dev/sdz)\nEOF\n)"`,
+	]) {
+		strictEqual(judge(command).kind, "block", command);
+	}
+	const over = judge(`: "$(cat <<X\nX\n)" ${"rm ".repeat(1000)}`);
+	strictEqual(over.kind, "block");
+	strictEqual(over.ruleId, "yolo-floor-raw-text");
+	match(over.reasons.join("\n"), /too large to read that way/u);
+	// A # beside a backtick, with no $( on the line, is not read as raw text.
+	strictEqual(
+		judge("git commit -m 'fix(cli): `clio-coder configure` keeps the saved route' -m 'fixes #412'").kind,
+		"allow",
+	);
 });
 
 // #419: an admitted yolo script commits through git, fills its own package cache,
