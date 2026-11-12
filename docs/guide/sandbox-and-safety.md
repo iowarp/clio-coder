@@ -8,8 +8,9 @@ exact rules, with every reason code, are in the
 ## Quick start
 
 1. Run `clio-coder doctor` and read the `shell sandbox` row. `OK` means shell
-   commands run inside an OS sandbox on this host: bubblewrap on Linux,
-   `sandbox-exec` on macOS. `WARN` means they run uncontained and more of them
+   commands run inside an OS sandbox on this host: bubblewrap on Linux, or
+   `sandbox-exec` on macOS, whose profile has not yet been verified on a real
+   macOS build. `WARN` means they run uncontained and more of them
    ask first. See [Shell sandbox rows](doctor.md#shell-sandbox-rows).
 2. Work at the `default` autonomy level. It needs no setup.
 3. In your request, name any action that reaches beyond the project, such as
@@ -120,7 +121,7 @@ Submit from the command the agent runs rather than from a wrapper script. See
 | headless `clio-coder run` at `default` | The judge decides from your prompt. Anything it does not allow is denied, since nobody can answer a card. |
 
 An approval card nobody answers within `safety.unattendedAfterSeconds` (300
-seconds by default) is denied, and the turn continues on another route.
+seconds by default) is denied, and the turn continues.
 
 ## Make the sandbox stricter or looser
 
@@ -129,7 +130,11 @@ seconds by default) is denied, and the turn continues on another route.
 - `auto` (the default): use the sandbox when the host has one.
 - `required`: workers' commands are refused on a host without a sandbox. At
   unconfined yolo, every command `default` would contain, and every script,
-  runs in the sandbox, and `unsandboxed: true` is refused. The main session at
+  runs in the sandbox, and `unsandboxed: true` is refused. An outward command
+  then leaves the sandbox only as one literal command whose options are all
+  on that CLI's short list; `scp`, `glab`, `aws`, `gcloud`, `terraform`,
+  `srun`, `salloc` and `flux` stay inside on every line, without the
+  credentials the sandbox hides. The main session at
   `default` still runs uncontained, with the approval rails, on a host without
   a sandbox.
 - `off`: never sandbox. More commands then ask first.
