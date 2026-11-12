@@ -412,5 +412,23 @@
       "guide/research-and-arena.md",
       "guide/quality-policy.md"
     ]
+  },
+  {
+    "slug": "report-a-problem-without-leaking-your-machine",
+    "title": "Report a problem without leaking your machine",
+    "description": "Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to.",
+    "category": "Accountability",
+    "time": "5 min",
+    "author": "The CLIO Coder team",
+    "source": "report-a-problem-without-leaking-your-machine.md",
+    "basis": "Documented workflow",
+    "versionScope": "0.8.0",
+    "interfaces": [
+      "Terminal"
+    ],
+    "guides": [
+      "guide/troubleshooting.md",
+      "guide/exit-codes-and-output.md"
+    ]
   }
 ]
