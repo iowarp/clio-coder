@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 import { sandboxAvailability } from "../../src/core/sandbox/availability.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../../src/core/sandbox/types.js";
@@ -112,4 +112,35 @@ test("under bwrap a task worktree's worker cannot read the secrets of the checko
 	const result = await run(plan.file, plan.args);
 	assert.match(result.output, /^x$/mu, "the worker still reads its own tree");
 	assert.doesNotMatch(result.output, /ROOT_SECRET|SIBLING_SECRET/u, result.output);
+
+	// A bare repository's checkouts are all linked worktrees of `<name>.git`, so the source is found the same way.
+	const bare = join(checkout, "..", `${basename(checkout)}-bare.git`);
+	const source = `${bare.slice(0, -".git".length)}-main`;
+	t.after(() => rmSync(bare, { recursive: true, force: true }));
+	t.after(() => rmSync(source, { recursive: true, force: true }));
+	execFileSync("git", ["clone", "-q", "--bare", checkout, bare], { stdio: "ignore" });
+	execFileSync("git", ["-C", bare, "worktree", "add", "-q", source, "main"], { stdio: "ignore" });
+	const bareTask = join(source, ".clio-coder", "worktrees", "run1");
+	execFileSync("git", ["-C", source, "worktree", "add", "-q", "-b", "clio-coder/task/bare1", bareTask], {
+		stdio: "ignore",
+	});
+	writeFileSync(join(source, ".env"), "BARE_SOURCE_SECRET=source\n");
+	configureWorkerProcessSandbox(
+		resolveWorkerSandboxSpec({
+			mode: "auto",
+			readOnly: false,
+			cwd: bareTask,
+			writeBoundaries: [],
+			taskWorktree: { path: bareTask, branch: "clio-coder/task/bare1" },
+			allowedTools: ["bash"],
+			networkSetting: false,
+			dependencyRoots: [],
+		}),
+	);
+	const barePlan = planSandboxedSpawn({ shell: `cat ${join(source, ".env")} README.md 2>&1; true` }, bareTask);
+	assert.equal(barePlan.kind, "sandboxed");
+	if (barePlan.kind !== "sandboxed") return;
+	const bareResult = await run(barePlan.file, barePlan.args);
+	assert.match(bareResult.output, /^x$/mu, "the worker still reads its own tree");
+	assert.doesNotMatch(bareResult.output, /BARE_SOURCE_SECRET/u, bareResult.output);
 });

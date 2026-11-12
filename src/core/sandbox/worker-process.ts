@@ -18,6 +18,7 @@ import type {
 	WorkerSandboxSpec,
 } from "./types.js";
 import { unixSocketHostState, unixSocketLaunch, unixSocketStateLine } from "./unix-sockets.js";
+import { readTaskWorktreeGitLayout } from "./worktree-git.js";
 
 /**
  * Process-wide sandbox policy for a dispatched worker. The worker entry sets
@@ -289,20 +290,65 @@ export type SandboxedSpawnPlan =
  * The trees a worker's command can see that hold the run's own files: its
  * directory write roots and its readable roots (cwd, task worktree, parent
  * checkouts), minus Git metadata, which holds no secret file and is large.
- * A task worktree's shared `.git` stands for the checkout that owns it and
- * every worktree linked to it: none is bound, but the sandbox reads the whole
- * filesystem, so their untracked secrets are scanned like the worktree's own.
- * Each linked worktree is its own root, so the checkout's walk skips the ones
- * under `.clio-coder/worktrees` instead of spending its budget on them.
+ * A task worktree's repository stands for the checkout it was cut from and
+ * every worktree linked to it, whatever the repository directory is named (a
+ * bare `repo.git`, a submodule's `.git/modules/<name>`): none is bound, but the
+ * sandbox reads the whole filesystem, so their untracked secrets are scanned
+ * like the worktree's own. Each linked worktree is its own root, so the
+ * checkout's walk skips the ones under `.clio-coder/worktrees` instead of
+ * spending its budget on them.
  */
 function workerSecretRoots(policy: WorkerSandboxSpec): string[] {
-	const commonDirs = policy.readableRoots.filter((root) => path.basename(root) === ".git");
+	const commonDirs = new Set(
+		policy.readableRoots.flatMap((root) => {
+			const layout = readTaskWorktreeGitLayout(root);
+			return layout === null ? [] : [layout.commonDir];
+		}),
+	);
 	const roots = [
 		...policy.writableRoots.filter((root) => root.endsWith("/") || isDirectoryPath(root)),
 		...policy.readableRoots,
-		...commonDirs.flatMap((commonDir) => [path.dirname(commonDir), ...linkedWorktrees(commonDir)]),
+		...[...commonDirs].flatMap((commonDir) => [...mainWorkTree(commonDir), ...linkedWorktrees(commonDir)]),
 	];
 	return [...new Set(roots)].filter((root) => !root.split(path.sep).includes(".git"));
+}
+
+/**
+ * The main work tree of a repository directory, read without spawning Git:
+ * `core.worktree` when set (a submodule's `.git/modules/<name>`), none for a
+ * bare repository, else the directory holding a `.git` directory.
+ */
+function mainWorkTree(commonDir: string): string[] {
+	let config = "";
+	try {
+		config = readFileSync(path.join(commonDir, "config"), "utf8");
+	} catch {
+		// No config: Git falls back to the `.git` parent rule below.
+	}
+	const core = gitConfigSection(config, "core");
+	const worktree = core.get("worktree");
+	if (worktree !== undefined && worktree.length > 0) return [path.resolve(commonDir, worktree)];
+	if (core.get("bare")?.toLowerCase() === "true") return [];
+	return path.basename(commonDir) === ".git" ? [path.dirname(commonDir)] : [];
+}
+
+/** Lower-cased keys and unquoted values of one plain `[section]` of a Git config file; later entries win. */
+function gitConfigSection(config: string, section: string): Map<string, string> {
+	const values = new Map<string, string>();
+	let inside = false;
+	for (const raw of config.split(/\r?\n/u)) {
+		const line = raw.trim();
+		const header = /^\[\s*([A-Za-z0-9.-]+)\s*\]/u.exec(line);
+		if (header !== null) {
+			inside = header[1]?.toLowerCase() === section;
+			continue;
+		}
+		if (!inside) continue;
+		const entry = /^([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*?))?\s*(?:[#;].*)?$/u.exec(line);
+		if (entry?.[1] === undefined) continue;
+		values.set(entry[1].toLowerCase(), (entry[2] ?? "true").replace(/^"(.*)"$/u, "$1"));
+	}
+	return values;
 }
 
 /** The work trees linked to a repository, read from each `<common>/worktrees/<id>/gitdir` without spawning Git. */
