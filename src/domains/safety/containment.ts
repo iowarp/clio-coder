@@ -754,7 +754,8 @@ const SLURM_OPTIONS: ReadonlyMap<string, OptionList> = new Map([
  * Whether an outward CLI's argv may leave, by CLI. A CLI not named here runs inside on every line: its argv is
  * open-ended, it runs workspace code by design (terraform, pulumi, srun, salloc), it follows links both ways
  * (scp; rsync without `-L` copies a link as a link), or no line of it needs to leave. npm and pnpm publish leave only
- * with `--ignore-scripts`, since the lifecycle scripts come from a package.json the sandbox can edit.
+ * with `--ignore-scripts`, since the lifecycle scripts come from a package.json the sandbox can edit, and only when
+ * the package directory holds no secret file the sandbox masks: the sandbox writes the ignore rules that pick the pack.
  */
 const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: OutwardPlaces) => boolean> = new Map<
 	string,
@@ -797,14 +798,16 @@ const OUTWARD_ARGV: ReadonlyMap<string, (args: ReadonlyArray<string>, places: Ou
 		(args, places) =>
 			args[0] === "publish" &&
 			args.includes("--ignore-scripts") &&
-			listedOperands(args.slice(1), NPM_PUBLISH_OPTIONS, places)?.length === 0,
+			listedOperands(args.slice(1), NPM_PUBLISH_OPTIONS, places)?.length === 0 &&
+			!heldBySecret(".", places),
 	],
 	[
 		"pnpm",
 		(args, places) =>
 			args[0] === "publish" &&
 			args.includes("--ignore-scripts") &&
-			listedOperands(args.slice(1), PNPM_PUBLISH_OPTIONS, places)?.length === 0,
+			listedOperands(args.slice(1), PNPM_PUBLISH_OPTIONS, places)?.length === 0 &&
+			!heldBySecret(".", places),
 	],
 	...listed("docker podman").map(
 		(name) =>
