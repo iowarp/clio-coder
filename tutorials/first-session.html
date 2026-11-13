@@ -1,69 +1,301 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Your first session with CLIO Coder</title><meta name="description" content="Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
-<link rel="canonical" href="https://coder.iowarp.ai/tutorials/first-session.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
-<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/first-session.html"><meta property="og:title" content="Your first session with CLIO Coder"><meta property="og:description" content="Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/tui-boot.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder terminal at start: the CLIO Coder mark beside the model, autonomy, workspace and Git state, and the composer reporting the Qwen 3.8 model ready."><meta property="article:published_time" content="2026-09-26T12:33:55-05:00"><meta property="article:modified_time" content="2026-11-12T11:23:17-06:00">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Your first session with CLIO Coder"><meta name="twitter:description" content="Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/tui-boot.png"><meta name="twitter:image:alt" content="CLIO Coder terminal at start: the CLIO Coder mark beside the model, autonomy, workspace and Git state, and the composer reporting the Qwen 3.8 model ready.">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/first-session.html#page","name":"Your first session with CLIO Coder","description":"Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests.","url":"https://coder.iowarp.ai/tutorials/first-session.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/tui-boot.png","width":1200,"height":630},"datePublished":"2026-09-26T12:33:55-05:00","dateModified":"2026-11-12T11:23:17-06:00","headline":"Your first session with CLIO Coder","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/first-session.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/tui-boot.png","https://coder.iowarp.ai/assets/tui-boot.webp"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/first-session.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/first-session.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Your first session with CLIO Coder","item":"https://coder.iowarp.ai/tutorials/first-session.html"}]}]}</script></head><body>
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/first-session.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script><script src="/js/cast.js?v=741ab1632e" data-player-src="/assets/player/asciinema-player.min.js?v=752c9b528b" data-player-css="/assets/player/asciinema-player.css?v=981fe7bc60" data-cast-css="/css/cast.css?v=ad7414d08f" defer></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/first-session.html"><meta property="og:title" content="Your first session with CLIO Coder"><meta property="og:description" content="Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/cast-first-launch.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository."><meta property="article:published_time" content="2026-09-26T12:33:55-05:00"><meta property="article:modified_time" content="2026-11-12T16:18:44-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Your first session with CLIO Coder"><meta name="twitter:description" content="Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/cast-first-launch.png"><meta name="twitter:image:alt" content="Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/first-session.html#page","name":"Your first session with CLIO Coder","description":"Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests.","url":"https://coder.iowarp.ai/tutorials/first-session.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/cast-first-launch.png","width":1200,"height":630},"datePublished":"2026-09-26T12:33:55-05:00","dateModified":"2026-11-12T16:18:44-06:00","headline":"Your first session with CLIO Coder","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/first-session.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/cast-first-launch.png","https://coder.iowarp.ai/assets/guides/cast-first-launch.webp"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/first-session.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/first-session.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Your first session with CLIO Coder","item":"https://coder.iowarp.ai/tutorials/first-session.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
-    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
     <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a></nav>
     <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
   </div>
 </header>
-<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Getting started</span>5 min read</p><h1>Your first session with CLIO Coder</h1><p class="lede">Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.7.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T11:23:17-06:00">November 12, 2026</time></dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover"><a class="capture-frame" href="/assets/tui-boot.png"><img src="/assets/tui-boot.webp" width="2240" height="886" alt="CLIO Coder terminal at start: the CLIO Coder mark beside the model, autonomy, workspace and Git state, and the composer reporting the Qwen 3.8 model ready." fetchpriority="high" srcset="/assets/responsive/tui-boot-640.webp 640w, /assets/responsive/tui-boot-960.webp 960w, /assets/responsive/tui-boot-1280.webp 1280w, /assets/tui-boot.webp 2240w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">The terminal at start, with the project, its Git state, and the selected model. <span class="tag">Terminal · v0.7.0-rc.1</span></figcaption></figure><details class="doc-toc-mobile"><summary>On this page</summary><a href="#1-install-clio-coder">1. Install CLIO Coder</a>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Getting started</span>5 min read</p><h1>Your first session with CLIO Coder</h1><p class="lede">Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T16:18:44-06:00">November 12, 2026</time></dd></div></dl></header><nav class="path-strip" aria-label="Learning path"><ul><li><a class="path-strip-path" href="/learn.html#path-agents">Coding agents · step 1 of 5</a><span>Next: <a href="/tutorials/let-it-work-with-containment-and-rewind.html">Let CLIO Coder work without watching every call</a></span></li><li><a class="path-strip-path" href="/learn.html#path-hpc">Science and HPC · step 1 of 5</a><span>Next: <a href="/tutorials/temperature-calibration.html">A numerical change, checked with CLIO Coder</a></span></li></ul></nav><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover" data-cast="/assets/casts/cast-first-launch.cast?v=920715b619" data-cast-cols="120" data-cast-rows="36" data-cast-poster="2.431" data-cast-length="0:15"><a class="capture-frame" href="/assets/guides/cast-first-launch.png?v=f370795b38"><img src="/assets/guides/cast-first-launch.webp?v=1909f6be44" width="2268" height="1548" alt="Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository." fetchpriority="high" srcset="/assets/responsive/cast-first-launch-640.webp?v=a5ed8c0316 640w, /assets/responsive/cast-first-launch-1024.webp?v=d3df0b03c2 1024w, /assets/responsive/cast-first-launch-1600.webp?v=b7a884bed9 1600w, /assets/guides/cast-first-launch.webp?v=1909f6be44 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-first-launch.cast?v=920715b619" download>Recording · 0:15</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">First launch of CLIO Coder: setup finds a local model and chat opens
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== tui-boot
+
+~/projects/calibration-lab $ clio-coder
+No model target is configured. Clio needs a model before it can do anything else, so setup starts now.
+
+┌  Welcome to Clio Coder
+│
+│  Choose what you already use. Clio checks the endpoint and model list when the provider allows it.
+│  Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).
+│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
+│  only after the test message, except a browser sign-in you complete.
+│
+│  Clio found a way to reach a model:
+│
+│  ❯ A model server at http://127.0.0.1:4000 (LiteLLM gatewa…  model qwen3.8-27b, run by user researcher
+│    Set up something else                                     an API key, a subscription, or a server
+│
+│  ↑↓ move · Enter select · Esc cancel · q quit
+
+== chat
+
+┌  Welcome to Clio Coder
+│
+│  Choose what you already use. Clio checks the endpoint and model list when the provider allows it.
+│  Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).
+│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
+│  only after the test message, except a browser sign-in you complete.
+│
+●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
+│
+│  Testing litellm / qwen3.8-27b ...
+│
+◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
+◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
+◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
+│
+│  Change any of this later:
+●    clio-coder configure
+│
+└  Done
+
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+┌─ &gt;C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      litellm · qwen3.8-27b                                                                                     │
+│ Autonomy   Default · reviewed approvals                                                                              │
+│ Awareness  Not indexed yet                                                                                           │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                                     200K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
+
+== sent
+
+│  only after the test message, except a browser sign-in you complete.
+│
+●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
+│
+│  Testing litellm / qwen3.8-27b ...
+│
+◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
+◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
+◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
+│
+│  Change any of this later:
+●    clio-coder configure
+│
+└  Done
+
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+&gt;C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+
+▌ Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification
+▌ task. Do not change files yet.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ bash `ls -la /home/researcher/projects/calibration-lab &amp;&amp; echo --- &amp;&amp; cat package.json 2&gt;/dev/null` ◌ preparing
+▸ find ◌ preparing
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is preparing a tool · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                11.1K/200K (5.6%) · ≈71 tok/s
+Type to steer · Esc stops the run · Alt+U Dashboard</pre></div></details></figure><details class="doc-toc-mobile"><summary>On this page</summary><a href="#1-install-clio-coder">1. Install CLIO Coder</a>
 <a href="#2-connect-a-model">2. Connect a model</a>
 <a href="#3-open-a-workspace">3. Open a workspace</a>
 <a href="#4-ask-a-focused-question">4. Ask a focused question</a>
 <a href="#5-make-the-next-task-specific">5. Make the next task specific</a>
 <a href="#keep-going">Keep going</a></details><p>CLIO Coder works in the repository you open. For your first session, give it a small, concrete task: explain how the project builds and runs its tests. That lets you see how it reads code and uses tools before asking it to make a change.</p>
-<h2 id="1-install-clio-coder">1. Install CLIO Coder</h2>
+<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This tutorial describes v0.8.0. The recordings on this page come from a small JavaScript project with one failing test and Qwen 3.8 27B on a local model server. The first starts with no model configured. The install step was not recorded.</p>
+</aside><h2 id="1-install-clio-coder">1. Install CLIO Coder</h2>
 <p>The installer brings its own Node.js and needs no root. Linux, macOS, and WSL are the primary platforms. Native Windows is best effort, so use the current stable release. On Linux, the installer offers to add the desktop app when it finishes.</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">curl -fsSL https://coder.iowarp.ai/install.sh | sh</code></pre></div>
-<p>Open a terminal in a repository you know:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">cd /path/to/your/project
-clio-coder configure</code></pre></div>
 <h2 id="2-connect-a-model">2. Connect a model</h2>
-<p>Choose <strong>Guided setup</strong>, then select an app on this computer, a model server, an AI subscription, or a provider account. CLIO Coder helps you choose a model and review the connection before saving. Choose a model that supports tool calling.</p>
-<p><strong>Connect by endpoint</strong> is the shortcut when you already know the URL. LM Studio commonly serves at <code>http://localhost:1234</code>; Ollama commonly serves at <code>http://localhost:11434</code>. The <a href="/docs/guide/configuration-and-targets.html">connection guide</a> covers setup and credentials.</p>
+<p>Open a terminal in a repository you know and start CLIO Coder:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">cd /path/to/your/project
+clio-coder</code></pre></div>
+<p>With no model configured, setup starts on its own:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">No model target is configured. Clio needs a model before it can do anything else, so setup starts now.</code></pre></div>
+<p>Setup looks for a provider key in your environment, a stored sign-in and a local model server, and lists what it found. Pick one, or choose <strong>Set up something else</strong> and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Use a model that supports tool calling.</p>
+<p>CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the recording, setup found a model server and saved it:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 4"><code class="language-text">◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
+◇  target litellm saved, runtime litellm
+◇  chat runs on litellm, model qwen3.8-27b
+◇  fleet default is litellm
+◇  settings written to ~/.config/clio-coder/settings.yaml
+◇  Saved. Chat and workers use this model. Change it any time with /model or /config.</code></pre></div>
+<p><code>clio-coder configure</code> runs setup again at any time. Its <strong>Connect by endpoint</strong> is the shortcut when you already know the URL. LM Studio commonly serves at <code>http://localhost:1234</code>; Ollama commonly serves at <code>http://localhost:11434</code>. The <a href="/docs/guide/configuration-and-targets.html">connection guide</a> covers setup and credentials.</p>
 <p>If you have used CLIO Coder before, you can skip this step. A chat route you already chose stays in use, and CLIO Coder will not swap it for another when it stops working.</p>
-<p>With no route chosen, starting <code>clio-coder</code> looks for a saved connection, a provider key in your environment, a stored sign-in, or a local model server, and opens chat with the first one that has a model.</p>
 <p>If a connection fails, run:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 3"><code class="language-sh">clio-coder doctor</code></pre></div>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 5"><code class="language-sh">clio-coder doctor</code></pre></div>
 <h2 id="3-open-a-workspace">3. Open a workspace</h2>
-<p>Launch the terminal workspace:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder</code></pre></div>
+<p>When setup saves, the terminal workspace opens in the same folder. In the recording, its header read <code>Model      litellm · qwen3.8-27b</code> and the status line ended <code>200K ctx</code>, the context window of the model it found. Later, <code>clio-coder</code> opens the workspace directly.</p>
 <p>Or open the desktop alpha in your browser:</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 5"><code class="language-sh">clio-coder gui --open</code></pre></div>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 6"><code class="language-sh">clio-coder gui --open</code></pre></div>
 <p>In the desktop, open a workspace folder and start a task. If you have not configured a model, <strong>Guided setup</strong> is also available in the browser; terminal configuration is optional. For this tutorial, either interface gives you a place to enter the first request.</p>
 <h2 id="4-ask-a-focused-question">4. Ask a focused question</h2>
 <p>Try this request:</p>
 <blockquote>
 <p>Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.</p>
 </blockquote>
-<p>Follow the tool activity as CLIO Coder reads the repository. Review any permission request before allowing it. If the answer misses an important directory or build system, name it in a follow-up.</p>
+<p>Follow the tool activity as CLIO Coder reads the repository. The recording ends as it starts reading. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.</p>
 <h2 id="5-make-the-next-task-specific">5. Make the next task specific</h2>
-<p>Once you understand the project, ask for a check you recognize:</p>
+<p>Once you understand the project, ask for one change you can check. Name the problem, what to do and how to verify it. The recording below gave this request for the project&#39;s one failing test:</p>
 <blockquote>
-<p>Run the existing parser tests and report the results. Do not edit files.</p>
+<p>The absolute-zero test fails. Find the cause, fix it, and run the test check.</p>
 </blockquote>
-<p>Use your project&#39;s real test name. Read the command and its output before deciding on a change. If you later ask CLIO Coder to edit code, inspect the diff and rerun the relevant checks.</p>
+<figure class="guide-capture" data-cast="/assets/casts/cast-first-task.cast?v=4025075f54" data-cast-cols="120" data-cast-rows="36" data-cast-poster="33.326" data-cast-length="0:35"><a class="capture-frame" href="/assets/guides/cast-first-task.png?v=4b02935de2"><img src="/assets/guides/cast-first-task.webp?v=b2dcaa7c66" width="2268" height="1548" alt="Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin &lt;= 0 to kelvin &lt; 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted." loading="lazy" srcset="/assets/responsive/cast-first-task-640.webp?v=dcdb2b1a1e 640w, /assets/responsive/cast-first-task-1024.webp?v=4fa88a8adc 1024w, /assets/responsive/cast-first-task-1600.webp?v=48a2a0009e 1600w, /assets/guides/cast-first-task.webp?v=b2dcaa7c66 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project&#39;s declared test check without asking. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-first-task.cast?v=4025075f54" download>Recording · 0:35</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">A first task in CLIO Coder: fix a failing test and verify
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== ready
+
+~/projects/calibration-lab $ clio-coder
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+┌─ &gt;C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      litellm · qwen3.8-27b                                                                                     │
+│ Autonomy   Default · reviewed approvals                                                                              │
+│ Awareness  Not indexed yet                                                                                           │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                                     200K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
+
+== tui-verify
+
+│ line 21 to `kelvin &lt; 0`. 0 K should be a valid value (absolute zero is reachable). Negative Kelvin is still rejected.
+│ The other three guards already use `&lt;`, so this makes it consistent.
+
+✦ I confirmed the cause of the failure: at temperature.mjs:21, kelvin &lt;= 0 is rejecting 0 K itself, but this is exactly
+  the value that the test is asking for. Since the other three guards already use &lt; for the same purpose, this is an
+  off-by-one boundary condition. The fix is:
+
+± edited temperature.mjs · +1 -1 ✓ · 31ms
+  │ -21    if (kelvin &lt;= 0) {
+  │ +21    if (kelvin &lt; 0) {
+  │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
+  │  23    }
+  │  24    return kelvin - CELSIUS_KELVIN_OFFSET;
+  │  25 }
+  │     ...
+
+│ Thinking · /view
+
+▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
+
+│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin &lt; 0) {`. Now let&#39;s re-run the test check.
+
+✦ Edit applied cleanly. Rerunning the test check:
+
+$ checked test · exit 0 · 19 lines ✓ · 214ms
+  │ … 17 earlier lines · /view
+  │ ℹ todo 0
+  │ ℹ duration_ms 49.240549
+
+│ Thinking · All 7 tests passed. The tree has uncommitted changes.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                              15.8K/200K (7.9%) · ≈99 tok/s
+Type to steer · Esc stops the run · Alt+U Dashboard
+
+== tui-verify-result
+
+  │     ...
+
+│ Thinking · /view
+
+▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
+
+│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin &lt; 0) {`. Now let&#39;s re-run the test check.
+
+✦ Edit applied cleanly. Rerunning the test check:
+
+$ checked test · exit 0 · 19 lines ✓ · 214ms
+  │ … 17 earlier lines · /view
+  │ ℹ todo 0
+  │ ℹ duration_ms 49.240549
+
+│ Thinking · All 7 tests passed. The tree has uncommitted changes. Should I commit? The user said &quot;Find the cause, fix
+│ it, and run the test check.&quot; They didn&#39;t ask for a commit. I&#39;ll leave it uncommitted and just report. Following the
+│ instructions, I&#39;ll stop with just the simple fact.
+
+✦ Fixed. The cause: kelvinToCelsius rejected kelvin &lt;= 0 (temperature.mjs:21), throwing RangeError for exactly 0 K — the
+  value the absolute-zero test asserts at calibration.test.mjs:20. 0 K is a valid temperature, so the guard was an
+  off-by-one against its siblings, which all use &lt;.
+
+  The change is one character: &lt;= 0 → &lt; 0. Negative Kelvin still throws RangeError, so the &quot;below absolute zero&quot; tests
+  still pass. All 7 tests now pass (previously 6/7).
+
+  The fix is in the working tree on main, uncommitted.
+
+✓ Done · 24s · 7 calls · in 22.2k · out 1.4k · cached 75.8k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                          16.1K/200K (8.0%) · last 93 tok/s
+i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
+Alt+M Model · ? Keys                                                                                    memory reviewing</pre></div></details></figure><p>The agent changed <code>kelvin &lt;= 0</code> to <code>kelvin &lt; 0</code> in <code>temperature.mjs</code>, ran the declared test check (<code>checked test · exit 0</code>), and ended its report with <code>All 7 tests now pass (previously 6/7).</code> and <code>The fix is in the working tree on main, uncommitted.</code></p>
+<p>Use your project&#39;s real test name. Read the diff and the check output yourself before you commit the change.</p>
 <h2 id="keep-going">Keep going</h2>
-<p>In the terminal, <code>/help</code> lists commands, <code>/model</code> selects a model, <code>/settings</code> opens configuration, and <code>/config</code> runs guided setup again without leaving the session.</p>
+<p>In the terminal, <code>/help</code> lists commands, <code>/model</code> selects a model, <code>/settings</code> opens the settings center, and <code>/config</code> opens your connections, where <strong>Add a target</strong> runs setup again without leaving the session.</p>
 <p>When you quit, CLIO Coder prints a summary of the session and a <code>/resume &lt;id&gt;</code> line. Start <code>clio-coder</code> again and type that line to return to the conversation, or use <code>/resume</code> alone to pick from a list.</p>
 <p>The <a href="/docs/guide/commands-and-modes.html">commands guide</a> covers shortcuts and session controls. The <a href="/docs/guide/tool-usage.html">tools guide</a> explains the repository tools and their permissions.</p>
-</article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#1-install-clio-coder">1. Install CLIO Coder</a>
+<nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/let-it-work-with-containment-and-rewind.html">Let CLIO Coder work without watching every call <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/temperature-calibration.html">A numerical change, checked with CLIO Coder <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/commands-and-modes.html">Commands and modes <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#1-install-clio-coder">1. Install CLIO Coder</a>
 <a href="#2-connect-a-model">2. Connect a model</a>
 <a href="#3-open-a-workspace">3. Open a workspace</a>
 <a href="#4-ask-a-focused-question">4. Ask a focused question</a>
 <a href="#5-make-the-next-task-specific">5. Make the next task specific</a>
 <a href="#keep-going">Keep going</a></aside></div><div class="tutorial-end"><p class="caption">By The CLIO Coder team · CLIO Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
 <footer class="colophon page">
-  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
-</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
 </body></html>

@@ -1,25 +1,227 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Let CLIO Coder work without watching every call</title><meta name="description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
-<link rel="canonical" href="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
-<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><meta property="og:title" content="Let CLIO Coder work without watching every call"><meta property="og:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-11-04T09:47:21-06:00"><meta property="article:modified_time" content="2026-11-12T11:00:06-06:00">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Let CLIO Coder work without watching every call"><meta name="twitter:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="CLIO Coder">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#page","name":"Let CLIO Coder work without watching every call","description":"Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.","url":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-11-04T09:47:21-06:00","dateModified":"2026-11-12T11:00:06-06:00","headline":"Let CLIO Coder work without watching every call","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Let CLIO Coder work without watching every call","item":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"}]}]}</script></head><body>
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script><script src="/js/cast.js?v=741ab1632e" data-player-src="/assets/player/asciinema-player.min.js?v=752c9b528b" data-player-css="/assets/player/asciinema-player.css?v=981fe7bc60" data-cast-css="/css/cast.css?v=ad7414d08f" defer></script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><meta property="og:title" content="Let CLIO Coder work without watching every call"><meta property="og:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/cast-let-it-work.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring."><meta property="article:published_time" content="2026-09-27T14:19:46-05:00"><meta property="article:modified_time" content="2026-11-12T16:18:44-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Let CLIO Coder work without watching every call"><meta name="twitter:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/cast-let-it-work.png"><meta name="twitter:image:alt" content="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#page","name":"Let CLIO Coder work without watching every call","description":"Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.","url":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/cast-let-it-work.png","width":1200,"height":630},"datePublished":"2026-09-27T14:19:46-05:00","dateModified":"2026-11-12T16:18:44-06:00","headline":"Let CLIO Coder work without watching every call","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/cast-let-it-work.png","https://coder.iowarp.ai/assets/guides/cast-let-it-work.webp"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Let CLIO Coder work without watching every call","item":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
-    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
     <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a></nav>
     <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
   </div>
 </header>
-<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Safety and autonomy</span>7 min read</p><h1>Let CLIO Coder work without watching every call</h1><p class="lede">Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.6.8</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T11:00:06-06:00">November 12, 2026</time></dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Safety and autonomy</span>7 min read</p><h1>Let CLIO Coder work without watching every call</h1><p class="lede">Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T16:18:44-06:00">November 12, 2026</time></dd></div></dl></header><nav class="path-strip" aria-label="Learning path"><ul><li><a class="path-strip-path" href="/learn.html#path-agents">Coding agents · step 2 of 5</a><span>Previous: <a href="/tutorials/first-session.html">Your first session with CLIO Coder</a></span><span>Next: <a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository</a></span></li></ul></nav><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover" data-cast="/assets/casts/cast-let-it-work.cast?v=63f153a1a7" data-cast-cols="120" data-cast-rows="36" data-cast-poster="34.278" data-cast-length="0:42"><a class="capture-frame" href="/assets/guides/cast-let-it-work.png?v=0924d2d3db"><img src="/assets/guides/cast-let-it-work.webp?v=879caa350b" width="2268" height="1548" alt="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring." fetchpriority="high" srcset="/assets/responsive/cast-let-it-work-640.webp?v=d4f7128120 640w, /assets/responsive/cast-let-it-work-1024.webp?v=cf70d00232 1024w, /assets/responsive/cast-let-it-work-1600.webp?v=13e37043f7 1600w, /assets/guides/cast-let-it-work.webp?v=879caa350b 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">Doctor&#39;s sandbox row, a rebuild on a scratch branch, and /rewind&#39;s preview, closed with Esc so nothing is restored. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-let-it-work.cast?v=63f153a1a7" download>Recording · 0:42</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">Letting CLIO Coder work: sandbox, snapshot and rewind
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== doctor
+
+nd model fit are not checked.
+OK   state storage          0 B (0 bytes); largest contributor none
+OK   home storage           config 262 B, data 0 B, cache 0 B
+OK   connection litellm     http://127.0.0.1:4313 reachable in 17ms; credential available from environment; passive metadata only, no generation was attempted; 1 models read live
+OK   model litellm          defaultModel &#39;qwen3.8-27b&#39;, chat.model &#39;qwen3.8-27b&#39;, fleet.default.model &#39;qwen3.8-27b&#39; found in live list from http://127.0.0.1:4313
+INFO system one (experimental) off
+INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
+WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
+OK   external tool yazi     experimental integration disabled by settings
+INFO external tool croc     not found (install with `clio-coder tools install croc`)
+INFO external tool cliamp   not found (install with `clio-coder tools install cliamp`)
+OK   files pane profile     disabled by settings
+OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfinfo /usr/bin/pdfinfo
+OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
+INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
+OK   store backend          local (no selection; the default)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 430.7 GiB free at /home/researcher/.local/share/clio-coder)
+OK   panes mode             Clio&#39;s private pane host opens with bare `clio-coder`; this command is not running inside one
+OK   panes layout           off
+OK   naming                 clean: immutable history, git refs, worktree markers
+OK   validation contract    none at the workspace root; rigor default normal
+OK   shell sandbox          default-autonomy shell commands run in the bwrap sandbox; writable roots: /home/researcher/projects/calibration-lab, /tmp, /var/tmp, /home/researcher/.cache/clio-coder/sandbox-cache, /home/researcher/projects/calibration-lab/.git; 6 secret files in the workspace and scratch roots are masked; unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works) and the kernel keyring calls; yolo runs contained in the same sandbox
+OK   task worktree root     fleet.worktrees.root disk: /home/researcher/projects/calibration-lab/.clio-coder/worktrees (ext4, 430.7 GiB free)
+OK   task worktrees         none preserved
+17 rows folded; `clio-coder doctor --verbose` prints each one
+~/projects/calibration-lab $
+
+== report
+
+✦ Build regenerated. Now running the project&#39;s test check (the declared test check → node --test calibration.test.mjs).
+
+$ checked test · exit 0 · 19 lines ✓ · 377ms
+  │ … 17 earlier lines · /view
+  │ ℹ todo 0
+  │ ℹ duration_ms 53.438351
+
+│ … 2 rows · /view
+│ fit, so I don&#39;t mention it. Good.
+│ Let me report concisely.
+
+✦ Done. dist/ was the gitignored build output (copied temperature.mjs + a build.json), so I cleared it and rebuilt from
+  source, then ran the test check.
+
+  What I ran, in order:
+
+  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
+  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
+     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
+  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
+     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+
+  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
+  unchanged.
+
+  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
+  calibration project, so it doesn&#39;t fit.
+
+✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+i checks passed; coverage of the change not measured                                    Alt+U +1 more · Ctrl+G X dismiss
+Alt+M Model · ? Keys
+
+== rewind
+
+  source, then ran the test check.
+
+  What I ran, in order:
+
+  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
+  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
+     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
+  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
+     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+
+  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
+  unchanged.
+
+  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
+  calibration project, so it doesn&#39;t fit.
+
+✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
+  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+                                                                 │ ✓ same as now · delete · bash
+                                                                 │ [Enter] preview rewind  shows what restoring this
+                                                                 │                         snapshot would change;
+                                                                 │                         nothing is written until
+                                                                 │                         you confirm
+                                                                 │
+                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Reason       delete
+                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
+                                                                 │ Commit       870255cb73e1
+                                                                 │              (refs/clio-coder/snapshots/
+                                                                 │              2ikoa22l5prs/1)
+                                                                 │ Pinned refs  HEAD aae72d8ff787 on scratch
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
+default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
+
+== preview
+
+  source, then ran the test check.
+
+  What I ran, in order:
+
+  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
+  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
+     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
+  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
+     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+
+  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
+  unchanged.
+
+  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
+  calibration project, so it doesn&#39;t fit.
+
+✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind files to snapshot #1 ━
+   snapshot #1 · 2026-11-12 13:26:56 · delete before bash
+   The workspace already matches this snapshot. Nothing would change.
+   Pinned refs ─────────────────────────────────────────────────────────────────────────────────────────────────── 1
+     HEAD aae72d8ff787 on scratch · still in place
+   Never touched ────────────────────────────────────────────────────────────────────────────────────────────────────
+   Gitignored files are never touched. Your Git index, HEAD and branches do not change.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [↑↓] scroll · [Esc] back to snapshots, nothing changed ━
+default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
+
+== kept
+
+  source, then ran the test check.
+
+  What I ran, in order:
+
+  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
+  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
+     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
+  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
+     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+
+  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
+  unchanged.
+
+  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
+  calibration project, so it doesn&#39;t fit.
+
+✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
+  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+                                                                 │ ✓ same as now · delete · bash
+                                                                 │ [Enter] preview rewind  shows what restoring this
+                                                                 │                         snapshot would change;
+                                                                 │                         nothing is written until
+                                                                 │                         you confirm
+                                                                 │
+                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Reason       delete
+                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
+                                                                 │ Commit       870255cb73e1
+                                                                 │              (refs/clio-coder/snapshots/
+                                                                 │              2ikoa22l5prs/1)
+                                                                 │ Pinned refs  HEAD aae72d8ff787 on scratch
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
+default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss</pre></div></details></figure><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
 <a href="#what-still-reaches-you">What still reaches you</a>
 <a href="#when-to-use-yolo">When to use yolo</a></details><p>Most of a coding task should not need you. At the <code>default</code> level, CLIO Coder runs shell work inside an OS sandbox, snapshots your files before it changes them, and has a safety judge review what escapes the sandbox. You are asked only when the judge has no verdict or the decision is yours.</p>
 <p>This guide shows how to check that setup, undo a change, and choose when to step up to <code>yolo</code>.</p>
-<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This guide describes v0.6.8. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental <code>sandbox-exec</code> profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what <code>doctor</code> reports on your host.</p>
+<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This guide describes v0.8.0. The sandbox needs bubblewrap on Linux; on macOS it uses an experimental <code>sandbox-exec</code> profile. Snapshots need a Git work tree. Native Windows has neither guarantee, so read what <code>doctor</code> reports on your host.</p>
 </aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
 <ul>
 <li>CLIO Coder installed, with a connected model.</li>
@@ -28,16 +230,108 @@
 </section><ol class="guide-steps"><li class="guide-step"><span class="step-number" aria-hidden="true">01</span><div><h3 id="check-what-this-host-can-contain">Check what this host can contain</h3>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder doctor</code></pre></div>
 <p>Look for the <code>shell sandbox</code> row. It names the backend and where contained commands may write. If no backend exists, commands outside the recognized set go to the judge and then to you, so the rest of this guide still holds with more questions.</p>
-</div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="give-it-a-task-and-watch-what-happens">Give it a task and watch what happens</h3>
+<p>A contained command can write the workspace, the scratch roots, <code>/tmp</code>, and a private tool cache. Your own <code>~/.cache</code> and <code>~/.npm</code> stay read-only. Credentials, credential variables, secret files such as <code>.env</code>, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in <code>safety.scratchRoots</code>.</p>
+<p>A secret path is also refused before any sandbox is involved. In the recording below, asked <code>Show me the API token in .env.</code>, the agent tried a command that lists the file&#39;s keys, and CLIO Coder stopped it:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">rule: secret_path_bash
+This is a hard block; confirmation cannot override it.</code></pre></div>
+<figure class="guide-capture" data-cast="/assets/casts/cast-sandbox.cast?v=4a75986143" data-cast-cols="120" data-cast-rows="36" data-cast-poster="20.501" data-cast-length="0:28"><a class="capture-frame" href="/assets/guides/cast-sandbox.png?v=63affa7f4b"><img src="/assets/guides/cast-sandbox.webp?v=71dba056c7" width="2268" height="1548" alt="Terminal recording in which the user asks CLIO Coder for the API token in the project&#39;s .env. The agent&#39;s command to list the file&#39;s keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user&#39;s own terminal." loading="lazy" srcset="/assets/responsive/cast-sandbox-640.webp?v=2f212f765a 640w, /assets/responsive/cast-sandbox-1024.webp?v=c2cb622f33 1024w, /assets/responsive/cast-sandbox-1600.webp?v=8eefdef6ac 1600w, /assets/guides/cast-sandbox.webp?v=71dba056c7 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">The project&#39;s .env is refused outright; confirmation cannot override the block. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-sandbox.cast?v=4a75986143" download>Recording · 0:28</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">CLIO Coder refuses to read a project secret
+Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+
+== ready
+
+~/projects/calibration-lab $ clio-coder
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+┌─ &gt;C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      litellm · qwen3.8-27b                                                                                     │
+│ Autonomy   Default · reviewed approvals                                                                              │
+│ Awareness  Not indexed yet                                                                                           │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                                                   200K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
+
+== blocked
+
+~/projects/calibration-lab $ clio-coder
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+&gt;C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+
+▌ Show me the API token in .env.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ blocked `if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;;…` ✗ · bash blocked: runs a command · 39ms
+  │ command › if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;; sed -E
+  │ &#39;s/^([^=]+).*/\1=***REDACTED***/&#39; .env; else echo &quot;no .env at workspace root&quot;; fi
+  │ … 4 earlier lines · /view
+  │ rule: secret_path_bash
+  │ This is a hard block; confirmation cannot override it.
+
+│ Thinking · The .env is a zero-access secret path. Clio&#39;s safety net blocks me
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣾ Qwen3.8 is thinking · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                              12.3K/200K (6.1%) · ≈82 tok/s
+! Clio&#39;s safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
+Type to steer · Esc stops the run · Alt+U Dashboard
+
+== answer
+
+  │ command › if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;; sed -E
+  │ &#39;s/^([^=]+).*/\1=***REDACTED***/&#39; .env; else echo &quot;no .env at workspace root&quot;; fi
+  │ … 4 earlier lines · /view
+  │ rule: secret_path_bash
+  │ This is a hard block; confirmation cannot override it.
+
+│ … 7 rows · /view
+│ it themselves. I can offer to check whether a specific key exists (by name) if they give me the variable name.
+│ Let me give them the command to run in their own terminal.
+
+✦ I can&#39;t show it. .env here is a zero-access secret path — Clio&#39;s safety net blocks me from reading it (even just to
+  list keys), and a token&#39;s value must never pass through chat or command output, since that&#39;s what persists in
+  transcripts and logs.
+
+  To view it yourself, in your own terminal:
+
+  bash
+    # the whole file
+    cat /home/researcher/projects/calibration-lab/.env
+
+    # or just the token&#39;s value (no echo of the whole line)
+    grep -E &#39;^MY_API_TOKEN=&#39; .env
+
+  Replace MY_API_TOKEN with the actual variable name. If you tell me the key name, I can confirm whether that key exists
+  in the file by checking for it — but only presence/absence, never the value.
+
+  One caveat: pasting the token back into chat would defeat the protection, so keep it in your terminal.
+
+✓ Done · 18s · 2 calls · in 6.3k · out 1.3k · cached 16.4k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                          12.7K/200K (6.3%) · last 87 tok/s
+! Clio&#39;s safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
+Alt+M Model · ? Keys</pre></div></details></figure></div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="give-it-a-task-and-watch-what-happens">Give it a task and watch what happens</h3>
 <p>On a scratch branch, type this:</p>
-<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">Delete the build output directory, regenerate it, and run the project&#39;s test check. Report what you ran.</code></pre></div>
-<p>Workspace edits and contained commands run without a card. A delete inside the workspace runs after a snapshot, because the snapshot can undo it. A push or a command that leaves the sandbox goes to the judge first.</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">Delete the build output directory, regenerate it, and run the project&#39;s test check. Report what you ran.</code></pre></div>
+<p>Workspace edits and contained commands run without a card. A delete inside the workspace runs after a snapshot is taken. Build output is usually gitignored, and a snapshot does not hold ignored files, so the build directory itself is not something <code>/rewind</code> can bring back. A push or a command that leaves the sandbox goes to the judge first.</p>
 </div></li><li class="guide-step"><span class="step-number" aria-hidden="true">03</span><div><h3 id="undo-it-with-rewind">Undo it with /rewind</h3>
-<div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">/rewind</code></pre></div>
-<p>The list shows this session&#39;s snapshots, newest first, with how many files each differs by. <code>Enter</code> previews a restore before anything is written. Confirming takes one more snapshot, so the rewind itself can be rewound.</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 4"><code class="language-text">/rewind</code></pre></div>
+<p>The list shows this session&#39;s snapshots, newest first, with how many files each differs by. <code>Enter</code> previews a restore before anything is written. Confirming takes one more snapshot, so the rewind itself can be rewound. <code>Esc</code> goes back without writing anything.</p>
+<p>In the recorded session behind this guide, the regenerated build was gitignored and nothing tracked had changed, so the preview read:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 5"><code class="language-text">The workspace already matches this snapshot. Nothing would change.</code></pre></div>
+<p>It also said that gitignored files are never touched and that the Git index, <code>HEAD</code> and branches do not change.</p>
 </div></li><li class="guide-step"><span class="step-number" aria-hidden="true">04</span><div><h3 id="tell-the-judge-about-your-machine">Tell the judge about your machine</h3>
-<p>The judge reads your typed messages and the proposed call. It never reads the agent&#39;s reasoning or tool output, so text in a file cannot argue past it. Name what is yours in your user settings:</p>
-<div class="code-block"><p class="code-label eyebrow">settings.yaml</p><pre tabindex="0" aria-label="Code example 4"><code class="language-yaml">safety:
+<p>The judge reads your typed messages and the proposed call. It never reads the agent&#39;s reasoning or tool output, so text in a file cannot argue past it. Name what is yours in your user settings, the <code>settings.yaml</code> file in the folder that <code>clio-coder paths</code> prints on its <code>config</code> line:</p>
+<div class="code-block"><p class="code-label eyebrow">settings.yaml</p><pre tabindex="0" aria-label="Code example 6"><code class="language-yaml">safety:
   judge:
     environment:
       - &quot;Shared cluster; /scratch/$USER is mine to create and delete in.&quot;
@@ -45,62 +339,71 @@
       - &quot;restarting the dev containers this project&#39;s compose file defines&quot;</code></pre></div>
 </div></li></ol><section class="guide-result"><p class="eyebrow"><span class="chapter">What you should see</span></p><p>Contained work runs without a card, and <code>/rewind</code> lists a snapshot from before the first change of the turn. This shows the controls work on your host. It does not show that the agent&#39;s change is correct, so review the diff and the check results.</p>
 </section><h2 id="what-still-reaches-you">What still reaches you</h2>
-<p>Some decisions never go to the judge: <code>ask_user</code> questions, CLIO Coder&#39;s own settings, a plan-scale dispatch, and a model edit of project settings. A permission card nobody answers within <code>safety.unattendedAfterSeconds</code> (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and <code>/decisions</code> shows what was chosen for you.</p>
+<p>Some decisions never go to the judge: <code>ask_user</code> questions, CLIO Coder&#39;s own settings, a plan-scale dispatch, and a model edit of project settings. An approval card nobody answers within <code>safety.unattendedAfterSeconds</code> (300 by default) is denied, never approved, and the turn continues. A question nobody answers takes its recommended option, and <code>/decisions</code> shows what was chosen for you.</p>
 <h2 id="when-to-use-yolo">When to use yolo</h2>
-<p><code>yolo</code> is a skip-permissions mode for long jobs in a container or another disposable environment. Nothing asks, and commands run unsandboxed with your credentials.</p>
-<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 5"><code class="language-sh">clio-coder --autonomy yolo</code></pre></div>
+<p><code>yolo</code> is for long jobs you leave running: nothing waits for you. It is contained by default. The sandbox, snapshots, and safety judge work as at <code>default</code>, and a call that would have asked you is refused back to CLIO Coder, so the job keeps going without it.</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 7"><code class="language-sh">clio-coder --autonomy yolo</code></pre></div>
 <p>The first interactive activation shows a one-time acceptance card, and yolo is refused as root outside a detected container. A short floor still blocks deleting your home directory or a system tree, <code>mkfs</code>, writes to a block device, fork bombs, and reads of CLIO Coder&#39;s credential store. Your project&#39;s approved rules and the run&#39;s ceilings also hold. Snapshots stay on.</p>
+<p>After 600 tool calls since you last spoke, set by <code>safety.limits.autonomousToolCalls</code>, the session pauses until you continue.</p>
+<p>Unconfined yolo is the skip-permissions mode for a container or another disposable environment: nothing asks, and commands run unsandboxed with your credentials. It takes effect only with <code>safety.yoloConfinement: unconfined</code> in your user settings and its own one-time acceptance. The footer shows which one is active.</p>
+<p>To keep unconfined yolo inside the sandbox, also set <code>safety.sandbox: required</code>. Commands then run contained, and a retry with <code>unsandboxed: true</code> is refused. An outward command such as <code>git push</code> or <code>gh pr create</code> leaves the sandbox only as one literal command on that tool&#39;s short option list, with no pipe, redirect, or substitution. <code>doctor</code> reports which rule applies.</p>
 <div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
 <thead>
 <tr>
 <th></th>
 <th><code>default</code></th>
-<th><code>yolo</code></th>
+<th><code>yolo</code>, contained</th>
+<th><code>yolo</code>, unconfined</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>Shell commands</td>
 <td>In the OS sandbox when a backend exists</td>
-<td>Unsandboxed as you</td>
+<td>As at <code>default</code></td>
+<td>Unsandboxed as you, unless <code>safety.sandbox: required</code></td>
 </tr>
 <tr>
 <td>Would-be approvals</td>
 <td>Judge first, then you</td>
+<td>Judge first, then refused back to CLIO Coder</td>
 <td>None</td>
 </tr>
 <tr>
 <td>Your questions</td>
 <td>Wait, then resolve after the timeout</td>
 <td>Answered at once</td>
+<td>Answered at once</td>
 </tr>
 <tr>
 <td>Workers</td>
 <td>Own sandbox, asks go to the judge</td>
+<td>Dispatched as at <code>default</code></td>
 <td>Own sandbox, run the yolo way in their scope</td>
 </tr>
 <tr>
 <td><code>/rewind</code></td>
 <td>Available</td>
 <td>Available</td>
+<td>Available</td>
 </tr>
 </tbody></table></div>
 </div><section class="guide-limits"><p class="eyebrow"><span class="chapter">What this does not protect</span></p><ul>
-<li>The sandbox contains <code>bash</code> and <code>run_script</code>. Typed <code>write</code> and <code>edit</code> calls follow the rules instead.</li>
+<li>The sandbox contains <code>bash</code>, <code>run_script</code> and checks that run commands through <code>verify</code>. Typed <code>write</code> and <code>edit</code> calls follow the rules instead.</li>
 <li>Ignored files, untracked files over 16 MiB, and nested repositories are not in a snapshot.</li>
 <li><code>/rewind</code> restores files. It never moves refs: it prints the commands that bring a moved branch back.</li>
 <li>The judge is a model. It can be wrong, and a route error means no verdict, so the call parks or is denied.</li>
 <li>Stronger isolation needs an external sandbox such as a container.</li>
 </ul>
 </section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 <li><a href="/docs/guide/tool-usage.html">Tools and permissions <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 <li><a href="/tutorials/keep-long-coding-tasks-on-track.html">Keep a long coding task on track <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
-<li><a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 </ul>
 </nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a>
 <a href="#what-still-reaches-you">What still reaches you</a>
 <a href="#when-to-use-yolo">When to use yolo</a></aside></div><div class="tutorial-end"><p class="caption">By The CLIO Coder team · CLIO Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
 <footer class="colophon page">
-  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
-</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
 </body></html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Report a problem without leaking your machine · CLIO Coder</title><meta name="description" content="Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html"><meta property="og:title" content="Report a problem without leaking your machine · CLIO Coder"><meta property="og:description" content="Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-11-12T15:48:04-06:00"><meta property="article:modified_time" content="2026-11-12T15:48:04-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Report a problem without leaking your machine · CLIO Coder"><meta name="twitter:description" content="Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="CLIO Coder">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html#page","name":"Report a problem without leaking your machine · CLIO Coder","description":"Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to.","url":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-11-12T15:48:04-06:00","dateModified":"2026-11-12T15:48:04-06:00","headline":"Report a problem without leaking your machine","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Report a problem without leaking your machine","item":"https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Accountability</span>5 min read</p><h1>Report a problem without leaking your machine</h1><p class="lede">Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Documented workflow</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T15:48:04-06:00">November 12, 2026</time></dd></div></dl></header><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
+<a href="#draft-a-report">Draft a report</a>
+<a href="#read-what-would-be-posted">Read what would be posted</a>
+<a href="#choose-how-it-leaves">Choose how it leaves</a>
+<a href="#attach-a-diagnostic-bundle-only-if-you-want-to">Attach a diagnostic bundle only if you want to</a>
+<a href="#share-it-encrypted-in-your-own-account">Share it encrypted, in your own account</a>
+<a href="#forget-it-later">Forget it later</a></details><p>When CLIO Coder itself misbehaves, <code>/report</code> in a session and <code>clio-coder report</code> in a shell draft a bug report, a feature request or a question for its maintainers. You read the exact text before anything leaves your machine, with your paths, names and keys masked, and CLIO Coder never sends a report on its own. This tutorial previews a report and never sends one.</p>
+<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This tutorial describes v0.8.0. The output below is from CLIO Coder run with <code>--dry-run</code> against a fresh CLIO Coder home and a small Git repository that had one finished session. Nothing was sent or saved.</p>
+</aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
+<ul>
+<li>CLIO Coder installed.</li>
+<li>A folder where you have run at least one session, for <code>--last</code>.</li>
+<li>To send for real: the GitHub CLI <code>gh</code>, signed in. Without it you can still open or write the report.</li>
+</ul>
+</section><h2 id="draft-a-report">Draft a report</h2>
+<p>In a session, <code>/report bug footer flickers on resize</code> uses the summary as the title and adds what CLIO Coder observed in the current session. <code>/report feature</code> and <code>/report question</code> work the same way. From a shell, <code>--title</code> and <code>--body-file</code> supply the text, and <code>--last</code> adds the newest session in this folder:</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder report bug --title &quot;footer flickers on resize&quot; --body-file notes.txt --last --dry-run</code></pre></div>
+<p>Without <code>--body-file</code>, a terminal opens <code>$EDITOR</code> on a template. <code>--session &lt;id&gt;</code> names another session. The note in this run named the machine and the project folder on purpose.</p>
+<h2 id="read-what-would-be-posted">Read what would be posted</h2>
+<p>The preview opens with where the report would go, then the body exactly as it would be sent:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">Public, posted from your gh account to github.com/iowarp/clio-coder; nothing sent yet
+
+----- title -----
+
+fix: footer flickers on resize
+
+----- body, exactly as it will be sent -----
+### What happened
+
+The footer flickers when I resize the terminal on &lt;host&gt;.
+Repro: open clio-coder in &lt;path&gt; and drag the window edge.</code></pre></div>
+<p>The host name and the folder were masked before the preview was shown. Below the body come an environment block (version, platform, Node, install kind and model) and a report block with an id. The preview ends with what was masked and what sending would do:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">Masked by Clio: 1 path, 1 host name. No secrets recognized.
+No diagnostic bundle is attached.
+
+Sending will, in this order:
+  1. search iowarp/clio-coder for an existing report of the same problem
+  2. post the text you reviewed as a public issue from your gh account
+dry run: nothing sent</code></pre></div>
+<p>The masks cover local paths, URLs other than CLIO Coder&#39;s own, user, host, project, branch, remote and target names, e-mail and IP addresses, and secrets, including the API keys the process holds. The review then searches the text again for this machine&#39;s names, and refuses to send while one slipped past or the text holds hidden characters.</p>
+<p>In the session, <code>e</code> edits the text in <code>$EDITOR</code> and masks the edit again, <code>m</code> masks or unmasks one value, Enter moves to the next step and Esc closes the review and keeps a draft.</p>
+<h2 id="choose-how-it-leaves">Choose how it leaves</h2>
+<p>What happens at the end depends on what the machine has:</p>
+<ul>
+<li><strong>Send.</strong> With a signed-in <code>gh</code>, CLIO Coder searches GitHub for the same problem, then posts a public issue, or a discussion for a question, under your account. In a session only <code>s</code> on the send step sends, never Enter. In a shell you choose send at the prompt, or pass <code>--yes</code>.</li>
+<li><strong>Open.</strong> Without <code>gh</code>, it opens a prefilled form in your browser, and you submit it there.</li>
+<li><strong>Write.</strong> Without a browser, it writes the report to a file and prints the link to paste it into.</li>
+<li><strong>Preview.</strong> <code>--dry-run</code> stops after the preview, with no network call.</li>
+</ul>
+<p>The shell prompt can also save a draft for <code>clio-coder report send &lt;id&gt;</code> later. When the search finds an open report of the same problem, you choose to add your details to it, file a new issue that links it, or cancel. With <code>--yes</code>, <code>--on-duplicate stop</code> is the default: the draft is saved and the command exits 3.</p>
+<h2 id="attach-a-diagnostic-bundle-only-if-you-want-to">Attach a diagnostic bundle only if you want to</h2>
+<p>A bundle is opt-in and built only from a shell: add <code>--bundle mechanics --consent debug</code> with <code>--last</code> or <code>--session &lt;id&gt;</code>. Its preview lists what it keeps and what it never keeps:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 4"><code class="language-text">Never kept:
+  - Prompts, model text, thinking, tool arguments and output, unless the transcript is ticked.
+  - File contents, diffs, commit messages.
+  - Absolute or relative paths, repository names and remotes, branch names.
+  - Host and user names, endpoint URLs, target ids, agent, rule and hook names, environment variables.
+  - Anything a schema does not bound.</code></pre></div>
+<p><code>--transcript [N]</code> adds the last turns, scrubbed. <code>debug</code> lets the maintainers read the bundle to fix this report, and <code>dataset</code> also lets its mechanics go into public datasets. <code>clio-coder report selftest</code> builds the same bundle in memory and writes nothing. Here it printed <code>0 identifiers found in 11370 bytes</code>, and it exits 1 when an identifier survives.</p>
+<p>Without <code>--share</code>, the bundle stays on your machine and the issue never carries it. <code>/report</code> in a session, over ACP or in the desktop app attaches no bundle.</p>
+<h2 id="share-it-encrypted-in-your-own-account">Share it encrypted, in your own account</h2>
+<p><code>--share</code> encrypts the bundle so that only the maintainers&#39; key opens it, and uploads it as a secret gist in your own GitHub account through your <code>gh</code>. The issue names the gist.</p>
+<p>The preview in this run showed the pointer it would carry, <code>bundle: gist:&lt;created on send&gt;#shr_2784226036f4c9e7</code>: the gist is created only when you send, and deleted again if posting fails. Without a signed-in <code>gh</code>, the bundle is sealed to a <code>.box</code> file you attach by hand.</p>
+<h2 id="forget-it-later">Forget it later</h2>
+<p><code>clio-coder report status</code> lists your reports and drafts, and <code>clio-coder report forget &lt;id&gt;</code> deletes a draft you never posted. A posted report cannot be withdrawn from CLIO Coder; edit or close it on GitHub. For a shared report, <code>forget</code> deletes the gist first, then offers a one-line comment asking the maintainers to delete their copy, posted only if you confirm.</p>
+<p>Once a share is 180 days old, CLIO Coder deletes its gist the next time you run <code>clio-coder report</code> or <code>clio-coder telemetry share</code>. Nothing runs at startup or in the background. Your local copy of a sent report&#39;s bundle is deleted after 30 days.</p>
+<section class="guide-result"><p class="eyebrow"><span class="chapter">Exit codes</span></p><p><code>clio-coder report</code> exits 0 when the report was sent, opened in the browser, written or previewed; 1 when sending failed or a bundle was refused; 2 on a usage error, or outside a terminal without <code>--yes</code>; and 3 when a likely duplicate or a newer release stopped it and the draft was saved.</p>
+</section><section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>The masks cover the names CLIO Coder knows about this machine. Text you typed about another machine can pass, so read the preview.</li>
+<li>A sent report is a public GitHub issue or discussion. Security problems never go there: <code>/report security</code> prints the link to the private advisory form.</li>
+<li>The agent can save a draft, but never send one or share a bundle. Only your own review sends.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/docs/guide/troubleshooting.html#report-a-problem-to-the-maintainers">Report a problem to the maintainers <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/see-what-a-session-cost-and-what-a-run-did.html">See what a session cost and what a run did <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/exit-codes-and-output.html">Automate with clio-coder run <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a>
+<a href="#draft-a-report">Draft a report</a>
+<a href="#read-what-would-be-posted">Read what would be posted</a>
+<a href="#choose-how-it-leaves">Choose how it leaves</a>
+<a href="#attach-a-diagnostic-bundle-only-if-you-want-to">Attach a diagnostic bundle only if you want to</a>
+<a href="#share-it-encrypted-in-your-own-account">Share it encrypted, in your own account</a>
+<a href="#forget-it-later">Forget it later</a></aside></div><div class="tutorial-end"><p class="caption">By The CLIO Coder team · CLIO Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
+</body></html>

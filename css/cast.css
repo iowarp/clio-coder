@@ -1,0 +1,1 @@
+@font-face{font-family:"Cast Symbols";font-style:normal;font-weight:400 700;font-display:swap;src:url("../assets/player/cast-symbols.woff2?v=ee5efb5a72") format("woff2")}.cast-player .ap-player{--term-font-family:"IBM Plex Mono","Cast Symbols",monospace}.cast-player{border-radius:var(--radius);overflow:hidden}

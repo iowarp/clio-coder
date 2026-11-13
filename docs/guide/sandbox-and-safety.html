@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Sandbox and safety · CLIO Coder docs</title><meta name="description" content="What CLIO Coder&#39;s sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html"><meta property="og:title" content="Sandbox and safety · CLIO Coder docs"><meta property="og:description" content="What CLIO Coder&#39;s sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-11-12T12:23:41-06:00"><meta property="article:modified_time" content="2026-11-12T17:09:46-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Sandbox and safety · CLIO Coder docs"><meta name="twitter:description" content="What CLIO Coder&#39;s sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="CLIO Coder">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html#page","name":"Sandbox and safety · CLIO Coder docs","description":"What CLIO Coder's sandbox lets a command write, which credentials it hides, which commands leave it, and what a project may change.","url":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-11-12T12:23:41-06:00","dateModified":"2026-11-12T17:09:46-06:00","headline":"Sandbox and safety","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Sandbox and safety","item":"https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
+  </div>
+</header>
+<main class="page docs-layout" id="content">
+  <aside class="docs-sidebar" aria-label="Documentation"><details class="docs-menu"><summary>Browse documentation</summary><div class="docs-menu-body"><a class="docs-home" href="/docs.html">CLIO Coder docs</a><label class="search-label" for="doc-search">Find a guide</label><input id="doc-search" type="search" placeholder="Search topics…" aria-describedby="search-status" /><p class="search-status" id="search-status" role="status"></p><ul class="search-hits" id="search-hits"></ul><noscript><p class="caption">Browse the guides below. Search requires JavaScript.</p></noscript><div id="all-docs"><details class="doc-nav-group" open><summary>Start</summary><a href="/docs.html">Install CLIO Coder</a>
+<a href="/docs/guide/hpc-clusters.html">Install on a cluster</a>
+<a href="/docs/guide/configuration-and-targets.html">Connect a model</a></details>
+<details class="doc-nav-group" open><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
+<a href="/docs/guide/tool-usage.html">Tools and permissions</a>
+<a href="/docs/guide/sandbox-and-safety.html" aria-current="page">Sandbox and safety</a>
+<a href="/docs/guide/context-continuity.html">Save and resume work</a>
+<a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
+<a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
+<a href="/docs/guide/gui.html">The desktop app</a>
+<a href="/docs/guide/quality-policy.html">Require project checks</a>
+<a href="/docs/guide/research-and-arena.html">Climb a metric, compare models</a>
+<a href="/docs/guide/store.html">Keep results in the store</a>
+<a href="/docs/guide/exit-codes-and-output.html">Automate with clio-coder run</a>
+<a href="/docs/guide/semantic-context.html">Semantic context</a>
+<a href="/docs/guide/built-in-agents.html">Built-in and custom agents</a></details>
+<details class="doc-nav-group"><summary>Extend CLIO Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
+<a href="/docs/guide/resource-library.html">Skills and resources</a>
+<a href="/docs/guide/plugins.html">Install plugins</a>
+<a href="/docs/guide/harness-extensions.html">Write and install extensions</a>
+<a href="/docs/guide/interop.html">Editors and other agents</a>
+<a href="/docs/guide/slurm.html">Slurm workflows</a></details>
+<details class="doc-nav-group"><summary>Reference</summary><a href="/docs/guide/doctor.html">Check your installation</a>
+<a href="/docs/guide/troubleshooting.html">Troubleshooting</a>
+<a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
+<a href="/docs/guide/environment-variables.html">Environment essentials</a>
+<a href="/docs/guide/system-one.html">System One decision models</a>
+<a href="/docs/guide/information-flow.html">Information flow</a>
+<a href="/docs/guide/glossary.html">Glossary</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Sandbox and safety</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/guide/sandbox-and-safety.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/sandbox-and-safety.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#check-your-machine-first">Check your machine first</a>
+<a href="#what-a-sandboxed-command-may-do">What a sandboxed command may do</a>
+<a href="#what-the-sandbox-hides">What the sandbox hides</a>
+<a href="#commands-that-leave-the-sandbox">Commands that leave the sandbox</a>
+<a href="#stricter-or-looser">Stricter or looser</a>
+<a href="#project-configuration-and-trust">Project configuration and /trust</a></details><h1 id="sandbox-and-safety">Sandbox and safety</h1>
+<p>What a sandboxed command may do, what it hides, and when CLIO Coder asks you.</p>
+<h2 id="check-your-machine-first">Check your machine first</h2>
+<p>Run <code>clio-coder doctor</code> and read the <code>shell sandbox</code> row. <code>OK</code> means shell commands run inside an OS sandbox: bubblewrap on Linux and WSL, <code>sandbox-exec</code> on macOS (not yet verified on a real Mac). <code>WARN</code> means they run uncontained, so more of them ask first. Windows has no sandbox.</p>
+<p>Then work at the <code>default</code> level. In your request, name anything that reaches beyond the project, such as &quot;push the branch when the tests pass&quot;.</p>
+<h2 id="what-a-sandboxed-command-may-do">What a sandboxed command may do</h2>
+<p>A sandboxed command can read your files and use the network. It writes only to the project, the temp directories, any directory in <code>safety.scratchRoots</code>, a private tool cache and the repository&#39;s Git data. Git hooks and Git config stay read-only, because they run later outside the sandbox.</p>
+<h2 id="what-the-sandbox-hides">What the sandbox hides</h2>
+<p>The command cannot read SSH and GPG keys, the SSH agent, cloud and cluster logins, code-host and registry tokens, password stores, browser profiles, shell histories or other agents&#39; logins. Secret files in the project, such as <code>.env</code> and <code>*.key</code>, are hidden too. Variables whose names or values look like credentials are removed. List one a build needs in <code>safety.sandboxPassEnv</code>.</p>
+<h2 id="commands-that-leave-the-sandbox">Commands that leave the sandbox</h2>
+<p><code>git push</code>, <code>gh</code>, cloud CLIs, <code>ssh</code>, publishing commands and the Slurm, PBS, LSF and Flux clients need your credentials, so they run outside the sandbox. At <code>default</code> the safety judge reviews each one against your own messages first, and you are asked when it has no verdict. Contained yolo runs one only when your message names it.</p>
+<h2 id="stricter-or-looser">Stricter or looser</h2>
+<p><code>safety.sandbox</code> is <code>auto</code> by default. <code>required</code> refuses workers&#39; commands on a machine without a sandbox and keeps unconfined yolo sandboxed; <code>srun</code>, <code>salloc</code> and <code>flux</code> then stay inside it. <code>off</code> never sandboxes. Unconfined yolo, for containers only, runs commands as you with your credentials.</p>
+<h2 id="project-configuration-and-trust">Project configuration and /trust</h2>
+<p>A repository&#39;s own CLIO Coder settings, safety rules, hooks and packages are ignored until you approve their exact contents. A card lists them when you open the project, and <code>/trust</code> reopens it. Even approved, project settings can only make CLIO Coder more careful: they cannot raise the autonomy level, loosen the sandbox, raise limits or carry credentials.</p>
+</div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf" data-source-version="0.8.0" data-source-ref="beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf" data-source-commit="beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf">Guide to v0.8.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#check-your-machine-first">Check your machine first</a>
+<a href="#what-a-sandboxed-command-may-do">What a sandboxed command may do</a>
+<a href="#what-the-sandbox-hides">What the sandbox hides</a>
+<a href="#commands-that-leave-the-sandbox">Commands that leave the sandbox</a>
+<a href="#stricter-or-looser">Stricter or looser</a>
+<a href="#project-configuration-and-trust">Project configuration and /trust</a></aside>
+</main><footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
+</body></html>

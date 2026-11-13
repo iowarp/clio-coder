@@ -343,7 +343,14 @@
 		ready = true;
 		updateControls();
 	};
-	if (document.readyState === "complete") start();
-	else addEventListener("load", start, { once: true });
+	// The hero poster is the page's largest paint. Starting the companion hides it,
+	// so hand over only after the poster is decoded and has had a frame on screen.
+	const poster = heroSlot?.querySelector(".scene-poster");
+	const begin = () =>
+		(poster?.decode() ?? Promise.resolve())
+			.catch(() => {})
+			.then(() => requestAnimationFrame(() => requestAnimationFrame(start)));
+	if (document.readyState === "complete") begin();
+	else addEventListener("load", begin, { once: true });
 	updateControls();
 })();

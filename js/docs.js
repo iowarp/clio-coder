@@ -139,6 +139,12 @@
 		// The article is static; one animation-frame update keeps both table-of-contents views in sync.
 		window.addEventListener("scroll", schedule, { passive: true });
 		window.addEventListener("resize", schedule);
-		update();
+		// The first update waits for an observer report, which arrives after layout,
+		// so reading heading positions does not force a synchronous reflow.
+		const initial = new IntersectionObserver(() => {
+			initial.disconnect();
+			update();
+		});
+		initial.observe(article);
 	}
 })();

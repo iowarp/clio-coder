@@ -27,6 +27,7 @@
     "excerpt": "Install CLIO Coder on a login node with an old glibc, a proxy, or no internet.",
     "headings": [
       "Install without root",
+      "Work on the cluster",
       "Old glibc, proxies, and quotas",
       "Verified downloads",
       "Airgapped sites and your own Node"
@@ -40,6 +41,7 @@
     "excerpt": "Set up local models, institutional endpoints, and cloud connections.",
     "headings": [
       "Connect the way you already work",
+      "Use a local model server",
       "Settings Center",
       "Check the connection",
       "Servers without a built-in runtime"
@@ -66,10 +68,27 @@
     "headings": [
       "Ask for a bounded change",
       "Understand permission requests",
+      "What the sandbox hides",
       "Verify using your project's checks",
-      "How tools reach the model"
+      "How tools reach the model",
+      "Limit what the agent may use"
     ],
     "url": "/docs/guide/tool-usage.html"
+  },
+  {
+    "path": "guide/sandbox-and-safety.md",
+    "title": "Sandbox and safety",
+    "group": "Everyday use",
+    "excerpt": "What a sandboxed command may do, what it hides, and when CLIO Coder asks you.",
+    "headings": [
+      "Check your machine first",
+      "What a sandboxed command may do",
+      "What the sandbox hides",
+      "Commands that leave the sandbox",
+      "Stricter or looser",
+      "Project configuration and /trust"
+    ],
+    "url": "/docs/guide/sandbox-and-safety.html"
   },
   {
     "path": "guide/context-continuity.md",
@@ -135,6 +154,7 @@
       "Permissions, sandbox, and merges",
       "Run a playbook when you need one",
       "Give workers MCP tools",
+      "Run workers on another machine",
       "When a worker stops or fails"
     ],
     "url": "/docs/guide/fleet-dispatch.html"
@@ -146,6 +166,7 @@
     "excerpt": "Browse and use skills, prompts, agents, fleets, and plugins.",
     "headings": [
       "Find a useful skill",
+      "Write your own prompts and skills",
       "Command reference",
       "Review before installing",
       "Trust project packages",
@@ -227,10 +248,12 @@
     "group": "Reference",
     "excerpt": "Resolve common connection, terminal, and runtime problems.",
     "headings": [
+      "First problems",
       "A connection is unavailable",
       "Settings fail to load",
       "A terminal shortcut does not arrive",
       "Work stopped or a check failed",
+      "Report a problem to the maintainers",
       "Exit codes"
     ],
     "url": "/docs/guide/troubleshooting.html"
@@ -259,6 +282,33 @@
       "Compare models blind"
     ],
     "url": "/docs/guide/research-and-arena.html"
+  },
+  {
+    "path": "guide/store.md",
+    "title": "Keep results in the store",
+    "group": "Everyday use",
+    "excerpt": "Keep datasets and results outside the working tree, with a record of where each came from.",
+    "headings": [
+      "Keep results out of your working tree",
+      "Store a file from your shell",
+      "Ask CLIO Coder to use it",
+      "Let workers write",
+      "Limits"
+    ],
+    "url": "/docs/guide/store.html"
+  },
+  {
+    "path": "guide/exit-codes-and-output.md",
+    "title": "Automate with clio-coder run",
+    "group": "Everyday use",
+    "excerpt": "Run one task from a script or CI job, read its exit code, and parse its JSON output.",
+    "headings": [
+      "Run one task from a script",
+      "Read the exit code",
+      "Bound the run",
+      "Read structured output"
+    ],
+    "url": "/docs/guide/exit-codes-and-output.html"
   },
   {
     "path": "guide/configuration-reference.md",
@@ -315,6 +365,20 @@
       "Read a refusal and recover"
     ],
     "url": "/docs/guide/information-flow.html"
+  },
+  {
+    "path": "guide/glossary.md",
+    "title": "Glossary",
+    "group": "Reference",
+    "excerpt": "Plain-language meanings of the words CLIO Coder uses, from target to worktree.",
+    "headings": [
+      "Words you meet first",
+      "Sessions and models",
+      "Safety",
+      "Workers and results",
+      "Packages"
+    ],
+    "url": "/docs/guide/glossary.html"
   },
   {
     "path": "guide/semantic-context.md",

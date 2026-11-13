@@ -118,8 +118,9 @@
 			);
 		});
 	}
-	const captures = [...document.querySelectorAll('a[href^="/assets/"][href$=".png"]')].filter((link) =>
-		link.querySelector("img"),
+	// Asset links carry a ?v= cache key, so match the path rather than the raw attribute.
+	const captures = [...document.querySelectorAll('a[href^="/assets/"]')].filter(
+		(link) => new URL(link.href).pathname.endsWith(".png") && link.querySelector("img"),
 	);
 	if (captures.length && "HTMLDialogElement" in window && "showModal" in HTMLDialogElement.prototype) {
 		const viewer = document.createElement("dialog");
@@ -146,7 +147,7 @@
 			const link = captures[current];
 			const source = link.querySelector("img");
 			// Load the full WebP only when a reader opens the viewer; keep the original PNG available.
-			image.src = new URL(link.href).pathname.replace(/\.png$/, ".webp");
+			image.src = source.getAttribute("src");
 			image.alt = source.alt;
 			image.width = Number(source.getAttribute("width"));
 			image.height = Number(source.getAttribute("height"));
@@ -318,23 +319,29 @@
 		for (const el of document.querySelectorAll("[data-reveal]")) el.dataset.reveal = "visible";
 	}
 	if (!reduced.matches && "IntersectionObserver" in window) {
+		// The observer's first report classifies each element from layout the browser
+		// already computed: anything that starts above the fold is left alone, the rest
+		// waits hidden until it scrolls in. Measuring here would force a reflow.
+		const seen = new WeakSet();
 		reveals = new IntersectionObserver(
 			(entries) => {
-				for (const entry of entries)
-					if (entry.isIntersecting) {
-						entry.target.dataset.reveal = "visible";
-						reveals.unobserve(entry.target);
-					}
+				for (const entry of entries) {
+					const el = entry.target;
+					const first = !seen.has(el);
+					seen.add(el);
+					if (first && entry.boundingClientRect.top < entry.rootBounds.bottom) reveals.unobserve(el);
+					else if (entry.isIntersecting) {
+						el.dataset.reveal = "visible";
+						reveals.unobserve(el);
+					} else if (first) el.dataset.reveal = "pending";
+				}
 			},
 			{ threshold: 0.08, rootMargin: "0px 0px -32px 0px" },
 		);
 		for (const el of document.querySelectorAll(
 			".section-heading, .interface-grid, .model-routes, .workflow-grid, .tutorial-card, .project-section, .guide-step, .guide-capture, .guide-sequence, .guide-diagram, .guide-result",
-		)) {
-			if (el.getBoundingClientRect().top < innerHeight - 32) continue;
-			el.dataset.reveal = "pending";
+		))
 			reveals.observe(el);
-		}
 	}
 	reduced.addEventListener("change", () => {
 		if (reduced.matches) finishReveals();

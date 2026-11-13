@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Run a research campaign and a blind arena · CLIO Coder</title><meta name="description" content="Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
+<link rel="canonical" href="https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html"><meta property="og:title" content="Run a research campaign and a blind arena · CLIO Coder"><meta property="og:description" content="Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-11-12T14:20:36-06:00"><meta property="article:modified_time" content="2026-11-12T14:33:56-06:00">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Run a research campaign and a blind arena · CLIO Coder"><meta name="twitter:description" content="Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="CLIO Coder">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html#page","name":"Run a research campaign and a blind arena · CLIO Coder","description":"Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them.","url":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-11-12T14:20:36-06:00","dateModified":"2026-11-12T14:33:56-06:00","headline":"Run a research campaign and a blind arena","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Run a research campaign and a blind arena","item":"https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html"}]}]}</script></head><body>
+<a class="skip" href="#content">Skip to content</a><header class="mast">
+  <div class="mast-row page">
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a></nav>
+    <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
+  </div>
+</header>
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Scientific software</span>7 min read</p><h1>Run a research campaign and a blind arena</h1><p class="lede">Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T14:33:56-06:00">November 12, 2026</time></dd></div></dl></header><nav class="path-strip" aria-label="Learning path"><ul><li><a class="path-strip-path" href="/learn.html#path-hpc">Science and HPC · step 4 of 5</a><span>Previous: <a href="/tutorials/submit-a-slurm-job.html">Submit a Slurm job through CLIO Coder</a></span><span>Next: <a href="/tutorials/work-from-a-laptop-with-remote-workers.html">Work from a laptop with remote workers</a></span></li><li><a class="path-strip-path" href="/learn.html#path-local">Local models · step 5 of 5</a><span>Previous: <a href="/tutorials/keep-long-coding-tasks-on-track.html">Keep a long coding task on track</a></span><span>Last step, <a href="/learn.html#learning-paths">back to the paths</a></span></li></ul></nav><div class="guide-layout"><article class="doc guide-body" id="doc"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
+<a href="#declare-what-to-measure-and-what-must-not-break">Declare what to measure and what must not break</a>
+<a href="#run-a-short-campaign">Run a short campaign</a>
+<a href="#read-the-result-line-by-line">Read the result line by line</a>
+<a href="#audit-it-and-take-the-change">Audit it and take the change</a>
+<a href="#compare-answers-blind">Compare answers blind</a>
+<a href="#vote-then-reveal">Vote, then reveal</a></details><p>You changed some code and it feels faster, or one model&#39;s answer looks better than another&#39;s. CLIO Coder has two commands that replace that impression with a record. <code>clio-coder research</code> keeps a change only when a measurement shows a real gain and every correctness check still passes. <code>clio-coder arena</code> shows you answers from several models without their names, and records your vote.</p>
+<aside class="guide-note"><p class="eyebrow">Version scope</p><p>This guide describes v0.8.0. The output below comes from one recorded session with a single model, Qwen 3.8 27B, on a small Python project. One model is enough to learn both commands. It is not enough to rank models, and the arena section shows why.</p>
+</aside><section class="guide-needs"><h2 id="before-you-start">Before you start</h2>
+<ul>
+<li>CLIO Coder installed, with a connected model.</li>
+<li>A Git repository with a check that prints a number as JSON, and a second check that proves the answers are still right.</li>
+<li>Whatever the checks need installed before you start. The agent cannot install it during the campaign.</li>
+</ul>
+</section><h2 id="declare-what-to-measure-and-what-must-not-break">Declare what to measure and what must not break</h2>
+<p>The project here has a <code>summary()</code> function that returns a mean, a median and a variance. It is correct and slow. <code>bench.py</code> times it on 3000 values and prints <code>{&quot;wall_ms&quot;: ...}</code>. <code>check.py</code> prints the answers for a holdout input, and <code>tests/reference/stats.json</code> holds the expected values.</p>
+<div class="code-block"><p class="code-label eyebrow">.clio-coder/verifiers.yaml</p><pre tabindex="0" aria-label="Code example 1"><code class="language-yaml">version: 2
+checks:
+  - id: bench
+    description: Wall time of summary() on 3000 values (min is better)
+    tags: [perf]
+    kind: command
+    command: [python3, bench.py]
+    cwd: .
+    timeoutMs: 60000
+  - id: correct
+    description: summary() answers match the reference on a holdout input
+    tags: [correctness]
+    kind: numeric-compare
+    command: [python3, check.py]
+    reference: tests/reference/stats.json
+    tolerance: { relative: 1.0e-9 }
+    cwd: .
+    timeoutMs: 60000</code></pre></div>
+<p>Every check needs <code>id</code>, <code>description</code>, <code>command</code>, <code>cwd</code>, <code>timeoutMs</code> and <code>tags</code>; an empty <code>tags: []</code> is allowed. Commit the catalog and every file the checks run or name. Each campaign worktree starts from <code>HEAD</code>, so an uncommitted <code>bench.py</code> or reference file is not there.</p>
+<p>The tolerance is your definition of the same answer. Here, a relative difference up to one part in a billion still passes.</p>
+<h2 id="run-a-short-campaign">Run a short campaign</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder research start --check bench --metric wall_ms --direction min \
+  --max-iterations 2 --gate correct --scope stats.py --max-wall-minutes 25 \
+  --goal &quot;make stats.py faster without changing any answer&quot;</code></pre></div>
+<p><code>--scope</code> limits which files the agent may change, and an iteration that changes anything outside it is archived without being measured. The checks and every file they name are protected the same way, so the agent cannot speed up the benchmark by editing it.</p>
+<section class="guide-result"><p class="eyebrow"><span class="chapter">What the recorded session printed</span></p><div class="code-block"><pre tabindex="0" aria-label="Code example 3"><code class="language-text">campaign r20261112-192812-1d5d (stopped: max-iterations)
+objective: min wall_ms from check bench; min improvement +5.00%, 5 pairs
+gates: correct; scope: stats.py
+protected: .clio-coder/verifiers.yaml, bench.py, check.py, tests/reference/stats.json
+agent: autonomy default
+branch: clio/research/r20261112-192812-1d5d at 37407c7dee9e (base 39930e6fbfbf, 2 ratchets)
+budget: 2/2 iterations, 25 min wall; spend not measured; 2 run(s) had unknown spend
+A/A: quiet; unchanged, median delta +4.04%, 95% CI [-0.96%, +6.93%]
+  it-0001  ratcheted; improved, median delta -99.74%, 95% CI [-99.76%, -99.71%]; gates correct pass; cost unknown
+  it-0002  ratcheted; improved, median delta -17.69%, 95% CI [-27.80%, -12.04%]; gates correct pass; cost unknown
+stopped: max-iterations: ran 2 of 2 iterations</code></pre></div>
+</section><h2 id="read-the-result-line-by-line">Read the result line by line</h2>
+<p>Start with the A/A line. Before any change, CLIO Coder timed the unchanged code against itself in five interleaved pairs. The medians moved 4.04%, and the 95% interval spans zero, so the noise stayed under the 5% threshold. If the base against itself already looked like a change, the campaign would have stopped there unless you passed <code>--allow-noisy</code>.</p>
+<p>Each iteration counts as improved only when the median moves at least 5% the right way and the bootstrap interval excludes zero. The first iteration removed almost all the time. The second found a further 17.69%, a gain that would be invisible by eye. Both passed the <code>correct</code> gate.</p>
+<p><code>spend not measured</code> is honest. This model was reached through a gateway with no price, so CLIO Coder cannot know what the runs cost, and it does not count unknown spend as zero. With <code>--max-cost-usd</code> on such a route, the campaign stops as <code>budget-unenforceable</code> unless you also pass <code>--allow-unpriced</code>.</p>
+<h2 id="audit-it-and-take-the-change">Audit it and take the change</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 4"><code class="language-sh">clio-coder research report r20261112-192812-1d5d
+git diff HEAD clio/research/r20261112-192812-1d5d</code></pre></div>
+<p><code>report</code> regrades the A/A check and every iteration from the stored samples with the recorded seed. In the recorded session each line ended <code>agrees with the journal</code>, and the command exited 0. It exits 1 when a grade disagrees.</p>
+<p>The result lives on the branch <code>clio/research/&lt;id&gt;</code>, and your checkout is never touched. Here the branch replaced an insertion sort with <code>sorted()</code>, stopped <code>variance</code> from recomputing the mean for every element, and used <code>sum()</code> for the mean. Review the diff and merge it yourself.</p>
+<h2 id="compare-answers-blind">Compare answers blind</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 5"><code class="language-sh">clio-coder arena run --suite speed --check correct \
+  --contender litellm/qwen3.8-27b --contender litellm/qwen3.8-27b \
+  -- &quot;Make summary() in stats.py faster without changing any answer. Keep the change minimal.&quot;</code></pre></div>
+<p>A contender is <code>&lt;target&gt;/&lt;model&gt;</code>. Each one runs as a normal <code>clio-coder run</code> in its own worktree from <code>HEAD</code>, and <code>--check</code> runs the named check on each result. Naming the same model twice is an A/A match: it shows how much two runs of one model differ before you read anything into a difference between two models.</p>
+<p>To name your own contenders, <code>clio-coder targets</code> lists each target id with its model, a local server&#39;s target included.</p>
+<div class="guide-compare"><div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th></th>
+<th>Contender A</th>
+<th>Contender B</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Change</td>
+<td>One line: <code>variance</code> reuses the mean it already computed</td>
+<td>Two edits: the same fix, and <code>sorted()</code> for the median</td>
+</tr>
+<tr>
+<td>Diff</td>
+<td><code>+1 -1</code></td>
+<td><code>+2 -7</code></td>
+</tr>
+<tr>
+<td><code>correct</code> check</td>
+<td>Pass, every answer bit-identical</td>
+<td>Pass, every answer bit-identical</td>
+</tr>
+<tr>
+<td>Its own timing claim</td>
+<td>155 ms to 69 ms</td>
+<td>176 ms to 0.465 ms</td>
+</tr>
+</tbody></table></div>
+</div><p>One model, one prompt and one starting commit gave two different readings of &quot;keep the change minimal&quot;. That spread is the noise any model comparison has to beat.</p>
+<h2 id="vote-then-reveal">Vote, then reveal</h2>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 6"><code class="language-sh">clio-coder arena show 20261112-193135-2727
+clio-coder arena vote 20261112-193135-2727 B --note &quot;both exact; B removes the quadratic sort too, still a small diff&quot;
+clio-coder arena show 20261112-193135-2727 --reveal
+clio-coder arena standings --suite speed</code></pre></div>
+<p>Before a vote, <code>show</code> lists A and B in a seeded random order and hides the target, model, duration, tokens and cost. <code>--reveal</code> before a vote is refused. CLIO Coder never grades a contender; the vote is yours, and so is the note.</p>
+<section class="guide-result"><p class="eyebrow"><span class="chapter">What the recorded session printed</span></p><div class="code-block"><pre tabindex="0" aria-label="Code example 7"><code class="language-text">recorded B for match 20261112-193135-2727; arena show 20261112-193135-2727 reveals who is who</code></pre></div>
+<p>After the reveal, <code>standings</code> printed:</p>
+<div class="code-block"><pre tabindex="0" aria-label="Code example 8"><code class="language-text">no voted matches yet (1 recorded)</code></pre></div>
+</section><p>That is the inconclusive result, reported as it is. A match that pits a model against itself says nothing about the model, so standings skip it. To rank models, run matches with two or more different contenders. A rating appears once a model has 5 votes, and one vote is one person&#39;s judgment on one prompt.</p>
+<section class="guide-limits"><p class="eyebrow"><span class="chapter">Boundaries</span></p><ul>
+<li>A campaign is only as good as its checks. A benchmark that measures the wrong thing will be optimized anyway.</li>
+<li>The <code>correct</code> gate checks one holdout input. Iteration answers that pass it can still differ elsewhere.</li>
+<li>Research runs one candidate per iteration and optimizes one number at a time.</li>
+<li>A single vote, and a single A/A match, are anecdotes. Standings mean something only after many matches with different contenders.</li>
+</ul>
+</section><nav class="guide-next" aria-label="Next steps"><ul>
+<li><a href="/tutorials/work-from-a-laptop-with-remote-workers.html">Work from a laptop with remote workers <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/docs/guide/research-and-arena.html">Research campaigns and the arena <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+<li><a href="/tutorials/pre-register-a-benchmark.html">Pre-register a benchmark <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></article><aside class="docs-toc guide-toc" aria-label="On this page"><h2>On this page</h2><a href="#before-you-start">Before you start</a>
+<a href="#declare-what-to-measure-and-what-must-not-break">Declare what to measure and what must not break</a>
+<a href="#run-a-short-campaign">Run a short campaign</a>
+<a href="#read-the-result-line-by-line">Read the result line by line</a>
+<a href="#audit-it-and-take-the-change">Audit it and take the change</a>
+<a href="#compare-answers-blind">Compare answers blind</a>
+<a href="#vote-then-reveal">Vote, then reveal</a></aside></div><div class="tutorial-end"><p class="caption">By The CLIO Coder team · CLIO Coder</p><a class="text-link" href="/docs.html">Continue with the documentation <span class="arrow arrow-forward" aria-hidden="true">→</span></a></div></main>
+<footer class="colophon page">
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
+</body></html>

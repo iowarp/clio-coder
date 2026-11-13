@@ -7,7 +7,7 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
 - Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
 - Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
-- Current release: v0.7.0. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+- Current release: v0.8.0. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
 
 ## Start
 
@@ -19,12 +19,15 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 
 - [Commands and shortcuts](https://coder.iowarp.ai/docs/guide/commands-and-modes.html): Navigate the terminal, choose models, and control a session.
 - [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html): Read, search, edit, and run commands with CLIO Coder's repository tools.
+- [Sandbox and safety](https://coder.iowarp.ai/docs/guide/sandbox-and-safety.html): What a sandboxed command may do, what it hides, and when CLIO Coder asks you.
 - [Save and resume work](https://coder.iowarp.ai/docs/guide/context-continuity.html): Resume conversations, manage context, and prepare a handoff.
 - [Memory and lessons](https://coder.iowarp.ai/docs/guide/proactive-memory.html): See what CLIO Coder remembers, approve lessons, or turn memory off.
 - [Files and terminal panes](https://coder.iowarp.ai/docs/guide/panes-and-files.html): Attach files and open companion terminal panes.
 - [The desktop app](https://coder.iowarp.ai/docs/guide/gui.html): Open the desktop alpha, keep tasks in one window, and read the Session column.
 - [Require project checks](https://coder.iowarp.ai/docs/guide/quality-policy.html): Choose the declared checks a change requires and inspect verification freshness.
 - [Climb a metric, compare models](https://coder.iowarp.ai/docs/guide/research-and-arena.html): Improve a measured number with verified research campaigns, and compare models blind in the arena.
+- [Keep results in the store](https://coder.iowarp.ai/docs/guide/store.html): Keep datasets and results outside the working tree, with a record of where each came from.
+- [Automate with clio-coder run](https://coder.iowarp.ai/docs/guide/exit-codes-and-output.html): Run one task from a script or CI job, read its exit code, and parse its JSON output.
 - [Semantic context](https://coder.iowarp.ai/docs/guide/semantic-context.html): Search your project by meaning with a local embedding route.
 - [Built-in and custom agents](https://coder.iowarp.ai/docs/guide/built-in-agents.html): See the agents you can dispatch and add your own.
 
@@ -45,13 +48,14 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - [Environment essentials](https://coder.iowarp.ai/docs/guide/environment-variables.html): Use directory overrides and existing provider credentials when needed.
 - [System One decision models](https://coder.iowarp.ai/docs/guide/system-one.html): Bring a decision model, name a route, and read its limits.
 - [Information flow](https://coder.iowarp.ai/docs/guide/information-flow.html): Keep named files away from destinations you did not choose.
+- [Glossary](https://coder.iowarp.ai/docs/guide/glossary.html): Plain-language meanings of the words CLIO Coder uses, from target to worktree.
 
 ## Tutorials
 
 - [Your first session with CLIO Coder](https://coder.iowarp.ai/tutorials/first-session.html): Connect a model, open a repository, and ask CLIO Coder to explain how it builds and runs its tests.
 - [Desktop or terminal: find your workspace](https://coder.iowarp.ai/tutorials/desktop-and-terminal.html): See both interfaces, learn how to launch them, and choose where to start your next coding session.
 - [Let CLIO Coder work without watching every call](https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html): Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.
-- [Run a playbook and land the result](https://coder.iowarp.ai/tutorials/run-a-playbook-and-land-it.html): Run the builtin sdlc playbook on one task, watch it work, and land the branch it keeps after you preview the change.
+- [Run a playbook from plan to commit](https://coder.iowarp.ai/tutorials/run-a-playbook-and-land-it.html): Run the builtin sdlc playbook on one task, watch it work, and read the three commits it makes on your branch.
 - [Run it unattended within limits](https://coder.iowarp.ai/tutorials/run-it-unattended-within-limits.html): Start a headless run with a cost ceiling and a timeout, ask read-only questions, schedule turns, and know what stops each one.
 - [See what a session cost and what a run did](https://coder.iowarp.ai/tutorials/see-what-a-session-cost-and-what-a-run-did.html): Read session cost and stop reasons from local journals, verify a sealed record, and prepare an archive that uploads nothing.
 - [A numerical change, checked with CLIO Coder](https://coder.iowarp.ai/tutorials/temperature-calibration.html): Follow a temperature-conversion example through a floating-point test failure, a correction, and recorded verification.
@@ -63,12 +67,18 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - [Work from a laptop with remote workers](https://coder.iowarp.ai/tutorials/work-from-a-laptop-with-remote-workers.html): Use a local CLIO Coder session to coordinate SSH workers when your machines share the required project path, runtime version, and approved access.
 - [Write an extension with declared capabilities](https://coder.iowarp.ai/tutorials/write-an-extension-with-declared-capabilities.html): Scaffold, test, and install a small extension, and see exactly what approving its capabilities covers.
 - [Diffusion models in the terminal](https://coder.iowarp.ai/tutorials/diffusion-models.html): Connect Inception's Mercury models for chat and workers, and watch an answer refine as a whole instead of arriving token by token.
-- [Panes and docks: files, workers, and music](https://coder.iowarp.ai/tutorials/panes-and-docks.html): Inside Herdr, show and hide a file browser, a live worker dashboard, and a focus radio beside the conversation with one key each.
+- [Panes and docks: files, workers, and music](https://coder.iowarp.ai/tutorials/panes-and-docks.html): Show and hide a file browser, a live worker dashboard, and a focus radio beside the terminal conversation with one key each.
 - [Keep named files with the models you chose](https://coder.iowarp.ai/tutorials/information-flow-rules.html): Declare which paths and tool results may reach which model targets, approve the policy, and see a request to any other destination refused.
 - [Search by meaning and record worker runs](https://coder.iowarp.ai/tutorials/semantic-context-and-recordings.html): Index code, memory, and experiment folders with a local embedding model, and attach a redacted terminal recording to a worker's evidence.
 - [Run CLIO Coder on a local model](https://coder.iowarp.ai/tutorials/run-on-a-local-model.html): Connect a local server with no account or key, check what CLIO Coder learned about it, and see what else to check if code must stay on your machine.
-- [Submit a Slurm job through CLIO Coder](https://coder.iowarp.ai/tutorials/submit-a-slurm-job.html): Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with your approval before it reaches the scheduler.
+- [Submit a Slurm job through CLIO Coder](https://coder.iowarp.ai/tutorials/submit-a-slurm-job.html): Declare the clio-kit Slurm server, install the skill, and let the agent submit and follow a job, with a confirmation before it reaches the scheduler.
 - [Pre-register a benchmark before you measure](https://coder.iowarp.ai/tutorials/pre-register-a-benchmark.html): Use the experiment-protocol skill to lock thresholds, tolerances, and verdict conditions into a contract you commit before any result exists.
+- [Keep results outside the tree with the project store](https://coder.iowarp.ai/tutorials/keep-results-in-the-project-store.html): Store a result with a note, check it for drift, read it from a script, and let a worker write into one granted tag.
+- [Set up a lab from one setup file](https://coder.iowarp.ai/tutorials/set-up-a-lab-from-one-setup-file.html): Write one YAML file that connects every lab member to your model gateway, check what it may carry, and test the route.
+- [Share a folder with a teammate or a second terminal](https://coder.iowarp.ai/tutorials/share-a-folder-with-a-teammate-or-a-second-terminal.html): Run two sessions in one project, keep each person's state private, and commit project settings that can only make CLIO Coder stricter.
+- [Run a research campaign and a blind arena](https://coder.iowarp.ai/tutorials/run-a-research-campaign-and-a-blind-arena.html): Keep a speed-up only when a measurement proves it and the answers still match, then compare model answers without knowing which model wrote them.
+- [Report a problem without leaking your machine](https://coder.iowarp.ai/tutorials/report-a-problem-without-leaking-your-machine.html): Draft a bug report, read the exact text with your paths, names and keys masked, choose how it leaves, and share a diagnostic bundle only if you want to.
+- [Ask several agents at once](https://coder.iowarp.ai/tutorials/ask-several-agents-at-once.html): Poll two to five agents on one question and read the vote, or give a council roster one task and let a judge write a single answer.
 
 ## Research
 
@@ -77,7 +87,7 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - [Does agent memory change outcomes?](https://coder.iowarp.ai/research/proactive-memory.html): Whether lessons change what an agent does, whether self-approval is safe, and a first experiment on one repeated mistake.
 - [What does an agent lose when its context is reduced?](https://coder.iowarp.ai/research/context-and-retrieval.html): Fidelity of summaries, the cost of reduction, and search by meaning, with a first experiment that counts how many planted facts survive.
 - [When do several agents or small models pay off?](https://coder.iowarp.ai/research/fleets-and-local-models.html): Compete, council, heterogeneous fleets and local models, with no comparative numbers yet and a first experiment on one seeded bug.
-- [What would make a scientist trust an agent's change?](https://coder.iowarp.ai/research/scientific-and-hpc-workflows.html): Pre-registered checks, validated modernization and scheduler use on scientific code, with a first experiment on catching a numerical error.
+- [What would make a scientist trust an agent's change?](https://coder.iowarp.ai/research/scientific-and-hpc-workflows.html): Pre-registered checks, validated modernization, a project store and scheduler use on scientific code, with a first experiment on catching a numerical error.
 
 ## Optional
 

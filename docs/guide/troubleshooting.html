@@ -1,16 +1,40 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+qjUlTEMC52KLUpmdTa5eE+/Q+ZLfhs5Z6mYuXZRUlw=' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'"><meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Troubleshooting · CLIO Coder docs</title><meta name="description" content="Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes."><meta name="color-scheme" content="dark light"><meta name="clio-default-theme" content="dark"><meta name="theme-color" content="#000000">
-<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/troubleshooting.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png" sizes="180x180">
-<link rel="preload" href="/assets/fonts/plex-sans.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/site.css"><script src="/js/theme.js"></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/troubleshooting.html"><meta property="og:title" content="Troubleshooting · CLIO Coder docs"><meta property="og:description" content="Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-09-26T01:31:06-05:00"><meta property="article:modified_time" content="2026-11-12T11:00:06-06:00">
+<link rel="canonical" href="https://coder.iowarp.ai/docs/guide/troubleshooting.html"><link rel="manifest" href="/site.webmanifest"><link rel="icon" href="/assets/responsive/clio-icon-32.png?v=10f16aa3ac" type="image/png" sizes="32x32"><link rel="apple-touch-icon" href="/assets/responsive/clio-icon-180.png?v=264f9d1429" sizes="180x180">
+<link rel="preload" href="/assets/fonts/plex-sans.woff2?v=e2291e842c" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/news-normal-500.woff2?v=62981321d9" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/css/site.css?v=d72e9e4540"><script>// Runs before first paint; explicit choices take priority over the sanctioned default.
+(() => {
+	const defaultTheme = document.querySelector('meta[name="clio-default-theme"]')?.content ?? "dark";
+	const requested = new URLSearchParams(location.search).get("theme");
+	let saved;
+	try {
+		saved = localStorage.getItem("clio-theme");
+	} catch {
+		/* Storage is optional. */
+	}
+	const theme = ["light", "dark"].includes(requested)
+		? requested
+		: ["light", "dark"].includes(saved)
+			? saved
+			: defaultTheme === "system"
+				? matchMedia("(prefers-color-scheme: light)").matches
+					? "light"
+					: "dark"
+				: defaultTheme === "light"
+					? "light"
+					: "dark";
+	document.documentElement.dataset.theme = theme;
+	const meta = document.querySelector('meta[name="theme-color"]');
+	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+})();</script>
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/docs/guide/troubleshooting.html"><meta property="og:title" content="Troubleshooting · CLIO Coder docs"><meta property="og:description" content="Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="CLIO Coder"><meta property="article:published_time" content="2026-09-26T01:31:06-05:00"><meta property="article:modified_time" content="2026-11-12T17:09:46-06:00">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Troubleshooting · CLIO Coder docs"><meta name="twitter:description" content="Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/gui-task.png"><meta name="twitter:image:alt" content="CLIO Coder">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#page","name":"Troubleshooting · CLIO Coder docs","description":"Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes.","url":"https://coder.iowarp.ai/docs/guide/troubleshooting.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-09-26T01:31:06-05:00","dateModified":"2026-11-12T11:00:06-06:00","headline":"Troubleshooting","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/troubleshooting.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Troubleshooting","item":"https://coder.iowarp.ai/docs/guide/troubleshooting.html"}]}]}</script></head><body>
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"TechArticle","@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#page","name":"Troubleshooting · CLIO Coder docs","description":"Resolve common CLIO Coder problems: unavailable connections, settings that fail to load, missing terminal shortcuts, stopped work, and exit codes.","url":"https://coder.iowarp.ai/docs/guide/troubleshooting.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/gui-task.png","width":1200,"height":630},"datePublished":"2026-09-26T01:31:06-05:00","dateModified":"2026-11-12T17:09:46-06:00","headline":"Troubleshooting","mainEntityOfPage":"https://coder.iowarp.ai/docs/guide/troubleshooting.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/gui-task.png"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/docs/guide/troubleshooting.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Docs","item":"https://coder.iowarp.ai/docs.html"},{"@type":"ListItem","position":3,"name":"Troubleshooting","item":"https://coder.iowarp.ai/docs/guide/troubleshooting.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
-    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
+    <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
     <nav class="nav" aria-label="Primary"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a></nav>
     <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html" aria-current="page">Docs</a><a href="/learn.html">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
   </div>
@@ -21,12 +45,15 @@
 <a href="/docs/guide/configuration-and-targets.html">Connect a model</a></details>
 <details class="doc-nav-group"><summary>Everyday use</summary><a href="/docs/guide/commands-and-modes.html">Commands and shortcuts</a>
 <a href="/docs/guide/tool-usage.html">Tools and permissions</a>
+<a href="/docs/guide/sandbox-and-safety.html">Sandbox and safety</a>
 <a href="/docs/guide/context-continuity.html">Save and resume work</a>
 <a href="/docs/guide/proactive-memory.html">Memory and lessons</a>
 <a href="/docs/guide/panes-and-files.html">Files and terminal panes</a>
 <a href="/docs/guide/gui.html">The desktop app</a>
 <a href="/docs/guide/quality-policy.html">Require project checks</a>
 <a href="/docs/guide/research-and-arena.html">Climb a metric, compare models</a>
+<a href="/docs/guide/store.html">Keep results in the store</a>
+<a href="/docs/guide/exit-codes-and-output.html">Automate with clio-coder run</a>
 <a href="/docs/guide/semantic-context.html">Semantic context</a>
 <a href="/docs/guide/built-in-agents.html">Built-in and custom agents</a></details>
 <details class="doc-nav-group"><summary>Extend CLIO Coder</summary><a href="/docs/guide/fleet-dispatch.html">Workers and fleets</a>
@@ -40,13 +67,50 @@
 <a href="/docs/guide/configuration-reference.html">Configuration essentials</a>
 <a href="/docs/guide/environment-variables.html">Environment essentials</a>
 <a href="/docs/guide/system-one.html">System One decision models</a>
-<a href="/docs/guide/information-flow.html">Information flow</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Troubleshooting</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/guide/troubleshooting.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/troubleshooting.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#a-connection-is-unavailable">A connection is unavailable</a>
+<a href="/docs/guide/information-flow.html">Information flow</a>
+<a href="/docs/guide/glossary.html">Glossary</a></details></div></div></details></aside>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Troubleshooting</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/guide/troubleshooting.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/troubleshooting.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#first-problems">First problems</a>
+<a href="#a-connection-is-unavailable">A connection is unavailable</a>
 <a href="#settings-fail-to-load">Settings fail to load</a>
 <a href="#a-terminal-shortcut-does-not-arrive">A terminal shortcut does not arrive</a>
 <a href="#work-stopped-or-a-check-failed">Work stopped or a check failed</a>
-<a href="#exit-codes">Exit codes</a></details><h1 id="troubleshooting">Troubleshooting</h1>
+<a href="#report-a-problem-to-the-maintainers">Report a problem to the maintainers</a>
+<a href="#exit-codes">Exit codes</a>
+<a href="#related-tutorials">Related tutorials</a></details><h1 id="troubleshooting">Troubleshooting</h1>
 <p>Resolve common connection, terminal, and runtime problems.</p>
+<h2 id="first-problems">First problems</h2>
+<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<thead>
+<tr>
+<th>You see</th>
+<th>Do this</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>clio-coder: command not found</code> after installing</td>
+<td>Open a new shell, or run the <code>export PATH=...</code> line the installer printed last.</td>
+</tr>
+<tr>
+<td><code>&lt;target&gt; at &lt;url&gt; did not answer (...)</code></td>
+<td>Start the model server, or change the address with <code>/config</code>.</td>
+</tr>
+<tr>
+<td><code>&lt;provider&gt; has no key or sign-in stored.</code> or HTTP 401</td>
+<td>Run the <code>clio-coder auth login</code> command it names, or fix the key in <code>/config</code>.</td>
+</tr>
+<tr>
+<td><code>... reports no tool support</code></td>
+<td>Pick a model that calls tools with <code>/model</code>.</td>
+</tr>
+<tr>
+<td><code>shell sandbox</code> is <code>WARN</code> in doctor</td>
+<td>On Linux, install <code>bubblewrap</code>. CLIO Coder still works; more commands ask first.</td>
+</tr>
+<tr>
+<td>A call was denied because nobody answered</td>
+<td>Name the action in your request, or set <code>safety.unattendedAfterSeconds: 0</code> to wait for you.</td>
+</tr>
+</tbody></table></div>
 <h2 id="a-connection-is-unavailable">A connection is unavailable</h2>
 <p>Start with these diagnostics:</p>
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder doctor
@@ -58,13 +122,18 @@ clio-coder targets --probe</code></pre></div>
 <p>Use <a href="/docs/guide/configuration-reference.html">Configuration essentials</a> to find the settings layers and the full reference.</p>
 <h2 id="a-terminal-shortcut-does-not-arrive">A terminal shortcut does not arrive</h2>
 <p>Open <strong>Ctrl+G</strong> and choose the corresponding menu action. A terminal or multiplexer may intercept Alt shortcuts. <strong>Ctrl+J</strong> is the portable newline; <code>/help</code> shows your effective bindings.</p>
-<p>If a files or companion pane is unavailable, check that CLIO Coder is running inside a reachable Herdr session and that the requested tools are installed. See <a href="/docs/guide/panes-and-files.html">files and terminal panes</a>.</p>
+<p>If a files or companion pane is unavailable, run <code>clio-coder doctor</code> and read its <code>panes</code> and <code>external tool</code> rows. <code>clio-coder panes install</code> adds a missing pane host, and <code>clio-coder tools install yazi</code> adds the file browser. See <a href="/docs/guide/panes-and-files.html">files and terminal panes</a>.</p>
 <h2 id="work-stopped-or-a-check-failed">Work stopped or a check failed</h2>
 <p>Read the recorded command and output in the desktop&#39;s <strong>Artifacts</strong> card or terminal <code>/view</code>. A failed test can point to a useful next task; ask CLIO Coder to explain the failure before changing the test&#39;s acceptance criteria.</p>
-<p>For an interrupted context handoff, inspect <code>/context</code> and follow <a href="/docs/guide/context-continuity.html">save and resume work</a>. Include the installed version and relevant doctor findings when reporting a persistent issue; keep credentials and private project content out of public reports.</p>
+<p>For an interrupted context handoff, inspect <code>/context</code> and follow <a href="/docs/guide/context-continuity.html">save and resume work</a>.</p>
+<h2 id="report-a-problem-to-the-maintainers">Report a problem to the maintainers</h2>
+<p><code>/report</code> in the terminal and <code>clio-coder report</code> in a shell draft a bug report, a feature request or a question. <code>--last</code> adds what CLIO Coder observed in the newest session in this folder.</p>
+<div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 2"><code class="language-sh">clio-coder report bug --title &quot;footer flickers on resize&quot; --last --dry-run</code></pre></div>
+<p>You review the draft exactly as it will be posted. Local paths, user, host, project and branch names, e-mail and IP addresses, and secrets are masked first, and a draft that still holds this machine&#39;s names is refused. Nothing is sent until you press <code>s</code> in the terminal, answer the prompt in a shell, or pass <code>--yes</code>. <code>--dry-run</code> stops after the preview.</p>
+<p>With a signed-in <code>gh</code>, CLIO Coder searches GitHub for the same problem, then posts a public issue or discussion under your account. Without <code>gh</code> it opens a prefilled form in the browser. A diagnostic bundle is opt-in, encrypted for the maintainers, and shared only from your own shell. CLIO Coder never sends anything on its own.</p>
 <h2 id="exit-codes">Exit codes</h2>
 <p>Every <code>clio-coder</code> command uses the same exit codes, so a script can tell why a run stopped:</p>
-<div class="doc-table" role="region" aria-label="Reference table 1" tabindex="0"><table>
+<div class="doc-table" role="region" aria-label="Reference table 2" tabindex="0"><table>
 <thead>
 <tr>
 <th>Code</th>
@@ -100,19 +169,30 @@ clio-coder targets --probe</code></pre></div>
 <td><code>clio-coder run --timeout</code> elapsed.</td>
 </tr>
 <tr>
+<td><code>141</code></td>
+<td>The reader of a <code>clio-coder run</code> stdout closed, as in <code>clio-coder run ... | head -1</code>.</td>
+</tr>
+<tr>
 <td><code>129</code>, <code>130</code>, <code>143</code></td>
 <td>Stopped by SIGHUP, SIGINT, or SIGTERM.</td>
 </tr>
 </tbody></table></div>
-<p>A few commands, such as <code>fleet events</code>, <code>telemetry verify</code>, <code>research start</code>, and <code>arena run</code>, give small codes their own meaning; the full guide lists them. In a headless <code>clio-coder run</code>, the answer or JSON stream goes to stdout, while progress and diagnostics go to stderr. The <a href="https://github.com/iowarp/clio-coder/blob/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54/docs/guide/exit-codes-and-output.md">exit codes and output reference</a> has the details.</p>
-</div><div class="doc-end"><span>Updated <time datetime="2026-11-12T11:00:06-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-version="0.7.0" data-source-ref="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54" data-source-commit="7e9b18b7769f4e750a9ba71e7cfdbaabe111de54">Guide to v0.7.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
-  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#a-connection-is-unavailable">A connection is unavailable</a>
+<p>A few commands, such as <code>fleet events</code>, <code>telemetry verify</code>, <code>research start</code>, and <code>arena run</code>, give small codes their own meaning; the full guide lists them. In a headless <code>clio-coder run</code>, the answer or JSON stream goes to stdout, while progress and diagnostics go to stderr. <a href="/docs/guide/exit-codes-and-output.html">Automate with clio-coder run</a> has the details.</p>
+<h2 id="related-tutorials">Related tutorials</h2>
+<nav class="guide-next" aria-label="Related tutorials"><ul>
+<li><a href="/tutorials/report-a-problem-without-leaking-your-machine.html">Report a problem without leaking your machine <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
+</ul>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf" data-source-version="0.8.0" data-source-ref="beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf" data-source-commit="beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf">Guide to v0.8.0</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+  <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#first-problems">First problems</a>
+<a href="#a-connection-is-unavailable">A connection is unavailable</a>
 <a href="#settings-fail-to-load">Settings fail to load</a>
 <a href="#a-terminal-shortcut-does-not-arrive">A terminal shortcut does not arrive</a>
 <a href="#work-stopped-or-a-check-failed">Work stopped or a check failed</a>
-<a href="#exit-codes">Exit codes</a></aside>
+<a href="#report-a-problem-to-the-maintainers">Report a problem to the maintainers</a>
+<a href="#exit-codes">Exit codes</a>
+<a href="#related-tutorials">Related tutorials</a></aside>
 </main><footer class="colophon page">
-  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp 32w, /assets/responsive/clio-mark-64.webp 64w, /assets/responsive/clio-mark-128.webp 128w, /assets/brand/clio-mark.webp 466w" sizes="36px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
+  <div class="footer-top"><a class="brand" href="/"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="32" height="35" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a><p>An open-source coding agent for scientific computing and HPC.</p></div>
   <div class="footer-bottom"><p>Copyright 2026 iowarp.ai</p><div><a href="https://grc.iit.edu">Developed by Gnosis Research Center</a><a href="https://github.com/iowarp/clio-coder/blob/main/LICENSE">Apache 2.0</a><a href="https://github.com/iowarp/clio-coder/blob/main/NOTICE">Notices</a><a href="https://github.com/iowarp/clio-coder/issues">Feedback <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></div>
-</footer><script src="/js/site.js" defer></script><script src="/js/docs.js" defer></script>
+</footer><script src="/js/site.js?v=6039e2153b" defer></script><script src="/js/docs.js?v=0694797257" defer></script>
 </body></html>
