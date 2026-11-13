@@ -192,6 +192,9 @@ function prepareHome(dir, scenario) {
 		`root:x:0:0:root:/root:/bin/sh\nresearcher:x:${uid}:${gid}:Researcher:/home/researcher:/bin/bash\n`,
 	);
 	writeFileSync(join(dir, "group"), `root:x:0:\nresearcher:x:${gid}:\n`);
+	// npm 12's "new major version" notice reached the 0.8.0 takes through the sandboxed bash despite
+	// NPM_CONFIG_UPDATE_NOTIFIER; a home .npmrc without a token is not masked, so npm reads this one.
+	writeFileSync(join(home, ".npmrc"), "update-notifier=false\nfund=false\n");
 	if (scenario.privateNet) mkdirSync(join(dir, "net"));
 	if (scenario.repo) seedRepo(join(home, "projects", scenario.repo), scenario.fixture ?? scenario.repo, scenario);
 	// After the repository, so a file such as an untracked .env can sit inside it.
