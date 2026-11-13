@@ -67,7 +67,7 @@
 			],
 			"capture": {
 				"label": "Doctor",
-				"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
+				"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
 				"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each."
 			},
 			"cols": 120
@@ -157,7 +157,7 @@
 			],
 			"capture": {
 				"label": "First launch",
-				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
+				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends while the agent plans its first reads of the repository.",
 				"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt."
 			},
 			"env": {
@@ -241,21 +241,21 @@
 			],
 			"capture": {
 				"label": "First task",
-				"alt": "Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted.",
+				"alt": "Terminal recording of a first task in CLIO Coder 0.8.0: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and that negative Kelvin is still rejected.",
 				"caption": "A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking."
 			},
 			"shots": {
 				"tui-verify": {
 					"image": "assets/tui-verify.webp",
 					"label": "Verify",
-					"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, rereads the file, and runs the declared test check through verify with exit 0.",
+					"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, and runs the declared test check through verify with exit 0.",
 					"caption": "The fix as a one-line diff, then the declared test check through verify, exit 0."
 				},
 				"tui-verify-result": {
 					"image": "assets/guides/tui-verify-result.webp",
 					"label": "Result",
-					"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0 at line 21 of temperature.mjs, the change is one character, all seven tests now pass where six did before, and the fix is uncommitted on main.",
-					"caption": "The report after the check: the cause, the change, the test result, and what was left uncommitted."
+					"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0, which rejected 0 K; changing it to kelvin < 0 at line 21 of temperature.mjs keeps negative Kelvin rejected, and all seven tests now pass.",
+					"caption": "The report after the check: the cause, the change, and the test result."
 				}
 			},
 			"env": {
@@ -335,7 +335,7 @@
 			],
 			"capture": {
 				"label": "Unattended run",
-				"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 3 allowed, 0 blocked and 0 permission requests.",
+				"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 1 allowed, 0 blocked and 0 permission requests.",
 				"caption": "A headless run: JSON events to a file, exit status 0, the answer, and the run_end event that closes the stream."
 			}
 		},
@@ -419,7 +419,7 @@
 			],
 			"capture": {
 				"label": "Secret refused",
-				"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's command to list the file's keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
+				"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
 				"caption": "The project's .env is refused outright; confirmation cannot override the block."
 			}
 		},

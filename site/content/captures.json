@@ -11,9 +11,9 @@
 			"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.",
 			"caption": "The terminal at start, with the project, its Git state, and the selected model.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: interface: { demo: true, outputDetail: detailed }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-boot\" marker, rows 3-24, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: interface: { demo: true, outputDetail: detailed }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-boot\" marker, rows 3-24, rendered by the site's player at 2x."
 		},
 		"tui-verify": {
 			"image": "assets/tui-verify.webp",
@@ -21,12 +21,12 @@
 			"width": 2268,
 			"height": 1548,
 			"label": "Verify",
-			"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, rereads the file, and runs the declared test check through verify with exit 0.",
+			"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, and runs the declared test check through verify with exit 0.",
 			"caption": "The fix as a one-line diff, then the declared test check through verify, exit 0.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify\" marker, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify\" marker, rendered by the site's player at 2x."
 		},
 		"tui-verify-result": {
 			"image": "assets/guides/tui-verify-result.webp",
@@ -34,12 +34,12 @@
 			"width": 2268,
 			"height": 1548,
 			"label": "Result",
-			"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0 at line 21 of temperature.mjs, the change is one character, all seven tests now pass where six did before, and the fix is uncommitted on main.",
-			"caption": "The report after the check: the cause, the change, the test result, and what was left uncommitted.",
+			"alt": "Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0, which rejected 0 K; changing it to kelvin < 0 at line 21 of temperature.mjs keeps negative Kelvin rejected, and all seven tests now pass.",
+			"caption": "The report after the check: the cause, the change, and the test result.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify-result\" marker, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify-result\" marker, rendered by the site's player at 2x."
 		},
 		"tui-view-result": {
 			"image": "assets/guides/tui-view-result.webp",
@@ -50,9 +50,9 @@
 			"alt": "Terminal View dock with the session's records on the left and the checked test row selected; the preview shows check test, its working directory examples/temperature-calibration, exit 0, the test command, and the passing test lines.",
 			"caption": "/view: the recorded check, with its working directory, exit status and output.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-view-result\" marker, rows 26-43, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-view-result\" marker, rows 26-43, rendered by the site's player at 2x."
 		},
 		"tui-approval-effect": {
 			"image": "assets/guides/tui-approval-effect.webp",
@@ -63,9 +63,9 @@
 			"alt": "Terminal approval card for git push origin main at default autonomy: an outward-consequence header, the exact command, an effect row reading Publishes to origin, undo not guaranteed, the task that asked for it, the timeout notice, and the allow, deny and stop keys.",
 			"caption": "With the safety judge off, an outward command such as git push comes to you; the effect row says what it would change.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-approval-effect\" marker, rows 26-43, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-approval-effect\" marker, rows 26-43, rendered by the site's player at 2x."
 		},
 		"tui-context": {
 			"image": "assets/guides/tui-context.webp",
@@ -76,9 +76,9 @@
 			"alt": "Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 200,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
 			"caption": "/context: the probed window, tokens in use, and what fills them.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-context\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-context\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"tui-tree": {
 			"image": "assets/guides/tui-tree.webp",
@@ -102,9 +102,9 @@
 			"alt": "Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.",
 			"caption": "Settings: the model answering you, under Models.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-models\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-models\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"tui-settings-fleet": {
 			"image": "assets/guides/tui-settings-fleet.webp",
@@ -115,9 +115,9 @@
 			"alt": "Terminal Settings open on Workers with Add SSH node selected under Machines: automatic routing, the ready local node, Tailscale discovery, workers at once, and fleet retry and tool limits.",
 			"caption": "Settings: worker routing, machines, and limits under Workers.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-fleet\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-fleet\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"tui-configure-source": {
 			"image": "assets/guides/tui-configure-source.webp",
@@ -128,9 +128,9 @@
 			"alt": "Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind the first three and a path or https address for the setup file.",
 			"caption": "Guided setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-source) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. The sandbox has its own network namespace with only a loopback interface. Still at the \"tui-configure-source\" marker, rows 1-16, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-source) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. The sandbox has its own network namespace with only a loopback interface. Still at the \"tui-configure-source\" marker, rows 1-16, rendered by the site's player at 2x."
 		},
 		"tui-library-skill-tdd": {
 			"image": "assets/guides/tui-library-skill-tdd.webp",
@@ -141,9 +141,9 @@
 			"alt": "Terminal Library on the Skills tab filtered to tdd: the bundled skill, not installed in user scope, with its version, what it does, and the key to review an install.",
 			"caption": "The Library in Browse mode, filtered to the bundled tdd skill.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-library-skill-tdd\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-library-skill-tdd\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"cli-library-dry-run": {
 			"image": "assets/guides/cli-library-dry-run.webp",
@@ -154,9 +154,9 @@
 			"alt": "Terminal: the tdd skill install as a dry run prints one planned-install line; the --json form then shows the full plan with the project destination under .clio-coder/plugins, the bundled source with its sha256, valid content, and no required, missing or inactive dependencies.",
 			"caption": "A dry run plans the install without writing; the --json form carries the full plan.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-library-dry-run\" marker, rows 1-61, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-library-dry-run\" marker, rows 1-61, rendered by the site's player at 2x."
 		},
 		"tui-library-installed": {
 			"image": "assets/guides/tui-library-installed.webp",
@@ -167,9 +167,9 @@
 			"alt": "Terminal Library Installed view at project scope with the tdd skill available and trusted: how to use it with /skill tdd, its kind, source and origin, and the keys to disable, update or remove it.",
 			"caption": "Installed at project scope: how to use the skill and where it came from.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-library-installed\" marker, rows 5-22, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-library-installed\" marker, rows 5-22, rendered by the site's player at 2x."
 		},
 		"cli-library-list-plugin": {
 			"image": "assets/guides/cli-library-list-plugin.webp",
@@ -180,9 +180,9 @@
 			"alt": "Terminal listing the six bundled plugins, hpc, life-science, literature, materio, science-data and wtfp, each with its version, available but not installed, and a description of what it adds.",
 			"caption": "The bundled plugins, listed without installing them.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-library-list-plugin\" marker, rows 1-21, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-library-list-plugin\" marker, rows 1-21, rendered by the site's player at 2x."
 		},
 		"tui-interop": {
 			"image": "assets/guides/tui-interop.webp",
@@ -193,9 +193,9 @@
 			"alt": "Terminal Local coding agents view: Claude Code, Codex, OpenCode and GitHub Copilot proposed for connection and not configured, their inventories with nothing to adopt, Antigravity CLI not installed, and the configuration entry that connecting Claude Code would append.",
 			"caption": "/library interop lists the coding agents CLIO Coder detected and the entry that connecting would add.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-interop\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-interop\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"cli-interop-inspect": {
 			"image": "assets/guides/cli-interop-inspect.webp",
@@ -206,9 +206,9 @@
 			"alt": "Terminal interop inspect report: Claude Code, Codex, OpenCode and GitHub Copilot present with ACP not configured, each with its ACP, headless and pane status and the next step, no inventory found, and Antigravity CLI absent.",
 			"caption": "interop inspect: each coding agent CLIO Coder detected, how far it is wired, and the next step.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-interop-inspect\" marker, rows 1-31, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-interop-inspect\" marker, rows 1-31, rendered by the site's player at 2x."
 		},
 		"cli-doctor": {
 			"image": "assets/guides/cli-doctor.webp",
@@ -216,18 +216,18 @@
 			"width": 2268,
 			"height": 2108,
 			"label": "Doctor",
-			"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
+			"alt": "Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.",
 			"caption": "doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cli-doctor) in a fresh profile: home /home/researcher, host lab, 120x50 terminal, asciinema v2, idle capped at 1s. No model.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cli-doctor) in a fresh profile: home /home/researcher, host lab, 120x50 terminal, asciinema v2, idle capped at 1s. No model.",
 			"cast": "assets/casts/cli-doctor.cast",
 			"transcript": "assets/casts/cli-doctor.txt",
 			"cols": 120,
 			"rows": 50,
-			"duration": 7.5,
-			"posterAt": 6.357
+			"duration": 8.1,
+			"posterAt": 6.913
 		},
 		"gui-task": {
 			"image": "assets/gui-task.webp",
@@ -303,9 +303,9 @@
 			"alt": "Terminal: doctor --verbose filtered to its Slurm rows reports sbatch not on PATH, clio-kit OK with the slurm server, the slurm MCP server OK as declared and trusted in the user mcp.yaml, and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows the server with no recorded tool catalog, and mcp list --refresh lists its five tools: submit and cancel as execute, list, describe and cluster as read.",
 			"caption": "The setup checks on a host with no scheduler: the server is declared and trusted, its tools are listed, and doctor reports sbatch and squeue missing.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-slurm) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Host tools (uv, uvx) bound read-only. clio-kit 2.12.3 installed from PyPI with uv tool install and prepared with clio-kit mcp-server slurm --prepare before the shown commands; mcp.yaml as the guide gives it; sbatch and squeue absent. No job was submitted. Still at the \"cli-slurm-doctor\" marker, rows 1-19, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-slurm) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Host tools (uv, uvx) bound read-only. clio-kit 2.12.3 installed from PyPI with uv tool install and prepared with clio-kit mcp-server slurm --prepare before the shown commands; mcp.yaml as the guide gives it; sbatch and squeue absent. No job was submitted. Still at the \"cli-slurm-doctor\" marker, rows 1-19, rendered by the site's player at 2x."
 		},
 		"cli-playbook-graph": {
 			"image": "assets/guides/cli-playbook-graph.webp",
@@ -316,9 +316,9 @@
 			"alt": "Terminal output: playbook validate sdlc reports 8 declared steps, 6 code steps, 4 agents and 14 plan steps with the plan hash; playbook graph lists waves 1 to 14 with each step's kind, agent or command, and scope, then the suite and review loops.",
 			"caption": "validate runs the preflight and graph prints the compiled waves and loops, both without side effects.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-playbook-graph\" marker, rows 1-46, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-playbook-graph\" marker, rows 1-46, rendered by the site's player at 2x."
 		},
 		"cli-telemetry-session": {
 			"image": "assets/guides/cli-telemetry-session.webp",
@@ -342,9 +342,9 @@
 			"alt": "Terminal output: extensions init creates lint-status from the status template under .clio-coder/dev/extensions, validate prints its capability envelope with the status command, exec and net false, its SHA-256, and a passed registration check, and test reports one test passed and none failed.",
 			"caption": "Scaffold, validate and test an extension; validate prints the capability envelope you consent to.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-extension-validate\" marker, rows 1-53, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-extension-validate\" marker, rows 1-53, rendered by the site's player at 2x."
 		},
 		"cast-first-task": {
 			"image": "assets/guides/cast-first-task.webp",
@@ -352,18 +352,18 @@
 			"width": 2268,
 			"height": 1548,
 			"label": "First task",
-			"alt": "Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted.",
+			"alt": "Terminal recording of a first task in CLIO Coder 0.8.0: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and that negative Kelvin is still rejected.",
 			"caption": "A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-task) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
 			"cast": "assets/casts/cast-first-task.cast",
 			"transcript": "assets/casts/cast-first-task.txt",
 			"cols": 120,
 			"rows": 36,
-			"duration": 35,
-			"posterAt": 33.326
+			"duration": 26.5,
+			"posterAt": 24.644
 		},
 		"cast-headless-run": {
 			"image": "assets/guides/cast-headless-run.webp",
@@ -371,18 +371,18 @@
 			"width": 1908,
 			"height": 1308,
 			"label": "Unattended run",
-			"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 3 allowed, 0 blocked and 0 permission requests.",
+			"alt": "Terminal recording of clio-coder run --json writing its events to run.jsonl and exiting 0, jq printing the final answer that 6 of 7 tests pass with the absolute-zero test failing, and the last event, run_end, with outcome succeeded and safety decisions of 1 allowed, 0 blocked and 0 permission requests.",
 			"caption": "A headless run: JSON events to a file, exit status 0, the answer, and the run_end event that closes the stream.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-headless-run) in a fresh profile: home /home/researcher, host lab, 100x30 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-headless-run) in a fresh profile: home /home/researcher, host lab, 100x30 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
 			"cast": "assets/casts/cast-headless-run.cast",
 			"transcript": "assets/casts/cast-headless-run.txt",
 			"cols": 100,
 			"rows": 30,
-			"duration": 17.6,
-			"posterAt": 16.489
+			"duration": 17.9,
+			"posterAt": 16.738
 		},
 		"cast-sandbox": {
 			"image": "assets/guides/cast-sandbox.webp",
@@ -390,18 +390,18 @@
 			"width": 2268,
 			"height": 1548,
 			"label": "Secret refused",
-			"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's command to list the file's keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
+			"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
 			"caption": "The project's .env is refused outright; confirmation cannot override the block.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-sandbox) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-sandbox) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
 			"cast": "assets/casts/cast-sandbox.cast",
 			"transcript": "assets/casts/cast-sandbox.txt",
 			"cols": 120,
 			"rows": 36,
-			"duration": 27.5,
-			"posterAt": 20.501
+			"duration": 33.4,
+			"posterAt": 29.593
 		},
 		"cast-let-it-work": {
 			"image": "assets/guides/cast-let-it-work.webp",
@@ -412,15 +412,15 @@
 			"alt": "Terminal recording: clio-coder doctor's shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.",
 			"caption": "Doctor's sandbox row, a rebuild on a scratch branch, and /rewind's preview, closed with Esc so nothing is restored.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-let-it-work) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-let-it-work) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
 			"cast": "assets/casts/cast-let-it-work.cast",
 			"transcript": "assets/casts/cast-let-it-work.txt",
 			"cols": 120,
 			"rows": 36,
-			"duration": 42.2,
-			"posterAt": 34.278
+			"duration": 39,
+			"posterAt": 30.495
 		},
 		"tui-verify-table": {
 			"image": "assets/guides/tui-verify-table.webp",
@@ -431,9 +431,9 @@
 			"alt": "Terminal turn for the verify request: CLIO Coder runs the declared test check in examples/temperature-calibration with exit 0, reads calibration.test.mjs, reports all seven tests passing, and shows freezing point, boiling point and absolute zero in Celsius, Kelvin and Fahrenheit as a table.",
 			"caption": "The declared test check through verify, exit 0, then the reference temperatures read from the test file.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify-table\" marker, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-verify) in a fresh profile: home /home/researcher, host lab, 120x44 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Settings: safety: { judge: { enabled: false } }. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. Still at the \"tui-verify-table\" marker, rendered by the site's player at 2x."
 		},
 		"cast-first-launch": {
 			"image": "assets/guides/cast-first-launch.webp",
@@ -441,18 +441,18 @@
 			"width": 2268,
 			"height": 1548,
 			"label": "First launch",
-			"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0-rc.1 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends as the agent starts reading the repository.",
+			"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends while the agent plans its first reads of the repository.",
 			"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-launch) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it.",
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-first-launch) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it.",
 			"cast": "assets/casts/cast-first-launch.cast",
 			"transcript": "assets/casts/cast-first-launch.txt",
 			"cols": 120,
 			"rows": 36,
-			"duration": 15.4,
-			"posterAt": 2.431
+			"duration": 15.9,
+			"posterAt": 2.401
 		},
 		"tui-settings-workers": {
 			"image": "assets/guides/tui-settings-workers.webp",
@@ -463,9 +463,9 @@
 			"alt": "Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
 			"caption": "Settings: the default worker's connection, model and thinking level, under Workers.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-workers\" marker, rows 18-35, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-terminal) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"tui-settings-workers\" marker, rows 18-35, rendered by the site's player at 2x."
 		},
 		"tui-configure-detected": {
 			"image": "assets/guides/tui-configure-detected.webp",
@@ -476,9 +476,9 @@
 			"alt": "Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.",
 			"caption": "When setup finds a model server it offers it first; Set up something else leads to the routes.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-detected\" marker, rows 1-15, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-detected\" marker, rows 1-15, rendered by the site's player at 2x."
 		},
 		"tui-configure-saved": {
 			"image": "assets/guides/tui-configure-saved.webp",
@@ -489,9 +489,9 @@
 			"alt": "Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.",
 			"caption": "A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-saved\" marker, rows 1-31, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-configure-gateway) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias. The sandbox has its own network namespace; the model port 4000 exists only inside it. Still at the \"tui-configure-saved\" marker, rows 1-31, rendered by the site's player at 2x."
 		},
 		"cli-store-stat": {
 			"image": "assets/guides/cli-store-stat.webp",
@@ -502,9 +502,9 @@
 			"alt": "Terminal: store put saves run-042.csv under the results tag with a note, then store stat shows its ref, path in the store, size in bytes, modification time, drift none, its sha256, no producing run on record, and the local backend.",
 			"caption": "store put keeps a result under a tag; store stat shows its hash and whether it has drifted.",
 			"interface": "Terminal",
-			"version": "0.8.0-rc.1",
-			"capturedAt": "2026-11-12",
-			"source": "CLIO Coder 0.8.0-rc.1 (packed from branch site/v080-sprint at 0d1f36358, ahead of the release) installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-store-stat\" marker, rows 1-12, rendered by the site's player at 2x."
+			"version": "0.8.0",
+			"capturedAt": "2026-11-13",
+			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario stills-cli) in a fresh profile: home /home/researcher, host lab, 120x120 terminal, asciinema v2, idle capped at 1s. Environment: CLIO_CODER_REDUCE_MOTION=1. No model. Peer agent CLIs (claude, codex, opencode, copilot) bound read-only, with no credentials. Still at the \"cli-store-stat\" marker, rows 1-12, rendered by the site's player at 2x."
 		}
 	}
 }

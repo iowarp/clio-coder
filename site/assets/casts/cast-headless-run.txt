@@ -1,41 +1,38 @@
 An unattended CLIO Coder run with JSON output
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == answer
 
 ~/projects/calibration-lab $ clio-coder run --json "Run the test check and report how many tests pass." > run.jsonl; echo "exit $?"
 exit 0
 ~/projects/calibration-lab $ jq -r 'select(.type == "turn_end").message.content[] | select(.type == "text").text' run.jsonl
-Done — the test check ran: **6 of 7 tests pass, 1 fails.**
+Test check finished: **6 of 7 pass, 1 fails.**
 
-The failure is `absolute zero: 0 K = -273.15°C = -459.67°F` (calibration.test.mjs:19). `kelvinToCelsius(0)` throws `RangeError: Kelvin temperature 0 is below absolute zero (0 K)` because temperature.mjs:22 guards with `kelvin <= 0`, which rejects 0 K itself. The other three conversions use strict `<` against their absolute-zero bound, so the fix is changing that `<=` to `<` at temperature.mjs:22.
+The failing test is `absolute zero: 0 K = -273.15°C = -459.67°F` at `calibration.test.mjs:20`. It throws `RangeError: Kelvin temperature 0 is below absolute zero (0 K)` from `kelvinToCelsius` at `temperature.mjs:22` — the guard rejects `0 K` even though 0 K is absolute zero itself and the test expects it to be valid.
 
-The passing six: freezing point, boiling point, round trips, non-numeric TypeError, non-finite TypeError, and below-absolute-zero RangeError. I read the source to confirm the cause; I didn't change anything.
-Done — the test check ran: **6 of 7 tests pass, 1 fails.**
-
-The failure is `absolute zero: 0 K = -273.15°C = -459.67°F` (calibration.test.mjs:19). `kelvinToCelsius(0)` throws `RangeError: Kelvin temperature 0 is below absolute zero (0 K)` because temperature.mjs:21 guards with `kelvin <= 0`, which rejects 0 K itself (the throw is on line 22, matching the stack trace). The other three conversions use strict `<` against their absolute-zero bound, so the fix is changing that `<=` to `<` at temperature.mjs:21.
-
-The passing six: freezing point, boiling point, round trips, non-numeric TypeError, non-finite TypeError, and below-absolute-zero RangeError. I didn't change anything.
+All six other tests pass, including the `rejects temperatures below absolute zero with RangeError` case, so the boundary condition is off-by-one: `0 K` should be allowed.
 ~/projects/calibration-lab $
 
 == run-end
 
-The passing six: freezing point, boiling point, round trips, non-numeric TypeError, non-finite TypeError, and below-absolute-zero RangeError. I read the source to confirm the cause; I didn't change anything.
-Done — the test check ran: **6 of 7 tests pass, 1 fails.**
+s." > run.jsonl; echo "exit $?"
+exit 0
+~/projects/calibration-lab $ jq -r 'select(.type == "turn_end").message.content[] | select(.type == "text").text' run.jsonl
+Test check finished: **6 of 7 pass, 1 fails.**
 
-The failure is `absolute zero: 0 K = -273.15°C = -459.67°F` (calibration.test.mjs:19). `kelvinToCelsius(0)` throws `RangeError: Kelvin temperature 0 is below absolute zero (0 K)` because temperature.mjs:21 guards with `kelvin <= 0`, which rejects 0 K itself (the throw is on line 22, matching the stack trace). The other three conversions use strict `<` against their absolute-zero bound, so the fix is changing that `<=` to `<` at temperature.mjs:21.
+The failing test is `absolute zero: 0 K = -273.15°C = -459.67°F` at `calibration.test.mjs:20`. It throws `RangeError: Kelvin temperature 0 is below absolute zero (0 K)` from `kelvinToCelsius` at `temperature.mjs:22` — the guard rejects `0 K` even though 0 K is absolute zero itself and the test expects it to be valid.
 
-The passing six: freezing point, boiling point, round trips, non-numeric TypeError, non-finite TypeError, and below-absolute-zero RangeError. I didn't change anything.
+All six other tests pass, including the `rejects temperatures below absolute zero with RangeError` case, so the boundary condition is off-by-one: `0 K` should be allowed.
 ~/projects/calibration-lab $ tail -n 1 run.jsonl | jq .
 {
   "type": "run_end",
-  "startedAt": "2026-11-12T19:16:54.188Z",
-  "endedAt": "2026-11-12T19:17:15.636Z",
+  "startedAt": "2026-11-13T00:18:10.188Z",
+  "endedAt": "2026-11-13T00:18:16.582Z",
   "exitCode": 0,
   "outcome": "succeeded",
   "safety": {
     "decisions": {
-      "allowed": 3,
+      "allowed": 1,
       "blocked": 0,
       "permissionRequested": 0
     },

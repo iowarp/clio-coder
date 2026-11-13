@@ -1,14 +1,14 @@
 Letting CLIO Coder work: sandbox, snapshot and rewind
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == doctor
 
-nd model fit are not checked.
 OK   state storage          0 B (0 bytes); largest contributor none
-OK   home storage           config 262 B, data 0 B, cache 0 B
-OK   connection litellm     http://127.0.0.1:4313 reachable in 17ms; credential available from environment; passive metadata only, no generation was attempted; 1 models read live
-OK   model litellm          defaultModel 'qwen3.8-27b', chat.model 'qwen3.8-27b', fleet.default.model 'qwen3.8-27b' found in live list from http://127.0.0.1:4313
+OK   home storage           config 263 B, data 0 B, cache 0 B
+OK   connection litellm     http://127.0.0.1:43130 reachable in 22ms; credential available from environment; passive metadata only, no generation was attempted; 1 models read live
+OK   model litellm          defaultModel 'qwen3.8-27b', chat.model 'qwen3.8-27b', fleet.default.model 'qwen3.8-27b' found in live list from http://127.0.0.1:43130
 INFO system one (experimental) off
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -19,161 +19,161 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 430.7 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 419.7 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
 OK   validation contract    none at the workspace root; rigor default normal
 OK   shell sandbox          default-autonomy shell commands run in the bwrap sandbox; writable roots: /home/researcher/projects/calibration-lab, /tmp, /var/tmp, /home/researcher/.cache/clio-coder/sandbox-cache, /home/researcher/projects/calibration-lab/.git; 6 secret files in the workspace and scratch roots are masked; unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works) and the kernel keyring calls; yolo runs contained in the same sandbox
-OK   task worktree root     fleet.worktrees.root disk: /home/researcher/projects/calibration-lab/.clio-coder/worktrees (ext4, 430.7 GiB free)
+OK   task worktree root     fleet.worktrees.root disk: /home/researcher/projects/calibration-lab/.clio-coder/worktrees (ext4, 419.7 GiB free)
 OK   task worktrees         none preserved
 17 rows folded; `clio-coder doctor --verbose` prints each one
 ~/projects/calibration-lab $
 
 == report
 
-✦ Build regenerated. Now running the project's test check (the declared test check → node --test calibration.test.mjs).
+$ Clio ran `rm -rf dist && echo "deleted dist/" && npm run build && echo "---" && ls -la…` · exit 0 · 12 lines ✓ · 454ms
+  │ … 10 earlier lines · /view
+  │ -rw-r--r-- 1 researcher researcher   33 Nov 12 18:28 build.json
+  │ -rw-r--r-- 1 researcher researcher 1317 Nov 12 18:28 temperature.mjs
 
-$ checked test · exit 0 · 19 lines ✓ · 377ms
+│ Thinking · Now run the test check via verify.
+
+✦ Build succeeded. Now running the project's test check.
+
+$ checked test · exit 0 · 19 lines ✓ · 464ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 53.438351
+  │ ℹ duration_ms 64.456709
 
-│ … 2 rows · /view
-│ fit, so I don't mention it. Good.
-│ Let me report concisely.
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-✦ Done. dist/ was the gitignored build output (copied temperature.mjs + a build.json), so I cleared it and rebuilt from
-  source, then ran the test check.
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  What I ran, in order:
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  1. rm -rf dist — removed the old build output (it's gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({"entry": "temperature.mjs"}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
-
-  I did not offer the marketplace clio-coder-test skill — it's for validating Clio Coder's own source, not for this
-  calibration project, so it doesn't fit.
-
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
-i checks passed; coverage of the change not measured                                    Alt+U +1 more · Ctrl+G X dismiss
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
+i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys
 
 == rewind
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it's gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({"entry": "temperature.mjs"}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it's for validating Clio Coder's own source, not for this
-  calibration project, so it doesn't fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
-  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+  ❯ #1  18:28:31  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 18:28:31
                                                                  │ ✓ same as now · delete · bash
                                                                  │ [Enter] preview rewind  shows what restoring this
                                                                  │                         snapshot would change;
                                                                  │                         nothing is written until
                                                                  │                         you confirm
                                                                  │
-                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Taken        2026-11-12 18:28:31
                                                                  │ Reason       delete
-                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
-                                                                 │ Commit       870255cb73e1
+                                                                 │ Before       bash (call_c4283f0bc022b2f76fc93009)
+                                                                 │ Commit       48203d63701e
                                                                  │              (refs/clio-coder/snapshots/
-                                                                 │              2ikoa22l5prs/1)
+                                                                 │              1pnyvuhmtk65/1)
                                                                  │ Pinned refs  HEAD aae72d8ff787 on scratch
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
 
 == preview
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it's gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({"entry": "temperature.mjs"}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it's for validating Clio Coder's own source, not for this
-  calibration project, so it doesn't fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind files to snapshot #1 ━
-   snapshot #1 · 2026-11-12 13:26:56 · delete before bash
+   snapshot #1 · 2026-11-12 18:28:31 · delete before bash
    The workspace already matches this snapshot. Nothing would change.
    Pinned refs ─────────────────────────────────────────────────────────────────────────────────────────────────── 1
      HEAD aae72d8ff787 on scratch · still in place
    Never touched ────────────────────────────────────────────────────────────────────────────────────────────────────
    Gitignored files are never touched. Your Git index, HEAD and branches do not change.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [↑↓] scroll · [Esc] back to snapshots, nothing changed ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
 
 == kept
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it's gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({"entry": "temperature.mjs"}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it's for validating Clio Coder's own source, not for this
-  calibration project, so it doesn't fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
-  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+  ❯ #1  18:28:31  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 18:28:31
                                                                  │ ✓ same as now · delete · bash
                                                                  │ [Enter] preview rewind  shows what restoring this
                                                                  │                         snapshot would change;
                                                                  │                         nothing is written until
                                                                  │                         you confirm
                                                                  │
-                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Taken        2026-11-12 18:28:31
                                                                  │ Reason       delete
-                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
-                                                                 │ Commit       870255cb73e1
+                                                                 │ Before       bash (call_c4283f0bc022b2f76fc93009)
+                                                                 │ Commit       48203d63701e
                                                                  │              (refs/clio-coder/snapshots/
-                                                                 │              2ikoa22l5prs/1)
+                                                                 │              1pnyvuhmtk65/1)
                                                                  │ Pinned refs  HEAD aae72d8ff787 on scratch
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss

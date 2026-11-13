@@ -18,7 +18,7 @@ The verifier derives checks from supported build systems, project scripts, and C
 Run this project's test check through verify. Report its exit status, failures, and anything you could not check.
 :::
 
-::: capture tui-verify-result
+::: capture tui-verify-table
 The same request in the temperature-calibration example, with the check's working directory named.
 :::
 

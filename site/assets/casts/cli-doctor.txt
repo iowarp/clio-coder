@@ -1,12 +1,11 @@
 CLIO Coder doctor on a fresh install
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == repaired
 
-WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
-OK   Clio Coder version     0.8.0-rc.1
+OK   Clio Coder version     0.8.0
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.22.2
+OK   node version           v24.20.0
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -18,14 +17,15 @@ OK   state dir mode         tightened to 700
 OK   data dir mode          tightened to 700
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0-rc.1 (repaired 2026-11-12T18:46:25.137Z)
+OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 30.0 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
-OK   state storage          126 B (126 bytes); largest contributor home.json at 126 B (126 bytes)
+OK   local worker capacity  24 usable CPUs, 19.7 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 0 B
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -36,7 +36,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 431.0 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
@@ -49,9 +49,9 @@ OK   shell sandbox          default-autonomy shell commands run in the bwrap san
 
 ~ $ clio-coder doctor
 WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
-OK   Clio Coder version     0.8.0-rc.1
+OK   Clio Coder version     0.8.0
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.22.2
+OK   node version           v24.20.0
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -61,14 +61,15 @@ OK   state dir              /home/researcher/.local/state/clio-coder
 OK   cache dir              /home/researcher/.cache/clio-coder
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0-rc.1 (repaired 2026-11-12T18:46:25.137Z)
+OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 29.9 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
-OK   state storage          126 B (126 bytes); largest contributor home.json at 126 B (126 bytes)
+OK   local worker capacity  24 usable CPUs, 19.4 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 60.3 KB
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -79,7 +80,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 431.0 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
