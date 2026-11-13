@@ -29,9 +29,9 @@
 	const meta = document.querySelector('meta[name="theme-color"]');
 	if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
 })();</script><script src="/js/cast.js?v=741ab1632e" data-player-src="/assets/player/asciinema-player.min.js?v=752c9b528b" data-player-css="/assets/player/asciinema-player.css?v=981fe7bc60" data-cast-css="/css/cast.css?v=ad7414d08f" defer></script>
-<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><meta property="og:title" content="Let CLIO Coder work without watching every call"><meta property="og:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/cast-let-it-work.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring."><meta property="article:published_time" content="2026-09-27T14:19:46-05:00"><meta property="article:modified_time" content="2026-11-12T16:18:44-06:00">
+<meta property="og:locale" content="en_US"><meta property="og:site_name" content="CLIO Coder"><meta property="og:type" content="article"><meta property="og:url" content="https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"><meta property="og:title" content="Let CLIO Coder work without watching every call"><meta property="og:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta property="og:image" content="https://coder.iowarp.ai/assets/social/cast-let-it-work.png"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring."><meta property="article:published_time" content="2026-09-27T14:19:46-05:00"><meta property="article:modified_time" content="2026-11-12T18:37:49-06:00">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Let CLIO Coder work without watching every call"><meta name="twitter:description" content="Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call."><meta name="twitter:image" content="https://coder.iowarp.ai/assets/social/cast-let-it-work.png"><meta name="twitter:image:alt" content="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#page","name":"Let CLIO Coder work without watching every call","description":"Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.","url":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/cast-let-it-work.png","width":1200,"height":630},"datePublished":"2026-09-27T14:19:46-05:00","dateModified":"2026-11-12T16:18:44-06:00","headline":"Let CLIO Coder work without watching every call","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/cast-let-it-work.png","https://coder.iowarp.ai/assets/guides/cast-let-it-work.webp"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Let CLIO Coder work without watching every call","item":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"}]}]}</script></head><body>
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1"><script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"WebSite","@id":"https://coder.iowarp.ai/#site","name":"CLIO Coder","url":"https://coder.iowarp.ai/","description":"CLIO Coder is the open-source meta-harness for scientific software: every model you have, behind shared project guidance and checks you can inspect. Use it in the terminal or the desktop alpha with local or cloud models. Apache 2.0.","inLanguage":"en","publisher":{"@id":"https://iowarp.ai/#organization"},"copyrightHolder":{"@id":"https://iowarp.ai/#organization"},"copyrightYear":2026},{"@type":"Article","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#page","name":"Let CLIO Coder work without watching every call","description":"Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.","url":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","isPartOf":{"@id":"https://coder.iowarp.ai/#site"},"inLanguage":"en","primaryImageOfPage":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/social/cast-let-it-work.png","width":1200,"height":630},"datePublished":"2026-09-27T14:19:46-05:00","dateModified":"2026-11-12T18:37:49-06:00","headline":"Let CLIO Coder work without watching every call","mainEntityOfPage":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html","author":{"@type":"Organization","name":"The CLIO Coder team","url":"https://coder.iowarp.ai/#project"},"publisher":{"@id":"https://iowarp.ai/#organization"},"image":["https://coder.iowarp.ai/assets/social/cast-let-it-work.png","https://coder.iowarp.ai/assets/guides/cast-let-it-work.webp"],"about":{"@id":"https://coder.iowarp.ai/#application"},"breadcrumb":{"@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs"}},{"@type":"Organization","@id":"https://iowarp.ai/#organization","name":"IOWarp","alternateName":"iowarp.ai","url":"https://iowarp.ai/","logo":{"@type":"ImageObject","url":"https://coder.iowarp.ai/assets/brand/iowarp-mark.png"},"sameAs":["https://github.com/iowarp"]},{"@type":"BreadcrumbList","@id":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html#breadcrumbs","itemListElement":[{"@type":"ListItem","position":1,"name":"CLIO Coder","item":"https://coder.iowarp.ai/"},{"@type":"ListItem","position":2,"name":"Tutorials","item":"https://coder.iowarp.ai/learn.html"},{"@type":"ListItem","position":3,"name":"Let CLIO Coder work without watching every call","item":"https://coder.iowarp.ai/tutorials/let-it-work-with-containment-and-rewind.html"}]}]}</script></head><body>
 <a class="skip" href="#content">Skip to content</a><header class="mast">
   <div class="mast-row page">
     <a class="brand" href="/" aria-label="CLIO Coder home"><img src="/assets/responsive/clio-mark-64.webp?v=6cbb390523" width="36" height="40" alt="" srcset="/assets/responsive/clio-mark-32.webp?v=d5000fe84d 32w, /assets/responsive/clio-mark-48.webp?v=3b500dd7c4 48w, /assets/responsive/clio-mark-64.webp?v=6cbb390523 64w, /assets/responsive/clio-mark-128.webp?v=aa71391a35 128w, /assets/brand/clio-mark.webp?v=0ccf2efeb6 466w" sizes="(max-width: 600px) 27px, 32px" decoding="async"><span class="brand-name">CLIO <span>Coder</span></span></a>
@@ -39,17 +39,17 @@
     <div class="mast-actions"><a class="source-link" href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch color theme"><span aria-hidden="true">◐</span></button><a class="btn btn-small" href="/#start">Install CLIO Coder <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><details class="nav-more"><summary>Menu</summary><nav aria-label="Mobile"><a href="/">Overview</a><a href="/docs.html">Docs</a><a href="/learn.html" aria-current="page">Tutorials</a><a href="/research.html">Research</a><a href="https://github.com/iowarp/clio-coder">GitHub <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a><a href="/#start">Install CLIO Coder</a></nav></details></div>
   </div>
 </header>
-<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Safety and autonomy</span>7 min read</p><h1>Let CLIO Coder work without watching every call</h1><p class="lede">Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T16:18:44-06:00">November 12, 2026</time></dd></div></dl></header><nav class="path-strip" aria-label="Learning path"><ul><li><a class="path-strip-path" href="/learn.html#path-agents">Coding agents · step 2 of 5</a><span>Previous: <a href="/tutorials/first-session.html">Your first session with CLIO Coder</a></span><span>Next: <a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository</a></span></li></ul></nav><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover" data-cast="/assets/casts/cast-let-it-work.cast?v=63f153a1a7" data-cast-cols="120" data-cast-rows="36" data-cast-poster="34.278" data-cast-length="0:42"><a class="capture-frame" href="/assets/guides/cast-let-it-work.png?v=0924d2d3db"><img src="/assets/guides/cast-let-it-work.webp?v=879caa350b" width="2268" height="1548" alt="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring." fetchpriority="high" srcset="/assets/responsive/cast-let-it-work-640.webp?v=d4f7128120 640w, /assets/responsive/cast-let-it-work-1024.webp?v=cf70d00232 1024w, /assets/responsive/cast-let-it-work-1600.webp?v=13e37043f7 1600w, /assets/guides/cast-let-it-work.webp?v=879caa350b 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">Doctor&#39;s sandbox row, a rebuild on a scratch branch, and /rewind&#39;s preview, closed with Esc so nothing is restored. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-let-it-work.cast?v=63f153a1a7" download>Recording · 0:42</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">Letting CLIO Coder work: sandbox, snapshot and rewind
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+<main id="content" class="page guide"><header class="page-intro guide-head"><a class="text-link" href="/learn.html"><span class="arrow arrow-back" aria-hidden="true">←</span> All tutorials</a><p class="eyebrow"><span class="chapter">Safety and autonomy</span>7 min read</p><h1>Let CLIO Coder work without watching every call</h1><p class="lede">Check the sandbox, undo a change with /rewind, tell the safety judge about your machine, and know when yolo is the right call.</p><dl class="guide-facts"><div><dt class="eyebrow">Written for</dt><dd>v0.8.0</dd></div><div><dt class="eyebrow">Works in</dt><dd>Terminal · Desktop alpha</dd></div><div><dt class="eyebrow">Basis</dt><dd>Recorded session</dd></div><div><dt class="eyebrow">Updated</dt><dd><time datetime="2026-11-12T18:37:49-06:00">November 12, 2026</time></dd></div></dl></header><nav class="path-strip" aria-label="Learning path"><ul><li><a class="path-strip-path" href="/learn.html#path-agents">Coding agents · step 2 of 5</a><span>Previous: <a href="/tutorials/first-session.html">Your first session with CLIO Coder</a></span><span>Next: <a href="/tutorials/check-a-change-against-your-repository.html">Check a change against your repository</a></span></li></ul></nav><div class="guide-layout"><article class="doc guide-body" id="doc"><figure class="guide-capture guide-cover" data-cast="/assets/casts/cast-let-it-work.cast?v=510a98f5d9" data-cast-cols="120" data-cast-rows="36" data-cast-poster="30.495" data-cast-length="0:39"><a class="capture-frame" href="/assets/guides/cast-let-it-work.png?v=6f0b2a0563"><img src="/assets/guides/cast-let-it-work.webp?v=abd5275cad" width="2268" height="1548" alt="Terminal recording: clio-coder doctor&#39;s shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring." fetchpriority="high" srcset="/assets/responsive/cast-let-it-work-640.webp?v=a6c569ad11 640w, /assets/responsive/cast-let-it-work-1024.webp?v=e00e0e165c 1024w, /assets/responsive/cast-let-it-work-1600.webp?v=c26d5f0ab9 1600w, /assets/guides/cast-let-it-work.webp?v=abd5275cad 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">Doctor&#39;s sandbox row, a rebuild on a scratch branch, and /rewind&#39;s preview, closed with Esc so nothing is restored. <span class="tag">Terminal · v0.8.0</span> <a class="cast-download" href="/assets/casts/cast-let-it-work.cast?v=510a98f5d9" download>Recording · 0:39</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">Letting CLIO Coder work: sandbox, snapshot and rewind
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == doctor
 
-nd model fit are not checked.
 OK   state storage          0 B (0 bytes); largest contributor none
-OK   home storage           config 262 B, data 0 B, cache 0 B
-OK   connection litellm     http://127.0.0.1:4313 reachable in 17ms; credential available from environment; passive metadata only, no generation was attempted; 1 models read live
-OK   model litellm          defaultModel &#39;qwen3.8-27b&#39;, chat.model &#39;qwen3.8-27b&#39;, fleet.default.model &#39;qwen3.8-27b&#39; found in live list from http://127.0.0.1:4313
+OK   home storage           config 263 B, data 0 B, cache 0 B
+OK   connection litellm     http://127.0.0.1:43130 reachable in 22ms; credential available from environment; passive metadata only, no generation was attempted; 1 models read live
+OK   model litellm          defaultModel &#39;qwen3.8-27b&#39;, chat.model &#39;qwen3.8-27b&#39;, fleet.default.model &#39;qwen3.8-27b&#39; found in live list from http://127.0.0.1:43130
 INFO system one (experimental) off
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -60,163 +60,163 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 430.7 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 419.7 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio&#39;s private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
 OK   validation contract    none at the workspace root; rigor default normal
 OK   shell sandbox          default-autonomy shell commands run in the bwrap sandbox; writable roots: /home/researcher/projects/calibration-lab, /tmp, /var/tmp, /home/researcher/.cache/clio-coder/sandbox-cache, /home/researcher/projects/calibration-lab/.git; 6 secret files in the workspace and scratch roots are masked; unix sockets: a seccomp filter refuses new AF_UNIX sockets (socketpair still works) and the kernel keyring calls; yolo runs contained in the same sandbox
-OK   task worktree root     fleet.worktrees.root disk: /home/researcher/projects/calibration-lab/.clio-coder/worktrees (ext4, 430.7 GiB free)
+OK   task worktree root     fleet.worktrees.root disk: /home/researcher/projects/calibration-lab/.clio-coder/worktrees (ext4, 419.7 GiB free)
 OK   task worktrees         none preserved
 17 rows folded; `clio-coder doctor --verbose` prints each one
 ~/projects/calibration-lab $
 
 == report
 
-✦ Build regenerated. Now running the project&#39;s test check (the declared test check → node --test calibration.test.mjs).
+$ Clio ran `rm -rf dist &amp;&amp; echo &quot;deleted dist/&quot; &amp;&amp; npm run build &amp;&amp; echo &quot;---&quot; &amp;&amp; ls -la…` · exit 0 · 12 lines ✓ · 454ms
+  │ … 10 earlier lines · /view
+  │ -rw-r--r-- 1 researcher researcher   33 Nov 12 18:28 build.json
+  │ -rw-r--r-- 1 researcher researcher 1317 Nov 12 18:28 temperature.mjs
 
-$ checked test · exit 0 · 19 lines ✓ · 377ms
+│ Thinking · Now run the test check via verify.
+
+✦ Build succeeded. Now running the project&#39;s test check.
+
+$ checked test · exit 0 · 19 lines ✓ · 464ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 53.438351
+  │ ℹ duration_ms 64.456709
 
-│ … 2 rows · /view
-│ fit, so I don&#39;t mention it. Good.
-│ Let me report concisely.
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-✦ Done. dist/ was the gitignored build output (copied temperature.mjs + a build.json), so I cleared it and rebuilt from
-  source, then ran the test check.
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  What I ran, in order:
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
-
-  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
-  calibration project, so it doesn&#39;t fit.
-
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
-i checks passed; coverage of the change not measured                                    Alt+U +1 more · Ctrl+G X dismiss
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
+i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys
 
 == rewind
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
-  calibration project, so it doesn&#39;t fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
-  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+  ❯ #1  18:28:31  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 18:28:31
                                                                  │ ✓ same as now · delete · bash
                                                                  │ [Enter] preview rewind  shows what restoring this
                                                                  │                         snapshot would change;
                                                                  │                         nothing is written until
                                                                  │                         you confirm
                                                                  │
-                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Taken        2026-11-12 18:28:31
                                                                  │ Reason       delete
-                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
-                                                                 │ Commit       870255cb73e1
+                                                                 │ Before       bash (call_c4283f0bc022b2f76fc93009)
+                                                                 │ Commit       48203d63701e
                                                                  │              (refs/clio-coder/snapshots/
-                                                                 │              2ikoa22l5prs/1)
+                                                                 │              1pnyvuhmtk65/1)
                                                                  │ Pinned refs  HEAD aae72d8ff787 on scratch
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
 
 == preview
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
-  calibration project, so it doesn&#39;t fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind files to snapshot #1 ━
-   snapshot #1 · 2026-11-12 13:26:56 · delete before bash
+   snapshot #1 · 2026-11-12 18:28:31 · delete before bash
    The workspace already matches this snapshot. Nothing would change.
    Pinned refs ─────────────────────────────────────────────────────────────────────────────────────────────────── 1
      HEAD aae72d8ff787 on scratch · still in place
    Never touched ────────────────────────────────────────────────────────────────────────────────────────────────────
    Gitignored files are never touched. Your Git index, HEAD and branches do not change.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [↑↓] scroll · [Esc] back to snapshots, nothing changed ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss
 
 == kept
 
-  source, then ran the test check.
+  │ ℹ duration_ms 64.456709
 
-  What I ran, in order:
+│ … 3 rows · /view
+│ - Ran test check via verify: 7 pass, 0 fail
+│ Let me write a concise report.
 
-  1. rm -rf dist — removed the old build output (it&#39;s gitignored, so no tracked files touched).
-  2. node build.mjs — regenerated dist/temperature.mjs (1317 B, byte-identical size to the source copy) and
-     dist/build.json ({&quot;entry&quot;: &quot;temperature.mjs&quot;}).
-  3. verify check test → node --test calibration.test.mjs — 7 passed, 0 failed (freezing point, boiling point, absolute
-     zero, round-trips, and the three input-validation rejections: non-numeric, non-finite, and below-absolute-zero).
+✦ Done. dist/ was deleted, rebuilt, and the test check passes.
 
-  The regenerated dist/ matches what the build produces fresh, and the full test suite is green. Git tree is otherwise
-  unchanged.
+  What I ran:
+  - rm -rf dist — removed the build output (gitignored directory containing dist/temperature.mjs and dist/build.json)
+  - npm run build → node build.mjs — regenerated dist/ (built dist/temperature.mjs)
+  - verify check test → node --test calibration.test.mjs — 7 pass, 0 fail (freezing point, boiling point, absolute zero,
+    round-trips, non-numeric/non-finite/absolute-zero rejection)
 
-  I did not offer the marketplace clio-coder-test skill — it&#39;s for validating Clio Coder&#39;s own source, not for this
-  calibration project, so it doesn&#39;t fit.
+  Working tree is clean; dist/ is regenerated and gitignored.
 
-✓ Done · 19s · 5 calls · in 15.3k · out 1.2k · cached 55.3k
+✓ Done · 15s · 5 calls · in 14.5k · out 906 · cached 49.2k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Rewind workspace files ━
-  ❯ #1  13:26:56  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 13:26:56
+  ❯ #1  18:28:31  delete · bash                    ✓ same as now │ Snapshot #1                     2026-11-12 18:28:31
                                                                  │ ✓ same as now · delete · bash
                                                                  │ [Enter] preview rewind  shows what restoring this
                                                                  │                         snapshot would change;
                                                                  │                         nothing is written until
                                                                  │                         you confirm
                                                                  │
-                                                                 │ Taken        2026-11-12 13:26:56
+                                                                 │ Taken        2026-11-12 18:28:31
                                                                  │ Reason       delete
-                                                                 │ Before       bash (call_c994e2c23ba63ef83a6c9976)
-                                                                 │ Commit       870255cb73e1
+                                                                 │ Before       bash (call_c4283f0bc022b2f76fc93009)
+                                                                 │ Commit       48203d63701e
                                                                  │              (refs/clio-coder/snapshots/
-                                                                 │              2ikoa22l5prs/1)
+                                                                 │              1pnyvuhmtk65/1)
                                                                  │ Pinned refs  HEAD aae72d8ff787 on scratch
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ [Enter] preview rewind · [↑↓] select · [PgUp/PgDn] scroll detail · [Esc] close ━
-default · ~/projects/calibration-lab · scratch                                         16.3K/200K (8.1%) · last 94 tok/s
+default · ~/projects/calibration-lab · scratch                                          14K/200K (7.0%) · last 131 tok/s
 i checks passed; coverage of the change not measured                                                    Ctrl+G X dismiss</pre></div></details></figure><details class="doc-toc-mobile"><summary>On this page</summary><a href="#before-you-start">Before you start</a>
 <a href="#what-still-reaches-you">What still reaches you</a>
 <a href="#when-to-use-yolo">When to use yolo</a></details><p>Most of a coding task should not need you. At the <code>default</code> level, CLIO Coder runs shell work inside an OS sandbox, snapshots your files before it changes them, and has a safety judge review what escapes the sandbox. You are asked only when the judge has no verdict or the decision is yours.</p>
@@ -231,17 +231,17 @@ i checks passed; coverage of the change not measured                            
 <div class="code-block"><p class="code-label eyebrow">Shell</p><pre tabindex="0" aria-label="Code example 1"><code class="language-sh">clio-coder doctor</code></pre></div>
 <p>Look for the <code>shell sandbox</code> row. It names the backend and where contained commands may write. If no backend exists, commands outside the recognized set go to the judge and then to you, so the rest of this guide still holds with more questions.</p>
 <p>A contained command can write the workspace, the scratch roots, <code>/tmp</code>, and a private tool cache. Your own <code>~/.cache</code> and <code>~/.npm</code> stay read-only. Credentials, credential variables, secret files such as <code>.env</code>, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in <code>safety.scratchRoots</code>.</p>
-<p>A secret path is also refused before any sandbox is involved. In the recording below, asked <code>Show me the API token in .env.</code>, the agent tried a command that lists the file&#39;s keys, and CLIO Coder stopped it:</p>
+<p>A secret path is also refused before any sandbox is involved. In the recording below, asked <code>Show me the API token in .env.</code>, the agent tried <code>ls -la .env 2&gt;&amp;1 | head</code>, and CLIO Coder stopped it:</p>
 <div class="code-block"><pre tabindex="0" aria-label="Code example 2"><code class="language-text">rule: secret_path_bash
 This is a hard block; confirmation cannot override it.</code></pre></div>
-<figure class="guide-capture" data-cast="/assets/casts/cast-sandbox.cast?v=4a75986143" data-cast-cols="120" data-cast-rows="36" data-cast-poster="20.501" data-cast-length="0:28"><a class="capture-frame" href="/assets/guides/cast-sandbox.png?v=63affa7f4b"><img src="/assets/guides/cast-sandbox.webp?v=71dba056c7" width="2268" height="1548" alt="Terminal recording in which the user asks CLIO Coder for the API token in the project&#39;s .env. The agent&#39;s command to list the file&#39;s keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user&#39;s own terminal." loading="lazy" srcset="/assets/responsive/cast-sandbox-640.webp?v=2f212f765a 640w, /assets/responsive/cast-sandbox-1024.webp?v=c2cb622f33 1024w, /assets/responsive/cast-sandbox-1600.webp?v=8eefdef6ac 1600w, /assets/guides/cast-sandbox.webp?v=71dba056c7 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">The project&#39;s .env is refused outright; confirmation cannot override the block. <span class="tag">Terminal · v0.8.0-rc.1</span> <a class="cast-download" href="/assets/casts/cast-sandbox.cast?v=4a75986143" download>Recording · 0:28</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">CLIO Coder refuses to read a project secret
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+<figure class="guide-capture" data-cast="/assets/casts/cast-sandbox.cast?v=26c035e375" data-cast-cols="120" data-cast-rows="36" data-cast-poster="29.593" data-cast-length="0:33"><a class="capture-frame" href="/assets/guides/cast-sandbox.png?v=1a2d3beb6c"><img src="/assets/guides/cast-sandbox.webp?v=7246d31ae4" width="2268" height="1548" alt="Terminal recording in which the user asks CLIO Coder for the API token in the project&#39;s .env. The agent&#39;s ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user&#39;s own terminal." loading="lazy" srcset="/assets/responsive/cast-sandbox-640.webp?v=970ba61c71 640w, /assets/responsive/cast-sandbox-1024.webp?v=e39b476e6d 1024w, /assets/responsive/cast-sandbox-1600.webp?v=36c6858eba 1600w, /assets/guides/cast-sandbox.webp?v=7246d31ae4 2268w" sizes="(max-width: 600px) calc(100vw - 40px), (max-width: 1100px) calc(100vw - 64px), 1000px" decoding="async"></a><figcaption class="caption">The project&#39;s .env is refused outright; confirmation cannot override the block. <span class="tag">Terminal · v0.8.0</span> <a class="cast-download" href="/assets/casts/cast-sandbox.cast?v=26c035e375" download>Recording · 0:33</a></figcaption><details class="cast-transcript"><summary>Transcript</summary><pre class="cast-transcript-text" tabindex="0" aria-label="Transcript of the recording">CLIO Coder refuses to read a project secret
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == ready
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ &gt;C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ &gt;C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -258,7 +258,7 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-&gt;C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+&gt;C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
 
 ▌ Show me the API token in .env.
 
@@ -266,58 +266,58 @@ i Reply from litellm · qwen3.8-27b
 
 │ Thinking · /view
 
-$ blocked `if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;;…` ✗ · bash blocked: runs a command · 39ms
-  │ command › if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;; sed -E
-  │ &#39;s/^([^=]+).*/\1=***REDACTED***/&#39; .env; else echo &quot;no .env at workspace root&quot;; fi
+$ blocked `ls -la .env 2&gt;&amp;1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ Thinking · The .env is a zero-access secret path. Clio&#39;s safety net blocks me
+│ … 2 rows · /view
+│ command output.
+│ So my answer: I can&#39;t show you the API token —
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣾ Qwen3.8 is thinking · Esc stops ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⡿ Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              12.3K/200K (6.1%) · ≈82 tok/s
+default · ~/projects/calibration-lab · main *                                              12.9K/200K (6.5%) · ≈79 tok/s
 ! Clio&#39;s safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == answer
 
-  │ command › if [ -f .env ]; then echo &quot;--- keys in .env (values redacted) ---&quot;; sed -E
-  │ &#39;s/^([^=]+).*/\1=***REDACTED***/&#39; .env; else echo &quot;no .env at workspace root&quot;; fi
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+&gt;C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+
+▌ Show me the API token in .env.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ blocked `ls -la .env 2&gt;&amp;1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ … 7 rows · /view
-│ it themselves. I can offer to check whether a specific key exists (by name) if they give me the variable name.
-│ Let me give them the command to run in their own terminal.
+│ … 4 rows · /view
+│ can&#39;t read it or echo its contents into this chat. If you need the token, read it directly on your machine, e.g. `cat
+│ .env` (or `grep TOKEN .env`) in your own terminal.
 
-✦ I can&#39;t show it. .env here is a zero-access secret path — Clio&#39;s safety net blocks me from reading it (even just to
-  list keys), and a token&#39;s value must never pass through chat or command output, since that&#39;s what persists in
-  transcripts and logs.
+✦ I can&#39;t show it. .env is a zero-access secret path under Clio&#39;s safety policy — I can&#39;t read it or echo its contents
+  into this chat, and that&#39;s a hard block, not something a confirmation would lift.
 
-  To view it yourself, in your own terminal:
+  If you need the token, pull it in your own terminal where it stays on your machine:
 
-  bash
-    # the whole file
-    cat /home/researcher/projects/calibration-lab/.env
+  code
+    grep &#39;TOKEN&#39; .env
 
-    # or just the token&#39;s value (no echo of the whole line)
-    grep -E &#39;^MY_API_TOKEN=&#39; .env
+  or just cat .env.
 
-  Replace MY_API_TOKEN with the actual variable name. If you tell me the key name, I can confirm whether that key exists
-  in the file by checking for it — but only presence/absence, never the value.
-
-  One caveat: pasting the token back into chat would defeat the protection, so keep it in your terminal.
-
-✓ Done · 18s · 2 calls · in 6.3k · out 1.3k · cached 16.4k
+✓ Done · 23s · 2 calls · in 4.7k · out 1.7k · cached 18.4k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          12.7K/200K (6.3%) · last 87 tok/s
+default · ~/projects/calibration-lab · main *                                         13.1K/200K (6.5%) · last 101 tok/s
 ! Clio&#39;s safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys</pre></div></details></figure></div></li><li class="guide-step"><span class="step-number" aria-hidden="true">02</span><div><h3 id="give-it-a-task-and-watch-what-happens">Give it a task and watch what happens</h3>
 <p>On a scratch branch, type this:</p>

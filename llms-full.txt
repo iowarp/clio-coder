@@ -1989,7 +1989,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. The recording ends as it starts reading. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. The recording ends while it plans its first reads. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -1997,21 +1997,21 @@ Once you understand the project, ask for one change you can check. Name the prob
 
 > The absolute-zero test fails. Find the cause, fix it, and run the test check.
 
-![Terminal recording of a first task in CLIO Coder 0.8.0-rc.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and the fix is uncommitted.](https://coder.iowarp.ai/assets/guides/cast-first-task.webp)
+![Terminal recording of a first task in CLIO Coder 0.8.0: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and that negative Kelvin is still rejected.](https://coder.iowarp.ai/assets/guides/cast-first-task.webp)
 
 *A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking.*
 
-[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-first-task.cast), 0:35. Transcript:
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-first-task.cast), 0:27. Transcript:
 
 ```text
 A first task in CLIO Coder: fix a failing test and verify
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == ready
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -2026,14 +2026,18 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 == tui-verify
 
-│ line 21 to `kelvin < 0`. 0 K should be a valid value (absolute zero is reachable). Negative Kelvin is still rejected.
-│ The other three guards already use `<`, so this makes it consistent.
+▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 30ms
+▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 31ms
 
-✦ I confirmed the cause of the failure: at temperature.mjs:21, kelvin <= 0 is rejecting 0 K itself, but this is exactly
-  the value that the test is asking for. Since the other three guards already use < for the same purpose, this is an
-  off-by-one boundary condition. The fix is:
+│ Thinking · Found it. The absolute zero test on line 20 asserts `kelvinToCelsius(0)` === -273.15, but `kelvinToCelsius`
+│ throws a RangeError when kelvin <= 0 (line 21). The test also expects 0 K to be valid. Fix: allow 0 K (change `kelvin
+│ <= 0` to `kelvin < 0`).
 
-± edited temperature.mjs · +1 -1 ✓ · 31ms
+✦ I found the issue: kelvinToCelsius(0) at temperature.mjs:21 rejects 0 K with a RangeError due to the kelvin <= 0
+  check, but the test at calibration.test.mjs:20 expects absolute zero to be valid. I'll fix it by changing the guard to
+  kelvin < 0.
+
+± edited temperature.mjs · +1 -1 ✓ · 308ms
   │ -21    if (kelvin <= 0) {
   │ +21    if (kelvin < 0) {
   │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
@@ -2044,66 +2048,60 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 │ Thinking · /view
 
-▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
-
-│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin < 0) {`. Now let's re-run the test check.
-
-✦ Edit applied cleanly. Rerunning the test check:
-
-$ checked test · exit 0 · 19 lines ✓ · 214ms
+$ checked test · exit 0 · 19 lines ✓ · 558ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 49.240549
+  │ ℹ duration_ms 75.108879
 
-│ Thinking · All 7 tests passed. The tree has uncommitted changes.
+│ Thinking · All 7 tests passed. The "rejects temperatures below absolute zero" test includes kelvinToCelsius(-0.001)
+│ and (-1), both
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              15.8K/200K (7.9%) · ≈99 tok/s
+default · ~/projects/calibration-lab · main *                                             13.7K/200K (6.9%) · ≈117 tok/s
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == tui-verify-result
 
+± edited temperature.mjs · +1 -1 ✓ · 308ms
+  │ -21    if (kelvin <= 0) {
+  │ +21    if (kelvin < 0) {
+  │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
+  │  23    }
+  │  24    return kelvin - CELSIUS_KELVIN_OFFSET;
+  │  25 }
   │     ...
 
 │ Thinking · /view
 
-▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
-
-│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin < 0) {`. Now let's re-run the test check.
-
-✦ Edit applied cleanly. Rerunning the test check:
-
-$ checked test · exit 0 · 19 lines ✓ · 214ms
+$ checked test · exit 0 · 19 lines ✓ · 558ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 49.240549
+  │ ℹ duration_ms 75.108879
 
-│ Thinking · All 7 tests passed. The tree has uncommitted changes. Should I commit? The user said "Find the cause, fix
-│ it, and run the test check." They didn't ask for a commit. I'll leave it uncommitted and just report. Following the
-│ instructions, I'll stop with just the simple fact.
+│ … 3 rows · /view
+│ edge case: `-0 < 0` is false, so kelvinToCelsius(-0) returns -273.15. This is definitely correct behavior (in JS, -0
+│ is treated numerically as 0). No need to belabor the point. Done.
 
-✦ Fixed. The cause: kelvinToCelsius rejected kelvin <= 0 (temperature.mjs:21), throwing RangeError for exactly 0 K — the
-  value the absolute-zero test asserts at calibration.test.mjs:20. 0 K is a valid temperature, so the guard was an
-  off-by-one against its siblings, which all use <.
+✦ Fixed. The cause: kelvinToCelsius rejected kelvin <= 0, so the test's kelvinToCelsius(0) at calibration.test.mjs:20
+  threw a RangeError — the guard treated 0 K itself as invalid instead of only below-absolute-zero values. Changing it
+  to kelvin < 0 at temperature.mjs:21 keeps negative Kelvin (e.g. -0.001, -1) rejected, as the RangeError test still
+  confirms.
 
-  The change is one character: <= 0 → < 0. Negative Kelvin still throws RangeError, so the "below absolute zero" tests
-  still pass. All 7 tests now pass (previously 6/7).
+  All 7 tests pass now, measured with the test check.
 
-  The fix is in the working tree on main, uncommitted.
-
-✓ Done · 24s · 7 calls · in 22.2k · out 1.4k · cached 75.8k
+✓ Done · 15s · 5 calls · in 15.3k · out 750 · cached 47.1k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          16.1K/200K (8.0%) · last 93 tok/s
+default · ~/projects/calibration-lab · main *                                          14.1K/200K (7.1%) · last 93 tok/s
 i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
-Alt+M Model · ? Keys                                                                                    memory reviewing
+Alt+M Model · ? Keys
 ```
 
-The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests now pass (previously 6/7).` and `The fix is in the working tree on main, uncommitted.`
+The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests pass now, measured with the test check.`
 
 Use your project's real test name. Read the diff and the check output yourself before you commit the change.
 
@@ -2241,28 +2239,28 @@ Look for the `shell sandbox` row. It names the backend and where contained comma
 
 A contained command can write the workspace, the scratch roots, `/tmp`, and a private tool cache. Your own `~/.cache` and `~/.npm` stay read-only. Credentials, credential variables, secret files such as `.env`, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in `safety.scratchRoots`.
 
-A secret path is also refused before any sandbox is involved. In the recording below, asked `Show me the API token in .env.`, the agent tried a command that lists the file's keys, and CLIO Coder stopped it:
+A secret path is also refused before any sandbox is involved. In the recording below, asked `Show me the API token in .env.`, the agent tried `ls -la .env 2>&1 | head`, and CLIO Coder stopped it:
 
 ```text
 rule: secret_path_bash
 This is a hard block; confirmation cannot override it.
 ```
 
-![Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's command to list the file's keys is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.](https://coder.iowarp.ai/assets/guides/cast-sandbox.webp)
+![Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.](https://coder.iowarp.ai/assets/guides/cast-sandbox.webp)
 
 *The project's .env is refused outright; confirmation cannot override the block.*
 
-[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-sandbox.cast), 0:28. Transcript:
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-sandbox.cast), 0:33. Transcript:
 
 ```text
 CLIO Coder refuses to read a project secret
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == ready
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -2279,7 +2277,7 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+>C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
 
 ▌ Show me the API token in .env.
 
@@ -2287,58 +2285,58 @@ i Reply from litellm · qwen3.8-27b
 
 │ Thinking · /view
 
-$ blocked `if [ -f .env ]; then echo "--- keys in .env (values redacted) ---";…` ✗ · bash blocked: runs a command · 39ms
-  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
-  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ Thinking · The .env is a zero-access secret path. Clio's safety net blocks me
+│ … 2 rows · /view
+│ command output.
+│ So my answer: I can't show you the API token —
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣾ Qwen3.8 is thinking · Esc stops ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⡿ Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              12.3K/200K (6.1%) · ≈82 tok/s
+default · ~/projects/calibration-lab · main *                                              12.9K/200K (6.5%) · ≈79 tok/s
 ! Clio's safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == answer
 
-  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
-  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+>C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+
+▌ Show me the API token in .env.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ … 7 rows · /view
-│ it themselves. I can offer to check whether a specific key exists (by name) if they give me the variable name.
-│ Let me give them the command to run in their own terminal.
+│ … 4 rows · /view
+│ can't read it or echo its contents into this chat. If you need the token, read it directly on your machine, e.g. `cat
+│ .env` (or `grep TOKEN .env`) in your own terminal.
 
-✦ I can't show it. .env here is a zero-access secret path — Clio's safety net blocks me from reading it (even just to
-  list keys), and a token's value must never pass through chat or command output, since that's what persists in
-  transcripts and logs.
+✦ I can't show it. .env is a zero-access secret path under Clio's safety policy — I can't read it or echo its contents
+  into this chat, and that's a hard block, not something a confirmation would lift.
 
-  To view it yourself, in your own terminal:
+  If you need the token, pull it in your own terminal where it stays on your machine:
 
-  bash
-    # the whole file
-    cat /home/researcher/projects/calibration-lab/.env
+  code
+    grep 'TOKEN' .env
 
-    # or just the token's value (no echo of the whole line)
-    grep -E '^MY_API_TOKEN=' .env
+  or just cat .env.
 
-  Replace MY_API_TOKEN with the actual variable name. If you tell me the key name, I can confirm whether that key exists
-  in the file by checking for it — but only presence/absence, never the value.
-
-  One caveat: pasting the token back into chat would defeat the protection, so keep it in your terminal.
-
-✓ Done · 18s · 2 calls · in 6.3k · out 1.3k · cached 16.4k
+✓ Done · 23s · 2 calls · in 4.7k · out 1.7k · cached 18.4k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          12.7K/200K (6.3%) · last 87 tok/s
+default · ~/projects/calibration-lab · main *                                         13.1K/200K (6.5%) · last 101 tok/s
 ! Clio's safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys
 ```
@@ -3184,9 +3182,9 @@ The verifier derives checks from supported build systems, project scripts, and C
 
 > Run this project's test check through verify. Report its exit status, failures, and anything you could not check.
 
-![Terminal turn ending with CLIO Coder's report: the cause was kelvin <= 0 at line 21 of temperature.mjs, the change is one character, all seven tests now pass where six did before, and the fix is uncommitted on main.](https://coder.iowarp.ai/assets/guides/tui-verify-result.webp)
+![Terminal turn for the verify request: CLIO Coder runs the declared test check in examples/temperature-calibration with exit 0, reads calibration.test.mjs, reports all seven tests passing, and shows freezing point, boiling point and absolute zero in Celsius, Kelvin and Fahrenheit as a table.](https://coder.iowarp.ai/assets/guides/tui-verify-table.webp)
 
-*The report after the check: the cause, the change, the test result, and what was left uncommitted.*
+*The declared test check through verify, exit 0, then the reference temperatures read from the test file.*
 
 The same request in the temperature-calibration example, with the check's working directory named.
 
@@ -3513,7 +3511,7 @@ Model facts distinguish network reachability, access to the model listing, model
 
 Each registered node adds a `fleet node <id>` row to `doctor` with its host, remote version and project check. The recording shows the report on a fresh install, before any node or model is added; each warning names the command that clears it.
 
-![Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0-rc.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.](https://coder.iowarp.ai/assets/guides/cli-doctor.webp)
+![Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.](https://coder.iowarp.ai/assets/guides/cli-doctor.webp)
 
 *doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each.*
 
@@ -3521,14 +3519,13 @@ Each registered node adds a `fleet node <id>` row to `doctor` with its host, rem
 
 ```text
 CLIO Coder doctor on a fresh install
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == repaired
 
-WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
-OK   Clio Coder version     0.8.0-rc.1
+OK   Clio Coder version     0.8.0
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.22.2
+OK   node version           v24.20.0
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -3540,14 +3537,15 @@ OK   state dir mode         tightened to 700
 OK   data dir mode          tightened to 700
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0-rc.1 (repaired 2026-11-12T18:46:25.137Z)
+OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 30.0 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
-OK   state storage          126 B (126 bytes); largest contributor home.json at 126 B (126 bytes)
+OK   local worker capacity  24 usable CPUs, 19.7 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 0 B
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -3558,7 +3556,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 431.0 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
@@ -3571,9 +3569,9 @@ OK   shell sandbox          default-autonomy shell commands run in the bwrap san
 
 ~ $ clio-coder doctor
 WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
-OK   Clio Coder version     0.8.0-rc.1
+OK   Clio Coder version     0.8.0
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.22.2
+OK   node version           v24.20.0
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -3583,14 +3581,15 @@ OK   state dir              /home/researcher/.local/state/clio-coder
 OK   cache dir              /home/researcher/.cache/clio-coder
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0-rc.1 (repaired 2026-11-12T18:46:25.137Z)
+OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 29.9 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
-OK   state storage          126 B (126 bytes); largest contributor home.json at 126 B (126 bytes)
+OK   local worker capacity  24 usable CPUs, 19.4 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 60.3 KB
+OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -3601,7 +3600,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 431.0 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
