@@ -23,7 +23,7 @@ async function until(check: () => boolean) {
 test("an unrecognized sessionUpdate kind is dropped, and the turn it arrived in still completes", {
 	timeout: 15000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "tool" });
+	const h = await harness({}, { scenario: "tool", lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
@@ -60,7 +60,7 @@ test("an unrecognized sessionUpdate kind is dropped, and the turn it arrived in 
 test("a malformed frame of a kind this app does handle is skipped, the turn completes and the task is told", {
 	timeout: 15000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "malformed-update" });
+	const h = await harness({}, { scenario: "malformed-update", lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
@@ -78,7 +78,7 @@ test("a malformed frame of a kind this app does handle is skipped, the turn comp
 test("an engine process that ends on its own fails the turn, parks the task and says so", {
 	timeout: 15000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "crash" });
+	const h = await harness({}, { scenario: "crash", lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
@@ -92,7 +92,7 @@ test("an engine process that ends on its own fails the turn, parks the task and 
 });
 
 test("a content-less running tool update keeps the last partial output", { timeout: 15000 }, async (t) => {
-	const h = await harness({}, { scenario: "tool-progress-no-content" });
+	const h = await harness({}, { scenario: "tool-progress-no-content", lanes: false });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path);
 	const session = await h.supervisor.open(workspace.id);
