@@ -16,6 +16,7 @@ import { useSessionCommands } from "../shell/SessionControls.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { useSessionIntent } from "../shell/use-session-intent.js";
 import type { SessionFilter } from "./mission-control-model.js";
 import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
@@ -40,6 +41,7 @@ export function MissionControl({ client }: { client: Client }) {
 	const selection = search.get("status");
 	const filter = SESSION_FILTERS.find((value) => value === selection) ?? "all";
 	const query = search.get("q") ?? "";
+	const searchBox = useSearchDraft(query, (value) => setSearch(liveSearchWith("q", value), { replace: true }));
 	const deferredQuery = useDeferredValue(query);
 	const project = search.get("workspace") ?? "";
 	const page = useInventoryWindow(JSON.stringify([deferredQuery, project, filter]));
@@ -160,9 +162,9 @@ export function MissionControl({ client }: { client: Client }) {
 							<span className="sr-only">Search sessions</span>
 							<input
 								type="search"
-								value={query}
+								value={searchBox.value}
 								maxLength={256}
-								onChange={(event) => set("q", event.target.value)}
+								onChange={searchBox.onChange}
 								placeholder="Find a session, project, model or machine…"
 							/>
 						</label>

@@ -1359,7 +1359,17 @@ nav a:hover {
 
 /* Reconnect */
 .reconnect {
+	box-sizing: border-box;
+	width: 100%;
 	max-width: 42rem;
+	margin: var(--space-12) auto;
+	padding-inline: var(--space-6);
+}
+/* Nothing else is open, so the page reads as a document, not a card. */
+.wb-stage:has(> .wb-main > .reconnect) {
+	border-color: transparent;
+	background: none;
+	box-shadow: none;
 }
 .reconnect label {
 	display: block;

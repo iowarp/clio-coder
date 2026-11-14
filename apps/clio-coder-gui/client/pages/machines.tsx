@@ -12,6 +12,7 @@ import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { attachInstallCommand, attachmentStatus, openAction } from "../shell/machine-switcher-model.js";
 import { useMachineAttach } from "../shell/use-machine-attach.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import type { MachineDraft, MachineRequest } from "./machines-model.js";
 import {
 	acceptMachineRequest,
@@ -371,6 +372,11 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 	const [search, setSearch] = useSearchParams();
 	const selectedId = search.get("machine") ?? "";
 	const query = search.get("q") ?? "";
+	const searchBox = useSearchDraft(query, (value) => {
+		const next = liveSearchWith("q", value);
+		next.delete("machine");
+		setSearch(next, { replace: true });
+	});
 	const filter = MACHINE_FILTERS.find((item) => item === search.get("status")) ?? "all";
 	const set = (key: string, value: string) =>
 		setSearch(
@@ -742,9 +748,9 @@ export function MachinesPage({ client, local }: { client: Client; local: Client 
 									<span className="sr-only">Search machines</span>
 									<input
 										type="search"
-										value={query}
+										value={searchBox.value}
 										maxLength={256}
-										onChange={(event) => set("q", event.target.value)}
+										onChange={searchBox.onChange}
 										placeholder="Search machine, host or label…"
 									/>
 								</label>

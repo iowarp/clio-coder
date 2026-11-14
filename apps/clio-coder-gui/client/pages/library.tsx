@@ -7,6 +7,7 @@ import { Facts } from "../design/facts.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { LibraryCatalog } from "./library-catalog.js";
 import {
 	type Agent,
@@ -164,6 +165,16 @@ export function LibraryPage({
 	const filter = compact ? localDiscovery.q : (search.get("q") ?? "");
 	const tabId = useId();
 	const [limit, setLimit] = useState(40);
+	const searchBox = useSearchDraft(filter, (query) => {
+		setLimit(40);
+		if (compact) {
+			setLocalDiscovery((current) => ({ ...current, q: query }));
+			return;
+		}
+		const next = liveSearchWith("q", query);
+		next.set("collection", active.toLowerCase());
+		setSearch(next, { replace: true });
+	});
 	const discover = (collection: Collection, query: string, replace = false) => {
 		if (compact) {
 			setLocalDiscovery({ collection, q: query });
@@ -301,18 +312,11 @@ export function LibraryPage({
 					Search {active.toLowerCase()}
 					<input
 						type="search"
-						value={filter}
-						onChange={(event) => {
-							discover(active, event.target.value, true);
-							setLimit(40);
-						}}
+						value={searchBox.value}
+						onChange={searchBox.onChange}
+						placeholder="Name, description or source"
 					/>
 				</label>
-				{filter && (
-					<button type="button" onClick={() => discover(active, "")}>
-						Clear search
-					</button>
-				)}
 				{source.isPending && id && <p role="status">Reading {active.toLowerCase()}…</p>}
 				{source.error && (
 					<p role="alert">
@@ -351,9 +355,16 @@ export function LibraryPage({
 				)}
 				{active !== "Catalog" && source.data && !visible.length && (
 					<PanelEmpty>
-						{filter
-							? "No matches. Try a different search."
-							: emptyState.emptyStore(active.toLowerCase().replace(/s$/u, ""), "for this workspace")}
+						{filter ? (
+							<>
+								No matches. Try a different search.{" "}
+								<button type="button" onClick={() => discover(active, "")}>
+									Clear search
+								</button>
+							</>
+						) : (
+							emptyState.emptyStore(active.toLowerCase().replace(/s$/u, ""), "for this workspace")
+						)}
 					</PanelEmpty>
 				)}
 				{active !== "Catalog" && source.data && (

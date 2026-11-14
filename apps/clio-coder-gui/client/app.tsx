@@ -99,6 +99,10 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [reportRequest, setReportRequest] = useState<ReportRequest | null>(null);
 	useEffect(() => onReportRequest((request) => setReportRequest(request)), []);
+	useEffect(() => {
+		// Help offers "Report a problem": warm its chunk so the dialog's first frame is the dialog.
+		if (helpOpen) void import("./report/ReportDialog.js");
+	}, [helpOpen]);
 	const openReport = useCallback(() => setReportRequest({}), []);
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [drawer, setDrawer] = useState(false);

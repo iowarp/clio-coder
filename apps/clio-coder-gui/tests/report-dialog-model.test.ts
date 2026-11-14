@@ -130,3 +130,24 @@ test("report dialog: the credit label states the current choice", () => {
 	const credited = reportReducer(ready, { type: "credit", value: true });
 	assert.match(reportControls(credited).creditLabel, /\(credit: yes\)$/);
 });
+
+test("report dialog: a failed plan offers Try again and keeps Next and the steps off until a preview exists", () => {
+	const preparing = reportControls(INITIAL_REPORT_STATE);
+	assert.equal(preparing.stepsEnabled, false);
+	assert.equal(preparing.retry, false);
+	const failed = reportReducer(INITIAL_REPORT_STATE, {
+		type: "failed",
+		message: "Method is not supported for this API route.",
+	});
+	const controls = reportControls(failed);
+	assert.equal(controls.stepsEnabled, false);
+	assert.equal(controls.sendEnabled, false);
+	assert.equal(controls.retry, true);
+	assert.match(controls.destination, /^CLIO Coder could not prepare the report/);
+	const retrying = reportReducer(failed, { type: "busy", busy: "plan" });
+	assert.equal(reportControls(retrying).retry, false);
+	const planned = reportReducer(retrying, { type: "planned", view: view([]) });
+	assert.equal(reportControls(planned).stepsEnabled, true);
+	assert.equal(reportControls(planned).retry, false);
+	assert.equal(reportControls(planned).sendEnabled, true);
+});

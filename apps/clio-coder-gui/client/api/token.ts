@@ -80,12 +80,17 @@ export function listenForForget(revoke: () => Promise<void>) {
 	if (typeof BroadcastChannel !== "function") return;
 	new BroadcastChannel(forgetChannel).onmessage = () => void forgetBrowser(revoke, false);
 }
+/** What the server refused: a spent or expired launch ticket, or this browser's own credential. */
+export type RefusalReason = "ticket" | "credential";
+// Kept in memory too, so the page can name the refusal when browser storage is disabled.
+let refusal: RefusalReason | null = null;
 /** A refused credential is dropped at once, so a reload asks for a link instead of failing the same way again. */
-export function dropStoredToken() {
+export function dropStoredToken(reason: RefusalReason = "credential") {
+	refusal = reason;
 	for (const drop of [
 		() => localStorage.removeItem(rememberedCredentialKey),
 		// Survives a reload, so the page still says why it is disconnected rather than "no token yet".
-		() => sessionStorage.setItem(refusedKey, "1"),
+		() => sessionStorage.setItem(refusedKey, reason),
 	])
 		try {
 			drop();
@@ -106,10 +111,16 @@ export function adoptLaunchSecret(secret: { ticket: string }, origin = location.
 	location.hash = hash;
 	location.reload();
 }
-export function lastTokenWasRefused() {
+export function refusalReason(): RefusalReason | null {
 	try {
-		return sessionStorage.getItem(refusedKey) === "1";
+		const stored = sessionStorage.getItem(refusedKey);
+		// "1" is what builds before the reason was recorded stored.
+		if (stored !== null) return stored === "ticket" ? "ticket" : "credential";
 	} catch {
-		return false;
+		/* Storage may be disabled; the in-memory reason still holds for this document. */
 	}
+	return refusal;
+}
+export function lastTokenWasRefused() {
+	return refusalReason() !== null;
 }
