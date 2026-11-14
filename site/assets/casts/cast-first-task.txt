@@ -1,11 +1,11 @@
 A first task in CLIO Coder: fix a failing test and verify
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == ready
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -20,14 +20,19 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 == tui-verify
 
-│ line 21 to `kelvin < 0`. 0 K should be a valid value (absolute zero is reachable). Negative Kelvin is still rejected.
-│ The other three guards already use `<`, so this makes it consistent.
 
-✦ I confirmed the cause of the failure: at temperature.mjs:21, kelvin <= 0 is rejecting 0 K itself, but this is exactly
-  the value that the test is asking for. Since the other three guards already use < for the same purpose, this is an
-  off-by-one boundary condition. The fix is:
+▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 30ms
+▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 31ms
 
-± edited temperature.mjs · +1 -1 ✓ · 31ms
+│ Thinking · Found it. The absolute zero test on line 20 asserts `kelvinToCelsius(0)` === -273.15, but `kelvinToCelsius`
+│ throws a RangeError when kelvin <= 0 (line 21). The test also expects 0 K to be valid. Fix: allow 0 K (change `kelvin
+│ <= 0` to `kelvin < 0`).
+
+✦ I found the issue: kelvinToCelsius(0) at temperature.mjs:21 rejects 0 K with a RangeError due to the kelvin <= 0
+  check, but the test at calibration.test.mjs:20 expects absolute zero to be valid. I'll fix it by changing the guard to
+  kelvin < 0.
+
+± edited temperature.mjs · +1 -1 ✓ · 308ms
   │ -21    if (kelvin <= 0) {
   │ +21    if (kelvin < 0) {
   │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
@@ -38,60 +43,55 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 │ Thinking · /view
 
-▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
-
-│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin < 0) {`. Now let's re-run the test check.
-
-✦ Edit applied cleanly. Rerunning the test check:
-
-$ checked test · exit 0 · 19 lines ✓ · 214ms
+$ checked test · exit 0 · 19 lines ✓ · 558ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 49.240549
+  │ ℹ duration_ms 75.108879
 
-│ Thinking · All 7 tests passed. The tree has uncommitted changes.
+│ Thinking · All 7 tests passed. The "rejects temperatures below absolute zero" test includes kelvinToCelsius(-0.001)
+│ and (-1), both
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              15.8K/200K (7.9%) · ≈99 tok/s
+default · ~/projects/calibration-lab · main *                                             13.7K/200K (6.9%) · ≈117 tok/s
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == tui-verify-result
 
+
+± edited temperature.mjs · +1 -1 ✓ · 308ms
+  │ -21    if (kelvin <= 0) {
+  │ +21    if (kelvin < 0) {
+  │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
+  │  23    }
+  │  24    return kelvin - CELSIUS_KELVIN_OFFSET;
+  │  25 }
   │     ...
 
 │ Thinking · /view
 
-▸ read temperature.mjs · line_numbers · lines 19-26 of 41 · 350B of 1.5KB · truncated ✓ · 11ms
-
-│ Thinking · The edit was applied correctly — line 21 is now `if (kelvin < 0) {`. Now let's re-run the test check.
-
-✦ Edit applied cleanly. Rerunning the test check:
-
-$ checked test · exit 0 · 19 lines ✓ · 214ms
+$ checked test · exit 0 · 19 lines ✓ · 558ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 49.240549
+  │ ℹ duration_ms 75.108879
 
-│ Thinking · All 7 tests passed. The tree has uncommitted changes. Should I commit? The user said "Find the cause, fix
-│ it, and run the test check." They didn't ask for a commit. I'll leave it uncommitted and just report. Following the
-│ instructions, I'll stop with just the simple fact.
+│ … 3 rows · /view
+│ edge case: `-0 < 0` is false, so kelvinToCelsius(-0) returns -273.15. This is definitely correct behavior (in JS, -0
+│ is treated numerically as 0). No need to belabor the point. Done.
 
-✦ Fixed. The cause: kelvinToCelsius rejected kelvin <= 0 (temperature.mjs:21), throwing RangeError for exactly 0 K — the
-  value the absolute-zero test asserts at calibration.test.mjs:20. 0 K is a valid temperature, so the guard was an
-  off-by-one against its siblings, which all use <.
+✦ Fixed. The cause: kelvinToCelsius rejected kelvin <= 0, so the test's kelvinToCelsius(0) at calibration.test.mjs:20
+  threw a RangeError — the guard treated 0 K itself as invalid instead of only below-absolute-zero values. Changing it
+  to kelvin < 0 at temperature.mjs:21 keeps negative Kelvin (e.g. -0.001, -1) rejected, as the RangeError test still
+  confirms.
 
-  The change is one character: <= 0 → < 0. Negative Kelvin still throws RangeError, so the "below absolute zero" tests
-  still pass. All 7 tests now pass (previously 6/7).
+  All 7 tests pass now, measured with the test check.
 
-  The fix is in the working tree on main, uncommitted.
-
-✓ Done · 24s · 7 calls · in 22.2k · out 1.4k · cached 75.8k
+✓ Done · 15s · 5 calls · in 15.3k · out 750 · cached 47.1k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          16.1K/200K (8.0%) · last 93 tok/s
+default · ~/projects/calibration-lab · main *                                          14.1K/200K (7.1%) · last 93 tok/s
 i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
-Alt+M Model · ? Keys                                                                                    memory reviewing
+Alt+M Model · ? Keys

@@ -1,11 +1,11 @@
 CLIO Coder refuses to read a project secret
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
 == ready
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -22,7 +22,7 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 ~/projects/calibration-lab $ clio-coder
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+>C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
 
 ▌ Show me the API token in .env.
 
@@ -30,57 +30,57 @@ i Reply from litellm · qwen3.8-27b
 
 │ Thinking · /view
 
-$ blocked `if [ -f .env ]; then echo "--- keys in .env (values redacted) ---";…` ✗ · bash blocked: runs a command · 39ms
-  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
-  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ Thinking · The .env is a zero-access secret path. Clio's safety net blocks me
+│ … 2 rows · /view
+│ command output.
+│ So my answer: I can't show you the API token —
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣾ Qwen3.8 is thinking · Esc stops ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⡿ Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              12.3K/200K (6.1%) · ≈82 tok/s
+default · ~/projects/calibration-lab · main *                                              12.9K/200K (6.5%) · ≈79 tok/s
 ! Clio's safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == answer
 
-  │ command › if [ -f .env ]; then echo "--- keys in .env (values redacted) ---"; sed -E
-  │ 's/^([^=]+).*/\1=***REDACTED***/' .env; else echo "no .env at workspace root"; fi
+Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
+>C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+
+▌ Show me the API token in .env.
+
+i Reply from litellm · qwen3.8-27b
+
+│ Thinking · /view
+
+$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ … 7 rows · /view
-│ it themselves. I can offer to check whether a specific key exists (by name) if they give me the variable name.
-│ Let me give them the command to run in their own terminal.
+│ … 4 rows · /view
+│ can't read it or echo its contents into this chat. If you need the token, read it directly on your machine, e.g. `cat
+│ .env` (or `grep TOKEN .env`) in your own terminal.
 
-✦ I can't show it. .env here is a zero-access secret path — Clio's safety net blocks me from reading it (even just to
-  list keys), and a token's value must never pass through chat or command output, since that's what persists in
-  transcripts and logs.
+✦ I can't show it. .env is a zero-access secret path under Clio's safety policy — I can't read it or echo its contents
+  into this chat, and that's a hard block, not something a confirmation would lift.
 
-  To view it yourself, in your own terminal:
+  If you need the token, pull it in your own terminal where it stays on your machine:
 
-  bash
-    # the whole file
-    cat /home/researcher/projects/calibration-lab/.env
+  code
+    grep 'TOKEN' .env
 
-    # or just the token's value (no echo of the whole line)
-    grep -E '^MY_API_TOKEN=' .env
+  or just cat .env.
 
-  Replace MY_API_TOKEN with the actual variable name. If you tell me the key name, I can confirm whether that key exists
-  in the file by checking for it — but only presence/absence, never the value.
-
-  One caveat: pasting the token back into chat would defeat the protection, so keep it in your terminal.
-
-✓ Done · 18s · 2 calls · in 6.3k · out 1.3k · cached 16.4k
+✓ Done · 23s · 2 calls · in 4.7k · out 1.7k · cached 18.4k
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          12.7K/200K (6.3%) · last 87 tok/s
+default · ~/projects/calibration-lab · main *                                         13.1K/200K (6.5%) · last 101 tok/s
 ! Clio's safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys

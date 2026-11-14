@@ -352,6 +352,8 @@ The ACP child pushes session telemetry and the server forwards it to every windo
 | Memory guardian | `_meta["clio-coder/memory"]` on `session_info_update` | A `Memory reviewing` or `Memory waiting` mark beside the task title while the session is live. |
 | Eggs | `_meta["clio-coder/eggs"]` on `session_info_update` | The rubber duck badge while `/eggs` has it active. |
 | Telemetry | `_clio-coder/telemetry/update`, coalesced by the child to at most 10 per second | Forwarded to the windows as a `telemetry.updated` event naming the moved topics; the window re-reads those telemetry views and folds nothing itself. |
+| Readouts | `_clio-coder/session/readouts`, a whole frame at most 4 times a second, sent once the GUI opts in at initialize | Top-bar chips in the engine's words: yolo and its confinement, the yolo window (`yolo paused` once it halts), the token rate and provider retry while a turn runs, and the armed skills. A narrow bar keeps only yolo and the pause. |
+| Judge | `_meta["clio-coder/admission"]` on an in-progress `tool_call_update` | The live status reads `Waiting for the safety judge` until the judge admits the call. |
 
 The pushed usage totals also say when a token amount is a partial sum or a cost is estimated or partly unpriced, so the live view never shows a partial figure as a total.
 

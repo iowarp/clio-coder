@@ -68,7 +68,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. The recording ends as it starts reading. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. The recording ends while it plans its first reads. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -79,7 +79,7 @@ Once you understand the project, ask for one change you can check. Name the prob
 ::: capture cast-first-task
 :::
 
-The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests now pass (previously 6/7).` and `The fix is in the working tree on main, uncommitted.`
+The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests pass now, measured with the test check.`
 
 Use your project's real test name. Read the diff and the check output yourself before you commit the change.
 

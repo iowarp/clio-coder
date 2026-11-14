@@ -7,6 +7,7 @@ import {
 	AcpEventsCapability as EventsCapability,
 	AcpJobsCapability as JobsCapability,
 	AcpQueueCapability as QueueCapability,
+	AcpReadoutsCapability as ReadoutsCapability,
 	AcpShellCapability as ShellCapability,
 	AcpSteeringCapability as SteeringCapability,
 	AcpToolProgressCapability as ToolProgressCapability,
@@ -18,6 +19,7 @@ export {
 	EventsCapability,
 	JobsCapability,
 	QueueCapability,
+	ReadoutsCapability,
 	ShellCapability,
 	SteeringCapability,
 	ToolProgressCapability,
@@ -68,6 +70,8 @@ export const AgentCapabilities = Type.Object(
 		steering: Type.Optional(SteeringCapability),
 		/** Edit, reorder and send one waiting message. */
 		queue: Type.Optional(QueueCapability),
+		/** Live yolo, rate, skill and retry readouts, and the judge's hold on a tool call. */
+		readouts: Type.Optional(ReadoutsCapability),
 		/** Run a shell line as the operator, between turns. */
 		shell: Type.Optional(ShellCapability),
 		commands: Type.Optional(CommandsCapability),

@@ -15,6 +15,7 @@ import {
 	EventsCapability,
 	JobsCapability,
 	QueueCapability,
+	ReadoutsCapability,
 	ShellCapability,
 	SteeringCapability,
 	ToolProgressCapability,
@@ -46,6 +47,7 @@ import {
 	ACP_JOBS_META_KEY,
 	ACP_LIBRARY_META_KEY,
 	ACP_QUEUE_META_KEY,
+	ACP_READOUTS_META_KEY,
 	ACP_SESSION_META_KEY,
 	ACP_SESSION_TRUST_METHOD,
 	ACP_SETTINGS_META_KEY,
@@ -114,6 +116,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("targets", optional(Targets, meta[ACP_TARGETS_META_KEY])),
 		...maybe("steering", optional(SteeringCapability, meta[ACP_STEERING_META_KEY])),
 		...maybe("queue", optional(QueueCapability, meta[ACP_QUEUE_META_KEY])),
+		...maybe("readouts", optional(ReadoutsCapability, meta[ACP_READOUTS_META_KEY])),
 		...maybe("shell", optional(ShellCapability, meta[ACP_SHELL_META_KEY])),
 		...maybe("commands", optional(CommandsCapability, meta[ACP_COMMANDS_META_KEY])),
 		...maybe("toolProgress", optional(ToolProgressCapability, meta[ACP_TOOL_PROGRESS_META_KEY])),
@@ -251,6 +254,8 @@ export class AcpClient {
 					[ACP_TOOL_PROGRESS_META_KEY]: { version: 1 },
 					// Opting in turns on `_clio-coder/session/queue_changed`, so the queue is pushed and not polled.
 					[ACP_QUEUE_META_KEY]: { version: 1 },
+					// Opting in turns on `_clio-coder/session/readouts` and the judge's `clio-coder/admission` on a held call.
+					[ACP_READOUTS_META_KEY]: { version: 1 },
 					[ACP_INTERVIEWS_META_KEY]: { version: 1, request: INTERVIEW_REQUEST_METHOD, cancel: INTERVIEW_CANCEL_METHOD },
 					// A dispatched worker's escalation reaches the approval card as a permission request,
 					// and a withdrawn one retires the card, because the wire cannot cancel a single ask.

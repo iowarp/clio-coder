@@ -1061,3 +1061,19 @@ test("the usage and context reads re-key on every settle, past the projection's 
 	assert.equal(settledKey([...after, turnRow({ id: "t130", status: "running" })]), settledKey(after));
 	assert.equal(settledKey([turnRow({ id: "t1", status: "running" })]), "none");
 });
+
+test("a call the safety judge is holding says so in the engine's words, and a held call without it is Running", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user", text: "write the notes" });
+	const tool = { id: "2", turnId: "t", kind: "tool", status: "in_progress", title: "Write notes.md" } as const;
+	const judged = item({ ...tool, admission: "waiting for the safety judge" });
+	assert.deepEqual(liveStatus(chatTurn([user, judged], "running"), undefined, null), {
+		state: "waiting",
+		label: "Waiting for the safety judge",
+		detail: "Write notes.md",
+	});
+	assert.deepEqual(liveStatus(chatTurn([user, item(tool)], "running"), undefined, null), {
+		state: "acting",
+		label: "Running",
+		detail: "Write notes.md",
+	});
+});

@@ -6,7 +6,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 0.8.0 is the stable release of 0.8.0-rc.1, with the same product code; the notes below are the 0.8.0 notes.
 
-CLIO Coder 0.8.0 is for people who run a coding agent beside other people, other agents and other tools, and for anyone who automates one: researchers on shared login nodes, teams in one repository, and scripts that drive headless `run`. Shared folders, the sandbox, headless `run`, setup and installs behave more strictly and more predictably. A per-project store keeps results outside the working tree, reports are reviewed before they leave the machine, and long sessions, large repositories and streamed answers stay fast. Several exit codes, defaults and permissions change, so read the Upgrade notes first. This is a release candidate on the npm `beta` tag; 0.7.0 remains the stable release.
+CLIO Coder 0.8.0 is for people who run a coding agent beside other people, other agents and other tools, and for anyone who automates one: researchers on shared login nodes, teams in one repository, and scripts that drive headless `run`. Shared folders, the sandbox, headless `run`, setup and installs behave more strictly and more predictably. A per-project store keeps results outside the working tree, reports are reviewed before they leave the machine, and long sessions, large repositories and streamed answers stay fast. Several exit codes, defaults and permissions change, so read the Upgrade notes first.
 
 ### Highlights
 

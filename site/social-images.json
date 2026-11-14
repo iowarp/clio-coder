@@ -13,21 +13,21 @@
 			"path": "assets/social/cast-headless-run.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "218d79e820e7e2563e69220b7e625078d71a3a72c55b280b38450bb76de01481"
+			"sha256": "944b5e870a465831ee42d01070fb0009ca7994236c9dd05c60dcc0e2b3c8e7be"
 		},
 		"cast-let-it-work": {
 			"source": "assets/guides/cast-let-it-work.png",
 			"path": "assets/social/cast-let-it-work.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "1039e1741d6e998039a8741d2d37aba77ab7173b14649ff119a8ffa42a715a8b"
+			"sha256": "25df090f83649be5ed9a53e01e33be62330b9157b6dc15409c1fffeacedd003d"
 		},
 		"cli-store-stat": {
 			"source": "assets/guides/cli-store-stat.png",
 			"path": "assets/social/cli-store-stat.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "4ec4f2dc8faef89fad9658fe9fa61ad5970dc7ada533f9d64a21d5555df49293"
+			"sha256": "584bb67a181150a8afd1ab6508956849f7afaac337f497c59d871d25b35d715f"
 		},
 		"gui-task": {
 			"source": "assets/gui-task.png",
@@ -41,21 +41,21 @@
 			"path": "assets/social/tui-configure-saved.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "fedfea1c0a811cc77cc314f8fb3ecace5b36814dbf5d78f45f87ee8e1c139968"
+			"sha256": "70b5ac87110da33c4b15714639575af4c2a567f9b38f84c0430694a6be573fcf"
 		},
 		"tui-context": {
 			"source": "assets/guides/tui-context.png",
 			"path": "assets/social/tui-context.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "962aef0a0095ce1e011977f97b5ce08f2185b9d3115c43ea3615bd01fa808afc"
+			"sha256": "65064dbba237992e6cbb61359e71c3edb7e3734e0ca000855d3acf2179629050"
 		},
 		"tui-interop": {
 			"source": "assets/guides/tui-interop.png",
 			"path": "assets/social/tui-interop.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "a89d295f4f932de791ca7d85938be22691e0c213ee6c9a46002f047d5f4a76ff"
+			"sha256": "4029d8a15e21ec2c2e1c6203184f24915af06624584ff09ea795d44b682bfb54"
 		},
 		"tui-library-installed": {
 			"source": "assets/guides/tui-library-installed.png",
@@ -76,14 +76,14 @@
 			"path": "assets/social/tui-verify-result.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "a31b0dc6f8da65fbbbf4669deaf7ed798f2b0702e25bb3bc6ee98d3c865b1d18"
+			"sha256": "4e8873a4aa2f8e8c167e022da79c01d94f124412ce982abb43d3b8790867491e"
 		},
 		"tui-view-result": {
 			"source": "assets/guides/tui-view-result.png",
 			"path": "assets/social/tui-view-result.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "7df439e9faa52bad448858502e68f415484c92bb3a40df73fe24489cd123da4c"
+			"sha256": "a242957aed60bcb927e3597aee28a1f083aee5c19b42f296cffc18cca8fd02ed"
 		}
 	}
 }

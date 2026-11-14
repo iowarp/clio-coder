@@ -1,328 +1,128 @@
 # Doctor
 
-`runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
+`clio-coder doctor` ([doctor.ts](../../src/cli/doctor.ts), [doctor.ts](../../src/domains/lifecycle/doctor.ts)) diagnoses a CLIO Coder install and current workspace. Plain `doctor` is read-only and sends no model generation request (passive endpoint probes use a 2.5s budget per target). See [First problems](troubleshooting.md#first-problems) to interpret common errors.
 
-`clio-coder doctor` diagnoses a CLIO Coder install and the workspace it runs in. It
-reads, performs passive endpoint probes, and reports; plain `doctor` writes
-nothing and sends no model generation request. This page covers what the checks
-are, the deep checks, the in-session `/doctor`, and how to read the rows.
+## Invocations
 
-## First run: three rows to read
-
-1. **`chat`** leads the report. It names the configured route and either
-   `endpoint reachable` or what is missing, with the command that fixes it.
-2. **`connection <id>`** appears once per target. It says whether a key is
-   available and whether the endpoint answered, with the error when it did not.
-3. **`shell sandbox`** is `OK` when shell commands run in an OS sandbox, and
-   `WARN` when they run uncontained and more of them ask first.
-
-Fix the `!!` rows first; a `WARN` row still lets CLIO Coder work. For the
-messages these rows print, see
-[First problems](troubleshooting.md#first-problems).
-
-## Running it
-
-| Command | What it does |
+| Invocation | Behavior |
 | --- | --- |
-| `clio-coder doctor` | Every standard check. Read-only; quiet row families are folded in text output. |
-| `clio-coder doctor --verbose` | Print every finding separately in text output. JSON always retains every finding. |
-| `clio-coder doctor --fix` | Also repairs missing directories, template files, and credential permissions, tightens `settings.yaml` to `0600` and a state or data root open to other users to `0700` when it can prove the root is CLIO Coder's own, removes settings keys retired without a replacement and rewrites retired enum values and YAML 1.1 `on`/`off` booleans in `settings.yaml` while preserving comments and formatting, records fleet preflight results, removes stale task worktree claims, regenerates a managed Yazi profile that is not current, repairs the GUI background service and launchers, and rebuilds a source checkout whose build outputs are missing. A configured model ID is corrected only after an interactive confirmation. It does not apply lifecycle migrations or rename moved settings paths; `clio-coder upgrade` does. |
-| `clio-coder doctor --json` | The same findings as JSON on stdout: `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
-| `clio-coder doctor --deep` | The standard checks plus the live tool probe on every configured target and a dry run of the validation contract. |
-| `clio-coder doctor --deep --tools-timeout <seconds>` | Bounds each tool probe's generation. The default is 120 seconds, enough for a cold load of a large local model. |
-| `/doctor` | The standard checks, rendered in the session as one notice. |
-| `/doctor --deep` | The deep checks against the session's targets and autonomy. |
+| `clio-coder doctor` | Standard checks; quiet `ok`/`info` families with `>= 2` quiet rows fold in text output (``N rows folded; `clio-coder doctor --verbose` prints each one``). |
+| `clio-coder doctor --verbose` | Unfolded text output. |
+| `clio-coder doctor --json` | Emits `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }` on stdout (never folded). |
+| `clio-coder doctor --fix` | Repairs missing dirs, templates, `settings.yaml`/`credentials.yaml` mode (`0600` POSIX), state/data root mode (`0700` when ownership verifies), YAML 1.1 `on`/`off` booleans, retired keys/enum values (preserving comments unless aliases/anchors prevent it), fleet preflight cache, stale task worktree claims, stale Yazi profile, GUI background service/launchers, and missing source checkout build outputs. Wrong model IDs update only on interactive confirmation. Does not run lifecycle migrations (`clio-coder upgrade` does). |
+| `clio-coder doctor --deep [--tools-timeout <s>]` | Adds live streamed tool-call probes (`tools <target>`, default `120`s timeout) and validation contract dry run (`validator <n>`). Composes with `--json` and `--fix`. |
+| `/doctor [--deep]` | In-session summary notice (e.g. `doctor: 58 checks, 0 error(s), 3 warning(s)`) with worst-row level; read-only (never repairs). |
 
-`--deep` composes with `--json` and `--fix`. `--tools-timeout` without
-`--deep`, a value that is not a positive number of seconds, and an unknown flag
-are usage errors: the message and the help text go to stderr and doctor exits 2.
-`--help` prints the help text on stdout and exits 0.
+`--tools-timeout` without `--deep`, non-positive `--tools-timeout`, or unknown flags print help to stderr and exit `2`. `--help` prints to stdout and exits `0`.
 
-In text output the `interop`, `toolchain`, `slurm` and `naming` row families fold
-into one row each while every member is `OK` or `INFO` and the family has at
-least two members. A member that is `WARN` or an error keeps its own row. When
-anything folded, the report ends with
-``N rows folded; `clio-coder doctor --verbose` prints each one``.
+## Levels, folding, and exit codes
 
-## Reading a row
-
-Each row has a level:
-
-| Level | Badge | Meaning | Affects exit code |
+| `level` | Badge | Meaning | Exit code |
 | --- | --- | --- | --- |
-| `ok` | `OK` | Healthy. | No |
-| `info` | `INFO` | A fact that needs no action, such as an optional tool that is not installed. | No |
-| `warn` | `WARN` | Worth attention; CLIO Coder still works. | No |
-| `error` | `!!` | Broken. | Yes: doctor exits 1 |
+| `ok` | `OK` | Healthy. | `0` |
+| `info` | `INFO` | Informational (e.g., absent optional tool). | `0` |
+| `warn` | `WARN` | Degraded or advisory; CLIO Coder still runs. | `0` |
+| `error` | `!!` | Broken requirement (`ok: false`). | `1` |
 
-Doctor exits 0 when no row is an error. See
-[Exit Codes and Output](exit-codes-and-output.md).
+- Text folding applies to `interop` (except `interop skills`), `toolchain`, `slurm`, and `naming` whenever a family has `>= 2` quiet (`ok`/`info`) rows, even if sibling rows in that family are `warn` or `error` (the `warn`/`error` rows print expanded beside the folded summary row) ([doctor.ts](../../src/cli/doctor.ts)):
+  - Summary format `<ok-word>: a, b; <info-word>: c`: `interop` (`on PATH` / `noted`; `` `clio-coder configure --interop` reviews them ``), `toolchain` (`found` / `not on PATH`), `slurm` (`ready` / `not set up`), `naming` (`clean` / `noted`).
+- `warn` and `error` findings that do not already contain a backticked `clio-coder`, `pnpm`, or `chmod` command get `` ; next: `<command>` `` appended automatically (`withDoctorCommand`).
 
-The lifecycle rows report the detected install method, whether config, data,
-state, and cache are absolute and non-overlapping (including through symlinks),
-and whether `migrations.json` is trustworthy and current. Pending migrations
-are a warning with the post-install command. A registered migration that is
-not recorded but whose result the current valid `settings.yaml` already
-satisfies (`2026-09-01-settings-v2` and `2026-09-01-retire-panes-knobs`) is
-reported as satisfied, not pending. Invalid JSON, an invalid manifest
-shape, duplicate IDs, or an oversized manifest is an error: doctor does not
-rewrite it or guess that no migration ran. Restore or review the manifest before
-running upgrade. An unknown install method is a warning because CLIO Coder cannot
-safely choose a package manager for it; ordinary work remains available.
+## First run: which rows to read first
 
-Standard checks include one `connection <id>` row for every configured target.
-It says whether a credential is available, whether the runtime offers a passive
-check, whether the endpoint answered, and whether a live model list was read.
-A target used by chat, fleet, or memory is an error when its passive check
-fails or required credentials are missing; an unused target is a warning. Successful public metadata does not prove that credentials are ready for inference. Each target’s passive probe has a 2.5-second total budget, including credential resolution and all metadata requests. Expired browser credentials are reported without refreshing or writing them. `model <id>` separately says whether each
-configured role model came from a live list, a cached list from an earlier check, a list recorded in settings by configure, or
-a provider catalog. A catalog match is not presented as live availability, and a model missing from an older catalog or recorded list is a warning, not proof that the endpoint rejects it. A role model absent from a live list of a target that chat, fleet, or memory uses is an error. The exception is a runtime that serves models it does not list, which today is `copilot-sdk`: the row is `INFO`, says CLIO Coder sends the model id as typed, and proposes no repair. An unknown runtime on a target is an error. ALCF’s passive probe reads its catalog; it does not verify the configured inference URL.
+1. **`chat`**: Leads the report; names the configured route and `endpoint reachable` or the missing piece with its recovery command. Fix `!!` rows first.
+2. **`connection <id>`**: One per configured target; reports credential availability, passive probe answer, and any failure detail.
+3. **`shell sandbox`**: `OK` when contained in an OS sandbox; `WARN` when uncontained (more commands ask for approval).
 
-A `copilot sign-in` row appears when a `copilot-sdk` target is configured and the
-Copilot SDK component is installed. Doctor starts a short-lived Copilot runtime
-with the system keychain closed, as headless `run` and fleet workers start it,
-and reports the account it sees and whether that is a `copilot login` on disk or
-a GitHub CLI session. When it sees none and doctor runs in a terminal, a second
-runtime asks with the keychain open: a login found only there is a `WARN` that
-names the headless fix, because the TUI, ACP and the GUI can use it but `run` and
-workers cannot. The `connection <id>` row of each Copilot target, whose passive
-check also runs with the keychain closed, is then the same warning instead of an
-error. Without a terminal the keychain is not checked, and the row says so. A missing login is an error when chat, memory or the fleet routes to a
-Copilot target and a warning otherwise. CLIO Coder reads no token; only the runtime
-answers. Beside that row, each `copilot-sdk` target that sets
-`contextTier: long_context` gets an `INFO` `copilot tier <id>` row saying the
-model's long-context prompt budget and prices apply. The default tier adds no
-row.
+## Target and capacity rows
 
-The `local worker capacity` row reports usable CPUs, currently available memory,
-any process/cgroup memory bound, and the worker count `auto` resolves to. It
-also states that CLIO Coder did not inspect GPU/VRAM or model fit.
+- **`chat`**: On an uninitialized home, plain `doctor` warns on `chat` and `installation` (`not set up yet`), writes nothing, and exits `0` (`--fix` creates directories without configuring a model).
+- **`connection <id>`**: Per-target credential check and 2.5s passive probe (expired browser OAuth is reported without refreshing). Missing credentials/failed probe is `error` for targets used by `chat`/`fleet`/`memory`, else `warn`. Successful public metadata does not prove credentials are ready for inference. `alcf` passive check reads catalog only (does not probe inference URL).
+- **`model <id>`**: Checks configured role models against live, cached, configured, or provider catalog lists. A catalog match is not live availability (and absence from a catalog/recorded list is `WARN`). Absence from a live list on a `chat`/`fleet`/`memory` target is `error` (except `copilot-sdk`, which emits `INFO` and sends model ID as typed).
+- **`copilot sign-in` / `copilot tier <id>`**: When a `copilot-sdk` target and SDK component exist, probes Copilot login with system keychain closed (`run`/worker behavior); in a TTY, falls back to keychain open and emits `WARN` with headless fix instructions if login exists only there (`no terminal` notes keychain was skipped). Missing login is `error` if active in `chat`/`memory`/`fleet`, else `warn`. CLIO Coder reads no token; only the runtime answers. `contextTier: long_context` emits an `INFO` `copilot tier <id>` row.
+- **`local worker capacity`**: Reports usable CPUs, available memory, cgroup/process limit, and resolved `auto` worker count (explicitly notes GPU/VRAM fit is not inspected).
 
 ## Core install rows
 
-A `chat` row leads the report with the configured route, whether chat can run, and the recovery command when setup is incomplete. The core install checks follow: `Clio Coder version`, `install method`, `node version`, `platform`, `engine runtime`, `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir`, `settings.yaml`, `credentials`, `state metadata`, `lifecycle migrations`, and the session store and state storage rows. A missing directory, an invalid `settings.yaml`, a `credentials.yaml` whose mode is not `600`, or stale state metadata is an error, and `clio-coder doctor --fix` repairs the directories, template files, credential mode and state metadata.
-
-The core rows read as follows.
-
-| Row | Level and meaning |
+| Row(s) | Checks and failure conditions |
 | --- | --- |
-| `repair` | `!!` `--fix could not finish: <reason>` when the repair itself threw. The rows below say which root is still wrong. |
-| `install method` | The detected kind and package root, with what the install follows or is pinned to, in the same words `paths` and `upgrade` use. For an installer install it also names the prefix and the managed Node and its path, then either `follows <channel>; background updates on` or `background updates off (<blocker>)` with the blocker `env` (`CLIO_CODER_AUTO_UPDATE=0`), `setting` (`interface.autoUpdate: false`) or `installer` (opted out at install time), or `pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>` for an exact version pin, then the last background update as `last background update <time>: ok v<from> -> v<to>` or `failed v<to>: <detail>`. For an npm, pnpm or Bun install it reads `<kind> global; follows latest through <kind>`, `update after exit on` or `off (<env\|setting\|prefix not user-writable>)`, the last background update with its log path, and `update to v<version> waiting for <holders> since <time>` while an earlier attempt gave up on live sessions. `WARN` when the launcher points at a different prefix than this process runs, when this process runs a different Node than the managed one (for example under `CLIO_CODER_NODE`), when the last background update failed or an update is waiting, and for an unknown layout. |
-| `settings.yaml` | `OK` with the path when the file validates against the current schema. Otherwise `!!` with the exact key paths and the remedy. Validation is read-only. |
-| `settings.yaml mode` | `WARN` when the file is wider than owner read and write. `--fix` tightens it to `0600` and the row then reads `tightened <old> -> 600`. Not checked on Windows. |
-| `settings.yaml booleans` | `WARN` when YAML 1.1 `on`/`off` values read as strings. `--fix` rewrites exactly those values. |
-| `settings.yaml retired keys` | `WARN` naming each key retired without a replacement, which loading ignores, and why it was retired. After `--fix` removes them the row is `OK` and reads `removed <paths>`. |
-| `settings.yaml retired values` | `WARN` naming each retired enum value `--fix` would rewrite and the value it becomes. |
-| `settings.yaml repair`, `settings.yaml repair skipped` | What `--fix` rewrote, and `WARN` for values it could not rewrite safely because of aliases, anchors or tags. |
-| `credentials` | `!!` when `credentials.yaml` is missing, unreadable, or not `0600` on POSIX. On Windows only its content is checked. |
-| `state metadata` | `!!` when the state `home.json` is missing, unreadable, or records an older version than the running one. A development build leaves the recorded version alone. |
-| `state metadata` (newer home) | `!!` when a newer CLIO Coder last used this home: the row names that version, this binary's version and path, and every `clio-coder` on `PATH`, and asks you to run the newer one. The older binary leaves the home's recorded version alone; `CLIO_CODER_ALLOW_OLDER=1` lets a headless run or ACP session start anyway. |
-| `state dir mode`, `data dir mode` | `WARN` when the state or data root is open to group or other users, who could read session transcripts. `--fix` tightens a root that passes the same ownership test `reset` uses, and the row then reads `tightened to 700`; otherwise `chmod 700` it yourself when the directory is CLIO Coder's alone. |
-| `proxy` | Present when `HTTPS_PROXY`, `HTTP_PROXY` or their lowercase forms are set: the proxy model requests use and the `NO_PROXY` hosts that go direct. |
-| `scheduler commands` | Present when the shell sandbox is active and a Slurm, PBS, LSF or Flux client is on `PATH`: those commands run outside the sandbox with approval. See [HPC clusters](hpc-clusters.md#scheduler-clients). |
-| `lifecycle migrations` | See the migration paragraph above. |
-| `installation files` | For a source checkout, or a release package that records its build, whether the build outputs are present. `!!` names the missing files and the remedy: `pnpm --dir <checkout> run build` for a checkout, which `--fix` runs, or `clio-coder upgrade` for a package. |
-| `running <surface> <pid>` | `WARN` for a live CLIO Coder process whose loaded build is no longer the activated one, with the command to restart it once its work is done. |
-| `GUI background`, `GUI running version` | Present only when the GUI background service was installed. `WARN` when the service or its launchers need repair or belong to another install, which `--fix` repairs or hands over, and when the running app is older than the installed version. |
-| `session store` | `OK` with the number of readable session ledgers. `!!` when ledgers hold lines that cannot be read or a directory cannot be listed. |
-| `telemetry` | The telemetry mode a session in the current directory gets, the research flags it captures, and whether content capture is on, with the workspace consent that grants it (who and when) or why it is off. In standard mode it counts recorded workspace consents. `WARN` when settings cannot be read, or when the consent store cannot be read, which grants no workspace consent. Journal health and seal states are in `clio-coder telemetry doctor`. |
-| `cache telemetry` | From the latest session's telemetry journal: the cached share of its prompt tokens, its prompt-cache verdict counts (`hot`, `partial`, `cold`, `small`, `unknown`), tokens read from cache, tokens re-prefilled by calls that missed an expected cache hit with the number of breaks and their cost, and the most common cause. `INFO`, with no advice, when that session journaled no prompt-cache verdict (it made no cached model call); `WARN` when its journal cannot be read. `clio-coder telemetry cache <session>` shows the full report. |
-| `state storage` | Total size of the state root and its largest top-level contributor. `!!` only when the root cannot be measured. |
-| `home storage` | Size of the config, data and cache roots. `!!` only when one cannot be measured. |
-| `install root` | Size and path of the installer root, when there is one. It is `WARN` and says so when this binary does not run from that root, which happens after the launcher moves to a checkout or a package manager; nothing updates or prunes such a root, and `clio-coder uninstall --inactive` removes only it. |
-| `target <id>` | `WARN` when an OpenAI-compatible or Anthropic-compatible target answers like a native LM Studio or Ollama server, with the `clio-coder targets convert` command. `!!` when the target names an unknown runtime. |
-| `cache <id>` | `WARN` prompt-cache advisories from a target's passive check. |
+| `repair` | `!!` (`--fix could not finish: <reason>`) if `--fix` threw while repairing directories. |
+| `Clio Coder version`, `node version`, `platform`, `engine runtime` | CLI version, Node `>= 22.19.0`, OS/arch, bundled/SDK runtime presence. |
+| `install method` | Kind (`installer`, `npm`, `pnpm`, `bun`, `homebrew`, `winget`, `source`, `local`, `unknown`), tracking/pin state (`follows <channel>; background updates on` or `off (<blocker>)` where blocker is `env`\|`setting`\|`installer`; `pinned to <version> since <date> (<origin>); release with clio-coder upgrade --channel <channel>`; npm/pnpm/bun `<kind> global; follows latest through <kind>; update after exit on\|off (<reason>)`), last background update / waiting `pid@host` holds. `WARN` on launcher/Node mismatch, failed/waiting update, or `unknown` layout. |
+| `directory layout`, `config dir`, `data dir`, `state dir`, `cache dir` | Absolute, distinct, non-nesting paths (including symlinks). |
+| `settings.yaml*` | `settings.yaml` (`OK` or `!!` invalid keys), `settings.yaml mode` (`WARN` > `0600` POSIX; `--fix` prints `tightened <old> -> 600`; skipped on Windows), `settings.yaml booleans` (`WARN` YAML 1.1 `on`/`off`), `settings.yaml retired keys` / `retired values`, `settings.yaml repair` / `repair skipped` (`WARN` when aliases/anchors/tags block rewrite). |
+| `credentials` | `!!` if `credentials.yaml` missing, unreadable, or mode != `0600` on POSIX (Windows checks content only). |
+| `state metadata` | `!!` if `home.json` missing/unreadable/older version (`dev` build skips stamp check), or if a newer CLIO Coder wrote the home (lists newer version, `PATH` binaries, `CLIO_CODER_ALLOW_OLDER=1` override for headless/ACP). |
+| `state dir mode`, `data dir mode` | `WARN` if group/other bits set on POSIX (`--fix` tightens when ownership verifies -> `tightened to 700`; otherwise `chmod 700` it yourself when not CLIO Coder's alone). |
+| `lifecycle migrations` | Status of `migrations.json`: `2026-09-01-settings-v2` and `2026-09-01-retire-panes-knobs` auto-satisfy if `settings.yaml` already matches; pending migrations emit `WARN` naming the post-install command; `!!` on corrupt/oversized manifest (restore or review before `upgrade`). |
+| `installation files`, `running <surface> <pid>` | Release builds/checkouts verify outputs (`!!` remedies: `pnpm --dir <checkout> run build` for source, which `--fix` runs, or `clio-coder upgrade` for packages); stale live processes emit `WARN`. |
+| `GUI background`, `GUI running version` | Shown when `state/gui/background` exists; `WARN` on broken/foreign service/launchers (`--fix` repairs) or stale running GUI version. |
+| `session store` | Readable session ledger count; `!!` on unreadable ledgers/dirs. |
+| `telemetry`, `cache telemetry` | Effective capture mode, workspace consent count/grant (`WARN` on unreadable settings/consent), and latest session prompt-cache stats (`INFO` if no cached calls, `WARN` if journal unreadable; `clio-coder telemetry doctor` checks seals). |
+| `state storage`, `home storage`, `install root` | Disk footprint of state (with top subdir), config/data/cache, and installer root (`WARN` when binary runs outside an existing installer root; remove with `clio-coder uninstall --inactive`). |
+| `target <id>`, `cache <id>` | `WARN` if OpenAI/Anthropic-compat target behaves like native LM Studio/Ollama (suggests `clio-coder targets convert`) or has cache advisories; `!!` on unknown runtime. |
+| `proxy`, `scheduler commands` | `proxy` shown when `HTTP_PROXY`/`HTTPS_PROXY` set; `scheduler commands` shown when sandbox active and Slurm/PBS/LSF/Flux CLI found on `PATH`. |
 
-On a home CLIO Coder has never written to, plain `doctor` prints a `chat` warning explaining that no model target is configured and an `installation` warning row (`not set up yet`) and exits 0. It creates nothing. `doctor --fix` creates the directories without choosing a model.
+Conditional rows:
+- `validation contract`: valid (raises rigor default to `high`), absent, `WARN` Markdown-only, or `!!` invalid ([doctor-validation-contract.ts](../../src/cli/doctor-validation-contract.ts)).
+- `interop <agent>`, `fleet node <id>` (SSH preflight cache), `harness` / `harness <file>` (`!!` per unresolved custom agent/skill/settings ref), `playbook <name>` (`WARN` on shadowed name), `reports` (`INFO` `<N> sent, <M> fixed`, listing fixed issues with release).
+- `naming immutable history`, `naming git refs`, `naming worktree markers`: `WARN` on retained legacy `clio` IDs/`clio/task/*`/`clio/compete/*` refs/worktree markers (always read-only, never modified by `--fix`; [doctor-naming.ts](../../src/cli/doctor-naming.ts)).
+- `store backend`, `store root`, `store <check>`: `local (no selection; the default)` unless overridden (`WARN` on unusable selection record), store dir + free space, or `clio-core` probes ([doctor-store.ts](../../src/cli/doctor-store.ts), [store.md](store.md)).
 
-Other rows appear when they apply: `validation contract` (valid, absent, Markdown-only or invalid; an invalid contract is an error and a valid one raises the rigor default to high), `interop <agent>` rows for detected external agents, `fleet node <id>` rows from the SSH preflight, `panes ...` rows, `external tool <id>` rows, `harness` rows for the repository's custom agent recipes, its skills and `.clio-coder/settings.local.yaml` (one `!!` `harness <file>` row per file with an unresolved reference; `clio-coder agents validate` lists each problem), and the `naming immutable history`, `naming git refs` and `naming worktree markers` rows. The naming rows count released `clio` identifiers retained in sessions, `clio/task/*` and `clio/compete/*` git refs, and legacy worktree markers. They warn while any remain, are read-only even under `--fix`, and repair nothing. A `playbook <name>` row is a `WARN` for each user or project playbook that replaces another of the same name: it names both files and says which one `/fleet run <name>` runs. A `reports` row is `INFO` once you have sent a report: it reads `<N> sent, <M> fixed` and lists each fixed issue with the release that fixed it. The `store backend` row names the store backend in use, `local (no selection; the default)` unless one was chosen, and is a `WARN` when the selection record cannot be used; `store root` gives the store directory and its free space, and a selected clio-core backend adds one `store <check>` row per probe, an error when the probe fails. See [Store](store.md).
+## External tools, PDFs, and panes
 
-## External tool rows
-
-Doctor reports one `external tool <id>` row for each pinned external program:
-`asciinema` (recording playback), `herdr` (the pane host), `yazi` (the files pane),
-`croc` (relay file transfer between machines) and `cliamp` (the terminal music
-player behind `/music`). The `herdr` row describes only CLIO Coder's own pinned copy, because
-it never hosts on a `herdr` from `PATH`: ``pane host <pin> (Clio's pinned copy) at <path>``
-is `OK`, ``pane host <pin> is not installed; run `clio-coder panes install` ``
-is a `WARN`, and `no pinned pane host for this platform; Clio runs without panes` is `INFO`.
-For every other tool the detail says
-where the tool resolves, with a `PATH` copy winning when it meets the pin's minimum version:
+`external tool <id>` covers `asciinema`, `herdr`, `yazi`, `croc`, `cliamp` (never `error`) ([doctor-toolchain.ts](../../src/cli/doctor-toolchain.ts), [resolve.ts](../../src/domains/toolchain/resolve.ts)):
+- `herdr` uses CLIO Coder's pinned copy only: ``pane host <pin> (Clio's pinned copy) at <path>`` (`OK`), `` pane host <pin> is not installed; run `clio-coder panes install` `` (`WARN`), or `no pinned pane host for this platform; Clio runs without panes` (`INFO`).
+- Other tools prefer `PATH` when version `>= minimumVersion`, else vendored copy (`WARN` on missing `yazi` while files pane enabled; `INFO` on missing `croc`/`cliamp`/`asciinema`):
 
 | Detail | Meaning |
 | --- | --- |
-| `PATH <path> (<version>, pin <pin>)` | A copy on `PATH` met the minimum and is used. |
-| `vendored <path> (<pin>)` | The copy `clio-coder tools install <id>` downloaded is used. When a `PATH` copy was rejected the detail names it, its version and the floor it missed. |
-| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | A CLIO Coder upgrade moved the pin and only older vendored versions remain on disk, so nothing resolves. A rejected `PATH` copy is named in the same detail. |
-| `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | A `PATH` copy is too old and there is no vendored copy. |
-| ``not found (install with `clio-coder tools install <id>`)`` | Nothing resolves. |
-| `not installed and no pinned asset for this platform (<platform>)` | The pin has no download for this machine. |
-| `experimental integration disabled by settings` | `yazi` while the files pane is off. |
+| `PATH <path> (<version>, pin <pin>)` | `PATH` binary met minimum floor and is used. |
+| `vendored <path> (<pin>)` | Bundled/installed binary used (names any rejected `PATH` binary and floor). |
+| ``vendored <versions> is superseded by the <pin> pin (update with `clio-coder tools install <id>`)`` | Only older vendored copies exist on disk; nothing resolves. |
+| `PATH copy <path> is <version>, below the <floor> floor, and nothing is vendored (install with ...)` | `PATH` binary is too old and no vendored binary exists. |
+| ``not found (install with `clio-coder tools install <id>`)`` | Neither `PATH` nor vendored copy resolves. |
+| `not installed and no pinned asset for this platform (<platform>)` | No upstream pinned asset for host platform. |
+| `experimental integration disabled by settings` | `yazi` when files pane is disabled (`OK`). |
 
-An external tool row is never an error. A missing `yazi`, which includes
-one whose only vendored copy is superseded, is a `WARN` while the files pane is
-enabled, and the row is `OK` with the disabled detail while it is off; a missing
-`croc` or `cliamp` is `INFO`. The `files pane profile` row reports the managed Yazi profile
-(`OK` when current, `INFO` when not yet generated, `WARN` when stale or when
-generation failed). `doctor --fix` regenerates a profile that is not current when
-both `yazi` and `ya` resolve, and Yazi validates the staged profile first. See [Panes and the Files Pane](panes-and-files.md)
-for the rows `panes mode`, `panes socket`, `panes protocol`, `panes binary`,
-`panes layout`, `naming panes` and `panes journal dir`, none of which is an error.
-
-The `pdf attachments` row is `OK` when poppler's `pdftotext` and `pdfinfo` are on
-`PATH`, and names the version `pdftotext -v` reports. It is `INFO` when either is
-missing or `pdftotext -v` prints no version, and then names the install command for
-the platform: `brew install poppler` on macOS, `scoop install poppler` on Windows,
-and `poppler-utils` from the system package manager elsewhere. `@`-attached PDFs and
-`read` on a PDF need both binaries. The row reads only `PATH`, so it also appears on
-a home CLIO Coder has never written to.
+- `files pane profile`: managed Yazi profile (`OK`/`INFO`/`WARN`; `--fix` regenerates when `yazi` + `ya` resolve and Yazi validates it; cache write errors return a profile error without crashing launchers).
+- `panes ...` ([doctor-panes.ts](../../src/cli/doctor-panes.ts)): Outside `HERDR_ENV=1`, emits only `panes mode` and `panes layout`. Inside `HERDR_ENV=1`, emits 7 non-error rows (`panes mode`, `panes socket`, `panes protocol`, `panes binary`, `panes layout`, `naming panes`, `panes journal dir`).
+- `pdf attachments`: checks `pdftotext` + `pdfinfo` on `PATH` (`OK` with version, else `INFO` with `brew install poppler` / `scoop install poppler` / `poppler-utils`; runs on uninitialized homes too).
 
 ## HPC toolchain rows
 
-The full findings include one `toolchain <name>` row for each of `cc`, `c++`, `clang`,
-`gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`,
-`meson`, `python3`, and `sbatch`. The `cc` row accepts `gcc` when `cc` is
-absent, and the `c++` row accepts `g++`.
+Probes `cc` (`gcc`), `c++` (`g++`), `clang`, `gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`, `meson`, `python3`, `sbatch` concurrently (2s `--version` timeout from a scratch dir; [doctor-hpc.ts](../../src/cli/doctor-hpc.ts)). Absent = `INFO` (or `WARN` if referenced by validation contract or missing `sbatch` with `runtime.kind: slurm`); non-zero exit = `WARN`; Slurm timeout = `WARN` (other timeouts stay `OK` with timeout note).
 
-A present tool shows its resolved path and the first line of `--version`
-output that carries a version number. Each `--version` runs for at most two
-seconds from a scratch directory, and all of them run at once.
+## Task worktrees
 
-- An absent tool is `INFO`. Most workspaces need none of these.
-- An absent tool is `WARN` when the workspace
-  [validation contract](quality-policy.md) names it in a
-  validator command, or when the contract declares `runtime.kind: slurm` and
-  `sbatch` is missing.
-- An installed tool whose `--version` exits nonzero is `WARN`. An
-  unconfigured Slurm client, which cannot reach its controller, shows up this
-  way. Slurm client version timeouts also warn; other HPC version timeouts
-  retain their informational detail on an OK row. The scheduler row reuses
-  the bounded sbatch result rather than spawning a second probe.
-
-## Task worktree rows
-
-In a git checkout, the `task worktree root` row gives the directory
-`fleet.worktrees.root` resolves to, its filesystem type, and its free space,
-and warns when an off-disk setting fell back to disk. Doctor then lists every `worktree: true` task worktree that
-outlived its run, one `task worktree <runId>` row each, or a single
-`task worktrees` row reading `none preserved`. A `settled` row is a worktree
-its run kept on purpose and is informational. An `abandoned` row is a crashed
-run's worktree that restart recovery kept because it holds work, and it is a
-warning, as is a claim whose owner is gone or that predates recovery. Each row
-gives the branch, the age, the `git log <base>..<branch>` command to inspect
-it, and the commands to drop it. A claim whose branch and worktree are both gone is reported as stale; `doctor --fix` removes that stale claim after rechecking both. Doctor never removes a surviving branch or worktree. See
-[Fleet dispatch](fleet-dispatch.md).
+In a Git repo ([doctor-task-worktrees.ts](../../src/cli/doctor-task-worktrees.ts)):
+- `task worktree root`: resolved dir, filesystem type, free space (`WARN` if `tmpfs`/`ram`/`auto` fell back to disk).
+- `task worktree <runId>` (or `task worktrees`: `none preserved`): prints `<branch> (<state>, <age>, <reason>): inspect with git log <base>..<branch>; drop with ...`. `INFO` for `settled`, `WARN` for `abandoned` or orphaned claims (`--fix` removes stale claims whose branch and worktree are both gone, never deletes surviving branches or worktrees).
 
 ## Shell sandbox rows
 
-The `shell sandbox` row says how the main session's shell commands run on this
-host ([main-session.ts](../../src/core/sandbox/main-session.ts)). With a sandbox
-backend and `safety.sandbox` not `off` it is `OK` and reads
-`default-autonomy shell commands run in the <backend> sandbox; writable roots: ...`,
-listing the workspace, the scratch roots, the package caches and the
-repository's git dirs, then how many secret files in the workspace and scratch
-roots are masked and how Unix sockets are treated: refused by a seccomp
-filter, denied by the Seatbelt profile, allowed by
-`safety.sandboxUnixSockets: allow`, your own masked as found under
-`safety.sandboxUnixSockets: owned`, or masked as found because the filter could
-not load. The row is `WARN` when the secret-file search stopped at its limit or
-sockets fall back to masks, since abstract sockets then stay reachable.
-Without a backend it is `WARN` and reads
-`default-autonomy shell commands run uncontained and keep the approval rails (<reason>)`.
-The row also says how yolo treats commands, read from the same confinement a
-yolo run resolves to. Contained yolo, the default, reads
-`yolo runs contained in the same sandbox`, or
-`contained yolo runs commands as default does and refuses what would ask` without
-a backend. Unconfined yolo (`safety.yoloConfinement: unconfined` with
-`safety.yoloUnconfinedAccepted: true`) reads `unconfined yolo runs unsandboxed`,
-`unconfined yolo commands run sandboxed too` under `safety.sandbox: required`, or
-a `WARN` that unconfined yolo refuses commands because `required` has no backend. Each configured `safety.scratchRoots` entry that this
-workspace leaves out gets a `WARN` `safety.scratchRoots` row with the reason,
-such as a root that contains the workspace. See
-[Containment at default](../architecture/safety-model.md#containment-at-default).
+`shell sandbox` summarizes host containment ([main-session.ts](../../src/core/sandbox/main-session.ts)):
+- Contained (`safety.sandbox` != `off` and backend available): `OK` (or `WARN` if secret discovery hit limit, sockets fell back to masks, or unconfined yolo refused): `default-autonomy shell commands run in the <backend> sandbox; writable roots: ...`, masked secret count, Unix socket enforcement (`seccomp`/`Seatbelt`/allow/masked), plus yolo line.
+- Uncontained (`safety.sandbox: off` or no backend): `WARN`: `<reason>; <yoloState>; default-autonomy shell commands run uncontained and keep the approval rails`.
+- Yolo state texts: `yolo runs contained in the same sandbox`, `contained yolo runs commands as default does and refuses what would ask`, `unconfined yolo commands run sandboxed too (safety.sandbox is required)`, `unconfined yolo refuses commands: safety.sandbox is required and no sandbox is available (...)`, `unconfined yolo runs unsandboxed`.
+- `safety.scratchRoots`: one `WARN` row per invalid/excluded configured scratch root.
 
-## Slurm MCP rows
+See [Containment at default](../architecture/safety-model.md#containment-at-default).
 
-`slurm clio-kit` names the `clio-kit` binary on `PATH` and whether its build
-ships the Slurm MCP server. `slurm mcp server` names the `mcp.yaml` that
-declares `clio-kit mcp-server slurm`, its scope, and its trust. `slurm
-scheduler` reports `sbatch` and `squeue`. An install with none of the three
-gets a single informational `slurm mcp` row. These rows never fail doctor. See
-[Slurm](slurm.md).
+## Slurm MCP and System One
 
-## System One rows
-
-Doctor reports how System One is configured and never asks a decision. See the [System One guide](system-one.md).
-
-| Row | Level and meaning |
-| --- | --- |
-| `system one (experimental)` | `INFO` `off` when no route is named, and it is then the only System One row. Otherwise one row per named route. `OK` shows the route, its engine kind, target and model. `WARN` names why a route cannot answer, or that `connection <target>` is not verified, so `consult` may give no answer. |
-| `system one (experimental) engine <name>` | One row for each `systemone` engine a route uses. It shows the engine's profile, the window one request may fill and where that window comes from (the target's `capabilities.contextWindow`, the profile ceiling or the runtime default), and whether the server answered the passive check. The check never asks a decision, so it puts no work on the processor the engine runs on. `WARN` when the server does not answer. `clio-coder systemone check <engine> --live` asks one decision. |
+- **Slurm MCP** ([doctor-slurm.ts](../../src/cli/doctor-slurm.ts)): `slurm clio-kit`, `slurm mcp server`, `slurm scheduler` (5s timeout), or single `INFO` `slurm mcp` row if absent. Never fails doctor.
+- **System One** ([doctor.ts](../../src/domains/lifecycle/doctor.ts)): `INFO` `off` if unconfigured, else `OK`/`WARN` per route plus `system one (experimental) engine <name>` (profile, context window provenance, passive health; use `clio-coder systemone check <engine> --live` to test decisions).
 
 ## Deep checks
 
-`--deep` and `/doctor --deep` add two groups of rows.
+Enabled via `clio-coder doctor --deep` or `/doctor --deep` ([doctor-deep.ts](../../src/cli/doctor-deep.ts)):
+- **`tools <target>`**: Live streamed tool-call probe (`--tools-timeout`, default `120`s) per target (`OK` valid call + latency; `WARN` failed health/credentials or malformed/missing call; `INFO` no model, non-streaming runtime, no live probe, or non-chat decision engine). Unloads only a cold local model loaded by the probe itself.
+- **`validator <n>`**: Resolves each contract validator executable (`PATH` or workspace-relative when containing `/`) and evaluates bash admission at configured `safety.autonomy` (or live session autonomy for `/doctor --deep`) without execution (`OK` if resolved + runs without ask, else `WARN`):
 
-### Tool probe: `tools <target>`
-
-The same streamed tool-call probe as `clio-coder targets --probe --tools` runs
-on every configured target. It checks that the target's chat model, or its
-default model when chat uses another target, streams a schema-valid tool call
-through the path a real turn uses.
-
-| Result | Level |
+| Verdict | Meaning |
 | --- | --- |
-| The model streamed a valid tool call | `OK`, with the model and latency |
-| The probe ran and the call was missing or malformed | `WARN`, with the reason |
-| The probe could not run: no model is set, or the runtime does not stream through the engine | `INFO` |
-| An available runtime has no live probe | `INFO`, with the credential source |
-| The target is a decision engine without chat, such as a System One target | `INFO`, not applicable |
-| Credentials are missing or the target did not answer its health probe | `WARN`, with the actual error |
-
-The probe generates tokens and can load a cold model on a local server. It
-unloads afterwards only the model it loaded itself, on the server it probed.
-A model that was already resident stays, and so does a model a chat turn
-loads while an in-session probe runs.
-
-### Validation contract dry run: `validator <n>`
-
-For each command under `validators:` in the workspace validation contract,
-doctor resolves the program (the first word after any `NAME=value`
-assignments) on PATH, or relative to the workspace when it contains a `/`.
-Then it evaluates the command as a bash call the way tool admission does, at
-the configured `safety.autonomy` or at the session's level for `/doctor --deep`.
-At `default` it uses this host's containment for the operator's session: with a
-sandbox backend the command runs contained, and a discard or delete a workspace
-snapshot undoes runs when the workspace is a Git work tree with
-`safety.snapshots` on. At `yolo` only the floor, operator rules and the run's
-ceilings refuse. Otherwise the autonomy mapping at that level decides. Nothing
-is executed.
-
-The row is `OK` when the program resolves and the command would run without an
-approval ask at that level. Otherwise it is `WARN`. The verdict says what
-really happens:
-
-| Verdict | What happens |
-| --- | --- |
-| `runs without approval at default`, or `at yolo in the operator's session` | The command runs at the evaluated level. |
-| `asks for approval at default and runs at yolo in the operator's session` | An ask at `default`, such as an uncontained unrecognized command, `$(...)` on a host without a sandbox, or a damage-control rule. In a session the safety judge reviews it before anyone is asked, and a headless run denies what the judge does not allow. Yolo runs it. |
-| `blocked by the safety policy` | A block at the evaluated level: at `default` the floor, path policy or an authority rail; at `yolo` the floor, an operator rule or a ceiling. |
-
-A verdict that comes from a safety rule names the rule's reason code in
-parentheses. A command that asks only because it is unrecognized gets a hint
-instead: declare it in `.clio-coder/safety.yaml` to run it unattended at
-default. The project safety file takes effect only after you approve it with
-`clio-coder config trust safety`.
-
-With no contract, or a contract with no validators, the dry run adds no rows.
-
-## In the session
-
-`/doctor` runs the same checks as the CLI and shows them as one notice headed
-by a tally, for example `doctor: 58 checks, 0 error(s), 3 warning(s)`. The
-notice takes the level of the worst row. `/doctor` never repairs anything;
-run `clio-coder doctor --fix` from a shell for that.
-
-Deep tool-probe rows report INFO when an available runtime has no live probe, naming the credential source. A failed health probe remains WARN and reports its last error.
-
-If the managed Yazi cache cannot be written, profile generation returns a profile error. Its diagnostic failure marker is best-effort; a cache failure does not crash either launcher.
+| `runs without approval at default` / `at yolo in the operator's session` | Admitted without approval prompt at evaluated level. |
+| `asks for approval at default and runs at yolo in the operator's session` | Prompts (or judge-reviewed) at `default`; runs at `yolo`. If unrecognized, declare in `.clio-coder/safety.yaml` + `clio-coder config trust safety`. |
+| `asks for confirmation at default and at yolo in the operator's session` | Explicit confirmation required even at `yolo` (with rule reason code). |
+| `blocked by the safety policy (<reasonCode \| classification>)` | Blocked at the evaluated level. |

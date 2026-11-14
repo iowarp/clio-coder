@@ -69,6 +69,7 @@ import { TelemetryQuota, TelemetryUpdate } from "../../contracts/telemetry.js";
 import { SessionUsage } from "../../contracts/usage.js";
 import type { AcpSafeSettingsPatch as SafeSettingsPatch } from "../../contracts/wire.js";
 import {
+	ACP_ADMISSION_META_KEY,
 	ACP_AGENT_META_KEY,
 	ACP_ARTIFACTS_LIST_METHOD,
 	ACP_ARTIFACTS_READ_METHOD,
@@ -96,6 +97,7 @@ import {
 	ACP_MEMORY_PROPOSE_METHOD,
 	ACP_NOTICE_META_KEY,
 	ACP_QUEUE_CHANGED_NOTIFICATION,
+	ACP_READOUTS_NOTIFICATION,
 	ACP_REPLAY_META_KEY,
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_INTERRUPT_METHOD,
@@ -117,6 +119,7 @@ import {
 	ACP_TURN_META_KEY,
 	type AcpJob,
 	AcpJobList,
+	AcpReadoutsNotification,
 	AcpTargetList,
 	type AcpAutonomyLevelSchema as AutonomyLevel,
 	AcpSafeSettings as SafeSettings,
@@ -175,6 +178,10 @@ type Entry = {
 	permissions?: Permissions;
 	interviews?: Interviews;
 	eventSequence: number;
+	/** The newest readouts frame applied. The sequence is per connection, and each child gets a new entry. */
+	readoutsSequence?: number;
+	/** A readouts frame that came before the session's id was bound, applied once it is. */
+	readoutsEarly?: Static<typeof AcpReadoutsNotification>;
 	prompt?: Promise<void>;
 	retired?: Promise<void>;
 	/**
@@ -651,6 +658,23 @@ export class Supervisor {
 				if (Value.Check(TelemetryUpdate, update) && update.sessionId === owned.id)
 					this.hub.publish({ type: "telemetry.updated", payload: { resource: owned.id, update } });
 			});
+			// Each frame replaces the session's readouts whole. It is checked as sent, not cleaned first: cleaning would
+			// strip an unknown property and pass a frame this build does not understand. A bad frame is dropped and the
+			// turn goes on; one older than the newest applied is dropped too.
+			transport.onNotification(ACP_READOUTS_NOTIFICATION, (params) => {
+				if (!owned.client.capabilities.readouts || (owned.bound && record(params).sessionId !== owned.id)) return;
+				const frame = structuredClone(params);
+				if (!Value.Check(AcpReadoutsNotification, frame)) return;
+				if (frame.sequence <= (owned.readoutsSequence ?? -1)) return;
+				owned.readoutsSequence = frame.sequence;
+				// The open frame follows the session/new result, which can land before the server binds the id it names.
+				if (!owned.bound) owned.readoutsEarly = frame;
+				else
+					this.publish({
+						type: "session.telemetry",
+						payload: { resource: owned.id, revision: this.revision(owned.id), telemetry: { readouts: frame.readouts } },
+					});
+			});
 			transport.onNotification("session/update", (params) => {
 				try {
 					this.update(owned, params);
@@ -737,9 +761,16 @@ export class Supervisor {
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;
+			const early = entry.readoutsEarly;
+			delete entry.readoutsEarly;
 			this.publish({
 				type: "session.telemetry",
-				payload: { resource: boundId, revision: this.revision(boundId), telemetry: entry.client.telemetry },
+				payload: {
+					resource: boundId,
+					revision: this.revision(boundId),
+					telemetry:
+						early?.sessionId === boundId ? { ...entry.client.telemetry, readouts: early.readouts } : entry.client.telemetry,
+				},
 			});
 			const config = entry.client.config ?? (resume && this.snapshot(boundId).config ? { options: [] } : undefined);
 			if (config)
@@ -1186,6 +1217,11 @@ export class Supervisor {
 			const settled = item.status === "completed" || item.status === "failed";
 			const timing = record(meta[ACP_TOOL_TIMING_META_KEY]).durationMs;
 			if (settled && typeof timing === "number" && Number.isSafeInteger(timing) && timing >= 0) item.durationMs = timing;
+			// The engine puts the judge's hold on the update's own `_meta`; the frame's `_meta` is read too, so either works.
+			const admission = record(record(update._meta)[ACP_ADMISSION_META_KEY] ?? meta[ACP_ADMISSION_META_KEY]);
+			if (settled || admission.state === "admitted") delete item.admission;
+			else if (admission.state === "judging" && typeof admission.display === "string")
+				item.admission = boundedText(admission.display, 128);
 			const partial = settled ? undefined : toolProgressText(update.content);
 			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
 			else if (settled) delete item.partialOutput;

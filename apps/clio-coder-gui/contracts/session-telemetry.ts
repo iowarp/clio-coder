@@ -2,6 +2,7 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Autonomy } from "./autonomy.js";
 import { ContextLedger } from "./context-ledger.js";
+import { SessionReadouts } from "./readouts.js";
 
 import { TelemetrySession } from "./telemetry.js";
 import { AcpUsageMetaSchema } from "./wire.js";
@@ -126,6 +127,7 @@ export const SessionTelemetry = Type.Object(
 		notices: Type.Optional(Type.Array(Type.String({ maxLength: 16384 }), { maxItems: 32 })),
 		/** Moves on each `available_commands_update`, so a client re-reads the command list (it carries no list itself). */
 		commandsRevision: Type.Optional(count),
+		readouts: Type.Optional(SessionReadouts),
 	},
 	closed,
 );

@@ -1,7 +1,7 @@
 First launch of CLIO Coder: setup finds a local model and chat opens
-Recorded with CLIO Coder 0.8.0-rc.1. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
 
-== tui-boot
+== setup
 
 ~/projects/calibration-lab $ clio-coder
 No model target is configured. Clio needs a model before it can do anything else, so setup starts now.
@@ -46,7 +46,7 @@ No model target is configured. Clio needs a model before it can do anything else
 └  Done
 
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0-rc.1 ─────────────────────────────────────────────────────────────────────────────────────────┐
+┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
 │ Model      litellm · qwen3.8-27b                                                                                     │
 │ Autonomy   Default · reviewed approvals                                                                              │
 │ Awareness  Not indexed yet                                                                                           │
@@ -61,6 +61,7 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 
 == sent
 
+│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
 │  only after the test message, except a browser sign-in you complete.
 │
 ●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
@@ -80,20 +81,19 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
 └  Done
 
 Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0-rc.1 · litellm · qwen3.8-27b
+>C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
 
 ▌ Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification
 ▌ task. Do not change files yet.
 
 i Reply from litellm · qwen3.8-27b
 
-│ Thinking · /view
+│ … 3 rows · /view
+│ project type is TypeScript. The last commit is "Add temperature conversions with tests".
+│ Let me explore the repository structure. I'll batch the independent reads/search
 
-$ bash `ls -la /home/researcher/projects/calibration-lab && echo --- && cat package.json 2>/dev/null` ◌ preparing
-▸ find ◌ preparing
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is preparing a tool · Esc stops ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main                                                11.1K/200K (5.6%) · ≈71 tok/s
+default · ~/projects/calibration-lab · main                                               11.2K/200K (5.6%) · ≈106 tok/s
 Type to steer · Esc stops the run · Alt+U Dashboard
