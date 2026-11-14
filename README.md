@@ -533,7 +533,7 @@ are especially welcome.
 [Issues](https://github.com/iowarp/clio-coder/issues) ·
 [Discussions](https://github.com/iowarp/clio-coder/discussions) ·
 [Contributor guide](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) ·
-[Changelog](CHANGELOG.md) · [Security](SECURITY.md) · coder@iowarp.ai
+[Changelog](CHANGELOG.md) · [Security](SECURITY.md)
 
 ## Acknowledgements
 
