@@ -1098,6 +1098,10 @@ button.wb-chip:hover:not(:disabled) {
 .wb-bar > .wb-menu > .wb-menu__panel {
 	right: auto;
 	left: 0;
+	/* The task menu has twenty items, taller than a phone's screen: it scrolls itself rather than the conversation. */
+	max-height: calc(100dvh - 4rem - env(safe-area-inset-bottom, 0px));
+	overflow-y: auto;
+	overscroll-behavior: contain;
 }
 /* On a phone the menu hangs from the bar's own left gutter, so it fits whatever the title's width. */
 @media (max-width: 560px) {

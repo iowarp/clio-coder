@@ -355,3 +355,52 @@ test("the agent's telemetry_update reaches the browser as a telemetry.updated ev
 	assert.deepEqual(event.payload.update.topics, ["session", "cost"]);
 	assert.equal(event.payload.update.sessionId, session.id);
 });
+
+test("a page entering the back/forward cache closes its event stream and a restored page reopens it", async (t) => {
+	// Live: each address-bar navigation left the old page's stream open in Chrome's back/forward cache; after four,
+	// fonts and API reads queued behind dead streams for the six connections a host gets.
+	const sources: { closed: boolean }[] = [];
+	let stop = () => {};
+	t.after(() => stop());
+	class Source extends EventTarget {
+		onerror: (() => void) | null = null;
+		closed = false;
+		constructor() {
+			super();
+			sources.push(this);
+		}
+		close() {
+			this.closed = true;
+		}
+	}
+	const page = new EventTarget();
+	for (const [name, value] of [
+		["EventSource", Source],
+		["document", Object.assign(new EventTarget(), { visibilityState: "visible" })],
+		["window", page],
+	] as const) {
+		const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+		Object.defineProperty(globalThis, name, { configurable: true, value });
+		t.after(() => {
+			if (previous) Object.defineProperty(globalThis, name, previous);
+			else Reflect.deleteProperty(globalThis, name);
+		});
+	}
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	const client = createClient({ ticket: "ticket" }, credentialFetch());
+	t.after(() => client.credentials.dispose());
+	stop = subscribe(client, queries, () => {});
+	for (let turn = 0; turn < 50 && sources.length === 0; turn += 1) await setTimeout(1);
+	assert.equal(sources.length, 1);
+	page.dispatchEvent(Object.assign(new globalThis.Event("pagehide"), { persisted: true }));
+	assert.equal(sources[0]?.closed, true);
+	page.dispatchEvent(Object.assign(new globalThis.Event("pageshow"), { persisted: true }));
+	for (let turn = 0; turn < 100 && sources.length < 2; turn += 1) await setTimeout(5);
+	assert.equal(sources.length, 2);
+	assert.equal(sources[1]?.closed, false);
+	// A first load fires pageshow too, and must not open a second stream.
+	page.dispatchEvent(Object.assign(new globalThis.Event("pageshow"), { persisted: false }));
+	await setTimeout(20);
+	assert.equal(sources.length, 2);
+});

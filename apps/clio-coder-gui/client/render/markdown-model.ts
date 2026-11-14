@@ -81,8 +81,10 @@ function inlineMath(source: string): MathToken | undefined {
 	return undefined;
 }
 
+// A single newline is a line break, as the terminal's Markdown renders it: line-oriented replies (lists of
+// results, numbered lines, logs) otherwise collapse into one wrapped paragraph.
 const lexer = new Marked(
-	{ gfm: true, breaks: false, pedantic: false, async: false },
+	{ gfm: true, breaks: true, pedantic: false, async: false },
 	{
 		extensions: [
 			{
