@@ -1,15 +1,18 @@
 // What the command palette offers, decided here so the shell only supplies the handlers.
 //
 // The list is built from destinations this app actually routes to and from actions that are already
-// wired end to end. It is deliberately NOT built from `GET /api/sessions/:id/commands`: that catalog
-// belongs to one session and needs that session's arguments, which the conversation's command panel
-// collects. A palette row has neither, and a row that refuses teaches the operator that the whole
-// surface is a guess.
+// wired end to end. The open task's own commands come in as data (`situation.catalog`, the catalog the
+// task announced) and run through the composer, the same path a typed `/name` takes; a command that
+// needs arguments is not run from here but put in the composer for the operator to finish.
 //
 // Every row here is therefore either a route this client renders or a mutation this client already
 // sends from a visible button. A row that cannot run right now is marked unavailable and the palette
 // hides it, rather than showing it greyed and inviting the question of why.
 
+import type { SessionSnapshot } from "../../contracts/sessions.js";
+import type { CommandCatalog } from "../../contracts/steering.js";
+import type { SessionControlTarget } from "../pages/session-control-model.js";
+import { taskTitle } from "../shell/shell-model.js";
 import type { KeybindingId } from "./keybindings.js";
 
 /**
@@ -43,6 +46,8 @@ export interface Destination {
 export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Traces", path: "/traces", keywords: ["runs", "forensics"] },
 	{ label: "Toolchain", path: "/toolchain", keywords: ["tools", "install"] },
+	{ label: "Sessions", path: "/sessions", keywords: ["tasks", "conversations", "history", "resume"] },
+	{ label: "Machines", path: "/machines", keywords: ["hosts", "remote", "servers", "attach"] },
 	{ label: "Settings", path: "/settings", keywords: ["configuration", "preferences"] },
 	{ label: "General settings", path: "/settings/general", keywords: ["theme", "appearance", "install", "app"] },
 	{ label: "Model settings", path: "/settings/models", keywords: ["model", "default", "thinking", "connection"] },
@@ -79,6 +84,8 @@ export interface CommandSituation {
 	readonly hasNotices: boolean;
 	/** Tasks the palette can jump to: open ones and the saved ones this shell already loaded. */
 	readonly tasks?: readonly PaletteTask[];
+	/** The command catalog the open task announced, once the palette has read it. */
+	readonly catalog?: CommandCatalog | undefined;
 }
 
 export interface PaletteTask {
@@ -107,6 +114,46 @@ export interface CommandHandlers {
 	openWindow?(): void;
 	/** The report dialog (R-24). */
 	openReport?(): void;
+	/** Run one of the open task's commands that needs no arguments; `name` is what follows the slash. */
+	runTaskCommand?(name: string): void;
+	/** Put `/name ` in the open task's composer for the operator to finish. */
+	fillTaskCommand?(name: string): void;
+}
+
+/**
+ * What a stop control stops, read from the snapshot at the moment it is pressed. A turn id captured
+ * earlier can name a turn that already settled, and the server answers a stop for a settled turn with
+ * success while the turn now running carries on; this reads the turn that is running now or nothing.
+ */
+export function liveStopTarget(sessionId: string, snapshot: SessionSnapshot | undefined): SessionControlTarget | null {
+	const last = snapshot?.turns.at(-1);
+	if (snapshot?.state !== "open" || last?.status !== "running") return null;
+	return { id: sessionId, workspaceId: snapshot.workspaceId, title: taskTitle(snapshot), currentTurnId: last.id };
+}
+
+interface TaskCommand {
+	readonly name: string;
+	readonly summary: string;
+	readonly needsArgs: boolean;
+}
+
+/** The catalog flattened the way the slash list shows it: each runnable name with its own summary. */
+function taskCommands(catalog: CommandCatalog): readonly TaskCommand[] {
+	const rows: TaskCommand[] = [];
+	const required = (args: { readonly positionals?: readonly { readonly required: boolean }[] } | undefined) =>
+		(args?.positionals ?? []).some((positional) => positional.required);
+	for (const command of catalog.commands) {
+		// A hub command's bare form is refused, so only its verbs are rows.
+		if (!command.requiresSubcommand)
+			rows.push({ name: command.name, summary: command.summary, needsArgs: required(command.args) });
+		for (const [subcommand, args] of Object.entries(command.args.subcommands ?? {}))
+			rows.push({
+				name: `${command.name} ${subcommand}`,
+				summary: command.subcommandSummaries?.[subcommand] ?? command.summary,
+				needsArgs: required(args),
+			});
+	}
+	return rows;
 }
 
 export const NO_SITUATION: CommandSituation = {
@@ -186,6 +233,18 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 			run: handlers.closeSession,
 		});
 	}
+	const { runTaskCommand, fillTaskCommand } = handlers;
+	if (sessionId !== null && sessionOpen && situation.catalog && runTaskCommand && fillTaskCommand)
+		for (const row of taskCommands(situation.catalog))
+			commands.push({
+				id: `task-command.${row.name}`,
+				// A row that will ask for more says so, the way a menu item that opens a dialog does.
+				title: row.needsArgs ? `${row.summary}…` : row.summary,
+				group: "This task",
+				keywords: [row.name, ...row.name.split(" "), "command"],
+				available: true,
+				run: () => (row.needsArgs ? fillTaskCommand(row.name) : runTaskCommand(row.name)),
+			});
 	for (const destination of DESTINATIONS)
 		commands.push({
 			id: `go.${destination.path}`,

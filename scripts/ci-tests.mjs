@@ -193,6 +193,7 @@ export const guiTests = [
 	"report-dialog-model",
 	"setup-wizard-model",
 	"chat-composer",
+	"slash-model",
 	"chat-approval",
 	"chat-interview",
 	"chat-turns",

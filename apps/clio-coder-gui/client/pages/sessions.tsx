@@ -42,6 +42,7 @@ import { useTranscriptView } from "../chat/use-transcript-view.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
+import { liveStopTarget } from "../interaction/commands.js";
 import { useShortcut } from "../interaction/use-shortcut.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
@@ -169,6 +170,13 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const controlling = controls.records.some((row) => row.sessionId === id && row.stage !== "complete");
 	const input = { params: { id }, query: {}, body: {} };
 	const session = useQuery(sessionQuery(client, id));
+	// Ctrl+. takes the Stop button's path, naming the turn running when the key is pressed.
+	const stopRunningTurn = () => {
+		const target = liveStopTarget(id, queries.getQueryData(sessionQuery(client, id).queryKey));
+		if (target) controls.start(target, "stop");
+	};
+	const turnRunning = session.data?.state === "open" && session.data.turns.at(-1)?.status === "running";
+	useShortcut("cancelTurn", stopRunningTurn, { enabled: turnRunning });
 	// A saved task this server has not opened answers not_found. Only that answer starts the search for
 	// its project; a task that loads, and a server that cannot be reached, never do.
 	const notOpen =

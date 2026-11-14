@@ -26,6 +26,7 @@ const SHORTCUTS = [
 	"focusComposer",
 	"sessionPanel",
 	"cancelTurn",
+	"modelPicker",
 ] as const;
 
 export function GeneralPage({ client }: { client: Client }) {

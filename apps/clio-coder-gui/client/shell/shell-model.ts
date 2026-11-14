@@ -237,6 +237,7 @@ const SETTINGS_SEGMENTS = new Set([
 	"arena",
 	"docs",
 	"machines",
+	"skills",
 ]);
 
 export function isSettingsPath(pathname: string): boolean {

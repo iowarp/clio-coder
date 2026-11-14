@@ -6,6 +6,7 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { useMenuShortcut } from "../interaction/use-shortcut.js";
 import { type AutonomyLevel, autonomyMenu, currentAutonomy, UNRECOGNIZED_MODE_NOTE } from "./autonomy-model.js";
 import { useSessionTelemetry } from "./session-telemetry.js";
 
@@ -23,12 +24,15 @@ export function AutonomyPill({
 	sessionId,
 	capabilities,
 	locked,
+	chord,
 }: {
 	client: Client;
 	sessionId: string;
 	capabilities: AgentCapabilities | undefined;
 	/** A turn is running, so the level cannot change under it. */
 	locked: boolean;
+	/** Alt+Y opens the menu; false while the task is not open. */
+	chord: boolean;
 }) {
 	const queries = useQueryClient();
 	const pushed = useSessionTelemetry(client, sessionId)?.autonomy;
@@ -59,6 +63,7 @@ export function AutonomyPill({
 			if (panel.current) panel.current.open = false;
 		},
 	});
+	useMenuShortcut("autonomyMenu", panel, open, setOpen, { enabled: chord && supported && !!current.data });
 	if (!supported || !current.data) return null;
 	const autonomy = currentAutonomy(current.data, pushed);
 	const level = autonomy.level;
