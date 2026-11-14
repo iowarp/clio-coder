@@ -13,6 +13,8 @@ const LONG_MESSAGE_CHARS = 4_000;
 const PLAN_CLOSE_CONTEXT_THRESHOLD = 128_000;
 // Match the exploration advisory's short follow-up scope; a new task drops the close (#431).
 const PLAN_CLOSE_REMINDER_IDLE_MS = 5 * 60_000;
+// "Interview me first, then give me the plan": the plan waits on the operator's answers.
+const INTERVIEW_FIRST_REQUEST = /\binterview\s+me\b|\bask\s+me\s+(?:first|about|some|a\s+few|questions)\b/iu;
 const PLAN_CLOSE_FOLLOW_UP = /^(?:continue|go on|keep going|carry on|proceed)(?:[.!]|\s+please[.!]?)?$/iu;
 
 function operatorRequest(text: string, promptChars: unknown): string {
@@ -46,6 +48,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 	let changed = false;
 	let asked = false;
 	let closed = false;
+	let interviewFirst = false;
 	// What armed this turn's close, reported with the effects it causes (#431).
 	let armedBy = "regex:PLAN_REQUEST@operator-request";
 	let pending: { at: number; sessionId: string | undefined; message: string } | null = null;
@@ -59,6 +62,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 				changed = false;
 				asked = false;
 				closed = false;
+				interviewFirst = false;
 				const reminder = pending;
 				pending = null;
 				if (!deps.canAsk() || !turnCanCallTool(input, ToolNames.AskUser)) return [];
@@ -79,6 +83,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 					const request = operatorRequest(input.text ?? "", input.metadata?.promptChars);
 					const wantsPlan = PLAN_REQUEST.test(request) && !DISCUSSION_REQUEST.test(request);
 					planOnly = wantsPlan && isPlanOnlyRequest(request);
+					interviewFirst = wantsPlan && INTERVIEW_FIRST_REQUEST.test(request);
 					const proposal = input.metadata?.turnMode === "proposal";
 					armed = planOnly || proposal || wantsPlan;
 					armedBy = planOnly
@@ -93,7 +98,7 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 							{
 								kind: "inject_reminder",
 								audience: "model",
-								message: `End the plan text without a question or option list; ask_user "Carry out this plan?" is its only close.${planOnly ? ' This is plan-only: the card must offer "Keep the plan (Recommended)" first, then any implementation choices, then "Revise the plan first".' : ""}`,
+								message: `${interviewFirst ? "Ask the interview questions with ask_user before writing the plan, not in prose. " : ""}End the plan text without a question or option list; ask_user "Carry out this plan?" is its only close.${planOnly ? ' This is plan-only: the card must offer "Keep the plan (Recommended)" first, then any implementation choices, then "Revise the plan first".' : ""}`,
 							},
 						]
 					: [];
@@ -122,11 +127,16 @@ export function createPlanCloseRegistration(deps: { canAsk: () => boolean }): Mi
 			armed = false;
 			if (changed || closed || (asked && !input.text?.trim()) || !deps.canAsk() || input.metadata?.stopReason !== "stop")
 				return [];
-			const message =
-				(planOnly
-					? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '
-					: "") +
-				'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.';
+			// Asked to be interviewed first, a turn that ended without one has no plan to
+			// close yet: its questions sat in prose. Demanding the close there told a local
+			// model to close a plan it had not written and sent it into minutes of thinking.
+			const interviewOwed = interviewFirst && !asked;
+			const message = interviewOwed
+				? 'The operator asked to be interviewed before the plan. Ask those questions now with ask_user, each with 2-4 options and the recommended one first; do not ask them in prose. After the answers, write the plan and close it with ask_user "Carry out this plan?".'
+				: (planOnly
+						? 'This request is plan-only. Offer "Keep the plan (Recommended)" first; implementation is optional and is not recommended. '
+						: "") +
+					'Close this plan with ask_user "Carry out this plan?". Put any open choices in the options, with one-line descriptions and the recommended option first, and end with "Revise the plan first" so the operator can decline. Do not restate the plan.';
 			const contextTokens = input.metadata?.contextTokens;
 			if (typeof contextTokens === "number" && contextTokens >= PLAN_CLOSE_CONTEXT_THRESHOLD) {
 				pending = { at: performance.now(), sessionId: input.sessionId, message };

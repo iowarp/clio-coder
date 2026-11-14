@@ -92,6 +92,23 @@ describe("turn-ending contract in the session prompt", () => {
 	});
 });
 
+it("sends a plan that owes an interview back to ask_user instead of to a close it cannot make yet", () => {
+	const rule = createPlanCloseRegistration({ canAsk: () => true });
+	const start = rule.evaluate({
+		hook: "turn_start",
+		text: "Plan how to add geometric_mean. Interview me first about the edge cases, then give me the plan. Plan only.",
+	});
+	ok(start[0]?.kind === "inject_reminder" && start[0].message.startsWith("Ask the interview questions with ask_user"));
+	const effects = rule.evaluate({
+		hook: "turn_end",
+		text: "Before the plan: 1. Empty list? 2. Zeros? 3. Negatives?",
+		metadata: { stopReason: "stop" },
+	});
+	ok(effects[0]?.kind === "request_continuation", JSON.stringify(effects));
+	ok(effects[0].message.includes("asked to be interviewed before the plan"), effects[0].message);
+	ok(!effects[0].message.includes("Do not restate the plan"), effects[0].message);
+});
+
 it("continues only an armed plan that has not asked or changed files, once", () => {
 	let plan = false;
 	let canAsk = true;
