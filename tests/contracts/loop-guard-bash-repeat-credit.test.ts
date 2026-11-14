@@ -10,7 +10,7 @@ import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
  * epoch, so a slow identical command no longer trips the loop guard. The turn
  * tool budget and the session cost ceiling still bound it.
  */
-function harness(budget?: { soft: number; hard: number }) {
+function harness(budget?: { soft: number; hard: number }, turnBlockBudget = 2) {
 	let loopState = createLoopState();
 	const safety = {
 		observeLoop(key: string, now: number) {
@@ -21,11 +21,12 @@ function harness(budget?: { soft: number; hard: number }) {
 	} as unknown as Parameters<typeof createLoopGuardRegistration>[0]["safety"];
 	const guard = createLoopGuardRegistration({
 		safety,
-		turnBlockBudget: 2,
+		turnBlockBudget,
 		turnSynthesisLockout: true,
 		...(budget === undefined ? {} : { turnToolCallBudget: () => budget }),
 	});
 	const args = { command: "sleep 300; gh pr checks 42", timeout_ms: 600_000 };
+	const reasons: string[] = [];
 	const call = (result: { elapsedMs: number; output: string; failed?: boolean }): boolean => {
 		const base = { turnId: "turn-1", toolName: "bash", toolArgs: args };
 		const before = guard.evaluate({
@@ -33,7 +34,11 @@ function harness(budget?: { soft: number; hard: number }) {
 			hook: "before_tool",
 			metadata: { callFingerprint: hashToolCall("bash", args) },
 		} as MiddlewareHookInput);
-		if (before.some((effect) => effect.kind === "block_tool")) return false;
+		const block = before.find((effect) => effect.kind === "block_tool");
+		if (block !== undefined) {
+			reasons.push(block.kind === "block_tool" ? block.reason : "");
+			return false;
+		}
 		guard.evaluate({
 			...base,
 			hook: "after_tool",
@@ -46,7 +51,7 @@ function harness(budget?: { soft: number; hard: number }) {
 		} as MiddlewareHookInput);
 		return true;
 	};
-	return { call };
+	return { call, reasons };
 }
 
 function admitted(run: (index: number) => boolean, calls: number): boolean[] {
@@ -60,6 +65,16 @@ describe("loop guard bash repeat credit (#445)", () => {
 			admitted(() => call({ elapsedMs: 100, output: "pending" }), 3),
 			[true, true, false],
 		);
+	});
+
+	it("locks a worker's tools on the third block of one identical call, whatever run budget is left", () => {
+		const { call, reasons } = harness(undefined, 15);
+		deepStrictEqual(
+			admitted(() => call({ elapsedMs: 100, output: "calc.py | 2 +" }), 5),
+			[true, true, false, false, false],
+		);
+		ok(!/disabled/u.test(reasons[1] ?? ""), reasons[1]);
+		ok(/disabled/u.test(reasons[2] ?? ""), reasons[2]);
 	});
 
 	it("lets a slow identical command keep polling on an unchanged result", () => {

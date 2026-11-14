@@ -336,7 +336,13 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 			if (assignmentByRun.has(runId)) return null;
 			// The steps of one plan dispatch under the plan's root as siblings, all at attempt 0. A run this stream has not
 			// seen, at an attempt it has, is such a sibling rather than a retry, so it is its own work item and its own card.
-			const sibling = byAssignment.has(sharedId) && payload.attempt <= (attemptByAssignment.get(sharedId) ?? -1);
+			// A loop repair enters at its cycle number (attempt 1, 2) under that same root, so a higher attempt alone is no
+			// retry: one follows only a failed attempt, never one that succeeded. Folding the repair into the build's card
+			// replaced the build on screen and labelled the repair "failed over → attempt 2".
+			const existingShared = byAssignment.get(sharedId);
+			const sibling =
+				existingShared !== undefined &&
+				(payload.attempt <= (attemptByAssignment.get(sharedId) ?? -1) || existingShared.result?.outcome === "succeeded");
 			const assignmentId = sibling ? runId : sharedId;
 			const runtime = runtimeIdentity(payload);
 			const existing = sibling ? undefined : byAssignment.get(assignmentId);
