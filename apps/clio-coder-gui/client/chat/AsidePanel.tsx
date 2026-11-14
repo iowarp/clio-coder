@@ -21,6 +21,7 @@ export const AsidePanel = memo(function AsidePanel({
 	sessionOpen,
 	capabilities,
 	only,
+	seed = "",
 }: {
 	client: Client;
 	sessionId: string;
@@ -29,14 +30,16 @@ export const AsidePanel = memo(function AsidePanel({
 	/** Render without the disclosure frame, for a host that supplies its own heading. */
 	/** One form alone, for a host opened as the terminal's /btw (question) or /draft. */
 	only?: "question" | "draft";
+	/** What the form starts with, from a typed `/btw <question>` or `/draft <request>`. */
+	seed?: string;
 }) {
 	const capability = capabilities?.aside;
 	const block = asideBlock(capability, sessionOpen);
 	const questionId = useId();
 	const requestId = useId();
 	const countId = useId();
-	const [question, setQuestion] = useState("");
-	const [request, setRequest] = useState("");
+	const [question, setQuestion] = useState(only === "question" ? seed : "");
+	const [request, setRequest] = useState(only === "draft" ? seed : "");
 	const counts = capability ? draftCounts(capability) : null;
 	const [count, setCount] = useState<number | null>(null);
 	const params = { params: { id: sessionId }, query: {} };
