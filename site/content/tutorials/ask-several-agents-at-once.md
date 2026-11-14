@@ -43,7 +43,9 @@ poll       3 of 3 voted; majority: node:test
 node:test  ### 3 (100%)
 ```
 
-The headline reads `majority` when one answer has more than half the votes, `plurality` when it leads without a majority, and `tie` when the top two are level. Here all three chose `node:test` in about two seconds each, on both models, and gave the same reason: it ships with Node and adds no dependency. `/view` opens each full answer. A participant whose vote names none of the options is asked again, with the options quoted.
+The headline reads `majority` when one answer has more than half the votes, `plurality` when it leads without a majority, and `tie` when the top two are level.
+
+Here all three chose `node:test` in about two seconds each, on both models, and gave the same reason: it ships with Node and adds no dependency. `/view` opens each full answer. A participant whose vote names none of the options is asked again, with the options quoted.
 
 ## Declare a council roster
 

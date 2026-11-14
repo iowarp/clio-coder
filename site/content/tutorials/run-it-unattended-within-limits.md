@@ -60,7 +60,9 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 
 Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
 
-In a separate run of the first step, made for this guide apart from the session at the top of the page, Claude Haiku 5.5 on the `anthropic-max` route worked on a repository with one failing parser test. It split each line at the first `=`, ran the test check, committed on the branch, and pushed nothing. That route carries a price estimate, so `--max-cost-usd` could bound it and stderr printed no unpriced-route notice. Stderr read:
+In a separate run of the first step, made for this guide apart from the session at the top of the page, Claude Haiku 5.5 on the `anthropic-max` route worked on a repository with one failing parser test. It split each line at the first `=`, ran the test check, committed on the branch, and pushed nothing.
+
+That route carries a price estimate, so `--max-cost-usd` could bound it and stderr printed no unpriced-route notice. Stderr read:
 
 ```text
 clio-coder run: session n5iuvnc76u7o
