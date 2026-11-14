@@ -161,9 +161,10 @@ test("commands the app serves elsewhere are not listed, and still run when typed
 		],
 	};
 	const listed = slashEntries(facts({ catalog: withHostWriters })).map((entry) => entry.name);
-	for (const name of ["export", "archive", "eggs", "report bug", "report status"])
+	for (const name of ["export", "eggs", "report bug", "report status"])
 		assert.ok(!listed.includes(name), `${name} is listed`);
 	assert.ok(listed.includes("doctor"));
+	assert.ok(listed.includes("archive"), "no other control exports or imports a session");
 	assert.ok(listed.includes("report"), "the Report a problem dialog keeps the name");
 	assert.equal(parseSlashLine("/export", withHostWriters)?.kind, "command");
 	assert.equal(parseSlashLine("/report status", withHostWriters)?.kind, "command");
