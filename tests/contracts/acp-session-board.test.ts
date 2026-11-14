@@ -322,7 +322,7 @@ test("the prompt response totals the turn only after its main agent's last model
 	// A live GUI turn footer read "≥10,653 (1 call unknown) in" forever: the final call's settle record lands after
 	// the response streams, and the prompt response used to read the turn before it was folded.
 	const records = goldenTelemetryRecords("fold-wait");
-	const last = records.findLast((record) => record.k === "call.settled");
+	const last = [...records].reverse().find((record) => record.k === "call.settled");
 	assert.ok(last);
 	const turnId = last.ctx.turnId ?? "";
 	let view = telemetryViewOf(
