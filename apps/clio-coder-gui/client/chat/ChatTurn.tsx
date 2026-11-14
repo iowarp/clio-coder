@@ -32,7 +32,6 @@ import {
 	requestView,
 	responseAuthor,
 	responseText,
-	segmentSettled,
 	turnActivity,
 	turnAriaLabel,
 	turnStartedAt,
@@ -54,7 +53,7 @@ import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerRunRecord } from "./RunRecordLine.js";
 import { TurnChanges } from "./TurnChanges.js";
 import { describeTool } from "./tool-presentation.js";
-import { type ChatTurn, sameTurnView } from "./turns.js";
+import { type ChatSegment, type ChatTurn, sameTurnView } from "./turns.js";
 import "./chat-turn.css";
 import "./session-states.css";
 
@@ -241,34 +240,23 @@ export const ChatTurnView = memo(function ChatTurnView({
 							<span aria-hidden="true">{LIVE_GLYPHS[status.state]}</span> {livePlaceholder(status)}
 						</p>
 					) : null}
-					{turn.segments.map((segment, index) => {
-						const settled = segmentSettled(live, index, turn.segments.length);
-						switch (segment.kind) {
-							case "response":
-								return (
-									<div key={segment.item.id}>
-										<MarkdownContent source={segment.item.text} complete={settled} deferDiagrams={live} />
-										<WorkerRunRecord client={client} sessionId={session.id} item={segment.item} />
-									</div>
-								);
-							case "notice":
-								return null;
-							case "reasoning":
-								return <ReasoningDisclosure key={segment.item.id} item={segment.item} />;
-							default:
-								return (
-									<ActivityGroup
-										key={segment.items[0]?.id ?? `activity-${index}`}
-										items={segment.items}
-										settled={settled}
-										client={client}
-										session={session}
-										workspaceRoot={workspaceRoot}
-										// Only a running call reads the clock; the rest skip the once-a-second tick.
-										nowMs={segment.items.some(isRunningItem) ? nowMs : 0}
-									/>
-								);
-						}
+					{segmentChunks(turn.segments).map((chunk, index) => {
+						const first = index * SEGMENT_CHUNK;
+						const liveIndex = live ? turn.segments.length - 1 : -1;
+						return (
+							<SegmentChunk
+								key={`chunk-${first}`}
+								segments={chunk}
+								first={first}
+								liveIndex={liveIndex >= first && liveIndex < first + chunk.length ? liveIndex : -1}
+								live={live}
+								client={client}
+								session={session}
+								workspaceRoot={workspaceRoot}
+								// Only a running call reads the clock; the rest skip the once-a-second tick.
+								nowMs={chunk.some((segment) => segment.kind === "activity" && segment.items.some(isRunningItem)) ? nowMs : 0}
+							/>
+						);
 					})}
 					{turn.settled ? <TurnChanges items={turn.items} workspaceRoot={workspaceRoot} /> : null}
 				</div>
@@ -298,5 +286,108 @@ export const ChatTurnView = memo(function ChatTurnView({
 function isRunningItem(item: TimelineItem): boolean {
 	return item.status === "in_progress";
 }
+
+/**
+ * Segments per chunk. A long answer is hundreds of segments in one live turn, and without chunks every
+ * streamed delta reconciled each of them, and the browser placed and visibility-checked each one as
+ * its own grid item. A chunk that holds only finished segments skips its render and, off screen, its
+ * layout and paint as one box. Segment `i` always lives in chunk `i / SEGMENT_CHUNK`, so a segment
+ * never moves to another parent, and nothing remounts, when it finishes.
+ */
+const SEGMENT_CHUNK = 16;
+
+function segmentChunks(segments: readonly ChatSegment[]): ChatSegment[][] {
+	const chunks: ChatSegment[][] = [];
+	for (let index = 0; index < segments.length; index += SEGMENT_CHUNK)
+		chunks.push(segments.slice(index, index + SEGMENT_CHUNK));
+	return chunks;
+}
+
+interface SegmentChunkProps {
+	readonly segments: readonly ChatSegment[];
+	/** The index of the chunk's first segment in the turn. */
+	readonly first: number;
+	/** The index of the turn's growing segment when this chunk holds it, otherwise -1. */
+	readonly liveIndex: number;
+	/** The turn is live: diagrams wait for it to settle. */
+	readonly live: boolean;
+	readonly client: Client;
+	readonly session: SessionSnapshot;
+	readonly workspaceRoot: string | undefined;
+	readonly nowMs: number;
+}
+
+/** Live turns regroup their segments on every delta, so a segment is the same when what it renders is. */
+function sameSegment(previous: ChatSegment | undefined, next: ChatSegment | undefined): boolean {
+	if (previous === next) return true;
+	if (previous === undefined || next === undefined || previous.kind !== next.kind) return false;
+	if (previous.kind === "activity" && next.kind === "activity")
+		return previous.items.length === next.items.length && previous.items.every((item, i) => item === next.items[i]);
+	return "item" in previous && "item" in next && previous.item === next.item;
+}
+
+/**
+ * The session reaches the rows only through its id and its approval requests (ActivityGroup's own
+ * comparator reads nothing else), so a chunk skips its render while those and its segments hold.
+ */
+function sameSegmentChunk(previous: SegmentChunkProps, next: SegmentChunkProps): boolean {
+	return (
+		previous.first === next.first &&
+		previous.liveIndex === next.liveIndex &&
+		previous.live === next.live &&
+		previous.client === next.client &&
+		previous.workspaceRoot === next.workspaceRoot &&
+		previous.nowMs === next.nowMs &&
+		previous.session.id === next.session.id &&
+		previous.session.permissions === next.session.permissions &&
+		previous.segments.length === next.segments.length &&
+		previous.segments.every((segment, index) => sameSegment(segment, next.segments[index]))
+	);
+}
+
+const SegmentChunk = memo(function SegmentChunk({
+	segments,
+	first,
+	liveIndex,
+	live,
+	client,
+	session,
+	workspaceRoot,
+	nowMs,
+}: SegmentChunkProps) {
+	return (
+		<div className="chat-response__chunk">
+			{segments.map((segment, offset) => {
+				const index = first + offset;
+				const settled = index !== liveIndex;
+				switch (segment.kind) {
+					case "response":
+						return (
+							<div key={segment.item.id}>
+								<MarkdownContent source={segment.item.text} complete={settled} deferDiagrams={live} />
+								<WorkerRunRecord client={client} sessionId={session.id} item={segment.item} />
+							</div>
+						);
+					case "notice":
+						return null;
+					case "reasoning":
+						return <ReasoningDisclosure key={segment.item.id} item={segment.item} />;
+					default:
+						return (
+							<ActivityGroup
+								key={segment.items[0]?.id ?? `activity-${index}`}
+								items={segment.items}
+								settled={settled}
+								client={client}
+								session={session}
+								workspaceRoot={workspaceRoot}
+								nowMs={segment.items.some(isRunningItem) ? nowMs : 0}
+							/>
+						);
+				}
+			})}
+		</div>
+	);
+}, sameSegmentChunk);
 
 export { NO_NOTICES };
