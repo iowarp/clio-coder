@@ -312,9 +312,13 @@ function declaresPytestDependency(document: NonNullable<ReturnType<typeof parseT
 	return poetry.some((table) => table !== null && Object.hasOwn(table, "pytest"));
 }
 
-/** The first conventional test directory holding `test*.py` or `*_test.py` modules. */
+/**
+ * The first conventional test directory holding `test*.py` or `*_test.py`
+ * modules, then the root: a flat project keeps `test_calc.py` beside
+ * `calc.py`, and verify found no check there while `python3 -m unittest` passed.
+ */
 function unittestStartDirectory(workspaceRoot: string): string | null {
-	for (const directory of ["tests", "test"]) {
+	for (const directory of ["tests", "test", "."]) {
 		try {
 			if (readdirSync(path.join(workspaceRoot, directory)).some((name) => /^test.*\.py$|_test\.py$/u.test(name))) {
 				return directory;
