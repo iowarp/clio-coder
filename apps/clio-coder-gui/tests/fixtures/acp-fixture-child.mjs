@@ -117,9 +117,10 @@ const permission = async () => {
 		params: {
 			sessionId,
 			toolCall: scenario === "permission-mismatch" ? { ...toolCall, rawInput: { path: "different.txt" } } : toolCall,
+			// `permission-no-reject` offers no one-time refusal, which the app cannot present.
 			options: [
 				{ optionId: "allow", kind: "allow_once", name: "Allow once" },
-				{ optionId: "reject", kind: "reject_once", name: "Reject" },
+				...(scenario === "permission-no-reject" ? [] : [{ optionId: "reject", kind: "reject_once", name: "Reject" }]),
 			],
 		},
 	});
@@ -905,7 +906,7 @@ async function handle(frame) {
 				if (turnScenario === "plan-permission") await planPermission();
 				else if (turnScenario.startsWith("permission")) await permission();
 				else if (turnScenario === "held-worker") await heldWorker();
-				else if (turnScenario === "slow") {
+				else if (turnScenario === "slow" || scenario === "cancel-unanswered") {
 					while (!cancelled) await delay(100);
 				} else if (turnScenario === "workload") {
 					// `[workload 16384]` asks for an answer of at least that many bytes.
@@ -1439,6 +1440,8 @@ async function handle(frame) {
 				break;
 			}
 			case "session/cancel":
+				// A busy agent that never confirms the stop; only `session/close` ends its turn.
+				if (scenario === "cancel-unanswered") return;
 				cancelled = true;
 				for (const settle of liveRuns.values()) settle(false);
 				for (const resolve of pending.values()) resolve({ outcome: { outcome: "cancelled" } });

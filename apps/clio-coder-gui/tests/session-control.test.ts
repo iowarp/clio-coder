@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { Value } from "typebox/value";
 import { lostControlNotice } from "../client/chat/control-model.js";
 import { Problem } from "../contracts/common.js";
 import { SessionControl } from "../contracts/control.js";
 import type { Event } from "../contracts/events.js";
 import { SessionSnapshot } from "../contracts/sessions.js";
+import { Supervisor } from "../server/acp/supervisor.js";
 import { ClientRegistry, PRESENCE_MS } from "../server/services/clients.js";
 import { EventHub } from "../server/services/event-hub.js";
 import { SessionControls } from "../server/services/session-control.js";
+import { AppFiles } from "../server/state/files.js";
 import { harness, json } from "./harness/app.js";
 
 test("one window drives a session; another views it until it takes control, and the first is told", async (t) => {
@@ -152,4 +156,50 @@ test("a holder that went away is claimed by the next window to act, never by one
 	const count = events.length;
 	controls.admit("s1", b.clientId);
 	assert.equal(events.length, count);
+});
+
+test("an unconfirmed stop keeps the session, and a second stop forces the turn and parks the task", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { lanes: false });
+	// The agent never answers `session/cancel`; a short injected wait stands in for the ten-second one.
+	const supervisor = new Supervisor(
+		h.workspaces,
+		new AppFiles(join(h.home.path, "stop-state")),
+		h.hub,
+		{
+			...h.home.env,
+			CLIO_CODER_WEB_CLI: fileURLToPath(new URL("./fixtures/acp-fixture-child.mjs", import.meta.url)),
+			CLIO_CODER_WEB_FIXTURE_SCENARIO: "cancel-unanswered",
+			CLIO_CODER_WEB_FIXTURE_LOG: join(h.home.path, "stop.jsonl"),
+		},
+		4,
+		undefined,
+		undefined,
+		undefined,
+		50,
+	);
+	t.after(async () => {
+		await supervisor.shutdown();
+		await h.close();
+	});
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await supervisor.open(workspace.id);
+	const { turnId } = supervisor.startTurn(session.id, "Work until stopped");
+	await assert.rejects(supervisor.cancel(session.id, turnId), (error: unknown) => {
+		const problem = (error as { problem?: Problem }).problem;
+		return (
+			problem?.code === "upstream_acp" &&
+			problem.detail ===
+				"CLIO Coder has not confirmed the stop yet. The turn may still end on its own; ask again to force it."
+		);
+	});
+	assert.equal(supervisor.get(session.id).state, "open");
+	assert.equal(supervisor.get(session.id).turns.at(-1)?.status, "running");
+	await supervisor.cancel(session.id, turnId);
+	const snapshot = supervisor.get(session.id),
+		turn = snapshot.turns.at(-1);
+	assert.equal(turn?.status, "failed");
+	assert.equal(turn?.problem?.detail, "The turn was stopped by force because CLIO Coder did not confirm the stop.");
+	assert.equal(snapshot.state, "parked");
 });

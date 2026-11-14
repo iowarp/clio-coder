@@ -55,7 +55,7 @@ export function approvalQueue(permissions: readonly Permission[]) {
 export const RESOLUTION_SUMMARY: Readonly<Record<string, string>> = {
 	allowed: "Allowed once by the operator.",
 	rejected: "Rejected by the operator. CLIO Coder was told no.",
-	cancelled: "Withdrawn when the turn was cancelled. CLIO Coder was not told no.",
+	cancelled: "Withdrawn when the turn ended. CLIO Coder was not told no.",
 	expired: "Nobody answered. The turn was stopped; CLIO Coder was not told no.",
 };
 

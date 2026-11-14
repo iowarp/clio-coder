@@ -561,7 +561,7 @@ test("unanswered permission escalates then expires, cancels through ACP, and nev
 	assert.match(log, /"method":"session\/cancel"/);
 	assert.match(log, /"toolExecuted":false/);
 });
-test("mismatched permission tool input fails closed without publishing an approval card", {
+test("an ask whose input differs from its tool row is shown as asked and the session keeps running", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "permission-mismatch" });
@@ -569,8 +569,13 @@ test("mismatched permission tool input fails closed without publishing an approv
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
 	h.supervisor.startTurn(session.id, "Write");
-	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "failed");
-	assert.deepEqual(h.supervisor.get(session.id).permissions, []);
+	await until(() => h.supervisor.get(session.id).permissions.some((permission) => permission.status === "pending"));
+	assert.equal(h.supervisor.get(session.id).state, "open");
+	const card = h.supervisor.get(session.id).permissions.at(-1);
+	assert.equal(card?.title, "write");
+	h.supervisor.decide(session.id, card?.id ?? "", "reject");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "succeeded");
+	assert.equal(h.supervisor.get(session.id).state, "open");
 	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /"toolExecuted":true/);
 });
 test("cancel mid-stream has one terminal and an old cancel cannot cancel the next turn", {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
 	accessSentence,
 	approvalActions,
@@ -40,6 +41,7 @@ import {
 } from "../client/chat/fleet-facts.js";
 import type { Permission } from "../contracts/permissions.js";
 import { Permissions } from "../server/acp/permissions.js";
+import { harness } from "./harness/app.js";
 
 const REQUESTED = Date.parse("2026-09-20T10:00:00.000Z");
 
@@ -672,6 +674,133 @@ test("a worker ask is read from the agent's meta, answered once, and withdrawn w
 	const next = permissions.request("s-1", "turn-1", { ...ask, _meta: {} }, timeline);
 	permissions.decide(published.at(-1)?.[1].id ?? "", "allow-once");
 	assert.deepEqual(await next, { outcome: { outcome: "selected", optionId: "allow-once" } });
+});
+
+// ---- asks the app shows, and asks it declines without ending the session ------------------------
+
+const CHOICES = [
+	{ optionId: "allow-once", kind: "allow_once", name: "Approve once" },
+	{ optionId: "reject-once", kind: "reject_once", name: "Deny" },
+];
+const ROW = [
+	{ turnId: "turn-1", toolCallId: "dispatch-1", status: "in_progress", title: "dispatch", toolKind: "other" },
+] as never;
+function bridge(timing?: { escalateMs: number; budgetMs: number }) {
+	const published: Array<[string, Permission]> = [];
+	const declined: string[] = [];
+	let cancelled = 0;
+	const permissions = new Permissions(
+		(type, permission) => published.push([type, permission]),
+		async () => {
+			cancelled += 1;
+		},
+		timing,
+		(reason) => declined.push(reason),
+	);
+	return { permissions, published, declined, cancels: () => cancelled };
+}
+
+test("an ask titled differently from its tool row is shown with the ask's own title", async () => {
+	const { permissions, published } = bridge();
+	const ask = {
+		sessionId: "s-1",
+		toolCall: { toolCallId: "dispatch-1", title: "Scout read-only root: /data", kind: "read", rawInput: { other: 1 } },
+		options: CHOICES,
+	};
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	assert.equal(published[0]?.[0], "permission.requested");
+	assert.equal(published[0]?.[1].title, "Scout read-only root: /data");
+	assert.equal(published[0]?.[1].toolCallId, "dispatch-1");
+	assert.equal(published[0]?.[1].kind, "read");
+	permissions.decide(published[0]?.[1].id ?? "", "reject");
+	assert.deepEqual(await response, { outcome: { outcome: "selected", optionId: "reject-once" } });
+});
+
+test("an ask with no tool row, like the report-bundle consent, still raises a card that Allow answers", async () => {
+	const { permissions, published } = bridge();
+	const ask = { sessionId: "s-1", toolCall: { toolCallId: "report-bundle-1" }, options: CHOICES };
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	assert.equal(published[0]?.[0], "permission.requested");
+	assert.equal(published[0]?.[1].toolCallId, "report-bundle-1");
+	assert.equal(published[0]?.[1].title, "Approval needed");
+	assert.equal(published[0]?.[1].kind, "other");
+	permissions.decide(published[0]?.[1].id ?? "", "allow-once");
+	assert.deepEqual(await response, { outcome: { outcome: "selected", optionId: "allow-once" } });
+});
+
+test("an ask the app cannot present is declined as cancelled and says why", async () => {
+	const { permissions, published, declined } = bridge();
+	const call = { toolCallId: "dispatch-1", title: "dispatch" };
+	const allowOnly = [CHOICES[0]];
+	const cancelled = { outcome: { outcome: "cancelled" } };
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: allowOnly }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-2", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(
+		await permissions.request("s-1", null, { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(published, []);
+	assert.deepEqual(declined, ["no one-time allow or reject choice", "foreign session", "no active turn"]);
+	// A second ask while one waits is declined; the first keeps its card.
+	const first = permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW);
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.equal(declined.at(-1), "another approval is waiting");
+	assert.equal(published.length, 1);
+	permissions.cancel();
+	assert.deepEqual(await first, cancelled);
+});
+
+test("a worker ask expires on the worker's own window and leaves the turn running", async () => {
+	const { permissions, published, cancels } = bridge({ escalateMs: 10, budgetMs: 1000 });
+	const ask = {
+		sessionId: "s-1",
+		toolCall: { toolCallId: "dispatch-1", title: "dispatch" },
+		options: CHOICES,
+		_meta: { "clio-coder/workerAsk": { version: 1, ...WORKER, timeoutMs: 50 } },
+	};
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	const requested = published[0]?.[1];
+	assert.equal(Date.parse(requested?.expiresAt ?? "") - Date.parse(requested?.requestedAt ?? ""), 50);
+	assert.deepEqual(await response, { outcome: { outcome: "cancelled" } });
+	assert.equal(published.at(-1)?.[0], "permission.expired");
+	assert.equal(cancels(), 0);
+});
+
+test("a session declines an unpresentable ask, stays open, and refuses a decision it has no bridge for", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "permission-no-reject", lanes: false });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(session.id, "Write");
+	for (let index = 0; index < 1000 && h.supervisor.get(session.id).turns.at(-1)?.status === "running"; index += 1)
+		await delay(20);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(snapshot.state, "open");
+	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
+	assert.deepEqual(snapshot.permissions, []);
+	assert.equal(
+		snapshot.telemetry?.notices?.filter((notice) => notice.startsWith("CLIO Coder asked for an approval")).length,
+		1,
+	);
+	// No session runs without a bridge, so take it away to reach the guard.
+	const entries = (h.supervisor as unknown as { entries: Map<string, { permissions?: unknown }> }).entries;
+	const entry = entries.get(session.id);
+	if (entry) delete entry.permissions;
+	assert.throws(
+		() => h.supervisor.decide(session.id, "any", "allow-once"),
+		(error: unknown) => (error as { problem?: { code?: string } }).problem?.code === "conflict",
+	);
 });
 
 test("fleet failures show their outcome code and recovery detail in the row and fact", () => {
