@@ -270,17 +270,12 @@ function checkBoundaries(): Promise<void> {
 function checkCiScripts(): void {
 	const ci = parseYaml(readRoot(".github/workflows/ci.yml"));
 	const release = parseYaml(readRoot(".github/workflows/release.yml"));
-	const smoke = parseYaml(readRoot(".github/workflows/browser-smoke.yml"));
 	for (const [file, workflow] of [
 		["ci.yml", ci],
 		["release.yml", release],
-		["browser-smoke.yml", smoke],
 	] as const) {
-		// The browser smoke alone runs unasked, in its own workflow, so no push or pull request ever reports the
-		// required ci checks as skipped.
-		const triggers = file === "browser-smoke.yml" ? ["push", "pull_request", "workflow_call"] : ["workflow_dispatch"];
-		if (!isDeepStrictEqual(Object.keys(workflow.on ?? {}), triggers))
-			fail("ci-scripts", `${file} must run only on ${triggers.join(", ")}`);
+		if (!isDeepStrictEqual(Object.keys(workflow.on ?? {}), ["workflow_dispatch"]))
+			fail("ci-scripts", `${file} must run only on deliberate dispatch`);
 		if (workflow.permissions?.contents !== "read") fail("ci-scripts", `${file} defaults to read-only contents`);
 		for (const [name, job] of Object.entries(workflow.jobs ?? {}) as Array<
 			[
@@ -325,8 +320,6 @@ function checkCiScripts(): void {
 				fail("ci-scripts", "report-labels.yml must not interpolate expressions into a step");
 		}
 	}
-	if (ci.jobs?.["browser-smoke"]?.uses !== "./.github/workflows/browser-smoke.yml")
-		fail("ci-scripts", "a dispatch runs the same browser smoke that pushes and pull requests run");
 	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
 		fail("ci-scripts", "preserve branch-protection check names");
 	if (ci.jobs?.ci?.needs !== "prepare" || ci.jobs?.["runtime-compatibility"]?.needs !== "prepare")

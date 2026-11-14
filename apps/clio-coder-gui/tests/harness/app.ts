@@ -35,7 +35,6 @@ import { WorkspaceService } from "../../server/services/workspaces.js";
 import { AppFiles } from "../../server/state/files.js";
 import { WorkerHost } from "../../server/worker/host.js";
 import type { WorkerSettings } from "../../server/worker/protocol.js";
-import { sourceCli } from "./library-fixture.js";
 import { scratchHome } from "./scratch-home.js";
 
 export async function harness(
@@ -85,10 +84,7 @@ export async function harness(
 	);
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces, reads);
-	// CLI children run the checkout's own source, never whatever `clio-coder` is on PATH. A test may still point
-	// them at a fixture through options.env.
-	const cliEnv = { CLIO_CODER_WEB_CLI: sourceCli, ...env };
-	const cli = new CliRunner(cliEnv);
+	const cli = new CliRunner(env);
 	// Wired as the server wires it: a written turn limit is re-read from the user layer and applied.
 	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () =>
 		realpath(join(home.path, "state"))
@@ -98,7 +94,7 @@ export async function harness(
 				if (capacity !== undefined) supervisor.setTurnCapacity(capacity);
 			}),
 	);
-	const setup = new SetupService(reads, cliEnv, workspaces);
+	const setup = new SetupService(reads, env, workspaces);
 	// Wired as the server wires it, so the machine switcher reads the scratch home's (empty) node registry.
 	const attachments = new MachineAttachments({
 		endpoints: async () =>
@@ -107,7 +103,7 @@ export async function harness(
 		hub,
 		env,
 	});
-	const research = new ResearchService(cli, workspaces, operations, cliEnv);
+	const research = new ResearchService(cli, workspaces, operations, env);
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
@@ -125,7 +121,7 @@ export async function harness(
 		review: new ProjectReviewService(cli, workspaces),
 		reports: new ReportsService(cli, workspaces),
 		problemReports: new ProblemReportsService(ops, workspaces),
-		arena: new ArenaService(cli, workspaces, operations, cliEnv),
+		arena: new ArenaService(cli, workspaces, operations, env),
 		research,
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations, supervisor),

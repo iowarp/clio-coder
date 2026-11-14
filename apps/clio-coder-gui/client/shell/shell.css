@@ -943,30 +943,6 @@ button.wb-chip:hover:not(:disabled) {
 		display: none;
 	}
 }
-/* A page's own bar (Sessions, a project's work) gives way on the same terms, and once it is phone-narrow its primary
-   action keeps only its mark. The words stay in the accessibility tree, so each control keeps its name. */
-@container bar (max-width: 1120px) {
-	.wb-bar > .wb-icon--text > span {
-		display: none;
-	}
-}
-@container bar (max-width: 30rem) {
-	.wb-bar > .primary {
-		gap: 0;
-		padding-inline: var(--space-2);
-		font-size: 0;
-	}
-	.wb-bar > .wb-icon.wb-icon--text {
-		padding-inline: 6px;
-	}
-}
-/* At phone width such a bar also closes its gaps, so the sidebar and New task buttons, the title, four controls
-   and the primary action share 390px. */
-@media (max-width: 560px) {
-	.wb-bar:has(> .primary) {
-		gap: var(--space-1);
-	}
-}
 @container bar (max-width: 60rem) {
 	.wb-bar__readings {
 		flex-basis: 0;

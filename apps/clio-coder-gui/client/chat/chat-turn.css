@@ -44,13 +44,29 @@
 	overflow-clip-margin: var(--space-2);
 }
 /* A long answer is hundreds of finished paragraphs and tool groups inside one turn, and that turn
-   is on screen while it streams. Each finished segment off screen skips its layout and paint too,
-   so a streamed frame lays out the growing segment rather than the whole answer. The growing one
-   is the last child and stays fully rendered; it records its height then, before it is skipped. */
+   is on screen while it streams. Segments come in chunks of sixteen (ChatTurn.tsx). A finished chunk
+   off screen skips its layout and paint as one box, and inside the chunk on screen each finished
+   segment off screen does too, so a streamed frame lays out the growing segment rather than the
+   whole answer, and the browser tracks tens of boxes rather than hundreds. The growing segment is
+   the last child of the last chunk and stays fully rendered; it records its height then, before it
+   is skipped. */
+.chat-response__chunk {
+	display: grid;
+	gap: var(--space-4);
+	min-width: 0;
+}
 .chat-response__body > * {
 	contain-intrinsic-size: auto 120px;
 }
-.chat-response__body > :not(:last-child) {
+.chat-response__chunk > * {
+	contain-intrinsic-size: auto 120px;
+}
+/* A finished chunk never rendered yet stands in at the height its sixteen segments would. */
+.chat-response__body > .chat-response__chunk {
+	contain-intrinsic-size: auto 1920px;
+}
+.chat-response__body > :not(:last-child),
+.chat-response__chunk > :not(:last-child) {
 	content-visibility: auto;
 	overflow: clip;
 	overflow-clip-margin: var(--space-2);
@@ -87,6 +103,7 @@
 .chat-request > *,
 .chat-response > *,
 .chat-response__body > *,
+.chat-response__chunk > *,
 .activity > *,
 .activity__rows > *,
 .activity__row > *,
@@ -708,7 +725,8 @@
 }
 @media (prefers-reduced-motion: no-preference) {
 	.chat-turn.is-live > .chat-request,
-	.chat-turn.is-live .chat-response__body > *,
+	.chat-turn.is-live .chat-response__body > :not(.chat-response__chunk),
+	.chat-turn.is-live .chat-response__chunk > *,
 	.chat-turn.is-live .activity__rows > * {
 		animation: turn-enter var(--motion-base) var(--ease-standard) both;
 	}
