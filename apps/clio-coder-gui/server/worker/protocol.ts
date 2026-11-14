@@ -55,6 +55,7 @@ export interface Methods {
 	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"sessions.workspaces": { params: Record<string, never>; result: unknown };
+	"sessions.list": { params: { cwd: string }; result: unknown };
 	"workspace.files": { params: { cwd: string; input: string }; result: unknown };
 	"sessions.recover": {
 		params: { cwd: string; sessionId: string; pid: number; birth: string | null };

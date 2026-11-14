@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { WorkspaceService } from "../server/services/workspaces.js";
 import { AppFiles } from "../server/state/files.js";
@@ -61,7 +62,7 @@ test("workspace identity uses canonical directories and app state refuses symlin
 	await assert.rejects(new AppFiles(other).read("children"), /escapes/);
 });
 
-test("concurrent workspace reads share the ledger scan without caching completed results or sharing mutable rows", async (t) => {
+test("workspace reads share one ledger scan for two seconds, never across a recents write, and never share mutable rows", async (t) => {
 	const home = await scratchHome();
 	t.after(home.close);
 	const ledger = new WorkerHost("reads", { fixture: true }, home.env);
@@ -77,6 +78,15 @@ test("concurrent workspace reads share the ledger scan without caching completed
 	assert.notEqual(first[0], second[0]);
 	first.pop();
 	assert.equal(second.length, 1);
+	const id = second[0]?.id ?? "";
+	await service.get(id);
+	await setTimeout(100);
+	const again = await service.get(id);
+	assert.equal(scan.mock.callCount(), 1);
+	again.name = "changed";
+	assert.notEqual((await service.list())[0]?.name, "changed");
+	assert.equal(scan.mock.callCount(), 1);
+	await service.open(home.path);
 	await service.list();
 	assert.equal(scan.mock.callCount(), 2);
 });
