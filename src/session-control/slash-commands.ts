@@ -2614,6 +2614,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.subcommand !== "run") {
 				return parsed.error ? { kind: "usage-error", command: "fleet", reason: parsed.error } : { kind: "fleet" };
 			}
+			// Words after the playbook name are a task typed the way /run takes one; a playbook reads it from --var.
+			if (parsed.error?.startsWith("Unexpected argument:") && parsed.positionals.length > 0)
+				return usageError("fleet", `${parsed.error}; a playbook takes its task as --var task="<text>"`, "run");
 			if (parsed.error) return usageError("fleet", parsed.error, "run");
 			const name = parsed.positionals[0] ?? "";
 			if (name.length === 0) return usageError("fleet", "Missing required argument: playbook", "run");

@@ -739,7 +739,11 @@ function planProgressText(plan: FleetPlanRunView, statusShown = false, withFailu
 	const done = plan.steps.filter((step) => step.state === "passed" || step.state === "replayed").length;
 	const failed = plan.steps.find((step) => step.state === "failed" && !planStepStopped(plan, step.stepId));
 	const live = plan.state === "running" || plan.state === "cancelling";
-	const count = `${live ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps`;
+	const loops =
+		live || plan.loops === undefined
+			? ""
+			: ` · ${plan.loops.resolved}/${plan.loops.total} ${plan.loops.total === 1 ? "loop" : "loops"} resolved`;
+	const count = `${live ? done : plan.succeededStepCount}/${plan.requiredStepCount} steps${loops}`;
 	if (plan.state === "cancelling") {
 		const stopping = plan.stoppedStepIds ?? [];
 		return `${count} · ${stopping.length > 0 ? `stopping ${stopping.join(", ")}` : "stopping before the next step"}`;
