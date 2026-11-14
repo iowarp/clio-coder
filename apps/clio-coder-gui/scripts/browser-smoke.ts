@@ -8,7 +8,6 @@ import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator, type Route } from "playwright-core";
 import { SETTINGS_SECTIONS } from "../client/shell/shell-model.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
-import { resolveClioCommand } from "../server/process-policy.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -38,18 +37,6 @@ assert.ok(
 	widths.length > 0 && widths.every((width) => [1600, 1440, 1050, 400, 390, 320].includes(width)),
 	"widths: 1600, 1440, 1050, 400, 390, 320",
 );
-// Models, usage, library and system read through the real CLI; without one those flows fail as if broken.
-if (
-	!(await resolveClioCommand().then(
-		() => true,
-		() => false,
-	))
-) {
-	console.error(
-		"browser-smoke: no Clio CLI found; run `pnpm run build` at the repository root or export CLIO_CODER_WEB_CLI=<absolute path to dist/cli/index.js>.",
-	);
-	process.exit(1);
-}
 // Keep browser profiles and failure captures under the caller's private temp root too.
 const scratch = process.env.TMPDIR
 	? join(process.env.TMPDIR, "clio-coder-gui-validation")
@@ -133,6 +120,9 @@ function expectedRefusal(item: { method: string; path: string; status: number })
 		// The harness Clio does not expose session history, so the read refuses. The same path also
 		// creates a session, and a refused create must still fail the run.
 		(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) ||
+		// The harness wires no machine management, so the Machines page's list read refuses; the width step
+		// still lays the page out.
+		(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/machines$/.test(item.path)) ||
 		(item.status === 401 && firstReads.includes(item.path))
 	);
 }
@@ -2883,6 +2873,64 @@ try {
 				await page.locator("nav.wb-side__actions").getByRole("button", { name: "New task", exact: true }).click();
 				await eventually(composerFocused, true, "the rail's New task did not focus the message box");
 				await page.setViewportSize({ width, height: 1050 });
+			});
+		// The layout breakpoints and one pixel either side: phone 390, the 600 drawer bar, the 760 phone rail, a
+		// 768 tablet and the 1050 compact desktop. Every page fits its width: the document never scrolls sideways
+		// and no visible element reaches past the viewport outside a scroller of its own.
+		if (runIndex === 0 && zoom === 1)
+			await step("widths fit at every breakpoint", async () => {
+				const places = [
+					`${origin}/`,
+					`${origin}/sessions`,
+					noticeSessionUrl,
+					workspaceUrl,
+					...SETTINGS_SECTIONS.map((section) => `${origin}${section.path}`),
+				].filter((place) => place !== "");
+				const misfits: string[] = [];
+				for (const breakpoint of [390, 599, 601, 759, 761, 768, 1049, 1051]) {
+					await page.setViewportSize({ width: breakpoint, height: 900 });
+					for (const place of places) {
+						await page.goto(place);
+						await page.locator("main").getByRole("heading", { level: 1 }).first().waitFor();
+						await page.evaluate(() => document.fonts.ready);
+						await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+						const found = await page.evaluate(() => {
+							const viewport = document.documentElement.clientWidth;
+							const out: string[] = [];
+							if (document.documentElement.scrollWidth > viewport)
+								out.push(`document ${document.documentElement.scrollWidth}px wide`);
+							for (const node of document.body.querySelectorAll("*")) {
+								const rect = node.getBoundingClientRect();
+								if (rect.width === 0 || rect.height === 0 || (rect.right <= viewport + 1 && rect.left >= -1)) continue;
+								// A closed disclosure's content still has a layout box; checkVisibility knows it is skipped.
+								if (
+									!node.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true, opacityProperty: true }) ||
+									node.closest("[inert], .sr-only")
+								)
+									continue;
+								const style = getComputedStyle(node);
+								if (style.position === "fixed" && (rect.right <= 0 || rect.left >= viewport)) continue;
+								// Inside a scroller of its own the overflow is reachable, and inside a clip-path (the visually
+								// hidden pattern) nothing shows. No named helper here: tsx would wrap it in a __name call the
+								// page does not define.
+								let excused = false;
+								for (let at = node.parentElement; at && !excused; at = at.parentElement) {
+									const { overflowX, clipPath } = getComputedStyle(at);
+									excused =
+										clipPath !== "none" || ((overflowX === "auto" || overflowX === "scroll") && at.scrollWidth > at.clientWidth);
+								}
+								if (excused) continue;
+								const name = `${node.tagName.toLowerCase()}${node.className && typeof node.className === "string" ? `.${node.className.trim().split(/\s+/u).join(".")}` : ""}`;
+								out.push(`${name} spans ${Math.round(rect.left)}..${Math.round(rect.right)}`);
+							}
+							return out.slice(0, 6);
+						});
+						for (const item of found) misfits.push(`${breakpoint}px ${new URL(page.url()).pathname}: ${item}`);
+					}
+				}
+				await page.setViewportSize({ width, height: 1050 });
+				// One line, so --continue reports every misfit.
+				assert.deepEqual(misfits, [], `pages overflow their width: ${misfits.join("; ")}`);
 			});
 		await context.close();
 		if (zoom === 2) zoomContext = null;
