@@ -35,18 +35,35 @@ const SETTLED_NS = 3_000_000_000n;
 const MAX_KEPT = 512;
 
 const verified = new Map<string, Verified>();
+/**
+ * Trees seen with an entry still settling, and when that entry will have been still long enough. Until then a
+ * listing hashes without walking for a stamp nobody could use: a tree installed a moment ago costs one `lstat` more
+ * than it did, once.
+ */
+const settling = new Map<string, bigint>();
 
-/** The identity of every entry under `root`, or null when the tree cannot be vouched for by stamp. */
-function treeStamp(root: string, nowMs: number): string | null {
+function bounded<K, V>(map: Map<K, V>): void {
+	const oldest = map.keys().next();
+	if (map.size > MAX_KEPT && !oldest.done) map.delete(oldest.value);
+}
+
+class Unsettled extends Error {
+	constructor(readonly until: bigint) {
+		super("unsettled");
+	}
+}
+
+/**
+ * The identity of every entry under `root`; or the time its first unsettled entry will have settled; or null when
+ * the tree cannot be read, which the verification that follows reports.
+ */
+function treeStamp(root: string, now: bigint): string | bigint | null {
 	try {
-		const now = BigInt(Math.trunc(nowMs)) * 1_000_000n;
 		const hash = createHash("sha256");
-		// A swapped ancestor symlink leaves every entry's own identity alone on a copied tree.
-		hash.update(realpathSync.native(root));
-		let settled = true;
 		const visit = (absolute: string, relative: string): void => {
 			const stat = lstatSync(absolute, { bigint: true });
-			if (now - stat.mtimeNs < SETTLED_NS || now - stat.ctimeNs < SETTLED_NS) settled = false;
+			const changed = stat.mtimeNs > stat.ctimeNs ? stat.mtimeNs : stat.ctimeNs;
+			if (now - changed < SETTLED_NS) throw new Unsettled(changed + SETTLED_NS);
 			hash.update(
 				`\0${relative}\0${stat.mode}:${stat.dev}:${stat.ino}:${stat.nlink}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`,
 			);
@@ -56,10 +73,11 @@ function treeStamp(root: string, nowMs: number): string | null {
 			for (const entry of readdirSync(absolute).sort()) visit(path.join(absolute, entry), `${relative}/${entry}`);
 		};
 		visit(root, "");
-		return settled ? hash.digest("hex") : null;
-	} catch {
-		// The verification that follows reports why the tree cannot be read.
-		return null;
+		// A swapped ancestor symlink leaves every entry's own identity alone on a copied tree.
+		hash.update(`\0@${realpathSync.native(root)}`);
+		return hash.digest("hex");
+	} catch (error) {
+		return error instanceof Unsettled ? error.until : null;
 	}
 }
 
@@ -74,16 +92,26 @@ export function verifiedPluginCandidate(
 	nowMs: number = Date.now(),
 ): PluginCandidate {
 	const key = path.resolve(root);
-	const before = treeStamp(key, nowMs);
+	const now = BigInt(Math.trunc(nowMs)) * 1_000_000n;
+	const until = settling.get(key);
+	if (until !== undefined && now < until) {
+		verified.delete(key);
+		return read(root);
+	}
+	settling.delete(key);
+	const before = treeStamp(key, now);
 	const kept = verified.get(key);
-	if (before !== null && kept?.stamp === before) return structuredClone(kept.candidate);
+	if (typeof before === "string" && kept?.stamp === before) return structuredClone(kept.candidate);
 	verified.delete(key);
+	if (typeof before === "bigint") {
+		settling.set(key, before);
+		bounded(settling);
+	}
 	const candidate = read(root);
 	// Taken on both sides of the read: a tree that moved while it was hashed is not kept under either stamp.
-	if (candidate.valid && before !== null && treeStamp(key, nowMs) === before) {
+	if (candidate.valid && typeof before === "string" && treeStamp(key, now) === before) {
 		verified.set(key, { stamp: before, candidate: structuredClone(candidate) });
-		const oldest = verified.keys().next();
-		if (verified.size > MAX_KEPT && !oldest.done) verified.delete(oldest.value);
+		bounded(verified);
 	}
 	return candidate;
 }
