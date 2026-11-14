@@ -915,13 +915,12 @@ button.wb-chip:hover:not(:disabled) {
 /* The live readings take the room the title leaves, right-aligned, and shrink only once the title and the project's
    name are at their minimums. A reading that still does not fit wraps onto a second line the bar hides, so it shows
    whole or not at all, and the controls after it never leave the bar.
-   The basis is the widest single reading (a wrapping row's min-content), not every reading on one line: a basis
-   that counted the hidden readings squeezed the title for room nobody saw, and a basis of 0 would let a long title
-   push out even the first reading. */
+   On a wide bar the basis is every reading on one line, so a long title gives way before a reading does. Once the
+   bar is narrow enough that some reading will wrap out anyway, the basis drops to one ring's width, so the title is
+   not squeezed for readings nobody sees. */
 .wb-bar__readings {
 	display: flex;
 	flex: 1 1 auto;
-	width: min-content;
 	flex-wrap: wrap;
 	align-content: flex-start;
 	align-items: center;
@@ -942,6 +941,21 @@ button.wb-chip:hover:not(:disabled) {
 	.wb-bar__end .wb-icon--text > span:not(.diffstat, .pane-attention),
 	.wb-bar__end .conversation__find > span {
 		display: none;
+	}
+}
+@container bar (max-width: 60rem) {
+	.wb-bar__readings {
+		flex-basis: 0;
+		min-width: 5.5rem;
+	}
+}
+/* On a phone-width bar the readings and the project's name give up their room before the controls leave the bar. */
+@container bar (max-width: 30rem) {
+	.wb-bar__readings {
+		min-width: 0;
+	}
+	.wb-bar .wb-chip--place {
+		min-width: min(6ch, 20%);
 	}
 }
 @container bar (max-width: 760px) {

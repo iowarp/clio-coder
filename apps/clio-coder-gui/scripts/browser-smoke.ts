@@ -2441,11 +2441,13 @@ try {
 					await page.goto(`${origin}/library`);
 					await page.locator("main .library-packages > li").first().waitFor();
 					const library = await page.evaluate(() => {
-						const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect() ?? null;
-						const tabs = box(".library-page .settings-tabs"),
-							heading = box('.library-page > [role="tabpanel"] > h2'),
-							search = box('.library-page > [role="tabpanel"] > .settings-filter'),
-							show = box(".library-facets > legend");
+						// No named helper: tsx would wrap it in a `__name` call the page does not define.
+						const [tabs, heading, search, show] = [
+							".library-page .settings-tabs",
+							'.library-page > [role="tabpanel"] > h2',
+							'.library-page > [role="tabpanel"] > .settings-filter',
+							".library-facets > legend",
+						].map((selector) => document.querySelector(selector)?.getBoundingClientRect() ?? null);
 						const untitled = [...document.querySelectorAll<HTMLElement>(".library-package__identity p")]
 							.filter((node) => node.scrollHeight > node.clientHeight && !node.title.trim())
 							.map((node) => node.textContent?.slice(0, 40) ?? "");
@@ -2535,21 +2537,19 @@ try {
 				}
 				// Task header: a 40-character name is whole at 1440px, and narrower it gives way only to a full bar.
 				await page.goto(workspaceUrl);
+				// The harness Clio never saves a task, so it cannot be renamed here: the name is the first request.
+				const longTitle = "Renamed convergence check for the sensors";
 				await page.locator("main button.primary", { hasText: "New task" }).click();
 				await page.waitForURL(`${origin}/`);
-				await composerField.fill("Summarize this project.");
+				await composerField.fill(longTitle);
 				await page.getByRole("button", { name: "Start task", exact: true }).click();
 				await page.waitForURL(/\/sessions\/[^/]+$/);
 				const sessionPath = new URL(page.url()).pathname;
+				await page.locator(".chat-turn.is-settled").first().waitFor();
 				await settled();
 				// A docked task pane narrows the bar; the header is measured on its own.
 				await closePane();
 				assert.equal(await sessionsLink.getAttribute("aria-current"), null, "Sessions is marked current on a task page");
-				const longTitle = "Renamed convergence check for the sensors";
-				await taskMenu.locator("summary").click();
-				await taskMenu.getByRole("menuitem", { name: "Rename task", exact: true }).click();
-				await page.getByLabel("Task name", { exact: true }).fill(longTitle);
-				await page.keyboard.press("Enter");
 				await page.locator(".conversation .wb-bar__rename", { hasText: longTitle }).waitFor();
 				const bar = () =>
 					page.locator(".conversation .wb-bar").evaluate((node) => {
@@ -2562,9 +2562,15 @@ try {
 						const title =
 							node.querySelector<HTMLElement>(".wb-bar__rename") ?? node.querySelector<HTMLElement>(".wb-bar__title");
 						const last = children.at(-1)?.getBoundingClientRect();
+						const readings = node.querySelector(".wb-bar__readings");
+						const shelf = readings?.getBoundingClientRect();
 						return {
 							whole: title !== null && title.scrollWidth <= title.clientWidth,
 							unused: inner - used,
+							// A reading that wraps onto the bar's hidden second line is not shown.
+							readingsWhole:
+								shelf === undefined ||
+								[...(readings?.children ?? [])].every((child) => child.getBoundingClientRect().bottom <= shelf.bottom + 0.5),
 							lastInside: last !== undefined && last.right <= node.getBoundingClientRect().right + 0.5,
 						};
 					});
@@ -2577,7 +2583,12 @@ try {
 					await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 					const measured = await bar();
 					assert.ok(measured.lastInside, `the bar's last control left the bar at ${size.width}px`);
-					if (size.width === 1440) assert.ok(measured.whole, "the task's name is cut at 1440px");
+					// At 1440px the name gives way only to readings that all show whole and fill the bar.
+					if (size.width === 1440)
+						assert.ok(
+							measured.whole || (measured.readingsWhole && measured.unused < 8),
+							`the task's name is cut beside ${measured.unused}px of free bar at 1440px`,
+						);
 					else
 						assert.ok(
 							measured.whole || measured.unused < 8,
