@@ -949,8 +949,9 @@ button.wb-chip:hover:not(:disabled) {
 		min-width: 5.5rem;
 	}
 }
-/* On a phone-width bar the readings and the project's name give up their room before the controls leave the bar. */
-@container bar (max-width: 30rem) {
+/* On a phone-width bar the readings and the project's name give up their room before the controls leave the bar.
+   The drawer's bar at a 561–650 px window is still this tight: the floors alone summed past it at 40rem. */
+@container bar (max-width: 40rem) {
 	.wb-bar__readings {
 		min-width: 0;
 	}
@@ -1263,13 +1264,17 @@ button.wb-chip:hover:not(:disabled) {
 	font-size: var(--text-meta);
 	font-weight: 600;
 }
+/* The bleed sits on the heading, not the button: a negative margin on the button made the heading's
+   shrink-to-fit width 12 px narrower than the button's own box, so max-width cut the title with room to spare. */
+.wb-bar__title--rename {
+	margin-inline: -6px;
+}
 .wb-bar__rename {
 	display: block;
 	max-width: 100%;
 	min-height: 0;
 	margin: 0;
 	padding: 2px 6px;
-	margin-inline: -6px;
 	overflow: hidden;
 	border: 1px solid transparent;
 	border-radius: var(--radius-sm);

@@ -45,14 +45,17 @@ export function TopBar({
 				</button>
 			</div>
 			{title ? (
-				<h1 className="wb-bar__title" title={titleLabel ?? title}>
+				<h1
+					className={rename && !rename.active ? "wb-bar__title wb-bar__title--rename" : "wb-bar__title"}
+					title={titleLabel ?? title}
+				>
 					{rename?.active ? (
 						<InlineRename value={title} label="Task name" onCommit={rename.onSave} onCancel={rename.onCancel} />
 					) : rename ? (
 						<button
 							type="button"
 							className="wb-bar__rename"
-							title="Rename task (F2)"
+							title={`${titleLabel ?? title}\nRename task (F2)`}
 							onClick={rename.onStart}
 							onKeyDown={(event) => {
 								if (event.key === "F2") {
