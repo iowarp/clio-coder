@@ -848,6 +848,10 @@
 												}
 											]
 										},
+										"thinkingLevel": {
+											"type": "string",
+											"maxLength": 4096
+										},
 										"message": {
 											"type": "string",
 											"maxLength": 4096
@@ -10890,6 +10894,21 @@
 													},
 													"confirmValue": {
 														"type": "string"
+													},
+													"minimum": {
+														"type": "number"
+													},
+													"exclusiveMinimum": {
+														"type": "number"
+													},
+													"maximum": {
+														"type": "number"
+													},
+													"exclusiveMaximum": {
+														"type": "number"
+													},
+													"integer": {
+														"type": "boolean"
 													}
 												},
 												"additionalProperties": false
@@ -11168,6 +11187,21 @@
 															},
 															"confirmValue": {
 																"type": "string"
+															},
+															"minimum": {
+																"type": "number"
+															},
+															"exclusiveMinimum": {
+																"type": "number"
+															},
+															"maximum": {
+																"type": "number"
+															},
+															"exclusiveMaximum": {
+																"type": "number"
+															},
+															"integer": {
+																"type": "boolean"
 															}
 														},
 														"additionalProperties": false

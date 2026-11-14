@@ -394,7 +394,7 @@ export function Home({ client }: { client: Client }) {
 							<Icon name="models" />
 							<span>
 								{ready ? (
-									(setup.data?.model ?? setup.data?.targetId ?? "Connected model")
+									`${setup.data?.model ?? setup.data?.targetId ?? "Connected model"}${setup.data?.thinkingLevel ? ` · Thinking ${setup.data.thinkingLevel}` : ""}`
 								) : setup.isPending ? (
 									<>
 										<span className="newtask__skeleton" aria-hidden="true" />
@@ -418,6 +418,12 @@ export function Home({ client }: { client: Client }) {
 									Change model
 								</Link>
 							</dd>
+							{setup.data?.thinkingLevel ? (
+								<>
+									<dt>Thinking</dt>
+									<dd>{setup.data.thinkingLevel}</dd>
+								</>
+							) : null}
 							<dt>Approvals</dt>
 							<dd>
 								CLIO Coder may read, edit and run commands. Approval prompts depend on the effective workspace policy.{" "}

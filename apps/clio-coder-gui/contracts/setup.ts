@@ -14,6 +14,8 @@ export const SetupStatus = Type.Object(
 		]),
 		targetId: Type.Union([Id, Type.Null()]),
 		model: Type.Union([text, Type.Null()]),
+		/** The thinking level a new task starts with, from the same settings layers as the model. */
+		thinkingLevel: Type.Optional(text),
 		message: text,
 	},
 	closed,

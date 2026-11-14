@@ -16,7 +16,7 @@ import type { TimelineItem } from "../../contracts/sessions.js";
 import { formatDuration as formatSpan } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 import { hasStyle, stripAnsi } from "../render/ansi.js";
-import { type DiffPanel, diffCounts, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
+import { type DiffPanel, diffCounts, diffPanel, NOT_APPROVED_NOTE, type ProposalBaseline } from "./diff-model.js";
 import { type ChainStepStatus, readGateway } from "./gateway-model.js";
 
 /** Generic tool-label aliases from Clio Coder. */
@@ -192,13 +192,13 @@ export function formatDuration(seconds: number): string {
 	return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function record(value: unknown): Record<string, unknown> | undefined {
+export function record(value: unknown): Record<string, unknown> | undefined {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: undefined;
 }
 
-function str(value: unknown): string | null {
+export function str(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
@@ -800,6 +800,8 @@ export interface PresentOptions {
 	readonly startedAtMs?: number;
 	/** The operator's answer to this call's approval (`callDecisions`), which tells a Reject from a refusal. */
 	readonly decision?: string | undefined;
+	/** The file a whole-file write replaces, read before it lands, so the proposal counts real removals. */
+	readonly baseline?: ProposalBaseline;
 }
 
 /** A chain's steps with the headline each would carry as a direct call. */
@@ -862,6 +864,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				status: item.status,
 				isError: wire.isError,
 				decision: options.decision,
+				baseline: options.baseline,
 			});
 			// The diff panel prints its own note and +/- counts. Repeating them as card facts said
 			// everything twice and painted "removed 0" as a failure.
@@ -958,7 +961,10 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				? "Stopped"
 				: wire.isError && item.status === "completed"
 					? "Failed"
-					: (STATUS_LABEL[item.status] ?? item.status),
+					: // A call held for the operator's answer is not queued behind anything: it waits on them.
+						item.status === "pending" && (options.decision === "pending" || options.decision === "escalated")
+						? "Waiting for approval"
+						: (STATUS_LABEL[item.status] ?? item.status),
 		settled,
 		took: settled && item.durationMs !== undefined ? formatSpan(item.durationMs) : null,
 		failed,

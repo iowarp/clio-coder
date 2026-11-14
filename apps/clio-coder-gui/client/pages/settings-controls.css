@@ -314,10 +314,23 @@
 	position: sticky;
 	top: 0;
 	z-index: 2;
+	display: grid;
 	padding: var(--space-3) var(--space-4);
 	background: var(--status-warn-tint);
 	color: var(--status-warn-fg);
 	border: 1px solid var(--status-warn-line);
+}
+/* Both wordings sit in one grid cell; the one not in force keeps its height but is not seen. */
+.settings-draft-note > span {
+	grid-area: 1 / 1;
+}
+.settings-draft-note > [aria-hidden="true"] {
+	visibility: hidden;
+}
+.settings-draft-note[data-state="clean"] {
+	background: transparent;
+	color: var(--ink-muted);
+	border-color: var(--line);
 }
 .settings-write-scope--quiet {
 	padding: var(--space-3) var(--space-4);

@@ -58,6 +58,8 @@ export function readSetupStatus(cwd?: string): SetupStatus {
 			message: "Connect a model to start your first conversation.",
 		};
 	const model = status.route.model ?? null;
+	// A task started here runs with these settings, so its thinking level is read from the same layers as its model.
+	const thinkingLevel = settings.chat.thinkingLevel;
 	const first =
 		status.stage === "needs"
 			? status.missing.find((item) => item.kind === "credential" || item.kind === "env")
@@ -67,12 +69,14 @@ export function readSetupStatus(cwd?: string): SetupStatus {
 			state: "needs-credentials",
 			targetId: status.route.target,
 			model,
+			thinkingLevel,
 			message: describeMissing(first).sentence,
 		};
 	return {
 		state: model ? "ready" : "needs-model",
 		targetId: status.route.target,
 		model,
+		thinkingLevel,
 		message: model
 			? "Using your saved setup. Live reachability has not been checked."
 			: "Choose a model for your saved connection.",

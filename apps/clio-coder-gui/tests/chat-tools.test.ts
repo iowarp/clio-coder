@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { activityDigest, summarizeActivity } from "../client/chat/activity.js";
+import { baselineRows } from "../client/chat/baseline-diff.js";
 import {
 	ACP_TRUNCATION_MARKER,
 	CLIO_TRUNCATION_MARKER,
@@ -11,7 +12,9 @@ import {
 	MAX_PROPOSED_ROWS,
 	parseDiff,
 	synthesizeProposedDiff,
+	wholeFileWritePath,
 } from "../client/chat/diff-model.js";
+import { dispatchRunIds } from "../client/chat/dispatch-outcome-model.js";
 import {
 	applyPartialFrame,
 	basename,
@@ -782,6 +785,43 @@ test("a whole-file proposal claims no removals it cannot know", () => {
 	assert.doesNotMatch(card.digest ?? "", /−0/);
 });
 
+test("a whole-file proposal compared with the file now counts what the applied result will", () => {
+	const pending = (before: string | null) =>
+		diffPanel({
+			rawInput: { path: "/repo/fixture.txt", content: "approved" },
+			result: undefined,
+			resultText: "",
+			status: "pending",
+			isError: false,
+			baseline: before === null ? null : baselineRows(before, "approved", MAX_PROPOSED_ROWS),
+		});
+	const replaced = pending("draft\n").diff ?? parseDiff("");
+	const applied = parseDiff("-1 draft\n+1 approved");
+	assert.equal(diffCounts(replaced), diffCounts(applied));
+	assert.equal(diffCounts(replaced), "+1 −1");
+	assert.equal(diffCounts(pending(null).diff ?? parseDiff("")), "+1 · new file");
+	// Unchanged lines far from an edit fold into one elision and are not counted.
+	const long = Array.from({ length: 20 }, (_, index) => `line ${index}`);
+	const edited = diffPanel({
+		rawInput: { path: "/repo/a.txt", content: [...long.slice(0, 10), "changed", ...long.slice(11)].join("\n") },
+		result: undefined,
+		resultText: "",
+		status: "pending",
+		isError: false,
+		baseline: baselineRows(
+			long.join("\n"),
+			[...long.slice(0, 10), "changed", ...long.slice(11)].join("\n"),
+			MAX_PROPOSED_ROWS,
+		),
+	}).diff;
+	assert.equal(edited && diffCounts(edited), "+1 −1");
+	assert.deepEqual(
+		edited?.rows.map((row) => row.kind),
+		["elision", "ctx", "ctx", "del", "add", "ctx", "ctx", "elision"],
+	);
+	assert.equal(edited?.rows.find((row) => row.kind === "del")?.oldLine, 11);
+});
+
 test("a call refused at its gate reads Rejected only when the operator rejected it", () => {
 	const settled = toolItem({
 		title: "write",
@@ -799,6 +839,21 @@ test("a call refused at its gate reads Rejected only when the operator rejected 
 	assert.equal(refused.diff?.label, "Not applied · refused");
 	for (const card of [rejected, refused])
 		assert.doesNotMatch(`${card.statusLabel} ${card.diff?.label}`, /not approved|denied/i);
+});
+
+test("a call held for the operator's answer reads Waiting for approval, never Queued", () => {
+	const write = toolItem({
+		title: "write",
+		toolKind: "edit",
+		status: "pending",
+		rawInput: { path: "/repo/a.txt", content: "x" },
+	});
+	assert.equal(presentTool(write, { decision: "pending" }).statusLabel, "Waiting for approval");
+	assert.equal(presentTool(write, { decision: "escalated" }).statusLabel, "Waiting for approval");
+	const dispatch = toolItem({ title: "dispatch", toolKind: "other", status: "pending", rawInput: { tasks: [] } });
+	assert.equal(presentTool(dispatch, { decision: "pending" }).statusLabel, "Waiting for approval");
+	assert.equal(presentTool(write).statusLabel, "Queued");
+	assert.equal(presentTool(write, { decision: "approved" }).statusLabel, "Queued");
 });
 
 test("a dispatch batch names every run instead of 'no task preview'", () => {
@@ -847,4 +902,23 @@ test("a pending call waits on its approval or is queued, and is never counted as
 	assert.equal(activityDigest([change], new Map([["w", "rejected"]])), "1 change rejected");
 	assert.equal(activityDigest([change]), "1 change refused");
 	assert.equal(summarizeActivity([change], new Map([["w", "rejected"]])).label, "1 tool rejected");
+});
+
+test("a settled dispatch names the runs it started, in any of the runner's result shapes", () => {
+	const settled = (details: Record<string, unknown>) => ({
+		title: "dispatch",
+		rawInput: {},
+		rawOutput: { result: { kind: "ok", output: "dispatched", details }, isError: false },
+	});
+	assert.deepEqual(dispatchRunIds(settled({ mode: "detached", runs: [{ runId: "a" }, { runId: "b" }] })), ["a", "b"]);
+	assert.deepEqual(dispatchRunIds(settled({ terminalRunIds: ["a", "b"], runId: "a" })), ["a", "b"]);
+	assert.deepEqual(dispatchRunIds(settled({ runId: "solo" })), ["solo"]);
+	assert.deepEqual(dispatchRunIds({ ...settled({ runId: "solo" }), title: "bash" }), []);
+});
+
+test("only a whole-file write names a path whose current text the preview compares against", () => {
+	assert.equal(wholeFileWritePath({ path: "fixture.txt", content: "approved\n" }), "fixture.txt");
+	assert.equal(wholeFileWritePath({ path: "fixture.txt", edits: [{ oldText: "a", newText: "b" }] }), null);
+	assert.equal(wholeFileWritePath({ path: "fixture.txt" }), null);
+	assert.equal(wholeFileWritePath(undefined), null);
 });

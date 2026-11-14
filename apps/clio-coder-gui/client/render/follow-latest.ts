@@ -10,12 +10,16 @@ export interface FollowLatest {
 	readonly following: boolean;
 	/** Timeline activity arrived while the operator was scrolled away. */
 	readonly unseen: boolean;
+	/** Some content sits below the visible area. A view that fits, or rests at the very bottom, has nothing to jump to. */
+	readonly below: boolean;
 	jumpToLatest(): void;
 	snapshot(): ScrollPosition;
 	restore(position: ScrollPosition): void;
 }
 
 const BOTTOM_TOLERANCE_PX = 32;
+/** More than a pixel of content past the viewport's bottom edge; fractional zoom leaves sub-pixel gaps. */
+const hasContentBelow = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight > 1;
 /** How long after a wheel, touch, pointer or navigation key an upward scroll still counts as the reader's. */
 const INTENT_MS = 1_000;
 const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
@@ -134,6 +138,7 @@ export function useFollowLatest(
 ): FollowLatest {
 	const [following, setFollowing] = useState(true);
 	const [unseen, setUnseen] = useState(false);
+	const [below, setBelow] = useState(false);
 	const followingRef = useRef(true);
 	const programmaticTop = useRef(0);
 	/** `scrollHeight` and `clientHeight` when the hook last wrote. */
@@ -192,12 +197,14 @@ export function useFollowLatest(
 		const shrunkTo = () => (shrunk !== null && performance.now() - shrunk.at < CLAMP_WINDOW_MS ? shrunk.to : null);
 		const intended = () => pressed || performance.now() - intentAt < INTENT_MS;
 		const atBottom = () => element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_TOLERANCE_PX;
+		const readBelow = () => setBelow(hasContentBelow(element));
 		const pin = () => {
 			element.scrollTop = element.scrollHeight;
 			markPinned(element);
 			viewportHeight = element.clientHeight;
 		};
 		const onScroll = () => {
+			readBelow();
 			const top = element.scrollTop;
 			const height = element.clientHeight;
 			const contentHeight = element.scrollHeight;
@@ -271,6 +278,8 @@ export function useFollowLatest(
 			typeof ResizeObserver === "undefined"
 				? null
 				: new ResizeObserver(() => {
+						// Content that shrank to fit, or a taller viewport, can leave nothing below a reader who left.
+						readBelow();
 						if (!followingRef.current) return;
 						// Layout is fresh here, so this read costs nothing. Content that shrank below the last
 						// pin lowers how far a browser clamp can move the view before the next pin lands.
@@ -357,6 +366,7 @@ export function useFollowLatest(
 			setFollow(position.following);
 			element.scrollTop = position.following ? element.scrollHeight : position.top;
 			markPinned(element);
+			setBelow(hasContentBelow(element));
 		},
 		[scrollRef, setFollow, markPinned, endHold],
 	);
@@ -391,5 +401,5 @@ export function useFollowLatest(
 		} else if (!followingRef.current) setUnseen(true);
 	}, [activityKey, enabled, jumpToLatest, endHold, scrollRef]);
 
-	return { following, unseen, jumpToLatest, snapshot, restore };
+	return { following, unseen, below, jumpToLatest, snapshot, restore };
 }
