@@ -29,6 +29,7 @@ export function VisualActions({
 	onPick,
 	onShowChanges,
 	onRun,
+	initial,
 }: {
 	entries: readonly SlashEntry[];
 	paneAvailable: boolean;
@@ -43,6 +44,8 @@ export function VisualActions({
 	onPick: (entry: SlashEntry) => void;
 	onShowChanges: () => void;
 	onRun: (plan: CommandPlan) => void;
+	/** A command name to open straight at its form, once the catalog has been read. */
+	initial?: string;
 }) {
 	const search = useRef<HTMLInputElement>(null);
 	const [query, setQuery] = useState("");
@@ -52,6 +55,14 @@ export function VisualActions({
 		if (selected === null) search.current?.focus();
 	}, [selected]);
 	const allItems = visualActions(entries, query);
+	const [opening, setOpening] = useState(initial ?? null);
+	useEffect(() => {
+		if (opening === null || loading) return;
+		setOpening(null);
+		const match = allItems.find((item) => item.entry.kind === "command" && item.entry.name === opening);
+		if (match) setSelected(match);
+		else setQuery(opening);
+	}, [opening, loading, allItems]);
 	const items = actionCategoryRows(allItems, category);
 	const changesMatch = paneAvailable && matchesChanges(query);
 	const showChanges = changesMatch && (category === "All actions" || category === "Task details");

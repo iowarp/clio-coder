@@ -85,6 +85,18 @@ export const ACTIONS: readonly ActionSpec[] = [
 ];
 
 /**
+ * Catalog commands the Task actions menu opens straight at their form in the Actions dialog. The dialog falls back
+ * to its list, searched for the name, when this task's catalog does not carry one.
+ */
+export const MENU_FORMS: readonly { readonly name: string; readonly title: string }[] = [
+	{ name: "oracle", title: "Ask an advisor" },
+	{ name: "council", title: "Ask a team" },
+	{ name: "run", title: "Run an agent" },
+	{ name: "loop", title: "Start a loop" },
+	{ name: "skill", title: "Use a skill" },
+];
+
+/**
  * The actions a menu offers for this task: the dialogs it can serve, without the two the shell already offers
  * elsewhere (Report a problem is an app row) or that another row opens (Branches is where a fork is chosen).
  */

@@ -168,3 +168,16 @@ test("commands the app serves elsewhere are not listed, and still run when typed
 	assert.equal(parseSlashLine("/export", withHostWriters)?.kind, "command");
 	assert.equal(parseSlashLine("/report status", withHostWriters)?.kind, "command");
 });
+
+test("the Task actions menu opens forms only for commands the harness admits over ACP", async () => {
+	const { readFile } = await import("node:fs/promises");
+	const { MENU_FORMS, UNLISTED_COMMANDS } = await import("../client/chat/slash-actions.js");
+	const source = await readFile(new URL("../../../src/session-control/slash-commands.ts", import.meta.url), "utf8");
+	for (const form of MENU_FORMS) {
+		const at = source.indexOf(`\t\tname: "${form.name}",`);
+		assert.ok(at >= 0, `${form.name} is not a harness command`);
+		const admission = /\n\t\tacp: ([^\n]+)/u.exec(source.slice(at))?.[1];
+		assert.ok(admission !== undefined && !admission.startsWith("false"), `${form.name} is refused over ACP`);
+		assert.ok(!UNLISTED_COMMANDS.has(form.name));
+	}
+});
