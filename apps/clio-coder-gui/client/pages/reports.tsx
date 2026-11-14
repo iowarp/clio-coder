@@ -237,23 +237,6 @@ export function UsagePage({ client }: { client: Client }) {
 							))}
 						</div>
 					</details>
-					<details className="usage-records">
-						<summary>
-							<Icon name="skills" />
-							<span>
-								Suggestions from CLIO Coder<small>{query.data.opportunities.length} recorded suggestions in this window</small>
-							</span>
-							<Icon name="chevronDown" />
-						</summary>
-						{!query.data.opportunities.length && <PanelEmpty>CLIO Coder recorded no suggestion for this window.</PanelEmpty>}
-						{query.data.opportunities.map((row) => (
-							<article className="usage-source-fact" key={`${row.kind}:${row.evidence}`}>
-								<h3>{usageLabel(row.kind)}</h3>
-								<p>{row.suggestion}</p>
-								<p className="usage-chart-footnote">{row.evidence}</p>
-							</article>
-						))}
-					</details>
 					<Boundary panel={PANELS.usage} />
 				</>
 			)}

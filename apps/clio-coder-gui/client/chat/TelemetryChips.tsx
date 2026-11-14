@@ -13,7 +13,8 @@ import {
 	useTelemetrySession,
 } from "./session-telemetry.js";
 import type { Spend } from "./session-usage-model.js";
-import { chipFigures, contextFigure, sessionSpend } from "./session-usage-model.js";
+import { chipFigures, contextFigure, quotaChip, sessionSpend } from "./session-usage-model.js";
+import "./usage-panel.css";
 
 const RING = 2 * Math.PI * 6;
 const SOURCE_TITLE: Record<Spend["source"], string> = {
@@ -22,14 +23,15 @@ const SOURCE_TITLE: Record<Spend["source"], string> = {
 };
 
 /**
- * The top bar's live readout: how full the window is and what the chat has spent. Each chip opens the
- * pane on the view that explains it. The figures are the ones the pane shows, from the same reads.
+ * The top bar's live readout: how full the window is, a provider window close to its limit, and what the chat
+ * has spent. The figures are the ones the pane shows, from the same reads; the quota chip opens the Usage view.
  */
 export const TelemetryChips = memo(function TelemetryChips({
 	client,
 	sessionId,
 	state,
 	turns,
+	onOpen,
 }: {
 	client: Client;
 	sessionId: string;
@@ -55,12 +57,22 @@ export const TelemetryChips = memo(function TelemetryChips({
 	});
 	const figures = chipFigures(spend);
 	const share = meter ? contextFigure(context?.share, meter.figure) : null;
+	// A task that is not open has no live ledger: its ring is the last reading it retained, and says so.
+	const lastKnown = !open;
+	// A parked task's cached quota reading may already have reset, so only an open task warns.
+	const quota = open ? quotaChip(usage.data) : null;
 	const contextId = `${sessionId}-chip-context`;
+	const quotaId = `${sessionId}-chip-quota`;
 	const spendId = `${sessionId}-chip-spend`;
 	return (
 		<>
 			{meter ? (
-				<div id={contextId} className="wb-chip wb-chip--meter" data-tone={meter.tone} title={meter.text}>
+				<div
+					id={contextId}
+					className="wb-chip wb-chip--meter"
+					data-tone={lastKnown ? "neutral" : meter.tone}
+					title={lastKnown ? `${meter.text} · last known` : meter.text}
+				>
 					<svg className="wb-ring" viewBox="0 0 16 16" aria-hidden="true">
 						<circle cx="8" cy="8" r="6" className="wb-ring__track" />
 						<circle
@@ -79,6 +91,18 @@ export const TelemetryChips = memo(function TelemetryChips({
 						<span>{share.text}</span>
 					)}
 				</div>
+			) : null}
+			{quota ? (
+				<button
+					id={quotaId}
+					type="button"
+					className="wb-chip wb-chip--figure wb-chip--quota"
+					data-tone={quota.tone}
+					title={quota.title}
+					onClick={() => onOpen("usage", quotaId)}
+				>
+					<span>{quota.text}</span>
+				</button>
 			) : null}
 			{figures.cost !== null || figures.tokens !== null ? (
 				<div id={spendId} className="wb-chip wb-chip--figure" title={SOURCE_TITLE[spend.source]}>

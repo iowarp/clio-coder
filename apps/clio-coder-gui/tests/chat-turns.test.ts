@@ -15,6 +15,7 @@ import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
 import { routeFacts } from "../client/chat/route.js";
 import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
+import { settledKey, settledTurns } from "../client/chat/session-telemetry.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
 import {
 	activeTurn,
@@ -1023,4 +1024,16 @@ test("engine notices stay out of the conversation segments", () => {
 		only(turns).segments.map((segment) => segment.kind),
 		["activity", "response"],
 	);
+});
+
+test("the usage and context reads re-key on every settle, past the projection's 128-turn window", () => {
+	const window = (first: number) =>
+		Array.from({ length: 128 }, (_, index) => turnRow({ id: `t${first + index}`, status: "succeeded" }));
+	// One more turn settled: the projection dropped the oldest and appended the newest.
+	const before = window(1);
+	const after = window(2);
+	assert.equal(settledTurns(before), settledTurns(after), "a count stops moving at the window");
+	assert.notEqual(settledKey(before), settledKey(after));
+	assert.equal(settledKey([...after, turnRow({ id: "t130", status: "running" })]), settledKey(after));
+	assert.equal(settledKey([turnRow({ id: "t1", status: "running" })]), "none");
 });
