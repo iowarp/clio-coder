@@ -102,3 +102,12 @@ export function acknowledgeFirstRequest(draft: HomeDraft, sent: FirstRequest): H
 		pending: null,
 	};
 }
+
+/**
+ * The workspace the model-connection check is asked about: only one the workspace list holds. A workspace this
+ * browser remembers from before (a removed folder, another home) is answered with not-found, which read as "the
+ * model connection could not be checked" and hid a ready model behind "Connect a model".
+ */
+export function setupWorkspaceId(chosen: string | null, listed: ReadonlyArray<{ id: string }>): string | null {
+	return chosen !== null && listed.some((item) => item.id === chosen) ? chosen : null;
+}

@@ -57,9 +57,13 @@ export function summarizeActivity(items: readonly TimelineItem[], decisions?: Ca
 		if (item.kind === "thought") continue;
 		if (item.kind !== "tool") onlyTools = false;
 		switch (item.status) {
-			case "in_progress":
-				running += 1;
+			case "in_progress": {
+				// The engine opens a call as in progress before its approval gate, so a held call is waiting, not running.
+				const decision = decisionFor(item, decisions);
+				if (decision === "pending" || decision === "escalated") waiting += 1;
+				else running += 1;
 				break;
+			}
 			case "pending": {
 				const decision = item.toolCallId === undefined ? undefined : decisions?.get(item.toolCallId);
 				if (decision === "pending" || decision === "escalated") waiting += 1;
