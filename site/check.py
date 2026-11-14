@@ -8,9 +8,10 @@ import struct
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
+
+from html_scripts import ScriptParser
 
 root = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).parent / 'public').resolve()
 site = Path(__file__).parent
@@ -39,7 +40,7 @@ def png_size(path):
     return struct.unpack('>II', header[16:24])
 
 
-class Page(HTMLParser):
+class Page(ScriptParser):
     def __init__(self, path):
         super().__init__()
         self.path = path
@@ -64,6 +65,7 @@ class Page(HTMLParser):
         self.in_title = False
 
     def handle_starttag(self, tag, attrs):
+        super().handle_starttag(tag, attrs)
         a = dict(attrs)
         if len(a) != len(attrs):
             errors.append(f'{self.path}: duplicate attributes on {tag}')
@@ -111,12 +113,14 @@ class Page(HTMLParser):
             self.in_jsonld = True
 
     def handle_endtag(self, tag):
+        super().handle_endtag(tag)
         if tag == 'title':
             self.in_title = False
         if tag == 'script':
             self.in_jsonld = False
 
     def handle_data(self, data):
+        super().handle_data(data)
         if self.in_title:
             self.title += data
         if self.in_jsonld:
@@ -179,8 +183,11 @@ if origin + '/404.html' in urls:
 BASE_POLICY = ("default-src 'self'; script-src 'self' {theme} https://static.cloudflareinsights.com; style-src 'self'; "
                "img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; "
                "frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; form-action 'none'")
-theme_script = re.search(r'<script>(.*?)</script>', (root / 'index.html').read_text(), re.S)
-base_policy = BASE_POLICY.format(theme="'sha256-" + base64.b64encode(hashlib.sha256((theme_script.group(1) if theme_script else '').encode()).digest()).decode() + "'")
+theme_parser = ScriptParser()
+theme_parser.feed((root / 'index.html').read_text())
+theme_parser.close()
+theme_script = next(iter(theme_parser.inline_scripts), '')
+base_policy = BASE_POLICY.format(theme="'sha256-" + base64.b64encode(hashlib.sha256(theme_script.encode()).digest()).decode() + "'")
 cast_pages = []
 for url in [*urls, origin + '/404.html']:
     path = urlsplit(url).path
@@ -191,6 +198,7 @@ for url in [*urls, origin + '/404.html']:
     page = Page(path)
     source = file.read_text()
     page.feed(source)
+    page.close()
     if re.search(r'<a(?![^>]*\shref=)(?:\s[^>]*)?>', source):
         errors.append(f'{path}: a link has no href, so crawlers cannot follow it')
     if public_copyright not in source:
@@ -205,7 +213,7 @@ for url in [*urls, origin + '/404.html']:
         cast_pages.append((path, source))
     elif '/js/cast.js' in source or 'asciinema-player' in source:
         errors.append(f'{path}: a page without a recording loads the player')
-    for script in re.findall(r'<script>(.*?)</script>', source, re.S):
+    for script in page.inline_scripts:
         digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
         if not policy or f"'sha256-{digest}'" not in policy.group(1) or 'unsafe-inline' in policy.group(1):
             errors.append(f'{path}: an inline script is not allowed by its exact hash in the page policy')
