@@ -90,6 +90,8 @@ export interface OverlayGeneralOpenersDeps {
 	bus: TelemetryHub;
 	onContextClear?: (options: ContextClearCommandOptions) => Promise<void> | void;
 	stderr: (text: string) => void;
+	/** Informational transcript lines, such as a fleet loop's checkpoint, which `stderr` would draw as errors. */
+	stdout?: (text: string) => void;
 	/** A transcript block drawn at the width of each paint, so a card never keeps the width it was made at. */
 	appendBlock?: (render: (width: number) => string[]) => void;
 	refreshFooter: () => void;
@@ -838,7 +840,9 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					first >= steps ? `${steps} ${steps === 1 ? "step" : "steps"} running` : `${first} of ${steps} steps running`;
 				deps.notify("info", `plan ${preview.name} started · ${shape} · /fleet follows it`, "fleet-run:started");
 			},
-			onNotice: (text) => deps.stderr(`plan ${preview.name}: ${text}\n`),
+			// A gate notice (a loop decision or checkpoint) is progress, not a failure; a write-boundary breach and the rest stay errors.
+			onNotice: (text, kind) =>
+				(kind === "gate" ? (deps.stdout ?? deps.stderr) : deps.stderr)(`plan ${preview.name}: ${text}\n`),
 		};
 		// The settled card reads each step beside its worker's own row, and draws at the width of each paint.
 		const appendPlanCard = (settled: FleetPlanRunView): FleetPlanRunView => {
@@ -870,7 +874,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 					outcome.cleanRun && warned === 0 ? "success" : "warning",
 					// An unpriced run keeps the total a lower bound, never a measured $0.00 nobody put a number on. Steps whose
 					// worker finished with a warning say so, as their rows on the card do.
-					`plan ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps ${warned === 0 ? "succeeded" : `finished, ${warned} with warnings`}, ${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
+					`plan ${preview.name}: ${outcome.succeededStepCount}/${outcome.requiredStepCount} steps ${warned === 0 ? "succeeded" : `finished, ${warned} with warnings`}, ${plan?.loops === undefined ? "" : `${plan.loops.resolved}/${plan.loops.total} ${plan.loops.total === 1 ? "loop" : "loops"} resolved, `}${plan?.costText === null ? "no model calls" : `cost ${renderPricingSum(outcome.totalCost)}`}`,
 					"fleet-run:settled",
 				);
 			})
