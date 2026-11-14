@@ -244,6 +244,28 @@ export function validationCommandOf(
 }
 
 /**
+ * The command a receipt names for a validation call. The canonical identity reads a script-family verify id such as
+ * `test` as `npm run test`, but verify runs the project catalog's or the toolchain's check of that id first, so where
+ * the workspace resolves it to anything but a package script the receipt names the argv that really ran. Grounding a
+ * worker's claims keeps the canonical identity, which matches claims by check id.
+ */
+function receiptValidationCommand(
+	toolName: string,
+	args: Record<string, unknown> | undefined,
+	base: string,
+): string | null {
+	const canonical = validationCommandOf(toolName, args, "finish-contract");
+	if (canonical === null || toolName !== ToolNames.Verify || !canonical.startsWith("npm run ")) return canonical;
+	try {
+		const resolution = resolveVerifyCall(base, args ?? {});
+		if (resolution.kind === "package" || resolution.kind === "unresolved") return canonical;
+		return verifyResolutionArgv(resolution, args ?? {}, base)?.join(" ") ?? canonical;
+	} catch {
+		return canonical;
+	}
+}
+
+/**
  * Fold a run's tool calls into its observed effects. A call's effects land only
  * when its result comes back clean: a blocked write and a red command are not
  * evidence that the workspace changed or that a check passed.
@@ -272,7 +294,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			const paths = mutationTargets(toolName, args);
-			const validationCommand = validationCommandOf(toolName, args, "finish-contract");
+			// A bash call may re-base its relative paths with its own cwd argument.
+			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
+			const validationCommand = receiptValidationCommand(toolName, args, base);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
 			if (toolName === ToolNames.Verify || verificationCommand !== null) checkingCalls.set(toolCallId, null);
@@ -280,8 +304,6 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// command, because the fact that it ran at all is the finding.
 			const chain = toolName === "gateway" && args?.op === "chain";
 			if (!chain && !opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
-			// A bash call may re-base its relative paths with its own cwd argument.
-			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 			pending.set(toolCallId, {
 				proofCheck,
 				tool: toolName,

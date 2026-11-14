@@ -1,4 +1,7 @@
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { it } from "node:test";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { typedValidationSummary } from "../../src/domains/safety/finish-contract.js";
@@ -135,4 +138,29 @@ it("grounds verifier claims that name a typed check by its id or its task gate c
 	const pytest = [{ id: "gate-1", text: "python3 -m pytest -q tests" }];
 	strictEqual(ground("gate-1 (python3 -m pytest -q tests)", pytest), 1);
 	strictEqual(ground("python3 -m pytest -q tests"), 0);
+});
+
+it("a receipt names the catalog check verify ran, not an npm script that never did", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-verify-receipt-"));
+	try {
+		mkdirSync(join(root, ".clio-coder"));
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			"version: 2\nchecks:\n  - id: test\n    description: pytest\n    command: [python3, -m, pytest, -q]\n    cwd: .\n    timeoutMs: 60000\n    tags: [test]\n",
+		);
+		const effects = createRunEffectsRecorder(root);
+		effects.start("verify-1", "verify", { check: "test" });
+		effects.finish("verify-1", false);
+		const snapshot = effects.snapshot();
+		deepStrictEqual([...snapshot.validationCommands], ["python3 -m pytest -q"]);
+		// Grounding still matches claims by the check's canonical identity.
+		ok(snapshot.verificationCommands.has("npm run test"));
+		writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { lint: "eslint ." } }));
+		const lint = createRunEffectsRecorder(root);
+		lint.start("verify-2", "verify", { check: "lint" });
+		lint.finish("verify-2", false);
+		deepStrictEqual([...lint.snapshot().validationCommands], ["npm run lint"]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
