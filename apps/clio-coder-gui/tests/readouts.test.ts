@@ -5,6 +5,8 @@ import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
+import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
+import type { TimelineItem } from "../contracts/sessions.js";
 import { harness, json } from "./harness/app.js";
 
 // The `readouts` fixture's frames (tests/fixtures/acp-fixture-child.mjs).
@@ -110,6 +112,40 @@ test("a call shows the judge's hold while it is judged and loses it once admitte
 	const settled = run.snapshot.timeline.find((item) => item.toolCallId === "write-1");
 	assert.equal(settled?.status, "completed");
 	assert.equal(settled && "admission" in settled, false);
+});
+
+test("the window's projection takes the judge's hold off a call once it is admitted", () => {
+	const call: TimelineItem = {
+		id: "turn:tool:write-1",
+		turnId: "turn",
+		sequence: 0,
+		kind: "tool",
+		text: "Write notes.md",
+		status: "in_progress",
+		origin: "live",
+		title: "Write notes.md",
+		toolCallId: "write-1",
+		partialOutput: "half",
+	};
+	let snapshot = emptySession("session", "workspace");
+	const tool = (item: TimelineItem) =>
+		(snapshot = applySessionDelta(snapshot, {
+			type: "turn.tool",
+			payload: { resource: "session", revision: snapshot.revision + 1, item },
+		}));
+	const row = () => {
+		const found = snapshot.timeline.find((item) => item.id === call.id);
+		assert.ok(found);
+		return found;
+	};
+	tool({ ...call, admission: "waiting for the safety judge" });
+	assert.equal(row().admission, "waiting for the safety judge");
+	const { partialOutput: _partial, ...admitted } = call;
+	tool(admitted);
+	assert.equal("admission" in row(), false, "admitted, the call is running and no longer held");
+	assert.equal(row().partialOutput, "half", "an omitted partial output is still kept");
+	tool({ ...admitted, status: "completed" });
+	assert.equal("admission" in row(), false);
 });
 
 test("an engine without readouts leaves no readouts key on the session", { timeout: 20_000 }, async (t) => {
