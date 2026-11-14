@@ -22,6 +22,7 @@
 	display: grid;
 	gap: var(--space-6);
 	min-width: 0;
+	contain-intrinsic-size: auto 320px;
 }
 .chat-turn + .chat-turn {
 	border-top: 1px solid var(--line);
@@ -31,6 +32,16 @@
 	outline: 2px solid var(--accent);
 	outline-offset: var(--space-3);
 	border-radius: var(--radius-sm);
+}
+/* A settled turn can no longer change, so the browser may skip its layout and paint while it is off
+   screen: a streamed frame then lays out the live turn, not the whole conversation. Every turn keeps
+   its last rendered height (`auto`), recorded while it was still live too, so scrolling back and the
+   follow-latest pin never land on an estimate. Containment clips descendants at the turn's edge;
+   the clip margin keeps the focus ring of a control flush with that edge visible. */
+.chat-turn.is-settled {
+	content-visibility: auto;
+	overflow: clip;
+	overflow-clip-margin: var(--space-2);
 }
 
 .transcript-history {

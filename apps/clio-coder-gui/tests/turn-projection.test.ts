@@ -7,7 +7,7 @@ import { type SessionDelta, SessionDeltas, type SessionSnapshot, type TimelineIt
 import { harness, json } from "./harness/app.js";
 
 const CHUNK = "0123456789 ";
-function streamed(count: number, text = CHUNK) {
+function streamed(count: number, text: string | ((index: number) => string) = CHUNK) {
 	let revision = 0;
 	let snapshot = applySessionDelta(emptySession("session", "workspace"), {
 		type: "turn.started",
@@ -31,7 +31,13 @@ function streamed(count: number, text = CHUNK) {
 	for (let index = 0; index < count; index++)
 		snapshot = applySessionDelta(snapshot, {
 			type: "turn.text",
-			payload: { resource: "session", revision: ++revision, turnId: "turn", text, origin: "live" },
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId: "turn",
+				text: typeof text === "string" ? text : text(index),
+				origin: "live",
+			},
 		});
 	return { snapshot, encoded: encodeMeter.bytes - before };
 }
@@ -135,13 +141,276 @@ test("retention accounting stays linear: quadrupling the deltas must not quadrup
 	);
 });
 
+const SLICE = 16 * 1024;
+/** One answer of `total` bytes, cut into the 16 KiB chunks an agent streams. */
+function answer(total: number) {
+	return streamed(Math.ceil(total / SLICE), (index) => "y".repeat(Math.min(SLICE, total - index * SLICE))).snapshot;
+}
+
 test("a run past its byte limit keeps the marker, drops later appends, and flags the snapshot", () => {
-	const { snapshot } = streamed(1200, "x".repeat(64));
+	const { snapshot } = streamed(70, "x".repeat(SLICE));
 	const run = snapshot.timeline[0];
 	assert.equal(snapshot.timelineTruncated, true);
 	assert.ok(run?.text.endsWith("\n[… stream truncated …]"));
-	assert.equal(new TextEncoder().encode(run?.text).byteLength, 65536);
-	assert.equal(streamed(2400, "x".repeat(64)).snapshot.timeline[0]?.text, run?.text);
+	assert.equal(new TextEncoder().encode(run?.text).byteLength, 1024 * 1024);
+	assert.equal(streamed(140, "x".repeat(SLICE)).snapshot.timeline[0]?.text, run?.text);
+});
+
+test("a 200 KB answer arrives whole; only an answer past the 1 MiB run limit is cut", () => {
+	const whole = answer(200_000);
+	assert.equal(whole.timeline.length, 1);
+	assert.equal(whole.timeline[0]?.text.length, 200_000);
+	assert.ok(!whole.timeline[0]?.text.endsWith("\n[… stream truncated …]"));
+	assert.equal(whole.timelineTruncated, false);
+	const cut = answer(1_100_000);
+	assert.ok(cut.timeline[0]?.text.endsWith("\n[… stream truncated …]"));
+	assert.equal(cut.timelineTruncated, true);
+});
+
+/**
+ * The projection's timeline upsert as it was before the newest-item fast path, with its retention measured from
+ * scratch instead of carried forward, and only the deltas the recording below sends. Text bounds at the same
+ * 1 MiB run limit so the comparison isolates the upsert.
+ */
+const REFERENCE_MARKER = "\n[… stream truncated …]";
+const utf8 = (value: string) => new TextEncoder().encode(value).byteLength;
+function referenceBound(value: string) {
+	const limit = 1024 * 1024;
+	if (utf8(value) <= limit) return value;
+	const budget = limit - utf8(REFERENCE_MARKER);
+	let used = 0,
+		output = "";
+	for (const character of value) {
+		const size = utf8(character);
+		if (used + size > budget) break;
+		output += character;
+		used += size;
+	}
+	return output + REFERENCE_MARKER;
+}
+const referenceIdentity = (provenance: TimelineItem["provenance"]) =>
+	provenance ? `:${provenance.map((agent) => `${agent.agentId}:${agent.runId ?? ""}`).join("|")}` : "";
+function referenceNarrativeId(
+	timeline: readonly TimelineItem[],
+	turnId: string,
+	kind: "text" | "thought",
+	identity: string,
+) {
+	const base = `${turnId}:${kind}${identity}`;
+	let broken = false;
+	for (let index = timeline.length - 1; index >= 0; index -= 1) {
+		const item = timeline[index];
+		if (item === undefined || item.turnId !== turnId) break;
+		if (item.id === base || item.id.startsWith(`${base}#`)) {
+			if (!broken) return item.id;
+			return `${base}#${(timeline.at(-1)?.sequence ?? 0) + 1}`;
+		}
+		if (item.kind === "tool" || item.kind === "notice") broken = true;
+		else if ((item.kind === "text" || item.kind === "thought") && referenceIdentity(item.provenance) === identity)
+			broken = true;
+	}
+	return base;
+}
+function referenceApply(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
+	let state: SessionSnapshot = { ...current, revision: event.payload.revision };
+	const upsert = (item: Omit<TimelineItem, "sequence">, append = false) => {
+		const previous = state.timeline.find((row) => row.id === item.id);
+		const sequence = previous?.sequence ?? (state.timeline.at(-1)?.sequence ?? 0) + 1;
+		const text =
+			append && previous
+				? previous.text.endsWith(REFERENCE_MARKER)
+					? previous.text
+					: referenceBound(previous.text + item.text)
+				: referenceBound(item.text);
+		const next = { ...previous, ...item, text, sequence };
+		let timeline = previous ? state.timeline.map((row) => (row.id === item.id ? next : row)) : [...state.timeline, next];
+		let truncated = state.timelineTruncated;
+		const cost = (row: TimelineItem) => utf8(JSON.stringify(row)) + 1;
+		let bytes = timeline.reduce((sum, row) => sum + cost(row), 0);
+		let dropped = 0;
+		for (const removed of timeline) {
+			const retained = timeline.length - dropped;
+			if (retained <= 1 || (retained <= 2048 && bytes <= 2 * 1024 * 1024)) break;
+			bytes -= cost(removed);
+			dropped++;
+			truncated = true;
+		}
+		if (dropped) timeline = timeline.slice(dropped);
+		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(REFERENCE_MARKER) };
+	};
+	switch (event.type) {
+		case "turn.started": {
+			const turn = event.payload.turn;
+			state = { ...state, turns: [...state.turns, turn].slice(-128) };
+			if (turn.prompt)
+				upsert({
+					id: `${turn.id}:user`,
+					turnId: turn.id,
+					kind: "user",
+					text: turn.prompt,
+					status: "completed",
+					origin: turn.origin,
+				});
+			break;
+		}
+		case "turn.text":
+		case "turn.thought": {
+			const { turnId, text, origin, provenance } = event.payload,
+				kind = event.type === "turn.text" ? "text" : "thought";
+			upsert(
+				{
+					id: referenceNarrativeId(state.timeline, turnId, kind, referenceIdentity(provenance)),
+					turnId,
+					kind,
+					text,
+					origin,
+					status: origin === "replay" ? "completed" : "in_progress",
+					...(provenance ? { provenance } : {}),
+				},
+				true,
+			);
+			break;
+		}
+		case "turn.tool":
+			upsert(event.payload.item);
+			break;
+		case "turn.finished": {
+			const { turnId, stopReason, usage, problem, finishedAt } = event.payload;
+			const status = stopReason === "cancelled" ? "cancelled" : problem ? "failed" : "succeeded";
+			state = {
+				...state,
+				turns: state.turns.map((turn) => {
+					if (turn.id !== turnId) return turn;
+					const { queued: _queued, ...settled } = turn;
+					return { ...settled, status, stopReason, usage, problem, finishedAt };
+				}),
+				timeline: state.timeline.map((item) =>
+					item.turnId === turnId && (item.status === "in_progress" || item.status === "pending")
+						? { ...item, status: item.kind === "tool" ? "unknown" : status === "succeeded" ? "completed" : status }
+						: item,
+				),
+			};
+			break;
+		}
+		default:
+			throw new Error(`The recording sends no ${event.type}.`);
+	}
+	return state;
+}
+
+/**
+ * Two turns as an agent streams them: prose and reasoning in chunks, a worker writing between the lead's chunks
+ * (so the lead appends to an item that is not the newest), tool calls that update after later text, and a second
+ * turn large enough to cut its runs and evict the first turn from the timeline.
+ */
+function recording(): SessionDelta[] {
+	const deltas: SessionDelta[] = [];
+	let revision = 0;
+	const worker = [{ version: 1 as const, role: "worker" as const, agentId: "scout", runId: "r1" }];
+	const started = (id: string, prompt: string) =>
+		deltas.push({
+			type: "turn.started",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turn: {
+					id,
+					prompt,
+					origin: "live",
+					status: "running",
+					startedAt: null,
+					finishedAt: null,
+					stopReason: null,
+					usage: null,
+					problem: null,
+				},
+			},
+		});
+	const narrate = (type: "turn.text" | "turn.thought", turnId: string, text: string, provenance?: typeof worker) =>
+		deltas.push({
+			type,
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId,
+				text,
+				origin: "live",
+				...(provenance ? { provenance } : {}),
+			},
+		});
+	const tool = (turnId: string, call: string, status: TimelineItem["status"]) =>
+		deltas.push({
+			type: "turn.tool",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				item: {
+					id: `${turnId}:tool:${call}`,
+					turnId,
+					sequence: 0,
+					kind: "tool",
+					text: `Read ${call}`,
+					status,
+					origin: "live",
+					title: `Read ${call}`,
+					toolCallId: call,
+				},
+			},
+		});
+	const finished = (turnId: string) =>
+		deltas.push({
+			type: "turn.finished",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId,
+				stopReason: "end_turn",
+				usage: null,
+				problem: null,
+				finishedAt: null,
+			},
+		});
+	started("one", "Explain the café menu.");
+	for (let index = 0; index < 6; index++) {
+		narrate("turn.thought", "one", `Considering ${index}. `);
+		narrate("turn.text", "one", `Lead paragraph ${index} — é. `);
+		narrate("turn.text", "one", `Scout note ${index}. `, worker);
+	}
+	tool("one", "a", "in_progress");
+	narrate("turn.text", "one", "After the first call. ");
+	tool("one", "b", "in_progress");
+	tool("one", "a", "completed");
+	narrate("turn.text", "one", "Still after the calls. ", worker);
+	narrate("turn.text", "one", "Lead closes. ");
+	tool("one", "b", "failed");
+	finished("one");
+	started("two", "Write everything down.");
+	const block = "z".repeat(300 * 1024);
+	for (let index = 0; index < 5; index++) {
+		narrate("turn.text", "two", block);
+		narrate("turn.text", "two", block, worker);
+	}
+	for (let index = 0; index < 3; index++) {
+		tool("two", `c${index}`, "in_progress");
+		narrate("turn.text", "two", `Between calls ${index}. `);
+		if (index > 0) tool("two", `c${index - 1}`, "completed");
+	}
+	tool("one", "a", "completed");
+	finished("two");
+	return deltas;
+}
+
+test("projecting a recorded stream yields the same snapshot as the upsert that searched the whole timeline", () => {
+	let actual = emptySession("session", "workspace"),
+		expected = actual;
+	for (const [index, delta] of recording().entries()) {
+		actual = applySessionDelta(actual, delta);
+		expected = referenceApply(expected, delta);
+		assert.deepEqual(actual, expected, `Snapshots diverged at delta ${index} (${delta.type}).`);
+	}
+	assert.equal(actual.timelineTruncated, true);
+	assert.ok(actual.timeline.some((item) => item.text.endsWith(REFERENCE_MARKER)));
+	assert.ok(!actual.timeline.some((item) => item.turnId === "one" && item.kind === "text"));
 });
 
 test("the oldest timeline entries are dropped once the entry bound is passed", () => {

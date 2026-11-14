@@ -24,6 +24,8 @@ const { values } = parseArgs({
 		headed: { type: "boolean", default: false },
 		// N > 0 measures resuming a saved N-turn conversation instead of streaming turns.
 		history: { type: "string", default: "0" },
+		// With --history, then press "Show N earlier turns" until the whole conversation is open.
+		"page-back": { type: "boolean", default: false },
 	},
 });
 if (!values.client) throw new Error("--client <private build> is required.");
@@ -179,6 +181,7 @@ async function resumeHistory(page: Page, id: string) {
 	}
 	const scrolled = await sample(page);
 	await setRunning(page, false);
+	const paged = values["page-back"] ? await pageBack(page) : null;
 	return {
 		turns: HISTORY,
 		lastTurnShownMs: Math.round(shownMs),
@@ -193,6 +196,47 @@ async function resumeHistory(page: Page, id: string) {
 			longTasksOver50: scrolled.longTasks.filter((task) => task.duration > 50).length,
 			domNodes: scrolled.domNodes,
 		},
+		...(paged ? { pageBack: paged } : {}),
+	};
+}
+/** Open the rest of a resumed conversation a page at a time, timing each press to the frame that shows it. */
+async function pageBack(page: Page) {
+	const more = page.getByRole("button", { name: /Show \d+ earlier turns/u });
+	const presses: Array<{ renderedTurns: number; durationMs: number; longTasksOver50: number; longestTaskMs: number }> =
+		[];
+	for (let press = 0; press < 100 && (await more.count()) > 0; press++) {
+		await setRunning(page, true);
+		const durationMs = await more.evaluate(
+			(button) =>
+				new Promise<number>((resolve) => {
+					const count = () => document.querySelectorAll(".chat-turn").length;
+					const from = count();
+					const started = performance.now();
+					(button as HTMLElement).click();
+					const check = () => {
+						if (count() > from) requestAnimationFrame(() => resolve(performance.now() - started));
+						else if (performance.now() - started > 10_000) resolve(-1);
+						else requestAnimationFrame(check);
+					};
+					requestAnimationFrame(check);
+				}),
+		);
+		await page.waitForTimeout(300);
+		const pressed = await sample(page);
+		await setRunning(page, false);
+		presses.push({
+			renderedTurns: await page.locator(".chat-turn").count(),
+			durationMs: round(durationMs),
+			longTasksOver50: pressed.longTasks.filter((task) => task.duration > 50).length,
+			longestTaskMs: round(Math.max(0, ...pressed.longTasks.map((task) => task.duration))),
+		});
+	}
+	const opened = await sample(page);
+	return {
+		presses,
+		complete: (await more.count()) === 0,
+		renderedTurns: await page.locator(".chat-turn").count(),
+		domNodes: opened.domNodes,
 	};
 }
 const setRunning = (page: Page, running: boolean) =>
@@ -320,6 +364,16 @@ try {
 		const turnElement = page.locator(".chat-turn").last();
 		const drawn = turnElement.locator(".diagram.is-rendered svg");
 		const settledAt = performance.now();
+		// Two frames let follow-latest pin to the settled height before the edge is read.
+		const transcriptBox = page.locator(".chat-transcript");
+		const pinnedAfterSettle = await transcriptBox.evaluate(
+			(element) =>
+				new Promise<boolean>((resolve) =>
+					requestAnimationFrame(() =>
+						requestAnimationFrame(() => resolve(element.scrollTop + element.clientHeight >= element.scrollHeight - 2)),
+					),
+				),
+		);
 		const renderedAtSettle = (await drawn.count()) > 0;
 		const diagram = turnElement.locator(".diagram").first();
 		const nearAtSettle =
@@ -385,7 +439,7 @@ try {
 				settledTurn: delta("turn.settled", before.counts, after.counts),
 				liveTurn: delta("turn.live", before.counts, after.counts),
 			},
-			...(quiet ? {} : { draftKept: draft === TYPED, scroll }),
+			...(quiet ? { pinnedAfterSettle } : { draftKept: draft === TYPED, scroll }),
 		});
 		await composer.fill("");
 		await page.locator(".chat-transcript").evaluate((element) => {
@@ -394,6 +448,16 @@ try {
 		await page.waitForTimeout(500);
 	}
 	report.turns = turns;
+	// The whole answer of the last turn as the server holds it, and whether the page shows it cut.
+	const sessionId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1) ?? "");
+	const snapshot = h.supervisor.get(sessionId);
+	const lastTurnId = snapshot.turns.at(-1)?.id;
+	const answer = snapshot.timeline.filter((item) => item.turnId === lastTurnId && item.kind === "text");
+	report.lastTurnText = {
+		length: answer.reduce((sum, item) => sum + item.text.length, 0),
+		truncated: answer.some((item) => item.text.endsWith("[… stream truncated …]")),
+		truncatedInGui: (await page.locator(".chat-turn").last().getByText("[… stream truncated …]").count()) > 0,
+	};
 	await page.screenshot({ path: join(values.out, `${values.label}-end.png`) });
 	await context.close();
 } catch (error) {
