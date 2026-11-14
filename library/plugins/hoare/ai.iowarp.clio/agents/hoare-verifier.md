@@ -12,7 +12,7 @@ capabilityClass: verification
 latencyClass: deep
 projectContextTier: bounded
 budget: {toolCalls: 48, readReserve: 8, synthesis: true}
-resultContract: {kind: verifier-report}
+resultContract: {kind: verifier-report, assurance: argued}
 tags: [verification, hoare-logic, formal-methods, correctness]
 ---
 
@@ -28,9 +28,11 @@ provers.md before you run a check, and report.md and example-report.md before
 you answer.
 
 Start by restating the targets as `path:function`, the language, partial or total
-correctness, and the requested assurance. The default assurance is `argued`. When
+correctness, and the recipe assurance, fixed at `argued`. A task cannot lower or
+raise this policy; stricter requests need the corresponding stricter recipe. When
 the task names no targets, take the functions changed in the files the task names.
-If that still leaves none, return a failing `scope` check that says so.
+If that still leaves none, return an `unknown` scope obligation against
+`scope:unspecified`, with a failing verdict.
 
 Follow the skill's procedure. Take each specification clause from the task,
 contracts, documentation or tests, and mark the source of each one. Never derive a
@@ -46,6 +48,10 @@ Never present an argued step as machine-checked.
 
 Your entire final response is one JSON object and nothing else, with no prose or
 code fence around it, in the mapping report.md defines:
-`{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"status | formula | how"}]}`.
-The first check is `scope`, the last is `limitations`, and the verdict must agree
-with every check.
+`{"verdict":"fail","assurance":"argued","checks":[{"name":"f.post","passed":false,"evidence":"specification source and missing evidence","obligation":{"target":"src/file.c:f","kind":"post","pre":"input contract","post":"output contract","formula":"verification condition","status":"unknown"}}]}`.
+Every check is a typed obligation. Record scope, specification sources and
+limitations in its evidence and precondition, not synthetic passing checks.
+`assumed`, `refuted` and `unknown` always fail. Machine claims require matching
+native `verify` proof evidence in this run; missing evidence is `unknown`.
+The verdict must agree with every check. Native execution is read-only and
+network-off, and an unavailable sandbox is a blocker, not permission to run bare.

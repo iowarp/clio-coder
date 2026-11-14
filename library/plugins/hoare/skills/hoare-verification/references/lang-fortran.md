@@ -34,8 +34,9 @@ a runtime error to rely on. Name each one with its hazard id.
   not defined. Allocation status is an obligation, and so is `present()` for each
   `optional` argument before use.
 - `arr.contiguity`: pointer and assumed-shape arrays may be non-contiguous. Passing
-  one to an explicit-shape or C-interoperable dummy can make a copy, so writes go
-  to the copy, not the original.
+  one to a dummy requiring contiguity may create a temporary. Copy-in/copy-out
+  normally propagates permitted writes on return; reason about intent, aliasing,
+  lifetime and interoperability rather than assuming writes are lost.
 
 ## Arguments and state (`arg`)
 

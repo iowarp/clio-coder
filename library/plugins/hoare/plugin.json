@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "hoare",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Hoare-logic correctness review: states pre- and postconditions, loop invariants and variants for named functions, derives the verification conditions with language-specific hazard obligations for C/C++, Python and Fortran, and discharges each by a declared prover check or a written argument. Every obligation carries an honest status (mechanized, modeled, argued, assumed, refuted, unknown), so an argued proof is never reported as a machine-checked one. Ships a read-only verifier agent that answers a verifier-report, a /hoare:review prompt and a build-review playbook.",
 	"license": "Apache-2.0",
 	"author": {
@@ -13,7 +13,7 @@
 		"ai.iowarp.clio": {
 			"manifestVersion": 1,
 			"compatibility": {
-				"clio": ">=0.7.0-0"
+				"clio": ">=0.8.0-0"
 			},
 			"resources": {
 				"skills": "skills",
@@ -34,10 +34,22 @@
 					"requires": ["skill:hoare-verification"]
 				},
 				{
+					"kind": "agent",
+					"id": "hoare-modeled-verifier",
+					"path": "ai.iowarp.clio/agents/hoare-modeled-verifier.md",
+					"requires": ["skill:hoare-verification"]
+				},
+				{
+					"kind": "agent",
+					"id": "hoare-mechanized-verifier",
+					"path": "ai.iowarp.clio/agents/hoare-mechanized-verifier.md",
+					"requires": ["skill:hoare-verification"]
+				},
+				{
 					"kind": "prompt",
 					"id": "review",
 					"path": "ai.iowarp.clio/prompts/hoare/review.md",
-					"requires": ["agent:hoare-verifier"]
+					"requires": ["agent:hoare-verifier", "agent:hoare-modeled-verifier", "agent:hoare-mechanized-verifier"]
 				},
 				{
 					"kind": "playbook",

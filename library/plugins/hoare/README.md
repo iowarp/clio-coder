@@ -1,5 +1,8 @@
 # Hoare pack
 
+Original method and pack by **Keith Bateman** (#454), structurally integrated
+with CLIO Coder 0.8.1. Pack 0.2.0 requires CLIO 0.8.1 or later.
+
 A correctness review for individual functions, based on Hoare logic. The
 reviewer states each function's precondition and postcondition and where they came
 from. It adds loop invariants, variants and frame conditions, and derives the
@@ -15,6 +18,8 @@ clio-coder library install plugin:hoare --project
 | --- | --- | --- |
 | `hoare-verification` | skill | The method, hazard profiles for C/C++, Python and Fortran, prover guidance and the report layout |
 | `hoare-verifier` | agent | Read-only reviewer that returns a `verifier-report`, one check per obligation |
+| `hoare-modeled-verifier` | agent | Fixed modeled-or-mechanized assurance |
+| `hoare-mechanized-verifier` | agent | Fixed source-mechanized assurance |
 | `/hoare:review` | prompt | Dispatches the reviewer and renders a Markdown correctness report |
 | `hoare-build-review` | playbook | Coder, then the Hoare reviewer as the check in a bounded revise loop |
 
@@ -31,8 +36,12 @@ Each obligation carries one status, and the report never merges them:
 | `refuted` | A concrete input satisfying the precondition, traced to the violation |
 | `unknown` | Neither established nor refuted |
 
-The requested assurance (`argued` by default, or `modeled` or `mechanized`) decides
-which statuses pass. A reviewer working without a prover can report at most
+The selected recipe binds assurance (`argued` by default, or `modeled` or
+`mechanized`) in its result contract. `assumed`, `refuted` and `unknown` never
+pass. Every check has a typed obligation, not a status hidden in prose.
+The harness rejects unsupported machine claims; a repair must explicitly
+report `unknown` and fail, rather than silently upgrading or rewriting output.
+A reviewer working without a prover can report at most
 `argued`. A bounded tool such as CBMC without unwinding assertions, CrossHair,
 Hypothesis or a sanitizer run can refute an obligation, but cannot establish one.
 
@@ -52,6 +61,14 @@ Hypothesis or a sanitizer run can refute an obligation, but cannot establish one
 - Other languages get the general rules only, and the report says that no hazard
   profile was applied.
 
-The pack ships no executable code and runs no prover itself. A project opts into
-mechanization by declaring prover checks; see
+Machine evidence binds an exact declared goal and check to a successful native
+`verify` call in the same run and fingerprints the catalog and declared inputs.
+This is a repository-owned wrapper attestation, not an independently checked
+proof certificate: CLIO does not validate the mathematics or the completeness
+of declared inputs. No tool is installed automatically. Native Hoare workers
+require read-only, network-off command containment; unavailable containment fails
+closed. Proof checks also enforce containment when invoked outside a worker.
+
+The pack ships no executable code. A project opts into mechanization by
+declaring prover checks; see
 `skills/hoare-verification/references/provers.md`.

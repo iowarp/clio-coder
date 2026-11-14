@@ -21,6 +21,9 @@ onFailure: stop
 Implement this change so that an independent Hoare-logic reviewer can establish
 its correctness.
 
+This playbook fixes assurance at `argued`. A project playbook can instead select
+`hoare-modeled-verifier` or `hoare-mechanized-verifier` as its check recipe.
+
 {{task}}
 
 State the contract of each function you add or change, as a docstring or comment

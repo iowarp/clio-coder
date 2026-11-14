@@ -14,7 +14,12 @@ Gather the specification sources the reviewer cannot infer: what the operator sa
 each function must do in this conversation or task, and any validation contract.
 Do not write a postcondition from the implementation.
 
-Dispatch the hoare-verifier agent read-only, with no write grant. Pass the exact
+Select the fixed-policy recipe: `hoare-verifier` for `argued`,
+`hoare-modeled-verifier` for `modeled`, or `hoare-mechanized-verifier` for
+`mechanized`. Reject other assurance values. Dispatch that agent read-only,
+with no write grant, using a native runtime with command sandbox support.
+Do not fall back to a weaker recipe when a sandbox or prover is unavailable.
+Pass the exact
 targets, the requested assurance, the specification statements with their sources,
 and any build flags you know of. The agent loads the hoare-verification skill and
 returns a verifier report whose checks are the proof obligations.

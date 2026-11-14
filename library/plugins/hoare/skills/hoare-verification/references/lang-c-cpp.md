@@ -48,8 +48,10 @@ obligation. Name each one in the report with its hazard id.
 ## Evaluation (`eval`)
 
 - `eval.unsequenced`: two unsequenced modifications of one object, or a
-  modification and a read, are UB (`i = i++ + 1`). The evaluation order of function
-  arguments is unspecified, so a proof must hold for every order.
+  modification and a read, are UB. For example, `i = i++ + 1` is UB in C and
+  pre-C++17, but C++17 sequences the assignment after its right operand.
+  State the language version. Argument evaluation order can remain unspecified;
+  prove every permitted order under that version's sequencing rules.
 - `eval.macro`: expand macros before reasoning. A macro argument can be evaluated
   more than once.
 - `eval.for`: `for (init; cond; step) body` desugars to

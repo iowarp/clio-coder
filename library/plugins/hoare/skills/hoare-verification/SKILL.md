@@ -1,7 +1,7 @@
 ---
 name: hoare-verification
 description: Reviews named functions for correctness with Hoare logic. States each precondition and postcondition with its source, adds loop invariants, variants and frame conditions, derives the verification conditions with the language's hazard obligations, and discharges each one by a declared prover check or a written argument. Reports every obligation with an honest status. Use for C, C++, Python or Fortran functions that have a statable contract. Not for whole programs, concurrency proofs or floating-point error analysis; those are reported as limitations.
-version: 0.1.0
+version: 0.2.0
 license: Apache-2.0
 triggers:
   - hoare logic
@@ -16,6 +16,8 @@ clio-coder:
   agents:
     - main
     - hoare-verifier
+    - hoare-modeled-verifier
+    - hoare-mechanized-verifier
 ---
 
 # Hoare-logic correctness review
@@ -51,7 +53,7 @@ Read the linked references when needed. Resolve links from this skill directory.
 | `mechanized` | A declared prover check, run through `verify` in this run, proved the obligation on the real source. | yes |
 | `modeled` | A prover proved it on a translation (Dafny, Why3) of the source. Every place the translation differs from the language's semantics is listed. | yes, with the listed gaps |
 | `argued` | A complete written argument: every step is a rule application or a stated arithmetic fact. | yes, weakest |
-| `assumed` | Taken as given and named: a callee or library contract, an out-of-scope hazard, or a caller's documented duty. | yes, as an assumption only |
+| `assumed` | An undischarged goal taken as given rather than established. | no at every assurance |
 | `refuted` | A concrete input that satisfies the precondition and violates the obligation, traced step by step. | no: a defect |
 | `unknown` | Not established either way: no invariant found, a gap in the argument, or the budget ran out. | no |
 
@@ -80,7 +82,8 @@ counterexample within a bound is not a proof.
    specification.
 3. **Annotate.** For each loop, write an invariant `I`, and for total correctness a
    variant `V` that is bounded below and strictly decreases. For each call, state
-   the callee's contract or mark it `assumed`. Write the frame: what the function may
+   the callee's contract and its source. Ambient assumptions belong in `pre` and
+   evidence; an outstanding obligation marked `assumed` fails. Write the frame: what the function may
    modify, and that everything else is unchanged.
 4. **Generate the obligations.** Follow method.md: invariant initialization,
    preservation, exit-implies-postcondition, the variant's decrease and bound, each
@@ -89,8 +92,10 @@ counterexample within a bound is not a proof.
    the language reference, such as no overflow, indices in bounds, no undefined
    behavior, and separation of aliased arguments.
 5. **Discharge each obligation.** Call `verify()` once to list the declared checks.
-   When a declared prover check covers the target, run it by its exact ID and record
-   the outcome. Otherwise write the argument. For each obligation you cannot
+   When a declared command check has `proof` metadata matching the exact goal,
+   run it by its exact ID and record the outcome. Copy its declared goal fields
+   exactly; tags and plain command success do not establish a proof.
+   Otherwise write the argument or report `unknown`. For each obligation you cannot
    establish, search for a counterexample by method.md's procedure before you mark it
    `unknown`.
 6. **Report.** Write the report as report.md describes. List the obligations
@@ -99,7 +104,9 @@ counterexample within a bound is not a proof.
 
 ## Running as a worker or interactively
 
-As the `hoare-verifier` worker, you are read-only. Return the `verifier-report`
+As a Hoare worker, you are read-only and your recipe fixes the assurance level.
+Native command execution requires a sandbox with network disabled; no prover is
+installed automatically. Return the typed `verifier-report`
 mapping in report.md and nothing else. Do not edit source, add annotations to
 files, or create a verifier catalog entry. Put any proposed annotations or catalog
 entries in the report's evidence text.
