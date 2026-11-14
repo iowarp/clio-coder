@@ -23,7 +23,8 @@ export const REPLAY_PROMPT_MISSING = "(earlier prompt not replayed)";
 export const EMPTY_PROMPT = "(empty prompt)";
 
 /** Verbatim. The wording the page carried before read like data loss, which it is not. */
-export const TRUNCATION_NOTE = "Earlier turns are not shown; CLIO Coder still has the full context.";
+export const TRUNCATION_NOTE =
+	"This view shows the most recent part of a long task. Earlier turns stay in the saved session.";
 
 export const EMPTY_GLYPH = "◎";
 export const EMPTY_EYEBROW = "NEW RESEARCH THREAD";

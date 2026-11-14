@@ -1024,9 +1024,9 @@ try {
 		const cacheGroup = usage.locator(".turn-details__group", {
 			has: page.getByRole("heading", { name: "Cache", exact: true }),
 		});
-		// Cache reads and writes are the provider's fields; the hit share is the read part of the whole prompt.
-		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Hit share", "Written"]);
-		assert.deepEqual(await figures(cacheGroup), ["13", "34%", "14"]);
+		// Cache reads and writes are the provider's fields; no hit share is derived from them.
+		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Written"]);
+		assert.deepEqual(await figures(cacheGroup), ["13", "14"]);
 		await check("conversation-usage");
 		await page.keyboard.press("Enter");
 		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);

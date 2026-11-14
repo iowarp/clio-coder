@@ -35,6 +35,58 @@ export function turnStatuses(turns: readonly Turn[]): TurnStatuses {
 	return new Map(turns.map((turn) => [turn.id, turn.status] as const));
 }
 
+export type TurnEnding = "complete" | "output-limit" | "step-limit" | "refusal" | "other" | "failed" | "stopped";
+
+/**
+ * How a settled turn ended. `null` while it is running. A `succeeded` row only means the agent
+ * returned normally; its stop reason says whether the answer is whole. The loop guard and the
+ * tool-call cap both arrive as `max_turn_requests`.
+ */
+export function turnEnding(turn: Pick<Turn, "status" | "stopReason">): TurnEnding | null {
+	switch (turn.status) {
+		case "running":
+			return null;
+		case "failed":
+			return "failed";
+		case "cancelled":
+			return "stopped";
+	}
+	switch (turn.stopReason) {
+		case null:
+		case "end_turn":
+			return "complete";
+		case "max_tokens":
+			return "output-limit";
+		case "max_turn_requests":
+			return "step-limit";
+		case "refusal":
+			return "refusal";
+		default:
+			return "other";
+	}
+}
+
+/** True for the endings where the agent returned normally but the work is not finished. */
+export function isStoppedEarly(ending: TurnEnding | null | undefined): boolean {
+	return ending === "output-limit" || ending === "step-limit" || ending === "refusal" || ending === "other";
+}
+
+/** The sentence that explains an early ending. `null` for every other ending. */
+export function endingSentence(ending: TurnEnding, stopReason: string | null): string | null {
+	switch (ending) {
+		case "output-limit":
+			return "The model reached its output limit before it finished. Send a message to continue.";
+		case "step-limit":
+			return "CLIO Coder ended this turn at a step limit or loop guard. Check the last steps before you continue.";
+		case "refusal":
+			return "The model declined to continue this request.";
+		case "other":
+			return `The turn ended with stop reason ${stopReason ?? "not reported"}.`;
+		default:
+			return null;
+	}
+}
+
 function sameItems(previous: readonly TimelineItem[], next: readonly TimelineItem[]): boolean {
 	if (previous.length !== next.length) return false;
 	for (let index = 0; index < previous.length; index += 1) if (previous[index] !== next[index]) return false;
