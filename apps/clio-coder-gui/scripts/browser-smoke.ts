@@ -2623,6 +2623,38 @@ try {
 					"Documentation is named more than once in its own view",
 				);
 				await page.keyboard.press("Escape");
+				// Markdown: a pressed Wrap shows its state without weight, and a refused link reads as plain text.
+				const wrap = page.locator(".chat-transcript .code-block__head button", { hasText: "Wrap" }).first();
+				await wrap.scrollIntoViewIfNeeded();
+				const wrapLook = async () => {
+					await page.mouse.move(0, 0);
+					return wrap.evaluate((node) => {
+						const style = getComputedStyle(node);
+						return { boxShadow: style.boxShadow, borderColor: style.borderColor };
+					});
+				};
+				assert.equal(await wrap.getAttribute("aria-pressed"), "false");
+				const unpressed = await wrapLook();
+				await wrap.click();
+				assert.equal(await wrap.getAttribute("aria-pressed"), "true");
+				assert.notDeepEqual(await wrapLook(), unpressed, "a pressed Wrap looks like an unpressed one at rest");
+				await wrap.click();
+				const blocked = page.locator(".chat-transcript .md-link--blocked").first();
+				await blocked.scrollIntoViewIfNeeded();
+				const blockedLook = await blocked.evaluate((node) => {
+					const style = getComputedStyle(node);
+					return {
+						border: style.borderBottomStyle,
+						decoration: style.textDecorationLine,
+						cursor: style.cursor,
+						text: (node as HTMLElement).innerText,
+					};
+				});
+				assert.deepEqual(
+					{ border: blockedLook.border, decoration: blockedLook.decoration, cursor: blockedLook.cursor },
+					{ border: "none", decoration: "none", cursor: "default" },
+				);
+				assert.match(blockedLook.text, /\(link blocked\)/u);
 				await page.setViewportSize({ width, height: 1050 });
 			});
 		await context.close();

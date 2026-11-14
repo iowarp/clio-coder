@@ -231,7 +231,7 @@ test("hostile Markdown never becomes markup, a live unsafe link, or a fetched im
 	ok(!html.includes("javascript:"), "unsafe schemes never reach an href");
 	ok(!html.includes("data:text"), "data URLs never reach an href");
 	match(html, /<span class="md-html">&lt;script&gt;<\/span>alert\(1\)<span class="md-html">&lt;\/script&gt;<\/span>/u);
-	match(html, /<span class="md-link md-link--blocked"[^>]*>bad<\/span>/u);
+	match(html, /<span class="md-link md-link--blocked"[^>]*>bad<small> \(link blocked\)<\/small><\/span>/u);
 	match(
 		html,
 		/<a class="md-link" href="https:\/\/example\.org\/ok" target="_blank" rel="noopener noreferrer" title="Title">ok<\/a>/u,
