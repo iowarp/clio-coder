@@ -4,7 +4,7 @@ Diagnose errors, permission refusals, target connection failures, and runtime an
 
 ## First problems
 
-Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifies missing prerequisites and prints `; next: \`<command>\`` when a direct fix exists.
+Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifies missing prerequisites and prints `` ; next: `<command>` `` when a direct fix exists.
 
 | Symptom | Remediation | Reference |
 | --- | --- | --- |
@@ -32,21 +32,22 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 
 | Message | Cause | Fix |
 | --- | --- | --- |
-| `[install] error: do not run this installer with sudo; ...` | `install.sh` run with `SUDO_USER` set | Rerun without `sudo`, or set `CLIO_CODER_INSTALL_ALLOW_SUDO=1` for root installs. |
-| `[install] error: refusing to overwrite <launcher>` / `refusing to replace <launcher>` | Non-installer binary or external symlink at `--bin-dir` | Move existing file, choose another `--bin-dir`, or pass `--force`. |
-| `[install] error: installation locked at <root>/.install-lock ...` (exit `75`) | Concurrent installer/rollback/uninstall/update, or stale lock (`> 10` min with dead local PID is reclaimed automatically) | Wait for owner; remove only `.install-lock` if the owning local process died recently. Background updaters retry exit `75`. |
-| `[install] error: only <N> MB free under <root>; ... need about 732 MB.` | Less than `750000` KB free under install root | Free space or pass `--install-dir` on a larger filesystem. |
+| `[install] error: do not run this installer with sudo; it installs into your home directory. Rerun the same command without sudo, or set CLIO_CODER_INSTALL_ALLOW_SUDO=1 to install for root on purpose.` | `install.sh` run with `SUDO_USER` set | Rerun without `sudo`, or set `CLIO_CODER_INSTALL_ALLOW_SUDO=1` for root installs. |
+| `[install] error: refusing to overwrite <launcher>, which this installer did not write; move it aside, choose another --bin-dir, or rerun with --force` / `refusing to replace <launcher>; it points to <target> (a source-checkout launcher, perhaps). Rerun with --force to replace it, or choose another --bin-dir.` | Non-installer binary or external symlink at `--bin-dir` | Move existing file, choose another `--bin-dir`, or pass `--force`. |
+| `[install] error: installation locked at <root>/.install-lock by pid <pid> on <host>. ...` (exit `75`) | Concurrent installer/rollback/uninstall/update, or stale lock (`> 10` min with dead local PID is reclaimed automatically as `reclaimed stale installation lock`) | Wait for owner; remove only `.install-lock` if the owning local process died recently. Background updaters retry exit `75`. |
+| `[install] error: only <N> MB free under <root>; Clio Coder and its runtime need about 732 MB.` | Less than `750000` KB free under install root | Free space or pass `--install-dir` on a larger filesystem. |
 | Checksum / OpenPGP signature mismatch on `SHASUMS256.txt` or Node archive | Corrupt download, missing `gpgv`, or bad `CLIO_CODER_NODE_MIRROR` | Retry or fix mirror. `CLIO_CODER_REQUIRE_SIGNATURE=0` skips missing-`gpgv` checks (checksum over HTTPS still runs); a bad signature or checksum always stops. |
-| `[install] error: neither curl nor wget was found` | Missing downloader | Install `curl` or `wget`, or pass `--node-tarball` and `--package`. |
-| `[install] error: the <channel> channel resolved to <version>, older than the active <active>` | Channel points older than installed version | Use `clio-coder upgrade --channel latest` (passes `--leave-prerelease`), pass `--version <version>`, pass `--rollback`, or check `~/.npmrc` / `npm_config_registry`. |
-| `[install] error: npm could not install <spec>` | Proxy, registry, unknown version, or disk full | Fix `https_proxy` / `npm_config_registry` / version and rerun. |
+| `[install] error: neither curl nor wget was found; install one, or fetch Node and the package by hand and pass --node-tarball and --package` | Missing downloader | Install `curl` or `wget`, or pass `--node-tarball` and `--package`. |
+| `[install] error: the <channel> channel resolved to <version>, older than the active <active>; the installation was left unchanged. To leave the pre-release for stable <version>, pass --leave-prerelease; to return to the previous install, use --rollback.` (or `To install <version>, pass --version <version>; to return to the previous install, use --rollback.`) | Channel points older than installed version | Use `clio-coder upgrade --channel latest` (passes `--leave-prerelease`), pass `--version <version>`, pass `--rollback`, or check `~/.npmrc` / `npm_config_registry`. |
+| `[install] error: npm could not install <spec>. Common causes: no route to the registry (set https_proxy, or npm_config_registry for a mirror), an unknown version, or a full disk under <root>.` | Proxy, registry, unknown version, or disk full | Fix `https_proxy` / `npm_config_registry` / version and rerun. |
 | `[install] error: package is installed, but local migrations/initialization need attention; run: <launcher> upgrade --post-install.` | Post-install migrations failed (`install.ps1` prints the equivalent with `clio-coder upgrade --post-install`) | Inspect output above the line, run `<launcher> upgrade --post-install` then `clio-coder doctor`, or `--rollback`. |
 | `[install] error: candidate checks failed; previous install remains active` | New version failed startup check | Read errors above line, fix, and rerun; previous version remains active. |
-| `[install] error: glibc <version> is older than 2.28 ...` | Linux arm64 glibc too old for official Node binaries | Install conda-forge `nodejs` and `npm install -g @iowarp/clio-coder`. |
+| `[install] error: glibc <version> is older than 2.28, which official arm64 Node.js builds need, and no older-glibc arm64 build exists.` / `glibc <version> is older than 2.17, the oldest any Node.js 22+ build supports` | System glibc too old for official Node binaries | Install conda-forge `nodejs` (`conda create -n node -c conda-forge 'nodejs>=22'`) and `npm install -g @iowarp/clio-coder`. |
 | `Native Windows managed lifecycle requires 0.6.0 or later` / `[install] error: Clio Coder <version> is unsupported` | Target release `< 0.6.0` | Specify `>= 0.6.0`. |
-| `clio-coder: upgraded <from> → <to>.` | First interactive launch after version change | Informational (printed once per version). |
+| `clio-coder: upgraded <from> → <to>. What changed is in CHANGELOG.md, section <to>.` | First interactive launch after version change | Informational (printed once per version). |
 | `Installation changed · /quit, restart clio-coder, then /resume` / `build replaced · /restart` | Files or dev build replaced under live session | `/quit` and `/resume` (or `/restart` after dev rebuild). |
-| `v<version> available · ...` / `Updated to v<version> · ...` / `background update to v<version> failed ...` | Update check / background updater state | Run `clio-coder upgrade`, `/upgrade`, or `clio-coder upgrade --rollback`. Silence check with `CLIO_CODER_UPDATE_CHECK=0` or disable auto-update with `interface.autoUpdate: false`. |
+| `v<version> available · installs after you quit[; the last attempt waited for <pid@host,...>]` / `v<version> available · <command>` / `v<version> available · clio-coder upgrade[ --channel=<channel>] to install` / `v<version> available · installing in the background` | Update check found newer release | Quit live sessions (pm updates), run printed command / `/upgrade` / `clio-coder upgrade`. Silence with `CLIO_CODER_UPDATE_CHECK=0` or `interface.autoUpdate: false`. |
+| `Updated to v<version> · restart clio-coder to use it; this session keeps v<running>; upgrade --rollback undoes` / `Updated to v<version> · installed by <manager> after your last session` / `background update to v<version> failed (<detail>); log: <path>; run <command>` / `v<version> available · background update failed: <detail>; run clio-coder upgrade` | Background or after-quit update settled or failed | Restart and `/resume` (`clio-coder upgrade --rollback` undoes); on failure, read `<log>` and run the printed upgrade command. |
 | `Other Clio Coder processes of this install are running; nothing was replaced` (exit `75`) | Live sessions hold package lease | Quit listed `<pid>@<host>` processes and rerun, or use `/upgrade` in a session. |
 | `clio-coder: the update is still running after 120 s; see <log>` (exit `75`) | Concurrent package-manager update took `> 120` s | Wait for completion and inspect `<log>`. |
 | `[install] error: CLIO_CODER_INSTALL_GUI must be 1 or 0, got '<value>'` | Invalid `CLIO_CODER_INSTALL_GUI` | Set `1`, `0`, or unset for prompt. |
@@ -66,7 +67,7 @@ Run `clio-coder doctor` first ([doctor.md](doctor.md)): its `chat` row identifie
 - **`clio-coder changed this workspace to the playbooks layout.`** — First open/`playbook`/`fleet run` migrated `.clio-coder/fleets/` to `.clio-coder/playbooks/` without deleting conflicts. Merge any paths listed under `Left unchanged, needs you:` by hand.
 - **`built for an older Clio: <package> declares resources.fleets, and playbooks replaced fleets`** — Plugin uses retired `fleets` layout and does not load; update the plugin (`resources.playbooks`, `playbooks/`).
 - **`unsafe directory layout`** (`doctor`/`uninstall`/`reset`, exit `2`) — Four XDG roots overlap, nest, are relative, or point at/above `$HOME`. Set four distinct non-nesting absolute paths below `$HOME` via `CLIO_CODER_*_DIR`, then verify with `clio-coder paths` and `clio-coder doctor`.
-- **`not a Clio-only directory (...); remove Clio's files inside it by hand`** (`reset` exit `1`, or `uninstall` `Kept, and why`) — Override root cannot be proven CLIO-owned (contains foreign entries or misses `settings.yaml` / `home.json` / `.clio-coder-root`). Clean manually or use a dedicated directory.
+- **`not a Clio-only directory (...); remove Clio's files inside it by hand`** (`reset` exit `1`, or `uninstall` `Kept, and why`) — Override root cannot be proven owned by CLIO Coder (contains foreign entries or misses `settings.yaml` / `home.json` / `.clio-coder-root`). Clean manually or use a dedicated directory.
 - **`` `clio-coder reset` needs a terminal to confirm; pass --force to skip the prompt ``** (same for `uninstall`, exit `2`) — Pass `--dry-run` to preview or `--force` to execute non-interactively.
 - **`Another native session (pid <N>) is still running; close it before uninstalling`** / **`Native installation is locked; retry after the installer exits`** — Stop the listed PID or wait for `.install-lock`.
 - **`Reset stopped; Clio state was preserved.` / `Could not stop the graphical installation; Clio state was preserved.`** — Run `clio-coder gui background uninstall && clio-coder gui launcher uninstall`, then retry.
@@ -87,7 +88,7 @@ Project settings, hooks, and `safety.yaml` require SHA-256 approval of their exa
 - **`[clio-coder:trust] <file> is untrusted; project <surface> ignored. Review with clio-coder config trust <surface>.`** (or **`is changed;`**) — `<surface>` is `settings`, `hooks`, `safety`, `extensions`, or `plugins`. Run `clio-coder config trust <surface>` to inspect files and digest, approve with `clio-coder config trust <surface> --hash <sha256>`, then restart or reload (`/reload extensions`, `/reload library`). `--revoke` removes approval.
 - **`project <surface> changed since review; inspect it again before approving`** (exit `1`) — Re-run `clio-coder config trust <surface>` and approve the updated digest.
 - **`no readable project <surface> files to approve`** (exit `1`) — File missing/unreadable or no project package installed yet.
-- **`extensions list` shows `untrusted` / `library list` shows `invalid` or `requires trust`** — Approve `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json` via `clio-coder config trust extensions|plugins`, then reload. Packages installed by `library import`, `interop adopt`, `share import`, `/archive import`, or skill install offers never auto-trust the workspace; hand-created `git worktree` directories never inherit trust.
+- **`extensions list` shows `untrusted` / `library list` shows `invalid` or `requires trust`** — In-session diagnostics report `project extensions are not trusted for this workspace and are not loaded; review with clio-coder config trust extensions` ([state.ts](../../src/domains/extensions/state.ts)) or `project plugins are not trusted for this workspace and are not loaded; review with clio-coder config trust plugins, then run /reload library` ([state.ts](../../src/domains/plugins/state.ts)). Approve `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json` via `clio-coder config trust extensions|plugins`, then reload. Packages installed by `library import`, `interop adopt`, `share import`, `/archive import`, or skill install offers never auto-trust the workspace; hand-created `git worktree` directories never inherit trust.
 - **`usage: clio-coder config trust ...`** (exit `2`) — Supply a valid surface and, for `--hash`, the full 64-hex SHA-256 digest.
 - **`credentials are not allowed in project settings; key ignored`** — Move secrets to `clio-coder auth` or user settings.
 - **`project autonomy may only tighten the level in user settings; project value ignored`** / **`autonomy is set only in user settings or by the operator; project value ignored`** / **`trustedUnmediated is set only in user settings; project value ignored`** — Configure looser `safety.autonomy` or `trustedUnmediated` in user `settings.yaml` (or pass `--autonomy` / session toggle).
@@ -99,7 +100,7 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 | Message / Failure | Cause | Remediation |
 | --- | --- | --- |
 | `Clio's safety judge blocked this <tool> call (rule <rule>): <reason>` | At `default` autonomy, safety judge saw no user authorization (reviews only operator messages + call). After `3` consecutive or `20` total blocks, the next call escalates to the operator; approving resets review. | Explicitly ask for the action in your prompt, or configure `safety.judge.environment` / `safety.judge.allow` in user settings ([Choosing an autonomy level](commands-and-modes.md#telling-the-safety-judge-about-your-environment)). |
-| Remedy reads `nothing within this run; it is the yolo floor, which holds at every autonomy level.` | Yolo floor hit (e.g., wiping `/`, `$HOME`, system trees, `mkfs`/`wipefs`, block-device writes, fork bombs, writing CLIO config/state/trust, reading credential store). | Run manually outside CLIO Coder if genuinely required. |
+| Remedy reads `nothing within this run; it is the yolo floor, which holds at every autonomy level.` | Yolo floor hit (e.g., wiping `/`, `$HOME`, system trees, `mkfs`/`wipefs`, block-device writes, fork bombs, writing CLIO Coder config, state or trust files, reading credential store). | Run manually outside CLIO Coder if genuinely required. |
 | `<tool> blocked: no workspace snapshot` | Snapshot required to admit destructive action at `default` failed. | Fix the reported Git error, run manually, or set `safety.snapshots: off` (switches calls to ask). |
 | `The operator did not answer this <tool> approval within <n> s, so Clio denied it automatically; the call did not run.` | Approval card timed out on `safety.unattendedAfterSeconds` (default `300`). | Raise `safety.unattendedAfterSeconds` (`0` disables timeout). Inspect with `/decisions`. |
 | `sandbox: this command could write only to <roots> ...` | Contained command wrote outside writable roots (`~/.cache`, `~/.npm` are read-only; sandbox sets `XDG_CACHE_HOME`, `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`, `PLAYWRIGHT_BROWSERS_PATH`). | Rerun with `unsandboxed: true` (safety-judge reviewed) or add writable path to `safety.scratchRoots` in user settings. |
@@ -130,7 +131,7 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 - **`clio-coder run: no-op: <N> tool calls were blocked without recovery and no write succeeded`** / **`no-op under --fail-on-noop`** (exit `1`) — Resolve blocked call or pass `--turn-mode answer` for read-only Q&A tasks.
 - **`clio-coder run: <N> dispatched worker(s) did not deliver: <runId> (<agent>, <outcome>): <detail>`** (exit `1`, detail clipped to 600 chars) — Inspect full settled record with `clio-coder fleet view <runId>` or `monitor(run_id="<id>", mode="record")`.
 - **`clio-coder run: timed out after <N>s (--timeout)`** (exit `124`) — Increase `--timeout` or split the task.
-- **`worker_final_output_missing`** — Worker exited with code **`1`** and logged `[worker] worker loop ended without a final assistant output (last role=..., stopReason=...)`. Inspect settled run with `clio-coder fleet view <runId>`.
+- **`worker_final_output_missing`** (`terminalReason: final_output_missing_no_repair`, [outcome.ts](../../src/domains/dispatch/outcome.ts)) — Two paths trigger it: (1) the worker process exited **`1`** and logged `[worker] worker loop ended without a final assistant output (last role=<role>, stopReason=<reason>)` ([worker-runtime.ts](../../src/engine/worker-runtime.ts)); (2) the worker exited `0` without a sealed, durable final output, so the host failed the run with detail `worker loop ended without a sealed final assistant output` ([extension.ts](../../src/domains/dispatch/extension.ts)). Inspect settled run with `clio-coder fleet view <runId>`.
 - **`[worker] bulk output incomplete: <reason>`** — Worker failed writing stdout event frames (frame `> 4 MiB`, backlog `> 16 MiB`, write/drain failure) and exited nonzero. Check orchestrator for stalls; inspect settled run.
 - **`[worker] bulk evidence incomplete: <reason>`** — Orchestrator detected truncated/unparsable/overflowing worker event frames or unread stdout `> 1` s after exit; forces exit `1` and marks tool telemetry `partial`.
 - **`worker_turn_timeout` / `worker_output_cap_exhausted`** — Worker round exceeded `safety.limits.workerResponseSeconds` or output token cap. Deterministic (no automatic retry or breaker penalty). Narrow task, raise `safety.limits.workerResponseSeconds`, or change model.
@@ -144,13 +145,17 @@ Refused tool calls start with `Refused by Clio policy`, `Refused by operator app
 | Error / Symptom | Cause | Fix |
 | --- | --- | --- |
 | `fleet.decisionProfiles` / `turnControl.interpretation` / `turnControl.orientation` / `fleet.speculativeDispatch` / old `systemOne` under `settings.yaml retired keys` | Legacy keys in `settings.yaml` | Run `clio-coder doctor --fix`; configure active engine via `systemOne.use`. |
-| `runtime 'lmstudio-native' was removed in 0.5.6; set \`runtime: lmstudio\` on this target in settings.yaml` (or `ollama-native` -> `ollama`) | Unaliased retired runtime ID | Replace with `lmstudio` or `ollama` in `settings.yaml`. |
+| ``runtime 'lmstudio-native' was removed in 0.5.6; set `runtime: lmstudio` on this target in settings.yaml`` (or `ollama-native` -> `ollama`) | Unaliased retired runtime ID | Replace with `lmstudio` or `ollama` in `settings.yaml`. |
 | `ai.iowarp.clio key 'evals' was removed in 0.7.0; delete it from the package manifest and reinstall` | Legacy manifest key | Delete `evals` from plugin manifest and reinstall. |
 | `The 'github-copilot' login is retired ...` (`auth login github-copilot`, exit `2`) | Retired impersonation flow | Run `copilot login` and use a `copilot-sdk` target. |
 | `systemOne.engines.<name>.target: target '<id>' is not defined in targets` / absent `consult` | Missing target definition, key, open breaker, or window overflow | Define target under `targets`, inspect `clio-coder systemone status` and `clio-coder systemone check <engine> --live`. |
 | Judge screen never parks anything | Engine uses `generic` profile (no token probabilities), judge disabled, or no recent web/MCP result | Configure `jev` or a non-`generic` engine profile ([Judge screen](system-one.md#judge-screen)). |
 | `safety.autonomy: expected one of default \| yolo, got "auto-edit"` (plus `suggest`, `read-only`, `full-auto`, `clio-managed`, `clio-policy`) | Retired enum value blocks validation | Run `clio-coder doctor --fix` (rewrites enums in place, preserving comments). |
-| `<arg> is a global option and must come before the subcommand` / unsupported flag placement (exit `2`) | Misplaced global flag (`--with-panes`, `--demo`, `--no-demo`, `--autonomy`, `--allow-tools`, `--delegate-tools`, `--session-file`, `--api-key`, `--no-context-files`/`-nc`, `--skill`, `--no-skills`) | Move global flag before subcommand (or check command support in [exit-codes-and-output.md](exit-codes-and-output.md)); use `CLIO_CODER_*_DIR` for directory overrides. |
+| `<arg> is a global option and must come before the subcommand: clio-coder <usage> <command> ...` (exit `2`) | `--api-key`, `--no-context-files`, or `-nc` placed after a subcommand (note: `--skill` and `--no-skills` work in either position on `run`) | Move `--api-key`/`--no-context-files`/`-nc` before the subcommand (`clio-coder --api-key <key> run ...`). |
+| `<flag> applies only to the interactive session, clio-coder run, and clio-coder acp; clio-coder <cmd> does not honor it.` (exit `2`) | `--api-key`, `--no-context-files`/`-nc`, `--skill`, `--no-skills`, `--allow-tools`, or `--delegate-tools` passed before an unsupported subcommand | Omit the flag for `<cmd>`, or run interactive / `run` / `acp`. |
+| `--autonomy before a subcommand applies to the interactive session only. For a headless turn use: clio-coder run --autonomy <level> "<task>"` (exit `2`) | `--autonomy` placed before a subcommand | Move `--autonomy <level>` *after* `run` (`clio-coder run --autonomy <level> "<task>"`). |
+| `--allow-tools and --delegate-tools before a subcommand apply to the interactive session only; pass them after it: clio-coder <run\|acp> --allow-tools <names>` (exit `2`) | `--allow-tools`/`--delegate-tools` placed before `run` or `acp` | Move them *after* `run` or `acp`. |
+| `--demo and --no-demo apply to interactive sessions only; start clio-coder without a subcommand.` / `--session-file applies to the interactive session only; start clio-coder without a subcommand.` / `--with-panes applies only to the interactive session; ...` (exit `2`) | Interactive-only startup flag used with a subcommand | Remove subcommand to run interactively (`clio-coder --with-panes`), or drop the interactive-only flag. |
 | `no target with id <id>` / `unknown target or runtime: <id>` | Unknown target ID in `settings.yaml` | Inspect with `clio-coder targets` or add via `clio-coder targets add`. |
 | `context-window-unverified`: `This model's context window is unknown, so Clio compacts at its token budget instead.` | Target probe did not report window size; compaction uses `context.compaction.maxTokens` (default `400000`) | Probe loaded server (`clio-coder targets --probe`) or set `targets[].capabilities.contextWindow`. |
 | `Connection error. (through proxy <url>)` / `clio-coder: proxy variables ignored (<error>); requests go direct` | Request routed via `HTTPS_PROXY`/`HTTP_PROXY` (only `localhost`, `127.0.0.1`, `[::1]` bypass automatically) or malformed proxy URL | Fix proxy env vars or add host/CIDR to `NO_PROXY` (`NO_PROXY=*` disables proxy). Verify active routing via `clio-coder doctor` `proxy` row. |
@@ -182,45 +187,31 @@ clio-coder usage report
 ```
 
 If compiled prompts were identical yet the backend missed cache, check:
-1. Server restart/unload/router sleep (llama.cpp routers support `--no-cache-idle-slots` / `cache-idle-slots = false`).
-2. Concurrent workers/sessions evicting KV cache slots (`clio-coder targets --probe`).
-3. Model residency swaps on a shared router.
-4. `promptHash` and `toolSignature` diffs across `context.snapshotted` journal records.
+1. **Server lifetime and sleep settings**: a restart, unload, or router sleep can discard resident cache state.
+2. **Idle-slot caching & slow hits**: cache hits can still show long time-to-first-token while restoring slots from host memory or queuing behind another request; llama.cpp routers can toggle idle-slot caching with `--no-cache-idle-slots` / `cache-idle-slots = false`.
+3. **Hybrid/recurrent models**: recurrent-state models may reprocess from a context checkpoint when earlier history changes; check serving checkpoint settings.
+4. **Concurrent traffic / residency swaps / prompt identity**: compare `clio-coder targets --probe` slot availability, router model residency, and `promptHash`/`toolSignature` across `context.snapshotted` records.
 
 ## A TUI that stops answering the keyboard
 
-Every interactive session keeps a bounded ring buffer of the last `256` input-ingress events and `256` committed stdout frames, automatically writing a diagnostic dump on `SIGTERM` (such as killing a wedged pane):
-
-```text
-<stateDir>/input-wedge/<ISO timestamp>-<pid>.json
-```
-
-Only the newest `5` dumps are retained. Check `classification` first:
-- `input-not-committed` — Bytes reached stdin handler, no frame reached stdout (renderer stuck).
-- `no-input-recorded` — Stdin reader received nothing while typing (stdin reader stuck).
-- `input-committed` — Both halves progressed; hang lies elsewhere (see `msSinceLastInputIngress`, `msSinceLastCommittedFrame`, `inputIngress`, `frames`).
-
-To record every render/delta event live, start with `CLIO_CODER_RENDER_TRACE=/path/to/trace.jsonl` (takes a file path, not `1`).
+Interactive sessions buffer the last `256` input-ingress events and `256` committed stdout frames in memory, writing `<stateDir>/input-wedge/<ISO timestamp>-<pid>.json` on `SIGTERM` (keeps newest `5` dumps):
+- `classification`: `input-not-committed` (renderer stuck), `no-input-recorded` (stdin reader stuck), `input-committed` (pipeline moving; check `msSinceLastInputIngress`, `msSinceLastCommittedFrame`, `inputIngress`, `frames`).
+- Full live trace: `CLIO_CODER_RENDER_TRACE=/path/to/trace.jsonl` (takes a file path, not `1`).
 
 ## Report a problem to the maintainers
 
-`/report` (TUI/ACP/desktop) and `clio-coder report` (shell) draft bugs, features, or questions for `github.com/iowarp/clio-coder` without sending until confirmed:
+`/report` (TUI/ACP/desktop) and `clio-coder report` (shell) draft bugs, features, or questions for `github.com/iowarp/clio-coder` (`--dry-run` previews locally without network calls):
 
-```bash
-clio-coder report bug --title "footer flickers on resize" --last --dry-run
-```
-
-- **Create & mask**: `/report bug|feature|question [summary]` or `clio-coder report ... [--title <t>] [--body-file <f>|-] [--last|--session <id>]`. Automatically masks local paths, third-party URLs, user/host/repo/branch/remote/target names, emails, IPs, and process API keys. Identifier validation blocks sending (even with `--yes`) if unmasked local identifiers or hidden control characters remain.
-- **Review & send**: TUI sends only on `s` at the send step (`e` edits, `m` toggles masks). Shell sends only after terminal confirmation or `--yes` (outside TTY without `--yes` exits `2`; `--dry-run` stops after preview; `--credit` requests release-note credit). Over ACP and desktop, `/report <kind>` prints the draft and only `/report send <id>` sends that exact shown text.
-- **Duplicate check & exit codes**: With signed-in `gh`, CLIO Coder checks GitHub for matching open/closed issues (`--on-duplicate comment|new|stop`, default `stop` saves draft and exits `3`). Without `gh`, opens a prefilled browser URL or writes a local file. Exits `0` sent/opened/previewed, `1` send error or refused bundle, `2` usage / missing `--yes`, `3` duplicate or newer-release match (draft saved).
-- **Replies & status**: `clio-coder report status`, `show <id>`, `send <id>`, `forget <id>`. Optional reply checks (`--reply-check` / `r`) run at most daily via `gh` for open reports `< 90` days old (disabled in CI or with `CLIO_CODER_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER`). Security reports must use `/report security` or `clio-coder report security`.
-- **Diagnostic bundle** (shell only; never via `/report` or desktop): `--bundle mechanics --consent debug|dataset` (`--last` or `--session <id>`, optional `--transcript [N]` default `3` max `10`, `--with-tool-output`, `--anonymize-models`). Stored mode `0600` under `<stateDir>/reports/bundles/`, automatically deleted `30` days after send (or immediately via `forget <id>`). Run `clio-coder report selftest [--session <id>]` to verify zero local identifiers leak; dataset builds run via `scripts/report-dataset.ts` require explicit `dataset` consent (`>= 20` traces, re-keyed, timestamps shifted to `2000-01-01`).
-- **Agent rules**: When broken behavior occurs, the agent may create at most 1 session draft (`report` capability, 3 unsent max) without escape sequences, and **never** sends (`--yes` is refused on agent drafts and `clio-coder report` invoked from tool shells).
-- **Crash capture**: Crashes write `<stateDir>/reports/crashes/` (`settings.yaml` validation errors excluded) and headless faults print one `clio-coder: this looks like a Clio Coder fault; ...` line on stderr (unless CI, `--json`, or `report.offers: off`).
+- **Draft & mask**: `/report bug|feature|question [summary]` or `clio-coder report ... [--title <t>] [--body-file <f>|-] [--last|--session <id>]`. Masks local paths, external URLs, user/host/repo/branch/remote/target names, emails, IPs, and process API keys; refuses send (even `--yes`) if unmasked identifiers or hidden control characters remain.
+- **Confirm & exit codes**: TUI sends only on `s` (`e` edits, `m` toggles masks); ACP/desktop require `/report send <id>` matching the exact shown text. Shell requires terminal confirm or `--yes` (`2` on usage / non-TTY without `--yes`, `0` sent/opened/previewed, `1` send error/refused bundle). Signed-in `gh` checks duplicates (`--on-duplicate comment|new|stop`; `stop` saves draft and exits `3`); without `gh`, opens browser URL or writes local file. `--credit` requests release-note credit. Security issues use `/report security` or `clio-coder report security`.
+- **Manage & replies**: `clio-coder report status|show <id>|send <id>|forget <id>`. Reply checks (`--reply-check` / `r`) run `<= 1/day` via `gh` for open reports `< 90` days old (off in CI or `CLIO_CODER_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER`).
+- **Diagnostic bundle** (shell only): `--bundle mechanics --consent debug|dataset` (`--last`/`--session <id>`, `--transcript [N]` default `3` max `10`, `--with-tool-output`, `--anonymize-models`). Stored mode `0600` in `<stateDir>/reports/bundles/`, auto-deleted `30` days after send (or immediately via `forget <id>`). `clio-coder report selftest [--session <id>]` verifies zero leaks; dataset builds (`scripts/report-dataset.ts`) require `dataset` consent (`>= 20` traces, re-keyed, `2000-01-01` epoch).
+- **Agent limits**: At most 1 session draft via `report` capability (3 unsent max, control chars stripped); agent **never** sends (`--yes` refused on agent drafts and tool shells).
+- **Crashes & offers**: Crashes write `<stateDir>/reports/crashes/` (`settings.yaml` validation excluded); headless faults print `clio-coder: this looks like a Clio Coder fault; ...` to `stderr` (unless CI, `--json`, `report.offers: off`). Report offers fire `<= 1/session` and `<= 1/week`, never in first session, mid-turn, or unattended yolo (2 min idle), and lapse after 2 min (`REPORT_OFFER_TAKE_MS`) or session change (`report.offers: off` disables; [offers.ts](../../src/domains/report/offers.ts), [extension.ts](../../src/domains/report/extension.ts)).
 
 ### Share with the maintainers
 
-Sharing diagnostic bundles or telemetry archives is strictly opt-in, operator-only, encrypted client-side to the maintainers' X25519 key (HKDF-SHA256 + AES-256-GCM), and uploaded as a secret gist under your `gh` account (run `gh auth refresh -s gist` if `gh` lacks `gist` scope):
+Opt-in, operator-only client-side encryption (X25519 + HKDF-SHA256 + AES-256-GCM) uploaded as a secret gist via `gh` (`gh auth refresh -s gist` if lacking `gist` scope):
 
 ```bash
 clio-coder report bug --title "..." --last --bundle mechanics --consent debug --share
@@ -230,9 +221,8 @@ clio-coder telemetry share list
 clio-coder telemetry share forget <shareId>
 ```
 
-- **What goes**: `report ... --share` attaches `bundle: gist:<id>#<shareId>` (or writes `<stateDir>/reports/bundles/<id>.box` if `gh` is unavailable). `telemetry share --send` opens a discussion in `Telemetry shares` on `iowarp/clio-coder` with profile `content-free`, `structural`, or `research` (no raw session report profile). Bug report titles are prefixed `fix:`.
-- **Retention & deletion**: `clio-coder report forget <id>` or `clio-coder telemetry share forget <shareId>` deletes the secret gist; `report` / `telemetry share` also prune gists recorded in `<stateDir>/reports/shares.json` after `180` days. Note: `dataset` consent cannot be recalled once included in a published public dataset.
-- **Agent prohibition**: Agents must never pass `--share` or `--send` (refused from tool shells and non-TTY without `--yes`); agents may only inform the operator of these commands.
+- **Payloads**: `report ... --share` attaches `bundle: gist:<id>#<shareId>` (or writes `<stateDir>/reports/bundles/<id>.box` if `gh` is missing); bug titles prefix `fix:`. `telemetry share --send` opens a `Telemetry shares` discussion on `iowarp/clio-coder` (`content-free`, `structural`, or `research` profile).
+- **Deletion & constraints**: `report forget <id>` / `telemetry share forget <shareId>` deletes the secret gist; `report` / `telemetry share` prune gists in `<stateDir>/reports/shares.json` after `180` days. `dataset` consent cannot be recalled once published. Agents must never pass `--share` or `--send` (refused from tool shells and non-TTY without `--yes`).
 
 ## Diagnostic Commands
 
