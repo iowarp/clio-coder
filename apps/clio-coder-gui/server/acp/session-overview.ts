@@ -1,12 +1,14 @@
-import type { SessionOverviewItem } from "../../contracts/session-overview.js";
+import type { SessionOverviewItem, SessionWorkerRun } from "../../contracts/session-overview.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 
-type WorkerSummary = { active: number; queued: number; complete: boolean; nodes: string[] };
-const NO_WORKERS: WorkerSummary = { active: 0, queued: 0, complete: true, nodes: [] };
+type WorkerSummary = { active: number; queued: number; complete: boolean; nodes: string[]; runs: SessionWorkerRun[] };
+const NO_WORKERS: WorkerSummary = { active: 0, queued: 0, complete: true, nodes: [], runs: [] };
+/** The overview names this many live runs; the counts above still cover every one. */
+const LISTED_RUNS = 64;
 
 /** Live ownership outlives the bounded event feed; a quiet worker must not disappear when that feed rolls over. */
 export class SessionWorkers {
-	private readonly runs = new Map<string, { state: "active" | "queued"; node: string | null }>();
+	private readonly runs = new Map<string, { agentId: string | null; state: "active" | "queued"; node: string | null }>();
 	private complete = true;
 	observe(fact: { type: string; payload: unknown }) {
 		if (!fact.payload || typeof fact.payload !== "object") return;
@@ -24,6 +26,7 @@ export class SessionWorkers {
 			return;
 		}
 		this.runs.set(payload.runId, {
+			agentId: typeof payload.agentId === "string" ? payload.agentId.slice(0, 128) : (previous?.agentId ?? null),
 			state: fact.type === "fleet.enqueued" ? "queued" : "active",
 			node: typeof payload.node === "string" && payload.node ? payload.node.slice(0, 256) : (previous?.node ?? null),
 		});
@@ -35,12 +38,17 @@ export class SessionWorkers {
 		let active = 0;
 		let queued = 0;
 		const nodes = new Set<string>();
-		for (const run of this.runs.values()) {
+		const listed: SessionWorkerRun[] = [];
+		const waiting: SessionWorkerRun[] = [];
+		for (const [runId, run] of this.runs) {
 			if (run.state === "active") active++;
 			else queued++;
 			if (run.node && nodes.size < 128) nodes.add(run.node);
+			const rows = run.state === "active" ? listed : waiting;
+			if (rows.length < LISTED_RUNS) rows.push({ runId, agentId: run.agentId, state: run.state, node: run.node });
 		}
-		return { active, queued, complete: this.complete, nodes: [...nodes] };
+		const runs = [...listed, ...waiting].slice(0, LISTED_RUNS);
+		return { active, queued, complete: this.complete, nodes: [...nodes], runs };
 	}
 }
 
@@ -108,6 +116,7 @@ export function projectSessionOverview(
 		workersComplete: held ? workers.complete : true,
 		activeJobs,
 		nodes: held ? workers.nodes : [],
+		runs: held ? workers.runs : [],
 		recoveredOrphan: snapshot.recoveredOrphan,
 		untouched:
 			snapshot.state === "open" &&

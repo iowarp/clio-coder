@@ -143,6 +143,56 @@ test("workspace and session routes stream one complete turn with recorded usage 
 	assert.deepEqual(await h.files.read("children"), []);
 });
 
+test("an engine rename becomes the task's label once, and a new command list bumps the session's counter", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { lanes: false });
+	t.after(h.close);
+	const events: Event[] = [];
+	t.after(h.hub.connect(undefined, (event) => events.push(event)));
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const before = h.supervisor.get(session.id).telemetry?.commandsRevision ?? 0;
+	h.supervisor.startTurn(session.id, "[rename] Hello");
+	await waitUntil(() => h.supervisor.get(session.id).turns.at(-1)?.status === "succeeded");
+	const labelled = events.filter((event) => event.type === "session.labelled" && event.payload.resource === session.id);
+	assert.deepEqual(
+		labelled.map((event) => (event.type === "session.labelled" ? event.payload.label : null)),
+		["Renamed"],
+		"a repeated title is not a second rename",
+	);
+	const overview = await json(await h.request("/api/sessions/overview"), routes.sessionOverview.response);
+	assert.equal(overview.sessions.find((item) => item.id === session.id)?.title, "Renamed");
+	const counted = events.filter(
+		(event) =>
+			event.type === "session.telemetry" &&
+			event.payload.resource === session.id &&
+			event.payload.telemetry.commandsRevision !== undefined,
+	);
+	assert.equal(counted.length, 1);
+	assert.equal(h.supervisor.get(session.id).telemetry?.commandsRevision, before + 1);
+});
+
+test("the session overview names the live workers the engine holds, past the feed's bound", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "steer", lanes: false });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path);
+	const session = await h.supervisor.open(workspace.id);
+	const turn = h.supervisor.startTurn(session.id, "[fleet] Survey");
+	const listed = async () =>
+		(await json(await h.request("/api/sessions/overview"), routes.sessionOverview.response)).sessions.find(
+			(item) => item.id === session.id,
+		);
+	await waitUntil(async () => ((await listed())?.runs.length ?? 0) > 0);
+	const item = await listed();
+	assert.deepEqual(item?.runs, [{ runId: "run-live-1", agentId: "scout", state: "active", node: null }]);
+	assert.equal(item?.activeWorkers, 1);
+	await h.supervisor.cancel(session.id, turn.turnId);
+	await waitUntil(async () => (await listed())?.runs.length === 0);
+});
+
 test("saved tasks come from the ledger with no engine started, and a resume starts only its own", {
 	timeout: 30000,
 }, async (t) => {

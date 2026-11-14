@@ -22,6 +22,17 @@ export function livePlanView(plan: SessionPlan): { title: string; rows: PlanRow[
 	};
 }
 
+/**
+ * What the plan says about the tasks dropped from it. The engine leaves a cancelled task out of the plan and counts
+ * it, so a plan whose every task was dropped arrives with no rows: that plan was cancelled.
+ */
+export function planCancellation(plan: SessionPlan | undefined): string | null {
+	const cancelled = plan?.cancelled ?? 0;
+	if (plan === undefined || cancelled === 0) return null;
+	if (plan.entries.length === 0) return "Plan cancelled";
+	return `${cancelled} cancelled ${cancelled === 1 ? "task" : "tasks"} not shown.`;
+}
+
 export interface MemoryGuardianMark {
 	tone: StatusTone;
 	label: string;

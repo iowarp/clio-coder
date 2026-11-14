@@ -15,8 +15,10 @@
 // never reported. `taskPreview` is Clio's own sanitized 160-byte prefix, never the exact task.
 
 import type { FleetItem } from "../../contracts/fleet-events.js";
+import type { SessionWorkerRun } from "../../contracts/session-overview.js";
 import { formatDuration } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
+import { tokensText } from "./session-usage-model.js";
 
 /**
  * The feed as it may actually arrive. A newer engine can put a fact type on the wire that this
@@ -27,7 +29,11 @@ export type FleetItemLike = Omit<FleetItem, "fact"> & {
 	readonly fact: { readonly type: string; readonly payload?: unknown };
 };
 
-export type FleetRunState = "queued" | "running" | "progress" | "done" | "failed";
+/**
+ * `ended` is never folded from the feed: it is a run the feed last saw live that the server no longer holds, so its
+ * final event never reached this view. It says what the view knows, not how the run went.
+ */
+export type FleetRunState = "queued" | "running" | "progress" | "done" | "failed" | "ended";
 
 export interface FleetRun {
 	readonly runId: string;
@@ -56,6 +62,7 @@ export const FLEET_GLYPHS: Readonly<Record<FleetRunState, string>> = {
 	progress: "◑",
 	done: "✓",
 	failed: "✕",
+	ended: "○",
 };
 
 /** Sentence case, because a run row speaks in the conversation's voice. */
@@ -65,6 +72,7 @@ export const FLEET_STATE_LABELS: Readonly<Record<FleetRunState, string>> = {
 	progress: "Working",
 	done: "Done",
 	failed: "Failed",
+	ended: "Ended (final event not received)",
 };
 
 export const FLEET_STATE_TONES: Readonly<Record<FleetRunState, StatusTone>> = {
@@ -73,6 +81,7 @@ export const FLEET_STATE_TONES: Readonly<Record<FleetRunState, StatusTone>> = {
 	progress: "running",
 	done: "success",
 	failed: "fail",
+	ended: "neutral",
 };
 
 /** A run in one of these is still live; the rest have settled and must never disappear unannounced. */
@@ -127,7 +136,15 @@ function terminalOutcome(payload: Readonly<Record<string, unknown>>): string | n
 	return detail === null ? code : `${code === null ? "" : `${code}: `}${detail}`;
 }
 
+const TERMINAL_STATES: ReadonlySet<FleetRunState> = new Set<FleetRunState>(["done", "failed"]);
+
 function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unknown>>, at: string): FleetRun {
+	// A late progress or start frame must not bring a settled run back to life.
+	if (
+		TERMINAL_STATES.has(run.state) &&
+		(type === "fleet.progress" || type === "fleet.started" || type === "fleet.enqueued")
+	)
+		return run;
 	const base = { ...run, agentId: text(payload.agentId) ?? run.agentId, updatedAt: at };
 	switch (type) {
 		case "fleet.enqueued":
@@ -193,6 +210,44 @@ export function foldFleetRuns(items: readonly FleetItemLike[]): readonly FleetRu
 		runs.delete(oldest.value);
 	}
 	return [...runs.values()];
+}
+
+/**
+ * The feed's runs checked against the live set the server holds, which outlives the feed's bound. A run both
+ * know is the feed's row. A live run the feed no longer holds becomes a bare row: its agent and state, nothing the
+ * feed would have said. A run the feed shows live that the server no longer holds has settled without its final
+ * event reaching this view. Without a server list the feed stands as it is.
+ *
+ * `asOf` is the server list's newest fact time. A run whose latest fact is newer than the list may simply not be in
+ * it yet, so it keeps its feed row until the next read.
+ */
+export function reconcileRuns(
+	folded: readonly FleetRun[],
+	server: readonly SessionWorkerRun[] | undefined,
+	asOf?: string | null,
+): readonly FleetRun[] {
+	if (server === undefined) return folded;
+	const listed = new Map(server.map((run) => [run.runId, run]));
+	const seen = new Set(folded.map((run) => run.runId));
+	const cutoff = asOf === undefined || asOf === null ? Number.POSITIVE_INFINITY : Date.parse(asOf);
+	const missing: FleetRun[] = server
+		.filter((run) => !seen.has(run.runId))
+		.map((run) => {
+			const row = blank(run.runId, asOf ?? "");
+			return {
+				...row,
+				agentId: run.agentId ?? row.agentId,
+				state: run.state === "active" ? "running" : "queued",
+				node: run.node,
+			};
+		});
+	const reconciled = folded.map((run): FleetRun => {
+		if (!isLiveRun(run) || listed.has(run.runId)) return run;
+		// Never later than the list's own newest fact; NaN on either side keeps the feed's row.
+		return Date.parse(run.updatedAt) <= cutoff ? { ...run, state: "ended" } : run;
+	});
+	// A run the feed lost started before every run it still holds.
+	return missing.length === 0 ? reconciled : [...missing, ...reconciled];
 }
 
 /** The state column: the state label, then `· `-separated reported fragments in a fixed order. */
@@ -261,13 +316,15 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 				known: true,
 				summary: `${amount(integer(payload.progressCount))} steps reported${flag(payload.truncated) ? ", and CLIO Coder truncated the report" : ""}.`,
 			};
-		case "fleet.completed":
+		case "fleet.completed": {
+			const tokens = text(payload.tokenDisplay);
 			return {
 				label: "Run done",
 				tone: "success",
 				known: true,
-				summary: `${terminalOutcome(payload) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${text(payload.tokenDisplay) ?? "not reported"} tokens.`,
+				summary: `${terminalOutcome(payload) ?? "Finished"} after ${integer(payload.durationMs) === null ? "an unreported time" : formatDuration(integer(payload.durationMs) ?? 0)}, ${tokens === null ? "tokens not reported" : tokensText(tokens)}.`,
 			};
+		}
 		case "fleet.failed":
 			return {
 				label: "Run failed",

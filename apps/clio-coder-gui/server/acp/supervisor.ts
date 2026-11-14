@@ -136,7 +136,12 @@ import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
 import { projectSessionOverview, SessionWorkers } from "./session-overview.js";
-import { projectTelemetryValue, sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
+import {
+	projectTelemetryValue,
+	sessionInfoTitle,
+	sessionResultTelemetry,
+	sessionUpdateTelemetry,
+} from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -1040,6 +1045,24 @@ export class Supervisor {
 		const sessionNotice = record(record(update._meta)[ACP_NOTICE_META_KEY]);
 		if (update.sessionUpdate === "session_info_update" && typeof sessionNotice.text === "string")
 			this.notice(entry, sessionNotice.text);
+		// A rename from another client of this session, or by the engine itself. A title equal to the held label is a
+		// repeat or an echo and publishes nothing.
+		const title = sessionInfoTitle(update);
+		if (title !== undefined && title !== (this.snapshot(entry.id).label ?? null))
+			this.publish({
+				type: "session.labelled",
+				payload: { resource: entry.id, revision: this.revision(entry.id), label: title },
+			});
+		// The list itself is read on demand; the counter only tells a client its copy is stale.
+		if (update.sessionUpdate === "available_commands_update")
+			this.publish({
+				type: "session.telemetry",
+				payload: {
+					resource: entry.id,
+					revision: this.revision(entry.id),
+					telemetry: { commandsRevision: (this.snapshot(entry.id).telemetry?.commandsRevision ?? 0) + 1 },
+				},
+			});
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({

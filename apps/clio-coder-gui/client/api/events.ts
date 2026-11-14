@@ -197,6 +197,12 @@ export function subscribe(
 					delta.payload.revision > previousRevision
 				)
 					void queries.cancelQueries({ queryKey: ["session-autonomy", delta.payload.resource], exact: true });
+				// The engine announced a new command list (a skill or an extension came or went); the counter carries no list.
+				if (delta.type === "session.telemetry" && delta.payload.telemetry.commandsRevision !== undefined) {
+					const keys = refreshReads.get(delta.payload.resource) ?? new Set<string>();
+					keys.add("session-commands");
+					refreshReads.set(delta.payload.resource, keys);
+				}
 				if (
 					delta.type === "context.activity" ||
 					delta.type === "context.status" ||

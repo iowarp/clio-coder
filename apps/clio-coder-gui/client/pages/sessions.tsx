@@ -52,7 +52,7 @@ import { Menu, MenuItem } from "../shell/Menu.js";
 import { useSessionCommands } from "../shell/SessionControls.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
-import { rememberedWorkspace, useRenameTask } from "../shell/tasks.js";
+import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
@@ -239,7 +239,13 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		return next;
 	}, [snapshot?.timeline, statuses]);
 	const fleet = snapshot?.fleet;
-	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
+	// The server's count outlives the feed's bound; the feed counts only while the overview does not list this task.
+	const serverWorkers = useSessionWorkers(client, id)?.count;
+	const foldedWorkers = useMemo(
+		() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length),
+		[fleet],
+	);
+	const liveWorkers = serverWorkers ?? foldedWorkers;
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
 	const compactions = useMemo(
 		() => compactionsByTurn(compactionRows(snapshot?.health ?? []), snapshot?.turns ?? []),

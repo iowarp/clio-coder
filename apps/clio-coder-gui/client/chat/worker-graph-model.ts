@@ -1,6 +1,14 @@
 import type { FleetItem } from "../../contracts/fleet-events.js";
+import type { SessionWorkerRun } from "../../contracts/session-overview.js";
 import { formatTime } from "../api/clock.js";
-import { FLEET_STATE_LABELS, type FleetRun, fleetRunDetail, foldFleetRuns, isLiveRun } from "./fleet-facts.js";
+import {
+	FLEET_STATE_LABELS,
+	type FleetRun,
+	fleetRunDetail,
+	foldFleetRuns,
+	isLiveRun,
+	reconcileRuns,
+} from "./fleet-facts.js";
 
 export interface WorkerNode {
 	run: FleetRun;
@@ -9,9 +17,12 @@ export interface WorkerNode {
 	missingParent: string | null;
 }
 
-/** Only the runtime's worker:<runId> origin establishes a worker-to-worker edge. */
-export function workerGraph(items: readonly FleetItem[]) {
-	const runs = foldFleetRuns(items);
+/**
+ * Only the runtime's worker:<runId> origin establishes a worker-to-worker edge. `server` and `asOf` are the live set
+ * the server holds for this task (see `reconcileRuns`); without them the graph is the feed's.
+ */
+export function workerGraph(items: readonly FleetItem[], server?: readonly SessionWorkerRun[], asOf?: string | null) {
+	const runs = reconcileRuns(foldFleetRuns(items), server, asOf);
 	const parents = new Map<string, string>();
 	for (const item of [...items].sort((a, b) => a.sourceSequence - b.sourceSequence)) {
 		if (item.fact.type !== "fleet.enqueued" && item.fact.type !== "fleet.started") continue;

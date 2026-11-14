@@ -63,9 +63,11 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 	}
 	if (update.sessionUpdate === "plan") {
 		if (!Array.isArray(update.entries)) throw new AppProblem("upstream_acp", "Clio returned invalid plan entries.");
+		const cancelled = record(meta[ACP_PLAN_META_KEY]).cancelled;
 		return {
 			plan: projectTelemetryValue(SessionPlan, {
 				title: record(meta[ACP_PLAN_META_KEY]).title ?? null,
+				...(cancelled !== undefined ? { cancelled } : {}),
 				entries: update.entries.map((value, index) => {
 					const entry = record(value),
 						detail = record(record(entry._meta)[ACP_PLAN_META_KEY]);
@@ -83,4 +85,25 @@ export function sessionUpdateTelemetry(update: Record<string, unknown>): Session
 	if (update.sessionUpdate === "session_info_update" && meta[ACP_WORKSPACE_META_KEY] !== undefined)
 		return { workspace: projectTelemetryValue(SessionWorkspace, meta[ACP_WORKSPACE_META_KEY]) };
 	return null;
+}
+
+/** The GUI's own label route refuses more than this; an engine title is cut to it instead. */
+const TITLE_MAX_BYTES = 256;
+
+/**
+ * The session title a `session_info_update` carries: a string, null when the engine cleared it, undefined when the
+ * frame says nothing readable about the title. An empty title reads as cleared, as the label route stores it.
+ */
+export function sessionInfoTitle(update: Record<string, unknown>): string | null | undefined {
+	if (update.sessionUpdate !== "session_info_update" || !("title" in update)) return undefined;
+	if (update.title === null || update.title === "") return null;
+	if (typeof update.title !== "string") return undefined;
+	let bytes = 0,
+		title = "";
+	for (const char of update.title) {
+		bytes += Buffer.byteLength(char);
+		if (bytes > TITLE_MAX_BYTES) break;
+		title += char;
+	}
+	return title;
 }

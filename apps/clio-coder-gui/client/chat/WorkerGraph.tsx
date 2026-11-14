@@ -8,6 +8,7 @@ import { Icon } from "../design/icons.js";
 import { StatusMark, TONE_GLYPHS } from "../design/status.js";
 import { requestReport } from "../report/report-events.js";
 import { failedRunReport } from "../report/report-model.js";
+import { useSessionWorkers } from "../shell/tasks.js";
 import { steeringAffordances } from "./composer-model.js";
 import { FleetRunPanel } from "./FleetRunPanel.js";
 import { RunSteer, type RunSteering } from "./FleetStrip.js";
@@ -201,7 +202,11 @@ export const WorkerGraph = memo(function WorkerGraph({
 	client: Client;
 	session: SessionSnapshot;
 }) {
-	const graph = useMemo(() => workerGraph(session.fleet), [session.fleet]);
+	const workers = useSessionWorkers(client, session.id);
+	const graph = useMemo(
+		() => workerGraph(session.fleet, workers?.runs, workers?.asOf),
+		[session.fleet, workers?.runs, workers?.asOf],
+	);
 	const notices = useMemo(() => fleetNotices(session.fleet), [session.fleet]);
 	const evidence = useMemo(() => new Map(fleetEvidence(session.fleet).map((row) => [row.id, row])), [session.fleet]);
 	const [selected, setSelected] = useState<string | null>(null);

@@ -935,6 +935,23 @@ test("conversation routing takes reported current values and keeps target change
 	assert.equal(routeDraft(undefined, undefined, "conversation"), null);
 });
 
+test("a session config without a model option says the model is not reported, never the saved one", () => {
+	const route = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [{ id: "thinkingLevel" as const, currentValue: "high", options: [{ value: "high", name: "High" }] }],
+	});
+	assert.equal(route.text, "alpha · model not reported");
+	assert.equal(route.model, "Model not reported");
+	assert.match(route.title, /Model: not reported\./);
+	assert.doesNotMatch(`${route.text} ${route.model} ${route.title}`, /saved-model/);
+	const bare = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [],
+	});
+	assert.equal(bare.thinking, undefined, "a thinking level the session did not report is not the saved one");
+	assert.doesNotMatch(bare.title, /Thinking: off/);
+});
+
 test("config projection drops unknown controls and private metadata, and refuses malformed known options", () => {
 	const raw = [
 		{ id: "autonomy", internal: "private" },
