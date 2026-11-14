@@ -3,11 +3,14 @@ import { test } from "node:test";
 import { Hono } from "hono";
 import { Type } from "typebox";
 import { createClient } from "../client/api/client.js";
-import { Empty, Id } from "../contracts/common.js";
+import { ASIDE_TEXT_MAX_CHARACTERS } from "../contracts/aside.js";
+import { Empty, Id, MAX_SERVED_ARTIFACT_IDS } from "../contracts/common.js";
 import { defineRoute, routes } from "../contracts/routes.js";
+import * as browserSafe from "../contracts/runtime.js";
 import { SessionDeltaKinds } from "../contracts/runtime.js";
 import { routes as runtimeRoutes } from "../contracts/runtime-routes.js";
 import { SessionDeltas } from "../contracts/sessions.js";
+import { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "../contracts/wire.js";
 import { register } from "../server/http/validate.js";
 import { EventHub } from "../server/services/event-hub.js";
 import { credentialFetch } from "./harness/browser-fetch.js";
@@ -62,4 +65,11 @@ test("browser handles and subscription kinds preserve the server's complete cont
 		assert.equal(handle.path, routes[handle.name].path, handle.name);
 	}
 	assert.deepEqual(Object.keys(SessionDeltaKinds).sort(), Object.keys(SessionDeltas).sort());
+});
+
+test("the browser-safe limits restate their schema-bearing sources exactly", () => {
+	assert.equal(browserSafe.ACP_TARGET_MODEL_LIMIT, ACP_TARGET_MODEL_LIMIT);
+	assert.deepEqual(browserSafe.MODEL_TARGET_PATHS, MODEL_TARGET_PATHS);
+	assert.equal(browserSafe.MAX_SERVED_ARTIFACT_IDS, MAX_SERVED_ARTIFACT_IDS);
+	assert.equal(browserSafe.ASIDE_TEXT_MAX_CHARACTERS, ASIDE_TEXT_MAX_CHARACTERS);
 });
