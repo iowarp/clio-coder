@@ -2174,6 +2174,60 @@ test("each step of a plan opens its own worker card, though every step shares th
 	strictEqual(progressed?.entry, first?.entry, "the first step keeps streaming into its own card");
 });
 
+test("a loop repair after a step that succeeded opens its own card, and a retry after a failure folds in", () => {
+	const stream = createWorkerStream({ readResult: () => null });
+	const start = (runId: string, attempt: number) =>
+		stream.started({
+			runId,
+			assignmentId: "fleet-root",
+			attempt,
+			requestOrigin: "user",
+			agentId: "coder",
+			task: "add stdev",
+			targetId: "local",
+			wireModelId: "worker-model",
+			runtimeId: "openai",
+			runtimeKind: "http",
+			pid: 1,
+		} as never);
+	const settle = (runId: string, outcome: "succeeded" | "failed") =>
+		stream.completed({
+			runId,
+			agentId: "coder",
+			outcome,
+			outcomeCode: null,
+			outcomeDetail: null,
+			durationMs: 10,
+			exitCode: outcome === "succeeded" ? 0 : 1,
+		} as never);
+	const build = start("build", 0);
+	settle("build", "succeeded");
+	const repair = start("repair-1", 1);
+	strictEqual(repair?.kind, "created", "a repair is its own step, not a failover of the build");
+	strictEqual(build?.entry.attempts.length, 1);
+	settle("repair-1", "failed");
+	const lone = createWorkerStream({ readResult: () => null });
+	const first = lone.started({
+		runId: "w1",
+		assignmentId: "a",
+		attempt: 0,
+		requestOrigin: "user",
+		agentId: "coder",
+		pid: 1,
+	} as never);
+	lone.failed({ runId: "w1", agentId: "coder", outcome: "failed", outcomeCode: null, outcomeDetail: null } as never);
+	const retry = lone.started({
+		runId: "w2",
+		assignmentId: "a",
+		attempt: 1,
+		requestOrigin: "user",
+		agentId: "coder",
+		pid: 1,
+	} as never);
+	strictEqual(retry?.kind, "updated", "a retry after a failure stays on the same card");
+	strictEqual(first?.entry.attempts.length, 2);
+});
+
 test("a worker that stopped answering takes no steer, and takes one again once it answers", () => {
 	const row = { runtimeKind: "http", status: "stale" } as unknown as DispatchBoardRow;
 	strictEqual(isDispatchBoardRowSteerable(row), false);

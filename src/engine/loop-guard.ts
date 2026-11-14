@@ -55,6 +55,16 @@ export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
  */
 export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
 
+/**
+ * Blocks of one identical call in a row, with no other call run between them,
+ * that end tool use however much run-wide budget is left. A worker's budget
+ * scales with its run length so separate spirals in a long editing pass don't
+ * end it, but that let a local model resend one blocked `git diff --stat` 14
+ * times, a full model round and ~15k input tokens each, before the lockout.
+ * Resending a call the guard has refused twice is not a spiral that recovers.
+ */
+export const CONSECUTIVE_IDENTICAL_BLOCK_LIMIT = 3;
+
 /** One loop block tolerated per this many admitted calls in a worker run. */
 const WORKER_LOOP_BLOCK_CALLS_PER_BLOCK = 10;
 
@@ -603,6 +613,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	let reserveDirectiveEmitted = false;
 	const blocksByTurn = new Map<string, number>();
 	const lastBlockedCallByTurn = new Map<string, string>();
+	/** Per turn: the call blocked last and how many times in a row it was blocked. */
+	const identicalBlockStreakByTurn = new Map<string, { identity: string; count: number }>();
 	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
 	/**
@@ -1034,9 +1046,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			const oldest = lastBlockedCallByTurn.keys().next().value;
 			if (oldest !== undefined) lastBlockedCallByTurn.delete(oldest);
 		}
-		lastBlockedCallByTurn.set(turnKey, callIdentity(tool, input.toolArgs));
+		const identity = callIdentity(tool, input.toolArgs);
+		lastBlockedCallByTurn.set(turnKey, identity);
+		const previous = identicalBlockStreakByTurn.get(turnKey);
+		const streak = previous?.identity === identity ? previous.count + 1 : 1;
+		if (previous === undefined && identicalBlockStreakByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+			const oldest = identicalBlockStreakByTurn.keys().next().value;
+			if (oldest !== undefined) identicalBlockStreakByTurn.delete(oldest);
+		}
+		identicalBlockStreakByTurn.set(turnKey, { identity, count: streak });
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
-		const reachedBudget = blocksThisTurn >= budget;
+		const reachedBudget = blocksThisTurn >= budget || streak >= CONSECUTIVE_IDENTICAL_BLOCK_LIMIT;
 		// Budget reached with the synthesis lockout wired: enter the lockout
 		// instead of stopping the turn. The block reason becomes the
 		// synthesize-now directive; the LoopBlocked event carries "lockout"
@@ -1295,6 +1315,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					}
 				}
 				const blocked = lastBlockedCallByTurn.get(turnKey);
+				// Any other call that ran breaks a run of identical blocks.
+				if (
+					input.toolName !== undefined &&
+					identicalBlockStreakByTurn.get(turnKey)?.identity !== callIdentity(input.toolName, input.toolArgs)
+				) {
+					identicalBlockStreakByTurn.delete(turnKey);
+				}
 				const workspaceMutated = recordWorkspaceMutation(input);
 				recordMonitorCollectProgress(input);
 				if (
