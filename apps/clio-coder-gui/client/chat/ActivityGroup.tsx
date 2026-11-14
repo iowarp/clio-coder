@@ -10,7 +10,9 @@
  * files, ran 1 command"). Opening the group lists one line per call; each line opens to its evidence.
  */
 
-import { memo, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { lazy, memo, Suspense, useMemo, useState } from "react";
+import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatDuration } from "../api/clock.js";
@@ -29,6 +31,7 @@ import {
 } from "./activity.js";
 import { callDecisions, isAwaitingAnswer } from "./approval-model.js";
 import { observeStart } from "./chat-turn.js";
+import { type ProposalBaseline, wholeFileWritePath } from "./diff-model.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerRunRecord } from "./RunRecordLine.js";
 import { ToolCard } from "./tool-cards.js";
@@ -64,6 +67,38 @@ function sameSessionFor(previous: SessionSnapshot, next: SessionSnapshot, items:
 	);
 }
 
+/**
+ * A whole-file write's proposal is compared with the file as it stands before the write lands, so its +/− counts
+ * match the applied result. Read once per call while it is undecided; the answer is kept for the settled card. The
+ * comparison code is its own chunk, fetched with the file.
+ */
+function useProposalBaseline(client: Client, workspaceId: string, item: TimelineItem): ProposalBaseline {
+	const path = item.kind === "tool" ? wholeFileWritePath(item.rawInput) : null;
+	const read = useQuery({
+		meta: { errorSurface: "inline" },
+		queryKey: ["proposal-baseline", workspaceId, item.id],
+		queryFn: async (): Promise<{ baseline: ProposalBaseline }> => {
+			const [file, { baselineRows }] = await Promise.all([
+				client.call(routes.workspaceFile, { params: { id: workspaceId }, query: { path: path ?? "" }, body: {} }),
+				import("./baseline-diff.js"),
+			]);
+			if (file.status === "missing") return { baseline: null };
+			const content = item.rawInput?.content;
+			if (file.status !== "text" || file.truncated || typeof content !== "string") return { baseline: undefined };
+			return { baseline: baselineRows(file.text, content) ?? undefined };
+		},
+		enabled: path !== null && (item.status === "pending" || item.status === "in_progress"),
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
+	return read.data?.baseline;
+}
+
+// A settled dispatch's outcome line loads with the first dispatch row, not with the session route.
+const DispatchOutcome = lazy(() =>
+	import("./DispatchOutcome.js").then((module) => ({ default: module.DispatchOutcome })),
+);
+
 const ActivityRow = memo(function ActivityRow({
 	item,
 	client,
@@ -72,12 +107,14 @@ const ActivityRow = memo(function ActivityRow({
 	nowMs,
 	decision,
 }: ActivityRowProps) {
-	const startedAtMs = observeStart(item.id, nowMs);
+	const turnStartedAt = session.turns.find((turn) => turn.id === item.turnId)?.startedAt;
+	const startedAtMs = observeStart(item.id, nowMs, turnStartedAt ? Date.parse(turnStartedAt) : Number.NaN);
 	const elapsedMs = nowMs === 0 ? 0 : Math.max(0, nowMs - startedAtMs);
+	const baseline = useProposalBaseline(client, session.workspaceId, item);
 	// A fresh object per render would defeat ToolCard's memo on every streamed delta.
 	const options = useMemo(
-		() => ({ ...(workspaceRoot === undefined ? {} : { workspaceRoot }), nowMs, startedAtMs, decision }),
-		[workspaceRoot, nowMs, startedAtMs, decision],
+		() => ({ ...(workspaceRoot === undefined ? {} : { workspaceRoot }), nowMs, startedAtMs, decision, baseline }),
+		[workspaceRoot, nowMs, startedAtMs, decision, baseline],
 	);
 	return (
 		<li className="activity__row" data-kind={item.kind}>
@@ -101,6 +138,11 @@ const ActivityRow = memo(function ActivityRow({
 				</p>
 			)}
 			<WorkerRunRecord client={client} sessionId={session.id} item={item} />
+			{item.kind === "tool" && item.status === "completed" && item.title === "dispatch" ? (
+				<Suspense fallback={null}>
+					<DispatchOutcome client={client} sessionId={session.id} item={item} />
+				</Suspense>
+			) : null}
 			<AnchoredApproval client={client} session={session} item={item} />
 		</li>
 	);
