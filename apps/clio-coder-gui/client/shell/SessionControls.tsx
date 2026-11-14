@@ -1,7 +1,9 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
+import { useNoticeLead } from "../design/notifications.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { type SessionControls, useSessionControls } from "../pages/session-control-actions.js";
@@ -74,6 +76,9 @@ export function SessionControlsProvider({ client, children }: { client: Client; 
 
 export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const { controls } = useSessionCommands();
+	// The banner rides at the head of the notice stack. A row at the top of the page pushed the task's
+	// header down while a stop settled and pulled it back when the banner left.
+	const lead = useNoticeLead();
 	const [reviewing, setReviewing] = useState(false);
 	const { pathname } = useLocation();
 	const reviewButton = useRef<HTMLButtonElement>(null);
@@ -140,38 +145,38 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 		setReviewing(false);
 		returnToWork();
 	};
+	const banner = (
+		<section
+			className="session-control-notice"
+			data-state={needsReview ? "unresolved" : pending.length ? "sending" : "complete"}
+			aria-label="Session control status"
+			onMouseEnter={() => setHeld((state) => ({ ...state, hover: true }))}
+			onMouseLeave={() => setHeld((state) => ({ ...state, hover: false }))}
+			onFocus={() => setHeld((state) => ({ ...state, focus: true }))}
+			onBlur={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget)) setHeld((state) => ({ ...state, focus: false }));
+			}}
+		>
+			<div className="session-control-notice__message" role="status">
+				<StatusMark tone={needsReview ? "warn" : pending.length ? "running" : idle ? "neutral" : "success"} label={label} />
+				<span>{summary}</span>
+			</div>
+			<div className="session-control-notice__actions">
+				<button type="button" ref={reviewButton} onClick={() => setReviewing(true)} aria-haspopup="dialog">
+					{needsReview ? "Review request" : "Details"}
+					<Icon name="arrowUp" />
+				</button>
+				{!needsReview && !pending.length ? (
+					<button type="button" onClick={dismissCompleted} aria-label="Dismiss completed session controls">
+						<Icon name="close" />
+					</button>
+				) : null}
+			</div>
+		</section>
+	);
 	return (
 		<>
-			<section
-				className="session-control-notice"
-				data-state={needsReview ? "unresolved" : pending.length ? "sending" : "complete"}
-				aria-label="Session control status"
-				onMouseEnter={() => setHeld((state) => ({ ...state, hover: true }))}
-				onMouseLeave={() => setHeld((state) => ({ ...state, hover: false }))}
-				onFocus={() => setHeld((state) => ({ ...state, focus: true }))}
-				onBlur={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget)) setHeld((state) => ({ ...state, focus: false }));
-				}}
-			>
-				<div className="session-control-notice__message" role="status">
-					<StatusMark
-						tone={needsReview ? "warn" : pending.length ? "running" : idle ? "neutral" : "success"}
-						label={label}
-					/>
-					<span>{summary}</span>
-				</div>
-				<div className="session-control-notice__actions">
-					<button type="button" ref={reviewButton} onClick={() => setReviewing(true)} aria-haspopup="dialog">
-						{needsReview ? "Review request" : "Details"}
-						<Icon name="arrowUp" />
-					</button>
-					{!needsReview && !pending.length ? (
-						<button type="button" onClick={dismissCompleted} aria-label="Dismiss completed session controls">
-							<Icon name="close" />
-						</button>
-					) : null}
-				</div>
-			</section>
+			{lead ? createPortal(banner, lead) : banner}
 			{reviewing ? (
 				<Dialog title="Session requests" eyebrow="Session control" size="wide" onClose={() => setReviewing(false)}>
 					<p>Each request stays with its original session as you move around CLIO Coder.</p>

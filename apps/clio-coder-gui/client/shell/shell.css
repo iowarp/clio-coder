@@ -381,9 +381,11 @@
 }
 .wb-tasks > li {
 	min-width: 0;
-	animation: wb-task-arrive var(--motion-base) var(--ease-standard) both;
+	animation: wb-task-arrive var(--motion-base) var(--ease-standard) backwards;
 }
-/* A task that appears in the rail rises into its row once; rows never move after that. */
+/* A task that appears in the rail rises into its row once; rows never move after that. The fill is
+   backwards only: a transform held after the rise made the row the containing block of its fixed
+   action menu, which then opened hundreds of pixels below its button. */
 @keyframes wb-task-arrive {
 	from {
 		opacity: 0;

@@ -169,6 +169,79 @@ function useDockSlot(): HTMLElement | null {
 	return slot;
 }
 
+/**
+ * The first slot of the stack. Status that belongs with the notices but is raised elsewhere (the
+ * session-control banner) is portaled here, so it floats or docks with them instead of taking a row
+ * at the top of the page and pushing the task's header down.
+ */
+let lead: HTMLElement | null = null;
+const leadListeners = new Set<() => void>();
+function setLead(element: HTMLElement | null): void {
+	if (lead === element) return;
+	lead = element;
+	for (const listener of leadListeners) listener();
+}
+function subscribeLead(listener: () => void): () => void {
+	leadListeners.add(listener);
+	return () => {
+		leadListeners.delete(listener);
+	};
+}
+export function useNoticeLead(): HTMLElement | null {
+	return useSyncExternalStore(
+		subscribeLead,
+		() => lead,
+		() => null,
+	);
+}
+
+/**
+ * A focused control under the floating stack is scrolled clear of it. The page's scroller pads its
+ * end and its scroll padding by the stack's height (interaction.css), so "nearest" lands it above.
+ */
+function clearOf(stack: HTMLElement, target: EventTarget | null): void {
+	if (!(target instanceof HTMLElement) || stack.contains(target) || target.closest("dialog, [role='dialog']")) return;
+	const over = stack.getBoundingClientRect();
+	const box = target.getBoundingClientRect();
+	if (over.height === 0 || box.height === 0 || box.height > over.top) return;
+	if (box.bottom > over.top && box.top < over.bottom && box.right > over.left && box.left < over.right)
+		target.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/**
+ * Off a task page the stack floats over the page, which keeps the frame still when a notice comes or
+ * goes. Its height, measured from the window's bottom edge, is published as --notice-reserve so the
+ * page can always scroll its last control above the stack and focus never lands under it.
+ */
+function useFloatingReserve(region: { readonly current: HTMLElement | null }, docked: boolean): void {
+	useEffect(() => {
+		const root = document.documentElement;
+		const stack = region.current;
+		if (docked || !stack || typeof ResizeObserver !== "function") {
+			root.style.removeProperty("--notice-reserve");
+			return;
+		}
+		const measure = () => {
+			const box = stack.getBoundingClientRect();
+			const reserve = box.height > 0 ? Math.ceil(window.innerHeight - box.top) : 0;
+			if (reserve > 0) root.style.setProperty("--notice-reserve", `${reserve}px`);
+			else root.style.removeProperty("--notice-reserve");
+			clearOf(stack, document.activeElement);
+		};
+		const focused = (event: FocusEvent) => clearOf(stack, event.target);
+		const observer = new ResizeObserver(measure);
+		observer.observe(stack);
+		window.addEventListener("resize", measure);
+		document.addEventListener("focusin", focused);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", measure);
+			document.removeEventListener("focusin", focused);
+			root.style.removeProperty("--notice-reserve");
+		};
+	}, [region, docked]);
+}
+
 export function NoticeToasts() {
 	const values = useNotices();
 	const cap = useVisibleCap();
@@ -176,6 +249,7 @@ export function NoticeToasts() {
 	const shown = values.slice(-cap);
 	const hidden = values.length - shown.length;
 	const region = useRef<HTMLElement>(null);
+	useFloatingReserve(region, dockSlot !== null);
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
 	// Removing the focused Dismiss button drops focus to <body>, so the next notice, or failing that
@@ -252,6 +326,7 @@ export function NoticeToasts() {
 						if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
 					}}
 				>
+					<div className="notice-region__lead" ref={setLead} />
 					{values.length > 1 && (
 						<div className="notice-region__controls">
 							<span>

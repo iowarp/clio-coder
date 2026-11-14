@@ -12,8 +12,15 @@ function placeFloating(details: HTMLDetailsElement): void {
 	const below = anchor.bottom + 6;
 	const top = below + box.height > window.innerHeight - 8 ? Math.max(8, anchor.top - 6 - box.height) : below;
 	const left = Math.max(8, Math.min(anchor.right - box.width, window.innerWidth - box.width - 8));
-	panel.style.setProperty("--menu-top", `${Math.round(top)}px`);
-	panel.style.setProperty("--menu-left", `${Math.round(left)}px`);
+	// "Fixed" is relative to the window only while no ancestor is a containing block (a transform, a
+	// filter, containment). A probe at 0,0 in the same layer finds where that layer really starts.
+	const probe = document.createElement("span");
+	probe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden";
+	details.append(probe);
+	const origin = probe.getBoundingClientRect();
+	probe.remove();
+	panel.style.setProperty("--menu-top", `${Math.round(top - origin.top)}px`);
+	panel.style.setProperty("--menu-left", `${Math.round(left - origin.left)}px`);
 }
 
 const MENU_ITEMS = '[role="menuitem"]:not([disabled])';
@@ -64,9 +71,30 @@ export function Menu({
 			if (ref.current?.contains(document.activeElement)) placeFloating(ref.current);
 			else close();
 		};
+		// The button can also move without a scroll: the rail re-sorts its rows as tasks change state and
+		// animates its width. The fixed panel kept its first coordinates and opened hundreds of pixels
+		// from its button, so it follows the button every frame while open, and closes if it goes away.
+		let frame = 0;
+		let at = "";
+		const follow = () => {
+			const details = ref.current;
+			const anchor = details?.querySelector("summary")?.getBoundingClientRect();
+			if (!details || !anchor || (anchor.width === 0 && anchor.height === 0)) {
+				close();
+				return;
+			}
+			const where = `${anchor.top} ${anchor.right}`;
+			if (where !== at) {
+				at = where;
+				placeFloating(details);
+			}
+			frame = requestAnimationFrame(follow);
+		};
+		frame = requestAnimationFrame(follow);
 		window.addEventListener("resize", close);
 		document.addEventListener("scroll", scrolled, true);
 		return () => {
+			cancelAnimationFrame(frame);
 			window.removeEventListener("resize", close);
 			document.removeEventListener("scroll", scrolled, true);
 		};

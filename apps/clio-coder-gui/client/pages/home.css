@@ -15,6 +15,18 @@
 	width: min(100%, 720px);
 	margin: 0 auto;
 	padding-bottom: 6dvh;
+	position: relative;
+}
+/* The floating notices' reserve (interaction.css). In flow it would re-centre the page when a notice
+   arrives; as an absolute box below the content it only lengthens the scroll. */
+.newtask__inner::after {
+	content: "";
+	position: absolute;
+	top: 100%;
+	left: 0;
+	width: 1px;
+	height: var(--notice-reserve, 0px);
+	pointer-events: none;
 }
 .newtask__title {
 	margin: 0;

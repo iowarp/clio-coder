@@ -305,11 +305,30 @@
 	max-height: min(40dvh, 24rem);
 	pointer-events: none;
 }
-.notice-region:empty {
+.notice-region:not(:has(.notice, .notice-region__lead > *)) {
 	display: none;
 }
 .notice-region > * {
 	pointer-events: auto;
+}
+.notice-region__lead:empty {
+	display: none;
+}
+/* Off a task page the stack floats, so the page frame never moves when a notice comes or goes; in
+   exchange the page reserves the stack's height (--notice-reserve, set by notifications.tsx while it
+   floats) after its last content and as scroll padding. Every control can then be scrolled above the
+   stack, and focus or scrollIntoView never leaves one under it. A reserve after the content moves
+   nothing already on screen, which a reserve at the top would. Home centres its content, so its
+   reserve is an absolute box below the content instead (home.css). */
+.wb-main[data-mode="settings"],
+.wb-main[data-mode="work"] > :is(.taskpage, .skills, .newtask) {
+	scroll-padding-bottom: var(--notice-reserve, 0px);
+}
+.wb-main[data-mode="settings"]::after,
+.wb-main[data-mode="work"] > :is(.taskpage, .skills)::after {
+	content: "";
+	display: block;
+	height: var(--notice-reserve, 0px);
 }
 /* A phone-width window spans the stack across the page gutter. */
 @media (max-width: 599.98px) {

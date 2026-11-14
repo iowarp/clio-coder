@@ -7,7 +7,7 @@
 // only way to review the thing being approved.
 
 import { useIsMutating, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
@@ -311,18 +311,22 @@ function ApprovalButtons({
 }) {
 	const answering = useIsMutating({ mutationKey: permissionMutationKey(sessionId) }) > 0;
 	const answerSent = useAnswerSent(sessionId, permission.id);
+	const describedBy = useId();
 	return (
 		<>
+			{/* The button is named by its label alone; what the choice does is its description. A title
+			    attribute was read out as the name by some tools, so the text is a hidden element instead. */}
 			{approvalActions(permission).map((action) => {
 				// The turn-ending refusal's chord is declared here; the model keeps its two wire-era answers' ids.
 				const chord = action.keybinding ?? (action.decision === "reject-and-stop" ? "rejectAndStop" : null);
-				return (
+				return [
 					<button
 						key={action.decision}
 						type="button"
 						className={action.variant === "primary" ? "primary" : ""}
 						data-decision={action.decision}
-						title={action.description}
+						aria-label={action.label}
+						aria-describedby={`${describedBy}-${action.decision}`}
 						disabled={answering || answerSent}
 						onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
 					>
@@ -333,8 +337,11 @@ function ApprovalButtons({
 								{KEYBINDINGS[chord].key.toUpperCase()}
 							</span>
 						)}
-					</button>
-				);
+					</button>,
+					<span key={`${action.decision}-description`} id={`${describedBy}-${action.decision}`} hidden>
+						{action.description}
+					</span>,
+				];
 			})}
 			{answering || answerSent ? (
 				<span className="approval-decision-progress" role="status">
