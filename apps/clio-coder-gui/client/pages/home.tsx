@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
+import { composerKeyAction, fitComposerField, initialEnterSends, touchFirst } from "../chat/composer-field.js";
 import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/prompt-limit.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
@@ -239,7 +239,7 @@ export function Home({ client }: { client: Client }) {
 		send.mutate();
 	};
 	useEffect(() => {
-		if (window.matchMedia("(pointer: fine)").matches) field.current?.focus();
+		if (!touchFirst()) field.current?.focus();
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the text is the resize trigger; the DOM read happens in the callback.
 	useLayoutEffect(() => fitComposerField(field.current), [text]);

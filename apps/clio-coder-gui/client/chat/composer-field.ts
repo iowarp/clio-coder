@@ -9,7 +9,16 @@ import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 
 const ENTER_SENDS_KEY = "clio-coder-enter-sends";
 
-/** The stored choice, or Enter-sends on a fine pointer where a hardware keyboard is the likely input. */
+/**
+ * A coarse primary pointer means a touch screen with an on-screen keyboard. A device with no pointer at
+ * all (`pointer: none`) is keyboard-only, so it gets the desktop defaults: Enter sends and the field
+ * takes focus.
+ */
+export function touchFirst(): boolean {
+	return typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+}
+
+/** The stored choice, or Enter-sends unless the primary pointer is touch. */
 export function initialEnterSends(): boolean {
 	try {
 		const saved = localStorage.getItem(ENTER_SENDS_KEY);
@@ -17,7 +26,7 @@ export function initialEnterSends(): boolean {
 	} catch {
 		// The choice still works for this page when browser storage is unavailable.
 	}
-	return typeof matchMedia !== "function" || matchMedia("(pointer: fine)").matches;
+	return !touchFirst();
 }
 
 export function rememberEnterSends(enterSends: boolean): void {
