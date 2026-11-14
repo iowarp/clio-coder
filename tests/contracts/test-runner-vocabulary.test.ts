@@ -246,6 +246,96 @@ describe("test runner vocabulary (#377)", () => {
 		notStrictEqual(disposition(policy, "cd .. && ctest", "default"), "allow");
 	});
 
+	it("lets a fleet repair worker read a test run's exit status and inspect its diff at either autonomy", () => {
+		// Contained yolo hands workers default's admission, so a repair worker had
+		// `pytest -q; echo $?` refused as hidden content and could not read its own run.
+		const safety = createWorkerSafety({ cwd: scratch });
+		const worker = (command: string, yolo: boolean) =>
+			evaluateAdmission({
+				principal: "worker",
+				effects: [{ tool: ToolNames.Bash, args: { command, cwd: scratch } }],
+				safety,
+				cwd: scratch,
+				...(yolo ? { workerExecuteAutonomy: "yolo" as const } : {}),
+			}).kind;
+		for (const command of [
+			"pytest -q; echo $?",
+			'pytest -q tests; echo "exit: $?"',
+			// \u0024{?} is ${?}, spelled so the string is not read as a template.
+			"git diff --exit-code; echo \u0024{?}",
+			'python3 -m pytest -q; printf "%s\\n" $?',
+			"git diff; git status",
+			"git diff --stat HEAD; git status --short",
+		]) {
+			strictEqual(worker(command, false), "allow", command);
+			strictEqual(worker(command, true), "allow", command);
+			strictEqual(disposition(policy, command, "default"), "allow", command);
+		}
+		// `$?` stays hidden content wherever it can change a judged path or argv.
+		for (const command of [
+			'cat "a$?"',
+			"ls; cat a.py$?",
+			"pytest $?",
+			"FOO=1 echo $?",
+			"echo $HOME",
+			'echo "$? $HOME"',
+			"pytest -q; echo $(cat a.py) $?",
+		]) {
+			strictEqual(worker(command, false), "ask", command);
+			strictEqual(disposition(policy, command, "default"), "ask", command);
+		}
+		// The yolo floor still stops a destructive step beside a printed status.
+		strictEqual(worker("rm -rf /; echo $?", true), "deny");
+	});
+
+	it("admits read-only git inspection through -C inside the workspace and through pathspec globs", () => {
+		// The worker Git gate read `-C` as a repository redirect and asked, and the
+		// recognizer refused every unquoted glob, so `git diff -- *.py` asked too.
+		const safety = createWorkerSafety({ cwd: scratch });
+		const worker = (command: string, yolo: boolean) =>
+			evaluateAdmission({
+				principal: "worker",
+				effects: [{ tool: ToolNames.Bash, args: { command, cwd: scratch } }],
+				safety,
+				cwd: scratch,
+				...(yolo ? { workerExecuteAutonomy: "yolo" as const } : {}),
+			}).kind;
+		writeFileSync(join(scratch, "solver.py"), "");
+		try {
+			for (const command of [
+				"git -C . diff; git status",
+				"git -C build status",
+				"git diff -- *.py",
+				"git -C . diff --stat -- *.py; git status --short",
+				"git log --oneline -- *.rs",
+			]) {
+				strictEqual(worker(command, false), "allow", command);
+				strictEqual(worker(command, true), "allow", command);
+				strictEqual(disposition(policy, command, "default"), "allow", command);
+			}
+			for (const command of [
+				"git -C /etc diff",
+				"git -C .. status",
+				"git push",
+				"git checkout -- *.py",
+				"git -C . checkout -- solver.py",
+				"git -C . -c core.pager=cat diff",
+				"git diff -- ../*",
+				"git d* -- solver.py",
+			]) {
+				strictEqual(worker(command, false), "ask", command);
+				strictEqual(disposition(policy, command, "default"), "ask", command);
+			}
+			// A match that Git would read as an option is refused.
+			writeFileSync(join(scratch, "--output=x.py"), "");
+			strictEqual(disposition(policy, "git diff *.py", "default"), "ask");
+			rmSync(join(scratch, "--output=x.py"));
+			strictEqual(worker("git diff -- *.py; rm -rf /", true), "deny");
+		} finally {
+			rmSync(join(scratch, "solver.py"), { force: true });
+		}
+	});
+
 	it("asks the main session once before its first test runner, whoever wrote the code", async () => {
 		for (const command of ["pytest -q tests", "cd build && ctest", "PYTHONPATH=src python3 -m pytest -q"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).runsWorkspaceCode, true, command);

@@ -142,3 +142,12 @@ export function thinkingChoices(draft: RouteDraft, levels: readonly string[]): M
 		...levels.map((level) => ({ value: level, label: level })),
 	];
 }
+
+/**
+ * Why the picker shows the remembered models instead of a fresh list. `unsupported` means the connection's runtime
+ * cannot list its models at all, which said "did not answer" about a connection that answers chat fine.
+ */
+export function catalogFallbackNote(target: string, reason: string | null | undefined): string {
+	if (reason === "unsupported") return `${target} cannot list its models. These are the models CLIO Coder knows for it.`;
+	return `${target} did not answer (${reason ?? "no reason reported"}). These are the models CLIO Coder last knew for it.`;
+}

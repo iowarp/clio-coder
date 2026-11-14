@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
 	aliasEntries,
@@ -9,6 +10,7 @@ import {
 	type SlashFacts,
 	slashEntries,
 } from "../client/chat/slash-model.js";
+import { descriptionParts, visualActions } from "../client/chat/visual-actions-model.js";
 
 const command = (name: string, extra: Record<string, unknown> = {}) =>
 	({ name, summary: `${name} summary`, usage: `/${name}`, group: "Work", args: {}, ...extra }) as never;
@@ -181,4 +183,53 @@ test("the Task actions menu opens forms only for commands the harness admits ove
 		assert.ok(admission !== undefined && !admission.startsWith("false"), `${form.name} is refused over ACP`);
 		assert.ok(!UNLISTED_COMMANDS.has(form.name));
 	}
+});
+
+test("every engine command in the Actions menu reads as a written title, and reset names what it resets", () => {
+	// Live: the menu listed "Mcp", "Oracle", "Poll", and titled /context reset, which can delete CLIO.md,
+	// "Reset conversation memory".
+	const engine = {
+		version: 1 as const,
+		commands: [
+			command("context", {
+				requiresSubcommand: true,
+				args: { subcommands: { reset: {}, recover: {}, compact: {} } },
+			}),
+			command("mcp", { args: { subcommands: { list: {}, trust: {} } } }),
+			command("oracle"),
+			command("poll"),
+			command("run"),
+			command("loop"),
+		],
+		prompts: [],
+	};
+	const titles = new Map(
+		visualActions(slashEntries(facts({ catalog: engine })), "").map((a) => [a.entry.name, a.title]),
+	);
+	assert.equal(titles.get("context reset"), "Reset project context");
+	assert.equal(titles.get("context recover"), "Resume a paused handoff");
+	assert.equal(titles.get("mcp"), "MCP servers");
+	assert.equal(titles.get("mcp trust"), "Trust an MCP server");
+	assert.equal(titles.get("oracle"), "Ask an advisor");
+	assert.equal(titles.get("run"), "Run an agent");
+	for (const bare of ["Mcp", "Mcp list", "Mcp trust", "Oracle", "Poll", "Run", "Loop"])
+		assert.equal([...titles.values()].includes(bare), false, bare);
+});
+
+test("an action's description shows its backtick spans as code", () => {
+	assert.deepEqual(descriptionParts("Invoke a skill, or use `off` to clear active skill tools"), [
+		{ code: false, text: "Invoke a skill, or use " },
+		{ code: true, text: "off" },
+		{ code: false, text: " to clear active skill tools" },
+	]);
+	assert.deepEqual(descriptionParts("an odd ` mark"), [{ code: false, text: "an odd ` mark" }]);
+});
+
+test("the Actions list is one column on a phone", () => {
+	// Live at 400 px: two columns left each title three words wide and every description five lines tall.
+	const css = readFileSync(new URL("../client/chat/visual-actions.css", import.meta.url), "utf8");
+	assert.match(
+		css,
+		/@media \(max-width: 560px\) \{\s*\.visual-actions__rows \{\s*grid-template-columns: minmax\(0, 1fr\);/,
+	);
 });

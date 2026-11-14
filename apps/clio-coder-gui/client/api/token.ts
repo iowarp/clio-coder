@@ -27,6 +27,18 @@ export function launchSecret(): LaunchSecret {
 	}
 	return /^[\w-]{43}$/.test(ticket) ? { ticket } : {};
 }
+/**
+ * A launch link pasted into the address bar of a window already on this origin is a same-document hash
+ * change, so the page that read its secret at load would never see it. Reloading reads it the same way a
+ * fresh document does, which is what a window left open across a server restart needs.
+ */
+export function listenForLaunchLink(reload: () => void = () => location.reload()) {
+	addEventListener("hashchange", () => {
+		// A pasted ticket adopted below reloads on its own; a second reload would abort the first.
+		if (!adopting && new URLSearchParams(location.hash.slice(1)).has("ticket")) reload();
+	});
+}
+let adopting = false;
 /** This browser's latest live credential, which lets a reopened window open its own client while it lasts. */
 export const rememberedCredentialKey = "clio-coder-credential";
 const refusedKey = "clio-coder-token-refused";
@@ -108,6 +120,7 @@ export function adoptLaunchSecret(secret: { ticket: string }, origin = location.
 		location.assign(`${origin}/#${hash}`);
 		return;
 	}
+	adopting = true;
 	location.hash = hash;
 	location.reload();
 }

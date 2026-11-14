@@ -217,6 +217,8 @@ export interface ToolWire {
 	readonly styledText: string | null;
 	readonly isError: boolean;
 	readonly rawTruncated: boolean;
+	/** Notes the host added to the result for the model, split from the output it printed. */
+	readonly modelNotes?: readonly string[];
 }
 
 /** Text carried by an ACP content array, used when a terminal frame had no rawOutput. */
@@ -268,6 +270,33 @@ export function stripResultEnvelope(text: string): string {
 	return body;
 }
 
+const MODEL_NOTE_LINE = /^\[middleware:[a-z-]+\] (.+)$/u;
+
+/**
+ * Split the notes the host adds to a result for the model (`[middleware:info] prefer the structured observe
+ * tools…`) from the output they lead or trail, as the terminal's tool rows do. Only whole lines at the start or the
+ * end count, and a tool's own output cannot open a line with the tag (bash neutralizes it), so output that quotes
+ * one stays put.
+ */
+function splitModelNotes(text: string): { body: string; notes: string[] } {
+	const lines = text.split("\n");
+	const leading: string[] = [];
+	for (let note = MODEL_NOTE_LINE.exec(lines[0] ?? "")?.[1]; note !== undefined; ) {
+		leading.push(note);
+		lines.shift();
+		while (lines.length > 0 && (lines[0] ?? "").trim() === "") lines.shift();
+		note = MODEL_NOTE_LINE.exec(lines[0] ?? "")?.[1];
+	}
+	const trailing: string[] = [];
+	for (let note = MODEL_NOTE_LINE.exec(lines.at(-1) ?? "")?.[1]; note !== undefined; ) {
+		trailing.unshift(note);
+		lines.pop();
+		note = MODEL_NOTE_LINE.exec(lines.at(-1) ?? "")?.[1];
+	}
+	if (trailing.length > 0) while (lines.length > 0 && (lines.at(-1) ?? "").trim() === "") lines.pop();
+	return { body: lines.join("\n"), notes: [...leading, ...trailing] };
+}
+
 /**
  * Unwrap `rawInput`/`rawOutput` into the shapes the taxonomy reads.
  *
@@ -313,7 +342,9 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 	const operator = operatorText(details);
 	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
-	const printed = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
+	const shown = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
+	const split = shown === null ? null : splitModelNotes(shown);
+	const printed = split?.body ?? null;
 	return {
 		input,
 		result,
@@ -323,6 +354,7 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 		styledText: printed !== null && hasStyle(printed) ? printed : null,
 		isError: output.isError === true || result?.kind === "error",
 		rawTruncated: inputTruncated,
+		...(split && split.notes.length > 0 ? { modelNotes: split.notes } : {}),
 	};
 }
 
@@ -392,6 +424,15 @@ export function dispatchTasks(input: Record<string, unknown>): readonly Dispatch
 export function isSettledStatus(status: string): boolean {
 	return status === "completed" || status === "failed" || status === "cancelled" || status === "unknown";
 }
+
+const awaitingPane: OutputPane = {
+	source: "none",
+	text: "",
+	styled: null,
+	running: false,
+	truncated: false,
+	placeholder: "Nothing has run yet. It waits for your answer.",
+};
 
 /**
  * The output pane for one item. The presence of `partialOutput` says the call is
@@ -918,6 +959,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 			break;
 	}
 
+	if (wire.modelNotes !== undefined) note = note ?? `Note to the model: ${wire.modelNotes.join(" ")}`;
 	if (wire.rawTruncated)
 		note = note ?? "This call's raw record was larger than the 32 KiB wire limit, so only a snippet reached the browser.";
 
@@ -925,10 +967,13 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		options.nowMs !== undefined && options.startedAtMs !== undefined
 			? Math.max(0, Math.floor((options.nowMs - options.startedAtMs) / 1000))
 			: null;
-	if (!settled && elapsedSeconds !== null && elapsedSeconds >= LONG_RUNNING_TOOL_SECONDS)
+	// The engine opens a call as in progress before its approval gate, so a call held for the operator's answer
+	// has not started: it neither runs long nor waits for output.
+	const awaiting = !settled && (options.decision === "pending" || options.decision === "escalated");
+	if (!settled && !awaiting && elapsedSeconds !== null && elapsedSeconds >= LONG_RUNNING_TOOL_SECONDS)
 		facts.push({ label: "still running", value: formatDuration(elapsedSeconds), tone: "warn" });
 
-	const output = outputPane(item, wire);
+	const output = awaiting ? awaitingPane : outputPane(item, wire);
 	// A call that never got its approval did not break, so its row says that instead of echoing the
 	// last line of the refusal, which is an instruction to the model ("Do not retry the same call.").
 	const refused = notApproved(item, wire);
@@ -953,7 +998,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		steps,
 		headline,
 		body: kind.body,
-		tone: refused || stopped ? "neutral" : toneFor(item.status, wire.isError),
+		tone: refused || stopped ? "neutral" : awaiting ? "warn" : toneFor(item.status, wire.isError),
 		// A result that reports an error is a failure even when its frame said completed.
 		statusLabel: refused
 			? declinedLabel(options.decision)
@@ -961,8 +1006,8 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				? "Stopped"
 				: wire.isError && item.status === "completed"
 					? "Failed"
-					: // A call held for the operator's answer is not queued behind anything: it waits on them.
-						item.status === "pending" && (options.decision === "pending" || options.decision === "escalated")
+					: // A call held for the operator's answer is not queued or running: it waits on them.
+						awaiting
 						? "Waiting for approval"
 						: (STATUS_LABEL[item.status] ?? item.status),
 		settled,

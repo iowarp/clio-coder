@@ -59,6 +59,11 @@ describe("verify in repositories without package.json", () => {
 		strictEqual(commandOf(root, "python-pytest"), undefined);
 	});
 
+	it("derives a unittest check for test modules beside the code in a flat project", () => {
+		const root = workspace({ "calc.py": "", "test_calc.py": "" });
+		deepStrictEqual(commandOf(root, "python-unittest")?.slice(-5), ["-m", "unittest", "discover", "-s", "."]);
+	});
+
 	it("follows pytest when the project declares it as a dependency", () => {
 		const root = workspace({
 			"pyproject.toml": `${PYPROJECT}\n[dependency-groups]\ndev = ["pytest>=8"]\n`,

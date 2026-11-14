@@ -858,6 +858,7 @@ test("the TUI echoes an operator command and hands the host the same line to rec
 		refreshFooter() {},
 		recordSubmittedTurn() {},
 		recordOperatorCommand: (text: string) => recorded.push(text),
+		chat: {},
 	} as unknown as InteractiveSlashRuntimeDeps);
 	runtime.context.echoOperatorCommand?.("/run documenter document the retry options");
 	assert.deepEqual(recorded, ["/run documenter document the retry options"]);

@@ -84,6 +84,51 @@ export interface CustomEntry<T = unknown> extends BaseSessionEntry {
 	display?: boolean;
 }
 
+/**
+ * A statement the operator told Clio to remember for this session only
+ * (`pin`), or its retraction (`unpin`). Folded in order, the pins left
+ * standing are the session's pinned operator notes: the turn's `# Memory`
+ * carries them and compaction keeps them in its operator-notes block.
+ */
+export const OPERATOR_NOTE_ENTRY = "operatorNote";
+
+export interface OperatorNoteEntryData {
+	version: 1;
+	action: "pin" | "unpin";
+	id: string;
+	/** Present on `pin`. */
+	text?: string;
+	kind?: string;
+}
+
+/** The pins standing after folding every `operatorNote` entry in order. */
+export function standingOperatorNotes(
+	entries: ReadonlyArray<SessionEntry>,
+): Array<{ id: string; text: string; kind: string }> {
+	return foldOperatorNotes(
+		entries.flatMap((entry) =>
+			entry.kind === "custom" && entry.customType === OPERATOR_NOTE_ENTRY
+				? [entry.data as Partial<OperatorNoteEntryData>]
+				: [],
+		),
+	);
+}
+
+export function foldOperatorNotes(
+	records: Iterable<Partial<OperatorNoteEntryData> | undefined>,
+): Array<{ id: string; text: string; kind: string }> {
+	const notes = new Map<string, { id: string; text: string; kind: string }>();
+	for (const data of records) {
+		if (data?.version !== 1 || typeof data.id !== "string") continue;
+		if (data.action === "unpin") notes.delete(data.id);
+		else if (data.action === "pin" && typeof data.text === "string" && data.text.trim().length > 0) {
+			notes.delete(data.id);
+			notes.set(data.id, { id: data.id, text: data.text, kind: typeof data.kind === "string" ? data.kind : "fact" });
+		}
+	}
+	return [...notes.values()];
+}
+
 /** Durable admission stop, including the setting needed to resume paid calls (#424). */
 export const BUDGET_BLOCK_ENTRY = "budgetBlock";
 /**

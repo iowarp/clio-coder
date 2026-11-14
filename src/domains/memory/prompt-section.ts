@@ -91,7 +91,12 @@ export function inspectMemoryPromptSelection(
 				).map(({ record, ...relevance }) => ({ record, relevance }));
 	const selected: MemoryRecord[] = [];
 	const decisions: MemoryPromptDecision[] = [];
-	for (const { record, relevance } of base) {
+	// What the operator told Clio to remember is a standing instruction: it goes first, whatever the turn is about.
+	const ordered = [
+		...base.filter((candidate) => candidate.record.provenance?.sourceKind === "operator-stated"),
+		...base.filter((candidate) => candidate.record.provenance?.sourceKind !== "operator-stated"),
+	];
+	for (const { record, relevance } of ordered) {
 		const reason =
 			selected.length >= Math.floor(maxItems)
 				? "item-limit"
@@ -130,9 +135,11 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 	for (const record of records) {
 		const lesson = record.lesson.replace(/\s+/g, " ").trim();
 		const evidence = record.evidenceRefs.join(", ");
-		lines.push(
-			`- [${record.id}] (${renderApplicability(record)}; ${keptLessonLabel(projectKeptLesson(record))}) ${lesson} Evidence: ${evidence}.`,
-		);
+		const standing =
+			record.provenance?.sourceKind === "operator-stated"
+				? `operator-stated ${record.provenance.statedKind ?? "fact"}`
+				: keptLessonLabel(projectKeptLesson(record));
+		lines.push(`- [${record.id}] (${renderApplicability(record)}; ${standing}) ${lesson} Evidence: ${evidence}.`);
 		if (record.appliesWhen.length > 0) lines.push(`  Applies when: ${record.appliesWhen.map(compactText).join("; ")}.`);
 		if (record.avoidWhen.length > 0) lines.push(`  Avoid when: ${record.avoidWhen.map(compactText).join("; ")}.`);
 	}
@@ -154,6 +161,33 @@ export function memorySectionBlocks(section: string): Array<{ id: string; text: 
 }
 
 const MEMORY_UPDATE_HEADING = "# Memory update";
+
+/** A statement the operator pinned to this session only; it lives in the session ledger, not the store. */
+export interface OperatorSessionNote {
+	id: string;
+	text: string;
+	kind: string;
+}
+
+/**
+ * Add session-pinned operator notes to a rendered `# Memory` section, as
+ * `- [note-…]` entries the section delta tracks like store records.
+ */
+export function withOperatorSessionNotes(section: string, notes: ReadonlyArray<OperatorSessionNote>): string {
+	if (notes.length === 0) return section;
+	const lines = notes.map(
+		(note) =>
+			`- [${note.id}] (scope=session; operator-stated ${note.kind}) ${compactText(note.text)} Evidence: operator, this session.`,
+	);
+	if (section.length > 0) return [section, ...lines].join("\n");
+	return [
+		"# Memory",
+		"",
+		"Memory the operator stated for this session. Each names who stands behind it.",
+		"",
+		...lines,
+	].join("\n");
+}
 
 /** Whether a record a compiled prompt carries may still stand there: the fresh-selection eligibility, or why not. */
 export type MemoryRecordStanding = "eligible" | "withdrawn" | "deleted";

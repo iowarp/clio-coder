@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
+import { composerKeyAction, fitComposerField, initialEnterSends, touchFirst } from "../chat/composer-field.js";
 import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/prompt-limit.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
@@ -16,7 +16,7 @@ import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
-import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS } from "./home-draft-model.js";
+import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS, setupWorkspaceId } from "./home-draft-model.js";
 import { settleStarted } from "./started-request.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
@@ -199,7 +199,7 @@ export function Home({ client }: { client: Client }) {
 	useEffect(() => {
 		if (!draft.workspaceId && workspaceId) updateHomeDraft({ workspaceId });
 	}, [draft.workspaceId, workspaceId]);
-	const setup = useSetupStatus(client, true, workspaceId);
+	const setup = useSetupStatus(client, true, setupWorkspaceId(workspaceId, list));
 	const ready = setup.data?.state === "ready";
 	const meta = useQuery({
 		queryKey: ["meta"],
@@ -239,7 +239,7 @@ export function Home({ client }: { client: Client }) {
 		send.mutate();
 	};
 	useEffect(() => {
-		if (window.matchMedia("(pointer: fine)").matches) field.current?.focus();
+		if (!touchFirst()) field.current?.focus();
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the text is the resize trigger; the DOM read happens in the callback.
 	useLayoutEffect(() => fitComposerField(field.current), [text]);

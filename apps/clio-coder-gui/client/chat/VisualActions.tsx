@@ -10,10 +10,22 @@ import {
 	actionCategoryRows,
 	actionLabel,
 	actionWaitsForTurn,
+	descriptionParts,
 	matchesChanges,
 	visualActions,
 } from "./visual-actions-model.js";
 import "./visual-actions.css";
+
+function Description({ text }: { text: string }) {
+	return descriptionParts(text).map((part, index) =>
+		part.code ? (
+			// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed string never reorder.
+			<code key={index}>{part.text}</code>
+		) : (
+			part.text
+		),
+	);
+}
 
 export function VisualActions({
 	entries,
@@ -153,7 +165,9 @@ export function VisualActions({
 												<Icon name={item.icon} />
 												<span>
 													<strong>{item.title}</strong>
-													<small>{item.description}</small>
+													<small>
+														<Description text={item.description} />
+													</small>
 												</span>
 												<Icon name="chevronRight" />
 											</button>
@@ -251,7 +265,9 @@ function ActionForm({
 				<Icon name={action.icon} />
 				<h3 tabIndex={-1}>{action.title}</h3>
 			</div>
-			<p className="visual-actions__intro">{action.description}</p>
+			<p className="visual-actions__intro">
+				<Description text={action.description} />
+			</p>
 			{(args?.positionals ?? []).map((positional, index) => {
 				const key = `pos:${index}`;
 				return (

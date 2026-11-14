@@ -8,6 +8,7 @@ import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { createAcpLiveTelemetry } from "../../src/engine/acp/live-telemetry.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { goldenTelemetryRecords, telemetryViewOf } from "../harness/telemetry-view.js";
 
 // The terminal's /tasks, /decisions and /memory views had no ACP read path, so a GUI could add an
 // operator task but never list one. The board is that read path, bounded for the stdio line.
@@ -315,4 +316,44 @@ test("each plan change reaches the client as a standard plan update, in order", 
 	assert.ok(order.lastIndexOf("plan") > order.indexOf("end:c3"));
 	close();
 	await served;
+});
+
+test("the prompt response totals the turn only after its main agent's last model call settles", async () => {
+	// A live GUI turn footer read "≥10,653 (1 call unknown) in" forever: the final call's settle record lands after
+	// the response streams, and the prompt response used to read the turn before it was folded.
+	const records = goldenTelemetryRecords("fold-wait");
+	const last = [...records].reverse().find((record) => record.k === "call.settled");
+	assert.ok(last);
+	const turnId = last.ctx.turnId ?? "";
+	let view = telemetryViewOf(
+		"fold-wait",
+		records.filter((record) => record !== last),
+	);
+	let folded: () => void = () => {};
+	const live = createAcpLiveTelemetry({
+		notify: () => {},
+		sessionId: () => "fold-wait",
+		cwd: process.cwd(),
+		sessionTelemetry: () => view,
+		subscribeUsage: (listener) => {
+			folded = listener;
+			return () => {};
+		},
+	});
+	live.turnStarted({ turnIds: new Set([turnId]), attemptIds: new Set() });
+	const response = live.turnSettled();
+	// The writer's batch folds a while after the response would otherwise have been sent.
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	view = telemetryViewOf("fold-wait", records);
+	folded();
+	const usage = await response;
+	live.dispose();
+	assert.equal(usage?.quantities?.input.display, view.turns([turnId], "input").display);
+	assert.notEqual(
+		usage?.quantities?.input.display,
+		telemetryViewOf(
+			"fold-wait",
+			records.filter((record) => record !== last),
+		).turns([turnId], "input").display,
+	);
 });

@@ -35,6 +35,7 @@ import { extensionOwnerLabel } from "../domains/extensions/owner-label.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
+import type { OperatorMemoryScope } from "../domains/memory/operator-statement.js";
 import type { MusicOperations, MusicResult } from "../domains/mux/music-operations.js";
 import { describeMusicResult, musicResultTone } from "../domains/mux/music-operations.js";
 import type { PanePeerId, PanesOperations, PanesPresetId, PanesStatus } from "../domains/mux/operations.js";
@@ -92,6 +93,7 @@ import {
 	runLoopCommand,
 } from "./loop-command.js";
 import type { NoticeLevel } from "./notice-source.js";
+import type { OperatorMemoryCommands } from "./operator-memory.js";
 import type { OracleDigestSources } from "./oracle.js";
 import { formatOracleAnswer, ORACLE_AGENT_ID, ORACLE_TASK, packOracleDigest } from "./oracle.js";
 import type { PollCommandOptions } from "./poll.js";
@@ -259,6 +261,14 @@ type SlashCommandVariant =
 	| { kind: "tasks-drop"; id: string }
 	| { kind: "memory" }
 	| { kind: "memory-seed" }
+	/** `/remember <text>`, `/remember undo|scope|forget ...`: operator-stated memory and its chip actions. */
+	| {
+			kind: "remember";
+			action: "remember" | "undo" | "scope" | "forget";
+			text?: string;
+			scope?: OperatorMemoryScope;
+			captureId?: string;
+	  }
 	| { kind: "view"; filter?: string }
 	| { kind: "view-verify"; runId: string }
 	/** `/panes`: mode, health, pane inventory, effective settings. */
@@ -1265,6 +1275,8 @@ export interface SessionCommandContext {
 		done(id: string): UserTask;
 		drop(id: string): UserTask;
 	};
+	/** `/remember`: capture, move or undo what the operator told Clio to remember. Absent with no chat loop. */
+	operatorMemory?: OperatorMemoryCommands;
 	/** Open `/memory` for approved lessons, the live task bank, and reviewed promotion. */
 	openMemory?: () => void;
 	/** Opt-in import from the newest structured handoff; absent when the host has no task bank. */
@@ -2614,6 +2626,9 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (parsed.subcommand !== "run") {
 				return parsed.error ? { kind: "usage-error", command: "fleet", reason: parsed.error } : { kind: "fleet" };
 			}
+			// Words after the playbook name are a task typed the way /run takes one; a playbook reads it from --var.
+			if (parsed.error?.startsWith("Unexpected argument:") && parsed.positionals.length > 0)
+				return usageError("fleet", `${parsed.error}; a playbook takes its task as --var task="<text>"`, "run");
 			if (parsed.error) return usageError("fleet", parsed.error, "run");
 			const name = parsed.positionals[0] ?? "";
 			if (name.length === 0) return usageError("fleet", "Missing required argument: playbook", "run");
@@ -2815,6 +2830,52 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				case "refused":
 					ctx.notice("warn", `task memory not seeded: ${result.reason}`);
 			}
+		},
+	},
+	{
+		name: "remember",
+		rank: 2,
+		acp: { readOnlyRefuses: true },
+		description: "Remember a fact, preference, rule or command; undo or change the scope of the last one",
+		group: "Model and context",
+		kinds: ["remember"],
+		args: { positionals: [{ name: "text", required: true, rest: true }] },
+		fromArgs(parsed) {
+			const rest = parsed.rest?.trim() ?? "";
+			if (parsed.error || rest.length === 0) return usageError("remember", parsed.error);
+			const [head = "", ...tail] = rest.split(/\s+/u);
+			if (head === "undo" && tail.length <= 1)
+				return { kind: "remember", action: "undo", ...(tail[0] ? { captureId: tail[0] } : {}) };
+			const scope = (["session", "project", "global"] as const).find((value) => value === tail[0]);
+			if (head === "scope" && scope !== undefined && tail.length <= 2)
+				return { kind: "remember", action: "scope", scope, ...(tail[1] ? { captureId: tail[1] } : {}) };
+			if (head === "scope" && tail.length <= 2)
+				return usageError("remember", "scope takes session, project or global, then an optional capture id");
+			if (head === "forget" && tail.length > 0)
+				return { kind: "remember", action: "forget", text: rest.slice("forget".length).trim() };
+			return { kind: "remember", action: "remember", text: rest };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "remember") return;
+			const memory = ctx.operatorMemory;
+			if (!memory) {
+				ctx.notice("error", "remember is not wired: no chat session is bound to this process");
+				return;
+			}
+			const work = (async () => {
+				const report =
+					command.action === "undo"
+						? await memory.undo(command.captureId)
+						: command.action === "scope" && command.scope !== undefined
+							? await memory.rescope(command.scope, command.captureId)
+							: command.action === "forget"
+								? await memory.forget(command.text ?? "")
+								: await memory.remember(command.text ?? "");
+				ctx.notice(report.level === "warning" ? "warn" : report.level, report.text);
+			})().catch((error: unknown) => {
+				ctx.notice("error", `remember failed: ${error instanceof Error ? error.message : String(error)}`);
+			});
+			ctx.holdReplyFor?.(work);
 		},
 	},
 	{

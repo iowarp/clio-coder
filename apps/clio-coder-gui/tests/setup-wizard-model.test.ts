@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setupWorkspaceId } from "../client/pages/home-draft-model.js";
 import { readMessages, stepFor, viewFor, workingLabel } from "../client/wizard/wizard-model.js";
 import type { SetupState } from "../contracts/setup.js";
 
@@ -106,4 +107,14 @@ test("the test request is read from the CLI's lines: waiting on it, its answer, 
 	assert.deepEqual(anyway.kind === "saved" ? anyway.warnings : null, [
 		"anthropic was saved without a passed test request.",
 	]);
+});
+
+test("the new-task screen checks the model connection only against a listed workspace", () => {
+	// Live: a workspace id this browser remembered from another home made /api/setup answer not-found, so a ready
+	// model read "Connect a model" beside "The model connection could not be checked".
+	const listed = [{ id: "ws-a" }];
+	assert.equal(setupWorkspaceId("ws-a", listed), "ws-a");
+	assert.equal(setupWorkspaceId("ws-gone", listed), null);
+	assert.equal(setupWorkspaceId("ws-gone", []), null);
+	assert.equal(setupWorkspaceId(null, listed), null);
 });

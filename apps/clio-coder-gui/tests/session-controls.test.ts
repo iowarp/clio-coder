@@ -730,3 +730,10 @@ test("resting reloadable conversations permit restart while active turns still p
 	await until(() => h.supervisor.restartSafe);
 	assert.equal(h.supervisor.hasOpenSessions, true);
 });
+
+test("the stop notice keeps its outcome word whole and ellipsizes only the summary beside it", () => {
+	// A live Stop rendered the notice's "Stopped" mark squeezed to "Stoppe" over "d" beside a long task title.
+	const css = readFileSync(new URL("../client/shell/session-controls.css", import.meta.url), "utf8");
+	assert.match(css, /\.session-control-notice__message > :first-child \{\s*flex: none;/);
+	assert.match(css, /\.session-control-notice__message > span:last-child \{[^}]*text-overflow: ellipsis;/);
+});

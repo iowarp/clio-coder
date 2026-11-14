@@ -3,7 +3,9 @@ import { useNavigate } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { touchFirst } from "../chat/composer-field.js";
 import { rememberPrompt } from "../chat/composer-history.js";
+import { focusComposerSoon } from "../interaction/focus-return.js";
 import { ownDrafts, rememberOwnDraft } from "../shell/own-drafts.js";
 import { reusableDraft } from "../shell/shell-model.js";
 import { rememberWorkspace } from "../shell/tasks.js";
@@ -106,7 +108,11 @@ export function useFirstTask(client: Client) {
 					releaseFirstRequest();
 				});
 				handedOff = true;
+				// Sent from the keyboard, the next message is typed in the task's own box, not after a tab back
+				// through the header the route change parks focus before.
+				const typing = document.activeElement?.matches(".composer__field") === true && !touchFirst();
 				void navigate(`/sessions/${sessionId}`);
+				if (typing) focusComposerSoon();
 			} finally {
 				if (!handedOff) releaseFirstRequest();
 			}

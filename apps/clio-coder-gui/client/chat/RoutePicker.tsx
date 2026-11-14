@@ -24,6 +24,7 @@ import {
 import type { RouteFacts } from "./route.js";
 import type { RouteDraft } from "./route-picker-model.js";
 import {
+	catalogFallbackNote,
 	conversationChanges,
 	draftWithSupportedThinking,
 	modelThinkingLevels,
@@ -249,7 +250,7 @@ function RouteForm({
 				: catalogCheck.data?.healthy
 					? `${chosenTarget} answered at ${formatTime(new Date(catalogCheck.dataUpdatedAt).toISOString())}.${count}${cut}`
 					: catalogCheck.data
-						? `${chosenTarget} did not answer (${catalogCheck.data.reason ?? "no reason reported"}). These are the models CLIO Coder last knew for it.${cut}`
+						? `${catalogFallbackNote(chosenTarget, catalogCheck.data.reason)}${cut}`
 						: catalogCheck.error
 							? `The check failed: ${catalogCheck.error.message} These are the models CLIO Coder last knew for it.${cut}`
 							: `The models CLIO Coder knows for ${chosenTarget}.${count}${cut}`;

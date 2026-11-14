@@ -479,11 +479,32 @@ export function subscribe(
 		if (document.visibilityState === "visible") buffer.flush();
 	};
 	document.addEventListener("visibilitychange", onVisibility);
+	// Chrome keeps a page it navigated away from in its back/forward cache with this stream still open. Each such
+	// page held one of the six connections a browser allows per host, so after a few address-bar navigations fonts
+	// and API reads queued behind dead streams. A hidden page lets its stream go and a restored one resumes from the
+	// cursor it kept.
+	const onPageHide = () => {
+		if (retryTimer !== null) clearTimeout(retryTimer);
+		retryTimer = null;
+		attempt += 1;
+		stream?.close();
+		stream = null;
+	};
+	const onPageShow = (event: PageTransitionEvent) => {
+		if (!event.persisted || disposed || stream !== null) return;
+		retryMs = 1_000;
+		void connect();
+	};
+	const page = typeof window === "undefined" ? null : window;
+	page?.addEventListener("pagehide", onPageHide);
+	page?.addEventListener("pageshow", onPageShow);
 	return () => {
 		disposed = true;
 		stopSnapshots();
 		stopTelemetry();
 		document.removeEventListener("visibilitychange", onVisibility);
+		page?.removeEventListener("pagehide", onPageHide);
+		page?.removeEventListener("pageshow", onPageShow);
 		stopWatching();
 		if (retryTimer !== null) clearTimeout(retryTimer);
 		// Closing the buffer first stops a scheduled frame landing in a torn-down tree.

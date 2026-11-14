@@ -6,10 +6,14 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sumPricing } from "../../src/core/telemetry/pricing.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { FleetRunOutcome } from "../../src/domains/dispatch/fleet-run.js";
+import { writeFleetRunSync } from "../../src/domains/dispatch/state.js";
+import { readDurableFleetPlans } from "../../src/interactive/fleet-plan-history.js";
+import { createFleetPlanRuns } from "../../src/interactive/fleet-plan-runs.js";
 import {
 	createOverlayGeneralOpeners,
 	type OverlayGeneralOpenersDeps,
 } from "../../src/interactive/overlay-general-openers.js";
+import { parseSlashCommand } from "../../src/session-control/slash-commands.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -179,3 +183,126 @@ for (const outside of ["bash", "ledger"]) {
 		}
 	});
 }
+
+test("a settled fleet names its loops, and a loop checkpoint reads as progress rather than an error", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-overlay-loops-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const agents = dispatchStubContext({ settings: DEFAULT_SETTINGS }).getContract("agents");
+		ok(agents);
+		const notices: Array<[string, string, string]> = [];
+		const errors: string[] = [];
+		const infos: string[] = [];
+		const cards: string[] = [];
+		let accept: (() => void) | undefined;
+		const transitions = { state: "closed", handle: null, showPermission: () => false, close: noop };
+		const deps: Partial<OverlayGeneralOpenersDeps> = {
+			dispatch: {} as DispatchContract,
+			agents,
+			transitions: transitions as unknown as OverlayGeneralOpenersDeps["transitions"],
+			getSessionMeta: () => ({ cwd: root }) as ReturnType<OverlayGeneralOpenersDeps["getSessionMeta"]>,
+			terminal: { columns: 100 } as OverlayGeneralOpenersDeps["terminal"],
+			requestRender: noop,
+			stderr: (text) => errors.push(text),
+			stdout: (text) => infos.push(text),
+			appendBlock: (render) => cards.push(render(100).join("\n")),
+			fleetPlans: createFleetPlanRuns(),
+			getSettings: () => DEFAULT_SETTINGS,
+			closeOverlay: () => {
+				transitions.state = "closed";
+			},
+			notify: (level, text, key) => notices.push([level, key ?? "", text]),
+			loadFleetSources: () => ({
+				commands: null,
+				playbook: {
+					version: 3,
+					name: "survey",
+					description: "Survey fixture",
+					path: join(root, "survey.md"),
+					body: "Survey.",
+					maxWorkers: 1,
+					budgetUsd: null,
+					onFailure: "stop",
+					steps: [{ kind: "agent", id: "survey", agent: "coder", scope: "readonly", dependencies: [] }],
+				} as never,
+			}),
+			openFleetRunApprovalOverlay: (_tui, options) => {
+				accept = options.onAccept;
+				return {} as ReturnType<NonNullable<OverlayGeneralOpenersDeps["openFleetRunApprovalOverlay"]>>;
+			},
+			runFleet: async (input) => {
+				input.onStarted?.();
+				input.onNotice?.("loop suite cycle 1 checkpoint=refs/clio-coder/loop/abc", "gate");
+				input.onNotice?.("write boundary w0: outside writes", "write-boundary");
+				return {
+					cleanRun: true,
+					succeededStepCount: 1,
+					requiredStepCount: 1,
+					resolvedLoopCount: 1,
+					result: { loops: [{ loopId: "suite", resolved: true }] },
+					totalCost: sumPricing([]),
+				} as unknown as FleetRunOutcome;
+			},
+		};
+		const openers = createOverlayGeneralOpeners(deps as OverlayGeneralOpenersDeps);
+		openers.startFleetRun("survey", {});
+		ok(accept);
+		accept();
+		await new Promise((settle) => setImmediate(settle));
+		deepStrictEqual(infos, ["plan survey: loop suite cycle 1 checkpoint=refs/clio-coder/loop/abc\n"]);
+		deepStrictEqual(errors, ["plan survey: write boundary w0: outside writes\n"]);
+		const settled = notices.find(([, key]) => key === "fleet-run:settled");
+		ok(settled);
+		ok(settled[2].includes("1/1 steps succeeded, 1/1 loop resolved"), settled[2]);
+		ok(cards.at(-1)?.includes("1/1 steps · 1/1 loop resolved"), cards.at(-1));
+	} finally {
+		scratch.restore();
+	}
+});
+
+test("a task typed after the playbook name points at --var task", () => {
+	deepStrictEqual(parseSlashCommand("/fleet run build-test Add clamp to calc.py"), {
+		kind: "usage-error",
+		command: "fleet",
+		reason: 'Unexpected argument: Add; a playbook takes its task as --var task="<text>"',
+		subcommand: "run",
+	});
+});
+
+test("an earlier fleet read from its record counts steps and loops as the live run did", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-history-loops-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const result = (succeeded: boolean) => ({ succeeded, output: "" }) as never;
+		writeFleetRunSync({
+			version: 1,
+			id: "fleet-0123456789ab",
+			cwd: root,
+			fleet: "build-test",
+			planHash: "hash",
+			stepIds: ["build", "suite.check.1", "suite.repair.1", "suite.check.2"],
+			planSteps: [
+				{ id: "build", kind: "agent", agentId: "coder" },
+				{ id: "suite.check.1", kind: "code", argv: ["pytest"], loop: { loopId: "suite", role: "check", attempt: 1 } },
+				{ id: "suite.repair.1", kind: "agent", agentId: "coder", loop: { loopId: "suite", role: "repair", attempt: 1 } },
+				{ id: "suite.check.2", kind: "code", argv: ["pytest"], loop: { loopId: "suite", role: "check", attempt: 2 } },
+			],
+			vars: {},
+			startedAt: "2026-11-14T10:00:00.000Z",
+			endedAt: "2026-11-14T10:01:00.000Z",
+			resumedFrom: null,
+			steps: [
+				{ stepId: "build", result: result(true) },
+				{ stepId: "suite.check.1", result: result(true) },
+			],
+		});
+		const [plan] = readDurableFleetPlans(root);
+		ok(plan);
+		strictEqual(plan.state, "passed");
+		strictEqual(plan.requiredStepCount, 1);
+		strictEqual(plan.succeededStepCount, 1);
+		deepStrictEqual(plan.loops, { resolved: 1, total: 1 });
+	} finally {
+		scratch.restore();
+	}
+});

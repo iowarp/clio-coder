@@ -51,11 +51,13 @@ import type { CompactionSummaryEntry } from "../entries.js";
 import {
 	type CompactionUsage,
 	latestSkillContextState,
+	OPERATOR_NOTE_ENTRY,
 	type PreservedUserContext,
 	type SessionEntry,
 	type SkillContextCheckpoint,
 	type SkillContextState,
 	skillContextContentHash,
+	standingOperatorNotes,
 	verifiedSkillContextCheckpoint,
 } from "../entries.js";
 import { serializeConversation, TOOL_RESULT_MAX_CHARS } from "./branch-summary.js";
@@ -1603,13 +1605,29 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	// The instructions also ride verbatim as an operator note, so they survive
 	// a summarizer that ignores them and carry into later checkpoints (DF-7).
 	const compactInstructions = input.instructions?.trim();
-	const operatorNotes = extractOperatorNotes(
-		[
-			...priorCompactionContextEntries(entries, prevCompactionIndex),
-			...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
-		],
-		compactInstructions ? `/compact: ${compactInstructions}` : undefined,
+	// Notes pinned with "remember ... for this session" stand for the whole session, wherever their entry sits;
+	// one the operator undid or retracted leaves the block even when an earlier checkpoint carried it.
+	const pinned = standingOperatorNotes(input.entries);
+	const unpinned = new Set(
+		input.entries.flatMap((entry) => {
+			if (entry.kind !== "custom" || entry.customType !== OPERATOR_NOTE_ENTRY) return [];
+			const data = entry.data as { id?: unknown; text?: unknown } | undefined;
+			return typeof data?.text === "string" && !pinned.some((note) => note.id === data.id) ? [data.text.trim()] : [];
+		}),
 	);
+	const operatorNotes = [
+		...extractOperatorNotes(
+			[
+				...priorCompactionContextEntries(entries, prevCompactionIndex),
+				...entries.slice(boundaryStart, cut.firstKeptEntryIndex),
+			],
+			compactInstructions ? `/compact: ${compactInstructions}` : undefined,
+			// "Remember that X" is kept as typed, so an undone pin's text inside it drops the sentence too.
+		).filter((note) => ![...unpinned].some((text) => note.includes(text))),
+		...pinned.map((note) => note.text.trim()),
+	]
+		.filter((note, index, all) => all.indexOf(note) === index)
+		.slice(-OPERATOR_NOTE_MAX_COUNT);
 	const summary = `${stripEchoedExactFacts(
 		summaryParts
 			.join("\n\n---\n\n")
