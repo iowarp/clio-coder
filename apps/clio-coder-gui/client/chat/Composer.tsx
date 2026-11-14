@@ -59,7 +59,7 @@ import {
 } from "./attachments-model.js";
 import { useSessionControl } from "./ControlBanner.js";
 import type { CommandFields } from "./command-model.js";
-import { fitComposerField, initialEnterSends, rememberEnterSends } from "./composer-field.js";
+import { fitComposerField, initialEnterSends, rememberEnterSends, touchFirst } from "./composer-field.js";
 import { type HistoryBrowse, readHistory, rememberPrompt, stepHistory } from "./composer-history.js";
 import {
 	type ComposerNotice,
@@ -267,7 +267,7 @@ export const Composer = memo(function Composer({
 		};
 	}, [sessionId]);
 	useEffect(() => {
-		if (initialFocus && sessionState === "open" && window.matchMedia("(pointer: fine)").matches) field.current?.focus();
+		if (initialFocus && sessionState === "open" && !touchFirst()) field.current?.focus();
 	}, [initialFocus, sessionState]);
 
 	// This runs only with the isolated draft, never with incoming transcript frames.

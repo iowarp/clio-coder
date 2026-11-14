@@ -3263,6 +3263,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			lastMemoryPromptRuntimeId = request.runtimeId;
 			return memoryReader(request);
 		},
+		operatorMemory: memoryOwner.operatorStatements,
 		getMemoryRecordStatuses: (ids) => {
 			try {
 				const records = new Map(readMemoryStoreSnapshot(clioDataDir()).records.map((record) => [record.id, record]));
@@ -4057,6 +4058,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								submitOperatorNote: (text) => {
 									void chat.submit(text).catch(() => undefined);
 								},
+								...(chat.operatorMemory ? { operatorMemory: chat.operatorMemory } : {}),
 							}),
 						}
 					: {}),

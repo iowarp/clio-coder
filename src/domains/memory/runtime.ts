@@ -238,6 +238,29 @@ export class MemoryRuntime implements MemoryObservationCommands {
 	}
 
 	/**
+	 * What an operator's "remember that ..." writes through: the store root,
+	 * the workspace a project statement belongs to, and the background route
+	 * that classifies an unscoped statement when its endpoint is free.
+	 */
+	readonly operatorStatements = {
+		enabled: (): boolean => {
+			const infra = this.#infrastructure;
+			return infra?.settings().enabled === true && infra.dataDir?.() !== undefined;
+		},
+		dataDir: (): string => {
+			const dataDir = this.#infrastructure?.dataDir?.();
+			if (!dataDir) throw new Error("memory data root unavailable");
+			return dataDir;
+		},
+		cwd: (): string => this.#infrastructure?.cwd?.() ?? process.cwd(),
+		modelClient: (): TaskMemoryModelClient | null => {
+			const client = this.#infrastructure?.client;
+			if (!client || client.backgroundEndpointBusy()) return null;
+			return client.getModelClient();
+		},
+	};
+
+	/**
 	 * Approved repository lessons for the configured workspace, with conditions
 	 * and provenance, cached by store revision and repository authority.
 	 */

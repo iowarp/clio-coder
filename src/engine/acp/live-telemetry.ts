@@ -336,11 +336,18 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		if (emit) send(frame);
 	};
 
-	/** Whether the read model holds every call attempt the turn's runs settled. */
+	/**
+	 * Whether the read model holds every call attempt the turn's runs settled, and has settled every call the turn's
+	 * main agent started. The last model call's settle record is written after its response streams, so without the
+	 * second check the prompt response totals that call as unknown and the client keeps the partial figure.
+	 */
 	const folded = (settling: AcpPromptTurn): boolean => {
-		if (settling.attemptIds.size === 0) return true;
+		if (settling.attemptIds.size === 0 && settling.turnIds.size === 0) return true;
 		const view = deps.sessionTelemetry?.() ?? null;
-		if (view === null) return false;
+		// With no view the response claims no usage, so only a run's calls are worth waiting for.
+		if (view === null) return settling.attemptIds.size === 0;
+		const open = { turnIds: [...settling.turnIds], roles: ["main" as const], dispositions: ["incomplete" as const] };
+		if (settling.turnIds.size > 0 && view.calls(open).matched > 0) return false;
 		for (const attemptId of settling.attemptIds)
 			if (view.quantity(factRef({ scope: "own", owner: view.sessionId, attemptId, metric: "calls" })) === null)
 				return false;
