@@ -411,6 +411,7 @@ it("detects explicit plan-only requests and removes only a trailing duplicated c
 	strictEqual(isPlanOnlyRequest("Plan and implement the parser; do not change the public API."), false);
 	strictEqual(isPlanOnlyRequest("Plan and implement this; do not edit tests."), false);
 	strictEqual(isPlanOnlyRequest("Plan this change; do not implement it."), true);
+	strictEqual(isPlanOnlyRequest("Plan the median function. Don't implement yet."), true);
 	strictEqual(isPlanOnlyRequest("Do not edit anything; explain the parser."), false);
 	const rule = createPlanCloseRegistration({ canAsk: () => true });
 	rule.evaluate({ hook: "turn_start", text: request });

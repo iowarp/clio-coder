@@ -340,14 +340,15 @@ export interface InteractiveDeps {
 	 * Scoped commit for a single /settings edit. `id` is the config-path id, `next`
 	 * the effective view with that one leaf changed. scope "session" applies live
 	 * only; "global" also persists it as the default. Absent ⇒ the overlay falls
-	 * back to writeSettings (global-only).
+	 * back to writeSettings (global-only). Returns false when a gate held the
+	 * change instead of applying it (the yolo acceptance card, #407).
 	 */
 	commitSetting?: (
 		id: string,
 		next: ClioSettings,
 		scope: "session" | "project" | "global",
 		source?: ConfigChangeSource,
-	) => void;
+	) => unknown;
 	/** Which layer set a setting's effective value; /settings shows it beside the value. */
 	settingOrigin?: (path: string) => SettingsOrigin | "session";
 	/** Resume a past session id. Called from the /resume overlay. */

@@ -16,6 +16,11 @@ export function stateStorageFinding(stateDir = resolveClioDirs().state): DoctorF
 	try {
 		names = readdirSync(stateDir);
 	} catch (error) {
+		// A fresh home has no state root until the first session writes one; that is
+		// empty, not broken, and the home storage row already says "nothing yet".
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return { ok: true, name: "state storage", detail: `${stateDir} not created yet` };
+		}
 		return {
 			ok: false,
 			name: "state storage",
