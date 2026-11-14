@@ -26,6 +26,8 @@ import {
 import type { HealthRow } from "../client/chat/health.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../client/chat/turns.js";
 import { appCommands, DESTINATIONS, liveStopTarget, NO_SITUATION } from "../client/interaction/commands.js";
+import { stopRefusal } from "../client/pages/session-control-model.js";
+import type { Problem } from "../contracts/common.js";
 import type { TimelineItem, Turn } from "../contracts/sessions.js";
 
 const item = (over: Partial<TimelineItem> & Pick<TimelineItem, "id" | "kind">): TimelineItem => ({
@@ -386,4 +388,29 @@ test("a stop names the turn running when it is pressed, and nothing once that tu
 	assert.equal(liveStopTarget("s1", snapshot([turn("t1", "running"), turn("t2", "succeeded")])), null);
 	assert.equal(liveStopTarget("s1", snapshot([turn("t2", "running")], "closed")), null);
 	assert.equal(liveStopTarget("s1", undefined), null);
+});
+
+test("a refused stop reads as nothing stopped, never as accepted", () => {
+	const problem = (code: Problem["code"], extra: Partial<Problem> = {}): Problem => ({
+		type: `urn:clio-coder:problem:${code}`,
+		title: "Refused",
+		status: 409,
+		detail: "That turn already ended, so CLIO Coder stopped nothing.",
+		code,
+		instance: "/api/sessions/s1/turns/t1/cancel",
+		...extra,
+	});
+	assert.equal(stopRefusal(problem("conflict")), "That turn already ended, so CLIO Coder stopped nothing.");
+	// Another window's control and transport failures stay for review: retrying can still stop the turn.
+	assert.equal(
+		stopRefusal(problem("conflict", { control: { sessionId: "s1", controller: { clientId: "c", label: "Window A" } } })),
+		null,
+	);
+	assert.equal(stopRefusal(problem("upstream_acp")), null);
+	assert.equal(stopRefusal(undefined), null);
+	const actions = readFileSync(
+		fileURLToPath(new URL("../client/pages/session-control-actions.ts", import.meta.url)),
+		"utf8",
+	);
+	assert.match(actions, /stopRefusal\(error\.problem\)/);
 });

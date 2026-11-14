@@ -447,7 +447,7 @@ A line whose first word is not a catalog command or a prompt template is checked
 
 | Keys | Action |
 | --- | --- |
-| `Ctrl/Cmd+.` | Stop the running turn of the open task, through the same path as `Stop`. Nothing happens when no turn runs. |
+| `Ctrl/Cmd+.` | Stop the running turn of the open task, through the same path as `Stop`. Nothing happens when no turn runs. A stop that reaches the server after its turn ended is refused, and the notice reads `Nothing stopped` with the reason instead of reporting the stop as accepted. |
 | `Alt+M` | Open the model control beside Send. |
 | `Alt+O` | Open the transcript detail menu. |
 | `Alt+Y` | Open the autonomy menu. It never changes the level by itself. |

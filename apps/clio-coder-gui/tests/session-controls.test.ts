@@ -598,7 +598,21 @@ test("cancel mid-stream has one terminal and an old cancel cannot cancel the nex
 	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "cancelled");
 	assert.equal(events.filter((event) => event.type === "turn.finished").length, 1);
 	const next = h.supervisor.startTurn(session.id, "Next");
-	assert.equal((await h.post(path)).status, 200);
+	// A stop naming a settled or unknown turn is refused, so the window never reports a stop that did nothing.
+	const stale = await h.post(path);
+	assert.equal(stale.status, 409);
+	const refused = (await stale.json()) as Problem;
+	assert.equal(refused.code, "conflict");
+	assert.equal(
+		refused.detail,
+		"That turn already ended, so CLIO Coder stopped nothing. Another turn is running now; stop that one instead.",
+	);
+	const unknown = await h.post(`/api/sessions/${session.id}/turns/${crypto.randomUUID()}/cancel`);
+	assert.equal(unknown.status, 409);
+	assert.match(
+		((await unknown.json()) as Problem).detail,
+		/^That turn is not running in this session, so CLIO Coder stopped nothing\./,
+	);
 	assert.equal(h.supervisor.get(session.id).turns.at(-1)?.status, "running");
 	assert.equal((await h.post(`/api/sessions/${session.id}/turns/${next.turnId}/cancel`)).status, 200);
 });

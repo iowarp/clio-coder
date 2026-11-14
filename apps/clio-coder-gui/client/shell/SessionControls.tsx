@@ -96,13 +96,14 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 	if (!latest && !controls.notice) return null;
 	const needsReview = unresolved.length > 0 || controls.notice !== null;
 	const label = needsReview ? "Check session" : pending.length ? "Request in progress" : "Request checked";
+	const idle = !needsReview && !pending.length && latest?.nothingStopped === true;
 	const summary = needsReview
 		? `${unresolved.length || 1} session ${unresolved.length > 1 ? "requests need" : "request needs"} your review.`
 		: pending.length > 1
 			? `${pending.length} session requests in progress…`
 			: latest?.action === "close"
 				? `${pending.length ? "Close request" : "Closed"} · ${latest.title}`
-				: `Stop request · ${latest?.title ?? "Session"}`;
+				: `${idle ? "Nothing stopped" : "Stop request"} · ${latest?.title ?? "Session"}`;
 	const dismissCompleted = () => {
 		for (const row of controls.records) if (row.stage === "complete") controls.dismiss(row.key);
 		controls.clearNotice();
@@ -117,7 +118,10 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 				aria-label="Session control status"
 			>
 				<div className="session-control-notice__message" role="status">
-					<StatusMark tone={needsReview ? "warn" : pending.length ? "running" : "success"} label={label} />
+					<StatusMark
+						tone={needsReview ? "warn" : pending.length ? "running" : idle ? "neutral" : "success"}
+						label={label}
+					/>
 					<span>{summary}</span>
 				</div>
 				<div className="session-control-notice__actions">
@@ -154,7 +158,15 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 							>
 								<header>
 									<StatusMark
-										tone={record.stage === "unresolved" ? "warn" : record.stage === "sending" ? "running" : "success"}
+										tone={
+											record.stage === "unresolved"
+												? "warn"
+												: record.stage === "sending"
+													? "running"
+													: record.nothingStopped
+														? "neutral"
+														: "success"
+										}
 										label={record.action === "stop" ? "Stop turn" : "Close session"}
 									/>
 									<h3>{record.title}</h3>

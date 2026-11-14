@@ -1213,9 +1213,15 @@ export class Supervisor {
 	}
 	async cancel(id: string, turnId: string) {
 		const entry = this.active(id);
+		// Only the running turn can be stopped. Answering a stale id with success would tell the
+		// operator a stop landed while the current turn runs on.
 		if (entry.turnId !== turnId) {
-			if (this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running")) return {};
-			throw new AppProblem("conflict", "Turn is not active in this session.");
+			const ended = this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running");
+			const another = entry.turnId !== null ? " Another turn is running now; stop that one instead." : "";
+			throw new AppProblem(
+				"conflict",
+				`${ended ? "That turn already ended" : "That turn is not running in this session"}, so CLIO Coder stopped nothing.${another}`,
+			);
 		}
 		// A queued turn never reached the agent, so there is nothing to cancel there.
 		if (entry.queued) this.finish(entry, "cancelled", null, null, new Date().toISOString());
