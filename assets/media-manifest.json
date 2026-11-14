@@ -120,11 +120,11 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "e0ab7f5b374c058c37e7f87e956049911ddf7739677ddba5211b362d1e5a407d",
-			"provenance": "Actual capture of CLIO Coder 0.8.0, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
+			"sha256": "27165e97e3a4818ee7bf7eb915eba081e447653983aba57bfd8082b5a2bab840",
+			"provenance": "Actual capture of CLIO Coder 0.8.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
 				"width": 2268,
-				"height": 944
+				"height": 1308
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": [
@@ -136,16 +136,16 @@
 			"copies": [
 				"site/assets/tui-boot.png"
 			],
-			"capturedVersion": "0.8.0"
+			"capturedVersion": "0.8.1"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "4a45e7ccc56697acebf13b12d28639acf224c801ec1fdf2c86f0185600238f87",
-			"provenance": "Actual capture of CLIO Coder 0.8.0, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
+			"sha256": "527d2cb2d64c14fa0446ee4c395b5f02b9994e485562c8b88808d30901050e90",
+			"provenance": "Actual capture of CLIO Coder 0.8.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
 				"width": 2268,
-				"height": 944
+				"height": 1308
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": [
@@ -157,7 +157,7 @@
 			"copies": [
 				"site/assets/tui-boot.webp"
 			],
-			"capturedVersion": "0.8.0"
+			"capturedVersion": "0.8.1"
 		},
 		{
 			"id": "gui-conversation-png",
