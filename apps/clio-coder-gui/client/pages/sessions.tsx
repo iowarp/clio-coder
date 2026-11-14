@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
@@ -30,7 +30,6 @@ import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
-import { RewindHost } from "../chat/RewindDialog.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
@@ -59,6 +58,10 @@ import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/
 import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
+
+// The rewind dialog and transcript downloads open only from `?rewind=1` and `?download=`, so their code waits for the task page.
+const RewindHost = lazy(() => import("../chat/RewindDialog.js").then((module) => ({ default: module.RewindHost })));
+
 /** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
 export function Workspaces() {
 	return <Navigate to="/" replace />;
@@ -500,7 +503,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									Close task
 								</MenuItem>
 							</Menu>
-							<RewindHost client={client} snapshot={snapshot} onTurn={transcript.revealTurn} />
+							<Suspense fallback={null}>
+								<RewindHost client={client} snapshot={snapshot} onTurn={transcript.revealTurn} />
+							</Suspense>
 							<Link
 								className="wb-chip wb-chip--place"
 								to={`/workspaces/${snapshot.workspaceId}/sessions`}

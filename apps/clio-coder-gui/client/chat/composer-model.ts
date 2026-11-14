@@ -22,14 +22,16 @@ import type {
 	QueueSnapshot,
 	SteerMode,
 } from "../../contracts/steering.js";
+import { DRAFT_INDEX, DRAFT_KEY, MAX_DRAFT_STORES, storedDraftIds, stores } from "./draft-registry.js";
 import { compactDuration } from "./overview-model.js";
+import { PROMPT_TEXT_MAX_CHARACTERS } from "./prompt-limit.js";
 import { quantityValue } from "./session-usage-model.js";
 import { isSlashAlias } from "./slash-model.js";
 import type { TurnEnding } from "./turns.js";
 import { endingSentence, isStoppedEarly, turnEnding } from "./turns.js";
 
-/** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
-export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
+export { discardDraftStore, MAX_DRAFT_STORES, resetDraftStores } from "./draft-registry.js";
+export { PROMPT_TEXT_MAX_CHARACTERS };
 /** The mode the engine itself defaults to when a steer carries none. */
 export const DEFAULT_STEER_MODE: SteerMode = "next-slot";
 
@@ -162,21 +164,6 @@ export class DraftStore {
 	}
 }
 
-/** Drafts are kept per session and capped, the same way `sessionBuffer` caps projections. */
-export const MAX_DRAFT_STORES = 32;
-const DRAFT_KEY = "clio-coder-draft:";
-const DRAFT_INDEX = "clio-coder-draft-index";
-const stores = new Map<string, DraftStore>();
-
-function storedDraftIds(): string[] {
-	try {
-		const value: unknown = JSON.parse(sessionStorage.getItem(DRAFT_INDEX) ?? "[]");
-		return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-	} catch {
-		return [];
-	}
-}
-
 function savedDraft(id: string): SavedDraft | undefined {
 	try {
 		const raw = sessionStorage.getItem(`${DRAFT_KEY}${id}`);
@@ -243,20 +230,6 @@ export function draftStore(id: string): DraftStore {
 	stores.delete(id);
 	stores.set(id, store);
 	return store;
-}
-
-export function discardDraftStore(id: string): void {
-	stores.delete(id);
-	try {
-		sessionStorage.removeItem(`${DRAFT_KEY}${id}`);
-		sessionStorage.setItem(DRAFT_INDEX, JSON.stringify(storedDraftIds().filter((entry) => entry !== id)));
-	} catch {
-		/* Deletion still removes the in-memory draft when browser storage is unavailable. */
-	}
-}
-
-export function resetDraftStores(): void {
-	stores.clear();
 }
 
 // ---------------------------------------------------------------------------
