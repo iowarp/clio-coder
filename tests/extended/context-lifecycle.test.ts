@@ -2,6 +2,8 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { decodeHTML } from "entities";
+import { marked, type Tokens } from "marked";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { acceptHandbookProposal, proposalId, runBootstrap } from "../../src/domains/context/bootstrap.js";
@@ -454,6 +456,30 @@ describe("contracts/context lifecycle", () => {
 		assembleWikiTree({ dir: wiki, sourceRoot: isolated.dir, plan });
 		strictEqual(readFileSync(join(wiki, "section/safe.md"), "utf8"), safe);
 		strictEqual(readFileSync(join(wiki, "section/unsafe.md"), "utf8"), pending);
+	});
+
+	it("keeps backslashes, pipes and backticks in one wiki routing cell without changing displayed code", () => {
+		const wiki = join(isolated.dir, ".clio-coder", "wiki");
+		mkdirSync(wiki, { recursive: true });
+		const command = "check \\| `safe` *loud*\rbefore\nnext\r\nlast\u2028line\u2029end";
+		writeFileSync(
+			join(wiki, "architecture.md"),
+			`---\ntitle: "Architecture \\\\| safe"\nvalidate: [${JSON.stringify(command)}]\nsymbols: [entry]\n---\n# Architecture\n\nDetails.\n`,
+		);
+		assembleWikiTree({
+			dir: wiki,
+			sourceRoot: isolated.dir,
+			plan: { version: 1, overview: "", pages: [] },
+		});
+		const quickstart = readFileSync(join(wiki, "quickstart.md"), "utf8");
+		const table = marked.lexer(quickstart).find((token): token is Tokens.Table => token.type === "table");
+		ok(table);
+		strictEqual(table.rows[0]?.length, 6);
+		strictEqual(table.rows[0]?.[0]?.text, "Architecture \\\\| safe");
+		const cell = table.rows[0]?.[5];
+		ok(cell);
+		strictEqual(decodeHTML(cell.text), "<code>check \\| `safe` *loud* before next last line end</code>");
+		ok(!marked.parse(quickstart, { async: false }).includes("<em>"));
 	});
 
 	it("writes canonical wiki repair markers and consumes the released marker", () => {

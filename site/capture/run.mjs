@@ -154,6 +154,8 @@ function resolveClio(path) {
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const run = (command, args, options = {}) => execFileSync(command, args, { encoding: "utf8", ...options });
+// A fixture's own setup line is shell by design; keeping it out of run() leaves every other call argv only.
+const runShell = (script, options = {}) => execFileSync("sh", ["-c", script], { encoding: "utf8", ...options });
 
 // Operator values that must never appear in anything published.
 const secrets = [
@@ -233,7 +235,7 @@ function seedRepo(path, name, scenario) {
 		mkdirSync(dirname(join(path, file)), { recursive: true });
 		writeFileSync(join(path, file), text);
 	}
-	for (const command of fixture.run ?? []) run("sh", ["-c", command], { cwd: path, env: gitEnv() });
+	for (const command of fixture.run ?? []) runShell(command, { cwd: path, env: gitEnv() });
 	const env = {
 		...gitEnv(),
 		GIT_AUTHOR_DATE: "2026-11-02T09:00:00Z",
@@ -369,7 +371,7 @@ function sandboxScript(dir, scenario) {
 
 // A peer agent CLI or host tool from the host's PATH, bound read-only into ~/.local/bin.
 function peerPath(name) {
-	const found = spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+	const found = spawnSync("sh", ["-c", 'command -v "$1"', "sh", name], { encoding: "utf8" }).stdout.trim();
 	if (!found) throw new Error(`${name} is not on this host's PATH.`);
 	return execFileSync("readlink", ["-f", found], { encoding: "utf8" }).trim();
 }
@@ -401,9 +403,9 @@ class Session {
 			"--window-size",
 			`${this.cols}x${this.rows}`,
 			"-c",
-			script,
+			'exec "$CLIO_CAPTURE_SCRIPT"',
 			this.cast,
-		].join(" ");
+		];
 		this.t0 = Date.now();
 		run(
 			"tmux",
@@ -420,10 +422,17 @@ class Session {
 				String(this.cols),
 				"-y",
 				String(this.rows),
-				record,
+				...record,
 			],
 			{
-				env: { PATH: process.env.PATH, HOME: this.dir, TERM: "xterm-256color", TMPDIR: this.dir, LANG: "C.UTF-8" },
+				env: {
+					PATH: process.env.PATH,
+					HOME: this.dir,
+					TERM: "xterm-256color",
+					TMPDIR: this.dir,
+					LANG: "C.UTF-8",
+					CLIO_CAPTURE_SCRIPT: script,
+				},
 			},
 		);
 	}

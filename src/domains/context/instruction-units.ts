@@ -56,7 +56,12 @@ export function instructionUnits(
 	};
 	// Comment bodies and fenced examples are not policy; physical-line fragments lose that context.
 	// Keep a removed comment's line breaks so later units keep their source line numbers.
-	const text = content.replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\n]/g, ""));
+	let text = content;
+	let previous: string;
+	do {
+		previous = text;
+		text = text.replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => comment.replace(/[^\n]/g, ""));
+	} while (text !== previous);
 	const rawLines = text.split(/\r?\n/);
 	for (let lineIndex = 0; lineIndex < rawLines.length; lineIndex++) {
 		const raw = rawLines[lineIndex] ?? "";

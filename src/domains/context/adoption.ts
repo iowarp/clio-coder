@@ -414,8 +414,13 @@ function isBarePathOrFileName(text: string): boolean {
 }
 
 function cleanRuleText(raw: string, wholeUnit = false): string | null {
-	let text = raw
-		.replace(/<!--[\s\S]*?-->/g, "")
+	let text = raw;
+	let previous: string;
+	do {
+		previous = text;
+		text = text.replace(/<!--[\s\S]*?-->/g, "");
+	} while (text !== previous);
+	text = text
 		.replace(/^\[[ xX]\]\s+/, "")
 		.replace(/\s+/g, " ")
 		.trim();
