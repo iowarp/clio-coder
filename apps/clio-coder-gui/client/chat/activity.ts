@@ -9,18 +9,26 @@ import { notApproved, readWire, stoppedRun } from "./tool-presentation.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning" | "error";
 
+/** toolCallId to the status of its newest approval request (`callDecisions` in approval-model.ts). */
+export type CallDecisions = ReadonlyMap<string, string>;
+
 export interface ActivitySummary {
 	readonly label: string;
 	readonly tone: ActivityTone;
 	readonly total: number;
 	readonly running: number;
+	/** Calls that wait on the operator's answer, or that the agent escalated. */
 	readonly waiting: number;
+	/** Calls announced but not started, with no approval waiting on them. */
+	readonly queued: number;
 	readonly completed: number;
 	readonly failed: number;
 	readonly unknown: number;
 	readonly canceled: number;
 	/** Calls settled at their approval gate; they did not break, so they are not failures. */
 	readonly declined: number;
+	/** Of `declined`, the calls the operator rejected; the rest were refused without asking. */
+	readonly rejected: number;
 	/** True when something in the group needs the operator's eyes right now. */
 	readonly attention: boolean;
 }
@@ -30,10 +38,14 @@ const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ?
 /**
  * `TimelineItem.status` is an open string carrying the raw ACP status, so this maps the values the
  * harness actually emits. An unrecognised status has no reported outcome and earns no success.
+ * A `pending` call has not started: it waits for approval when `decisions` says its request is still
+ * open, and is queued otherwise. It is never counted as running.
  */
-export function summarizeActivity(items: readonly TimelineItem[]): ActivitySummary {
+export function summarizeActivity(items: readonly TimelineItem[], decisions?: CallDecisions): ActivitySummary {
 	let running = 0,
 		waiting = 0,
+		queued = 0,
+		rejected = 0,
 		completed = 0,
 		failed = 0,
 		unknown = 0,
@@ -46,17 +58,24 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 		if (item.kind !== "tool") onlyTools = false;
 		switch (item.status) {
 			case "in_progress":
-			case "pending":
 				running += 1;
 				break;
+			case "pending": {
+				const decision = item.toolCallId === undefined ? undefined : decisions?.get(item.toolCallId);
+				if (decision === "pending" || decision === "escalated") waiting += 1;
+				else queued += 1;
+				break;
+			}
 			case "escalated":
 				waiting += 1;
 				break;
 			case "failed": {
 				// A refusal and a stopped run settle as failed calls, but neither broke.
 				const wire = readWire(item);
-				if (item.kind === "tool" && notApproved(item, wire)) declined += 1;
-				else if (item.kind === "tool" && stoppedRun(item, wire)) canceled += 1;
+				if (item.kind === "tool" && notApproved(item, wire)) {
+					declined += 1;
+					if (decisionFor(item, decisions) === "rejected") rejected += 1;
+				} else if (item.kind === "tool" && stoppedRun(item, wire)) canceled += 1;
 				else failed += 1;
 				break;
 			}
@@ -77,10 +96,13 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	const noun = onlyTools ? "tool" : "step";
 	let label: string, tone: ActivityTone;
 	if (waiting > 0) {
-		label = "Approval needed";
+		label = `Approval needed${queued > 0 ? ` · ${queued} queued` : ""}`;
 		tone = "warning";
 	} else if (running > 0) {
-		label = `${plural(running, noun)} running${completed > 0 ? ` · ${completed} done` : ""}`;
+		label = `${plural(running, noun)} running${completed > 0 ? ` · ${completed} done` : ""}${queued > 0 ? ` · ${queued} queued` : ""}`;
+		tone = "action";
+	} else if (queued > 0) {
+		label = `${plural(queued, noun)} queued${completed > 0 ? ` · ${completed} done` : ""}`;
 		tone = "action";
 	} else if (failed > 0) {
 		label = `${plural(failed, noun)} failed${completed > 0 ? ` · ${completed} completed` : ""}`;
@@ -91,12 +113,13 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	} else {
 		const endings = (
 			[
-				[declined, "not approved"],
+				[rejected, "rejected"],
+				[declined - rejected, "refused"],
 				[canceled, "stopped"],
 			] as const
 		).filter(([count]) => count > 0);
 		if (completed === 0 && endings.length > 0) {
-			// The first count carries the noun: "1 tool not approved · 1 stopped".
+			// The first count carries the noun: "1 tool refused · 1 stopped".
 			label = endings.map(([count, word], index) => `${index === 0 ? plural(count, noun) : count} ${word}`).join(" · ");
 			tone = "neutral";
 		} else {
@@ -107,17 +130,22 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	return {
 		label,
 		tone,
-		total: running + waiting + completed + failed + canceled + declined + unknown,
+		total: running + waiting + queued + completed + failed + canceled + declined + unknown,
 		running,
 		waiting,
+		queued,
 		completed,
 		failed,
 		unknown,
 		canceled,
 		declined,
-		attention: waiting > 0 || running > 0 || failed > 0 || unknown > 0,
+		rejected,
+		attention: waiting > 0 || running > 0 || queued > 0 || failed > 0 || unknown > 0,
 	};
 }
+
+const decisionFor = (item: TimelineItem, decisions: CallDecisions | undefined): string | undefined =>
+	item.toolCallId === undefined ? undefined : decisions?.get(item.toolCallId);
 
 export const TOOL_STATUS_LABELS: Readonly<Record<string, string>> = {
 	pending: "queued",
@@ -153,6 +181,7 @@ export const statusGlyph = (status: string): string => STATUS_GLYPHS[status] ?? 
 export function activityGlyph(summary: ActivitySummary): string {
 	if (summary.waiting > 0) return "!";
 	if (summary.running > 0) return "◐";
+	if (summary.queued > 0) return "…";
 	if (summary.failed > 0) return "✕";
 	if (summary.unknown > 0) return "?";
 	if (summary.completed === 0 && summary.canceled + summary.declined > 0) return "–";
@@ -162,12 +191,12 @@ export function activityGlyph(summary: ActivitySummary): string {
 /**
  * The disclosure policy. The group the turn is still working in stays open, one line per call, so the
  * operator can follow it without it opening and closing between calls; once prose follows, it folds
- * to its summary. Failures, waiting approvals and changes that were not approved stay open. Once the
+ * to its summary. Failures, waiting approvals and changes that were rejected or refused stay open. Once the
  * operator has toggled a group, their choice wins forever, so `userOpen` is never reset.
  */
 export function activityOpen(userOpen: boolean | null, settled: boolean, summary: ActivitySummary): boolean {
 	if (userOpen !== null) return userOpen;
-	// A change that was not approved keeps its proposal on screen, so its group stays open too.
+	// A rejected or refused change keeps its proposal on screen, so its group stays open too.
 	return !settled || summary.failed > 0 || summary.waiting > 0 || summary.declined > 0 || summary.unknown > 0;
 }
 
@@ -190,7 +219,8 @@ const DIGEST_PHRASES: Readonly<Record<string, Phrase>> = {
 	web_fetch: counted("fetched", "page"),
 	dispatch: counted("delegated", "task"),
 	"change:done": counted("changed", "file"),
-	"change:not-approved": (count) => `${plural(count, "change")} not approved`,
+	"change:rejected": (count) => `${plural(count, "change")} rejected`,
+	"change:refused": (count) => `${plural(count, "change")} refused`,
 	"change:failed": (count) => `${plural(count, "change")} failed`,
 	"change:stopped": (count) => `${plural(count, "change")} stopped`,
 	"change:open": (count) => `${plural(count, "change")} in progress`,
@@ -201,7 +231,8 @@ const CHANGES = new Set(["edit", "write", "artifact"]);
 const BY_PATH = new Set([
 	"read",
 	"change:done",
-	"change:not-approved",
+	"change:rejected",
+	"change:refused",
 	"change:failed",
 	"change:stopped",
 	"change:open",
@@ -212,10 +243,10 @@ const BY_PATH = new Set([
  * earns it. Anything else says what became of the change, in the runtime's own terms. Edits and writes
  * share one phrase, so a turn that edits one file and writes another reads "changed 2 files".
  */
-function changeKey(item: TimelineItem): string {
+function changeKey(item: TimelineItem, decisions: CallDecisions | undefined): string {
 	const wire = readWire(item);
 	if (item.status === "completed" && !wire.isError) return "change:done";
-	if (notApproved(item, wire)) return "change:not-approved";
+	if (notApproved(item, wire)) return decisionFor(item, decisions) === "rejected" ? "change:rejected" : "change:refused";
 	if (item.status === "failed" || wire.isError) return "change:failed";
 	if (item.status === "cancelled") return "change:stopped";
 	return "change:open";
@@ -225,7 +256,7 @@ function changeKey(item: TimelineItem): string {
  * What a group did, in words: "read 2 files, ran 1 command". Phrases follow first appearance, reads and
  * changes count distinct paths, and anything unnamed is counted as a tool rather than dropped.
  */
-export function activityDigest(items: readonly TimelineItem[]): string {
+export function activityDigest(items: readonly TimelineItem[], decisions?: CallDecisions): string {
 	const order: string[] = [];
 	const tallies = new Map<string, { calls: number; paths: Set<string> }>();
 	for (const item of items) {
@@ -239,7 +270,7 @@ export function activityDigest(items: readonly TimelineItem[]): string {
 				: item.kind === "notice"
 					? "notice"
 					: CHANGES.has(title)
-						? changeKey(item)
+						? changeKey(item, decisions)
 						: DIGEST_PHRASES[title] === undefined
 							? "other"
 							: title;

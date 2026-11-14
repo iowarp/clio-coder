@@ -55,6 +55,7 @@ import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
+import { startedRequest } from "./home-draft.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
 
@@ -383,7 +384,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 				onRetry={() => void session.refetch()}
 			/>
 		);
-	if (!snapshot) return <TaskSkeleton />;
+	if (!snapshot) return <TaskSkeleton request={startedRequest(id)} />;
 	const turn = snapshot.turns.at(-1);
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;

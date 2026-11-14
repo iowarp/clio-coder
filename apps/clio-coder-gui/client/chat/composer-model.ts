@@ -815,6 +815,8 @@ export interface TurnActivity {
 	readonly toolMs: number;
 	readonly slowest: { readonly name: string; readonly ms: number } | null;
 	readonly compactions: number;
+	/** Changes settled at their approval gate, rejected or refused, so nothing reached the file. */
+	readonly notApplied?: number;
 }
 
 export const NO_ACTIVITY: TurnActivity = { tools: 0, timed: 0, toolMs: 0, slowest: null, compactions: 0 };
@@ -975,8 +977,12 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 	if (usageLabel !== null && quantities && quantityValue(quantities.output) !== null) facts.push(usageLabel);
 	if (quantities && quantityValue(quantities.usd) !== null) facts.push(quantities.usd.display);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
+	const notApplied = counted.notApplied ?? 0;
+	// A turn that finished with a change left unapplied did what it could, but it is not a clean success.
+	const unapplied = turn.status === "succeeded" && !early && notApplied > 0;
+	if (unapplied) facts.push(`${notApplied} ${notApplied === 1 ? "change" : "changes"} not applied`);
 	return {
-		tone: shape.tone,
+		tone: unapplied ? "neutral" : shape.tone,
 		glyph: shape.glyph,
 		label: shape.label,
 		detail:
@@ -1111,7 +1117,7 @@ export function draftEstimate(
 		...(attached.images > 0 ? [attached.images === 1 ? "the image" : "the images"] : []),
 	];
 	return {
-		text: `~${approximateCount(tokens)} tokens`,
+		text: `~${approximateCount(tokens)} ${tokens === 1 ? "token" : "tokens"}`,
 		tokens,
 		title:
 			`Estimated at about ${ESTIMATE_CHARACTERS_PER_TOKEN} characters a token for the typed text` +

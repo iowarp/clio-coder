@@ -24,6 +24,7 @@ import type {
 } from "../../contracts/permissions.js";
 import { formatClock, formatDuration } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
+import { dispatchTasks } from "./tool-presentation.js";
 
 /** The server's declared escalation window, used only when `escalateAt` does not parse. */
 export const ESCALATION_SECONDS = 45;
@@ -61,6 +62,26 @@ export const RESOLUTION_SUMMARY: Readonly<Record<string, string>> = {
 
 export const resolutionSummary = (status: string): string =>
 	RESOLUTION_SUMMARY[status] ?? "CLIO Coder recorded an outcome this GUI does not classify.";
+
+/** toolCallId to the status of its newest approval request; the projection keeps the last 32. */
+export function callDecisions(permissions: readonly Permission[]): ReadonlyMap<string, Permission["status"]> {
+	const decisions = new Map<string, Permission["status"]>();
+	for (const permission of permissions) decisions.set(permission.toolCallId, permission.status);
+	return decisions;
+}
+
+/** The quiet line an answered card leaves at its anchor: the newest settled request for the call. */
+export function decisionRecord(
+	permissions: readonly Permission[],
+	toolCallId: string,
+): { readonly status: Permission["status"]; readonly summary: string } | null {
+	for (let index = permissions.length - 1; index >= 0; index -= 1) {
+		const permission = permissions[index];
+		if (permission === undefined || permission.toolCallId !== toolCallId || isAwaitingAnswer(permission)) continue;
+		return { status: permission.status, summary: resolutionSummary(permission.status) };
+	}
+	return null;
+}
 
 export interface ApprovalTimings {
 	/** True once the declared escalation window has passed, or once the server said so. */
@@ -136,13 +157,24 @@ export function formatLocations(locations: readonly CallLocation[] | undefined):
 	return all.length > 3 ? [...all.slice(0, 3), `+${all.length - 3} more`] : all;
 }
 
+/** The ACP kind as a verb phrase; `think`, `switch_mode` and any kind this build does not know act on. */
+const ACCESS_PHRASES: Readonly<Record<string, string>> = {
+	edit: "Edits",
+	delete: "Deletes",
+	move: "Moves",
+	execute: "Runs a command in",
+	fetch: "Fetches",
+	read: "Reads",
+	search: "Searches",
+};
+
 /** The permission carries no locations of its own; they come from the gated tool call. */
 export function accessSentence(
 	permission: Pick<Permission, "kind">,
 	locations: readonly CallLocation[] | undefined,
 ): string {
 	const named = formatLocations(locations);
-	return `${permission.kind} access to ${named.length === 0 ? "this turn" : named.join(", ")}.`;
+	return `${ACCESS_PHRASES[permission.kind] ?? "Acts on"} ${named.length === 0 ? "this turn" : named.join(", ")}.`;
 }
 
 /**
@@ -163,8 +195,11 @@ export function safetyFacts(
 }
 
 /** What a screen reader hears the moment a card appears. */
-export const approvalAnnouncement = (permission: Pick<Permission, "title" | "kind">): string =>
-	`Approval needed: ${permission.title}. ${permission.kind} access. Nothing runs until you answer.`;
+export const approvalAnnouncement = (
+	permission: Pick<Permission, "title" | "kind">,
+	locations?: readonly CallLocation[],
+): string =>
+	`Approval needed: ${permission.title}. ${accessSentence(permission, locations)} Nothing runs until you answer.`;
 
 // ---- the agent's own classification -------------------------------------------------------
 
@@ -316,7 +351,7 @@ export function workerAskRows(worker: Permission["worker"]): readonly DecisionRo
 	if (worker.timeoutMs !== undefined) {
 		rows.push({
 			term: "If unanswered",
-			value: `The worker ${worker.fallback === "fail" ? "fails the call" : "is denied"} after ${Math.ceil(worker.timeoutMs / 1000)} seconds.`,
+			value: `The worker ${worker.fallback === "fail" ? "fails the call" : "is refused"} after ${Math.ceil(worker.timeoutMs / 1000)} seconds.`,
 		});
 	}
 	return rows;
@@ -634,8 +669,15 @@ export function gatedPreview(call: GatedCall | undefined, plan?: DispatchPlanFac
 	if (name === "dispatch") {
 		// The admitted plan wins over the arguments: it is what the run seals, and it names every run.
 		if (plan !== undefined) return planPreview(plan);
-		const agent = text(input.agent) ?? text(input.recipe) ?? "an unnamed agent";
-		const task = text(input.task);
+		const tasks = dispatchTasks(input);
+		if (tasks.length > 1)
+			return {
+				kind: "summary",
+				label: "Dispatch",
+				summary: `${tasks.length} runs · ${tasks.map((task) => task.agent).join(", ")}`,
+			};
+		const agent = text(input.agent) ?? text(input.recipe) ?? tasks[0]?.agent ?? "an unnamed agent";
+		const task = tasks[0]?.task || null;
 		const preview = task === null ? "no task preview" : clampText(task, 1, 160).text;
 		return { kind: "summary", label: "Dispatch", summary: `${agent} · ${preview}` };
 	}

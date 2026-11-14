@@ -12,6 +12,7 @@ import {
 	confirmFirstRequest,
 	homeDraft,
 	releaseFirstRequest,
+	rememberStarted,
 	updateHomeDraft,
 } from "./home-draft.js";
 import { setupStatusInput } from "./target-onboarding.js";
@@ -23,6 +24,8 @@ export function useFirstTask(client: Client) {
 	return useMutation({
 		mutationFn: async () => {
 			if (!acquireFirstRequest()) throw new Error("This tab is already starting a task.");
+			// Warm the task route while the requests run, so navigating does not wait on its chunk.
+			void import("./sessions.js");
 			try {
 				const draft = homeDraft();
 				let request = draft.pending;
@@ -94,6 +97,7 @@ export function useFirstTask(client: Client) {
 				// The session creation snapshot predates the admitted turn; let the stream or a fresh read supply it.
 				void queries.invalidateQueries({ queryKey: ["sessions"] });
 				void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+				rememberStarted({ sessionId, text: request.exactTurnBody.text });
 				void navigate(`/sessions/${sessionId}`);
 			} finally {
 				releaseFirstRequest();

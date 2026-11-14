@@ -67,3 +67,17 @@ export function releaseFirstRequest(): void {
 }
 
 export const firstRequestBusy = (): boolean => busy;
+
+let started: { readonly sessionId: string; readonly text: string } | null = null;
+
+/** The words of the task this tab just started, so its screen can show them before the first snapshot. */
+export function rememberStarted(value: { readonly sessionId: string; readonly text: string }): void {
+	started = value;
+}
+
+/**
+ * The started request's text for this session only. It is not consumed on read: the loading screen may
+ * render more than once before the first snapshot, and the next started task replaces it.
+ */
+export const startedRequest = (sessionId: string | undefined): string | null =>
+	started !== null && started.sessionId === sessionId ? started.text : null;
