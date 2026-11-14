@@ -25,7 +25,7 @@ import { FLOW_RESTRICTION_ENTRY_TYPE } from "../domains/session/history.js";
 import { openSession } from "../engine/session.js";
 import { printError, printOk } from "./shared.js";
 
-const HELP = `clio-coder memory list
+const HELP = `clio-coder memory list [--json]
 clio-coder memory propose --from-evidence <runId> [scope options]
 clio-coder memory propose --from-claim <claim-id-prefix>
 clio-coder memory promote --from-handoff <path> [--entry <id>...] --scope <scope> [scope options]
@@ -65,11 +65,12 @@ interface ParsedMemoryArgs {
 	runtimeId?: string;
 	agentId?: string;
 	stale: boolean;
+	json: boolean;
 	help: boolean;
 }
 
 function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
-	const parsed: ParsedMemoryArgs = { entryIds: [], acknowledgeGlobal: false, stale: false, help: false };
+	const parsed: ParsedMemoryArgs = { entryIds: [], acknowledgeGlobal: false, stale: false, json: false, help: false };
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === undefined) continue;
@@ -155,6 +156,10 @@ function parseMemoryArgs(args: ReadonlyArray<string>): ParsedMemoryArgs {
 				continue;
 			}
 			throw new Error(`unexpected memory ${parsed.command} argument: ${arg}`);
+		}
+		if (parsed.command === "list" && arg === "--json") {
+			parsed.json = true;
+			continue;
 		}
 		if (parsed.command === "prune") {
 			if (arg === "--stale") {
@@ -261,7 +266,9 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 	const dataDir = clioDataDir();
 	try {
 		if (parsed.command === "list") {
-			renderMemoryList(await loadMemoryRecords(dataDir));
+			const records = await loadMemoryRecords(dataDir);
+			if (parsed.json) process.stdout.write(`${JSON.stringify({ records: records.map(publicMemoryRecord) })}\n`);
+			else renderMemoryList(records);
 			return 0;
 		}
 		if (parsed.command === "propose" && parsed.claimId !== undefined)
@@ -545,6 +552,24 @@ function renderProposal(record: MemoryRecord, created: boolean): void {
 		}
 	}
 	process.stdout.write(`review: clio-coder memory approve ${record.id}\n`);
+}
+
+/** The fields a reviewer decides on, for `memory list --json`; absent optionals stay absent. */
+function publicMemoryRecord(record: MemoryRecord) {
+	return {
+		id: record.id,
+		scope: record.scope,
+		key: record.key,
+		lesson: record.lesson,
+		appliesWhen: record.appliesWhen,
+		avoidWhen: record.avoidWhen,
+		confidence: record.confidence,
+		evidenceRefs: record.evidenceRefs,
+		createdAt: record.createdAt,
+		approved: record.approved,
+		...(record.rejectedAt !== undefined ? { rejectedAt: record.rejectedAt } : {}),
+		...(record.repository !== undefined ? { repository: record.repository } : {}),
+	};
 }
 
 function renderMemoryList(records: ReadonlyArray<MemoryRecord>): void {

@@ -192,12 +192,15 @@ export const coreTests = [
 
 export const guiTests = [
 	"report-dialog-model",
+	"search-draft-model",
 	"setup-wizard-model",
 	"chat-composer",
+	"slash-model",
 	"chat-approval",
 	"chat-interview",
 	"chat-turns",
 	"egress-policy",
+	"http-meta",
 	"sessions-http",
 	"targets-http",
 	"library-http",
@@ -211,12 +214,20 @@ export const guiTests = [
 	"arena-model",
 	"research-model",
 	"research-http",
+	"autonomy-model",
 	"pages",
 	"machine-proxy",
 	"client-auth",
 	"session-control",
+	"session-overview",
+	"notification-model",
+	"rewind-http",
+	"rewind-model",
 	"openapi",
 	"boundaries",
+	// x090 spec 12
+	"review-http",
+	"trust-model",
 ]
 	.map((name) => `tests/${name}.test.ts`)
 	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");

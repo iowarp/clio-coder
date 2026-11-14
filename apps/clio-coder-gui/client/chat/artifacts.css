@@ -142,6 +142,79 @@
 .project-trust code {
 	white-space: pre-wrap;
 }
+/* x090 spec 12 */
+.project-trust li {
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+}
+.project-trust li > span {
+	grid-column: 1;
+}
+.project-trust__review {
+	grid-column: 2;
+	grid-row: 1 / span 2;
+}
+.trust-review__verdict {
+	margin: 0 0 12px;
+	font-weight: 500;
+}
+.trust-review__files,
+.trust-review__packages {
+	display: grid;
+	gap: 12px;
+	list-style: none;
+	padding: 0;
+	margin: 0 0 12px;
+}
+.trust-review__file {
+	display: grid;
+	gap: 4px;
+	min-width: 0;
+}
+.trust-review__path {
+	margin: 0;
+	overflow-wrap: anywhere;
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+.trust-review__text {
+	max-height: 40vh;
+	margin: 0;
+	overflow: auto;
+	white-space: pre;
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+.trust-review__packages li {
+	display: grid;
+	gap: 2px;
+	color: var(--muted);
+	font-size: 12px;
+}
+.trust-review__heading {
+	margin: 12px 0 8px;
+	font-size: 13px;
+}
+.trust-review__unreadable,
+.trust-review__note,
+.trust-review__technical {
+	margin: 0 0 8px;
+	color: var(--muted);
+	font-size: 12px;
+}
+.trust-review__technical code {
+	overflow-wrap: anywhere;
+}
+.trust-review__outcome.is-error,
+.trust-review__error {
+	color: var(--status-fail-fg);
+}
+.trust-review__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 12px;
+}
 .worker-run-result {
 	display: flex;
 	flex-wrap: wrap;

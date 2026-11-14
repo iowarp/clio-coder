@@ -4,11 +4,15 @@ import { taskOverview } from "../client/chat/overview-model.js";
 import {
 	chipFigures,
 	contextFigure,
+	quotaCards,
+	quotaChip,
 	sessionSpend,
+	usageReadable,
 	usageRows,
 	usageSummary,
 	usageTotals,
 } from "../client/chat/session-usage-model.js";
+import type { AgentCapabilities } from "../contracts/capabilities.js";
 import type { SessionSnapshot } from "../contracts/sessions.js";
 import type { SessionUsage } from "../contracts/usage.js";
 
@@ -122,4 +126,48 @@ test("the top bar leaves out a figure nobody measured and falls back to the ledg
 		fromShare: true,
 	});
 	assert.equal(contextFigure(undefined, null), null);
+});
+
+const quotaWindow = (key: string, used: number | null, resetsAt: string | null = null) => ({
+	key,
+	label: `${key} window`,
+	usedPct:
+		used === null
+			? { fact: { kind: "unknown", reason: "not reported" }, display: "unknown" }
+			: { fact: { kind: "measured", value: used, source: "provider" }, display: `${used}%` },
+	resetsAt,
+});
+const withQuota = (...windows: ReturnType<typeof quotaWindow>[]) =>
+	({
+		telemetry,
+		telemetryQuota: { providers: [{ provider: "anthropic", stale: false, windows }] },
+	}) as unknown as SessionUsage;
+
+test("a quota window with no reported share has no share to draw, and a reported one keeps its own", () => {
+	const [card] = quotaCards(withQuota(quotaWindow("five-hour", null), quotaWindow("weekly", 42))).cards;
+	assert.deepEqual(
+		card?.windows.map((window) => [window.label, window.used, window.share]),
+		[
+			["five-hour window", "unknown", null],
+			["weekly window", "42%", 42],
+		],
+	);
+});
+
+test("the quota chip names the fullest window from 80% and turns to failure at 100%", () => {
+	assert.equal(quotaChip(undefined), null);
+	assert.equal(quotaChip(withQuota(quotaWindow("a", 50), quotaWindow("b", null), quotaWindow("c", 79))), null);
+	const chip = quotaChip(withQuota(quotaWindow("a", 50), quotaWindow("b", 86), quotaWindow("c", 91)));
+	assert.deepEqual([chip?.text, chip?.tone, chip?.title], ["Quota 91%", "warn", "c window · reset time not reported"]);
+	const full = quotaChip(withQuota(quotaWindow("a", 100, "2026-11-14T08:00:00.000Z")));
+	assert.equal(full?.tone, "fail");
+	assert.match(full?.title ?? "", /^a window · resets \d{4}-\d{2}-\d{2} /u);
+});
+
+test("the usage read is asked only of a build that names its session, cost and quota methods", () => {
+	const telemetryOf = (methods: Record<string, string>) =>
+		({ telemetry: { version: 1, methods, update: "_clio-coder/telemetry/update" } }) as unknown as AgentCapabilities;
+	assert.equal(usageReadable(undefined), false);
+	assert.equal(usageReadable(telemetryOf({ session: "s" })), false);
+	assert.equal(usageReadable(telemetryOf({ session: "s", cost: "c", quota: "q" })), true);
 });

@@ -9,6 +9,7 @@ import { STEER_TEXT_MAX_BYTES } from "../../contracts/runtime.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
+import { useSessionWorkers } from "../shell/tasks.js";
 import { capabilityRefusal, steeringAffordances } from "./composer-model.js";
 import {
 	FLEET_GLYPHS,
@@ -20,6 +21,7 @@ import {
 	foldFleetRuns,
 	guidanceReady,
 	isLiveRun,
+	reconcileRuns,
 	type SteerOutcome,
 	steerOutcome,
 } from "./fleet-facts.js";
@@ -192,7 +194,8 @@ function FleetRunRows({ runs, steering }: { runs: readonly FleetRun[]; steering?
  * stopped. A run leaves the strip once it settles; the delegation row in its turn records how it
  * ended, and the task pane's Agents view keeps the full fleet history.
  *
- * `fleet` keeps its identity across narrative deltas, so streamed text never re-renders this.
+ * `fleet` keeps its identity across narrative deltas, and the overview read is selected down to this task's workers,
+ * so streamed text never re-renders this.
  */
 export const LiveWorkers = memo(function LiveWorkers({
 	client,
@@ -213,7 +216,12 @@ export const LiveWorkers = memo(function LiveWorkers({
 		retry: false,
 		enabled: sessionOpen,
 	});
-	const live = useMemo(() => foldFleetRuns(fleet).filter(isLiveRun), [fleet]);
+	// The server's live set outlives the feed's bound; a run it no longer holds leaves the strip.
+	const workers = useSessionWorkers(client, sessionId);
+	const live = useMemo(
+		() => reconcileRuns(foldFleetRuns(fleet), workers?.runs, workers?.asOf).filter(isLiveRun),
+		[fleet, workers?.runs, workers?.asOf],
+	);
 	if (live.length === 0) return null;
 	const steering = sessionOpen && steeringAffordances(capabilities.data).dispatch ? { client, sessionId } : undefined;
 	return (

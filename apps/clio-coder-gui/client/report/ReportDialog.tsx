@@ -1,7 +1,7 @@
 // The desktop report dialog (R-24): Review, Attach and Send, over the host's plan. Every decision is in
 // `report-model.ts`; the text shown is the host's `plan.rendered`, exactly what sending posts.
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ProblemReportEdits, ProblemReportView } from "../../contracts/problem-reports.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
@@ -37,12 +37,14 @@ export function ReportDialog({
 }) {
 	const [state, dispatch] = useReducer(reportReducer, INITIAL_REPORT_STATE);
 	const titleRef = useRef<HTMLInputElement>(null);
+	const [attempt, setAttempt] = useState(0);
 	const failed = useCallback(
 		(error: unknown) => dispatch({ type: "failed", message: error instanceof Error ? error.message : String(error) }),
 		[],
 	);
 	useEffect(() => {
 		let live = true;
+		if (attempt > 0) dispatch({ type: "busy", busy: "plan" });
 		client
 			.call(
 				routes.problemReportPlan,
@@ -62,7 +64,7 @@ export function ReportDialog({
 		return () => {
 			live = false;
 		};
-	}, [client, workspaceId, request.sessionId, request.summary, failed]);
+	}, [client, workspaceId, request.sessionId, request.summary, failed, attempt]);
 
 	const view = state.view;
 	const update = (edits: ProblemReportEdits) => {
@@ -121,7 +123,20 @@ export function ReportDialog({
 				<p className="report-dialog__destination" role="status">
 					{controls.destination}
 				</p>
-				{state.error ? (
+				{controls.retry ? (
+					<div className="report-dialog__failed" role="alert">
+						<h3>CLIO Coder could not prepare the report</h3>
+						<details>
+							<summary>Technical details</summary>
+							<p>{state.error}</p>
+						</details>
+						<div className="actions">
+							<button type="button" onClick={() => setAttempt((count) => count + 1)}>
+								Try again
+							</button>
+						</div>
+					</div>
+				) : state.error ? (
 					<p className="report-dialog__error" role="alert">
 						{state.error}
 					</p>
@@ -176,6 +191,7 @@ export function ReportDialog({
 									type="button"
 									role="tab"
 									aria-selected={state.step === step}
+									disabled={!controls.stepsEnabled}
 									onClick={() => dispatch({ type: "go", step })}
 								>
 									{step === "review" ? "Review" : step === "attach" ? "Attach" : "Send"}
@@ -234,7 +250,11 @@ export function ReportDialog({
 									Exactly what will be sent{hasUnplannedEdits(state) ? " (update the preview to include your edits)" : ""}:
 								</p>
 								<pre className="report-dialog__preview">
-									{view ? `${view.plan.rendered.title}\n\n${view.plan.rendered.body}` : "Preparing…"}
+									{view
+										? `${view.plan.rendered.title}\n\n${view.plan.rendered.body}`
+										: controls.retry
+											? "No preview yet."
+											: "Preparing…"}
 								</pre>
 								<div className="actions">
 									<button
@@ -244,7 +264,11 @@ export function ReportDialog({
 									>
 										Update preview
 									</button>
-									<button type="button" onClick={() => dispatch({ type: "go", step: "attach" })}>
+									<button
+										type="button"
+										disabled={!controls.stepsEnabled}
+										onClick={() => dispatch({ type: "go", step: "attach" })}
+									>
 										Next
 									</button>
 								</div>

@@ -22,6 +22,8 @@ const LedgerWorkspaces = Type.Array(
 	Type.Object({ cwd: Type.String({ maxLength: 4096 }), lastActivityAt: Type.String() }, { additionalProperties: true }),
 );
 const RECENT_LIMIT = 40;
+/** Task opens, `@` completions and history reads each look a workspace up; a burst of them shares one merged list. */
+const LIST_REUSE_MS = 2_000;
 const workspaceId = (path: string) => createHash("sha256").update(path).digest("hex").slice(0, 32);
 /**
  * A workspace is a canonical directory, the same identity the terminal interface and the session ledger use.
@@ -32,6 +34,9 @@ export class WorkspaceService {
 	private picking = false;
 	private host: PathHost | null = null;
 	private listing: Promise<Workspace[]> | undefined;
+	private listed: { at: number; rows: Workspace[] } | undefined;
+	/** Bumped by every recents write, so a list read that began before one never becomes the reused list. */
+	private generation = 0;
 	constructor(
 		private readonly files: AppFiles,
 		private readonly ledger?: WorkerHost,
@@ -104,6 +109,8 @@ export class WorkspaceService {
 		}));
 	}
 	async list(): Promise<Workspace[]> {
+		const listed = this.listed;
+		if (listed && performance.now() - listed.at < LIST_REUSE_MS) return structuredClone(listed.rows);
 		const read = this.listing ?? this.readList();
 		this.listing = read;
 		try {
@@ -112,7 +119,18 @@ export class WorkspaceService {
 			if (this.listing === read) this.listing = undefined;
 		}
 	}
+	private invalidate() {
+		this.generation++;
+		this.listing = undefined;
+		this.listed = undefined;
+	}
 	private async readList(): Promise<Workspace[]> {
+		const generation = this.generation;
+		const rows = await this.mergeList();
+		if (generation === this.generation) this.listed = { at: performance.now(), rows };
+		return rows;
+	}
+	private async mergeList(): Promise<Workspace[]> {
 		const value = await this.files.read("workspaces");
 		if (!Value.Check(Workspaces, value)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
 		const merged = new Map<string, Workspace>();
@@ -170,7 +188,7 @@ export class WorkspaceService {
 			if (!Value.Check(Workspaces, current)) throw new AppProblem("unavailable", "Recent workspace state is invalid.");
 			return { value: [row, ...current.filter((item) => item.id !== row.id)].slice(0, RECENT_LIMIT), result: row };
 		});
-		this.listing = undefined;
+		this.invalidate();
 		return opened;
 	}
 }

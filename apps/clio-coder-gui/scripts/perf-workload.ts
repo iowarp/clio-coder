@@ -8,9 +8,9 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium, type Page } from "playwright-core";
-import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
+import { fixtureLaunch } from "./fixture-launch.js";
 
 const { values } = parseArgs({
 	options: {
@@ -24,6 +24,10 @@ const { values } = parseArgs({
 		headed: { type: "boolean", default: false },
 		// N > 0 measures resuming a saved N-turn conversation instead of streaming turns.
 		history: { type: "string", default: "0" },
+		// With --history, then press "Show N earlier turns" until the whole conversation is open.
+		"page-back": { type: "boolean", default: false },
+		// Record a Chrome performance trace per streamed turn (and of the resume), for DevTools or Perfetto.
+		trace: { type: "boolean", default: false },
 	},
 });
 if (!values.client) throw new Error("--client <private build> is required.");
@@ -35,6 +39,8 @@ const TYPED = "Typing a follow-up question while Clio Coder is still streaming."
 
 /** Installed before any app script so the record clock and the render counters exist from the start. */
 const INSTRUMENTATION = `(() => {
+	// tsx keeps function names through a __name helper the page lacks, and evaluated callbacks call it.
+	globalThis.__name ??= (target) => target;
 	const WINDOW_FROM = 100;
 	globalThis.__clioRenderCounts = {};
 	const perf = {
@@ -151,36 +157,49 @@ class Done extends Error {}
  * Resume a saved conversation the fixture replays as HISTORY rich turns, then report how long the
  * page took to show its last turn, and what the open transcript costs at rest.
  */
+/** With --trace, a Chrome performance trace of `run`, saved beside the report as `<label>-<name>.trace.json`. */
+async function traced<T>(page: Page, name: string, run: () => Promise<T>): Promise<T> {
+	if (!values.trace) return run();
+	await browser.startTracing(page, { path: join(values.out, `${values.label}-${name}.trace.json`), screenshots: false });
+	try {
+		return await run();
+	} finally {
+		await browser.stopTracing();
+	}
+}
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
-async function launch() {
-	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
-	if (ticket === null) throw new Error("The perf server issued no launch ticket.");
-	return `ticket=${ticket}`;
+function launch() {
+	return fixtureLaunch(origin);
 }
 async function resumeHistory(page: Page, id: string) {
 	await page.goto(`${origin}/#${await launch()}`);
 	await page.getByPlaceholder("Describe a task or ask a question").waitFor();
 	await setRunning(page, true);
 	const started = await page.evaluate(() => performance.now());
-	await page.evaluate((path) => {
-		history.pushState(null, "", path);
-		dispatchEvent(new PopStateEvent("popstate"));
-	}, `/sessions/${id}`);
-	await page.getByText(`Earlier prompt ${HISTORY}:`, { exact: false }).waitFor({ timeout: 60_000 });
-	const shownMs = (await page.evaluate(() => performance.now())) - started;
-	await page.waitForTimeout(1_500);
+	const shownMs = await traced(page, "history", async () => {
+		await page.evaluate((path) => {
+			history.pushState(null, "", path);
+			dispatchEvent(new PopStateEvent("popstate"));
+		}, `/sessions/${id}`);
+		await page.getByText(`Earlier prompt ${HISTORY}:`, { exact: false }).waitFor({ timeout: 60_000 });
+		const shown = (await page.evaluate(() => performance.now())) - started;
+		await page.waitForTimeout(1_500);
+		return shown;
+	});
 	const settled = await sample(page);
 	const transcript = page.locator(".chat-transcript");
 	// Scroll back through the transcript a screen at a time, as a reader does.
 	await setRunning(page, true);
 	for (let step = 0; step < 30; step++) {
 		await transcript.evaluate((element) => {
+			element.dispatchEvent(new WheelEvent("wheel", { deltaY: -element.clientHeight, bubbles: true }));
 			element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight);
 		});
 		await page.waitForTimeout(80);
 	}
 	const scrolled = await sample(page);
 	await setRunning(page, false);
+	const paged = values["page-back"] ? await traced(page, "page-back", () => pageBack(page)) : null;
 	return {
 		turns: HISTORY,
 		lastTurnShownMs: Math.round(shownMs),
@@ -195,6 +214,60 @@ async function resumeHistory(page: Page, id: string) {
 			longTasksOver50: scrolled.longTasks.filter((task) => task.duration > 50).length,
 			domNodes: scrolled.domNodes,
 		},
+		...(paged ? { pageBack: paged } : {}),
+	};
+}
+/**
+ * Open the rest of a resumed conversation a page at a time. Each press is timed to the frame that
+ * first shows earlier turns (`durationMs`) and to the frame that shows the whole page (`pageMs`).
+ */
+async function pageBack(page: Page) {
+	const more = page.getByRole("button", { name: /Show \d+ earlier turns/u });
+	const presses: Array<{
+		renderedTurns: number;
+		durationMs: number;
+		pageMs: number;
+		longTasksOver50: number;
+		longestTaskMs: number;
+	}> = [];
+	for (let press = 0; press < 100 && (await more.count()) > 0; press++) {
+		await setRunning(page, true);
+		const timing = await more.evaluate(
+			(button) =>
+				new Promise<{ first: number; page: number }>((resolve) => {
+					const count = () => document.querySelectorAll(".chat-turn").length;
+					const from = count();
+					const wanted = from + Number(/\d+/u.exec(button.textContent ?? "")?.[0] ?? 1);
+					const started = performance.now();
+					let first = -1;
+					(button as HTMLElement).click();
+					const check = () => {
+						const now = performance.now();
+						if (first < 0 && count() > from) first = now - started;
+						if (count() >= wanted) requestAnimationFrame(() => resolve({ first, page: performance.now() - started }));
+						else if (now - started > 10_000) resolve({ first, page: -1 });
+						else requestAnimationFrame(check);
+					};
+					requestAnimationFrame(check);
+				}),
+		);
+		await page.waitForTimeout(300);
+		const pressed = await sample(page);
+		await setRunning(page, false);
+		presses.push({
+			renderedTurns: await page.locator(".chat-turn").count(),
+			durationMs: round(timing.first),
+			pageMs: round(timing.page),
+			longTasksOver50: pressed.longTasks.filter((task) => task.duration > 50).length,
+			longestTaskMs: round(Math.max(0, ...pressed.longTasks.map((task) => task.duration))),
+		});
+	}
+	const opened = await sample(page);
+	return {
+		presses,
+		complete: (await more.count()) === 0,
+		renderedTurns: await page.locator(".chat-turn").count(),
+		domNodes: opened.domNodes,
 	};
 }
 const setRunning = (page: Page, running: boolean) =>
@@ -281,7 +354,7 @@ try {
 	await home.fill("Ready when you are.");
 	await home.press("Enter");
 	await page.waitForURL(/\/sessions\/[^/]+$/);
-	const composer = page.getByLabel("Message Clio Coder", { exact: true });
+	const composer = page.getByLabel("Message CLIO Coder", { exact: true });
 	await composer.waitFor();
 	const stop = page.getByRole("button", { name: "Stop turn", exact: true });
 	await stop.waitFor({ state: "detached" });
@@ -293,34 +366,63 @@ try {
 		const before = await sample(page);
 		await setRunning(page, true);
 		const started = performance.now();
-		await composer.fill(`${WORKLOAD} Audit the convergence notes, turn ${turn}.`);
-		await page.locator(".composer__submit").click();
-		await working.waitFor();
 		let scroll: Record<string, unknown> | null = null;
-		if (!quiet) {
-			await page.waitForTimeout(700);
-			await composer.click();
-			await page.keyboard.type(TYPED, { delay: 35 });
-			const transcript = page.locator(".chat-transcript");
-			const held = await transcript.evaluate((element) => {
-				element.scrollTop = Math.max(0, element.scrollHeight / 2 - 300);
-				return element.scrollTop;
-			});
-			await page.waitForTimeout(1_200);
-			const after = await transcript.evaluate((element) => element.scrollTop);
-			scroll = {
-				held,
-				after,
-				stayedPut: Math.abs(after - held) < 2,
-				jumpPill: (await page.locator(".jump-to-latest").count()) > 0,
-			};
-		}
-		await stop.waitFor({ state: "detached", timeout: 120_000 });
+		await traced(page, `turn${turn}`, async () => {
+			await composer.fill(`${WORKLOAD} Audit the convergence notes, turn ${turn}.`);
+			await page.locator(".composer__submit").click();
+			await working.waitFor();
+			if (!quiet) {
+				await page.waitForTimeout(700);
+				await composer.click();
+				await page.keyboard.type(TYPED, { delay: 35 });
+				const transcript = page.locator(".chat-transcript");
+				const held = await transcript.evaluate((element) => {
+					// The reader's wheel, so follow-latest reads the move as leaving rather than as a layout clamp.
+					element.dispatchEvent(new WheelEvent("wheel", { deltaY: -element.clientHeight, bubbles: true }));
+					element.scrollTop = Math.max(0, element.scrollHeight / 2 - 300);
+					return element.scrollTop;
+				});
+				await page.waitForTimeout(1_200);
+				const after = await transcript.evaluate((element) => element.scrollTop);
+				scroll = {
+					held,
+					after,
+					stayedPut: Math.abs(after - held) < 2,
+					jumpPill: (await page.locator(".jump-to-latest").count()) > 0,
+				};
+			}
+			await stop.waitFor({ state: "detached", timeout: 120_000 });
+		});
 		const durationMs = performance.now() - started;
-		// Diagrams render after the turn settles; a diagram the view followed past counts as near.
+		// Diagrams render once the turn settles and only near the viewport (600px). A turn that held the view
+		// elsewhere leaves its diagram pending by design, so it is brought into view and timed from there.
 		const turnElement = page.locator(".chat-turn").last();
-		await turnElement.locator(".diagram.is-rendered svg").waitFor();
-		await turnElement.locator(".diagram .diagram__status [role=alert]").waitFor();
+		const drawn = turnElement.locator(".diagram.is-rendered svg");
+		const settledAt = performance.now();
+		// Two frames let follow-latest pin to the settled height before the edge is read.
+		const transcriptBox = page.locator(".chat-transcript");
+		const pinnedAfterSettle = await transcriptBox.evaluate(
+			(element) =>
+				new Promise<boolean>((resolve) =>
+					requestAnimationFrame(() =>
+						requestAnimationFrame(() => resolve(element.scrollTop + element.clientHeight >= element.scrollHeight - 2)),
+					),
+				),
+		);
+		const renderedAtSettle = (await drawn.count()) > 0;
+		const diagram = turnElement.locator(".diagram").first();
+		const nearAtSettle =
+			renderedAtSettle ||
+			(await diagram.evaluate((node) => {
+				const box = node.getBoundingClientRect();
+				return box.bottom > -600 && box.top < innerHeight + 600;
+			}));
+		let scrolledAt: number | null = null;
+		if (!nearAtSettle) {
+			await diagram.scrollIntoViewIfNeeded();
+			scrolledAt = performance.now();
+		}
+		await drawn.first().waitFor();
 		const diagramsAt = performance.now();
 		await page.waitForTimeout(1_000);
 		await setRunning(page, false);
@@ -334,7 +436,14 @@ try {
 			turn,
 			quiet,
 			durationMs: Math.round(durationMs),
-			diagramsDrawnMs: Math.round(diagramsAt - started - durationMs),
+			// Null when the diagram had to be scrolled into view; then `diagram.drawnAfterScrollMs` times it.
+			diagramsDrawnMs: scrolledAt === null ? Math.round(diagramsAt - started - durationMs) : null,
+			diagram: {
+				renderedAtSettle,
+				scrolledIntoView: scrolledAt !== null,
+				drawnAfterScrollMs: scrolledAt === null ? null : Math.round(diagramsAt - scrolledAt),
+				settleToDrawnMs: Math.round(diagramsAt - settledAt),
+			},
 			textEvents: after.textEvents,
 			streamMs: Math.round(after.lastTextAt - after.firstTextAt),
 			domNodes: { before: before.domNodes, after: after.domNodes },
@@ -365,7 +474,7 @@ try {
 				settledTurn: delta("turn.settled", before.counts, after.counts),
 				liveTurn: delta("turn.live", before.counts, after.counts),
 			},
-			...(quiet ? {} : { draftKept: draft === TYPED, scroll }),
+			...(quiet ? { pinnedAfterSettle } : { draftKept: draft === TYPED, scroll }),
 		});
 		await composer.fill("");
 		await page.locator(".chat-transcript").evaluate((element) => {
@@ -374,6 +483,16 @@ try {
 		await page.waitForTimeout(500);
 	}
 	report.turns = turns;
+	// The whole answer of the last turn as the server holds it, and whether the page shows it cut.
+	const sessionId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1) ?? "");
+	const snapshot = h.supervisor.get(sessionId);
+	const lastTurnId = snapshot.turns.at(-1)?.id;
+	const answer = snapshot.timeline.filter((item) => item.turnId === lastTurnId && item.kind === "text");
+	report.lastTurnText = {
+		length: answer.reduce((sum, item) => sum + item.text.length, 0),
+		truncated: answer.some((item) => item.text.endsWith("[… stream truncated …]")),
+		truncatedInGui: (await page.locator(".chat-turn").last().getByText("[… stream truncated …]").count()) > 0,
+	};
 	await page.screenshot({ path: join(values.out, `${values.label}-end.png`) });
 	await context.close();
 } catch (error) {

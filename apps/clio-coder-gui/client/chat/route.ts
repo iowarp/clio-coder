@@ -28,20 +28,25 @@ export interface RouteFacts {
 }
 
 /**
- * A provider's health does not identify the session's route; an unreported route stays unknown.
+ * A provider's health does not identify the session's route; an unreported route stays unknown. Once the session
+ * reports its config, a model or thinking level that config does not carry reads `not reported`: a saved default is
+ * never shown as the session's value.
  */
 export function routeFacts(
 	settings: RouteSettings | undefined,
 	health: HealthSummary,
 	config?: SessionConfig,
 ): RouteFacts {
-	if (config && (config.options.length > 0 || config.target !== undefined))
+	let modelReported = true;
+	if (config && (config.options.length > 0 || config.target !== undefined)) {
+		const model = config.options.find((row) => row.id === "model")?.currentValue;
+		modelReported = model !== undefined;
 		settings = {
 			target: config.target !== undefined ? config.target : (settings?.target ?? null),
-			model: config.options.find((row) => row.id === "model")?.currentValue ?? settings?.model ?? null,
-			thinking:
-				config.options.find((row) => row.id === "thinkingLevel")?.currentValue ?? settings?.thinking ?? "not reported",
+			model: model ?? null,
+			thinking: config.options.find((row) => row.id === "thinkingLevel")?.currentValue ?? "not reported",
 		};
+	}
 	const target = settings?.target ?? null;
 	const provider = health.providers.find((row) => row.key === target);
 	const tone = provider?.tone ?? "unverified";
@@ -59,13 +64,14 @@ export function routeFacts(
 	return {
 		...(config ? { config } : {}),
 		tone,
-		text: `${settings.target ?? "automatic routing"} · ${settings.model ?? "default model"}`,
-		model:
-			config?.options.find((row) => row.id === "model")?.options.find((row) => row.value === settings.model)?.name ??
-			settings.model ??
-			"Default model",
+		text: `${settings.target ?? "automatic routing"} · ${modelReported ? (settings.model ?? "default model") : "model not reported"}`,
+		model: modelReported
+			? (config?.options.find((row) => row.id === "model")?.options.find((row) => row.value === settings.model)?.name ??
+				settings.model ??
+				"Default model")
+			: "Model not reported",
 		...(settings.thinking === "not reported" ? {} : { thinking: settings.thinking }),
-		title: `Target: ${settings.target ?? "automatic"}. Model: ${settings.model ?? "configured default"}. Thinking: ${settings.thinking}. ${healthText}`,
+		title: `Target: ${settings.target ?? "automatic"}. Model: ${modelReported ? (settings.model ?? "configured default") : "not reported"}. Thinking: ${settings.thinking}. ${healthText}`,
 		spoken: `Thinking ${settings.thinking}. ${healthText}`,
 	};
 }

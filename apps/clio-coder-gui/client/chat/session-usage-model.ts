@@ -1,6 +1,8 @@
+import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { SessionUsage } from "../../contracts/usage.js";
 import type { SessionTelemetryV1 } from "../../contracts/wire.js";
+import { formatTime } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 import type { Explainable } from "../telemetry/quantity-model.js";
 
@@ -127,6 +129,15 @@ export function usageCoverageNotes(_usage: SessionUsage): string[] {
 	];
 }
 
+/**
+ * The usage read asks the agent for the session fold, its cost groups and the provider quota at once; a build that
+ * names fewer of those methods refuses the whole read, so the GUI asks only a build that names all three.
+ */
+export function usageReadable(capabilities: AgentCapabilities | undefined): boolean {
+	const methods = capabilities?.telemetry?.methods;
+	return !!(methods?.session && methods.cost && methods.quota);
+}
+
 export interface QuotaCard {
 	key: string;
 	name: string;
@@ -135,8 +146,13 @@ export interface QuotaCard {
 	note: string | null;
 	message: string | null;
 	credits: string | null;
-	windows: Array<{ label: string; used: string; share: number; resetsAt: string | null; binding: boolean }>;
+	/** `share` is the provider's used percent, or null when the provider did not report one: no bar is drawn for it. */
+	windows: Array<{ label: string; used: string; share: number | null; resetsAt: string | null }>;
 }
+
+type QuotaWindow = SessionUsage["telemetryQuota"]["providers"][number]["windows"][number];
+const knownShare = (window: QuotaWindow): number | null =>
+	"value" in window.usedPct.fact ? window.usedPct.fact.value : null;
 
 export function quotaCards(usage: SessionUsage): { status: "read"; cards: QuotaCard[] } {
 	return {
@@ -152,9 +168,8 @@ export function quotaCards(usage: SessionUsage): { status: "read"; cards: QuotaC
 			windows: provider.windows.map((window) => ({
 				label: window.label ?? window.key,
 				used: window.usedPct.display,
-				share: "value" in window.usedPct.fact ? window.usedPct.fact.value : 0,
+				share: knownShare(window),
 				resetsAt: window.resetsAt,
-				binding: false,
 			})),
 		})),
 	};
@@ -162,6 +177,35 @@ export function quotaCards(usage: SessionUsage): { status: "read"; cards: QuotaC
 
 export function quotaTone(share: number): "ok" | "warn" | "full" {
 	return share >= 85 ? "full" : share >= 65 ? "warn" : "ok";
+}
+
+/** The used share at which the task header starts warning about a provider window. */
+const QUOTA_CHIP_AT = 80;
+
+export interface QuotaChip {
+	text: string;
+	tone: "warn" | "fail";
+	title: string;
+}
+
+/**
+ * The header's quota warning: the provider window with the highest reported used share, once one reaches
+ * {@link QUOTA_CHIP_AT}. The share is compared as reported; the chip words it with the engine's display.
+ */
+export function quotaChip(usage: SessionUsage | undefined): QuotaChip | null {
+	let top: { window: QuotaWindow; share: number } | null = null;
+	for (const provider of usage?.telemetryQuota.providers ?? [])
+		for (const window of provider.windows) {
+			const share = knownShare(window);
+			if (share !== null && share >= QUOTA_CHIP_AT && (top === null || share > top.share)) top = { window, share };
+		}
+	if (top === null) return null;
+	const label = top.window.label ?? top.window.key;
+	return {
+		text: `Quota ${top.window.usedPct.display}`,
+		tone: top.share >= 100 ? "fail" : "warn",
+		title: `${label} · ${top.window.resetsAt ? `resets ${formatTime(top.window.resetsAt)}` : "reset time not reported"}`,
+	};
 }
 
 export function usageSummary(

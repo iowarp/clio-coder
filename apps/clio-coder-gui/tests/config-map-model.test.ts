@@ -39,7 +39,7 @@ test("the map leads with four figures and keeps an unread report apart from an e
 	const unread = configMap(graph, null);
 	assert.deepEqual(
 		unread.figures.map((figure) => figure.label),
-		["Effective setting facts", "Customization surfaces", "Estimated context cost", "Needs a restart"],
+		["Effective setting facts", "Customization surfaces", "Context cost", "Needs a restart"],
 	);
 	assert.equal(unread.figures[0]?.value, "—");
 	assert.match(unread.figures[0]?.note ?? "", /not been read/u);
@@ -49,17 +49,17 @@ test("the map leads with four figures and keeps an unread report apart from an e
 		[
 			["2", "reported in this snapshot"],
 			["3", "2 represented categories"],
-			["~1,500", "tokens across 2 costed entries"],
+			["2 of 3", "surfaces report a context cost"],
 			["1", "2 reported issues"],
 		],
 	);
 });
 
-test("no costed surface reads as a dash, and a costed zero reads as zero", () => {
+test("the context cost figure counts the surfaces that report one and adds no estimates together", () => {
 	const none = configMap({ categories: [], entries: [entry({})], issues: [] }, null);
-	assert.deepEqual([none.figures[2]?.value, none.figures[2]?.note], ["—", "no surface reported a cost"]);
+	assert.deepEqual([none.figures[2]?.value, none.figures[2]?.note], ["0 of 1", "surface reports a context cost"]);
 	const zero = configMap({ categories: [], entries: [entry({ contextCostTokens: 0 })], issues: [] }, null);
-	assert.deepEqual([zero.figures[2]?.value, zero.figures[2]?.note], ["~0", "tokens across 1 costed entry"]);
+	assert.deepEqual([zero.figures[2]?.value, zero.figures[2]?.note], ["1 of 1", "surface reports a context cost"]);
 	assert.equal(none.figures[3]?.note, "no reported inspection issues");
 });
 

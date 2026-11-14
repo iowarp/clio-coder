@@ -429,6 +429,21 @@
 .diff__row.is-del .diff__text::before {
 	content: "− ";
 }
+/* A change that never landed reads as struck-through history, not as green and red edits. */
+.diff.is-rejected .diff__row.is-add,
+.diff.is-rejected .diff__row.is-del {
+	background: transparent;
+}
+.diff.is-rejected .diff__row.is-add .diff__num,
+.diff.is-rejected .diff__row.is-add .diff__text,
+.diff.is-rejected .diff__row.is-del .diff__num,
+.diff.is-rejected .diff__row.is-del .diff__text {
+	color: var(--ink-muted);
+}
+.diff.is-rejected .diff__row.is-add .diff__text,
+.diff.is-rejected .diff__row.is-del .diff__text {
+	text-decoration: line-through;
+}
 /* The changed part of a rewritten line takes a deeper wash of the row's own colour. */
 .diff__change {
 	border-radius: var(--radius-sm);

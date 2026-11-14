@@ -7,12 +7,13 @@
 // only way to review the thing being approved.
 
 import { useIsMutating, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { clock, formatDuration } from "../api/clock.js";
+import { formatDuration } from "../api/clock.js";
+import { useSharedSecond } from "../api/second-clock.js";
 import { StatusMark } from "../design/status.js";
 import { announce, announceEscalation, setApprovalPending } from "../interaction/announcer.js";
 import { KEYBINDINGS } from "../interaction/keybindings.js";
@@ -25,6 +26,7 @@ import {
 	CARD_EYEBROW,
 	clampText,
 	decisionChips,
+	decisionRecord,
 	decisionRows,
 	decisionTone,
 	deriveApprovalTimings,
@@ -65,16 +67,64 @@ function useAnchored(id: string | null): boolean {
 }
 const anchorId = (permissionId: string) => `approval-${permissionId}`;
 
-/** One shared second. A countdown phrased as a consequence still has to move. */
-function useSecond(active: boolean): number {
-	const [now, setNow] = useState(() => clock.now());
+/** Someone writing a message keeps their caret; an approval only announces itself to them. */
+function isTyping(element: Element | null): boolean {
+	if (element instanceof HTMLElement && element.isContentEditable) return (element.textContent ?? "").trim() !== "";
+	if (element instanceof HTMLTextAreaElement) return element.value.trim() !== "";
+	return (
+		element instanceof HTMLInputElement &&
+		["text", "search", "url", "email", "tel", "password", ""].includes(element.type) &&
+		element.value.trim() !== ""
+	);
+}
+
+/** After an answer the card's buttons are gone, so focus is on the page body or still inside a leaving card. */
+function focusLost(element: Element | null): boolean {
+	return (
+		element === null ||
+		element === document.body ||
+		!element.isConnected ||
+		element.closest(".approval-banner, .approval-card") !== null
+	);
+}
+
+/**
+ * An approval is the one thing the turn waits on, so its arrival offers the keyboard the decision:
+ * focus moves to "Allow once" unless the operator is typing. Once it is answered, focus goes back to
+ * the composer, or to the page when the composer is disabled. An open dialog keeps focus either way.
+ */
+function useApprovalFocus(id: string | null): void {
+	const last = useRef<string | null>(null);
 	useEffect(() => {
-		if (!active) return;
-		setNow(clock.now());
-		const timer = setInterval(() => setNow(clock.now()), 1000);
-		return () => clearInterval(timer);
-	}, [active]);
-	return now;
+		const previous = last.current;
+		last.current = id;
+		if (id === previous) return;
+		let ran = false;
+		// One frame lets the anchored card register, which turns the banner into its strip.
+		const frame = requestAnimationFrame(() => {
+			ran = true;
+			if (document.querySelector("dialog[open], .dialog-backdrop")) return;
+			const active = document.activeElement;
+			if (id !== null) {
+				if (isTyping(active)) return;
+				const allow = '[data-decision="allow-once"]:not(:disabled)';
+				(
+					document.querySelector<HTMLElement>(`#${CSS.escape(anchorId(id))} ${allow}`) ??
+					document.querySelector<HTMLElement>(`.approval-banner ${allow}`)
+				)?.focus();
+				return;
+			}
+			if (previous !== null && focusLost(active))
+				(
+					document.querySelector<HTMLElement>(".composer__field:not(:disabled)") ?? document.getElementById("main")
+				)?.focus();
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			// A change that never reached the page is not a transition; the next one starts from here.
+			if (!ran) last.current = previous;
+		};
+	}, [id]);
 }
 
 export type AnswerApproval = ReturnType<typeof useAnswerApproval>;
@@ -251,26 +301,38 @@ function ApprovalButtons({
 }) {
 	const answering = useIsMutating({ mutationKey: permissionMutationKey(sessionId) }) > 0;
 	const answerSent = useAnswerSent(sessionId, permission.id);
+	const describedBy = useId();
 	return (
 		<>
-			{approvalActions(permission).map((action) => (
-				<button
-					key={action.decision}
-					type="button"
-					className={action.variant === "primary" ? "primary" : ""}
-					title={action.description}
-					disabled={answering || answerSent}
-					onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
-				>
-					{action.label}
-					{action.keybinding === null ? null : (
-						<span className="approval-card__chord" aria-hidden="true">
-							{KEYBINDINGS[action.keybinding].modifiers.includes("alt") ? "Alt+" : ""}
-							{KEYBINDINGS[action.keybinding].key.toUpperCase()}
-						</span>
-					)}
-				</button>
-			))}
+			{/* The button is named by its label alone; what the choice does is its description. A title
+			    attribute was read out as the name by some tools, so the text is a hidden element instead. */}
+			{approvalActions(permission).map((action) => {
+				// The turn-ending refusal's chord is declared here; the model keeps its two wire-era answers' ids.
+				const chord = action.keybinding ?? (action.decision === "reject-and-stop" ? "rejectAndStop" : null);
+				return [
+					<button
+						key={action.decision}
+						type="button"
+						className={action.variant === "primary" ? "primary" : ""}
+						data-decision={action.decision}
+						aria-label={action.label}
+						aria-describedby={`${describedBy}-${action.decision}`}
+						disabled={answering || answerSent}
+						onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
+					>
+						{action.label}
+						{chord === null ? null : (
+							<span className="approval-card__chord" aria-hidden="true">
+								{KEYBINDINGS[chord].modifiers.includes("alt") ? "Alt+" : ""}
+								{KEYBINDINGS[chord].key.toUpperCase()}
+							</span>
+						)}
+					</button>,
+					<span key={`${action.decision}-description`} id={`${describedBy}-${action.decision}`} hidden>
+						{action.description}
+					</span>,
+				];
+			})}
 			{answering || answerSent ? (
 				<span className="approval-decision-progress" role="status">
 					{answerSent ? "Decision recorded; updating this task…" : "Sending your decision…"}
@@ -291,7 +353,7 @@ interface CardProps {
 }
 
 function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, variant }: CardProps) {
-	const now = useSecond(true);
+	const now = useSharedSecond(true);
 	const timings = deriveApprovalTimings(permission, now);
 	const facts = safetyFacts(permission, call?.locations, timings);
 	const chips = decisionChips(permission.decision);
@@ -369,13 +431,14 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	const permission = queue.first;
 	const answerSent = useAnswerSent(session.id, permission?.id);
 	const call = permission ? session.timeline.find((item) => item.toolCallId === permission.toolCallId) : undefined;
-	const now = useSecond(permission !== undefined);
+	const now = useSharedSecond(permission !== undefined);
 	const timings = permission ? deriveApprovalTimings(permission, now) : null;
 	const escalated = timings?.escalated === true;
 	const escalationWindow = timings?.declaredEscalationSeconds ?? null;
 	const id = permission?.id ?? null,
 		title = permission?.title ?? "",
 		kind = permission?.kind ?? "";
+	const spoken = permission ? approvalAnnouncement({ title, kind }, call?.locations) : "";
 
 	// The tab title has exactly one writer (client/interaction/announcer.ts), so this only raises the
 	// flag it composes from; nothing here touches `document.title` directly.
@@ -385,8 +448,9 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	}, [id]);
 	useEffect(() => {
 		if (id === null) return;
-		announce(`${approvalAnnouncement({ title, kind })} Request ${queue.position}.`, "assertive");
-	}, [id, title, kind, queue.position]);
+		announce(`${spoken} Request ${queue.position}.`, "assertive");
+	}, [id, spoken, queue.position]);
+	useApprovalFocus(id);
 	// The declared window, not the observed wait: say what the product promised.
 	useEffect(() => {
 		announceEscalation(escalated && escalationWindow !== null ? escalationWindow : null);
@@ -398,6 +462,9 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 		enabled,
 	});
 	useShortcut("reject", () => permission && answer.mutate({ id: permission.id, decision: "reject" }), { enabled });
+	const stoppable = enabled && permission?.canStopTurn === true;
+	const rejectAndStop = () => permission && answer.mutate({ id: permission.id, decision: "reject-and-stop" });
+	useShortcut("rejectAndStop", rejectAndStop, { enabled: stoppable });
 
 	const anchored = useAnchored(id);
 	if (!permission) return null;
@@ -451,7 +518,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 				call={call}
 				answer={answer}
 				eyebrow={`${bannerEyebrow(escalated)} · ${queue.position}`}
-				hint={KEYBOARD_HINT}
+				hint={permission.canStopTurn ? `${KEYBOARD_HINT} · Alt+X rejects and stops the turn` : KEYBOARD_HINT}
 				variant="banner"
 			/>
 		</section>
@@ -475,7 +542,15 @@ export function AnchoredApproval({
 	const permission = permissionForCall(session, item);
 	const permissionId = permission?.id ?? null;
 	useEffect(() => (permissionId === null ? undefined : registerAnchor(permissionId)), [permissionId]);
-	if (!permission) return null;
+	if (!permission) {
+		// An answered card leaves its outcome where it stood, so Allow or Reject never just vanishes.
+		const record = item.toolCallId === undefined ? null : decisionRecord(session.permissions, item.toolCallId);
+		return record === null ? null : (
+			<p className="approval-record approval-preview__note" data-status={record.status}>
+				{record.summary}
+			</p>
+		);
+	}
 	return (
 		<ApprovalCard
 			sessionId={session.id}

@@ -10691,7 +10691,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
+									"$ref": "#/components/schemas/Object_issues_layers_rows_4a05be25"
 								}
 							}
 						},
@@ -10858,6 +10858,9 @@
 													"timing": {
 														"$ref": "#/components/schemas/Union_d85bd6b4"
 													},
+													"timingNote": {
+														"type": "string"
+													},
 													"value": {
 														"type": "string"
 													},
@@ -10883,6 +10886,9 @@
 														"type": "string"
 													},
 													"confirm": {
+														"type": "string"
+													},
+													"confirmValue": {
 														"type": "string"
 													}
 												},
@@ -11130,6 +11136,9 @@
 															"timing": {
 																"$ref": "#/components/schemas/Union_d85bd6b4"
 															},
+															"timingNote": {
+																"type": "string"
+															},
 															"value": {
 																"type": "string"
 															},
@@ -11155,6 +11164,9 @@
 																"type": "string"
 															},
 															"confirm": {
+																"type": "string"
+															},
+															"confirmValue": {
 																"type": "string"
 															}
 														},
@@ -12324,6 +12336,29 @@
 													"maxLength": 128
 												},
 												"fork": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
+										"snapshots": {
+											"type": "object",
+											"required": ["version", "list", "preview", "restore"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"list": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"preview": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"restore": {
 													"type": "string",
 													"maxLength": 128
 												}
@@ -18326,7 +18361,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_b5ff992a"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
 								}
 							}
 						},
@@ -18390,7 +18425,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_level_source_ac199f39"
+									"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
 								}
 							}
 						},
@@ -18482,7 +18517,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_level_source_ac199f39"
+									"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
 								}
 							}
 						},
@@ -19363,7 +19398,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_b5ff992a"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
 								}
 							}
 						},
@@ -19458,7 +19493,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_b5ff992a"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
 								}
 							}
 						},
@@ -19508,7 +19543,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_b5ff992a"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
 									}
 								}
 							}
@@ -19587,6 +19622,7 @@
 													"workersComplete",
 													"activeJobs",
 													"nodes",
+													"runs",
 													"recoveredOrphan",
 													"untouched"
 												],
@@ -19732,6 +19768,55 @@
 															"maxLength": 256
 														},
 														"maxItems": 128
+													},
+													"runs": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["runId", "agentId", "state", "node"],
+															"properties": {
+																"runId": {
+																	"type": "string",
+																	"maxLength": 128
+																},
+																"agentId": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 128
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"state": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "active"
+																		},
+																		{
+																			"type": "string",
+																			"const": "queued"
+																		}
+																	]
+																},
+																"node": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"maxLength": 256
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 64
 													},
 													"recoveredOrphan": {
 														"type": "boolean"
@@ -19999,7 +20084,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_b5ff992a"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
 								}
 							}
 						},
@@ -22960,7 +23045,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_82be1402"
+									"$ref": "#/components/schemas/Union_c42a87cf"
 								}
 							}
 						},
@@ -23055,7 +23140,1207 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_82be1402"
+									"$ref": "#/components/schemas/Union_c42a87cf"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/snapshots": {
+			"get": {
+				"operationId": "sessionSnapshots",
+				"summary": "The workspace snapshots this task holds, newest first, as the terminal's /rewind lists them",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["snapshots", "truncated"],
+									"properties": {
+										"snapshots": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["n", "at", "reason", "differs", "skipped"],
+												"properties": {
+													"n": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"at": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"reason": {
+														"type": "string",
+														"maxLength": 512
+													},
+													"tool": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"turnId": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"differs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"skipped": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 100
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/snapshots/{n}": {
+			"get": {
+				"operationId": "sessionSnapshotPreview",
+				"summary": "What restoring a workspace snapshot would write, remove and keep",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "n",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9][0-9]{0,8}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["kind", "n", "restore", "remove", "kept", "refs", "truncated"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "plan"
+												},
+												"n": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"restore": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"remove": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"kept": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"refs": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["kind", "label", "state", "recover"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "head"
+																	},
+																	{
+																		"type": "string",
+																		"const": "stash"
+																	},
+																	{
+																		"type": "string",
+																		"const": "branch"
+																	}
+																]
+															},
+															"label": {
+																"type": "string",
+																"maxLength": 512
+															},
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "in-place"
+																	},
+																	{
+																		"type": "string",
+																		"const": "moved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gone"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															"recover": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 1024
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "unavailable"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/snapshots/{n}/restore": {
+			"post": {
+				"operationId": "sessionSnapshotRestore",
+				"summary": "Restore the workspace files from a snapshot, taking an undo snapshot first",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "n",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9][0-9]{0,8}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["kind", "n", "undo", "restored", "removed", "kept", "failed", "refs", "truncated"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "restored"
+												},
+												"n": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"undo": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"restored": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"removed": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"kept": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"failed": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"refs": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["kind", "label", "state", "recover"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "head"
+																	},
+																	{
+																		"type": "string",
+																		"const": "stash"
+																	},
+																	{
+																		"type": "string",
+																		"const": "branch"
+																	}
+																]
+															},
+															"label": {
+																"type": "string",
+																"maxLength": 512
+															},
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "in-place"
+																	},
+																	{
+																		"type": "string",
+																		"const": "moved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gone"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															"recover": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 1024
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "unavailable"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason", "undo"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "failed"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												},
+												"undo": {
+													"type": "integer",
+													"minimum": 1
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/transcript": {
+			"get": {
+				"operationId": "sessionTranscript",
+				"summary": "The task's transcript as the terminal's /export writes it, for the browser to save",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "format",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string",
+									"const": "html"
+								},
+								{
+									"type": "string",
+									"const": "markdown"
+								}
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["filename", "mediaType", "text"],
+									"properties": {
+										"filename": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 160
+										},
+										"mediaType": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "text/html"
+												},
+												{
+													"type": "string",
+													"const": "text/markdown"
+												}
+											]
+										},
+										"text": {
+											"type": "string",
+											"maxLength": 16777216
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/trust/{surface}": {
+			"get": {
+				"operationId": "trustPreview",
+				"summary": "Every file, script and package a project trust surface holds, with the digest an approval names",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "surface",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"$ref": "#/components/schemas/Union_2b85be37"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["workspaceRoot", "surface", "files", "contentHash", "verdict"],
+									"properties": {
+										"workspaceRoot": {
+											"type": "string",
+											"maxLength": 4096
+										},
+										"surface": {
+											"$ref": "#/components/schemas/Union_2b85be37"
+										},
+										"files": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["path", "text", "hash"],
+												"properties": {
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"text": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 262144
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hash": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 128
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"error": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"truncatedFrom": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										},
+										"contentHash": {
+											"anyOf": [
+												{
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"verdict": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "trusted"
+												},
+												{
+													"type": "string",
+													"const": "untrusted"
+												},
+												{
+													"type": "string",
+													"const": "changed"
+												}
+											]
+										},
+										"scripts": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["path", "text", "hash"],
+												"properties": {
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"text": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 262144
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hash": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 128
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"error": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"truncatedFrom": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										},
+										"packages": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "source", "kind", "enabled"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"maxLength": 1024
+													},
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 4096
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"enabled": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 1024
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "trustApprove",
+				"summary": "Trust a project surface at the digest of the preview the operator reviewed",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "surface",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"$ref": "#/components/schemas/Union_2b85be37"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["hash"],
+								"properties": {
+									"hash": {
+										"type": "string",
+										"pattern": "^[0-9a-f]{64}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/memory/pending": {
+			"get": {
+				"operationId": "memoryPending",
+				"summary": "Memory lessons waiting for review, newest first",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["records"],
+									"properties": {
+										"records": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"scope",
+													"key",
+													"lesson",
+													"appliesWhen",
+													"avoidWhen",
+													"confidence",
+													"evidenceRefs",
+													"createdAt",
+													"approved"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^mem-[a-f0-9]{16}$"
+													},
+													"scope": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"key": {
+														"type": "string",
+														"maxLength": 1024
+													},
+													"lesson": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"appliesWhen": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"avoidWhen": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"confidence": {
+														"type": "number",
+														"minimum": 0,
+														"maximum": 1
+													},
+													"evidenceRefs": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"createdAt": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"approved": {
+														"type": "boolean"
+													},
+													"rejectedAt": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"repository": {
+														"type": "object",
+														"required": ["key"],
+														"properties": {
+															"key": {
+																"type": "string",
+																"maxLength": 4096
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 200
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/memory/{memoryId}": {
+			"post": {
+				"operationId": "memoryDecide",
+				"summary": "Approve or reject one memory lesson waiting for review",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "memoryId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^mem-[a-f0-9]{16}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["decision"],
+								"properties": {
+									"decision": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "approve"
+											},
+											{
+												"type": "string",
+												"const": "reject"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
+									"additionalProperties": false
 								}
 							}
 						},
@@ -23171,6 +24456,13 @@
 				},
 				"maxItems": 16
 			},
+			"Array_356271b9": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_description_id_name_8cbb3cb6"
+				},
+				"maxItems": 8
+			},
 			"Array_3610e4f1": {
 				"type": "array",
 				"items": {
@@ -23236,6 +24528,12 @@
 					"$ref": "#/components/schemas/Object_share_tokens_75147379"
 				},
 				"maxItems": 32
+			},
+			"Array_541b9459": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_kind_message_origin_b279b57c"
+				}
 			},
 			"Array_5476b752": {
 				"type": "array",
@@ -23458,6 +24756,13 @@
 				},
 				"maxItems": 64
 			},
+			"Array_d390febe": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_path_why_89715cdc"
+				},
+				"maxItems": 500
+			},
 			"Array_d68bdb0a": {
 				"type": "array",
 				"items": {
@@ -23474,11 +24779,13 @@
 				},
 				"maxItems": 64
 			},
-			"Array_da4a6dba": {
+			"Array_dccae6b5": {
 				"type": "array",
 				"items": {
-					"$ref": "#/components/schemas/Object_kind_message_origin_eda6e2b3"
-				}
+					"type": "string",
+					"maxLength": 4096
+				},
+				"maxItems": 500
 			},
 			"Array_de2d36b0": {
 				"type": "array",
@@ -24255,7 +25562,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b454e3e0"
+										"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_838c32d0"
 									}
 								},
 								"additionalProperties": false
@@ -25583,7 +26890,7 @@
 										"type": "string"
 									},
 									"operation": {
-										"$ref": "#/components/schemas/Union_82be1402"
+										"$ref": "#/components/schemas/Union_c42a87cf"
 									}
 								}
 							}
@@ -27051,10 +28358,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_eggs_b454e3e0": {
+			"Object_autonomy_budget_commandsRevision_838c32d0": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_1d4e9401"
+					"$ref": "#/components/schemas/Shape_178e5e21"
 				},
 				"additionalProperties": false
 			},
@@ -27871,11 +29178,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cancellable_finishedAt_id_d92c15c4": {
+			"Object_cancellable_finishedAt_id_bc1589d9": {
 				"type": "object",
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "result"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_73a6759b"
+					"$ref": "#/components/schemas/Shape_f7ed5f9c"
 				},
 				"additionalProperties": false
 			},
@@ -27884,6 +29191,14 @@
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status"],
 				"properties": {
 					"$ref": "#/components/schemas/Shape_80e91d79"
+				},
+				"additionalProperties": false
+			},
+			"Object_cancelled_entries_title_39c51394": {
+				"type": "object",
+				"required": ["title", "entries", "truncated"],
+				"properties": {
+					"$ref": "#/components/schemas/Shape_052f2c8e"
 				},
 				"additionalProperties": false
 			},
@@ -28260,7 +29575,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_b5ff992a": {
+			"Object_config_contextWork_fleet_03daef86": {
 				"type": "object",
 				"required": [
 					"id",
@@ -28277,7 +29592,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_5fc8c4c8"
+					"$ref": "#/components/schemas/Shape_b023189c"
 				},
 				"additionalProperties": false
 			},
@@ -28648,6 +29963,25 @@
 					},
 					"failover": {
 						"enum": ["none", "approved"]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_description_id_name_8cbb3cb6": {
+				"type": "object",
+				"required": ["id", "name", "description"],
+				"properties": {
+					"id": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"description": {
+						"type": "string",
+						"maxLength": 512
 					}
 				},
 				"additionalProperties": false
@@ -29098,14 +30432,6 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_entries_title_truncated_0b4b308b": {
-				"type": "object",
-				"required": ["title", "entries", "truncated"],
-				"properties": {
-					"$ref": "#/components/schemas/Shape_108fba47"
-				},
-				"additionalProperties": false
-			},
 			"Object_estimatedTokens_mode_omittedMessages_2d692044": {
 				"type": "object",
 				"required": ["mode", "estimatedTokens", "omittedMessages"],
@@ -29181,11 +30507,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_id_kind_847e19f3": {
+			"Object_exitCode_id_kind_5ab81846": {
 				"type": "object",
 				"required": ["kind", "id", "message", "exitCode", "targets"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_52231196"
+					"$ref": "#/components/schemas/Shape_4e5db761"
 				},
 				"additionalProperties": false
 			},
@@ -29549,11 +30875,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_issues_layers_rows_bb43261c": {
+			"Object_issues_layers_rows_4a05be25": {
 				"type": "object",
 				"required": ["rows", "layers", "issues"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_e120b9e1"
+					"$ref": "#/components/schemas/Shape_e908a932"
 				},
 				"additionalProperties": false
 			},
@@ -29631,7 +30957,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_kind_message_origin_eda6e2b3": {
+			"Object_kind_message_origin_b279b57c": {
 				"type": "object",
 				"required": ["origin", "path", "kind", "message"],
 				"properties": {
@@ -29646,6 +30972,9 @@
 					},
 					"message": {
 						"type": "string"
+					},
+					"surface": {
+						"$ref": "#/components/schemas/Union_2b85be37"
 					}
 				},
 				"additionalProperties": false
@@ -29917,17 +31246,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_level_source_ac199f39": {
+			"Object_level_modes_source_c5f9dc23": {
 				"type": "object",
 				"required": ["level", "source"],
 				"properties": {
-					"level": {
-						"$ref": "#/components/schemas/Union_0657f444"
-					},
-					"source": {
-						"type": "string",
-						"maxLength": 64
-					}
+					"$ref": "#/components/schemas/Shape_fa4ddc88"
 				},
 				"additionalProperties": false
 			},
@@ -30149,6 +31472,21 @@
 					},
 					"passed": {
 						"type": "boolean"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_path_why_89715cdc": {
+				"type": "object",
+				"required": ["path", "why"],
+				"properties": {
+					"path": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"why": {
+						"type": "string",
+						"maxLength": 512
 					}
 				},
 				"additionalProperties": false
@@ -31514,6 +32852,29 @@
 					"$ref": "#/components/schemas/Union_74cd918b"
 				}
 			},
+			"Shape_052f2c8e": {
+				"title": {
+					"anyOf": [
+						{
+							"type": "string",
+							"maxLength": 4096
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"entries": {
+					"$ref": "#/components/schemas/Array_2c1edd69"
+				},
+				"truncated": {
+					"type": "boolean"
+				},
+				"cancelled": {
+					"type": "integer",
+					"minimum": 0
+				}
+			},
 			"Shape_06b99b32": {
 				"coverage": {
 					"$ref": "#/components/schemas/Object_gaps_journals_unavailable_1f981b3f"
@@ -31634,25 +32995,6 @@
 					"$ref": "#/components/schemas/Object_contract_contractKind_elapsedMs_3cdbab98"
 				}
 			},
-			"Shape_108fba47": {
-				"title": {
-					"anyOf": [
-						{
-							"type": "string",
-							"maxLength": 4096
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"entries": {
-					"$ref": "#/components/schemas/Array_2c1edd69"
-				},
-				"truncated": {
-					"type": "boolean"
-				}
-			},
 			"Shape_10c72712": {
 				"key": {
 					"type": "string",
@@ -31701,6 +33043,42 @@
 					"$ref": "#/components/schemas/Object_canStopTurn_decision_escalateAt_da5b47bd"
 				}
 			},
+			"Shape_178e5e21": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
+				},
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
+				},
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_cancelled_entries_title_39c51394"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
+				},
+				"commandsRevision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"readouts": {
+					"$ref": "#/components/schemas/Object_autonomy_retry_skills_c940d2cd"
+				}
+			},
 			"Shape_189a8354": {
 				"type": {
 					"type": "string",
@@ -31716,38 +33094,6 @@
 				},
 				"usd": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
-				}
-			},
-			"Shape_1d4e9401": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_source_ac199f39"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
-				},
-				"readouts": {
-					"$ref": "#/components/schemas/Object_autonomy_retry_skills_c940d2cd"
 				}
 			},
 			"Shape_1eb2e845": {
@@ -32318,6 +33664,29 @@
 					]
 				}
 			},
+			"Shape_4e5db761": {
+				"kind": {
+					"type": "string",
+					"const": "targets"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"message": {
+					"type": "string"
+				},
+				"exitCode": {
+					"type": "number",
+					"const": 0
+				},
+				"targets": {
+					"$ref": "#/components/schemas/Object_targets_truncated_f813c111"
+				},
+				"settings": {
+					"$ref": "#/components/schemas/Object_issues_layers_rows_4a05be25"
+				}
+			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -32348,29 +33717,6 @@
 				},
 				"total": {
 					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				}
-			},
-			"Shape_52231196": {
-				"kind": {
-					"type": "string",
-					"const": "targets"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"message": {
-					"type": "string"
-				},
-				"exitCode": {
-					"type": "number",
-					"const": 0
-				},
-				"targets": {
-					"$ref": "#/components/schemas/Object_targets_truncated_f813c111"
-				},
-				"settings": {
-					"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
 				}
 			},
 			"Shape_52915b31": {
@@ -32775,66 +34121,6 @@
 					"$ref": "#/components/schemas/Object_display_fact_7a4ef687"
 				}
 			},
-			"Shape_5fc8c4c8": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_029d694f"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_b454e3e0"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_61296a73": {
 				"shellReused": {
 					"type": "boolean"
@@ -33220,38 +34506,6 @@
 				},
 				"truncated": {
 					"type": "boolean"
-				}
-			},
-			"Shape_73a6759b": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"cancellable": {
-					"type": "boolean"
-				},
-				"startedAt": {
-					"type": "string"
-				},
-				"progress": {
-					"$ref": "#/components/schemas/Array_62d9e6ab"
-				},
-				"status": {
-					"type": "string",
-					"const": "succeeded"
-				},
-				"finishedAt": {
-					"type": "string"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Union_5f05c598"
 				}
 			},
 			"Shape_74fd8979": {
@@ -33686,6 +34940,66 @@
 				},
 				"payload": {
 					"$ref": "#/components/schemas/Object_agentId_attempt_node_66c67273"
+				}
+			},
+			"Shape_b023189c": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_029d694f"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_838c32d0"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
 				}
 			},
 			"Shape_b3be4c3e": {
@@ -34539,17 +35853,6 @@
 					"$ref": "#/components/schemas/Union_46b9d05f"
 				}
 			},
-			"Shape_e120b9e1": {
-				"rows": {
-					"$ref": "#/components/schemas/Array_296ec6ce"
-				},
-				"layers": {
-					"$ref": "#/components/schemas/Array_ea04312e"
-				},
-				"issues": {
-					"$ref": "#/components/schemas/Array_da4a6dba"
-				}
-			},
 			"Shape_e2cced2d": {
 				"id": {
 					"type": "integer",
@@ -34596,6 +35899,17 @@
 				},
 				"closed": {
 					"$ref": "#/components/schemas/Union_76a27b10"
+				}
+			},
+			"Shape_e908a932": {
+				"rows": {
+					"$ref": "#/components/schemas/Array_296ec6ce"
+				},
+				"layers": {
+					"$ref": "#/components/schemas/Array_ea04312e"
+				},
+				"issues": {
+					"$ref": "#/components/schemas/Array_541b9459"
 				}
 			},
 			"Shape_ed19653f": {
@@ -34806,6 +36120,54 @@
 				},
 				"changedAfterCommit": {
 					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				}
+			},
+			"Shape_f7ed5f9c": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"cancellable": {
+					"type": "boolean"
+				},
+				"startedAt": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/components/schemas/Array_62d9e6ab"
+				},
+				"status": {
+					"type": "string",
+					"const": "succeeded"
+				},
+				"finishedAt": {
+					"type": "string"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Union_e8a6bdcb"
+				}
+			},
+			"Shape_fa4ddc88": {
+				"level": {
+					"$ref": "#/components/schemas/Union_0657f444"
+				},
+				"source": {
+					"type": "string",
+					"maxLength": 64
+				},
+				"modes": {
+					"$ref": "#/components/schemas/Array_356271b9"
+				},
+				"unrecognized": {
+					"type": "string",
+					"maxLength": 64
 				}
 			},
 			"Shape_fd2af4a0": {
@@ -36389,6 +37751,34 @@
 					}
 				]
 			},
+			"Union_2b85be37": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "safety"
+					},
+					{
+						"type": "string",
+						"const": "hooks"
+					},
+					{
+						"type": "string",
+						"const": "settings"
+					},
+					{
+						"type": "string",
+						"const": "extensions"
+					},
+					{
+						"type": "string",
+						"const": "plugins"
+					},
+					{
+						"type": "string",
+						"const": "handbook"
+					}
+				]
+			},
 			"Union_2c0a1e0b": {
 				"anyOf": [
 					{
@@ -36827,19 +38217,6 @@
 					}
 				]
 			},
-			"Union_5f05c598": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_id_message_304430bd"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_9f278733"
-					}
-				]
-			},
 			"Union_5f470bd4": {
 				"anyOf": [
 					{
@@ -37199,22 +38576,6 @@
 					},
 					{
 						"type": "null"
-					}
-				]
-			},
-			"Union_82be1402": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_d92c15c4"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_196f4e51"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},
@@ -37914,6 +39275,22 @@
 					}
 				]
 			},
+			"Union_c42a87cf": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bc1589d9"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_196f4e51"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
+					}
+				]
+			},
 			"Union_c6270044": {
 				"anyOf": [
 					{
@@ -38247,6 +39624,19 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_e8a6bdcb": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_id_message_304430bd"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_5ab81846"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_9f278733"
 					}
 				]
 			},

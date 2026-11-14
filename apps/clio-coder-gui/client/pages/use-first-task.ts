@@ -14,6 +14,7 @@ import {
 	releaseFirstRequest,
 	updateHomeDraft,
 } from "./home-draft.js";
+import { rememberStarted, settleStarted } from "./started-request.js";
 import { setupStatusInput } from "./target-onboarding.js";
 
 /** Every retry is explicit and uses the original body, workspace, session and command keys. */
@@ -22,7 +23,12 @@ export function useFirstTask(client: Client) {
 	const navigate = useNavigate();
 	return useMutation({
 		mutationFn: async () => {
+			settleStarted();
 			if (!acquireFirstRequest()) throw new Error("This tab is already starting a task.");
+			let handedOff = false;
+			// Warm the task route while the requests run, so navigating does not wait on its chunk.
+			// Name the export: a bare import() keeps every export of the module alive and defeats tree-shaking.
+			void import("./sessions.js").then(({ Session }) => Session);
 			try {
 				const draft = homeDraft();
 				let request = draft.pending;
@@ -88,15 +94,21 @@ export function useFirstTask(client: Client) {
 					undefined,
 					request.epoch,
 				);
-				confirmFirstRequest(request);
 				rememberPrompt(request.exactTurnBody.text);
 				rememberWorkspace(workspaceId);
 				// The session creation snapshot predates the admitted turn; let the stream or a fresh read supply it.
 				void queries.invalidateQueries({ queryKey: ["sessions"] });
 				void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+				// Home stays busy with the words in its field until the task screen mounts and settles this.
+				const sent = request;
+				rememberStarted(sessionId, sent.exactTurnBody.text, () => {
+					confirmFirstRequest(sent);
+					releaseFirstRequest();
+				});
+				handedOff = true;
 				void navigate(`/sessions/${sessionId}`);
 			} finally {
-				releaseFirstRequest();
+				if (!handedOff) releaseFirstRequest();
 			}
 		},
 		retry: false,

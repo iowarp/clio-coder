@@ -14,6 +14,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useNavigate } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { CommandRequest, QueueEditRequest, QueueSnapshot } from "../../contracts/steering.js";
@@ -28,7 +29,9 @@ import { countRender } from "../render/render-probe.js";
 import { requestReport } from "../report/report-events.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { useSessionCommands } from "../shell/SessionControls.js";
+import { useShell } from "../shell/shell-context.js";
 import { taskTitle } from "../shell/shell-model.js";
+import { useRenameTask } from "../shell/tasks.js";
 import { AutonomyPill } from "./AutonomyPill.js";
 import { persistAttachments, savedAttachments } from "./attachment-drafts.js";
 import { readAttachment } from "./attachment-image.js";
@@ -83,19 +86,23 @@ import {
 	resolveSteerTarget,
 	steerCandidates,
 } from "./mention-model.js";
+import { preloadPanels } from "./on-demand-panels.js";
 import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
-import { RoutePicker } from "./RoutePicker.js";
+import { openRoutePicker, RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import { SlashActionDialog, SlashPalette, slashOptionId } from "./SlashPalette.js";
 import {
+	aliasEntries,
 	argumentSuggestions,
 	completedDraft,
 	exactEntry,
 	filterSlashEntries,
 	parseSlashLine,
+	resolveAlias,
 	type SlashAction,
+	type SlashAlias,
 	type SlashEntry,
 	slashEntries,
 	slashQuery,
@@ -107,6 +114,8 @@ import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
 const focusHandlers = new Map<string, () => void>();
+/** Catalog runners keyed by session, so the Ctrl+K palette runs a command where its output is shown. */
+const commandRunners = new Map<string, (name: string) => boolean>();
 
 function saveAttachment(item: Attachment): void {
 	const url =
@@ -123,6 +132,14 @@ function saveAttachment(item: Attachment): void {
 /** Put the caret in this session's composer, for a control that is leaving the page with focus. */
 export function focusComposer(sessionId: string): void {
 	focusHandlers.get(sessionId)?.();
+}
+
+/**
+ * Run a catalog command that takes no arguments, as if `/name` had been submitted here. False when this
+ * session has no composer on screen or the line does not parse to a command; nothing was sent then.
+ */
+export function runComposerCommand(sessionId: string, name: string): boolean {
+	return commandRunners.get(sessionId)?.(name) ?? false;
 }
 
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
@@ -269,17 +286,25 @@ export const Composer = memo(function Composer({
 	const [dismissed, setDismissed] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<SlashAction | null>(null);
 	const [slashError, setSlashError] = useState<string | null>(null);
+	// What a typed terminal name said instead of running, kept until the draft it was said about changes.
+	const [aliasNote, setAliasNote] = useState<{ text: string; message: string } | null>(null);
+	const shell = useShell();
+	const navigate = useNavigate();
+	const renameTask = useRenameTask(client);
 	// The branch tree is keyed on settled turns, the way the pane passes it.
 	const [settledTurns, setSettledTurns] = useState(0);
 	useEffect(() => {
 		if (runningTurnId === null) setSettledTurns((count) => count + 1);
 	}, [runningTurnId]);
-	const entries = useMemo(
-		() => slashEntries({ capabilities: capabilities.data, catalog: commandCatalog.data, paneAvailable: pane !== null }),
+	const slashFacts = useMemo(
+		() => ({ capabilities: capabilities.data, catalog: commandCatalog.data, paneAvailable: pane !== null }),
 		[capabilities.data, commandCatalog.data, pane],
 	);
+	const entries = useMemo(() => slashEntries(slashFacts), [slashFacts]);
+	// Terminal names the app answers are offered after everything the task lists itself, and only in the slash list.
+	const typedEntries = useMemo(() => [...entries, ...aliasEntries(slashFacts, entries)], [entries, slashFacts]);
 	const query = sessionState === "open" ? slashQuery(draft.text) : null;
-	const matches = useMemo(() => (query === null ? [] : filterSlashEntries(entries, query)), [entries, query]);
+	const matches = useMemo(() => (query === null ? [] : filterSlashEntries(typedEntries, query)), [typedEntries, query]);
 	const paletteOpen = matches.length > 0 && dismissed !== draft.text && dialog === null && !actionsOpen;
 	const active = Math.min(activeIndex, Math.max(0, matches.length - 1));
 	const line = slashDraft ? parseSlashLine(draft.text, commandCatalog.data) : null;
@@ -347,6 +372,8 @@ export const Composer = memo(function Composer({
 	const browse = useRef<(HistoryBrowse & { readonly text: string }) | null>(null);
 	// Ctrl+R: the sent messages read when the search opened, or null while it is closed.
 	const [historySearch, setHistorySearch] = useState<readonly string[] | null>(null);
+	// History search and the slash dialogs load apart from the task page; fetch them once it is idle.
+	useEffect(() => preloadPanels(), []);
 	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
 	const queuePolicy = queueAccess(steering, sessionState, running);
@@ -440,6 +467,19 @@ export const Composer = memo(function Composer({
 	});
 	const { controls } = useSessionCommands();
 	const control = controls.records.find((row) => row.sessionId === sessionId && row.stage !== "complete");
+	// A confirmed stop settles before the turn's own end arrives. Until it does, the control keeps saying
+	// Stopping rather than flicking back to Stop for the few frames in between.
+	const stopping =
+		control ??
+		controls.records.find(
+			(row) =>
+				row.sessionId === sessionId &&
+				row.action === "stop" &&
+				row.stage === "complete" &&
+				!row.nothingStopped &&
+				row.turnId !== null &&
+				row.turnId === runningTurnId,
+		);
 	const stopTurn = () => {
 		if (!runningTurnId) return;
 		const snapshot = queries.getQueryData<SessionSnapshot>(["session", sessionId]);
@@ -490,6 +530,20 @@ export const Composer = memo(function Composer({
 			baseline: contextBaseline(queries, sessionId),
 		});
 	};
+	const runNamed = useRef<(name: string) => boolean>(() => false);
+	runNamed.current = (name) => {
+		const parsed = parseSlashLine(`/${name}`, commandCatalog.data);
+		if (parsed?.kind !== "command") return false;
+		runCommand(parsed.plan, null);
+		return true;
+	};
+	useEffect(() => {
+		const run = (name: string) => runNamed.current(name);
+		commandRunners.set(sessionId, run);
+		return () => {
+			if (commandRunners.get(sessionId) === run) commandRunners.delete(sessionId);
+		};
+	}, [sessionId]);
 	// A context command's operation card reports its progress and result. The command line steps aside for
 	// it, and only for it: a refusal before any operation began has no card and keeps its own output.
 	const commandKind = command.variables ? contextCommandKind(command.variables.request) : null;
@@ -564,10 +618,49 @@ export const Composer = memo(function Composer({
 			placeCaretAtEnd();
 			return;
 		}
+		if (entry.kind === "alias") {
+			if (entry.alias.needsText) {
+				store.write(completedDraft(entry));
+				placeCaretAtEnd();
+			} else runAlias(entry.alias, "");
+			return;
+		}
 		store.clear();
 		if (entry.kind === "pane") pane?.show(entry.view);
 		else if (entry.action === "report") requestReport({ sessionId });
 		else setDialog(entry.action);
+	};
+	// A terminal name runs the app's own control for it. A notice keeps the draft; anything else clears it,
+	// as a command does once it ran.
+	const runAlias = (alias: SlashAlias, rest: string) => {
+		setSlashError(null);
+		const note = (message: string) => setAliasNote({ text: store.snapshot().text, message });
+		const target = alias.target;
+		if (target.kind === "notice") return note(target.message);
+		if (target.kind === "command") {
+			const line = `/${target.command} ${target.subcommand}${target.passRest && rest !== "" ? ` ${rest}` : ""}`;
+			const parsed = parseSlashLine(line, commandCatalog.data);
+			if (parsed === null) return note(`/${alias.name} is not available in this task.`);
+			if (parsed.kind === "invalid") return note(parsed.error);
+			runCommand(parsed.plan, store.snapshot().text);
+			return;
+		}
+		if (target.kind === "control" && target.control === "rename") {
+			if (rest === "") return note("Type a name after /rename, or click the task title.");
+			renameTask.mutate(
+				{ sessionId, workspaceId, label: rest },
+				{ onError: (error) => setAliasNote({ text: store.snapshot().text, message: error.message }) },
+			);
+		}
+		setAliasNote(null);
+		store.clear();
+		if (target.kind === "pane") pane?.show(target.view);
+		else if (target.kind === "action") setDialog(target.action);
+		else if (target.kind === "navigate") void navigate(target.path);
+		else if (target.control === "help") shell?.openHelp();
+		else if (target.control === "new") shell?.startTask();
+		else if (target.control === "model" && !openRoutePicker(sessionId))
+			void navigate(`/settings/models?${new URLSearchParams({ workspace: workspaceId })}`);
 	};
 
 	const drain = useMutation({
@@ -617,6 +710,8 @@ export const Composer = memo(function Composer({
 			: capabilities.error
 				? "failed"
 				: "checking";
+	const unknownSlashOf = (text: string) => slashNotice(text, commandCatalog.data)?.message;
+	const unknownSlash = unknownSlashOf(draft.text);
 	const situation = {
 		sessionState,
 		turnRunning: running,
@@ -626,6 +721,7 @@ export const Composer = memo(function Composer({
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 		shell: capabilities.data?.shell !== undefined,
 		...(viewing === null ? {} : { viewing }),
+		...(unknownSlash === undefined ? {} : { unknownSlash }),
 	} as const;
 	const intent = submitIntent(draft, situation);
 	const delivery = composerDelivery(situation, draft.mode, contextRunning, readingAttachments);
@@ -717,7 +813,12 @@ export const Composer = memo(function Composer({
 		// A line naming a session action or a catalog command runs it instead of becoming a prompt.
 		// Anything else that starts with a slash, a prompt template say, still goes to the agent.
 		if (sessionState === "open" && current.text.trimStart().startsWith("/")) {
-			const exact = exactEntry(entries, current.text);
+			const exact = exactEntry(typedEntries, current.text);
+			if (exact?.kind === "alias") {
+				rememberPrompt(current.text);
+				runAlias(exact.alias, "");
+				return;
+			}
 			if (exact) {
 				pick(exact);
 				return;
@@ -732,8 +833,16 @@ export const Composer = memo(function Composer({
 				runCommand(parsed.plan, current.text);
 				return;
 			}
+			const typed = parsed === null ? resolveAlias(current.text, slashFacts) : null;
+			if (typed !== null) {
+				rememberPrompt(current.text);
+				runAlias(typed.alias, typed.rest);
+				return;
+			}
 		}
-		const next = submitIntent(current, situation);
+		const currentSlash = unknownSlashOf(current.text);
+		const { unknownSlash: _, ...rest } = situation;
+		const next = submitIntent(current, currentSlash === undefined ? rest : { ...rest, unknownSlash: currentSlash });
 		if (
 			next.kind !== "blocked" &&
 			shellBlock(next.kind, attached.current.length) === null &&
@@ -851,7 +960,7 @@ export const Composer = memo(function Composer({
 								<p className="slash-palette__error">{slashError}</p>
 							) : (
 								<p className="slash-palette__keys">
-									<kbd>{enterSends ? "Enter" : "Ctrl/⌘+Enter"}</kbd> runs{" "}
+									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd> runs{" "}
 									{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
 								</p>
 							)}
@@ -1100,6 +1209,25 @@ export const Composer = memo(function Composer({
 								setHistorySearch(readHistory());
 								return;
 							}
+							// The stop chord never types into the draft; the page-level shortcut does the stopping.
+							if (matchesKeybinding(KEYBINDINGS.cancelTurn, event)) {
+								event.preventDefault();
+								return;
+							}
+							// Alt+S delivers the draft as immediate direction, whichever delivery is chosen.
+							if (
+								!event.nativeEvent.isComposing &&
+								matchesKeybinding(KEYBINDINGS.sendNow, event) &&
+								running &&
+								draft.text.trim() !== "" &&
+								modes.some((offer) => offer.mode === "next-slot")
+							) {
+								event.preventDefault();
+								store.chooseMode("next-slot");
+								if (!send.isPending && !send.isIdle) send.reset();
+								submit();
+								return;
+							}
 							if (paletteOpen && !event.nativeEvent.isComposing) {
 								const plain = !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
 								const count = matches.length;
@@ -1147,7 +1275,7 @@ export const Composer = memo(function Composer({
 							// Esc with nothing open stops the turn, as it does in the terminal, on the second press.
 							if (event.key === "Escape" && plain && running && !layerOwned && !optionsOpen) {
 								event.preventDefault();
-								if (stopArmed && !control) stopTurn();
+								if (stopArmed && !stopping) stopTurn();
 								setStopArmed(!stopArmed);
 								return;
 							}
@@ -1224,8 +1352,9 @@ export const Composer = memo(function Composer({
 								{estimate.text}
 							</span>
 						) : null}
-						{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"} · @ adds a file or folder · ↑
-						recalls earlier messages, Ctrl/⌘+R searches them
+						{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/Cmd+Enter sends"}
+						{running && modes.some((offer) => offer.mode === "next-slot") ? " · Alt+S sends now" : ""} · / lists commands · @
+						adds a file or folder · ↑ recalls earlier messages, Ctrl/Cmd+R searches them
 						{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 					</p>
 					<div className="composer__actions">
@@ -1325,12 +1454,18 @@ export const Composer = memo(function Composer({
 										Enter sends
 									</label>
 									<p className="composer__options-note">
-										{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @ adds a file or folder.
-										↑ recalls earlier messages and Ctrl/⌘+R searches them.
+										{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/Cmd+Enter sends."} @ adds a file or
+										folder. ↑ recalls earlier messages and Ctrl/Cmd+R searches them.
 									</p>
 								</div>
 							</details>
-							<AutonomyPill client={client} sessionId={sessionId} capabilities={capabilities.data} locked={running} />
+							<AutonomyPill
+								client={client}
+								sessionId={sessionId}
+								capabilities={capabilities.data}
+								locked={running}
+								chord={sessionState === "open"}
+							/>
 						</div>
 						<div className="composer__route-actions">
 							<RoutePicker
@@ -1339,6 +1474,7 @@ export const Composer = memo(function Composer({
 								route={route}
 								running={running}
 								capabilities={capabilities.data}
+								chord={sessionState === "open"}
 							/>
 							{steerChoice ? (
 								<fieldset className="composer__delivery">
@@ -1366,14 +1502,14 @@ export const Composer = memo(function Composer({
 								<button
 									className="composer__icon-button composer__stop composer__stop--live"
 									type="button"
-									disabled={!!control}
+									disabled={!!stopping}
 									onClick={() => stopTurn()}
-									aria-label={control ? (control.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
+									aria-label={stopping ? (stopping.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
 									title="End this turn now. Nothing further is run."
 								>
 									<Icon name="stop" />
 									<span aria-hidden="true">
-										{control ? (control.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
+										{stopping ? (stopping.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
 									</span>
 								</button>
 							) : null}
@@ -1406,7 +1542,10 @@ export const Composer = memo(function Composer({
 							)}
 						</p>
 					) : null}
-					{intent.kind === "blocked" && draft.text.trim() !== "" && intent.reason !== delivery.detail ? (
+					{intent.kind === "blocked" &&
+					draft.text.trim() !== "" &&
+					intent.reason !== delivery.detail &&
+					intent.reason !== slash?.message ? (
 						<p className="composer__blocked" role="status">
 							{intent.reason}
 							{running && steeringUnavailable === "failed" ? (
@@ -1425,6 +1564,12 @@ export const Composer = memo(function Composer({
 						<p className="composer__notice" role="status">
 							<StatusMark tone="neutral" label="Shell" />
 							{shellHint}
+						</p>
+					) : null}
+					{aliasNote !== null && aliasNote.text === draft.text ? (
+						<p className="composer__notice" role="status">
+							<StatusMark tone="neutral" label="Not run" />
+							{aliasNote.message}
 						</p>
 					) : null}
 					{slash && !send.isPending ? (

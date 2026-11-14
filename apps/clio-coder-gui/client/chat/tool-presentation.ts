@@ -16,7 +16,7 @@ import type { TimelineItem } from "../../contracts/sessions.js";
 import { formatDuration as formatSpan } from "../api/clock.js";
 import type { StatusTone } from "../design/status.js";
 import { hasStyle, stripAnsi } from "../render/ansi.js";
-import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
+import { type DiffPanel, diffCounts, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
 import { type ChainStepStatus, readGateway } from "./gateway-model.js";
 
 /** Generic tool-label aliases from Clio Coder. */
@@ -364,6 +364,31 @@ export function stoppedRun(
 	return (item.status === "failed" || wire.isError) && (outcome === "canceled" || outcome === "cancelled");
 }
 
+/**
+ * Spec 04's words for a call settled at its gate: "Rejected" when the operator pressed Reject, "Refused"
+ * when the engine declined it without asking. Only the session's permissions can tell the two apart.
+ */
+export const declinedLabel = (decision: string | undefined): string =>
+	decision === "rejected" ? "Rejected" : "Refused";
+
+export interface DispatchTask {
+	readonly agent: string;
+	/** The task text, or "" when the call carried none. */
+	readonly task: string;
+}
+
+/** Every run a dispatch asks for: the `tasks` batch first, else the single `agent`/`task` pair. */
+export function dispatchTasks(input: Record<string, unknown>): readonly DispatchTask[] {
+	const shared = str(input.agent) ?? str(input.recipe) ?? "worker";
+	if (Array.isArray(input.tasks) && input.tasks.length > 0)
+		return input.tasks.map((entry) => {
+			if (typeof entry === "string") return { agent: shared, task: entry };
+			const record = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+			return { agent: str(record.agent) ?? str(record.recipe) ?? shared, task: str(record.task) ?? "" };
+		});
+	return [{ agent: shared, task: str(input.task) ?? "" }];
+}
+
 export function isSettledStatus(status: string): boolean {
 	return status === "completed" || status === "failed" || status === "cancelled" || status === "unknown";
 }
@@ -638,7 +663,7 @@ function digestFor(
 			return { text: size?.value ?? null, tone: null };
 		}
 		case "diff":
-			return diff?.diff ? { text: `+${diff.diff.adds} −${diff.diff.dels}`, tone: null } : { text: null, tone: null };
+			return diff?.diff ? { text: diffCounts(diff.diff), tone: null } : { text: null, tone: null };
 		case "matches": {
 			if (!settled) return { text: null, tone: null };
 			const rows = matches.reduce((total, group) => total + group.total, 0);
@@ -730,9 +755,9 @@ function headlineFor(name: string, input: Record<string, unknown>, fallback: str
 			}
 		}
 		case "dispatch": {
-			const agent = str(input.agent) ?? str(input.recipe) ?? "worker";
-			const task = str(input.task);
-			return `${agent} · ${task ?? "no task preview"}`;
+			const tasks = dispatchTasks(input);
+			if (tasks.length > 1) return `${tasks.length} runs · ${tasks.map((task) => task.agent).join(", ")}`;
+			return `${tasks[0]?.agent ?? "worker"} · ${tasks[0]?.task || "no task preview"}`;
 		}
 		case "configure_clio":
 			return `setting ${str(input.path) ?? ""}`.trim();
@@ -773,6 +798,8 @@ export interface PresentOptions {
 	readonly nowMs?: number;
 	/** When the call started, in ms. Only used to mark a long-running call. */
 	readonly startedAtMs?: number;
+	/** The operator's answer to this call's approval (`callDecisions`), which tells a Reject from a refusal. */
+	readonly decision?: string | undefined;
 }
 
 /** A chain's steps with the headline each would carry as a direct call. */
@@ -834,6 +861,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				resultText: wire.resultText,
 				status: item.status,
 				isError: wire.isError,
+				decision: options.decision,
 			});
 			// The diff panel prints its own note and +/- counts. Repeating them as card facts said
 			// everything twice and painted "removed 0" as a failure.
@@ -870,8 +898,17 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		case "dispatch": {
 			const runId = str(wire.details?.runId) ?? str(wire.input.runId);
 			if (runId !== null) facts.push({ label: "run", value: runId });
-			const agent = str(wire.input.agent) ?? str(wire.input.recipe);
-			if (agent !== null) facts.push({ label: "agent", value: agent });
+			const tasks = dispatchTasks(wire.input);
+			if (tasks.length > 1)
+				for (const [index, task] of tasks.entries())
+					facts.push({
+						label: `${index + 1} · ${task.agent}`,
+						value: task.task ? truncateHeadline(task.task, 120) : "no task preview",
+					});
+			else {
+				const agent = str(wire.input.agent) ?? str(wire.input.recipe);
+				if (agent !== null) facts.push({ label: "agent", value: agent });
+			}
 			break;
 		}
 		default:
@@ -916,7 +953,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		tone: refused || stopped ? "neutral" : toneFor(item.status, wire.isError),
 		// A result that reports an error is a failure even when its frame said completed.
 		statusLabel: refused
-			? "Not approved"
+			? declinedLabel(options.decision)
 			: stopped
 				? "Stopped"
 				: wire.isError && item.status === "completed"

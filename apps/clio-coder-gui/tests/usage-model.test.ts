@@ -125,6 +125,15 @@ test("the headline reads the read model's window totals and names an unpriced re
 	assert.equal(usageView(report([cost("role", exactTotal)])).knownSubtotals, null);
 });
 
+test("an all-free window says it was recorded as free and leaves which rule to the engine's amount", () => {
+	const free = { provider: 0, "target-rates": 0, catalog: 0, free: 3, none: 0 };
+	const view = usageView(
+		report([cost("role", { ...exactTotal, usd: quantity("$0.00 free (declared)", 0), pricedBy: free })]),
+	);
+	const figure = view.headline.find((item) => item.label === "Cost");
+	assert.deepEqual([figure?.value, figure?.note], ["$0.00 free (declared)", "Recorded as free"]);
+});
+
 test("session and run counts retain the read model's canonical display", () => {
 	const view = usageView(
 		report([

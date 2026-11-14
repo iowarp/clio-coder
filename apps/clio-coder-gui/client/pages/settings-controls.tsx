@@ -8,7 +8,8 @@ import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
-import { MODEL_TARGET_PATHS } from "./model-picker-model.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
+import { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "./model-picker-model.js";
 import { ModelSelect } from "./model-select.js";
 import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
 import {
@@ -192,6 +193,8 @@ function ControlRow({
 		write.reset();
 	};
 	const writable = control.access === "writable";
+	// A value-scoped confirmation (confirmValue) asks only before saving that one value.
+	const needsConfirm = !!control.confirm && (control.confirmValue === undefined || value === control.confirmValue);
 	const structured = control.kind === "json" && !!STRUCTURED_SETTINGS[control.path];
 	return (
 		<div className="setting-control" data-access={control.access} data-dirty={dirty} aria-busy={write.isPending}>
@@ -210,7 +213,9 @@ function ControlRow({
 					>
 						{sourceLabel(control.source)}
 					</Link>
-					<span title={TIMING_SENTENCE[control.timing]}>· {TIMING_PHRASE[control.timing]}</span>
+					<span title={control.timingNote ?? TIMING_SENTENCE[control.timing]}>
+						· {control.timingNote ?? TIMING_PHRASE[control.timing]}
+					</span>
 				</small>
 			</div>
 			<div className="setting-control__edit">
@@ -229,7 +234,7 @@ function ControlRow({
 									path: control.path,
 									value,
 									expectedValue: expectedValue ?? control.value,
-									...(control.confirm ? { confirmed } : {}),
+									...(needsConfirm ? { confirmed } : {}),
 								});
 							}
 						}}
@@ -311,7 +316,7 @@ function ControlRow({
 						)}
 						{control.valueHelp[value] && <p className="setting-control__help">{sentence(control.valueHelp[value])}</p>}
 						{control.kind === "list" && <small>Separate values with commas.</small>}
-						{dirty && control.confirm && (
+						{dirty && needsConfirm && (
 							<label className="setting-control__confirm">
 								<input
 									type="checkbox"
@@ -336,9 +341,7 @@ function ControlRow({
 								<button
 									type="submit"
 									className="primary"
-									disabled={
-										write.isPending || conflict || refresh.isPending || !structuredValid || (!!control.confirm && !confirmed)
-									}
+									disabled={write.isPending || conflict || refresh.isPending || !structuredValid || (needsConfirm && !confirmed)}
 								>
 									{write.isPaused ? "Waiting…" : write.isPending ? "Saving…" : "Save"}
 								</button>
@@ -424,7 +427,7 @@ function ControlRow({
 						)}
 						{saved && (
 							<p className="setting-control__saved" role="status">
-								{saved.sentences.join(" ")} {TIMING_SENTENCE[saved.timing]}
+								{saved.sentences.join(" ")} {control.timingNote ? `${control.timingNote}.` : TIMING_SENTENCE[saved.timing]}
 							</p>
 						)}
 					</form>
@@ -453,6 +456,15 @@ export function SettingsControlsView({
 	const [selectedControl, setSelectedControl] = useState<string | null>(null);
 	const section = compact ? localDiscovery.section : search.get("section"),
 		filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const searchBox = useSearchDraft(filter, (query) => {
+		setShowDrafts(false);
+		if (compact) {
+			setLocalDiscovery((current) => ({ ...current, q: query }));
+			setSelectedControl(null);
+			return;
+		}
+		setSearch(liveSearchWith("q", query), { replace: true });
+	});
 	const discover = (sectionId: string | null, query: string, replace = false) => {
 		if (compact) {
 			setLocalDiscovery({ section: sectionId, q: query });
@@ -559,7 +571,7 @@ export function SettingsControlsView({
 				<>
 					{source}
 					{target.modelsTruncated
-						? " The list shows the first 200; choose Advanced: unverified model id for one not shown."
+						? ` The list shows the first ${ACP_TARGET_MODEL_LIMIT}; choose Advanced: unverified model id for one not shown.`
 						: ""}{" "}
 					<button
 						type="button"
@@ -616,14 +628,7 @@ export function SettingsControlsView({
 			</div>
 			<label className="settings-filter">
 				Find a setting
-				<input
-					type="search"
-					value={filter}
-					onChange={(event) => {
-						discover(section, event.target.value, true);
-						setShowDrafts(false);
-					}}
-				/>
+				<input type="search" value={searchBox.value} onChange={searchBox.onChange} />
 			</label>
 			{compact ? (
 				<div className="sidebar-settings__selection">

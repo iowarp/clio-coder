@@ -23,7 +23,12 @@ export default defineConfig({
 		rolldownOptions: {
 			output: {
 				codeSplitting: {
-					groups: [{ name: "framework", test: /node_modules[\\/](react|react-dom|react-router|scheduler|@tanstack)[\\/]/ }],
+					groups: [
+						{ name: "framework", test: /node_modules[\\/](react|react-dom|react-router|scheduler|@tanstack)[\\/]/ },
+						// The app's own first-paint code ships as one chunk. Left alone, the bundler splits each module a lazy
+						// route also imports into its own preloaded file, and the small files compress worse than one.
+						{ name: "app", tags: ["$initial"], test: (id) => !/node_modules/.test(id) },
+					],
 				},
 			},
 		},

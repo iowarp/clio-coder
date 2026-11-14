@@ -668,6 +668,7 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 				return (
 					<span className="md-link md-link--blocked" title="This link was not activated: unsupported destination">
 						<Inline tokens={link.tokens} />
+						<small> (link blocked)</small>
 					</span>
 				);
 			}

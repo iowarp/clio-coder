@@ -6,10 +6,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
+import type { SessionOverview } from "../../contracts/session-overview.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
-import { discardDraftStore } from "../chat/composer-model.js";
+import { discardDraftStore } from "../chat/draft-registry.js";
 import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import type { SessionControlTarget } from "../pages/session-control-model.js";
@@ -57,6 +58,33 @@ export function useSessionOverview(client: Client, enabled = true) {
 		refetchOnWindowFocus: "always",
 		enabled,
 	});
+}
+
+/**
+ * One task's live workers as the server holds them, read from the overview the sidebar already keeps: the count, and
+ * the runs when the list is whole. Undefined while the overview does not list the task, so a caller keeps the feed.
+ */
+export function useSessionWorkers(client: Client, sessionId: string) {
+	const select = useCallback((overview: SessionOverview) => sessionWorkers(overview, sessionId), [sessionId]);
+	return useQuery({
+		queryKey: ["session-overview"],
+		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
+		staleTime: Number.POSITIVE_INFINITY,
+		refetchOnWindowFocus: "always",
+		select,
+	}).data;
+}
+
+function sessionWorkers(overview: SessionOverview, sessionId: string) {
+	const item = overview.sessions.find((row) => row.id === sessionId);
+	if (!item) return undefined;
+	const count = item.activeWorkers + item.queuedWorkers;
+	return {
+		count,
+		// A lower bound or a capped list cannot say that a run it does not name has ended.
+		runs: item.workersComplete && item.runs.length === count ? item.runs : undefined,
+		asOf: item.updatedAt,
+	};
 }
 
 export function useTaskActions(client: Client, afterNavigate?: () => void): TaskActions {

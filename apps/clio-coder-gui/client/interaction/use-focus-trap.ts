@@ -62,10 +62,22 @@ export function useFocusTrap(
 			document.removeEventListener("keydown", onKeyDown);
 			// The shell marks the page behind a layer `inert`, and it drops that attribute only on the
 			// render after this cleanup runs. Calling `focus()` inside a still-inert subtree does
-			// nothing and leaves focus on `<body>`, so the restore waits one frame for inert to clear.
-			requestAnimationFrame(() => {
-				if (previouslyFocused?.isConnected) previouslyFocused.focus();
-			});
+			// nothing and leaves focus on `<body>`, so the restore waits a frame for inert to clear and
+			// tries once more if it has not. A layer opened from nothing (a global chord with no focus)
+			// returns to the message box or the main region rather than leaving focus on `<body>`. Focus
+			// that something else already took, such as a menu a command opened, is left where it is.
+			const restore = (tries: number) =>
+				requestAnimationFrame(() => {
+					const active = document.activeElement;
+					if (active && active !== document.body) return;
+					const target =
+						previouslyFocused?.isConnected && previouslyFocused !== document.body
+							? previouslyFocused
+							: (document.querySelector<HTMLElement>(".composer__field:not(:disabled)") ?? document.getElementById("main"));
+					target?.focus();
+					if (tries > 0 && document.activeElement !== target) restore(tries - 1);
+				});
+			restore(1);
 		};
 	}, [container, active, initial]);
 }

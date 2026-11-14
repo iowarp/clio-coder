@@ -16,6 +16,8 @@ const HIDDEN = [
 	"interface.panes.workers.ratio",
 	"interface.panes.files.ratio",
 	"interface.keybindings",
+	"safety.yoloAccepted",
+	"safety.yoloUnconfinedAccepted",
 ];
 
 test("settings controls derive from the engine registry, write only the user layer, and refuse what the policy withholds", async () => {
@@ -117,6 +119,26 @@ test("settings controls derive from the engine registry, write only the user lay
 			SettingWritten,
 		);
 		assert.deepEqual(confirmed.changed, [{ path: "fleet.history.maxRuns", value: "10" }]);
+
+		// The yolo acknowledgements are recorded only by the terminal's one-time card.
+		assert.ok(!byPath.has("safety.yoloAccepted"));
+		assert.ok(!byPath.has("safety.yoloUnconfinedAccepted"));
+		assert.equal((await patch({ path: "safety.yoloAccepted", value: "true" })).status, 404);
+		assert.equal(byPath.get("safety.review.target")?.timingNote, "Terminal sessions only");
+		// Only the unconfined value asks first, with the same refusal the other confirm rows use.
+		const confinement = byPath.get("safety.yoloConfinement");
+		assert.equal(confinement?.confirmValue, "unconfined");
+		assert.match(confinement?.confirm ?? "", /outside the OS sandbox/);
+		const unconfined = await patch({ path: "safety.yoloConfinement", value: "unconfined" });
+		assert.equal(unconfined.status, 422);
+		assert.match(JSON.stringify(await unconfined.json()), /needs confirmation/);
+		const accepted = await json(
+			await patch({ path: "safety.yoloConfinement", value: "unconfined", confirmed: true }),
+			SettingWritten,
+		);
+		assert.deepEqual(accepted.changed, [{ path: "safety.yoloConfinement", value: "unconfined" }]);
+		const contained = await json(await patch({ path: "safety.yoloConfinement", value: "contained" }), SettingWritten);
+		assert.deepEqual(contained.changed, [{ path: "safety.yoloConfinement", value: "contained" }]);
 	} finally {
 		await h.close();
 	}

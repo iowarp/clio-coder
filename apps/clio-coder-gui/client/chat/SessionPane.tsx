@@ -11,10 +11,8 @@ import { useShortcutLayer } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import { ASIDE_DOCK_QUERY } from "../shell/aside-state.js";
 import { useShell } from "../shell/shell-context.js";
-import { BranchPanel } from "./BranchPanel.js";
 import { changeCounts, NO_CHANGES, summarizeChanges } from "./changes-model.js";
-import { ExtensionsPanel } from "./ExtensionsPanel.js";
-import { HandoffPanel } from "./HandoffPanel.js";
+import { BranchPanel, ExtensionsPanel, HandoffPanel } from "./on-demand-panels.js";
 import {
 	PANE_DESCRIPTIONS,
 	PANE_GROUPS,
@@ -199,25 +197,29 @@ export const SessionPane = memo(function SessionPane({
 			case "handoff":
 				return (
 					<div className="pane-drill">
-						<HandoffPanel
-							client={client}
-							sessionId={pane.id}
-							sessionOpen={open && pane.state === "open" && view === id}
-							capabilities={capabilities.data}
-							running={pane.turns.at(-1)?.status === "running"}
-						/>
+						<Suspense fallback={null}>
+							<HandoffPanel
+								client={client}
+								sessionId={pane.id}
+								sessionOpen={open && pane.state === "open" && view === id}
+								capabilities={capabilities.data}
+								running={pane.turns.at(-1)?.status === "running"}
+							/>
+						</Suspense>
 					</div>
 				);
 			case "extensions":
 				return (
 					<div className="pane-drill">
-						<ExtensionsPanel
-							client={client}
-							sessionId={pane.id}
-							sessionOpen={open && pane.state === "open" && view === id}
-							capabilities={capabilities.data}
-							running={pane.turns.at(-1)?.status === "running"}
-						/>
+						<Suspense fallback={null}>
+							<ExtensionsPanel
+								client={client}
+								sessionId={pane.id}
+								sessionOpen={open && pane.state === "open" && view === id}
+								capabilities={capabilities.data}
+								running={pane.turns.at(-1)?.status === "running"}
+							/>
+						</Suspense>
 					</div>
 				);
 			case "session":
@@ -237,14 +239,16 @@ export const SessionPane = memo(function SessionPane({
 			case "branches":
 				return (
 					<div className="pane-drill">
-						<BranchPanel
-							client={client}
-							sessionId={pane.id}
-							sessionOpen={pane.state === "open"}
-							capabilities={capabilities.data}
-							settledTurns={pane.turns.filter((turn) => turn.status !== "running").length}
-							running={pane.turns.at(-1)?.status === "running"}
-						/>
+						<Suspense fallback={null}>
+							<BranchPanel
+								client={client}
+								sessionId={pane.id}
+								sessionOpen={pane.state === "open"}
+								capabilities={capabilities.data}
+								settledTurns={pane.turns.filter((turn) => turn.status !== "running").length}
+								running={pane.turns.at(-1)?.status === "running"}
+							/>
+						</Suspense>
 					</div>
 				);
 			case "artifacts":
@@ -473,7 +477,7 @@ export const PaneToggles = memo(function PaneToggles({
 				className="wb-icon wb-icon--text"
 				aria-expanded={open}
 				aria-label={`${open ? "Hide" : "Show"} task details${trustAttention ? ", project files need review" : ""}`}
-				title="Task details (Ctrl/⌘ Shift \\)"
+				title="Task details (Ctrl/Cmd + Shift + \)"
 				onClick={() => onToggle(view, ids.pane)}
 			>
 				<Icon name="panelRight" />

@@ -4,13 +4,13 @@ import { setTimeout } from "node:timers/promises";
 import { harness } from "./harness/app.js";
 
 /**
- * The two halves of forward compatibility, and the line between them.
+ * Forward compatibility and resilience.
  *
  * An unrecognized kind is a newer engine talking to an older app: the frame is
  * logged and dropped, and the turn it arrived in still settles. A malformed
- * frame of a kind this app DOES handle is a broken peer, and it still takes the
- * turn down, because continuing there means projecting a shape no contract
- * describes. Tolerance has to stop exactly at that line or it becomes blindness.
+ * frame of a kind this app DOES handle is skipped too, but the task is told
+ * once, because continuing past it must not be silent. An engine process that
+ * ends on its own parks the task so it resumes from the saved session.
  */
 async function until(check: () => boolean) {
 	for (let index = 0; index < 400; index += 1) {
@@ -57,7 +57,7 @@ test("an unrecognized sessionUpdate kind is dropped, and the turn it arrived in 
 	assert.equal(h.supervisor.get(session.id).turns.at(-1)?.status, "succeeded");
 });
 
-test("a malformed frame of a kind this app does handle still fails the turn loudly", {
+test("a malformed frame of a kind this app does handle is skipped, the turn completes and the task is told", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "malformed-update" });
@@ -66,9 +66,29 @@ test("a malformed frame of a kind this app does handle still fails the turn loud
 		session = await h.supervisor.open(workspace.id);
 	h.supervisor.startTurn(session.id, "Read the fixture");
 	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
-	const turn = h.supervisor.get(session.id).turns.at(-1);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
+	assert.equal(snapshot.state, "open");
+	assert.deepEqual(
+		snapshot.telemetry?.notices?.filter((notice) => notice.startsWith("CLIO Coder sent an update")),
+		["CLIO Coder sent an update this app could not read; it was skipped. (non-text chunk)"],
+	);
+});
+
+test("an engine process that ends on its own fails the turn, parks the task and says so", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "crash" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(session.id, "Read the fixture");
+	await until(() => h.supervisor.get(session.id).state === "parked");
+	const snapshot = h.supervisor.get(session.id),
+		turn = snapshot.turns.at(-1);
 	assert.equal(turn?.status, "failed");
-	assert.equal(turn?.problem?.type, "urn:clio-coder:problem:upstream_acp");
+	assert.equal(turn?.problem?.detail, "The CLIO Coder engine process for this task ended unexpectedly.");
+	assert.ok(snapshot.telemetry?.notices?.some((notice) => notice.startsWith("The engine process ended unexpectedly.")));
 });
 
 test("a content-less running tool update keeps the last partial output", { timeout: 15000 }, async (t) => {

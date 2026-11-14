@@ -151,7 +151,7 @@ export function boardView(board: SessionBoard): BoardView {
 /** What a proposal did, in words; the review step is always named because a proposal is not an approval. */
 export function memoryOutcome(result: MemoryProposed): { tone: "success" | "warning" | "error"; text: string } {
 	if ("recordId" in result) {
-		const review = `Review it, then run clio-coder memory approve ${result.recordId}.`;
+		const review = "Review it under Waiting for review.";
 		return {
 			tone: "success",
 			text:

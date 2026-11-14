@@ -76,6 +76,7 @@ import type {
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { narrowTurnConstraints, snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
+import { clioStateDir } from "../../core/xdg.js";
 import type { StartupHint } from "../../domains/context/contract.js";
 import type { RunResultFacts } from "../../domains/dispatch/index.js";
 import { readRunResultFacts, readRunResultFactsForReplay, runResultWireFacts } from "../../domains/dispatch/index.js";
@@ -113,6 +114,7 @@ import { resumedSessionRoute } from "../../domains/session/resumed-route.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
+import { createWorkspaceSnapshots, type RewindKept, type RewindRef } from "../../domains/workspace-snapshots/index.js";
 import { mutationFacts, sessionApprovalTask } from "../../session-control/approval-request-facts.js";
 import type { ApprovalRequestView, MutationFacts } from "../../session-control/approval-request-view.js";
 import { RATE_MIN_WINDOW_MS } from "../../session-control/assistant-generation-timing.js";
@@ -248,6 +250,9 @@ import type {
 	AcpSessionResultMeta,
 	AcpSessionUpdateParams,
 	AcpShellResult,
+	AcpSnapshotList,
+	AcpSnapshotOutcome,
+	AcpSnapshotPlan,
 	AcpSteerResult,
 	AcpTarget,
 	AcpTargetList,
@@ -296,6 +301,12 @@ import {
 	ACP_SESSION_META_KEY,
 	ACP_SESSION_SHELL_METHOD,
 	ACP_SHELL_META_KEY,
+	ACP_SNAPSHOT_LIST_MAX,
+	ACP_SNAPSHOT_PATH_LIST_MAX,
+	ACP_SNAPSHOT_PREVIEW_METHOD,
+	ACP_SNAPSHOT_RESTORE_METHOD,
+	ACP_SNAPSHOTS_LIST_METHOD,
+	ACP_SNAPSHOTS_META_KEY,
 	ACP_TOOL_PROGRESS_META_KEY,
 	ACP_USAGE_META_KEY,
 	ACP_WORKER_ASK_META_KEY,
@@ -4018,6 +4029,16 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 									},
 								}
 							: {}),
+						...(features.session
+							? {
+									[ACP_SNAPSHOTS_META_KEY]: {
+										version: 1,
+										list: ACP_SNAPSHOTS_LIST_METHOD,
+										preview: ACP_SNAPSHOT_PREVIEW_METHOD,
+										restore: ACP_SNAPSHOT_RESTORE_METHOD,
+									},
+								}
+							: {}),
 						...(features.branches
 							? {
 									[ACP_BRANCHES_META_KEY]: {
@@ -5646,6 +5667,136 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			return projectSessionTree(session.tree(bound.id));
 		} catch {
 			throw new AcpRequestError(-32603, "session tree could not be read", { code: "internal_error" });
+		}
+	});
+
+	// Workspace snapshots: the files the engine saved before it changed them, listed, previewed and restored as the
+	// terminal's /rewind does. The store is keyed by the session id and the bound workspace, as the orchestrator keys it.
+	const snapshotStore = (bound: AcpServerSession) => {
+		if (options.session === undefined)
+			throw new AcpRequestError(-32601, "method not found", { code: "method_not_found" });
+		return createWorkspaceSnapshots({ stateDir: clioStateDir(), sessionId: bound.id, cwd: bound.cwd });
+	};
+	const snapshotN = (value: unknown): number => {
+		if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+			throw new AcpRequestError(-32602, "n must be a positive integer", { code: "invalid_params" });
+		return value;
+	};
+	const clipSnapshotText = (text: string, max: number): string =>
+		text.length > max ? `${text.slice(0, max - 1)}…` : text;
+	const snapshotPaths = (paths: ReadonlyArray<string>) => ({
+		rows: paths.slice(0, ACP_SNAPSHOT_PATH_LIST_MAX).map((path) => clipSnapshotText(path, 4096)),
+		cut: paths.length > ACP_SNAPSHOT_PATH_LIST_MAX,
+	});
+	const snapshotKept = (rows: ReadonlyArray<RewindKept>) => ({
+		rows: rows
+			.slice(0, ACP_SNAPSHOT_PATH_LIST_MAX)
+			.map((row) => ({ path: clipSnapshotText(row.path, 4096), why: clipSnapshotText(row.why, 512) })),
+		cut: rows.length > ACP_SNAPSHOT_PATH_LIST_MAX,
+	});
+	const snapshotRefs = (refs: ReadonlyArray<RewindRef>) =>
+		refs.slice(0, 64).map((ref) => ({
+			kind: ref.pin.kind,
+			label: clipSnapshotText(
+				ref.pin.kind === "head"
+					? (ref.pin.branch ?? "HEAD")
+					: ref.pin.kind === "stash"
+						? `stash@{${ref.pin.index}}: ${ref.pin.message}`
+						: ref.pin.name,
+				512,
+			),
+			state: ref.state,
+			recover: ref.recover === null ? null : clipSnapshotText(ref.recover, 1024),
+		}));
+	const snapshotFailure = (error: unknown): never => {
+		if (error instanceof AcpRequestError) throw error;
+		throw new AcpRequestError(-32603, "workspace snapshots could not be read", { code: "internal_error" });
+	};
+
+	options.transport.onRequest(ACP_SNAPSHOTS_LIST_METHOD, async (params): Promise<AcpSnapshotList> => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		const bound = getSession(request);
+		try {
+			const store = snapshotStore(bound);
+			const records = store.list();
+			const differences = records.length > 0 ? await store.differences() : null;
+			const counts = differences?.kind === "counts" ? differences.counts : null;
+			return {
+				snapshots: records.slice(0, ACP_SNAPSHOT_LIST_MAX).map((record) => ({
+					n: record.n,
+					at: clipSnapshotText(record.at, 64),
+					reason: clipSnapshotText(record.reason, 512),
+					...(record.tool !== undefined ? { tool: clipSnapshotText(record.tool, 128) } : {}),
+					...(record.turnId !== undefined && record.turnId.length > 0 && record.turnId.length <= 128
+						? { turnId: record.turnId }
+						: {}),
+					differs: counts?.get(record.n) ?? null,
+					skipped: record.skipped.length,
+				})),
+				truncated: records.length > ACP_SNAPSHOT_LIST_MAX,
+			};
+		} catch (error) {
+			return snapshotFailure(error);
+		}
+	});
+
+	options.transport.onRequest(ACP_SNAPSHOT_PREVIEW_METHOD, async (params): Promise<AcpSnapshotPlan> => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "n"]));
+		const bound = getSession(request);
+		const n = snapshotN(request.n);
+		try {
+			const preview = await snapshotStore(bound).preview(n);
+			if (preview.kind === "unavailable") return { kind: "unavailable", reason: clipSnapshotText(preview.reason, 512) };
+			const restore = snapshotPaths(preview.plan.restore);
+			const remove = snapshotPaths(preview.plan.remove);
+			const kept = snapshotKept(preview.plan.kept);
+			return {
+				kind: "plan",
+				n: preview.plan.n,
+				restore: restore.rows,
+				remove: remove.rows,
+				kept: kept.rows,
+				refs: snapshotRefs(preview.plan.refs),
+				truncated: restore.cut || remove.cut || kept.cut,
+			};
+		} catch (error) {
+			return snapshotFailure(error);
+		}
+	});
+
+	options.transport.onRequest(ACP_SNAPSHOT_RESTORE_METHOD, async (params): Promise<AcpSnapshotOutcome> => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "n"]));
+		const bound = getSession(request);
+		const n = snapshotN(request.n);
+		requireIdle(bound, "rewind");
+		try {
+			const outcome = await snapshotStore(bound).restore(n);
+			if (outcome.kind === "unavailable") return { kind: "unavailable", reason: clipSnapshotText(outcome.reason, 512) };
+			if (outcome.kind === "failed")
+				return { kind: "failed", reason: clipSnapshotText(outcome.reason, 512), undo: outcome.preRewind.n };
+			const restored = snapshotPaths(outcome.restored);
+			const removed = snapshotPaths(outcome.removed);
+			const kept = snapshotKept(outcome.kept);
+			const failed = snapshotKept(outcome.failed);
+			return {
+				kind: "restored",
+				n: outcome.n,
+				undo: outcome.preRewind.n,
+				restored: restored.rows,
+				removed: removed.rows,
+				kept: kept.rows,
+				failed: failed.rows,
+				refs: snapshotRefs(outcome.refs),
+				truncated: restored.cut || removed.cut || kept.cut || failed.cut,
+			};
+		} catch (error) {
+			return snapshotFailure(error);
 		}
 	});
 
