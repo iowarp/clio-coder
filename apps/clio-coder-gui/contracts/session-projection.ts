@@ -4,10 +4,13 @@ import type { AcpJob } from "./wire.js";
 
 const encoder = new TextEncoder();
 const MARKER = "\n[… stream truncated …]";
-const STREAM_LIMIT = 65536;
-const MARKER_BYTES = encoder.encode(MARKER).byteLength;
 const MAX_TIMELINE_ITEMS = 2048;
 const MAX_TIMELINE_BYTES = 2 * 1024 * 1024;
+// Half the timeline's byte bound: a long answer arrives whole, yet one message can never evict the rest of the timeline.
+const STREAM_LIMIT = MAX_TIMELINE_BYTES / 2;
+// Single fields the server bounds once, such as a tool's title, keep the tighter limit they always had.
+const FIELD_LIMIT = 65536;
+const MARKER_BYTES = encoder.encode(MARKER).byteLength;
 
 /** Every UTF-8 measurement passes through one meter so the suite can prove retention accounting stays O(1) per delta. */
 export const encodeMeter = { bytes: 0, calls: 0 };
@@ -32,7 +35,7 @@ function bound(value: string, limit: number): Bounded {
 	}
 	return { text: output + MARKER, bytes: used + MARKER_BYTES };
 }
-export function boundedText(value: string, limit = STREAM_LIMIT) {
+export function boundedText(value: string, limit = FIELD_LIMIT) {
 	return bound(value, limit).text;
 }
 
@@ -164,8 +167,10 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 	if (event.payload.revision !== current.revision + 1) throw new Error("Session revision gap requires a snapshot.");
 	let state: SessionSnapshot = { ...current, revision: event.payload.revision };
 	const upsert = (item: Omit<TimelineItem, "sequence">, append = false) => {
-		const previous = state.timeline.find((row) => row.id === item.id);
-		const sequence = previous?.sequence ?? (state.timeline.at(-1)?.sequence ?? 0) + 1;
+		// Nearly every delta extends the newest item, so it is checked before the timeline is searched.
+		const last = state.timeline.at(-1);
+		const previous = last?.id === item.id ? last : state.timeline.find((row) => row.id === item.id);
+		const sequence = previous?.sequence ?? (last?.sequence ?? 0) + 1;
 		const prior = previous ? itemCost(previous) : undefined;
 		let text: string,
 			textBytes: number,
@@ -194,7 +199,13 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 				? { text: textBytes, json: prior.json + jsonGrowth }
 				: { text: textBytes, json: measure(JSON.stringify(next)) + 1 };
 		costs.set(next, cost);
-		let timeline = previous ? state.timeline.map((row) => (row.id === item.id ? next : row)) : [...state.timeline, next];
+		let timeline: TimelineItem[];
+		if (previous === undefined) timeline = [...state.timeline, next];
+		else if (previous === last) {
+			// Ids are unique in a timeline, so the newest item is the only row the map below would replace.
+			timeline = state.timeline.slice();
+			timeline[timeline.length - 1] = next;
+		} else timeline = state.timeline.map((row) => (row.id === item.id ? next : row));
 		let truncated = state.timelineTruncated;
 		// Bound retained projection by both entries and bytes, while keeping the newest evidence visible.
 		let bytes = timelineBytes(state.timeline) - (prior?.json ?? 0) + cost.json;

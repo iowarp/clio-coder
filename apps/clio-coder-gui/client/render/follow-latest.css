@@ -9,7 +9,14 @@
 	contain: layout paint;
 }
 
-/* The affordance sits between the transcript and the composer without taking height. */
+/* A region the reader has scrolled away from gives up a strip at its foot, and the jump control
+   sits in that strip, so it never covers a line of the transcript. The region keeps its scroll
+   offset as it shortens, so the text the reader is on does not move. */
+[data-follow-latest="away"] {
+	margin-bottom: var(--space-10);
+}
+
+/* The anchor itself takes no height; the control is laid out against it, inside the strip above. */
 .jump-anchor {
 	position: relative;
 	z-index: 4;
@@ -21,12 +28,14 @@
    measure, rather than over the text in the middle of the column. */
 .jump-to-latest {
 	position: absolute;
-	bottom: var(--space-2);
+	bottom: calc((var(--space-10) - 28px) / 2);
 	right: var(--chat-gutter, var(--space-4));
+	box-sizing: border-box;
+	height: 28px;
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
-	padding: 6px 12px;
+	padding: 0 12px;
 	border: 1px solid var(--accent);
 	border-radius: var(--radius-sm);
 	background: var(--surface);
@@ -39,10 +48,18 @@
 	cursor: pointer;
 }
 
+/* New output below marks the same control instead of renaming it. */
 .jump-to-latest.has-unseen {
 	border-color: var(--action-line);
 	background: var(--action-tint);
 	color: var(--action-fg);
+}
+.jump-to-latest.has-unseen::after {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: currentColor;
 }
 
 .jump-to-latest:hover {

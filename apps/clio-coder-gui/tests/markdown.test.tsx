@@ -123,6 +123,39 @@ test("incremental lexing keeps settled token identity and re-lexes only the tail
 	equal(restarted.tail[0]?.type, "paragraph");
 });
 
+test("a 20 KB code block streamed a character at a time lexes exactly as marked does, before and after it closes", () => {
+	const lines: string[] = [];
+	for (let index = 0; lines.join("\n").length < 20_000; index++)
+		lines.push(
+			index % 50 === 7
+				? "    ```"
+				: index % 50 === 21
+					? "``"
+					: `\tconst value${index} = "${"é".repeat(index % 13)}"; // $$ <b> [ref]: x \`code\` ~~`,
+		);
+	const body = lines.join("\n");
+	for (const complete of [
+		`Intro paragraph right above the block.\n\`\`\`ts\n${body}\n\`\`\`\n\nAfter the block.\n`,
+		`## Heading\n\n~~~python\n${body}\n~~~\n`,
+	]) {
+		const incremental = new IncrementalMarkdown();
+		let previous: readonly unknown[] = [],
+			reused = 0;
+		for (let end = 1; end <= complete.length; end++) {
+			const source = complete.slice(0, end);
+			const split = incremental.update(source);
+			const last = source.at(-1);
+			if (last === "\n" || last === "`" || last === "~" || end % 257 === 0)
+				deepEqual([...split.tail], [...lexMarkdown(source.slice(split.settledLength))], `cut at ${end}`);
+			if (split.tail.length > 1 && split.tail[0] === previous[0]) reused++;
+			previous = split.tail;
+		}
+		const final = incremental.update(complete);
+		deepEqual([...final.settled, ...final.tail], [...lexMarkdown(complete)]);
+		if (complete.startsWith("Intro")) ok(reused > 5_000, "the tokens before an open fence are reused, not re-lexed");
+	}
+});
+
 test("partial streamed Markdown renders what has arrived without throwing", () => {
 	const partial = renderMarkdown("## Results\n\n| Level | Cells |\n| --- | ---: |\n| L0 | 12,8", false);
 	match(partial, /<h3 class="md-heading md-heading--2">Results<\/h3>/u);

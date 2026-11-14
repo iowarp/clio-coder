@@ -10,11 +10,11 @@
  * files, ran 1 command"). Opening the group lists one line per call; each line opens to its evidence.
  */
 
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatDuration } from "../api/clock.js";
-import { AnchoredApproval } from "./Approval.js";
+import { AnchoredApproval, permissionForCall } from "./Approval.js";
 import {
 	activityDigest,
 	activityGlyph,
@@ -46,9 +46,24 @@ export interface ActivityGroupProps {
 	readonly nowMs: number;
 }
 
-function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRowProps) {
+/**
+ * A row reads only the session's id and the request gating its own call, so a delta that touches
+ * neither leaves it alone; the comparators below check exactly those.
+ */
+function sameSessionFor(previous: SessionSnapshot, next: SessionSnapshot, items: readonly TimelineItem[]) {
+	if (previous.id !== next.id) return false;
+	if (previous.permissions === next.permissions) return true;
+	return items.every((item) => permissionForCall(previous, item) === permissionForCall(next, item));
+}
+
+const ActivityRow = memo(function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRowProps) {
 	const startedAtMs = observeStart(item.id, nowMs);
 	const elapsedMs = nowMs === 0 ? 0 : Math.max(0, nowMs - startedAtMs);
+	// A fresh object per render would defeat ToolCard's memo on every streamed delta.
+	const options = useMemo(
+		() => ({ ...(workspaceRoot === undefined ? {} : { workspaceRoot }), nowMs, startedAtMs }),
+		[workspaceRoot, nowMs, startedAtMs],
+	);
 	return (
 		<li className="activity__row" data-kind={item.kind}>
 			{item.kind === "thought" ? (
@@ -56,11 +71,7 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 			) : item.kind === "tool" ? (
 				<ToolCard
 					item={item}
-					options={{
-						...(workspaceRoot === undefined ? {} : { workspaceRoot }),
-						nowMs,
-						startedAtMs,
-					}}
+					options={options}
 					agent={workerLabel(item.provenance)}
 					elapsed={showElapsed(item, elapsedMs) ? formatDuration(elapsedMs) : null}
 				/>
@@ -78,6 +89,16 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 			<AnchoredApproval client={client} session={session} item={item} />
 		</li>
 	);
+}, sameActivityRow);
+
+function sameActivityRow(previous: ActivityRowProps, next: ActivityRowProps): boolean {
+	return (
+		previous.item === next.item &&
+		previous.client === next.client &&
+		previous.workspaceRoot === next.workspaceRoot &&
+		previous.nowMs === next.nowMs &&
+		sameSessionFor(previous.session, next.session, [next.item])
+	);
 }
 
 interface ActivityRowProps {
@@ -88,7 +109,29 @@ interface ActivityRowProps {
 	readonly nowMs: number;
 }
 
-export function ActivityGroup({ items, settled, client, session, workspaceRoot, nowMs }: ActivityGroupProps) {
+function sameActivityGroup(previous: ActivityGroupProps, next: ActivityGroupProps): boolean {
+	return (
+		// A live turn regroups its items on every delta; the rows, not the array, are what this renders.
+		previous.items.length === next.items.length &&
+		previous.items.every((item, index) => item === next.items[index]) &&
+		previous.settled === next.settled &&
+		previous.client === next.client &&
+		previous.workspaceRoot === next.workspaceRoot &&
+		previous.nowMs === next.nowMs &&
+		// The group hides pending notices while any request in the session waits for an answer.
+		previous.session.permissions.some(isAwaitingAnswer) === next.session.permissions.some(isAwaitingAnswer) &&
+		sameSessionFor(previous.session, next.session, next.items)
+	);
+}
+
+export const ActivityGroup = memo(function ActivityGroup({
+	items,
+	settled,
+	client,
+	session,
+	workspaceRoot,
+	nowMs,
+}: ActivityGroupProps) {
 	// Null means "nobody has touched this". Once the operator toggles, their choice wins forever.
 	const [userOpen, setUserOpen] = useState<boolean | null>(null);
 	const summary = summarizeActivity(items);
@@ -134,11 +177,11 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 							client={client}
 							session={session}
 							workspaceRoot={workspaceRoot}
-							nowMs={nowMs}
+							nowMs={item.status === "in_progress" ? nowMs : 0}
 						/>
 					))}
 				</ul>
 			) : null}
 		</details>
 	);
-}
+}, sameActivityGroup);
