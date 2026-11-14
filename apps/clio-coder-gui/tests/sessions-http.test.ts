@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
@@ -9,6 +9,7 @@ import { routes } from "../contracts/routes.js";
 import { acpProblem } from "../server/acp/client.js";
 import { AcpProtocolError } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
+import { seedHistory } from "./harness/history-fixture.js";
 
 test("ACP problems explain missing credentials and failed turns without forwarding upstream prose", () => {
 	const failure = (code: unknown, reason?: unknown) =>
@@ -93,9 +94,6 @@ test("workspace and session routes stream one complete turn with recorded usage 
 		disconnect = h.hub.connect(undefined, (event) => events.push(event));
 	t.after(disconnect);
 	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
-	const legacyHistory = await h.request(`/api/workspaces/${workspace.id}/sessions`);
-	assert.equal(legacyHistory.status, 409);
-	assert.equal((await json(legacyHistory, Problem)).code, "unsupported");
 	const response = await h.post(`/api/workspaces/${workspace.id}/sessions`, {}, "new-session");
 	assert.equal(response.status, 200);
 	const session = await json(response, routes.newSession.response);
@@ -143,6 +141,74 @@ test("workspace and session routes stream one complete turn with recorded usage 
 	assert.equal("costDisplay" in snapshot, false);
 	await h.post(`/api/sessions/${session.id}/close`);
 	assert.deepEqual(await h.files.read("children"), []);
+});
+
+test("saved tasks come from the ledger with no engine started, and a resume starts only its own", {
+	timeout: 30000,
+}, async (t) => {
+	// The default fixture runtime does not announce session/list; the ledger answers anyway.
+	const h = await harness({});
+	t.after(h.close);
+	await mkdir(join(h.home.path, "field-notes"));
+	await mkdir(join(h.home.path, "elsewhere"));
+	const project = await realpath(join(h.home.path, "field-notes")),
+		elsewhere = await realpath(join(h.home.path, "elsewhere"));
+	await seedHistory(h.home.path, project);
+	const ledger = join(h.home.path, "state", "sessions"),
+		[bucket = ""] = await readdir(ledger),
+		seeded = join(ledger, bucket, "seeded-1");
+	const meta = JSON.parse(await readFile(join(seeded, "meta.json"), "utf8")) as Record<string, unknown>,
+		transcript = (await readFile(join(seeded, "current.jsonl"), "utf8")).trim().split("\n");
+	// Two records in the project's own ledger directory that the engine's session/list would not return.
+	const extra = async (id: string, fields: Record<string, unknown>, lines: string[]) => {
+		await mkdir(join(ledger, bucket, id));
+		await writeFile(join(ledger, bucket, id, "meta.json"), JSON.stringify({ ...meta, id, ...fields }));
+		await writeFile(join(ledger, bucket, id, "current.jsonl"), `${lines.join("\n").replaceAll("seeded-1", id)}\n`);
+	};
+	await extra("elsewhere-1", { cwd: elsewhere, name: "Another project's task" }, transcript);
+	await extra("unanswered-1", { name: "A task the model never answered" }, transcript.slice(0, 2));
+	const controls = t.mock.method(h.supervisor, "workspaceControl");
+	const workspace = await json(await h.post("/api/workspaces", { path: project }), routes.openWorkspace.response);
+	const history = await json(
+		await h.request(`/api/workspaces/${workspace.id}/sessions`),
+		routes.sessionHistory.response,
+	);
+	assert.deepEqual(
+		history.map((row) => [row.id, row.name ?? row.firstMessagePreview]),
+		[
+			["seeded-1", "Survey the sensor calibration notes"],
+			["seeded-2", "Why does the reduction step drop the last sample of every run? Look at reduce.py and the tests."],
+			["seeded-3", "Draft the methods section figures"],
+		],
+	);
+	assert.ok(history.every((row) => row.workspaceId === workspace.id));
+	assert.equal(history[2]?.endedAt, null);
+	assert.equal(controls.mock.callCount(), 0);
+	assert.deepEqual(await h.files.read("children"), []);
+	const loaded = await h.post("/api/sessions/seeded-1/load", { workspaceId: workspace.id });
+	assert.equal(loaded.status, 200, await loaded.clone().text());
+	const session = await json(loaded, routes.loadSession.response);
+	assert.equal(controls.mock.callCount(), 0);
+	assert.equal(((await h.files.read("children")) as unknown[]).length, 1);
+	await h.post(`/api/sessions/${session.id}/close`);
+	// An id the ledger does not hold asks the engine once before it is refused.
+	const missing = await h.post("/api/sessions/perf-history/load", { workspaceId: workspace.id });
+	assert.equal(missing.status, 404);
+	assert.equal(controls.mock.callCount(), 1);
+});
+
+test("a saved task only the engine's session/list knows still loads", { timeout: 30000 }, async (t) => {
+	const h = await harness({}, { env: { CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS: "1" } });
+	t.after(h.close);
+	const workspace = await json(await h.post("/api/workspaces", { path: h.home.path }), routes.openWorkspace.response);
+	const history = await json(
+		await h.request(`/api/workspaces/${workspace.id}/sessions`),
+		routes.sessionHistory.response,
+	);
+	assert.deepEqual(history, []);
+	const loaded = await h.post("/api/sessions/perf-history/load", { workspaceId: workspace.id });
+	assert.equal(loaded.status, 200, await loaded.clone().text());
+	assert.equal((await json(loaded, routes.loadSession.response)).id, "perf-history");
 });
 
 test("permission rejection never executes and remote session admission codes remain upstream_acp problems", {

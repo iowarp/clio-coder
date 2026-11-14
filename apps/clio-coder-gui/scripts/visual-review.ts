@@ -84,11 +84,7 @@ const h = await harness(
 		scenario: "markdown",
 		origin: () => origin,
 		...(values.client ? { clientDir: values.client } : {}),
-		// One replay turn makes the fixture advertise session/list, so the history page has a row to show.
-		env: {
-			CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS: "1",
-			...(values.route || values.serve ? { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } : {}),
-		},
+		env: values.route || values.serve ? { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } : {},
 	},
 );
 if (values.state !== "empty") {
@@ -168,11 +164,11 @@ if (values.serve) {
 			}
 			if (want("history") || want("delete")) {
 				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
-				// The fixture's session/list names its one saved session (tests/fixtures/acp-fixture-child.mjs).
-				await page.locator("main").getByText("A long saved conversation").waitFor();
+				// The page lists the ledger seedHistory wrote; its newest row is the named one.
+				await page.locator("main").getByText("Survey the sensor calibration notes").first().waitFor();
 				if (want("history")) await shot("history", true);
 				if (want("delete")) {
-					await page.getByRole("button", { name: "Delete A long saved conversation", exact: true }).click();
+					await page.getByRole("button", { name: "Delete Survey the sensor calibration notes", exact: true }).click();
 					await page.getByRole("button", { name: "Keep", exact: true }).waitFor();
 					await shot("delete");
 					await page.getByRole("button", { name: "Keep", exact: true }).click();
