@@ -5,7 +5,7 @@ import { Value } from "typebox/value";
 import { tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { createCredentials } from "../client/api/credentials.js";
-import { dropStoredToken, refusalReason } from "../client/api/token.js";
+import { dropStoredToken, listenForLaunchLink, refusalReason } from "../client/api/token.js";
 import { ClientCredential, LaunchChallenge } from "../contracts/auth.js";
 import { Problem } from "../contracts/common.js";
 import { routes } from "../contracts/routes.js";
@@ -246,6 +246,29 @@ function browserPage(t: TestContext) {
 	});
 	return { stored, listeners };
 }
+
+test("a launch link pasted into an open window's address bar reloads it, so the fresh ticket is read", (t) => {
+	const { listeners } = browserPage(t);
+	const page = globalThis as unknown as Record<string, unknown>;
+	const savedLocation = page.location;
+	const location = { hash: "" };
+	page.location = location;
+	t.after(() => {
+		page.location = savedLocation;
+	});
+	let reloads = 0;
+	listenForLaunchLink(() => {
+		reloads += 1;
+	});
+	const hashChange = (hash: string) => {
+		location.hash = hash;
+		for (const listener of listeners.get("hashchange") ?? []) listener();
+	};
+	hashChange("#section");
+	assert.equal(reloads, 0);
+	hashChange(`#ticket=${"a".repeat(43)}`);
+	assert.equal(reloads, 1);
+});
 
 test("a reload keeps the window's credential, but a document opened from another launch link exchanges that link", async (t) => {
 	const { listeners } = browserPage(t);
