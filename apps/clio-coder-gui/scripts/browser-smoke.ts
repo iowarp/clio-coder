@@ -1777,15 +1777,21 @@ try {
 			await workload.getByRole("heading", { name: "How the levels relate", exact: true }).waitFor();
 			assert.equal(await composerRenders(), rendersBefore, "a streamed delta rendered the composer");
 			await settled();
-			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[stream-held] Show progress until cancelled.");
 			await page.getByRole("button", { name: "Send", exact: true }).click();
 			await page.locator('.wb-chip--status[data-tone="working"]').waitFor();
 			// A scripted move up of less than a viewport while the turn runs (find-in-page, assistive
 			// technology) leaves the live edge like a reader's scroll; only a browser clamp is pinned back.
+			// The move waits out the send's hold, while the dock's reflow still counts as a clamp; the held
+			// stream runs until Stop turn, so the move always lands mid-turn.
 			const transcript = page.locator(".chat-transcript");
 			await page.waitForFunction(() => {
-				const element = document.querySelector(".chat-transcript");
-				return !!element && element.scrollHeight - element.scrollTop - element.clientHeight <= 32;
+				const element = document.querySelector<HTMLElement>(".chat-transcript");
+				return (
+					!!element &&
+					element.dataset.followHold === undefined &&
+					element.scrollHeight - element.scrollTop - element.clientHeight <= 32
+				);
 			});
 			const movedTo = await transcript.evaluate((element) => {
 				element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight / 2);
@@ -1948,7 +1954,7 @@ try {
 				.click();
 			await page.locator(".chat-request", { hasText: "Measure the second sample" }).waitFor();
 			assert.equal(
-				await page.locator(".chat-request", { hasText: "[stream] Show progress until cancelled." }).count(),
+				await page.locator(".chat-request", { hasText: "[stream-held] Show progress until cancelled." }).count(),
 				0,
 				"the branch left behind is not replayed",
 			);
