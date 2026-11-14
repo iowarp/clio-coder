@@ -25,6 +25,7 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } 
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { shellQuote } from "../../../core/shell-quote.js";
+import { TERMINAL_HANDOVER_VARS } from "../../../core/terminal-background.js";
 import { clioCacheDir, clioStateDir } from "../../../core/xdg.js";
 import type { HostLayout, MuxHostPlatform } from "./platform.js";
 
@@ -37,6 +38,9 @@ const SOCKET_PATH_BUDGET = 100;
 /** Variables the shim reads to hand the operator's shell their own XDG roots back. */
 const SHIM_SAVED_XDG = ["XDG_CONFIG_HOME", "XDG_STATE_HOME"] as const;
 const SHIM_PREFIX = "CLIO_CODER_PANE_";
+/** The command the Clio pane's shim starts before the shell: a count, then one variable per word. */
+const SHIM_ARGC = `${SHIM_PREFIX}ARGC`;
+const SHIM_ARG = `${SHIM_PREFIX}ARG_`;
 /** Shells the macOS shim starts as login shells: the ones that accept `-l`. */
 const LOGIN_FLAG_SHELLS = "sh|bash|zsh|ksh|dash|ash|mksh|fish|csh|tcsh";
 
@@ -47,6 +51,8 @@ export interface PosixHostOptions {
 	stateDir?: () => string;
 	/** Clio's cache root, the last fallback for the runtime directory before /tmp. */
 	cacheDir?: () => string;
+	/** Where `CLIO_CODER_PANE_LAUNCH` is read; the process environment unless a test supplies one. */
+	env?: NodeJS.ProcessEnv;
 }
 
 /** A preferred runtime directory left out because herdr's client socket in it would not fit a Unix socket path. */
@@ -242,12 +248,42 @@ export function renderPosixShellShim(platform: NodeJS.Platform): string {
 		platform === "darwin"
 			? [`case "\${shell##*/}" in`, `${LOGIN_FLAG_SHELLS}) exec "$shell" -l ;;`, "esac", 'exec "$shell"']
 			: ['exec "$shell"'];
+	// The Clio pane is created with its command in the environment. Typed at the shell's prompt instead, the command
+	// waited for the operator's whole rc first: over a second with nvm, a prompt theme and a line editor loaded.
+	// Each word is its own variable and is only ever expanded inside double quotes, so no operator-controlled text
+	// is parsed as shell. Every variable is unset before the command starts, so neither it nor the shell after it
+	// can start a second Clio. INT is caught, not ignored: an ignored signal would stay ignored in the command, and
+	// left alone it would end this script while the command handles it, leaving the pane without the shell.
+	const launch = [
+		`if [ -n "\${${SHIM_ARGC}+x}" ]; then`,
+		`argc=$${SHIM_ARGC}; unset ${SHIM_ARGC}`,
+		'case "$argc" in',
+		"''|*[!0-9]*) argc=0 ;;",
+		"esac",
+		"set --; index=0",
+		'while [ "$index" -lt "$argc" ]; do',
+		`eval "set -- \\"\\$@\\" \\"\\\${${SHIM_ARG}$index}\\"; unset ${SHIM_ARG}$index"`,
+		"index=$((index + 1))",
+		"done",
+		"unset argc index",
+		'if [ "$#" -gt 0 ]; then',
+		"trap : INT",
+		'"$@"',
+		"trap - INT",
+		"set --",
+		"fi",
+		"fi",
+	];
 	return [
 		"#!/bin/sh",
 		"# Written by Clio Coder for its private pane host. Every pane starts here:",
-		"# the operator's own XDG roots go back in place and their shell takes over.",
+		"# the operator's own XDG roots go back in place, the Clio pane runs Clio,",
+		"# and the operator's shell takes over.",
 		...restore,
 		`unset ${SHIM_SAVED_XDG.map((name) => `${SHIM_PREFIX}${name}`).join(" ")}`,
+		...launch,
+		// What the launcher said about the terminal was for that one start; the shell and whatever it runs ask again.
+		`unset ${TERMINAL_HANDOVER_VARS.join(" ")}`,
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
 		"shell=${SHELL:-/bin/sh}",
 		'case "$shell" in',
@@ -355,9 +391,17 @@ export function createPosixHostPlatform(options: PosixHostOptions = {}): MuxHost
 			};
 		},
 		paneLaunch(argv) {
-			const words = argv.map((word) => (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(word) ? word : shellQuote(word)));
-			// fish never records a line that starts with a space; bash and zsh skip it under ignorespace.
-			return { env: {}, line: ` ${words.join(" ")}` };
+			// The rollback: type the command at the operator's shell, which has run their rc by then. A session started
+			// from somewhere that never ran it (a desktop launcher, an IDE task) gets the rc's exports only this way.
+			const env = options.env ?? process.env;
+			if (env.CLIO_CODER_PANE_LAUNCH === "shell") {
+				const words = argv.map((word) => (/^[A-Za-z0-9_@%+=:,./-]+$/u.test(word) ? word : shellQuote(word)));
+				// fish never records a line that starts with a space; bash and zsh skip it under ignorespace.
+				return { env: {}, line: ` ${words.join(" ")}` };
+			}
+			const handed: Record<string, string> = { [SHIM_ARGC]: String(argv.length) };
+			for (const [index, word] of argv.entries()) handed[`${SHIM_ARG}${index}`] = word;
+			return { env: handed, line: null };
 		},
 		detach(attach: ChildProcess) {
 			// herdr's client treats a hangup as the terminal going away and detaches cleanly.

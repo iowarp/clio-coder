@@ -57,10 +57,11 @@ export interface MuxHostPlatform {
 	/** Compute the layout and create, idempotently, whatever must exist before the server starts (dirs, shim). */
 	hostLayout(input: HostLayoutInput): HostLayout;
 	/**
-	 * How the Clio pane's shell starts `argv`: variables for the pane's environment and the line typed at its
-	 * prompt. The pane runs the operator's own shell, so the line must stay out of their history or do nothing there.
+	 * How the Clio pane starts `argv`: variables for the pane's environment and the line typed at its shell's
+	 * prompt, or a null line when the pane's first process starts it from those variables. A typed line reaches the
+	 * operator's own shell, so it must stay out of their history or do nothing there.
 	 */
-	paneLaunch(argv: ReadonlyArray<string>): { env: Record<string, string>; line: string };
+	paneLaunch(argv: ReadonlyArray<string>): { env: Record<string, string>; line: string | null };
 	/** Make the attached herdr client let go of the terminal. */
 	detach(attach: ChildProcess): void;
 	/** Put the terminal back after the client exited, when the platform's detach could not. */

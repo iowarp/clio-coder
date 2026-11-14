@@ -298,7 +298,7 @@ describe("private pane host layout (POSIX)", () => {
 		});
 		equal(run.stdout.trim(), "cfg=/home/me/.cfg state=unset saved=unset args=");
 		match(renderPosixShellShim("darwin"), /bash\|zsh[^)]*\) exec "\$shell" -l ;;/u);
-		ok(!renderPosixShellShim("linux").includes(" -l"));
+		ok(!/exec "\$shell" -l/u.test(renderPosixShellShim("linux")));
 	});
 
 	it("preserves the operator's runtime directory or its absence in user shells and inner Clio", (t) => {
@@ -328,23 +328,74 @@ describe("private pane host layout (POSIX)", () => {
 				"src/cli/index.ts",
 				"--version",
 			]);
+			equal(command.line, null);
+			// The pane is created with the command in its environment: the shim starts Clio, then the shell.
 			const run = spawnSync("/bin/sh", [layout.shell.defaultShell], {
 				encoding: "utf8",
-				env: { ...env, ...layout.hostEnv },
-				input: `${command.line}\n`,
+				env: { ...env, ...layout.hostEnv, ...command.env },
+				input: "",
 			});
 			equal(run.status, 0, run.stderr);
 			const lines = run.stdout.split("\n");
-			equal(lines[0], `pane-runtime=${runtime ?? "unset"}`);
-			equal(lines[1], `clio-runtime=${runtime ?? "unset"}`);
+			equal(lines[0], `clio-runtime=${runtime ?? "unset"}`);
+			ok(lines.includes(`pane-runtime=${runtime ?? "unset"}`), run.stdout);
 		}
 	});
 
-	it("types the Clio command with a leading space so the operator's shell history skips it", () => {
-		deepStrictEqual(createPosixHostPlatform().paneLaunch(["/usr/bin/node", "/opt/clio coder/index.js", "it's"]), {
-			env: {},
-			line: " /usr/bin/node '/opt/clio coder/index.js' 'it'\\''s'",
-		});
+	it("hands the Clio command to the pane as one variable per word, with nothing to type", () => {
+		deepStrictEqual(
+			createPosixHostPlatform({ env: {} }).paneLaunch(["/usr/bin/node", "/opt/clio coder/index.js", "it's"]),
+			{
+				env: {
+					CLIO_CODER_PANE_ARGC: "3",
+					CLIO_CODER_PANE_ARG_0: "/usr/bin/node",
+					CLIO_CODER_PANE_ARG_1: "/opt/clio coder/index.js",
+					CLIO_CODER_PANE_ARG_2: "it's",
+				},
+				line: null,
+			},
+		);
+	});
+
+	it("types the Clio command with a leading space when the operator asks for the shell launch", () => {
+		deepStrictEqual(
+			createPosixHostPlatform({ env: { CLIO_CODER_PANE_LAUNCH: "shell" } }).paneLaunch([
+				"/usr/bin/node",
+				"/opt/clio coder/index.js",
+				"it's",
+			]),
+			{ env: {}, line: " /usr/bin/node '/opt/clio coder/index.js' 'it'\\''s'" },
+		);
+	});
+
+	it("the shim runs the handed command word for word, then the operator's shell, and leaves no launch variable", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-shim-launch-"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const shim = join(scratch, "pane-shell");
+		const shell = join(scratch, "fake-shell");
+		const clio = join(scratch, "fake clio");
+		const leaked = '$(env | grep -c "^CLIO_CODER_PANE_")';
+		writeFileSync(shim, renderPosixShellShim("linux"), { mode: 0o755 });
+		writeFileSync(shell, `#!/bin/sh\necho "shell args=$# leaked=${leaked}"\n`, { mode: 0o755 });
+		writeFileSync(
+			clio,
+			`#!/bin/sh\necho "clio leaked=${leaked}"\nfor word in "$@"; do echo "word=[$word]"; done\nexit 7\n`,
+			{ mode: 0o755 },
+		);
+		// Words a shell would split, expand or run if any of them were ever parsed as shell text.
+		const words = ["it's", 'say "hi" $HOME `id`', "", "a b", "--flag=x;y"];
+		const launch = createPosixHostPlatform({ env: {} }).paneLaunch([clio, ...words]);
+		const run = (env: Record<string, string>) =>
+			spawnSync("/bin/sh", [shim], { encoding: "utf8", env: { PATH: "/usr/bin:/bin", SHELL: shell, ...env } });
+		const started = run(launch.env);
+		deepStrictEqual(started.stdout.trim().split("\n"), [
+			"clio leaked=0",
+			...words.map((word) => `word=[${word}]`),
+			"shell args=0 leaked=0",
+		]);
+		equal(started.status, 0);
+		// A pane created without the command, every split and dock, is the plain shell.
+		equal(run({}).stdout.trim(), "shell args=0 leaked=0");
 	});
 
 	it("replaces a changed shell shim without truncating an existing reader's inode", (t) => {
