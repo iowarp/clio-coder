@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
 	aliasEntries,
@@ -222,4 +223,13 @@ test("an action's description shows its backtick spans as code", () => {
 		{ code: false, text: " to clear active skill tools" },
 	]);
 	assert.deepEqual(descriptionParts("an odd ` mark"), [{ code: false, text: "an odd ` mark" }]);
+});
+
+test("the Actions list is one column on a phone", () => {
+	// Live at 400 px: two columns left each title three words wide and every description five lines tall.
+	const css = readFileSync(new URL("../client/chat/visual-actions.css", import.meta.url), "utf8");
+	assert.match(
+		css,
+		/@media \(max-width: 560px\) \{\s*\.visual-actions__rows \{\s*grid-template-columns: minmax\(0, 1fr\);/,
+	);
 });

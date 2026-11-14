@@ -54,6 +54,12 @@
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	border-top: 1px solid var(--line);
 }
+/* Two columns on a phone left each title three words wide and every description five lines tall. */
+@media (max-width: 560px) {
+	.visual-actions__rows {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
 .visual-actions__more {
 	display: flex;
 	align-items: center;
