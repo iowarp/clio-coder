@@ -5,6 +5,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSummary } from "../../contracts/sessions.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
 import { Icon } from "../design/icons.js";
 import { InventoryMore } from "../interaction/InventoryMore.js";
 import { useInventoryWindow } from "../interaction/use-inventory-window.js";
@@ -109,7 +110,7 @@ export function Sessions({ client }: { client: Client }) {
 	const history = useQuery({
 		queryKey: ["session-history", workspaceId],
 		queryFn: ({ signal }) => client.call(routes.sessionHistory, input, undefined, signal),
-		retry: false,
+		...SESSION_HISTORY_FRESHNESS,
 		meta: { errorSurface: "inline" },
 	});
 	const overview = useSessionOverview(client);

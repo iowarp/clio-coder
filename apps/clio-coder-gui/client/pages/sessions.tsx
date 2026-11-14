@@ -6,6 +6,7 @@ import type { Client } from "../api/client.js";
 import { ApiProblem, emptyInput } from "../api/client.js";
 import { clock, formatDuration } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
+import { SWITCH_FRESHNESS } from "../api/queries.js";
 import { sessionQuery } from "../api/session-query.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
@@ -184,6 +185,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		queryKey: ["workspace", workspaceId],
 		queryFn: () => client.call(routes.workspace, { params: { id: workspaceId }, query: {}, body: {} }),
 		enabled: workspaceId !== "",
+		...SWITCH_FRESHNESS,
 	});
 
 	const capabilities = useQuery({
@@ -196,6 +198,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		queryKey: ["session-settings", id],
 		queryFn: () => client.call(routes.sessionSettings, input),
 		enabled: session.data?.state === "open" && capabilities.data?.settings?.get_safe === true,
+		...SWITCH_FRESHNESS,
 	});
 	const resume = useMutation({
 		mutationFn: (workspaceId: string) =>

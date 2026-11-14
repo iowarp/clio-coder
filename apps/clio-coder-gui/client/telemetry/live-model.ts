@@ -22,3 +22,24 @@ export function telemetryInvalidations(update: Pick<TelemetryUpdateV1, "topics">
 	for (const topic of update.topics) for (const key of TOPIC_READS[topic] ?? []) if (!keys.includes(key)) keys.push(key);
 	return keys;
 }
+
+/** A session's telemetry reads refresh at most this often while its turn streams pushes. */
+export const TELEMETRY_REFRESH_MS = 1_000;
+
+export type TelemetryRefresh = { readonly refresh: "now" } | { readonly refresh: "defer"; readonly delayMs: number };
+
+/**
+ * Whether a session's pushed telemetry keys refresh now or wait for the rest of the interval since its last refresh.
+ * `now` and `last` come from one monotonic clock; a session with no refresh yet always refreshes now.
+ */
+export function telemetryRefresh(
+	now: number,
+	last: number | undefined,
+	interval = TELEMETRY_REFRESH_MS,
+): TelemetryRefresh {
+	if (last === undefined) return { refresh: "now" };
+	const elapsed = now - last;
+	// A clock that went backwards cannot prove the interval has not passed; refresh rather than stall.
+	if (elapsed < 0 || elapsed >= interval) return { refresh: "now" };
+	return { refresh: "defer", delayMs: interval - elapsed };
+}
