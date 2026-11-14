@@ -20,15 +20,18 @@ import { type OutputChunk, rollup } from "rollup";
  *   1. the first session boot stage that loads the chunk, so a stage's file
  *      holds nothing an earlier stage could have done without and the staged
  *      preload in src/entry/stage1-preload.ts keeps its event-loop turns;
- *   2. which exact paths reach it ({@link EXACT_PATHS}), so a headless run, a
- *      native worker and the Stage 0 owner each load exactly the chunks they
- *      loaded before, only in fewer files;
- *   3. guard bits for cold commands. A merged file loads whole, so a command
- *      that needed three chunks of a group now parses and evaluates all of it.
- *      Guards split a group along a command's own closure until no command is
- *      estimated to lose more than {@link GUARD_FLOOR_MS} or
- *      {@link GUARD_SHARE} of its load time. Commands that tolerate one split
- *      share a bit, and fragments a guard cut for no gain are folded back.
+ *   2. which exact paths reach it ({@link EXACT_PATHS}), so the launcher, a
+ *      headless run, a native worker and the Stage 0 owner each load exactly
+ *      the chunks they loaded before, only in fewer files;
+ *   3. guard bits for every other load. A merged file loads whole, and it
+ *      pulls in the imports of every chunk in it, so an `import()` that
+ *      needed three chunks of a group can end up loading megabytes. Every
+ *      import() site and entry outside the first two parts is costed by what
+ *      its target loads transitively; guards split groups along a target's
+ *      own closure until none is estimated to lose more than
+ *      {@link GUARD_FLOOR_MS} or {@link GUARD_SHARE} of its load time. Loads
+ *      that tolerate one split share a bit, and fragments a guard cut for no
+ *      gain are folded back.
  * If chunk A imports chunk B, B's stage is no later and its bits are a
  * superset, so the merged files form a DAG exactly as the chunks did; the
  * fold-back step re-checks that for every merge it makes.
@@ -77,16 +80,45 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
 ];
 
 /**
- * Load paths other than the session's that stay exact: each loads the chunks it
- * loaded before the merge and no others. `stage0` is the instant shell's owner
- * and `runHelp` answers `run --help` without the run command; both are pinned
- * by tests/contracts/instant-shell-import-graph.test.ts.
+ * Processes other than the session whose load set stays exact: each loads the
+ * chunks it loaded before the merge and no others. A path lists every root its
+ * process crosses from the entry on, so chunks they all load anyway are not
+ * split apart. `stage0` is the exception: it is the instant shell's owner
+ * alone, because tests/contracts/instant-shell-import-graph.test.ts budgets
+ * that module's static closure, and `runHelp` answers `run --help` without the
+ * run command, which the same test pins.
  */
 const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
+	// The workspace launcher: the launch stage plus what starts the pane host and the session inside it.
+	[
+		"launcher",
+		[
+			"src/cli/index.ts",
+			"src/core/compile-cache.ts",
+			"src/cli/clio.ts",
+			"src/cli/workspace-check.ts",
+			"src/domains/lifecycle/boot-migrations.ts",
+			"src/cli/workspace-launch.ts",
+			"src/domains/mux/workspace/platform.ts",
+			"src/domains/toolchain/index.ts",
+			"src/domains/mux/workspace/launch.ts",
+			"src/domains/mux/child-env.ts",
+			"src/core/terminal-background.ts",
+		],
+	],
 	["stage0", ["src/interactive/terminal-lease.ts"]],
-	["headless", ["src/core/compile-cache.ts", "src/cli/run.ts", "src/entry/orchestrator.ts"]],
+	[
+		"headless",
+		[
+			"src/cli/index.ts",
+			"src/cli/run-help.ts",
+			"src/core/compile-cache.ts",
+			"src/cli/run.ts",
+			"src/entry/orchestrator.ts",
+		],
+	],
 	["worker", ["src/worker/entry.ts"]],
-	["runHelp", ["src/cli/run-help.ts"]],
+	["runHelp", ["src/cli/index.ts", "src/cli/run-help.ts"]],
 ];
 
 /**
@@ -101,6 +133,26 @@ const GUARD_SHARE = 0.15;
 
 type Outputs = Metafile["outputs"];
 
+/** A set of chunks, one bit per chunk in metafile order. */
+type ChunkSet = Uint32Array;
+const holds = (set: ChunkSet, chunk: number): boolean => ((set[chunk >>> 5] ?? 0) & (1 << (chunk & 31))) !== 0;
+const insert = (set: ChunkSet, chunk: number): void => {
+	set[chunk >>> 5] = (set[chunk >>> 5] ?? 0) | (1 << (chunk & 31));
+};
+const include = (set: ChunkSet, other: ChunkSet): void => {
+	for (let word = 0; word < set.length; word += 1) set[word] = (set[word] ?? 0) | (other[word] ?? 0);
+};
+
+/** One `import()` site or process start: what loading `to` adds for code that already holds `from`. */
+interface LoadUnit {
+	from: number;
+	to: number;
+	/** Bytes and files the load added before the merge, and the estimated milliseconds the merge may add. */
+	bytes: number;
+	files: number;
+	allowance: number;
+}
+
 /**
  * The file each esbuild output is merged into, keyed by metafile output name.
  * Outputs left out keep a file of their own; `entries` (the build's real entry
@@ -108,31 +160,27 @@ type Outputs = Metafile["outputs"];
  */
 export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>): Map<string, string> {
 	const names = Object.keys(outputs);
-	const index = new Map(names.map((name, at) => [name, at]));
+	const index = new Map(names.map((name, chunk) => [name, chunk]));
 	const at = (name: string): number => {
 		const found = index.get(name);
 		if (found === undefined) throw new Error(`chunk-merge: ${name} is imported but was not built`);
 		return found;
 	};
 	const size = names.map((name) => outputs[name]?.bytes ?? 0);
-	const imports = names.map((name) =>
+	const internal = (name: string, dynamic: boolean): number[] =>
 		(outputs[name]?.imports ?? [])
-			.filter((edge) => edge.kind !== "dynamic-import" && !edge.external)
-			.map((edge) => at(edge.path)),
-	);
-	const closures = new Map<number, number[]>();
-	const closure = (root: number): number[] => {
-		let reached = closures.get(root);
-		if (reached) return reached;
-		const seen = new Set<number>();
-		const stack = [root];
-		for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-			if (seen.has(next)) continue;
-			seen.add(next);
-			stack.push(...(imports[next] ?? []));
-		}
-		reached = [...seen];
-		closures.set(root, reached);
+			.filter((edge) => !edge.external && (edge.kind === "dynamic-import") === dynamic)
+			.map((edge) => at(edge.path));
+	const imports = names.map((name) => internal(name, false));
+	const emptySet = (): ChunkSet => new Uint32Array(Math.ceil(names.length / 32));
+	const closures: Array<ChunkSet | undefined> = [];
+	const closure = (chunk: number): ChunkSet => {
+		const known = closures[chunk];
+		if (known) return known;
+		const reached = emptySet();
+		closures[chunk] = reached;
+		insert(reached, chunk);
+		for (const target of imports[chunk] ?? []) include(reached, closure(target));
 		return reached;
 	};
 	const byEntryPoint = new Map<string, number>();
@@ -140,8 +188,8 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 		const source = outputs[name]?.entryPoint;
 		if (source !== undefined) byEntryPoint.set(source, chunk);
 	});
-	const reach = (roots: ReadonlyArray<string>): Set<number> => {
-		const all = new Set<number>();
+	const reach = (roots: ReadonlyArray<string>): ChunkSet => {
+		const all = emptySet();
 		for (const root of roots) {
 			const chunk = byEntryPoint.get(root);
 			// A stale root would silently leave its stage unmerged, so it fails the build instead.
@@ -150,33 +198,31 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 					`chunk-merge: ${root} is no longer an entry or import() target; update the roots in scripts/chunk-merge.ts`,
 				);
 			}
-			for (const reached of closure(chunk)) all.add(reached);
+			include(all, closure(chunk));
 		}
 		return all;
 	};
 
 	// A chunk's cell is its stage and exact paths. Chunks never merge across cells, which is what keeps those exact.
-	const stageOf = new Map<number, string>();
-	for (const [stage, roots] of SESSION_STAGES) {
-		for (const chunk of reach(roots)) if (!stageOf.has(chunk)) stageOf.set(chunk, stage);
-	}
-	const exact = EXACT_PATHS.map(([name, roots]) => [name, reach(roots)] as const);
+	const stages = SESSION_STAGES.map(([stage, roots]) => [stage, reach(roots)] as const);
+	const exact = EXACT_PATHS.map(([path, roots]) => [path, reach(roots)] as const);
 	const cellOf = names.map((name, chunk) => {
 		if (entries.has(name)) return undefined;
-		const held = exact.filter(([, chunks]) => chunks.has(chunk)).map(([path]) => path);
-		return `${stageOf.get(chunk) ?? ""}|${held.join("+")}`;
+		const stage = stages.find(([, chunks]) => holds(chunks, chunk))?.[0] ?? "";
+		const held = exact.filter(([, chunks]) => holds(chunks, chunk)).map(([path]) => path);
+		return `${stage}|${held.join("+")}`;
 	});
 
-	// group[chunk] is the group the chunk merges into, or -1 for a file of its own. A group is named by a member.
+	// group[chunk] names the group a chunk merges into by one of its members, or is -1 for a file of its own.
 	const group = new Int32Array(names.length).fill(-1);
+	const node = (chunk: number): number => ((group[chunk] ?? -1) === -1 ? chunk : (group[chunk] ?? -1));
 	const members = new Map<number, number[]>();
-	const weight = (id: number): number => (members.get(id) ?? []).reduce((total, chunk) => total + (size[chunk] ?? 0), 0);
-	const guards: Array<{ chunks: Set<number>; roots: ColdRoot[] }> = [];
+	const guards: Array<{ chunks: ChunkSet }> = [];
 	const regroup = (): void => {
 		const byKey = new Map<string, number[]>();
 		cellOf.forEach((cell, chunk) => {
 			if (cell === undefined) return;
-			const held = guards.flatMap((guard, bit) => (guard.chunks.has(chunk) ? [bit] : []));
+			const held = guards.flatMap((guard, bit) => (holds(guard.chunks, chunk) ? [bit] : []));
 			if (cell === "|" && held.length === 0) return;
 			const key = `${cell}|${held.join("+")}`;
 			const mates = byKey.get(key);
@@ -192,122 +238,188 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 		}
 	};
 
-	// A cold root is a command or auxiliary entry that starts its own process and loads its closure from nothing.
-	interface ColdRoot {
-		chunks: number[];
-		bytes: number;
-		allowance: number;
-	}
-	const megabytes = (count: number): number => (count / 1e6) * MS_PER_MEGABYTE;
-	const hot = new Set([...SESSION_STAGES, ...EXACT_PATHS].flatMap(([, roots]) => roots));
-	const coldChunks = new Set<number>();
-	for (const edge of outputs[names[byEntryPoint.get("src/cli/index.ts") ?? -1] ?? ""]?.imports ?? []) {
-		if (edge.kind === "dynamic-import" && !edge.external) coldChunks.add(at(edge.path));
-	}
-	for (const entry of entries) coldChunks.add(at(entry));
-	const cold: ColdRoot[] = [];
-	for (const root of coldChunks) {
-		if (hot.has(outputs[names[root] ?? ""]?.entryPoint ?? "")) continue;
-		const chunks = closure(root);
-		const bytes = chunks.reduce((total, chunk) => total + (size[chunk] ?? 0), 0);
-		const allowance = Math.max(GUARD_FLOOR_MS, GUARD_SHARE * (megabytes(bytes) + chunks.length * MS_PER_FILE));
-		cold.push({ chunks, bytes, allowance });
-	}
-	/** Estimated milliseconds the merge costs a cold root beyond its allowance, or 0 inside it. */
-	const excess = (root: ColdRoot): number => {
-		const files = new Set<number>();
-		let loaded = 0;
-		for (const chunk of root.chunks) {
-			const id = group[chunk] ?? -1;
-			if (id === -1) loaded += size[chunk] ?? 0;
-			else if (!files.has(id)) loaded += weight(id);
-			files.add(id === -1 ? chunk : id);
-		}
-		const cost = megabytes(loaded - root.bytes) - (root.chunks.length - files.size) * MS_PER_FILE;
-		return cost > root.allowance ? cost : 0;
-	};
-
-	// Guards: split along the closure of whichever cold root loses most, until none is over its allowance.
-	regroup();
-	for (;;) {
-		let worst: ColdRoot | undefined;
-		let worstExcess = 0;
-		for (const root of cold) {
-			const over = excess(root);
-			if (over > worstExcess) {
-				worst = root;
-				worstExcess = over;
+	/**
+	 * What each merged file loads: itself and everything its members import, transitively. A merged file drags in
+	 * the imports of every member, so this, not the group's own size, is what a load costs. Undefined when the
+	 * files would import each other in a cycle.
+	 */
+	const settle = (): Array<ChunkSet | undefined> | undefined => {
+		const importers = new Int32Array(names.length);
+		for (let chunk = 0; chunk < names.length; chunk += 1) {
+			for (const target of imports[chunk] ?? []) {
+				if (node(target) !== node(chunk)) importers[node(target)] = (importers[node(target)] ?? 0) + 1;
 			}
 		}
-		if (worst === undefined) break;
-		const guarded = worst;
-		// Prefer widening a guard that already exists: every new bit splits every group it crosses.
-		const joined = guards.some((guard) => {
-			const previous = guard.chunks;
-			guard.chunks = new Set([...previous, ...guarded.chunks]);
-			regroup();
-			if (excess(guarded) === 0 && guard.roots.every((root) => excess(root) === 0)) {
-				guard.roots.push(guarded);
-				return true;
-			}
-			guard.chunks = previous;
-			return false;
-		});
-		if (!joined) guards.push({ chunks: new Set(guarded.chunks), roots: [guarded] });
-		regroup();
-	}
-
-	// A guard splits every group it crosses, including ones where the split saves its command nothing. Undo those:
-	// fold the smallest group of a cell into another whenever every cold root stays inside its allowance and the
-	// merged files still form a DAG (two groups with a third between them on an import path cannot merge).
-	const acyclic = (): boolean => {
-		const node = (chunk: number): number => ((group[chunk] ?? -1) === -1 ? chunk : (group[chunk] ?? -1));
-		// Kahn's algorithm over the merged files: every file settles exactly when no import cycle joins them.
-		const importers = new Map<number, number>();
-		const nodes = new Set<number>();
-		imports.forEach((targets, chunk) => {
-			nodes.add(node(chunk));
-			for (const target of targets) {
-				if (node(target) !== node(chunk)) importers.set(node(target), (importers.get(node(target)) ?? 0) + 1);
-			}
-		});
-		const ready = [...nodes].filter((id) => !importers.has(id));
-		let settled = 0;
+		// Kahn's algorithm: importers settle first, so the reverse order visits every file after its imports.
+		const order: number[] = [];
+		const ready: number[] = [];
+		let files = 0;
+		for (let chunk = 0; chunk < names.length; chunk += 1) {
+			if (node(chunk) !== chunk) continue;
+			files += 1;
+			if (importers[chunk] === 0) ready.push(chunk);
+		}
 		for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
-			settled += 1;
+			order.push(id);
 			for (const chunk of members.get(id) ?? [id]) {
 				for (const target of imports[chunk] ?? []) {
 					const other = node(target);
 					if (other === id) continue;
-					const left = (importers.get(other) ?? 0) - 1;
-					importers.set(other, left);
-					if (left === 0) ready.push(other);
+					importers[other] = (importers[other] ?? 0) - 1;
+					if (importers[other] === 0) ready.push(other);
 				}
 			}
 		}
-		return settled === nodes.size;
+		if (order.length !== files) return undefined;
+		const loads: Array<ChunkSet | undefined> = [];
+		const included = new Int32Array(names.length).fill(-1);
+		for (const id of order.reverse()) {
+			const loaded = emptySet();
+			for (const chunk of members.get(id) ?? [id]) {
+				insert(loaded, chunk);
+				for (const target of imports[chunk] ?? []) {
+					const other = node(target);
+					const theirs = loads[other];
+					if (other === id || included[other] === id || theirs === undefined) continue;
+					included[other] = id;
+					include(loaded, theirs);
+				}
+			}
+			loads[id] = loaded;
+		}
+		return loads;
 	};
-	if (!acyclic()) throw new Error("chunk-merge: the staged groups import each other in a cycle");
+
+	// Every import() site whose target is not a stage or exact-path root, and every other entry, is a load the
+	// merge must not make much dearer. Stage and exact-path roots are exempt: their cells keep them exact.
+	const megabytes = (count: number): number => (count / 1e6) * MS_PER_MEGABYTE;
+	const rooted = new Set([...SESSION_STAGES, ...EXACT_PATHS].flatMap(([, roots]) => roots));
+	const isRooted = (chunk: number): boolean => rooted.has(outputs[names[chunk] ?? ""]?.entryPoint ?? "");
+	const units: LoadUnit[] = [];
+	const addUnit = (from: number, to: number): void => {
+		if (isRooted(to) || (from !== -1 && holds(closure(from), to))) return;
+		const unit = { from, to, bytes: 0, files: 0, allowance: 0 };
+		const held = from === -1 ? emptySet() : closure(from);
+		names.forEach((_, chunk) => {
+			if (!holds(closure(to), chunk) || holds(held, chunk)) return;
+			unit.bytes += size[chunk] ?? 0;
+			unit.files += 1;
+		});
+		unit.allowance = Math.max(GUARD_FLOOR_MS, GUARD_SHARE * (megabytes(unit.bytes) + unit.files * MS_PER_FILE));
+		units.push(unit);
+	};
+	names.forEach((name, chunk) => {
+		if (entries.has(name)) addUnit(-1, chunk);
+		for (const target of new Set(internal(name, true))) addUnit(chunk, target);
+	});
+	/** Estimated milliseconds the merge costs a load beyond its allowance, or 0 inside it. */
+	const excess = (unit: LoadUnit, loaded: ChunkSet, held: ChunkSet | undefined): number => {
+		let bytes = 0;
+		let files = 0;
+		for (let word = 0; word < loaded.length; word += 1) {
+			let added = (loaded[word] ?? 0) & ~(held?.[word] ?? 0);
+			while (added !== 0) {
+				const low = added & -added;
+				const chunk = word * 32 + 31 - Math.clz32(low);
+				bytes += size[chunk] ?? 0;
+				if (node(chunk) === chunk) files += 1;
+				added ^= low;
+			}
+		}
+		const cost = megabytes(bytes - unit.bytes) - (unit.files - files) * MS_PER_FILE;
+		return cost > unit.allowance ? cost : 0;
+	};
+	/** The loads over their allowance under the current grouping; undefined when the grouping is cyclic. */
+	const overdrawn = (): Map<LoadUnit, number> | undefined => {
+		const loads = settle();
+		if (loads === undefined) return undefined;
+		const over = new Map<LoadUnit, number>();
+		for (const unit of units) {
+			const cost = excess(unit, loads[node(unit.to)] ?? emptySet(), unit.from === -1 ? undefined : loads[node(unit.from)]);
+			if (cost > 0) over.set(unit, cost);
+		}
+		return over;
+	};
+
+	// Guards: split along the closure of whichever load loses most, until none is over its allowance.
+	regroup();
+	for (;;) {
+		const over = overdrawn();
+		if (over === undefined) throw new Error("chunk-merge: the staged groups import each other in a cycle");
+		const worst = [...over].sort((a, b) => b[1] - a[1])[0]?.[0];
+		if (worst === undefined) break;
+		// Prefer widening a guard that already exists: every new bit splits every group it crosses.
+		const joined = guards.some((guard) => {
+			const previous = guard.chunks;
+			guard.chunks = previous.slice();
+			include(guard.chunks, closure(worst.to));
+			regroup();
+			const after = overdrawn();
+			if (after && [...after.keys()].every((unit) => unit !== worst && over.has(unit))) return true;
+			guard.chunks = previous;
+			return false;
+		});
+		if (!joined) guards.push({ chunks: closure(worst.to).slice() });
+		regroup();
+	}
+
+	// A guard splits every group it crosses, including ones where the split saves its load nothing. Undo those:
+	// fold the smallest group of a cell into a larger one whenever every load stays inside its allowance and the
+	// merged files still form a DAG. Folding two files only changes what the files that reach either of them
+	// load, which becomes the union of both, so a trial updates those sets instead of settling the graph again.
+	const loads = settle() ?? [];
+	const loadsOf = (id: number): ChunkSet => loads[id] ?? emptySet();
+	const fold = (small: number, host: number): boolean => {
+		const chunks = members.get(small) ?? [];
+		const into = members.get(host) ?? [];
+		// A third file on an import path between the two would end up importing, and imported by, the merged file.
+		for (const [near, far] of [
+			[small, host],
+			[host, small],
+		] as const) {
+			for (let chunk = 0; chunk < names.length; chunk += 1) {
+				if (chunk === near || chunk === far || node(chunk) !== chunk || !holds(loadsOf(near), chunk)) continue;
+				if (holds(loadsOf(chunk), far)) return false;
+			}
+		}
+		const merged = loadsOf(small).slice();
+		include(merged, loadsOf(host));
+		const after = (id: number): ChunkSet => {
+			const before = loadsOf(id);
+			if (!holds(before, small) && !holds(before, host)) return before;
+			const widened = before.slice();
+			include(widened, merged);
+			return widened;
+		};
+		const nodes = units.map((unit) => [node(unit.to), unit.from === -1 ? -1 : node(unit.from)] as const);
+		for (const chunk of chunks) group[chunk] = host;
+		const fits = units.every((unit, at) => {
+			const [to, from] = nodes[at] ?? [-1, -1];
+			const loaded = after(to);
+			const held = from === -1 ? undefined : after(from);
+			// A load neither file is part of costs what it did, which was inside its allowance.
+			if (loaded === loadsOf(to) && (from === -1 || held === loadsOf(from))) return true;
+			return excess(unit, loaded, held) === 0;
+		});
+		if (!fits) {
+			for (const chunk of chunks) group[chunk] = small;
+			return false;
+		}
+		for (let id = 0; id < names.length; id += 1) if (loads[id] !== undefined) loads[id] = after(id);
+		loads[host] = merged;
+		loads[small] = undefined;
+		members.delete(small);
+		members.set(host, [...into, ...chunks]);
+		return true;
+	};
+	const weight = (id: number): number => (members.get(id) ?? []).reduce((total, chunk) => total + (size[chunk] ?? 0), 0);
 	const bySize = (a: number, b: number): number => weight(a) - weight(b) || a - b;
 	for (let folded = true; folded; ) {
 		folded = false;
 		for (const small of [...members.keys()].sort(bySize)) {
-			const chunks = members.get(small);
-			if (chunks === undefined) continue;
+			if (!members.has(small)) continue;
 			const hosts = [...members.keys()].filter((id) => id !== small && cellOf[id] === cellOf[small]).sort(bySize);
-			for (const host of hosts.reverse()) {
-				const into = members.get(host) ?? [];
-				members.delete(small);
-				members.set(host, [...into, ...chunks]);
-				for (const chunk of chunks) group[chunk] = host;
-				if (acyclic() && cold.every((root) => excess(root) === 0)) {
-					folded = true;
-					break;
-				}
-				members.set(host, into);
-				members.set(small, chunks);
-				for (const chunk of chunks) group[chunk] = small;
-			}
+			if (hosts.reverse().some((host) => fold(small, host))) folded = true;
 		}
 	}
 
