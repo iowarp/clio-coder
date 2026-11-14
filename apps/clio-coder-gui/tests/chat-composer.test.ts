@@ -495,16 +495,15 @@ test("the Detailed line reports route, speed, the prompt split and cache only wh
 		{ label: "Speed", value: "38 tok/s" },
 		{ label: "Prompt", value: "12,436 (90 cached)" },
 		{ label: "Output", value: "678" },
-		{ label: "Cache hit", value: "1%" },
 		{ label: "Reasoning", value: "234" },
 	]);
 	assert.deepEqual(
 		view.breakdown.filter((row) => row.group === "Cache").map((row) => [row.label, row.value]),
 		[
 			["Read", "90"],
-			["Hit share", "1%"],
 			["Written", "1"],
 		],
+		"provider token fields do not establish a hit share, so none is derived",
 	);
 	assert.deepEqual(
 		view.breakdown.filter((row) => row.group === "Model").map((row) => [row.label, row.value]),
@@ -576,6 +575,22 @@ test("a failed turn shows its problem detail and its stop reason; a stopped one 
 	assert.equal(stopped.label, "Stopped");
 	assert.equal(stopped.stopReason, null);
 	assert.equal(turnOutcome(turn({ status: "running", usage: null, finishedAt: null }), 0).tone, "running");
+});
+
+test("a succeeded turn cut at the output limit says it stopped early, with the reason, and can be tried again", () => {
+	const cut = turnOutcome(turn({ stopReason: "max_tokens" }), 0);
+	assert.equal(cut.label, "Stopped early");
+	assert.equal(cut.tone, "warn");
+	assert.equal(cut.glyph, "!");
+	assert.equal(cut.detail, "The model reached its output limit before it finished. Send a message to continue.");
+	assert.equal(cut.stopReason, "max_tokens");
+	const retry = messageActionOffers({
+		requestText: "do it",
+		responseText: "half",
+		status: "succeeded",
+		ending: "output-limit",
+	}).find((offer) => offer.id === "retry");
+	assert.equal(retry?.available, true);
 });
 
 test("a /name the session cannot run is flagged before it is sent, and nothing else is", () => {

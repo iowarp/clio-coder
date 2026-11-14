@@ -24,6 +24,8 @@ import type {
 } from "../../contracts/steering.js";
 import { compactDuration } from "./overview-model.js";
 import { quantityValue } from "./session-usage-model.js";
+import type { TurnEnding } from "./turns.js";
+import { endingSentence, isStoppedEarly, turnEnding } from "./turns.js";
 
 /** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
 export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
@@ -752,6 +754,8 @@ export interface MessageActionContext {
 	/** The response segments joined by a blank line, as raw Markdown. */
 	readonly responseText: string;
 	readonly status: Turn["status"];
+	/** How the turn ended, from `turnEnding`. A turn that stopped early can be tried again. */
+	readonly ending?: TurnEnding | null;
 }
 
 /**
@@ -762,7 +766,7 @@ export interface MessageActionContext {
 export function messageActionOffers(context: MessageActionContext): readonly MessageActionOffer[] {
 	const hasRequest = (context.requestText ?? "").trim() !== "";
 	const hasResponse = context.responseText.trim() !== "";
-	const retryable = context.status === "failed" || context.status === "cancelled";
+	const retryable = context.status === "failed" || context.status === "cancelled" || isStoppedEarly(context.ending);
 	return [
 		{
 			id: "copy-request",
@@ -872,6 +876,13 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 	cancelled: { tone: "neutral", glyph: "–", label: "Stopped" },
 };
 
+// A succeeded row whose stop reason says the answer is not whole: never a success mark.
+const STOPPED_EARLY: { tone: OutcomeTone; glyph: string; label: string } = {
+	tone: "warn",
+	glyph: "!",
+	label: "Stopped early",
+};
+
 /**
  * The footer carries per-turn facts: how long the turn took, what it read and wrote, what it spent
  * and how many tool calls it made. The time is the difference of the two recorded instants, so a
@@ -881,7 +892,9 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOutcomeView {
 	const counted = typeof activity === "number" ? { ...NO_ACTIVITY, tools: activity } : activity;
 	const toolCount = counted.tools;
-	const shape = OUTCOME[turn.status];
+	const ending = turnEnding(turn);
+	const early = ending !== null && isStoppedEarly(ending);
+	const shape = early ? STOPPED_EARLY : OUTCOME[turn.status];
 	const facts: string[] = [];
 	const nerd: OutcomeFact[] = [];
 	const elapsed =
@@ -933,7 +946,6 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 		nerd.push({ label: "Speed", value: tokenRate(rate) });
 	}
 	if (quantities) {
-		// The share of the prompt the provider served from its cache: what a warm session saves.
 		const read = quantityValue(quantities.cacheRead);
 		const prompt = quantityValue(quantities.prompt);
 		if (prompt !== null) {
@@ -958,11 +970,7 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 			value: quantities.cacheRead.display,
 			factRef: quantities.cacheRead.ref,
 		});
-		if (read !== null && prompt !== null && prompt > 0) {
-			const share = `${Math.round((100 * read) / prompt)}%`;
-			breakdown.push({ group: "Cache", label: "Hit share", value: share });
-			nerd.push({ label: "Cache hit", value: share });
-		}
+		// Provider token fields do not establish a cache hit rate, so no share is derived from them.
 		breakdown.push({
 			group: "Cache",
 			label: "Written",
@@ -998,8 +1006,13 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 		tone: shape.tone,
 		glyph: shape.glyph,
 		label: shape.label,
-		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
-		stopReason: turn.status === "failed" ? turn.stopReason : null,
+		detail:
+			early && ending !== null
+				? endingSentence(ending, turn.stopReason)
+				: turn.status === "succeeded"
+					? null
+					: (turn.problem?.detail ?? null),
+		stopReason: early || turn.status === "failed" ? turn.stopReason : null,
 		facts,
 		usageLabel,
 		usage: turn.usage,

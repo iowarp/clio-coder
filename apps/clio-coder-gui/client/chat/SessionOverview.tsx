@@ -33,6 +33,7 @@ import {
 } from "./session-telemetry.js";
 import { sessionSpend } from "./session-usage-model.js";
 import { livePlanView } from "./telemetry-model.js";
+import { isStoppedEarly, turnEnding } from "./turns.js";
 
 function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
 	if (tone === "success")
@@ -235,7 +236,9 @@ export function SessionOverview({
 							: last?.status === "cancelled"
 								? "Stopped"
 								: last
-									? "Complete"
+									? isStoppedEarly(turnEnding(last))
+										? "Stopped early"
+										: "Complete"
 									: "Not started";
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;

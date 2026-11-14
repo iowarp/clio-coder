@@ -25,10 +25,13 @@ export function settingsHref(budget: BudgetBlock): string {
 /**
  * What the banner says. While the request is parked it names the spend, the ceiling and the raise;
  * after the operator writes the raise it says so and waits for the turn to move, which clears it.
+ * `parked` is whether a turn of this session is still running: the block survives a turn boundary
+ * (#424), and once the operator has stopped that turn nothing is waiting to resume.
  */
 export function budgetBannerView(
 	budget: BudgetBlock,
 	outcome: { raisedTo: string | null; error: string | null },
+	parked: boolean,
 ): BudgetBannerView {
 	const spend = `${budget.currentDisplay ?? "not measured"} of ${budget.ceilingDisplay ?? "not measured"}`;
 	const href = settingsHref(budget);
@@ -39,7 +42,9 @@ export function budgetBannerView(
 				outcome.raisedTo === String(budget.raiseToUsd) && budget.raiseDisplay
 					? `Ceiling raised to ${budget.raiseDisplay}.`
 					: "Ceiling updated.",
-			detail: "CLIO Coder resumes the paused request within a second.",
+			detail: parked
+				? "CLIO Coder resumes the paused request within a second."
+				: "The new ceiling applies to your next message.",
 			raise: null,
 			settingsHref: href,
 		};

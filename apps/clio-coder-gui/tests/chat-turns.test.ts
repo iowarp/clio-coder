@@ -16,7 +16,15 @@ import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../
 import { routeFacts } from "../client/chat/route.js";
 import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
-import { activeTurn, type ChatTurn, groupTurns, sameTurnView, turnStatuses } from "../client/chat/turns.js";
+import {
+	activeTurn,
+	type ChatTurn,
+	endingSentence,
+	groupTurns,
+	sameTurnView,
+	turnEnding,
+	turnStatuses,
+} from "../client/chat/turns.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
 import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
@@ -424,7 +432,8 @@ test("the live status machine reaches all nine states from one realistic sequenc
 	);
 	assert.equal(record(parked), "waiting");
 	assert.equal(parked.detail, "Write src/lexer.ts");
-	assert.equal(record(liveStatus(chatTurn([user, notice], "running"), undefined, null)), "waiting");
+	// A trailing notice is not a pending approval; only a real `Permission` parks the chip.
+	assert.equal(record(liveStatus(chatTurn([user, notice], "running"), undefined, null)), "acting");
 	assert.equal(
 		record(liveStatus(chatTurn([user, running], "running"), turnRow({ id: "t", status: "running" }), null, true)),
 		"stopping",
@@ -498,6 +507,53 @@ test("a terminal row outranks everything, and a replayed turn is an earlier reco
 	assert.equal(isLive({ state: "done", label: "", detail: null }), false);
 	assert.equal(isLive({ state: "failed", label: "", detail: null }), false);
 	assert.equal(isLive({ state: "stopped", label: "", detail: null }), false);
+});
+
+test("turnEnding reads a settled turn's stop reason, and the chip never calls an early stop complete", () => {
+	const ending = (status: Turn["status"], stopReason: string | null) => turnEnding({ status, stopReason });
+	assert.equal(ending("succeeded", "max_tokens"), "output-limit");
+	assert.equal(ending("succeeded", "max_turn_requests"), "step-limit");
+	assert.equal(ending("succeeded", "refusal"), "refusal");
+	assert.equal(ending("succeeded", "end_turn"), "complete");
+	assert.equal(ending("succeeded", null), "complete");
+	assert.equal(ending("succeeded", "provider_quirk"), "other");
+	assert.equal(ending("failed", "max_tokens"), "failed");
+	assert.equal(ending("cancelled", "cancelled"), "stopped");
+	assert.equal(ending("running", null), null);
+	assert.equal(endingSentence("complete", "end_turn"), null);
+	assert.equal(endingSentence("other", "provider_quirk"), "The turn ended with stop reason provider_quirk.");
+
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const chip = liveStatus(
+		chatTurn([user], "succeeded"),
+		turnRow({ id: "t", status: "succeeded", stopReason: "max_turn_requests" }),
+		null,
+	);
+	assert.deepEqual(chip, {
+		state: "stopped",
+		label: "Stopped early",
+		detail: "CLIO Coder ended this turn at a step limit or loop guard. Check the last steps before you continue.",
+	});
+});
+
+test("a trailing notice with no pending permission reads as working, not as waiting for approval", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const resolved = item({ id: "2", turnId: "t", kind: "notice", status: "completed", title: "Allowed: run tests" });
+	const status = liveStatus(chatTurn([user, resolved], "running"), turnRow({ id: "t", status: "running" }), null);
+	assert.deepEqual(status, { state: "acting", label: "Working", detail: null });
+});
+
+test("a pending permission on the running turn still parks the chip on the approval", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const asked = item({ id: "2", turnId: "t", kind: "notice", status: "pending", title: "Run tests" });
+	const status = liveStatus(
+		chatTurn([user, asked], "running"),
+		turnRow({ id: "t", status: "running" }),
+		permission({ id: "p", turnId: "t", title: "Run tests" }),
+	);
+	assert.equal(status.state, "waiting");
+	assert.equal(status.label, "Waiting for your approval");
+	assert.equal(status.detail, "Run tests");
 });
 
 let healthSequence = 0;
