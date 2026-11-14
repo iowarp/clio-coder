@@ -176,6 +176,10 @@ export async function prepare(directory, credits) {
 	return receipt;
 }
 
+// The budget catches a tier that grows by accident; raise it on purpose when a tier grows on purpose. The GUI tier
+// runs every app test file, so it grows with each one added.
+const QUALIFICATION_TEST_BUDGET = 2500;
+
 export async function testCandidate(directory, commit, results = "test-results.json") {
 	const receipt = verifyCandidate(directory, commit);
 	rmSync(join(root, "dist"), { recursive: true, force: true });
@@ -187,7 +191,8 @@ export async function testCandidate(directory, commit, results = "test-results.j
 	for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
 	const counts = Object.fromEntries(outcomes.map((outcome, index) => [tiers[index], outcome.value]));
 	const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-	if (total + 3 > 2000) throw new Error(`Default qualification exceeds its 2000-test budget: ${total + 3}`);
+	if (total + 3 > QUALIFICATION_TEST_BUDGET)
+		throw new Error(`Default qualification exceeds its ${QUALIFICATION_TEST_BUDGET}-test budget: ${total + 3}`);
 	verifyCandidate(directory, commit);
 	if (source() !== commit) throw new Error("Source changed while testing the candidate.");
 	writeFileSync(

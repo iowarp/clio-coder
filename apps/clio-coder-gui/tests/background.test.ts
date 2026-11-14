@@ -580,8 +580,10 @@ test("opening after activation repins the service and restarts only idle work, i
 test("every start of the background app draws a new launch token, so an earlier copy opens nothing", {
 	timeout: 90_000,
 }, async (t) => {
+	// The app's build or the package's dist/gui/client; a fixture only when neither exists.
 	const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
-	if (!(await stat(join(clientDir, "index.html")).catch(() => null))) {
+	const packaged = fileURLToPath(new URL("../../../dist/gui/client/index.html", import.meta.url));
+	if (!(await stat(join(clientDir, "index.html")).catch(() => null)) && !(await stat(packaged).catch(() => null))) {
 		await mkdir(clientDir, { recursive: true });
 		await writeFile(join(clientDir, "index.html"), "<h1>Fixture client</h1>");
 		t.after(() => rm(clientDir, { recursive: true, force: true }));

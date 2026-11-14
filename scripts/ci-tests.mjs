@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { appendFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -191,63 +191,11 @@ export const coreTests = [
 	// The issue labeler runs on untrusted report bodies in GitHub Actions.
 	.concat(".github/scripts/report-labels.test.mjs");
 
-export const guiTests = [
-	"report-dialog-model",
-	"search-draft-model",
-	"setup-wizard-model",
-	"chat-composer",
-	"slash-model",
-	"chat-approval",
-	"chat-interview",
-	"chat-turns",
-	"egress-policy",
-	"http-meta",
-	"sessions-http",
-	"targets-http",
-	"library-http",
-	"file-preview",
-	"app-state",
-	"system-model",
-	"telemetry-live",
-	"readouts",
-	"readouts-model",
-	"ssh-model",
-	"arena-model",
-	"research-model",
-	"research-http",
-	"autonomy-model",
-	"pages",
-	"machine-proxy",
-	"client-auth",
-	"session-control",
-	"session-overview",
-	"notification-model",
-	"rewind-http",
-	"rewind-model",
-	"openapi",
-	"boundaries",
-	// x090 spec 12
-	"review-http",
-	"trust-model",
-	// x090 round 2, truth
-	"task-rename",
-	"metrics-scope-model",
-	// x090 round 2, keys
-	"row-keys-model",
-	// x090 r2-layout
-	"idle-reads",
-	// Round-2 regressions and the reports bridge. The other GUI files stay full-only: the default qualification's
-	// 2000-test budget has no room for their ~300 tests beside the core tier.
-	"chat-tools",
-	"chat-shell",
-	"interaction",
-	"settings-control-model",
-	"settings-controls-http",
-	"attachments-model",
-	"reports-http",
-]
-	.map((name) => `tests/${name}.test.ts`)
-	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");
+// Every top-level GUI test file. tests/real drives a real browser or a live agent and keeps its own commands.
+export const guiTests = readdirSync(join(root, "apps/clio-coder-gui/tests"))
+	.filter((name) => /\.test\.tsx?$/u.test(name))
+	.sort()
+	.map((name) => `tests/${name}`);
 
 export const packageTests = [
 	"tests/smoke/installed-package.test.ts",
@@ -275,6 +223,18 @@ export async function runTests(tier) {
 	const files = { core: coreTests, gui: guiTests, package: packageTests, full: fullTests }[tier];
 	if (!files) throw new Error(`Unknown test tier: ${tier}`);
 	const preloads = [join(root, "tests/harness/tmp-root.ts"), ...(gui ? ["./tests/harness/no-network.ts"] : [])];
+	// GUI tests that launch the server use the client build the tier already has: the app's own build, or the package's
+	// dist/gui/client that qualification extracts from the tarball. With neither, the tier supplies one static fixture for
+	// its whole run, so no test process creates or removes a shared client directory under another.
+	const fixtureClient =
+		gui &&
+		!["apps/clio-coder-gui/dist/client", "dist/gui/client"].some((dir) => existsSync(join(root, dir, "index.html")))
+			? join(cwd, "dist/client")
+			: null;
+	if (fixtureClient) {
+		mkdirSync(fixtureClient, { recursive: true });
+		writeFileSync(join(fixtureClient, "index.html"), "<h1>Fixture client</h1>");
+	}
 	const child = spawn(
 		process.execPath,
 		[
@@ -297,6 +257,8 @@ export async function runTests(tier) {
 	const code = await new Promise((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", (status) => resolve(status ?? 1));
+	}).finally(() => {
+		if (fixtureClient) rmSync(fixtureClient, { recursive: true, force: true });
 	});
 	const plain = stripVTControlCharacters(transcript);
 	const count = Number(/(?:ℹ|#) tests (\d+)/u.exec(plain)?.[1]);
