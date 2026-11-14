@@ -1,7 +1,9 @@
 import path from "node:path";
+import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
+import { captureProofSnapshot, readObservedProof } from "../../tools/verify/proof.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
@@ -38,6 +40,8 @@ import {
  * says outright whether the set is closed.
  */
 export interface RunEffects {
+	/** Latest paired native proof results, rechecked against current declared inputs. */
+	proofs: ReadonlyMap<string, ObservedProof>;
 	/** Absolute paths the run's successful tool calls aimed a mutation at. */
 	mutatedPaths: ReadonlySet<string>;
 	/**
@@ -108,15 +112,17 @@ export interface RunEffectsRecorderOptions {
 }
 
 export interface RunEffectsRecorder {
+	started(toolCallId: string): boolean;
 	/** Record a tool call's mutation targets and validation identity. */
 	start(toolCallId: string, toolName: string, args: Record<string, unknown> | undefined): void;
 	/** Commit a call's effects, or drop them when the call did not succeed. */
-	finish(toolCallId: string, failed: boolean): void;
+	finish(toolCallId: string, failed: boolean, result?: unknown): void;
 	checkOutcome(toolCallId: string, outcome: "ok" | "error" | "blocked"): void;
 	snapshot(): RunEffects;
 }
 
 interface PendingEffects {
+	proofCheck: string | null;
 	tool: string;
 	toolCallId: string;
 	paths: ReadonlyArray<string>;
@@ -253,8 +259,18 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
 	const executedShellCommands: string[] = [];
+	const proofs = new Map<string, ObservedProof>();
+	const latestProofCalls = new Map<string, string>();
 	return {
+		started(toolCallId) {
+			return pending.has(toolCallId);
+		},
 		start(toolCallId, toolName, args) {
+			const proofCheck = toolName === ToolNames.Verify && typeof args?.check === "string" ? args.check.trim() : null;
+			if (proofCheck !== null) {
+				proofs.delete(proofCheck);
+				latestProofCalls.set(proofCheck, toolCallId);
+			}
 			const paths = mutationTargets(toolName, args);
 			const validationCommand = validationCommandOf(toolName, args, "finish-contract");
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
@@ -262,10 +278,12 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (toolName === ToolNames.Verify || verificationCommand !== null) checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
 			// command, because the fact that it ran at all is the finding.
-			if (!opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
+			const chain = toolName === "gateway" && args?.op === "chain";
+			if (!chain && !opaque && paths.length === 0 && validationCommand === null && verificationCommand === null) return;
 			// A bash call may re-base its relative paths with its own cwd argument.
 			const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 			pending.set(toolCallId, {
+				proofCheck,
 				tool: toolName,
 				toolCallId,
 				paths: paths.map((target) => path.resolve(base, target)),
@@ -281,10 +299,21 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				outcome: null,
 			});
 		},
-		finish(toolCallId, failed) {
+		finish(toolCallId, failed, result) {
 			const effects = pending.get(toolCallId);
 			pending.delete(toolCallId);
 			if (effects === undefined) return;
+			if (
+				!failed &&
+				effects.proofCheck !== null &&
+				effects.outcome === "ok" &&
+				latestProofCalls.get(effects.proofCheck) === toolCallId
+			) {
+				const details = result !== null && typeof result === "object" && "details" in result ? result.details : undefined;
+				const value = details !== null && typeof details === "object" && "proof" in details ? details.proof : undefined;
+				const proof = readObservedProof(value, effects.proofCheck, toolCallId);
+				if (proof !== null) proofs.set(effects.proofCheck, proof);
+			}
 			// A pass before a later mutation cannot settle the final tree. A refused
 			// call never reached its tool, so it changed nothing and leaves passes
 			// standing. A failed call that really ran may have partly written.
@@ -332,9 +361,18 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (checkingCalls.has(toolCallId)) checkingCalls.set(toolCallId, outcome);
 		},
 		snapshot() {
+			const currentProofs = new Map<string, ObservedProof>();
+			for (const [check, proof] of proofs) {
+				try {
+					if (captureProofSnapshot(cwd, proof.proof.inputs) === proof.snapshot) currentProofs.set(check, proof);
+				} catch {
+					// Missing or unreadable inputs cannot ground a claim; the result validator names the missing evidence.
+				}
+			}
 			// A path written after an earlier attempt was refused is written, so
 			// the successful set always wins the overlap.
 			return {
+				proofs: currentProofs,
 				mutatedPaths: new Set(mutatedPaths),
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
@@ -379,14 +417,14 @@ export function recordToolExecutionEffects(recorder: RunEffectsRecorder, event: 
 		return;
 	}
 	if (event.type !== "tool_execution_end") return;
-	for (const child of gatewayChainReceipts(String(event.toolName), event.result)) {
+	for (const child of recorder.started(toolCallId) ? gatewayChainReceipts(String(event.toolName), event.result) : []) {
 		const id = `${toolCallId}:${child.id}`;
 		recorder.start(id, child.capability, child.args);
 		recorder.checkOutcome(id, child.admission.outcome);
-		recorder.finish(id, child.admission.outcome !== "ok");
+		recorder.finish(id, child.admission.outcome !== "ok", child.result);
 	}
 	// A structured refusal comes back as an error result with an "error" outcome,
 	// such as a gateway capability off the run's surface, but nothing ran.
 	if (isRefusalToolResultError(event.result)) recorder.checkOutcome(toolCallId, "blocked");
-	recorder.finish(toolCallId, event.isError === true);
+	recorder.finish(toolCallId, event.isError === true, event.result);
 }

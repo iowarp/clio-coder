@@ -320,8 +320,9 @@ function parseProcessList(platform, text, uid) {
 	if (platform !== "darwin") return lines.map((line) => line.trim());
 	const texts = [];
 	for (const line of lines) {
-		const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
-		if (match && (uid === undefined || Number(match[1]) === uid)) texts.push(match[2]);
+		const entry = line.trimStart();
+		const match = /^(\d+)\s+/u.exec(entry);
+		if (match && (uid === undefined || Number(match[1]) === uid)) texts.push(entry.slice(match[0].length));
 	}
 	return texts;
 }

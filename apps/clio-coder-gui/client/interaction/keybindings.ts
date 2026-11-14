@@ -37,7 +37,7 @@ export const KEYBINDINGS = {
 		modifiers: ["primary"],
 		scope: "composer",
 		action: "Send message",
-		where: "Shift+Enter adds a line. Ctrl+Enter always sends",
+		where: "Shift + Enter adds a line. Ctrl/Cmd + Enter always sends",
 		label: "Enter",
 	},
 	sendNow: {
@@ -118,7 +118,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "Previous tab",
-		where: "Tab focused",
+		where: "A tab focused: Help topics, Library, run details",
 	},
 	tabNext: {
 		id: "tabNext",
@@ -126,7 +126,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "Next tab",
-		where: "Tab focused",
+		where: "A tab focused: Help topics, Library, run details",
 	},
 	tabFirst: {
 		id: "tabFirst",
@@ -134,7 +134,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "First tab",
-		where: "Tab focused",
+		where: "A tab focused: Help topics, Library, run details",
 	},
 	tabLast: {
 		id: "tabLast",
@@ -142,7 +142,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "Last tab",
-		where: "Tab focused",
+		where: "A tab focused: Help topics, Library, run details",
 	},
 	listNext: {
 		id: "listNext",
@@ -150,7 +150,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "Next list row",
-		where: "List focused · j also moves",
+		where: "Sidebar task list · j also moves",
 	},
 	listPrevious: {
 		id: "listPrevious",
@@ -158,7 +158,7 @@ export const KEYBINDINGS = {
 		modifiers: [],
 		scope: "list",
 		action: "Previous list row",
-		where: "List focused · k also moves",
+		where: "Sidebar task list · k also moves",
 	},
 	palette: {
 		id: "palette",
@@ -299,10 +299,10 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
 	Enter: "Enter",
 	"|": "\\",
 	Escape: "Esc",
-	ArrowLeft: "Left arrow",
-	ArrowRight: "Right arrow",
-	ArrowUp: "Up arrow",
-	ArrowDown: "Down arrow",
+	ArrowLeft: "Left",
+	ArrowRight: "Right",
+	ArrowUp: "Up",
+	ArrowDown: "Down",
 	Home: "Home",
 	End: "End",
 };

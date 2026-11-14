@@ -44,8 +44,11 @@ test("Help projects only the canonical public allowlist and never forwards priva
 
 test("Help opens with its guide, keeps shortcuts one view away and offline retrieval in Documentation", () => {
 	const opening = renderToStaticMarkup(<HelpReferenceBody bundledDocsPath="/installed/clio/docs" />);
-	assert.match(opening, /aria-pressed="true"[^>]*>Using CLIO Coder/u);
-	assert.match(opening, /aria-pressed="false"[^>]*>Shortcuts/u);
+	// Topics are tabs: one tab stop on the selected topic, the rest reached with the arrow keys.
+	assert.match(opening, /role="tablist" aria-label="Help topics"/u);
+	assert.match(opening, /role="tab" aria-selected="true"[^>]*tabindex="0"[^>]*>Using CLIO Coder/u);
+	assert.match(opening, /role="tab" aria-selected="false"[^>]*tabindex="-1"[^>]*>Shortcuts/u);
+	assert.match(opening, /role="tabpanel" aria-labelledby=/u);
 	assert.ok(
 		helpContent("", "shortcuts").shortcuts.some((group) => group.bindings.some((binding) => binding.id === "palette")),
 	);

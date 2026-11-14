@@ -17,7 +17,7 @@ import {
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // A scratch Clio home for the whole file, holding the desktop app's launch token.
-const clioHome = await isolateClioEnv("clio-worker-sandbox-");
+const clioHome = await isolateClioEnv("clio-worker-sandbox-' ; ");
 after(() => clioHome.restore());
 const appToken = join(clioHome.dir, "state", "gui", "background", "server.json");
 mkdirSync(join(appToken, ".."), { recursive: true });
@@ -58,13 +58,25 @@ test("under bwrap a worker command writes only its writable root and cannot reac
 		readableRoots: [outside],
 		network,
 	});
-	const script = [
-		`echo inside > ${join(root, "inside.txt")} && echo wrote-inside`,
-		`if echo outside > ${join(outside, "outside.txt")} 2>/dev/null; then echo wrote-outside; fi`,
-		`if exec 3<>/dev/tcp/127.0.0.1/${address.port}; then echo connected; else echo no-network; fi`,
-	].join("; ");
+	const command = {
+		argv: [
+			"/bin/bash",
+			"--noprofile",
+			"--norc",
+			"-c",
+			[
+				'echo inside > "$1/inside.txt" && echo wrote-inside',
+				'if echo outside > "$2/outside.txt" 2>/dev/null; then echo wrote-outside; fi',
+				'if exec 3<>"/dev/tcp/127.0.0.1/$3"; then echo connected; else echo no-network; fi',
+			].join("; "),
+			"worker-sandbox",
+			root,
+			outside,
+			String(address.port),
+		],
+	};
 
-	const isolated = composeWorkerSandboxInvocation(policy(false), { shell: script }, root, availability, []);
+	const isolated = composeWorkerSandboxInvocation(policy(false), command, root, availability, []);
 	assert.ok(isolated !== null);
 	const result = await run(isolated.file, isolated.args);
 	assert.equal(result.code, 0, result.output);
@@ -76,7 +88,7 @@ test("under bwrap a worker command writes only its writable root and cannot reac
 
 	// Control: the same listener is reachable once the run holds a network
 	// grant, so the refusal above is the namespace and not a dead port.
-	const granted = composeWorkerSandboxInvocation(policy(true), { shell: script }, root, availability, []);
+	const granted = composeWorkerSandboxInvocation(policy(true), command, root, availability, []);
 	assert.ok(granted !== null);
 	assert.match((await run(granted.file, granted.args)).output, /connected/u);
 });
@@ -113,7 +125,16 @@ test("under bwrap a task worktree's worker cannot read the secrets of the checko
 	configureWorkerProcessSandbox(spec);
 	t.after(() => configureWorkerProcessSandbox(undefined));
 	const plan = planSandboxedSpawn(
-		{ shell: `cat ${join(checkout, ".env")} ${join(sibling, ".env")} README.md 2>&1; true` },
+		{
+			argv: [
+				"/bin/sh",
+				"-c",
+				'cat "$@" README.md 2>&1; true',
+				"worker-sandbox",
+				join(checkout, ".env"),
+				join(sibling, ".env"),
+			],
+		},
 		worktree,
 	);
 	assert.equal(plan.kind, "sandboxed");
@@ -146,7 +167,10 @@ test("under bwrap a task worktree's worker cannot read the secrets of the checko
 			dependencyRoots: [],
 		}),
 	);
-	const barePlan = planSandboxedSpawn({ shell: `cat ${join(source, ".env")} README.md 2>&1; true` }, bareTask);
+	const barePlan = planSandboxedSpawn(
+		{ argv: ["/bin/sh", "-c", 'cat "$1" README.md 2>&1; true', "worker-sandbox", join(source, ".env")] },
+		bareTask,
+	);
 	assert.equal(barePlan.kind, "sandboxed");
 	if (barePlan.kind !== "sandboxed") return;
 	const bareResult = await run(barePlan.file, barePlan.args);
@@ -162,7 +186,7 @@ test("under bwrap no contained command reads the desktop app's launch token", as
 	}
 	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-app-token-")));
 	t.after(() => rmSync(workspace, { recursive: true, force: true }));
-	const shell = `cat ${appToken} 2>&1; true`;
+	const command = { argv: ["/bin/sh", "-c", 'cat "$1" 2>&1; true', "worker-sandbox", appToken] };
 	configureWorkerProcessSandbox(
 		resolveWorkerSandboxSpec({
 			mode: "auto",
@@ -175,8 +199,8 @@ test("under bwrap no contained command reads the desktop app's launch token", as
 	);
 	t.after(() => configureWorkerProcessSandbox(undefined));
 	const plans = {
-		worker: planSandboxedSpawn({ shell }, workspace),
-		main: planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), { shell }, workspace),
+		worker: planSandboxedSpawn(command, workspace),
+		main: planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), command, workspace),
 	};
 	for (const [name, plan] of Object.entries(plans)) {
 		assert.equal(plan.kind, "sandboxed", name);
@@ -203,8 +227,16 @@ test("under bwrap a running command cannot read Clio's credential store after Cl
 	writeFileSync(store, "token: STORE_BEFORE\n", { mode: 0o600 });
 	const workspace = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-store-rename-")));
 	t.after(() => rmSync(workspace, { recursive: true, force: true }));
-	const shell = `cat ${join(config, "skills", "demo", "SKILL.md")} ${join(config, "agents", "demo.md")}; for i in 1 2 3 4 5 6 7 8; do cat ${store} ${settings} 2>&1; ls -a ${config}; sleep 0.25; done`;
-	const plan = planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), { shell }, workspace);
+	const command = {
+		argv: [
+			"/bin/sh",
+			"-c",
+			'cat "$1/skills/demo/SKILL.md" "$1/agents/demo.md"; for i in 1 2 3 4 5 6 7 8; do cat "$1/credentials.yaml" "$1/settings.yaml" 2>&1; ls -a "$1"; sleep 0.25; done',
+			"worker-sandbox",
+			config,
+		],
+	};
+	const plan = planMainSandboxSpawn(mainSandboxPolicy({ workspace, scratchRoots: [] }), command, workspace);
 	assert.equal(plan.kind, "sandboxed");
 	if (plan.kind !== "sandboxed") return;
 	const child = spawn(plan.file, plan.args, { stdio: ["ignore", "pipe", "pipe"] });

@@ -126,6 +126,6 @@ fallback when its extension is absent. An extension root never holds `plugin.jso
    clio-coder library register <package-path> --project
    clio-coder library install <kind>:<name> --project
    ```
-7. **Submit a focused fork PR**: Push to your fork and submit a PR against `main`.
+7. **Submit a focused fork PR**: Push to your fork and open the PR against the current version branch (`v` plus the digits of the `package.json` version, such as `v081`), not `main`. See "Submitting Changes" in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Built-in agents and baseline playbooks remain product-owned under `src/domains/agents/builtins/` and `src/domains/agents/playbooks/`.

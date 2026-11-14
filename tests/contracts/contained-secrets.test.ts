@@ -237,7 +237,7 @@ test("under bwrap a secret whose parent a verify script renamed is masked at its
 
 	const verified = await verifyTool.run({ check: "lint" }, { shellSandbox: policy });
 	strictEqual(verified.kind, "ok", verified.kind === "error" ? verified.message : "");
-	const plan = planMainSandboxSpawn(policy, { shell: "cat apps/w2/.env.local" }, root);
+	const plan = planMainSandboxSpawn(policy, { argv: ["cat", "apps/w2/.env.local"] }, root);
 	strictEqual(plan.kind, "sandboxed");
 	const read = plan.kind === "sandboxed" ? spawnSync(plan.file, plan.args, { encoding: "utf8" }) : undefined;
 	ok(!`${read?.stdout}`.includes("fake-deep-value"), read?.stdout);

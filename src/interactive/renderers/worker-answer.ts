@@ -83,9 +83,18 @@ function verifierReport(value: Record<string, unknown>): PresentedContractAnswer
 		const name = reportString(check.name);
 		const evidence = reportString(check.evidence);
 		if (name === null || evidence === null || typeof check.passed !== "boolean") return null;
-		lines.push(`${check.passed ? GLYPH.ok : GLYPH.error} ${name}: ${evidence}`);
+		const obligation = check.obligation;
+		const status =
+			obligation !== null && typeof obligation === "object" && "status" in obligation
+				? reportString(obligation.status)
+				: null;
+		lines.push(`${check.passed ? GLYPH.ok : GLYPH.error} ${name}${status === null ? "" : ` [${status}]`}: ${evidence}`);
 	}
-	return { lines: lines.length === 0 ? ["No checks reported."] : lines, footer: `verdict ${value.verdict}` };
+	const assurance = reportString(value.assurance);
+	return {
+		lines: lines.length === 0 ? ["No checks reported."] : lines,
+		footer: `verdict ${value.verdict}${assurance === null ? "" : `; assurance ${assurance}`}`,
+	};
 }
 
 function researchReport(value: Record<string, unknown>): PresentedContractAnswer | null {

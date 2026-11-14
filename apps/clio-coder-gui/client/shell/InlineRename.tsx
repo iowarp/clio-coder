@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { returnFocusNear } from "../interaction/focus-return.js";
 
 /**
  * A title edited in place. Enter or leaving the field saves, Escape and an unchanged value cancel.
- * An empty value is a real answer: the task falls back to its first request as its name.
+ * An empty value is a real answer: the task falls back to its first request as its name. Enter and
+ * Escape return focus to the control the field replaced, since the field itself unmounts.
  */
 export function InlineRename({
 	value,
@@ -49,10 +51,12 @@ export function InlineRename({
 			onKeyDown={(event) => {
 				if (event.key === "Enter") {
 					event.preventDefault();
+					returnFocusNear(event.currentTarget);
 					finish(true);
 				} else if (event.key === "Escape") {
 					event.preventDefault();
 					event.stopPropagation();
+					returnFocusNear(event.currentTarget);
 					finish(false);
 				}
 			}}

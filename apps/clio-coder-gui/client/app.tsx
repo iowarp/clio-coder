@@ -18,6 +18,8 @@ import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
 import { appCommands, liveStopTarget, type PaletteTask } from "./interaction/commands.js";
+import { focusComposerSoon } from "./interaction/focus-return.js";
+import { HelpFrame, PaletteFrame, preloadDialogs } from "./interaction/LazyDialogs.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { onReportRequest, type ReportRequest } from "./report/report-events.js";
@@ -39,13 +41,9 @@ import "./shell/shell.css";
 
 // The setup wizard, its films and its styles load only when it opens.
 const Wizard = lazy(() => import("./wizard/Wizard.js"));
-const CommandPalette = lazy(() =>
-	import("./interaction/CommandPalette.js").then((module) => ({ default: module.CommandPalette })),
-);
 const ReportDialog = lazy(() =>
 	import("./report/ReportDialog.js").then((module) => ({ default: module.ReportDialog })),
 );
-const HelpDialog = lazy(() => import("./interaction/HelpDialog.js").then((module) => ({ default: module.HelpDialog })));
 
 const PHONE = "(max-width: 760px)";
 
@@ -97,6 +95,12 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const [connection, setConnection] = useState<ConnectionState>(client.signedIn ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
+	// The control each dialog returns focus to on Esc. Recorded at open, since a click that does not
+	// focus its button (Safari) or a command run from the palette leaves `document.activeElement` wrong.
+	const [paletteFrom, setPaletteFrom] = useState<HTMLElement | null>(null);
+	const [helpFrom, setHelpFrom] = useState<HTMLElement | null>(null);
+	const paletteFromRef = useRef<HTMLElement | null>(null);
+	useEffect(() => preloadDialogs(), []);
 	const [reportRequest, setReportRequest] = useState<ReportRequest | null>(null);
 	useEffect(() => onReportRequest((request) => setReportRequest(request)), []);
 	useEffect(() => {
@@ -239,11 +243,31 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		else toggleSidebar();
 	}, [phone, toggleSidebar]);
 	const startTask = useCallback(() => {
-		if (activeWorkspaceId) actions.newTask(activeWorkspaceId);
-		else setWorkspaceOpen(true);
+		if (activeWorkspaceId) {
+			actions.newTask(activeWorkspaceId);
+			focusComposerSoon();
+		} else setWorkspaceOpen(true);
 	}, [activeWorkspaceId, actions.newTask]);
 	const openWorkspace = useCallback(() => setWorkspaceOpen(true), []);
-	const openHelp = useCallback(() => setHelpOpen(true), []);
+	const opener = useCallback((): HTMLElement | null => {
+		const active = document.activeElement;
+		if (!(active instanceof HTMLElement) || active === document.body) return null;
+		// A command run from the palette opens its dialog as the palette closes: return where the palette would.
+		return active.closest(".dialog--palette") ? paletteFromRef.current : active;
+	}, []);
+	const openPalette = useCallback(
+		(from?: HTMLElement) => {
+			const target = from ?? opener();
+			paletteFromRef.current = target;
+			setPaletteFrom(target);
+			setPaletteOpen(true);
+		},
+		[opener],
+	);
+	const openHelp = useCallback(() => {
+		setHelpFrom(opener());
+		setHelpOpen(true);
+	}, [opener]);
 	const openWindow = useCallback(
 		() => openAppWindow(`${client.prefix}${sessionId ? `/sessions/${sessionId}` : "/"}`),
 		[sessionId, client.prefix],
@@ -260,7 +284,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 		});
 	}, [navigate, client.prefix]);
 
-	useShortcut("palette", () => setPaletteOpen(true));
+	useShortcut("palette", () => openPalette());
 	useShortcut("newWindow", openWindow);
 	useShortcut("help", openHelp);
 	useShortcut("sidebar", revealSidebar);
@@ -550,7 +574,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 						connection={connection}
 						activeWorkspaceId={activeWorkspaceId}
 						onOpenWorkspace={openWorkspace}
-						onSearch={() => setPaletteOpen(true)}
+						onSearch={openPalette}
 						onToggle={revealSidebar}
 						onNavigate={closeDrawer}
 						onHelp={openHelp}
@@ -603,19 +627,19 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			{workspaceOpen ? (
 				<OpenWorkspaceDialog client={client} launch={actions.launch} onClose={() => setWorkspaceOpen(false)} />
 			) : null}
+			{paletteOpen ? (
+				<PaletteFrame commands={commands} returnFocus={paletteFrom} onClose={() => setPaletteOpen(false)} />
+			) : null}
+			{/* Report opens on top of Help: Esc closes Report alone and returns to Help's button. */}
+			{helpOpen ? (
+				<HelpFrame
+					returnFocus={helpFrom}
+					onClose={() => setHelpOpen(false)}
+					bundledDocsPath={meta.data?.bundledDocsPath}
+					onReport={openReport}
+				/>
+			) : null}
 			<Suspense fallback={null}>
-				{paletteOpen ? <CommandPalette open commands={commands} onClose={() => setPaletteOpen(false)} /> : null}
-				{helpOpen ? (
-					<HelpDialog
-						open
-						onClose={() => setHelpOpen(false)}
-						bundledDocsPath={meta.data?.bundledDocsPath}
-						onReport={() => {
-							setHelpOpen(false);
-							openReport();
-						}}
-					/>
-				) : null}
 				{reportRequest && activeWorkspaceId ? (
 					<ReportDialog
 						client={client}

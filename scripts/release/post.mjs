@@ -67,7 +67,14 @@ export function openUnreleased(text) {
 	return text.startsWith("## Unreleased", first) ? text : `${text.slice(0, first)}## Unreleased\n\n${text.slice(first)}`;
 }
 
-export const stripSvgComments = (svg) => `${svg.replace(/<!--[\s\S]*?-->\s*/gu, "").trimEnd()}\n`;
+export function stripSvgComments(svg) {
+	let previous;
+	do {
+		previous = svg;
+		svg = svg.replace(/<!--[\s\S]*?-->\s*/gu, "");
+	} while (svg !== previous);
+	return `${svg.trimEnd()}\n`;
+}
 
 const done = (note) => ({ status: "done", note });
 const skipped = (note) => ({ status: "skipped", note });

@@ -7,6 +7,7 @@ import { enumerateWorkspaceFiles, WorkspaceEnumerationLimitError } from "../../s
 import { scanAgentConfigs } from "../../src/domains/context/adoption.js";
 import { heuristicBootstrapOutput } from "../../src/domains/context/bootstrap.js";
 import { parseClioMd, serializeClioMd } from "../../src/domains/context/clio-md.js";
+import { instructionUnits } from "../../src/domains/context/instruction-units.js";
 import { readProjectMetadata } from "../../src/domains/context/project-metadata.js";
 import { detectProjectProfile } from "../../src/domains/session/workspace/project-type.js";
 import { probeWorkspace } from "../../src/domains/session/workspace/snapshot.js";
@@ -110,6 +111,30 @@ describe("project bootstrap boundary", () => {
 			ok(output.sections?.some(({ body }) => body.includes(".claude/skills/ticket/SKILL.md")));
 			ok(adoption.sources.some((source) => source.displayPath === "nested/AGENTS.md"));
 		}
+	});
+
+	it("removes comments revealed by earlier comment removals before adopting a rule", () => {
+		const root = scratch();
+		let comment = "<!-- hidden -->";
+		for (let layer = 0; layer < 4; layer++) comment = `<!${comment}-- hidden -->`;
+		writeFileSync(join(root, "AGENTS.md"), `- Always run ${comment}the focused test first.\n`);
+		const adoption = scanAgentConfigs({ cwd: root, homeDir: scratch() });
+		deepStrictEqual(
+			adoption.importedRules.map((rule) => rule.text),
+			["Always run the focused test first."],
+		);
+	});
+
+	it("keeps source line numbers while removing revealed and unterminated instruction comments", () => {
+		const units = instructionUnits(
+			"<!<!-- removed -->--\nNever publish hidden text.\n-->\nAlways run tests.\n<!-- Never adopt this.",
+			260,
+			"AGENTS.md",
+		);
+		deepStrictEqual(
+			units.map(({ text, line }) => ({ text, line })),
+			[{ text: "Always run tests.", line: 4 }],
+		);
 	});
 
 	it("scans Cursor, Copilot, Windsurf, Cline and Aider instruction sources", () => {
