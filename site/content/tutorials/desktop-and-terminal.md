@@ -9,13 +9,16 @@ cd /path/to/your/project
 clio-coder
 ```
 
-![CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.](/assets/tui-boot.webp)
+![CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the GPT-6-luna model ready.](/assets/tui-boot.webp)
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
 ![CLIO Coder in the terminal changing one line of temperature.mjs to fix a failing test, then running the declared test check through verify with exit 0](/assets/tui-verify.webp)
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
+
+::: capture anim-fix-a-test
+:::
 
 During a turn, **Enter** queues a message that CLIO Coder reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
 

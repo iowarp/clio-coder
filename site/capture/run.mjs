@@ -44,11 +44,13 @@ import { homedir, hostname, userInfo } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
 import { altCheck, printAltCheck } from "./alt-check.mjs";
 import { compactEvents } from "./compact.mjs";
 import { plain, privacyHits, scanChunks } from "./privacy.mjs";
 import { quoteCheck } from "./quote-check.mjs";
+import { renderStills } from "./stills.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = dirname(here);
@@ -77,7 +79,8 @@ if (values.list) {
 if (!values.scratch) throw new Error("--scratch <dir> is required; recordings are made outside the repository.");
 const scratch = resolve(values.scratch);
 const only = values.only ? new Set(values.only.split(",")) : null;
-const scenarios = spec.scenarios.filter((scenario) => !only || only.has(scenario.id));
+// Animation scenarios are hand-driven takes finished by animation.mjs.
+const scenarios = spec.scenarios.filter((scenario) => !scenario.animation && (!only || only.has(scenario.id)));
 if (only && scenarios.length !== only.size) throw new Error(`Unknown scenario in --only: ${values.only}`);
 
 const startedAt = Date.now();
@@ -204,7 +207,12 @@ function prepareHome(dir, scenario) {
 		mkdirSync(dirname(join(home, path)), { recursive: true });
 		writeFileSync(join(home, path), text, { mode: 0o600 });
 	}
-	if (scenario.profile === "configured") {
+	// A scenario with no profile starts unconfigured; its settings (the fullscreen interface mode) still apply.
+	if (scenario.login) writeSubscriptionHome(home, scenario);
+	else if (scenario.profile !== "configured" && scenario.settings)
+		writeFileSync(join(home, ".config/clio-coder/settings.yaml"), ["version: 2", ...scenario.settings, ""].join("\n"));
+	if (scenario.profile === "configured" && scenario.model) writeSubscriptionHome(home, scenario);
+	else if (scenario.profile === "configured") {
 		writeFileSync(
 			join(home, ".config/clio-coder/settings.yaml"),
 			[
@@ -218,6 +226,44 @@ function prepareHome(dir, scenario) {
 		);
 	}
 	return home;
+}
+
+// A scenario with `model` runs on a subscription login instead of the alias proxy:
+// the one OAuth profile it names is copied read-only from the operator's real
+// credential store into the scratch home (mode 0600), and its tokens join the
+// privacy scan so nothing that echoes one can be published.
+function writeSubscriptionHome(home, scenario) {
+	const { target, model } = scenario.model ?? { target: scenario.login };
+	const real = parseYaml(
+		readFileSync(
+			join(process.env.CLIO_CODER_REAL_CONFIG_DIR ?? join(homedir(), ".config/clio-coder"), "credentials.yaml"),
+			"utf8",
+		),
+	);
+	const entry = real?.entries?.[target];
+	if (!entry) throw new Error(`${scenario.id}: no stored login for ${target}; sign in once with clio-coder first.`);
+	for (const value of [entry.access, entry.refresh, entry.key]) if (typeof value === "string") secrets.push(value);
+	writeFileSync(
+		join(home, ".config/clio-coder/credentials.yaml"),
+		stringifyYaml({ version: real.version ?? 1, entries: { [target]: entry } }),
+		{ mode: 0o600 },
+	);
+	// A `login` scenario starts from the stored login alone, so first launch finds it; settings stay as the scenario lists them.
+	writeFileSync(
+		join(home, ".config/clio-coder/settings.yaml"),
+		[
+			"version: 2",
+			...(model
+				? [
+						`targets: [ { id: ${target}, runtime: ${target}, defaultModel: ${model}, auth: { oauthProfile: ${target} } } ]`,
+						`chat: { target: ${target}, model: ${model} }`,
+						`fleet: { default: { target: ${target}, model: ${model} } }`,
+					]
+				: []),
+			...(scenario.settings ?? []),
+			"",
+		].join("\n"),
+	);
 }
 
 function seedRepo(path, name, scenario) {
@@ -576,106 +622,6 @@ function transcript(session, scenario) {
 	return `${scenario.title}\nRecorded with CLIO Coder ${clioVersion}. Each section is the terminal screen at that moment.\n\n${chapters.join("\n\n")}\n`;
 }
 
-// Stills come from the recording through the player the site embeds, in the same fonts.
-async function renderStills(castText, stills, outDir) {
-	if (!stills.length) return [];
-	const require = createRequire(join(repo, "apps/clio-coder-gui/package.json"));
-	const { chromium } = require("playwright-core");
-	const browser = await chromium.launch({ executablePath: values.chrome, headless: true });
-	const files = {
-		"/player.js": [join(site, "vendor/asciinema-player/asciinema-player.min.js"), "text/javascript"],
-		"/player.css": [join(site, "vendor/asciinema-player/asciinema-player.css"), "text/css"],
-		"/cast-symbols.woff2": [join(site, "vendor/cast-symbols/cast-symbols.woff2"), "font/woff2"],
-		"/plex-400.woff2": [join(site, "assets/fonts/plex-400.woff2"), "font/woff2"],
-		"/plex-500.woff2": [join(site, "assets/fonts/plex-500.woff2"), "font/woff2"],
-	};
-	const page = await (
-		await browser.newContext({ deviceScaleFactor: 2, viewport: { width: 1400, height: 1000 } })
-	).newPage();
-	await page.route("http://capture.invalid/**", (route) => {
-		const path = new URL(route.request().url()).pathname;
-		if (path === "/") {
-			return route.fulfill({
-				contentType: "text/html",
-				body: `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/player.css"><style>
-@font-face{font-family:"IBM Plex Mono";font-weight:400;src:url(/plex-400.woff2)}
-@font-face{font-family:"IBM Plex Mono";font-weight:500 700;src:url(/plex-500.woff2)}
-@font-face{font-family:"Cast Symbols";src:url(/cast-symbols.woff2)}
-body{margin:0;background:${spec.theme.bg}}
-#host{display:inline-block;padding:16px;background:${spec.theme.bg}}
-.ap-player{--term-font-family:"IBM Plex Mono","Cast Symbols",monospace}
-.ap-overlay-start,.ap-control-bar{display:none!important}
-</style><div id="host"></div><script src="/player.js"></script>`,
-			});
-		}
-		const [file, type] = files[path] ?? [];
-		return file ? route.fulfill({ path: file, contentType: type }) : route.fulfill({ status: 404 });
-	});
-	await page.goto("http://capture.invalid/");
-	const results = [];
-	for (const still of stills) {
-		await page.evaluate(
-			async ({ data, time }) => {
-				document.querySelector("#host").replaceChildren();
-				const el = document.createElement("div");
-				document.querySelector("#host").append(el);
-				window.AsciinemaPlayer.create({ data }, el, {
-					poster: `npt:${time}`,
-					fit: false,
-					terminalFontSize: "15px",
-					controls: false,
-				});
-				await document.fonts.load('15px "IBM Plex Mono"');
-				await document.fonts.load('15px "Cast Symbols"', "✓⣾");
-			},
-			{ data: castText, time: still.time },
-		);
-		await page.waitForSelector(".ap-term");
-		await page.waitForTimeout(400);
-		const term = await page.$(".ap-term");
-		let clip = null;
-		if (still.crop) {
-			let box = await term.boundingBox();
-			// A clip is cut at the viewport edge; grow the viewport to hold the whole terminal.
-			const needed = Math.ceil(box.y + box.height + 32);
-			if (needed > page.viewportSize().height) {
-				await page.setViewportSize({ width: page.viewportSize().width, height: needed });
-				box = await term.boundingBox();
-			}
-			const [from, to] = still.crop;
-			// Measured per row: the player's line boxes, not the terminal height divided evenly.
-			const lines = await page.$$eval(".ap-term .ap-line", (els) =>
-				els.map((el) => {
-					const rect = el.getBoundingClientRect();
-					return [rect.top, rect.bottom];
-				}),
-			);
-			if (lines.length !== still.rows) throw new Error(`${still.id}: the player drew ${lines.length} rows`);
-			clip = {
-				x: box.x - 16,
-				y: lines[from - 1][0] - 16,
-				width: box.width + 32,
-				height: lines[to - 1][1] - lines[from - 1][0] + 32,
-			};
-		}
-		const path = join(outDir, `${still.id}.png`);
-		if (clip) {
-			await page.screenshot({ path, clip });
-			// The margin above and below a crop shows parts of the neighbouring rows; paint it as background.
-			run("python3", [
-				"-c",
-				"import sys;from PIL import Image,ImageDraw;i=Image.open(sys.argv[1]).convert('RGB');d=ImageDraw.Draw(i);w,h=i.size;m=int(sys.argv[2]);d.rectangle([0,0,w,m-1],fill=sys.argv[3]);d.rectangle([0,h-m,w,h],fill=sys.argv[3]);i.save(sys.argv[1])",
-				path,
-				"32",
-				spec.theme.bg,
-			]);
-		} else await (await page.$("#host")).screenshot({ path });
-		results.push({ ...still, path });
-	}
-	await browser.close();
-	return results;
-}
-
 function pngSize(path) {
 	const data = readFileSync(path);
 	return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
@@ -726,7 +672,7 @@ async function record(scenario, lockHeld, timing) {
 		const outDir = join(dir, "out");
 		prepareHome(dir, scenario);
 		mkdirSync(outDir, { recursive: true });
-		if (scenario.live) {
+		if (scenario.live && !scenario.model && !scenario.login) {
 			requireLiveEnv();
 			if (!lockHeld) {
 				console.log(`${scenario.id}: waiting for the model lock`);
@@ -744,13 +690,17 @@ async function record(scenario, lockHeld, timing) {
 		console.log(`${scenario.id}: recording`);
 		session.start(sandboxScript(dir, scenario));
 		try {
-			for (const step of scenario.steps) await session.step(step);
+			for (const step of scenario.steps) {
+				await session.step(step);
+				// What follows the end marker is dropped from the cast; a live turn may sit at an approval card, so end the session here.
+				if (scenario.stopAtEnd && step.marker === scenario.endAt) break;
+			}
 			await session.finish(scenario.exitTimeout ?? 30);
 		} catch (error) {
 			if (session.alive()) session.tmux("kill-server");
 			throw error;
 		}
-		if (scenario.live && lockHeld) timing.lockMs = Date.now() - recordAt;
+		if (scenario.live && !scenario.model && !scenario.login && lockHeld) timing.lockMs = Date.now() - recordAt;
 		const cast = finishCast(session, scenario.endAt);
 		const text = transcript(session, scenario);
 		// Stills are rendered from this cast alone, so scanning it covers them too.
@@ -790,7 +740,7 @@ async function render({ scenario, outDir, session, cast }) {
 	if (!scenario.stillsOnly && !poster)
 		throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached`);
 	if (poster) stills.push({ id: scenario.id, time: poster.time, rows: session.rows });
-	const rendered = await renderStills(cast.text, stills, outDir);
+	const rendered = await renderStills(cast.text, stills, outDir, values.chrome);
 	for (const still of rendered)
 		run("python3", [
 			"-c",
@@ -804,7 +754,7 @@ async function render({ scenario, outDir, session, cast }) {
 					.map(([key, value]) => `${key}=${value}`)
 					.join(", ")}.`
 			: ""
-	}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${spec.liveSource}.` : " No model."}${
+	}${scenario.settings ? ` Settings: ${scenario.settings.join("; ")}.` : ""}${scenario.live ? ` Chat: ${scenario.model?.source ?? scenario.loginSource ?? spec.liveSource}.` : " No model."}${
 		scenario.privateNet?.port
 			? ` The sandbox has its own network namespace; the model port ${scenario.privateNet.port} exists only inside it.`
 			: scenario.privateNet
@@ -858,7 +808,7 @@ const recorded = [];
 const timings = [];
 let lockTotalMs = 0;
 let releaseLock = null;
-if (values.release && scenarios.some((scenario) => scenario.live)) {
+if (values.release && scenarios.some((scenario) => scenario.live && !scenario.model && !scenario.login)) {
 	requireLiveEnv();
 	releaseLock = await holdLock(process.env.CLIO_CAPTURE_LOCK, { wait: false }).catch((error) => {
 		console.error(`release ${values.release}: ${error.message}`);

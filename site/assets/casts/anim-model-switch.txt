@@ -1,0 +1,200 @@
+Switching models in CLIO Coder
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
+
+== ready
+
+
+
+
+
+
+
+
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== models
+
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Models ━
+  focus · 2 of 26 models · 2 targets · 0 local · 26 cloud · ✓ current openai-codex · gpt-6-luna
+  refreshing all targets and model catalogs…
+      model              ctx  caps  target         runtime
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  ❯ ✓ gpt-6-luna        272k  TRV   openai-codex   OpenAI Codex
+      claude-haiku-5-5    1m  TRV   anthropic-max  Anthropic (Claude Pro/Max)
+  1–2 of 2 models · Tab shows all 26
+
+  ✓ healthy 267ms · in use, its connection's default · signed in through the browser
+  context   272k tokens
+  thinking  low
+  can use   tools, reasoning, vision
+  replies   up to 128k tokens · streamed · takes images
+  runtime   OpenAI Codex · provider catalog; openai-codex does not list its models live
+━━━━━━━━━━━━━━━━━ [type] filter · [Enter] use · [s] save · [Tab] focus/all · [*] fav · [Esc] close ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== haiku
+
+
+
+
+
+
+
+
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-haiku-5-5
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Claude-haiku-5-5 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                   1M ctx
+✓ active this session: anthropic-max · claude-haiku-5-5                             Ctrl+G X dismiss
+
+== opus
+
+
+
+
+
+
+
+
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-opus-5-5
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Claude-opus-5-5 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                   1M ctx
+✓ active this session: anthropic-max · claude-opus-5-5                              Ctrl+G X dismiss
+
+== sol
+
+
+
+
+
+
+
+
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6.1-sol
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6.1-sol is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 500K ctx
+✓ active this session: openai-codex · gpt-6.1-sol                                   Ctrl+G X dismiss
+
+== back
+
+
+
+
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+✓ active this session: openai-codex · gpt-6-luna                                    Ctrl+G X dismiss

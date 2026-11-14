@@ -95,34 +95,34 @@
 		{
 			"id": "tui-boot-png",
 			"source": "assets/screenshots/tui-boot.png",
-			"sha256": "e0ab7f5b374c058c37e7f87e956049911ddf7739677ddba5211b362d1e5a407d",
-			"provenance": "Actual capture of CLIO Coder 0.8.0, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
+			"sha256": "27165e97e3a4818ee7bf7eb915eba081e447653983aba57bfd8082b5a2bab840",
+			"provenance": "Actual capture of CLIO Coder 0.8.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
 				"width": 2268,
-				"height": 944
+				"height": 1308
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
 			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.png"],
-			"capturedVersion": "0.8.0"
+			"capturedVersion": "0.8.1"
 		},
 		{
 			"id": "tui-boot-webp",
 			"source": "assets/screenshots/tui-boot.webp",
-			"sha256": "4a45e7ccc56697acebf13b12d28639acf224c801ec1fdf2c86f0185600238f87",
-			"provenance": "Actual capture of CLIO Coder 0.8.0, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
+			"sha256": "527d2cb2d64c14fa0446ee4c395b5f02b9994e485562c8b88808d30901050e90",
+			"provenance": "Actual capture of CLIO Coder 0.8.1, packed from branch site/v080-sprint at 0d1f36358 ahead of the release and installed with npm install -g, on 2026-11-12. Recorded by site/capture/run.mjs (scenario still-tui-boot) in a fresh bubblewrap profile (home /home/researcher, host lab) with its own network namespace, interface.demo on and interface.outputDetail set to detailed. Fixed 120x44 terminal recorded as asciinema v2 and rendered by the site's player in IBM Plex Mono at 2x. Qwen 3.8 27B through a LiteLLM gateway, reached through the capture harness's alias proxy, so the model id shows no host name. Fresh launch in ~/projects/calibration-lab, no prompt sent. Welcome panel, composer and footer (rows 3-24).",
 			"dimensions": {
 				"width": 2268,
-				"height": 944
+				"height": 1308
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"channels": ["repository", "website"],
 			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
 			"copies": ["site/assets/tui-boot.webp"],
-			"capturedVersion": "0.8.0"
+			"capturedVersion": "0.8.1"
 		},
 		{
 			"id": "gui-conversation-png",
@@ -419,6 +419,36 @@
 			},
 			"sha256": "e73376f0911d3ecf49fba45bf380f1e9116567821ef1891ce9ac74919d537611",
 			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "animation-fix-a-test",
+			"source": "assets/animations/anim-fix-a-test.gif",
+			"sha256": "15254053cdadb90c6b99b6390f78bd2045e6285f866ec1eb8c172308f92dc50c",
+			"provenance": "Rendered by agg from site/assets/casts/anim-fix-a-test.cast, recorded from CLIO Coder 0.8.1 by site/capture/animation.mjs.",
+			"dimensions": {
+				"width": 897,
+				"height": 694
+			},
+			"role": "Fix a test",
+			"channels": ["repository", "readme"],
+			"altTextSeed": "Fullscreen terminal recording of GPT-6 Luna in CLIO Coder through the openai-codex target: asked why the absolute-zero test fails, the agent searches the project, edits one line of temperature.mjs from kelvin <= 0 to kelvin < 0, runs the declared test check with exit 0, and reports that all 7 tests pass.",
+			"representation": "captured-recording",
+			"copies": []
+		},
+		{
+			"id": "animation-model-switch",
+			"source": "assets/animations/anim-model-switch.gif",
+			"sha256": "87991f245e1c062b17e2772bf36d4421a40aab6f5d5e09925451fa794c8a17ae",
+			"provenance": "Rendered by agg from site/assets/casts/anim-model-switch.cast, recorded from CLIO Coder 0.8.1 by site/capture/animation.mjs.",
+			"dimensions": {
+				"width": 897,
+				"height": 694
+			},
+			"role": "Switch models",
+			"channels": ["repository", "readme"],
+			"altTextSeed": "Fullscreen terminal recording of the /model picker in CLIO Coder: the session starts on gpt-6-luna, then claude-haiku-5-5 and claude-opus-5-5 on anthropic-max and gpt-6.1-sol on openai-codex are chosen in turn by typing part of the name, and the session returns to gpt-6-luna.",
+			"representation": "captured-recording",
+			"copies": []
 		}
 	],
 	"socialExports": [

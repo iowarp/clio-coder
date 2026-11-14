@@ -1,5 +1,5 @@
-First launch of CLIO Coder: setup finds a local model and chat opens
-Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
+First launch of CLIO Coder: setup finds a stored login and chat opens
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
 
 == setup
 
@@ -15,85 +15,85 @@ No model target is configured. Clio needs a model before it can do anything else
 │
 │  Clio found a way to reach a model:
 │
-│  ❯ A model server at http://127.0.0.1:4000 (LiteLLM gatewa…  model qwen3.8-27b, run by user researcher
-│    Set up something else                                     an API key, a subscription, or a server
+│  ❯ OpenAI Codex, signed in  model gpt-6-luna (recommended)
+│    Set up something else    an API key, a subscription, or a server
 │
 │  ↑↓ move · Enter select · Esc cancel · q quit
 
 == chat
 
-┌  Welcome to Clio Coder
-│
-│  Choose what you already use. Clio checks the endpoint and model list when the provider allows it.
-│  Before saving, Clio sends the model one short test message (a few tokens; paid providers bill it).
-│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
-│  only after the test message, except a browser sign-in you complete.
-│
-●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
-│
-│  Testing litellm / qwen3.8-27b ...
-│
-◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
-◇  target litellm saved, runtime litellm
-◇  chat runs on litellm, model qwen3.8-27b
-◇  fleet default is litellm
-◇  settings written to ~/.config/clio-coder/settings.yaml
-◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
-│
-│  Change any of this later:
-●    clio-coder configure
-│
-└  Done
 
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Model      litellm · qwen3.8-27b                                                                                     │
-│ Autonomy   Default · reviewed approvals                                                                              │
-│ Awareness  Not indexed yet                                                                                           │
-│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
-│ /context init to index this repo                                                                                     │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+
+
+
+
+
+
+
+
+
+
+
+┌─ >C_ Clio Coder v0.8.1 ─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      openai-codex · gpt-6-luna                                                                                │
+│ Autonomy   Default · reviewed approvals                                                                             │
+│ Awareness  Not indexed yet                                                                                          │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                    │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main                                                                     200K ctx
+default · ~/projects/calibration-lab · main
 i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
 
 == sent
 
-│  Esc goes back a step, and from the first step leaves without saving. Your choices are written to your Clio settings
-│  only after the test message, except a browser sign-in you complete.
-│
-●  Using        A model server at http://127.0.0.1:4000 (LiteLLM gateway)
-│
-│  Testing litellm / qwen3.8-27b ...
-│
-◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
-◇  target litellm saved, runtime litellm
-◇  chat runs on litellm, model qwen3.8-27b
-◇  fleet default is litellm
-◇  settings written to ~/.config/clio-coder/settings.yaml
-◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
-│
-│  Change any of this later:
-●    clio-coder configure
-│
-└  Done
 
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+
+
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
 
 ▌ Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification
 ▌ task. Do not change files yet.
 
-i Reply from litellm · qwen3.8-27b
+i Reply from openai-codex · gpt-6-luna
 
-│ … 3 rows · /view
-│ project type is TypeScript. The last commit is "Add temperature conversions with tests".
-│ Let me explore the repository structure. I'll batch the independent reads/search
+▸ navigated project · 1 result ✓ · 176ms
+▸ read package.json · lines 1-9 of 9 · 160B ✓ · 15ms
+▸ read README.md · lines 1-24 of 24 · 827B ✓ · 9ms
+▸ found `**/*` · limit 30 · 4 paths ✓ · 32ms
+▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 12ms
+▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 12ms
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
+✦ This is a small Node.js ES module project. It has no build script or external dependencies: package.json defines only
+  test, which runs node --test calibration.test.mjs. Run it with npm test from the repository root.
+
+  Main entry points:
+  - temperature.mjs exports the four conversion functions and validates inputs and absolute-zero bounds.
+  - calibration.test.mjs imports those functions and uses Node’s built-in node:test and node:assert/strict to test
+    reference points, round trips, and invalid inputs.
+
+  One useful verification task: run npm test and confirm all tests pass. I have not run it; no files were changed.
+
+✓ Done · 11s · 4 calls · in 12.1k · out 320 · cached 28.7k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna finished · memory review on GPT-6-luna · 1.6s · you can send ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main                                               11.2K/200K (5.6%) · ≈106 tok/s
-Type to steer · Esc stops the run · Alt+U Dashboard
+default · ~/projects/calibration-lab · main                                            13.7K/272K (5.0%) · last 54 tok/s
+i tip: /context init writes a CLIO-CODER.md from this repository's conventions, so every…  Alt+U more · Ctrl+G X dismiss
+Alt+M Model · ? Keys

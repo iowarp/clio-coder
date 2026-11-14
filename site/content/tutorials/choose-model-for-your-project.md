@@ -58,7 +58,12 @@ Setup sends the model one short test request and saves when it answers. After a 
 :::
 
 ::: capture tui-configure-detected tui-configure-source tui-configure-saved
-Guided setup in the terminal: a model server it found, the routes it offers, and the saved connection.
+Guided setup in the terminal: a stored sign-in it found, the routes it offers, and the saved connection.
+:::
+
+After setup, `/model` lists the models of every connected target and switches the conversation between them:
+
+::: capture anim-model-switch
 :::
 
 ::: result

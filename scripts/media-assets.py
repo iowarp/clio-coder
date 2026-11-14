@@ -57,6 +57,8 @@ def image_dimensions(path: Path) -> tuple[int, int]:
                 packed = int.from_bytes(payload[1:5], "little")
                 return 1 + (packed & 0x3FFF), 1 + ((packed >> 14) & 0x3FFF)
             offset += 8 + size + (size % 2)
+    if data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
+        return struct.unpack("<HH", data[6:10])
     if path.suffix.lower() == ".svg":
         head = data[:4096].decode(errors="replace")
         width = re.search(r'\bwidth="(\d+)"', head)

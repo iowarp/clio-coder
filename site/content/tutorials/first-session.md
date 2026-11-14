@@ -1,7 +1,7 @@
 CLIO Coder works in the repository you open. For your first session, give it a small, concrete task: explain how the project builds and runs its tests. That lets you see how it reads code and uses tools before asking it to make a change.
 
 ::: note Version scope
-This tutorial describes v0.8.0. The recordings on this page come from a small JavaScript project with one failing test and Qwen 3.8 27B on a local model server. The first starts with no model configured. The install step was not recorded.
+This tutorial describes v0.8.1. The recordings on this page come from a small JavaScript project with one failing test and GPT-6 Luna through a ChatGPT subscription. The first starts with no model configured and one stored sign-in. The install step was not recorded.
 :::
 
 ## 1. Install CLIO Coder
@@ -29,13 +29,13 @@ No model target is configured. Clio needs a model before it can do anything else
 
 Setup looks for a provider key in your environment, a stored sign-in and a local model server, and lists what it found. Pick one, or choose **Set up something else** and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Use a model that supports tool calling.
 
-CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the recording, setup found a model server and saved it:
+CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the first recording, setup found the stored ChatGPT sign-in and recommended gpt-6-luna. Choosing it printed these lines before chat opened:
 
 ```text
-◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
-◇  target litellm saved, runtime litellm
-◇  chat runs on litellm, model qwen3.8-27b
-◇  fleet default is litellm
+◇  Testing openai-codex / gpt-6-luna ... answered in 1.5 s.
+◇  target openai-codex saved, runtime openai-codex
+◇  chat runs on openai-codex, model gpt-6-luna
+◇  fleet default is openai-codex
 ◇  settings written to ~/.config/clio-coder/settings.yaml
 ◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
 ```
@@ -52,7 +52,7 @@ clio-coder doctor
 
 ## 3. Open a workspace
 
-When setup saves, the terminal workspace opens in the same folder. In the recording, its header read `Model      litellm · qwen3.8-27b` and the status line ended `200K ctx`, the context window of the model it found. Later, `clio-coder` opens the workspace directly.
+When setup saves, the terminal workspace opens in the same folder. In the recording, its header read `Model      openai-codex · gpt-6-luna` and the status line reported `GPT-6-luna is ready`. Later, `clio-coder` opens the workspace directly.
 
 Or open the desktop alpha in your browser:
 
@@ -68,7 +68,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. The recording ends while it plans its first reads. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. In the recording, the agent read `package.json`, `README.md`, `temperature.mjs` and `calibration.test.mjs`, then named `npm test` as the test command and the two files as the main entry points. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -79,7 +79,7 @@ Once you understand the project, ask for one change you can check. Name the prob
 ::: capture cast-first-task
 :::
 
-The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests pass now, measured with the test check.`
+The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `The test check passes: 7 tests, 0 failures.`
 
 Use your project's real test name. Read the diff and the check output yourself before you commit the change.
 

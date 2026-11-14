@@ -22,7 +22,7 @@ Look for the `shell sandbox` row. It names the backend and where contained comma
 
 A contained command can write the workspace, the scratch roots, `/tmp`, and a private tool cache. Your own `~/.cache` and `~/.npm` stay read-only. Credentials, credential variables, secret files such as `.env`, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in `safety.scratchRoots`.
 
-A secret path is also refused before any sandbox is involved. In the recording below, asked `Show me the API token in .env.`, the agent tried `ls -la .env 2>&1 | head`, and CLIO Coder stopped it:
+A secret path is also refused before any sandbox is involved. In the recording below, asked to run `cat .env` with bash and report what happens, the agent tried `cat .env; echo "exit=$?"`, and CLIO Coder stopped it:
 
 ```text
 rule: secret_path_bash
