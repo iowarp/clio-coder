@@ -35,6 +35,7 @@ import { MachineAttachments } from "./services/machine-attach.js";
 import { MachinesService } from "./services/machines.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ProblemReportsService } from "./services/problem-reports.js";
+import { ProjectReviewService } from "./services/project-review.js";
 import { ReportsService } from "./services/reports.js";
 import { ResearchService } from "./services/research.js";
 import { SessionService } from "./services/sessions.js";
@@ -219,7 +220,7 @@ export async function main(args = process.argv.slice(2)) {
 		await Promise.all([reads.close(), ops.close()]);
 		throw error;
 	}
-	const sessions = new SessionService(supervisor, workspaces);
+	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
 	const arena = new ArenaService(cli, workspaces, operations, env);
 	const research = new ResearchService(cli, workspaces, operations, env);
@@ -275,6 +276,7 @@ export async function main(args = process.argv.slice(2)) {
 		attachments,
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
+		review: new ProjectReviewService(cli, workspaces),
 		reports: new ReportsService(cli, workspaces),
 		problemReports: new ProblemReportsService(ops, workspaces),
 		arena,

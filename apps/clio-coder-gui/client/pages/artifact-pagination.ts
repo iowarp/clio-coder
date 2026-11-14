@@ -1,4 +1,4 @@
-import { MAX_SERVED_ARTIFACT_IDS } from "../../contracts/common.js";
+import { MAX_SERVED_ARTIFACT_IDS } from "../../contracts/runtime.js";
 
 // The server admits a page's ids when it serves them, but the browser drops its
 // oldest page only once the next response arrives, and never if that response

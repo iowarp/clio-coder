@@ -36,8 +36,8 @@ export interface MessageActionsProps extends MessageActionContext {
  * The action row. It is quiet until the turn is hovered or something in it takes
  * focus, which `composer.css` handles; it is never hidden from the keyboard.
  */
-export function MessageActions({ sessionId, row, requestText, responseText, status }: MessageActionsProps) {
-	const offers = messageActionOffers({ requestText, responseText, status });
+export function MessageActions({ sessionId, row, requestText, responseText, status, ending }: MessageActionsProps) {
+	const offers = messageActionOffers({ requestText, responseText, status, ending: ending ?? null });
 	const offered = (id: string) => offers.find((offer) => offer.id === id);
 	const copyRequest = offered("copy-request");
 	const copyResponse = offered("copy-response");

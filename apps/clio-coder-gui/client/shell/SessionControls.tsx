@@ -1,12 +1,17 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { createPortal } from "react-dom";
+import { Link, useLocation } from "react-router";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
+import { useNoticeLead } from "../design/notifications.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { type SessionControls, useSessionControls } from "../pages/session-control-actions.js";
 import type { SessionControlTarget } from "../pages/session-control-model.js";
 import "./session-controls.css";
+
+/** How long a settled stop or close request stays in the task bar before it clears itself. */
+const COMPLETED_NOTICE_MS = 4_000;
 
 interface SessionCommands {
 	readonly controls: SessionControls;
@@ -71,7 +76,11 @@ export function SessionControlsProvider({ client, children }: { client: Client; 
 
 export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const { controls } = useSessionCommands();
+	// The banner rides at the head of the notice stack. A row at the top of the page pushed the task's
+	// header down while a stop settled and pulled it back when the banner left.
+	const lead = useNoticeLead();
 	const [reviewing, setReviewing] = useState(false);
+	const { pathname } = useLocation();
 	const reviewButton = useRef<HTMLButtonElement>(null);
 	const results = useRef<HTMLDivElement>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -88,50 +97,86 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const unresolved = controls.records.filter((row) => row.stage === "unresolved");
 	const pending = controls.records.filter((row) => row.stage === "sending");
 	const latest = pending.at(-1) ?? controls.records.at(-1);
+	// A pointer over the banner or focus inside it holds a settled request on screen; leaving restarts the wait.
+	const [held, setHeld] = useState({ hover: false, focus: false });
+	const settled =
+		latest?.stage === "complete" && unresolved.length === 0 && pending.length === 0 && controls.notice === null;
+	const expiring =
+		settled && !held.hover && !held.focus && !reviewing
+			? controls.records
+					.filter((row) => row.stage === "complete")
+					.map((row) => row.key)
+					.join(" ")
+			: "";
+	const shown = latest !== undefined || controls.notice !== null;
+	// The section unmounts under the pointer when dismissed, so no leave event ever arrives.
+	useEffect(() => {
+		if (!shown) setHeld({ hover: false, focus: false });
+	}, [shown]);
+	const latestControls = useRef(controls);
+	latestControls.current = controls;
+	useEffect(() => {
+		if (!expiring) return;
+		const timer = setTimeout(() => {
+			const current = latestControls.current;
+			for (const row of current.records) if (row.stage === "complete") current.dismiss(row.key);
+		}, COMPLETED_NOTICE_MS);
+		return () => clearTimeout(timer);
+	}, [expiring]);
 	const returnToWork = () =>
 		requestAnimationFrame(() => {
 			const field = document.querySelector<HTMLTextAreaElement>(".composer__field:not(:disabled)");
 			(field ?? document.getElementById("main"))?.focus();
 		});
-	if (!latest && !controls.notice) return null;
+	if (!shown) return null;
 	const needsReview = unresolved.length > 0 || controls.notice !== null;
 	const label = needsReview ? "Check session" : pending.length ? "Request in progress" : "Request checked";
+	const idle = !needsReview && !pending.length && latest?.nothingStopped === true;
 	const summary = needsReview
 		? `${unresolved.length || 1} session ${unresolved.length > 1 ? "requests need" : "request needs"} your review.`
 		: pending.length > 1
 			? `${pending.length} session requests in progress…`
 			: latest?.action === "close"
 				? `${pending.length ? "Close request" : "Closed"} · ${latest.title}`
-				: `Stop request · ${latest?.title ?? "Session"}`;
+				: `${pending.length ? "Stop request" : idle ? "Nothing stopped" : "Stop confirmed"} · ${latest?.title ?? "Session"}`;
 	const dismissCompleted = () => {
 		for (const row of controls.records) if (row.stage === "complete") controls.dismiss(row.key);
 		controls.clearNotice();
 		setReviewing(false);
 		returnToWork();
 	};
+	const banner = (
+		<section
+			className="session-control-notice"
+			data-state={needsReview ? "unresolved" : pending.length ? "sending" : "complete"}
+			aria-label="Session control status"
+			onMouseEnter={() => setHeld((state) => ({ ...state, hover: true }))}
+			onMouseLeave={() => setHeld((state) => ({ ...state, hover: false }))}
+			onFocus={() => setHeld((state) => ({ ...state, focus: true }))}
+			onBlur={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget)) setHeld((state) => ({ ...state, focus: false }));
+			}}
+		>
+			<div className="session-control-notice__message" role="status">
+				<StatusMark tone={needsReview ? "warn" : pending.length ? "running" : idle ? "neutral" : "success"} label={label} />
+				<span>{summary}</span>
+			</div>
+			<div className="session-control-notice__actions">
+				<button type="button" ref={reviewButton} onClick={() => setReviewing(true)} aria-haspopup="dialog">
+					{needsReview ? "Review request" : "Details"}
+					<Icon name="arrowUp" />
+				</button>
+				{!needsReview && !pending.length ? (
+					<button type="button" onClick={dismissCompleted} aria-label="Dismiss completed session controls">
+						<Icon name="close" />
+					</button>
+				) : null}
+			</div>
+		</section>
+	);
 	return (
 		<>
-			<section
-				className="session-control-notice"
-				data-state={needsReview ? "unresolved" : pending.length ? "sending" : "complete"}
-				aria-label="Session control status"
-			>
-				<div className="session-control-notice__message" role="status">
-					<StatusMark tone={needsReview ? "warn" : pending.length ? "running" : "success"} label={label} />
-					<span>{summary}</span>
-				</div>
-				<div className="session-control-notice__actions">
-					<button type="button" ref={reviewButton} onClick={() => setReviewing(true)} aria-haspopup="dialog">
-						{needsReview ? "Review request" : "Details"}
-						<Icon name="arrowUp" />
-					</button>
-					{!needsReview && !pending.length ? (
-						<button type="button" onClick={dismissCompleted} aria-label="Dismiss completed session controls">
-							<Icon name="close" />
-						</button>
-					) : null}
-				</div>
-			</section>
+			{lead ? createPortal(banner, lead) : banner}
 			{reviewing ? (
 				<Dialog title="Session requests" eyebrow="Session control" size="wide" onClose={() => setReviewing(false)}>
 					<p>Each request stays with its original session as you move around CLIO Coder.</p>
@@ -154,17 +199,27 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 							>
 								<header>
 									<StatusMark
-										tone={record.stage === "unresolved" ? "warn" : record.stage === "sending" ? "running" : "success"}
+										tone={
+											record.stage === "unresolved"
+												? "warn"
+												: record.stage === "sending"
+													? "running"
+													: record.nothingStopped
+														? "neutral"
+														: "success"
+										}
 										label={record.action === "stop" ? "Stop turn" : "Close session"}
 									/>
 									<h3>{record.title}</h3>
 								</header>
 								<p role={record.stage === "unresolved" ? "alert" : "status"}>{record.message}</p>
 								<div className="session-control-result__actions">
-									<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
-										Open session
-										<Icon name="external" />
-									</Link>
+									{pathname === `/sessions/${record.sessionId}` ? null : (
+										<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
+											Open session
+											<Icon name="external" />
+										</Link>
+									)}
 									<button
 										type="button"
 										data-control-wait={record.key}

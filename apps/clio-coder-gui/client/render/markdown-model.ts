@@ -9,7 +9,7 @@
  * re-lexed as tokens arrive.
  */
 
-import { Marked, type Token } from "marked";
+import { Marked, type Token, type Tokens } from "marked";
 
 export type MarkdownToken = Token;
 
@@ -302,12 +302,41 @@ export function settledBoundary(source: string, from = 0): number {
 export interface MarkdownSplit {
 	/** Tokens whose source can no longer change. The array identity is stable until more text settles. */
 	readonly settled: readonly MarkdownToken[];
-	/** Tokens for the text after the last boundary, re-lexed on every update. */
+	/** Tokens for the text after the last boundary, equal to lexing that text on every update. */
 	readonly tail: readonly MarkdownToken[];
 	readonly settledLength: number;
 }
 
 const EMPTY_TOKENS: readonly MarkdownToken[] = Object.freeze([]);
+
+/** Below this a tail is cheap to re-lex whole; above it an open fence is extended instead. */
+const OPEN_FENCE_TAIL_CHARS = 8_192;
+/** Any line marked could read as opening or closing a fence. */
+const FENCE_LINE = /^ {0,3}(?:`{3,}|~{3,})/u;
+/** An unindented opening fence, whose body marked keeps verbatim. */
+const FLUSH_FENCE = /^(?:`{3,}|~{3,})/u;
+/**
+ * Text before a fence that could start a construct marked lets run across the fence once a later line
+ * closes it: display math, raw HTML, or a link definition whose title spans lines.
+ */
+const SPANNING_START = /\$\$|\\\[|<|^ {0,3}\[/mu;
+
+/** What the tail scan knows about the fenced block at its end. Offsets are into the tail. */
+interface OpenFence {
+	/** The settled length the scan was made against. */
+	readonly from: number;
+	/** The tail through its last scanned line. */
+	scanned: string;
+	/** Where the opening fence line starts, or -1 before one opens. */
+	opening: number;
+	/** Where the code body starts. */
+	body: number;
+	/** False once the tail holds something only the canonical lexer reads correctly. */
+	viable: boolean;
+	/** The canonical tokens before the fence and the canonical code token, once one full lex agreed. */
+	prefix: readonly MarkdownToken[] | null;
+	code: Tokens.Code | null;
+}
 
 /** Incremental lexer for one growing narrative. */
 export class IncrementalMarkdown {
@@ -315,6 +344,7 @@ export class IncrementalMarkdown {
 	#settledTokens: readonly MarkdownToken[] = EMPTY_TOKENS;
 	#tailSource: string | null = null;
 	#tail: readonly MarkdownToken[] = EMPTY_TOKENS;
+	#fence: OpenFence | null = null;
 
 	update(source: string): MarkdownSplit {
 		if (!source.startsWith(this.#settledSource)) {
@@ -322,6 +352,7 @@ export class IncrementalMarkdown {
 			this.#settledTokens = EMPTY_TOKENS;
 			this.#tailSource = null;
 			this.#tail = EMPTY_TOKENS;
+			this.#fence = null;
 		}
 		const boundary = settledBoundary(source, this.#settledSource.length);
 		if (boundary > this.#settledSource.length) {
@@ -331,10 +362,66 @@ export class IncrementalMarkdown {
 		}
 		const tailSource = source.slice(this.#settledSource.length);
 		if (tailSource !== this.#tailSource) {
-			this.#tail = tailSource.length === 0 ? EMPTY_TOKENS : lexMarkdown(tailSource);
+			this.#tail = tailSource.length === 0 ? EMPTY_TOKENS : this.#lexTail(tailSource);
 			this.#tailSource = tailSource;
 		}
 		return { settled: this.#settledTokens, tail: this.#tail, settledLength: this.#settledSource.length };
+	}
+
+	/**
+	 * A fenced block has no boundary inside it, so a long code block would be re-lexed whole on every
+	 * frame until it closes. Once one canonical lex shows the tail ends in that open block, later updates
+	 * reuse the tokens before it and extend the code token with the body so far, which is exactly what
+	 * marked returns for an unclosed fence. Anything that could close the fence goes back to marked.
+	 */
+	#lexTail(tail: string): readonly MarkdownToken[] {
+		if (tail.length <= OPEN_FENCE_TAIL_CHARS) return lexMarkdown(tail);
+		const fence = this.#scanFence(tail);
+		if (fence === null) return lexMarkdown(tail);
+		if (fence.prefix === null || fence.code === null) {
+			const tokens = lexMarkdown(tail);
+			const last = tokens.at(-1);
+			if (last?.type === "code" && last.raw === tail.slice(fence.opening)) {
+				fence.prefix = tokens.slice(0, -1);
+				fence.code = last as Tokens.Code;
+			} else fence.viable = false;
+			return tokens;
+		}
+		const body = tail.slice(fence.body);
+		// marked's fence pattern leaves one final newline out of the code text.
+		const text = body.endsWith("\n") ? body.slice(0, -1) : body;
+		return [...fence.prefix, { ...fence.code, raw: tail.slice(fence.opening), text }];
+	}
+
+	/** Scans only the lines added since the last update; the result is null when the fast path does not apply. */
+	#scanFence(tail: string): OpenFence | null {
+		const from = this.#settledSource.length;
+		let fence = this.#fence;
+		if (fence === null || fence.from !== from || !tail.startsWith(fence.scanned)) {
+			fence = { from, scanned: "", opening: -1, body: -1, viable: true, prefix: null, code: null };
+			this.#fence = fence;
+		}
+		if (!fence.viable) return null;
+		let index = fence.scanned.length;
+		while (fence.viable) {
+			const end = tail.indexOf("\n", index);
+			if (end < 0) break;
+			const line = tail.slice(index, end);
+			// marked rewrites carriage returns before lexing, so its raw text would differ from the source.
+			if (line.includes("\r")) fence.viable = false;
+			else if (FENCE_LINE.test(line)) {
+				if (fence.opening < 0 && FLUSH_FENCE.test(line) && !SPANNING_START.test(tail.slice(0, index))) {
+					fence.opening = index;
+					fence.body = end + 1;
+				} else fence.viable = false;
+			}
+			index = end + 1;
+		}
+		fence.scanned = tail.slice(0, index);
+		if (!fence.viable || fence.opening < 0) return null;
+		// The line still arriving may yet close the fence, which only marked can judge.
+		const arriving = tail.slice(index);
+		return FENCE_LINE.test(arriving) || arriving.includes("\r") ? null : fence;
 	}
 }
 

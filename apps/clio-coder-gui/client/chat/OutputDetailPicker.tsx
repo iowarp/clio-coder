@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { useMenuShortcut } from "../interaction/use-shortcut.js";
 import { OUTPUT_DETAILS, type OutputDetail, outputDetailLabel } from "./output-detail-model.js";
 
 /**
@@ -18,6 +19,7 @@ export function OutputDetailPicker({
 	const ref = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(ref, open);
+	useMenuShortcut("outputDetail", ref, open, setOpen);
 	return (
 		<details className="wb-menu output-detail" ref={ref} onToggle={(event) => setOpen(event.currentTarget.open)}>
 			<summary

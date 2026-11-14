@@ -3,6 +3,8 @@ import { Value } from "typebox/value";
 import { ArtifactsCapability } from "../../contracts/artifacts.js";
 import { AsideCapability } from "../../contracts/aside.js";
 import type { TurnFile, TurnImage } from "../../contracts/attachments.js";
+import type { Autonomy, AutonomyMode } from "../../contracts/autonomy.js";
+import { AUTONOMY_MODE_LIMITS } from "../../contracts/autonomy.js";
 import { BoardCapability } from "../../contracts/board.js";
 import { BranchesCapability } from "../../contracts/branches.js";
 import {
@@ -24,6 +26,7 @@ import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
+import { SnapshotsCapability } from "../../contracts/rewind.js";
 import type { SessionConfig, SetConfigOption } from "../../contracts/session-config.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
@@ -50,6 +53,7 @@ import {
 	ACP_SESSION_TRUST_METHOD,
 	ACP_SETTINGS_META_KEY,
 	ACP_SHELL_META_KEY,
+	ACP_SNAPSHOTS_META_KEY,
 	ACP_STEERING_META_KEY,
 	ACP_TARGETS_META_KEY,
 	ACP_TELEMETRY_META_KEY,
@@ -122,6 +126,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("events", optional(EventsCapability, meta[ACP_EVENTS_META_KEY])),
 		...maybe("board", optional(BoardCapability, meta[ACP_BOARD_META_KEY])),
 		...maybe("branches", optional(BranchesCapability, meta[ACP_BRANCHES_META_KEY])),
+		...maybe("snapshots", optional(SnapshotsCapability, meta[ACP_SNAPSHOTS_META_KEY])),
 		...maybe("handoff", optional(HandoffCapability, meta[ACP_HANDOFF_META_KEY])),
 		...maybe("fleet", optional(FleetCapability, meta[ACP_FLEET_META_KEY])),
 		...maybe("jobs", optional(JobsCapability, meta[ACP_JOBS_META_KEY])),
@@ -195,9 +200,30 @@ export function acpProblem(error: unknown) {
 		return new AppProblem("unavailable", "Clio ACP did not respond before its deadline.");
 	return new AppProblem("upstream_acp", "Clio ACP process is unavailable.");
 }
+type AutonomyLevel = "default" | "yolo";
+type AutonomySource = "settings" | "session";
+type AutonomyState = Static<typeof Autonomy> & { level: AutonomyLevel; source: AutonomySource };
+const knownMode = (mode: unknown): mode is AutonomyLevel => mode === "default" || mode === "yolo";
+/** The engine's mode list, bounded. A malformed or oversized entry is dropped rather than cut, so text stays verbatim. */
+function readModeDescriptions(modes: unknown): Array<Static<typeof AutonomyMode>> | undefined {
+	const available = record(modes).availableModes;
+	if (!Array.isArray(available)) return undefined;
+	const described: Array<Static<typeof AutonomyMode>> = [];
+	for (const entry of available) {
+		if (described.length === AUTONOMY_MODE_LIMITS.count) break;
+		const { id, name, description } = record(entry);
+		if (typeof id !== "string" || typeof name !== "string" || typeof description !== "string") continue;
+		if (!id || id.length > AUTONOMY_MODE_LIMITS.id || name.length > AUTONOMY_MODE_LIMITS.name) continue;
+		if (description.length > AUTONOMY_MODE_LIMITS.description) continue;
+		if (described.some((mode) => mode.id === id)) continue;
+		described.push({ id, name, description });
+	}
+	return described;
+}
 export class AcpClient {
 	config: SessionConfig | undefined;
-	private readonly modes = new Map<string, { level: "default" | "yolo"; source: "settings" | "session" }>();
+	private readonly modes = new Map<string, AutonomyState>();
+	private readonly modeDescriptions = new Map<string, Array<Static<typeof AutonomyMode>>>();
 	constructor(readonly transport: AcpJsonRpcTransport) {}
 	/** Requests awaiting the agent's answer. A child with one in flight is not idle. */
 	pending = 0;
@@ -257,6 +283,7 @@ export class AcpClient {
 		});
 		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
+		const described = readModeDescriptions(record(result).modes);
 		const options = projectConfigOptions(record(result).configOptions);
 		const target = record(record(record(result)._meta)[ACP_SESSION_META_KEY]).target;
 		if (options !== undefined && this.config === previousConfig)
@@ -265,15 +292,17 @@ export class AcpClient {
 				...(target === null || (typeof target === "string" && target.length <= 128) ? { target } : {}),
 			};
 		if (sessionId) {
-			if ((mode === "default" || mode === "yolo") && this.modes.get(sessionId) === previousMode)
-				this.rememberMode(sessionId, mode);
+			if (described) this.modeDescriptions.set(sessionId, described);
+			if (typeof mode === "string" && this.modes.get(sessionId) === previousMode)
+				this.rememberReported(sessionId, mode, "settings");
 			const current = this.modes.get(sessionId);
 			if (current) this.telemetry.autonomy = current;
 			return sessionId;
 		}
 		if (!Value.Check(NewSession, result))
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid session identity.");
-		if (mode === "default" || mode === "yolo") this.rememberMode(result.sessionId, mode);
+		if (described) this.modeDescriptions.set(result.sessionId, described);
+		if (typeof mode === "string") this.rememberReported(result.sessionId, mode, "settings");
 		return result.sessionId;
 	}
 	/**
@@ -283,16 +312,42 @@ export class AcpClient {
 	 */
 	adopt(previousId: string, nextId: string, result: unknown) {
 		const previous = this.modes.get(previousId);
+		const previousDescriptions = this.modeDescriptions.get(previousId);
 		this.modes.delete(previousId);
+		this.modeDescriptions.delete(previousId);
 		this.telemetry = sessionResultTelemetry(result);
 		const mode = record(record(result).modes).currentModeId;
+		const described = readModeDescriptions(record(result).modes) ?? previousDescriptions;
+		if (described && !this.modeDescriptions.has(nextId)) this.modeDescriptions.set(nextId, described);
 		const notified = this.modes.get(nextId);
 		if (notified) this.telemetry.autonomy = notified;
-		else if (mode === "default" || mode === "yolo") this.rememberMode(nextId, mode, previous?.source ?? "settings");
-		else if (previous) this.rememberMode(nextId, previous.level, previous.source);
+		else if (typeof mode === "string") {
+			if (previous) this.modes.set(nextId, previous);
+			this.rememberReported(nextId, mode, previous?.source ?? "settings");
+		} else if (previous) this.rememberMode(nextId, previous.level, previous.source);
 	}
-	private rememberMode(sessionId: string, level: "default" | "yolo", source: "settings" | "session" = "settings") {
-		const current = { level, source };
+	/**
+	 * A mode the app does not know keeps the last known level and names the reported id, so the
+	 * task goes on and the control can say what the engine reported instead of guessing.
+	 */
+	private rememberReported(sessionId: string, mode: string, source: AutonomySource) {
+		if (knownMode(mode)) return this.rememberMode(sessionId, mode, source);
+		const previous = this.modes.get(sessionId);
+		return this.rememberMode(sessionId, previous?.level ?? "default", source, mode.slice(0, 64));
+	}
+	private rememberMode(
+		sessionId: string,
+		level: AutonomyLevel,
+		source: AutonomySource = "settings",
+		unrecognized?: string,
+	) {
+		const modes = this.modeDescriptions.get(sessionId);
+		const current: AutonomyState = {
+			level,
+			source,
+			...(modes && modes.length > 0 ? { modes } : {}),
+			...(unrecognized !== undefined ? { unrecognized } : {}),
+		};
 		this.modes.set(sessionId, current);
 		this.telemetry.autonomy = current;
 		this.capabilities.session = {
@@ -307,11 +362,9 @@ export class AcpClient {
 	}
 	/** A mode notification reports a session override, including changes made through runtime commands (GUI-03). */
 	modeUpdate(sessionId: string, mode: unknown) {
-		if (mode !== "default" && mode !== "yolo")
-			throw new AppProblem("upstream_acp", "Clio reported a session mode this app cannot display.");
-		return this.rememberMode(sessionId, mode, "session");
+		return this.rememberReported(sessionId, typeof mode === "string" && mode ? mode : "unnamed", "session");
 	}
-	async autonomy(sessionId: string, level?: "default" | "yolo") {
+	async autonomy(sessionId: string, level?: AutonomyLevel) {
 		if (level !== undefined) {
 			const previous = this.modes.get(sessionId);
 			await this.request("session/set_mode", { sessionId, modeId: level });

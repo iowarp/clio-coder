@@ -98,6 +98,16 @@
 	max-height: none;
 	overflow: visible;
 }
+/* Under 360px the eyebrow alone fills the line, so the Review button takes the next one instead of
+   sliding under the words. */
+@media (max-width: 359.98px) {
+	.approval-banner--strip {
+		flex-wrap: wrap;
+	}
+	.approval-strip {
+		flex-basis: 100%;
+	}
+}
 
 /* ---- the card -------------------------------------------------------------------------- */
 
@@ -115,6 +125,12 @@
 .approval-card--anchored {
 	box-shadow: var(--shadow-none);
 	margin-block: var(--space-3);
+}
+/* Review and the focus offer scroll the card in; the margin keeps it clear of the transcript's top
+   fade and the pinned strip above, so the card shows from its eyebrow and not only its buttons. */
+.approval-card--anchored,
+.approval-card--anchored .approval-card__actions button {
+	scroll-margin-block: var(--space-12) var(--space-6);
 }
 /* Escalation is a state, not a timeout, so it changes the card's own boundary rather than only a
    word in the eyebrow. */

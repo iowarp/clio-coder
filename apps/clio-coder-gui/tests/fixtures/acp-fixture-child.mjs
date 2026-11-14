@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { SCIENCE_MARKDOWN, SCIENCE_TOOL_JSON, SCIENCE_TOOL_OUTPUT } from "./science-transcript.mjs";
@@ -15,6 +15,21 @@ const settings = {
 	chat: { target: "fixture", model: "fixture-model", thinkingLevel: "off" },
 	safety: { autonomy: "default" },
 };
+// The engine's own mode descriptions (src/engine/acp/server.ts modeState), so the GUI shows real copy.
+const MODES = [
+	{
+		id: "default",
+		name: "default",
+		description:
+			"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.",
+	},
+	{
+		id: "yolo",
+		name: "yolo",
+		description:
+			"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
+	},
+];
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const configOptions = () => [
@@ -117,9 +132,10 @@ const permission = async () => {
 		params: {
 			sessionId,
 			toolCall: scenario === "permission-mismatch" ? { ...toolCall, rawInput: { path: "different.txt" } } : toolCall,
+			// `permission-no-reject` offers no one-time refusal, which the app cannot present.
 			options: [
 				{ optionId: "allow", kind: "allow_once", name: "Allow once" },
-				{ optionId: "reject", kind: "reject_once", name: "Reject" },
+				...(scenario === "permission-no-reject" ? [] : [{ optionId: "reject", kind: "reject_once", name: "Reject" }]),
 			],
 		},
 	});
@@ -178,6 +194,41 @@ const planPermission = async () => {
 	const result = await promise;
 	const approved = result?.outcome?.optionId === "allow-once";
 	log({ planPermission: result, approved });
+	if (approved) {
+		// The approved plan runs its tasks the way the engine reports them, spaced so the Agents panel
+		// shows each run arrive, start and finish.
+		const runs = tasks.map((task, index) => ({
+			runId: `run-plan-${writeCalls}-${index + 1}`,
+			agentId: task.agent,
+			taskPreview: task.task,
+			node: null,
+			origin: "tool",
+			attempt: 1,
+		}));
+		for (const identity of runs) event("run.enqueued", identity);
+		await delay(40);
+		for (const identity of runs) {
+			event("run.started", identity);
+			await delay(40);
+		}
+		for (const [index, identity] of runs.entries()) {
+			event(
+				"run.completed",
+				{
+					runId: identity.runId,
+					agentId: identity.agentId,
+					outcome: "success",
+					outcomeCode: "done",
+					durationMs: 80 + index * 40,
+					totalTokens: { kind: "measured", value: 23, source: "provider" },
+					apiCalls: { kind: "measured", value: 2, source: "local-count" },
+					tokenDisplay: "23",
+				},
+				true,
+			);
+			await delay(40);
+		}
+	}
 	update({
 		sessionUpdate: "tool_call_update",
 		toolCallId,
@@ -288,10 +339,44 @@ const COMMANDS =
 							},
 						},
 					},
+					{
+						name: "export",
+						summary: "Write the transcript to a file",
+						usage: "/export [path]",
+						group: "Session",
+						args: { positionals: [{ name: "path", required: false }] },
+					},
 				],
 				prompts: ["review-pr"],
 			}
 		: null;
+// The markdown scenario keeps workspace snapshots as the engine's store does: newest first, numbered.
+let promptRunning = false,
+	taskCwd = process.cwd();
+const SNAPSHOTS = [
+	{
+		n: 2,
+		at: "2026-01-01T00:05:00.000Z",
+		reason: "before the first change in a turn",
+		tool: "write",
+		turnId: "u2",
+		differs: 2,
+		skipped: 0,
+	},
+	{ n: 1, at: "2026-01-01T00:01:00.000Z", reason: "before a destructive command", tool: "bash", differs: 0, skipped: 1 },
+];
+const snapshotPlan = (n) =>
+	n === 1
+		? { kind: "plan", n, restore: [], remove: [], kept: [], refs: [], truncated: false }
+		: {
+				kind: "plan",
+				n,
+				restore: ["src/solver.py"],
+				remove: ["notes/scratch.md"],
+				kept: [{ path: "data/mesh.bin", why: "larger than the snapshot limit" }],
+				refs: [],
+				truncated: false,
+			};
 // The session board a real agent folds from its ledger: the operator's tasks change through the
 // `tasks` command above; the plan and decisions are the agent's own report.
 const BOARD = {
@@ -705,6 +790,12 @@ async function handle(frame) {
 														count: COMMANDS.commands.length,
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
+													"clio-coder/snapshots": {
+														version: 1,
+														list: "_clio-coder/session/snapshots",
+														preview: "_clio-coder/session/snapshot_preview",
+														restore: "_clio-coder/session/snapshot_restore",
+													},
 													"clio-coder/board": {
 														version: 1,
 														method: "_clio-coder/session/board",
@@ -765,6 +856,7 @@ async function handle(frame) {
 			}
 			case "session/new":
 				if (["session_limit", "session_cwd_mismatch"].includes(scenario)) throw Error(scenario);
+				if (typeof frame.params?.cwd === "string") taskCwd = frame.params.cwd;
 				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
 				result = {
 					sessionId,
@@ -773,10 +865,7 @@ async function handle(frame) {
 						: {}),
 					modes: {
 						currentModeId: autonomy,
-						availableModes: [
-							{ id: "default", name: "Default" },
-							{ id: "yolo", name: "Yolo" },
-						],
+						availableModes: MODES,
 					},
 				};
 				if (ROUTE)
@@ -817,10 +906,7 @@ async function handle(frame) {
 						: {}),
 					modes: {
 						currentModeId: autonomy,
-						availableModes: [
-							{ id: "default", name: "Default" },
-							{ id: "yolo", name: "Yolo" },
-						],
+						availableModes: MODES,
 					},
 				};
 				// A long saved conversation for scripts/perf-workload.ts `--history`: N rich exchanges.
@@ -866,6 +952,7 @@ async function handle(frame) {
 				}
 				break;
 			case "session/prompt": {
+				promptRunning = true;
 				pendingHandoff = null;
 				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
 				if (STEERING && promptText.includes("[unreadable-queue]")) queueReadFails = true;
@@ -878,15 +965,24 @@ async function handle(frame) {
 								? "plan-permission"
 								: scenario === "markdown" && promptText.includes("[stream]")
 									? "loop"
-									: scenario === "markdown" && promptText.includes("[workload")
-										? "workload"
-										: scenario === "markdown" && promptText.includes("[science]")
-											? "science"
-											: STEERING && promptText.includes("[fleet]")
-												? "held-worker"
-												: scenario;
+									: scenario === "markdown" && promptText.includes("[stream-held]")
+										? "held-stream"
+										: scenario === "markdown" && promptText.includes("[workload")
+											? "workload"
+											: scenario === "markdown" && promptText.includes("[science]")
+												? "science"
+												: STEERING && promptText.includes("[fleet]")
+													? "held-worker"
+													: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
+				if (promptText.includes("[rename]")) {
+					// The engine announces a title it chose; a repeat of the same title is not a new rename.
+					update({ sessionUpdate: "session_info_update", title: "Renamed" });
+					update({ sessionUpdate: "session_info_update", title: "Renamed" });
+					// A skill or an extension came or went mid-session; the session/new announcement predates the binding.
+					update({ sessionUpdate: "available_commands_update", availableCommands: [] });
+				}
 				if (promptText.startsWith("/context recover ")) {
 					await delay(40);
 					text("The paused turn continued from the handoff.\n\nHandoff delivered.");
@@ -944,7 +1040,7 @@ async function handle(frame) {
 				if (turnScenario === "plan-permission") await planPermission();
 				else if (turnScenario.startsWith("permission")) await permission();
 				else if (turnScenario === "held-worker") await heldWorker();
-				else if (turnScenario === "slow") {
+				else if (turnScenario === "slow" || scenario === "cancel-unanswered") {
 					while (!cancelled) await delay(100);
 				} else if (turnScenario === "workload") {
 					// `[workload 16384]` asks for an answer of at least that many bytes.
@@ -975,6 +1071,12 @@ async function handle(frame) {
 						if (cancelled) break;
 						text(chunk);
 						await delay(20);
+					}
+				} else if (turnScenario === "held-stream") {
+					// Streams until cancelled (capped near two minutes), so a check can land mid-turn on any machine.
+					for (let i = 0; i < 40_000 && !cancelled; i++) {
+						text(`${i} `);
+						await delay(3);
 					}
 				} else if (turnScenario === "loop") {
 					for (let i = 0; i < 1400 && !cancelled; i++) {
@@ -1186,6 +1288,19 @@ async function handle(frame) {
 					result = invokeTask(argv);
 					break;
 				}
+				// As the engine's /export: the path is resolved against the task's directory, Markdown for `.md`.
+				if (command === "export") {
+					const target = resolve(taskCwd, argv[0] ?? `.clio-coder/exports/${sessionId}.html`);
+					mkdirSync(dirname(target), { recursive: true });
+					writeFileSync(
+						target,
+						target.endsWith(".md")
+							? "# Fixture transcript\n\nEarlier reply\n"
+							: "<!doctype html><title>Fixture transcript</title>",
+					);
+					result = { level: "info", lines: [`wrote 1 requests to ${target}`] };
+					break;
+				}
 				result =
 					command === "doctor"
 						? { level: "success", lines: [argv.includes("deep") ? "Deep checks completed." : "Checks completed."] }
@@ -1241,6 +1356,41 @@ async function handle(frame) {
 				if (!COMMANDS) throw Error("method_not_found");
 				result = sessionTree();
 				break;
+			case "_clio-coder/session/snapshots":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = { snapshots: SNAPSHOTS, truncated: false };
+				break;
+			case "_clio-coder/session/snapshot_preview":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = SNAPSHOTS.some((row) => row.n === frame.params.n)
+					? snapshotPlan(frame.params.n)
+					: { kind: "unavailable", reason: `snapshot #${frame.params.n} not found` };
+				break;
+			case "_clio-coder/session/snapshot_restore": {
+				if (!COMMANDS) throw Error("method_not_found");
+				if (promptRunning) throw Error("prompt_active");
+				const plan = snapshotPlan(frame.params.n);
+				const undo = SNAPSHOTS[0].n + 1;
+				SNAPSHOTS.unshift({
+					n: undo,
+					at: new Date().toISOString(),
+					reason: `before rewind to #${frame.params.n}`,
+					differs: 0,
+					skipped: 0,
+				});
+				result = {
+					kind: "restored",
+					n: frame.params.n,
+					undo,
+					restored: plan.restore,
+					removed: plan.remove,
+					kept: plan.kept,
+					failed: [],
+					refs: [],
+					truncated: false,
+				};
+				break;
+			}
 			case "_clio-coder/session/switch_turn": {
 				if (!COMMANDS) throw Error("method_not_found");
 				if (!TREE_TURNS[frame.params.turnId]) throw Error("turn_unknown");
@@ -1529,6 +1679,8 @@ async function handle(frame) {
 				break;
 			}
 			case "session/cancel":
+				// A busy agent that never confirms the stop; only `session/close` ends its turn.
+				if (scenario === "cancel-unanswered") return;
 				cancelled = true;
 				for (const settle of liveRuns.values()) settle(false);
 				for (const resolve of pending.values()) resolve({ outcome: { outcome: "cancelled" } });
@@ -1611,6 +1763,8 @@ async function handle(frame) {
 					data: { _meta: { "clio-coder/error": { version: 1, code: error.message } } },
 				},
 			});
+	} finally {
+		if (frame.method === "session/prompt") promptRunning = false;
 	}
 }
 const input = createInterface({ input: process.stdin });

@@ -24,6 +24,16 @@ export type AcpEvent =
 	| { type: (typeof ACP_TO_WEB_EVENT)[keyof typeof ACP_TO_WEB_EVENT]; item: FleetItem | HealthItem; sequence: number }
 	| { type: null; item: null; sequence: number };
 
+/** An event envelope fault the caller drops and reports by class instead of ending the session. */
+export class EventFault extends AppProblem {
+	constructor(
+		readonly faultClass: "foreign session" | "event sequence",
+		detail: string,
+	) {
+		super("upstream_acp", detail);
+	}
+}
+
 /**
  * Projects one `_clio-coder/event` frame, or reports that it is not projectable.
  *
@@ -33,22 +43,20 @@ export type AcpEvent =
  * over a fact the UI would not have drawn anyway is the worse outcome. A frame
  * of a kind this app DOES claim to handle, whose envelope or payload is wrong,
  * is a broken or hostile peer and still throws: that is the case where
- * continuing means rendering something no contract describes. The envelope
+ * continuing means rendering something no contract describes, so the caller
+ * drops that frame (and only that frame) and tells the task. The envelope
  * check comes first either way, because an out-of-order or foreign-session
  * frame is malformed whatever kind it names.
  */
 export function fleetEvent(value: unknown, sessionId: string, previousSequence: number): AcpEvent {
 	const event = record(value),
 		kind = event.kind;
-	if (
-		event.version !== 1 ||
-		event.sessionId !== sessionId ||
-		typeof kind !== "string" ||
-		!Number.isSafeInteger(event.sequence) ||
-		(event.sequence as number) <= previousSequence
-	)
-		throw new AppProblem("upstream_acp", "Invalid or out-of-order ACP event envelope.");
+	if (event.sessionId !== sessionId)
+		throw new EventFault("foreign session", "ACP event names a different session identity.");
+	if (event.version !== 1 || typeof kind !== "string" || !Number.isSafeInteger(event.sequence))
+		throw new AppProblem("upstream_acp", "Invalid ACP event envelope.");
 	const sequence = event.sequence as number;
+	if (sequence <= previousSequence) throw new EventFault("event sequence", "Out-of-order ACP event.");
 	if (kind === "context.activity_changed") {
 		const activity = Value.Clean(ContextActivity, structuredClone(event.payload));
 		if (!Value.Check(ContextActivity, activity) || !activity.operation || activity.operation.sessionId !== sessionId)

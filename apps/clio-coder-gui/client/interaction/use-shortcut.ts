@@ -1,8 +1,9 @@
 // The scoped shortcut dispatcher. A layer stack replaces the hand-threaded `modalIsOpen` boolean,
 // so a dialog silences every global binding for as long as it is open and the innermost layer wins.
 
-import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { type RefObject, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { KEYBINDINGS, type KeybindingId, matchesKeybinding, type ShortcutScope } from "./keybindings.js";
+import { FOCUSABLE_SELECTOR } from "./use-focus-trap.js";
 
 /** Layers currently claiming the keyboard, in the order they were pushed. */
 const layers: { id: string; scope: ShortcutScope }[] = [];
@@ -83,4 +84,48 @@ export function useShortcut(
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
 	}, [id, enabled]);
+}
+
+/** The control a menu opened from the keyboard starts on: its current choice, else its first live control. */
+function focusMenu(details: HTMLDetailsElement): void {
+	const controls = [...details.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
+		(element) => element.tagName !== "SUMMARY",
+	);
+	const chosen = controls.find((element) => element.matches("input:checked, [aria-pressed='true']"));
+	(chosen ?? controls[0] ?? details.querySelector("summary"))?.focus();
+}
+
+/**
+ * Bind a chord that opens a `<details>` menu and moves focus into it. The caller's open state is set
+ * directly as well as on the element, so the menu body renders in this commit instead of after the
+ * element's asynchronous `toggle` event, and focus lands once it has.
+ */
+export function useMenuShortcut(
+	id: KeybindingId,
+	panel: RefObject<HTMLDetailsElement | null>,
+	open: boolean,
+	setOpen: (open: boolean) => void,
+	options: ShortcutOptions = {},
+): void {
+	const pending = useRef(false);
+	useShortcut(
+		id,
+		() => {
+			const details = panel.current;
+			if (!details) return;
+			if (details.open) {
+				focusMenu(details);
+				return;
+			}
+			pending.current = true;
+			details.open = true;
+			setOpen(true);
+		},
+		options,
+	);
+	useEffect(() => {
+		if (!open || !pending.current) return;
+		pending.current = false;
+		if (panel.current) focusMenu(panel.current);
+	}, [open, panel]);
 }

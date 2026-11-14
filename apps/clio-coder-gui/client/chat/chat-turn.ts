@@ -9,7 +9,7 @@
 // the model spoke first.
 
 import type { Turn } from "../../contracts/sessions.js";
-import { workerLabel } from "./activity.js";
+import { unappliedChange, workerLabel } from "./activity.js";
 import type { TurnActivity } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
 import type { ChatTurn } from "./turns.js";
@@ -23,7 +23,8 @@ export const REPLAY_PROMPT_MISSING = "(earlier prompt not replayed)";
 export const EMPTY_PROMPT = "(empty prompt)";
 
 /** Verbatim. The wording the page carried before read like data loss, which it is not. */
-export const TRUNCATION_NOTE = "Earlier turns are not shown; CLIO Coder still has the full context.";
+export const TRUNCATION_NOTE =
+	"This view shows the most recent part of a long task. Earlier turns stay in the saved session.";
 
 export const EMPTY_GLYPH = "◎";
 export const EMPTY_EYEBROW = "NEW RESEARCH THREAD";
@@ -116,16 +117,18 @@ export function turnActivity(turn: ChatTurn, compactions: number): TurnActivity 
 	let timed = 0;
 	let toolMs = 0;
 	let slowest: TurnActivity["slowest"] = null;
+	let notApplied = 0;
 	for (const item of turn.items) {
 		if (item.kind !== "tool") continue;
 		tools += 1;
+		if (unappliedChange(item)) notApplied += 1;
 		if (item.durationMs === undefined) continue;
 		timed += 1;
 		toolMs += item.durationMs;
 		if (slowest === null || item.durationMs > slowest.ms)
 			slowest = { name: (item.title ?? item.text).slice(0, 48), ms: item.durationMs };
 	}
-	return { tools, timed, toolMs, slowest, compactions };
+	return { tools, timed, toolMs, slowest, compactions, notApplied };
 }
 
 export function toolCount(turn: ChatTurn): number {
@@ -208,6 +211,8 @@ const observedStarts = new Map<string, number>();
 export function observeStart(id: string, nowMs: number): number {
 	const seen = observedStarts.get(id);
 	if (seen !== undefined) return seen;
+	// No clock is running (a settled or not yet live turn); a zero is not a sighting.
+	if (nowMs <= 0) return nowMs;
 	if (observedStarts.size >= MAX_OBSERVED_STARTS) {
 		const oldest = observedStarts.keys().next();
 		if (!oldest.done) observedStarts.delete(oldest.value);

@@ -2,6 +2,7 @@
 // insists on, and capability-dependent surfaces. The keyboard section
 // is generated from the binding table, so the reference cannot drift from the handlers.
 
+import { SLASH_ALIASES } from "../chat/slash-model.js";
 import type { navigation } from "../design/navigation.js";
 import { formatKeybinding, INTERVIEW_KEYBINDING_NAMESPACE, KEYBINDING_ORDER } from "./keybindings.js";
 
@@ -89,11 +90,38 @@ const VIEW_ENTRIES: readonly HelpEntry[] = Object.values(VIEW_GUIDE).map((view) 
 	meaning: view.meaning,
 }));
 
-const KEYBOARD_ENTRIES: readonly HelpEntry[] = KEYBINDING_ORDER.map((binding) => ({
-	bindingId: binding.id,
-	term: formatKeybinding(binding),
-	meaning: `${binding.action}. ${binding.where}.`,
-}));
+/** Keys handled by one control rather than the binding table: the message box and the task name. */
+export const COMPOSER_NOTES: readonly { term: string; action: string; where: string }[] = [
+	{ term: "Esc, Esc", action: "Stop the running turn", where: "Message box · press twice while a turn runs" },
+	{ term: "Up / Down", action: "Recall sent messages", where: "Message box · Up with the caret at the start" },
+	{ term: "F2", action: "Rename the task", where: "Task name in the header focused" },
+];
+
+const KEYBOARD_ENTRIES: readonly HelpEntry[] = [
+	...KEYBINDING_ORDER.map((binding) => ({
+		bindingId: binding.id,
+		term: formatKeybinding(binding),
+		meaning: `${binding.action}. ${binding.where}.`,
+	})),
+	...COMPOSER_NOTES.map((note) => ({ term: note.term, meaning: `${note.action}. ${note.where}.` })),
+];
+
+// Names sharing one summary are one line: `/new, /clear`, and the terminal-only names together. A
+// notice that stands alone says what it says in the message box.
+const COMMAND_ENTRIES: readonly HelpEntry[] = (() => {
+	const rows = new Map<string, { names: string[]; specs: (typeof SLASH_ALIASES)[number][] }>();
+	for (const spec of SLASH_ALIASES) {
+		const row = rows.get(spec.summary) ?? { names: [], specs: [] };
+		row.names.push(...spec.names.map((name) => `/${name}${spec.hint ? ` ${spec.hint}` : ""}`));
+		row.specs.push(spec);
+		rows.set(spec.summary, row);
+	}
+	return [...rows.entries()].map(([summary, row]) => {
+		const only = row.specs.length === 1 ? row.specs[0] : undefined;
+		const meaning = only?.target.kind === "notice" ? only.target.message : `${summary}.`;
+		return { term: row.names.join(", "), meaning };
+	});
+})();
 
 export const HELP_SECTIONS: readonly HelpSection[] = [
 	{
@@ -130,12 +158,12 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			{
 				term: "default",
 				meaning:
-					"CLIO Coder can read, edit and run recognised commands. Unrecognised shell commands, dispatching a full plan and publishing outside the project require approval.",
+					"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.",
 			},
 			{
 				term: "yolo",
 				meaning:
-					"CLIO Coder skips ordinary approval prompts. Safety rules can still ask or block an action, and protected paths remain protected.",
+					"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
 			},
 		],
 	},
@@ -200,13 +228,19 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 		],
 	},
 	{
+		id: "commands",
+		title: "Commands",
+		lede: "Type / in the message box to see this task's commands. These terminal names work here too.",
+		entries: COMMAND_ENTRIES,
+	},
+	{
 		id: "terminal",
 		title: "The terminal",
 		lede: "This reference covers the app.",
 		entries: [
 			{
 				term: "/help",
-				meaning: "In the terminal, /help lists CLIO Coder commands. The app has its own controls and shortcuts.",
+				meaning: "In the terminal, /help lists CLIO Coder commands. Here it opens this reference.",
 			},
 		],
 	},

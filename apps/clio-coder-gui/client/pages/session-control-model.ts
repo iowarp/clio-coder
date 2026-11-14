@@ -1,3 +1,4 @@
+import type { Problem } from "../../contracts/common.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 
 export type SessionControlTarget = Readonly<{
@@ -18,7 +19,18 @@ export type SessionControlRequest = Readonly<{
 	stage: "sending" | "unresolved" | "complete";
 	message: string;
 	restarted: boolean;
+	/** The server refused the stop because the named turn was not running, so nothing was stopped. */
+	nothingStopped?: true;
 }>;
+
+/**
+ * A stop the server refuses as a conflict did nothing: the turn had ended, another turn runs now, or the
+ * session is not open. The server's sentence says which. A refusal naming another window's control is
+ * not one of these, because taking control and retrying can still stop the turn.
+ */
+export function stopRefusal(problem: Problem | undefined): string | null {
+	return problem?.code === "conflict" && !problem.control ? problem.detail : null;
+}
 
 export function observedControlOutcome(request: SessionControlRequest, snapshot: SessionSnapshot): string | null {
 	if (snapshot.id !== request.sessionId) return null;
@@ -59,7 +71,10 @@ export function createSessionControlStore() {
 			publish([...held, request]);
 			return true;
 		},
-		patch: (key: string, update: Partial<Pick<SessionControlRequest, "stage" | "message" | "epoch" | "restarted">>) => {
+		patch: (
+			key: string,
+			update: Partial<Pick<SessionControlRequest, "stage" | "message" | "epoch" | "restarted" | "nothingStopped">>,
+		) => {
 			publish(records.map((row) => (row.key === key ? { ...row, ...update } : row)));
 		},
 		remove: (key: string) => publish(records.filter((row) => row.key !== key || row.stage === "sending")),

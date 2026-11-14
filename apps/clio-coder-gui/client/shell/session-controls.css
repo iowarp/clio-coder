@@ -9,6 +9,16 @@
 	background: var(--well);
 	font-size: var(--text-meta);
 }
+/* At the head of the notice stack (notifications.tsx) the strip becomes a card like the notices. It
+   floats or docks with them, so it never moves the page's header. */
+.notice-region__lead > .session-control-notice {
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+	margin-bottom: var(--space-2);
+	border: 1px solid var(--accent-line);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-panel);
+}
 .session-control-notice[data-state="unresolved"] {
 	border-color: var(--status-warn-line);
 	background: var(--status-warn-tint);

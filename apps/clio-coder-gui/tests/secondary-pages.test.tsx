@@ -398,6 +398,12 @@ for (const path of ["/research", "/arena"]) {
 	});
 }
 
+test("Skills opens with the settings rail, as the Library beside it does", () => {
+	assert.ok(isSettingsPath("/skills"));
+	assert.ok(isSettingsPath("/library"));
+	assert.ok(!isSettingsPath("/sessions/s1"));
+});
+
 test("research page follows a campaign the server still runs after the page was left and opened again", () => {
 	const cache = queries();
 	const campaign = "r20261108-135752-2f0f";

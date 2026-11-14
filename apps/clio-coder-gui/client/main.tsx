@@ -13,6 +13,8 @@ import { ClioPulse, PULSE_SIZE } from "./shell/ClioMark.js";
 import "./styles.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
+// After App, so the bundle keeps the module where App's own imports place it.
+import { sessionQuery } from "./api/session-query.js";
 
 // Under /m/<id> every call goes to that node's own GUI through the app on this machine. The switcher
 // and Machines keep talking to this machine's app, so the window can always come back or move on.
@@ -57,6 +59,11 @@ const queries = new QueryClient({
 			if (mutation.meta?.errorSurface !== "inline") reportProblem(error);
 		},
 	}),
+});
+// Every first read waits on the credential exchange, so it starts now rather than when React mounts the
+// first view.
+void credentials.bearer().catch(() => {
+	// Ignoring is safe: the first real request retries the exchange and reports any problem where it is seen.
 });
 function RouteError() {
 	const error = useRouteError();
@@ -307,6 +314,11 @@ const router = createBrowserRouter([
 		],
 	},
 ]);
+// The router matched the URL when it was created and is already loading the route chunk. A deep link to a
+// task also reads its snapshot now, under the decoded id the page's query asks for. A second import site for
+// the route chunk would grow the eager bundle past its budget, so that load is left to the router.
+const opening = router.state.matches.at(-1);
+if (opening?.route.path === "/sessions/:id") void queries.prefetchQuery(sessionQuery(client, opening.params.id ?? ""));
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root.");
 createRoot(root).render(

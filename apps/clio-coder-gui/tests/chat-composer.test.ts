@@ -206,6 +206,17 @@ test("a send already on the wire blocks the next one", () => {
 	assert.deepEqual(intent, { kind: "blocked", reason: "The previous send is still on the wire." });
 });
 
+test("a /name the session does not serve is held with its warning, not warned about and sent", () => {
+	const warning =
+		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.";
+	for (const turnRunning of [false, true]) {
+		assert.deepEqual(submitIntent(draft({ text: "/tpyo fix it" }), situation({ turnRunning, unknownSlash: warning })), {
+			kind: "blocked",
+			reason: warning,
+		});
+	}
+});
+
 test("a window that only views the task offers no send, steer or shell line, and says who controls it", () => {
 	const viewing = situation({ viewing: "Firefox on laptop" });
 	for (const text of ["fix the build", "!ls"]) {
@@ -495,16 +506,15 @@ test("the Detailed line reports route, speed, the prompt split and cache only wh
 		{ label: "Speed", value: "38 tok/s" },
 		{ label: "Prompt", value: "12,436 (90 cached)" },
 		{ label: "Output", value: "678" },
-		{ label: "Cache hit", value: "1%" },
 		{ label: "Reasoning", value: "234" },
 	]);
 	assert.deepEqual(
 		view.breakdown.filter((row) => row.group === "Cache").map((row) => [row.label, row.value]),
 		[
 			["Read", "90"],
-			["Hit share", "1%"],
 			["Written", "1"],
 		],
+		"provider token fields do not establish a hit share, so none is derived",
 	);
 	assert.deepEqual(
 		view.breakdown.filter((row) => row.group === "Model").map((row) => [row.label, row.value]),
@@ -534,6 +544,7 @@ test("tool time names how many calls it measured, and compactions are counted pe
 		toolMs: 4200,
 		slowest: { name: "Run tests", ms: 3900 },
 		compactions: 1,
+		notApplied: 0,
 	});
 	assert.deepEqual(view.nerd.slice(1), [
 		{ label: "Tool time", value: "4.2 s over 2 of 3" },
@@ -578,6 +589,22 @@ test("a failed turn shows its problem detail and its stop reason; a stopped one 
 	assert.equal(turnOutcome(turn({ status: "running", usage: null, finishedAt: null }), 0).tone, "running");
 });
 
+test("a succeeded turn cut at the output limit says it stopped early, with the reason, and can be tried again", () => {
+	const cut = turnOutcome(turn({ stopReason: "max_tokens" }), 0);
+	assert.equal(cut.label, "Stopped early");
+	assert.equal(cut.tone, "warn");
+	assert.equal(cut.glyph, "!");
+	assert.equal(cut.detail, "The model reached its output limit before it finished. Send a message to continue.");
+	assert.equal(cut.stopReason, "max_tokens");
+	const retry = messageActionOffers({
+		requestText: "do it",
+		responseText: "half",
+		status: "succeeded",
+		ending: "output-limit",
+	}).find((offer) => offer.id === "retry");
+	assert.equal(retry?.available, true);
+});
+
 test("a /name the session cannot run is flagged before it is sent, and nothing else is", () => {
 	const command = (name: string, extra: Record<string, unknown> = {}) =>
 		({ name, summary: "", usage: `/${name}`, group: "Work", args: {}, ...extra }) as never;
@@ -593,9 +620,15 @@ test("a /name the session cannot run is flagged before it is sent, and nothing e
 	assert.equal(slashNotice("\\/tmp is full", catalog), null);
 	assert.equal(slashNotice("/home/me/notes.md says why", catalog), null);
 	assert.equal(slashNotice("plain text /tpyo", catalog), null);
-	assert.match(slashNotice("/tpyo fix it", catalog)?.message ?? "", /\/tpyo is not a command or prompt template/);
-	assert.match(slashNotice("/model gpt", catalog)?.message ?? "", /Start the line with \\\//);
-	assert.match(slashNotice("/run verifier", catalog)?.message ?? "", /runs from the command list/);
+	assert.equal(
+		slashNotice("/tpyo fix it", catalog)?.message,
+		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.",
+	);
+	// A terminal name the app answers itself runs here, so it is not warned about.
+	assert.equal(slashNotice("/model", catalog), null);
+	assert.equal(slashNotice("/model gpt", catalog), null);
+	assert.equal(slashNotice("/extensions dev", catalog), null);
+	assert.equal(slashNotice("/run verifier", catalog), null);
 	// Without the template list the composer cannot tell a template from a typo, so it says nothing.
 	assert.equal(slashNotice("/tpyo", { version: 1, commands: catalog.commands }), null);
 	assert.equal(slashNotice("/tpyo", undefined), null);
@@ -675,4 +708,18 @@ test("Ctrl+R finds sent messages by what they said, newest first, each once", ()
 	assert.ok(taken);
 	assert.deepEqual(stepHistory(sent, { index: taken.index, stash: "my draft" }, "newer", taken.text)?.text, "deploy");
 	assert.deepEqual(stepHistory(sent, { index: 3, stash: "my draft" }, "newer", "x"), { browse: null, text: "my draft" });
+});
+
+test("a finished turn that left a change unapplied is not a green Done, and one token is singular", () => {
+	const clean = turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 1 });
+	assert.equal(clean.tone, "success");
+	const unapplied = turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 1, notApplied: 1 });
+	assert.equal(unapplied.tone, "neutral");
+	assert.ok(unapplied.facts.includes("1 change not applied"));
+	assert.ok(
+		turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 2, notApplied: 2 }).facts.includes(
+			"2 changes not applied",
+		),
+	);
+	assert.equal(draftEstimate("hi", { files: [], images: 0 })?.text, "~1 token");
 });

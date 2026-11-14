@@ -16,6 +16,7 @@ import { ConversationBanner } from "./SessionStates.js";
 export function BudgetBanner({ client, session }: { client: Client; session: SessionSnapshot }) {
 	const budget = session.telemetry?.budget;
 	if (budget === undefined) return null;
+	const parked = session.turns.at(-1)?.status === "running";
 	// A new stop is a new decision, so the previous raise's outcome does not carry over.
 	return (
 		<BudgetStop
@@ -23,11 +24,22 @@ export function BudgetBanner({ client, session }: { client: Client; session: Ses
 			client={client}
 			workspaceId={session.workspaceId}
 			budget={budget}
+			parked={parked}
 		/>
 	);
 }
 
-function BudgetStop({ client, workspaceId, budget }: { client: Client; workspaceId: string; budget: BudgetBlock }) {
+function BudgetStop({
+	client,
+	workspaceId,
+	budget,
+	parked,
+}: {
+	client: Client;
+	workspaceId: string;
+	budget: BudgetBlock;
+	parked: boolean;
+}) {
 	const queries = useQueryClient();
 	const raise = useMutation({
 		mutationFn: (body: { path: string; value: string }) =>
@@ -37,10 +49,14 @@ function BudgetStop({ client, workspaceId, budget }: { client: Client; workspace
 				void queries.invalidateQueries({ queryKey: [stale] });
 		},
 	});
-	const view = budgetBannerView(budget, {
-		raisedTo: raise.isSuccess ? raise.variables.value : null,
-		error: raise.error?.message ?? null,
-	});
+	const view = budgetBannerView(
+		budget,
+		{
+			raisedTo: raise.isSuccess ? raise.variables.value : null,
+			error: raise.error?.message ?? null,
+		},
+		parked,
+	);
 	return (
 		<ConversationBanner
 			tone={view.tone}

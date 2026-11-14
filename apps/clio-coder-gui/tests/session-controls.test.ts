@@ -5,11 +5,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { Value } from "typebox/value";
+import { Autonomy } from "../contracts/autonomy.js";
 import { Problem } from "../contracts/common.js";
 import { SessionControl } from "../contracts/control.js";
 import { Event } from "../contracts/events.js";
 import { ACP_TO_WEB_EVENT } from "../contracts/fleet-events.js";
 import { routes } from "../contracts/routes.js";
+import { AcpClient } from "../server/acp/client.js";
+import type { AcpJsonRpcTransport } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
 
 async function until(check: () => boolean) {
@@ -315,7 +318,8 @@ test("a branch switch replays only the chosen branch and a fork continues under 
 	assert.ok(!rows.some((row) => row.sessionId === session.id));
 	const mode = await h.request(`/api/sessions/${result.sessionId}/autonomy`);
 	assert.equal(mode.status, 200, "the forked conversation keeps its working freedom");
-	assert.deepEqual(await mode.json(), { level: "default", source: "settings" });
+	const forkedMode = await json(mode, Autonomy);
+	assert.deepEqual([forkedMode.level, forkedMode.source], ["default", "settings"]);
 	assert.equal((await h.post(`/api/sessions/${result.sessionId}/turns`, { text: "Continue here" })).status, 202);
 	await until(() => h.supervisor.get(result.sessionId).turns.at(-1)?.status !== "running");
 	assert.equal(h.supervisor.get(result.sessionId).turns.at(-1)?.status, "succeeded");
@@ -561,7 +565,7 @@ test("unanswered permission escalates then expires, cancels through ACP, and nev
 	assert.match(log, /"method":"session\/cancel"/);
 	assert.match(log, /"toolExecuted":false/);
 });
-test("mismatched permission tool input fails closed without publishing an approval card", {
+test("an ask whose input differs from its tool row is shown as asked and the session keeps running", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "permission-mismatch" });
@@ -569,8 +573,13 @@ test("mismatched permission tool input fails closed without publishing an approv
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
 	h.supervisor.startTurn(session.id, "Write");
-	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "failed");
-	assert.deepEqual(h.supervisor.get(session.id).permissions, []);
+	await until(() => h.supervisor.get(session.id).permissions.some((permission) => permission.status === "pending"));
+	assert.equal(h.supervisor.get(session.id).state, "open");
+	const card = h.supervisor.get(session.id).permissions.at(-1);
+	assert.equal(card?.title, "write");
+	h.supervisor.decide(session.id, card?.id ?? "", "reject");
+	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "succeeded");
+	assert.equal(h.supervisor.get(session.id).state, "open");
 	assert.doesNotMatch(await readFile(join(h.home.path, "acp.jsonl"), "utf8"), /"toolExecuted":true/);
 });
 test("cancel mid-stream has one terminal and an old cancel cannot cancel the next turn", {
@@ -589,7 +598,21 @@ test("cancel mid-stream has one terminal and an old cancel cannot cancel the nex
 	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status === "cancelled");
 	assert.equal(events.filter((event) => event.type === "turn.finished").length, 1);
 	const next = h.supervisor.startTurn(session.id, "Next");
-	assert.equal((await h.post(path)).status, 200);
+	// A stop naming a settled or unknown turn is refused, so the window never reports a stop that did nothing.
+	const stale = await h.post(path);
+	assert.equal(stale.status, 409);
+	const refused = (await stale.json()) as Problem;
+	assert.equal(refused.code, "conflict");
+	assert.equal(
+		refused.detail,
+		"That turn already ended, so CLIO Coder stopped nothing. Another turn is running now; stop that one instead.",
+	);
+	const unknown = await h.post(`/api/sessions/${session.id}/turns/${crypto.randomUUID()}/cancel`);
+	assert.equal(unknown.status, 409);
+	assert.match(
+		((await unknown.json()) as Problem).detail,
+		/^That turn is not running in this session, so CLIO Coder stopped nothing\./,
+	);
 	assert.equal(h.supervisor.get(session.id).turns.at(-1)?.status, "running");
 	assert.equal((await h.post(`/api/sessions/${session.id}/turns/${next.turnId}/cancel`)).status, 200);
 });
@@ -633,6 +656,33 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	);
 	assert.equal(autonomy.level, "default");
 	assert.equal((await h.request(`${base}/autonomy`)).status, 200);
+});
+test("autonomy carries the engine's mode descriptions, and a mode the app does not know keeps the task going", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await h.supervisor.open(workspace.id);
+	const read = await json(await h.request(`/api/sessions/${session.id}/autonomy`), Autonomy);
+	assert.deepEqual(
+		read.modes?.map((mode) => mode.id),
+		["default", "yolo"],
+	);
+	assert.match(read.modes?.find((mode) => mode.id === "yolo")?.description ?? "", /refused instead of asked/);
+
+	const transport = {
+		request: async () => ({ sessionId: "s1", modes: { currentModeId: "yolo", availableModes: read.modes } }),
+	} as unknown as AcpJsonRpcTransport;
+	const client = new AcpClient(transport);
+	assert.equal(await client.open("/"), "s1");
+	assert.doesNotThrow(() => client.modeUpdate("s1", "plan"));
+	const unknown = await client.autonomy("s1");
+	assert.equal(unknown.level, "yolo");
+	assert.equal(unknown.unrecognized, "plan");
+	assert.ok(Value.Check(Autonomy, unknown));
+	client.modeUpdate("s1", "default");
+	assert.equal((await client.autonomy("s1")).unrecognized, undefined);
 });
 test("all twelve opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {
 	timeout: 15000,

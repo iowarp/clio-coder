@@ -29,6 +29,8 @@ export const SettingControl = Type.Object(
 		suggestions: Type.Optional(Type.Array(Type.String())),
 		optional: Type.Boolean(),
 		timing: SettingTiming,
+		/** Shown in place of the timing phrase when the engine's timing does not describe this app's sessions. */
+		timingNote: Type.Optional(Type.String()),
 		/** The text form `applyControlValue` accepts. Guided collections cross as JSON; withheld collections cross as a count only. */
 		value: Type.String(),
 		source: SettingsOrigin,
@@ -39,6 +41,8 @@ export const SettingControl = Type.Object(
 		note: Type.Optional(Type.String()),
 		/** When present the write must carry `confirmed: true`, and the page shows this sentence first. */
 		confirm: Type.Optional(Type.String()),
+		/** When present, `confirm` applies only to writes of this value; any other value saves without it. */
+		confirmValue: Type.Optional(Type.String()),
 	},
 	closed,
 );

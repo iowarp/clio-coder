@@ -36,6 +36,7 @@ import {
 	type InterviewSubmission,
 } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD, type PermissionDecision } from "../../contracts/permissions.js";
+import { SnapshotList, SnapshotOutcome, SnapshotPlan } from "../../contracts/rewind.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
 import { BudgetBlock } from "../../contracts/session-telemetry.js";
@@ -133,13 +134,18 @@ import type { WorkspaceService } from "../services/workspaces.js";
 import type { AppFiles } from "../state/files.js";
 import { type ChildRow, ChildrenFile } from "./children-file.js";
 import { AcpClient, acpProblem, record } from "./client.js";
-import { fleetEvent } from "./fleet-events.js";
+import { EventFault, fleetEvent } from "./fleet-events.js";
 import { Interviews } from "./interviews.js";
 import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
 import { projectSessionOverview, SessionWorkers } from "./session-overview.js";
-import { projectTelemetryValue, sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
+import {
+	projectTelemetryValue,
+	sessionInfoTitle,
+	sessionResultTelemetry,
+	sessionUpdateTelemetry,
+} from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -207,6 +213,15 @@ type Entry = {
 	jobPublished?: Map<string, number>;
 	jobTimer?: ReturnType<typeof setTimeout>;
 	workers?: SessionWorkers;
+	/** When a stop of the running turn went unconfirmed; a second stop of that turn forces it. */
+	stopUnconfirmedAt?: number;
+	/** Frames dropped in the running turn, and the fault classes already reported to the task. */
+	droppedFrames?: number;
+	frameFaults?: Set<string>;
+	/** The newest child stderr, kept only in memory for the crash notice. */
+	stderrTail?: string;
+	/** The child's transport closed without this server asking. */
+	crashed?: boolean;
 };
 /** A branch change reads and replays a whole session, which a long one makes slow. */
 const BRANCH_TIMEOUT_MS = 60_000;
@@ -226,6 +241,35 @@ export function boundedTurnCapacity(value: unknown) {
 	return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= MAX_TURN_CAPACITY
 		? value
 		: DEFAULT_TURN_CAPACITY;
+}
+/** A busy agent can take a while to confirm a stop; past this the stop is reported as unconfirmed, not failed. */
+const CANCEL_TIMEOUT_MS = 10_000;
+/** A turn that drops more frames than this is failed rather than left drawing a partial picture. */
+const DROPPED_FRAMES_PER_TURN = 64;
+const STDERR_TAIL_BYTES = 4096;
+const STOP_UNCONFIRMED =
+	"CLIO Coder has not confirmed the stop yet. The turn may still end on its own; ask again to force it.";
+const STOP_FORCED = "The turn was stopped by force because CLIO Coder did not confirm the stop.";
+const ENGINE_ENDED = "The CLIO Coder engine process for this task ended unexpectedly.";
+/** A frame that failed validation, named by the class of fault the task's notice reports. */
+class FrameFault extends AppProblem {
+	constructor(
+		readonly faultClass: "non-text chunk" | "no active turn" | "foreign session" | "attribution",
+		detail: string,
+	) {
+		super("upstream_acp", detail);
+	}
+}
+/** The crash notice, with the child's last stderr lines when it wrote any. Never logged. */
+function crashNotice(stderr: string | undefined) {
+	const lines = (stderr ?? "")
+		.split(/\r?\n/u)
+		.map((line) => line.trimEnd())
+		.filter((line) => line.trim() !== "")
+		.slice(-20)
+		.map((line) => (line.length > 240 ? line.slice(0, 240) : line));
+	const head = "The engine process ended unexpectedly. Resume the task to continue from the saved session.";
+	return lines.length === 0 ? head : `${head}\n\nLast output from the engine:\n${lines.join("\n")}`;
 }
 /** Parked snapshots kept in memory. An older one is closed and forgotten, and reloads from its ledger like any saved task. */
 const PARKED_KEPT = 32;
@@ -276,6 +320,7 @@ export class Supervisor {
 			owner: { pid: number; birth: string | null },
 		) => Promise<unknown>,
 		private readonly parkAfterMs = PARK_AFTER_MS,
+		private readonly cancelTimeoutMs = CANCEL_TIMEOUT_MS,
 	) {
 		this.capacity = boundedTurnCapacity(turnCapacity);
 		this.children = new ChildrenFile(files);
@@ -283,8 +328,14 @@ export class Supervisor {
 			const now = performance.now();
 			for (const entry of this.entries.values()) {
 				if (entry.closing) continue;
-				if (entry.client.transport.closed) this.retireDetached(entry);
-				else if (now - entry.activeAt >= this.parkAfterMs && this.resting(entry)) {
+				if (entry.client.transport.closed) {
+					// The child ended without being asked. Its saved session is intact, so a task with
+					// anything in it parks and resumes from there instead of leaving the workbench.
+					entry.crashed = true;
+					entry.parking = true;
+					this.notice(entry, crashNotice(entry.stderrTail));
+					this.retireDetached(entry);
+				} else if (now - entry.activeAt >= this.parkAfterMs && this.resting(entry)) {
 					entry.parking = true;
 					this.retireDetached(entry);
 				}
@@ -444,12 +495,13 @@ export class Supervisor {
 			// The workspace may have vanished or the ledger be unreadable; the record then keeps its terminal-resume path.
 		}
 	}
-	async open(workspaceId: string, existingId?: string) {
+	/** `label` is a saved session's ledger name; the replayed transcript cannot restore it, so the snapshot starts with it. */
+	async open(workspaceId: string, existingId?: string, label?: string) {
 		if (existingId && this.snapshots.get(existingId)?.state === "parked") {
 			await this.wake(existingId);
 			return this.get(existingId);
 		}
-		return this.track(this.openSession(workspaceId, existingId));
+		return this.track(this.openSession(workspaceId, existingId, false, label));
 	}
 	private async track(pending: Promise<SessionSnapshot>) {
 		this.opening.add(pending);
@@ -513,7 +565,7 @@ export class Supervisor {
 		if (this.snapshot(id).state === "parked") await this.wake(id);
 		return {};
 	}
-	private async openSession(workspaceId: string, existingId?: string, resume = false) {
+	private async openSession(workspaceId: string, existingId?: string, resume = false, label?: string) {
 		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
 		if (existingId && (this.entries.has(existingId) || this.loading.has(existingId)))
 			throw new AppProblem("conflict", "Session is already open in this server.");
@@ -555,7 +607,9 @@ export class Supervisor {
 			if (!resume)
 				this.snapshots.set(
 					id,
-					existingId ? { ...emptySession(id, workspaceId), revision: this.floor + 1 } : emptySession(id, workspaceId),
+					existingId
+						? { ...emptySession(id, workspaceId), revision: this.floor + 1, label: label || null }
+						: emptySession(id, workspaceId),
 				);
 			this.entries.set(id, entry);
 			this.starting--;
@@ -565,7 +619,13 @@ export class Supervisor {
 					this.publish({ type, payload: { resource: owned.id, revision: this.revision(owned.id), permission } }),
 				() => this.cancelEntry(owned),
 				this.permissionTimers,
+				(reason) =>
+					this.notice(owned, `CLIO Coder asked for an approval this app could not show, so it was declined. (${reason})`),
 			);
+			// Stderr can carry paths and model text: it stays in memory and in this task's own crash notice.
+			transport.onStderr((chunk) => {
+				owned.stderrTail = `${owned.stderrTail ?? ""}${chunk}`.slice(-STDERR_TAIL_BYTES);
+			});
 			owned.interviews = new Interviews((round) =>
 				this.hub.publish({ type: "interview.changed", payload: { resource: owned.id, round } }),
 			);
@@ -620,17 +680,25 @@ export class Supervisor {
 				try {
 					this.update(owned, params);
 				} catch (error) {
-					this.failTurn(owned, acpProblem(error));
-					this.retireDetached(owned);
+					const kind = record(record(params).update).sessionUpdate;
+					this.dropFrame(
+						owned,
+						error instanceof FrameFault ? error.faultClass : "unreadable frame",
+						typeof kind === "string" && /^[a-z_]{1,64}$/u.test(kind) ? kind : "session/update",
+					);
 				}
 			});
 			transport.onRequest("session/request_permission", (params) => {
 				try {
 					return owned.permissions?.request(owned.id, owned.turnId, params, this.snapshot(owned.id).timeline);
-				} catch (error) {
-					this.failTurn(owned, acpProblem(error));
-					this.retireDetached(owned);
-					throw error;
+				} catch {
+					// Every non-operator answer is `cancelled`; the session keeps running.
+					console.error(`[clio-coder:gui] declined an unreadable approval request on session ${owned.id}`);
+					this.notice(
+						owned,
+						"CLIO Coder asked for an approval this app could not show, so it was declined. (unreadable request)",
+					);
+					return { outcome: { outcome: "cancelled" } };
 				}
 			});
 			transport.onNotification(ACP_EVENT_NOTIFICATION, (params) => {
@@ -671,8 +739,11 @@ export class Supervisor {
 						payload: { resource: owned.id, revision: this.revision(owned.id), item: projected.item },
 					} as SessionDelta);
 				} catch (error) {
-					this.failTurn(owned, acpProblem(error));
-					this.retireDetached(owned);
+					const fault = error instanceof EventFault ? error.faultClass : "unreadable frame";
+					// A sequence that went backwards is taken as the engine's new count, so later frames are read again.
+					const sequence = record(params).sequence;
+					if (fault === "event sequence" && Number.isSafeInteger(sequence)) owned.eventSequence = sequence as number;
+					this.dropFrame(owned, fault, "_clio-coder/event");
 				}
 			});
 			await entry.client.initialize();
@@ -687,7 +758,7 @@ export class Supervisor {
 				this.snapshots.delete(id);
 				entry.id = boundId;
 				this.entries.set(boundId, entry);
-				this.snapshots.set(boundId, emptySession(boundId, workspaceId));
+				this.snapshots.set(boundId, { ...emptySession(boundId, workspaceId), label: label || null });
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;
@@ -759,7 +830,7 @@ export class Supervisor {
 						this.finish(entry, result.stopReason, result.usage, null, new Date().toISOString(), result.details);
 				})
 				.catch((error) => {
-					if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
+					if (entry.turnId === turnId) this.failTurn(entry, this.turnFailure(entry, error));
 				});
 		if (queued)
 			entry.prompt = new Promise<void>((resolve) => {
@@ -812,6 +883,7 @@ export class Supervisor {
 			...(queued ? { queued: true as const } : {}),
 		};
 		entry.turnId = id;
+		entry.droppedFrames = 0;
 		if (origin === "live" && this.hasQueue(entry)) {
 			entry.queueEmpty = null;
 			entry.queueVersion++;
@@ -845,6 +917,7 @@ export class Supervisor {
 		});
 		entry.turnId = null;
 		delete entry.scheduled;
+		delete entry.stopUnconfirmedAt;
 		entry.activeAt = performance.now();
 		const queued = entry.queued;
 		if (queued) {
@@ -941,6 +1014,29 @@ export class Supervisor {
 	private failTurn(entry: Entry, problem: AppProblem) {
 		this.finish(entry, "failed", null, problem.problem, new Date().toISOString());
 	}
+	/** A prompt that failed because the child ended on its own says so, rather than repeating the transport's words. */
+	private turnFailure(entry: Entry, error: unknown) {
+		return entry.client.transport.closed && !entry.closing
+			? new AppProblem("upstream_acp", ENGINE_ENDED)
+			: acpProblem(error);
+	}
+	/**
+	 * A frame this app cannot read is skipped and the session, its turn and its child go on. The task
+	 * hears once per fault class; a turn that keeps sending them is failed, never the child.
+	 */
+	private dropFrame(entry: Entry, faultClass: string, kind: string) {
+		console.error(`[clio-coder:gui] dropped an unreadable ${kind} frame on session ${entry.id} (${faultClass})`);
+		const faults = entry.frameFaults ?? new Set<string>();
+		entry.frameFaults = faults;
+		if (!faults.has(faultClass)) {
+			faults.add(faultClass);
+			this.notice(entry, `CLIO Coder sent an update this app could not read; it was skipped. (${faultClass})`);
+		}
+		if (entry.turnId === null) return;
+		entry.droppedFrames = (entry.droppedFrames ?? 0) + 1;
+		if (entry.droppedFrames > DROPPED_FRAMES_PER_TURN)
+			this.failTurn(entry, new AppProblem("upstream_acp", "Too many unreadable updates from CLIO Coder in one turn."));
+	}
 	/** Keeps the task's newest 32 distinct notice texts. */
 	private notice(entry: Entry, value: string) {
 		const text = boundedText(value, 16384).trim();
@@ -971,7 +1067,7 @@ export class Supervisor {
 		if (entry.rebase?.mode === "move" && !entry.rebase.moved && params.sessionId !== entry.id)
 			this.moveTo(entry, params.sessionId);
 		if (params.sessionId !== entry.id)
-			throw new AppProblem("upstream_acp", "ACP update has a different session identity.");
+			throw new FrameFault("foreign session", "ACP update has a different session identity.");
 		if (entry.rebase?.mode === "switch" && !entry.rebase.reset) this.resetTimeline(entry);
 		if (update.sessionUpdate === "current_mode_update") {
 			const autonomy = entry.client.modeUpdate(entry.id, update.currentModeId);
@@ -984,6 +1080,24 @@ export class Supervisor {
 		const sessionNotice = record(record(update._meta)[ACP_NOTICE_META_KEY]);
 		if (update.sessionUpdate === "session_info_update" && typeof sessionNotice.text === "string")
 			this.notice(entry, sessionNotice.text);
+		// A rename from another client of this session, or by the engine itself. A title equal to the held label is a
+		// repeat or an echo and publishes nothing.
+		const title = sessionInfoTitle(update);
+		if (title !== undefined && title !== (this.snapshot(entry.id).label ?? null))
+			this.publish({
+				type: "session.labelled",
+				payload: { resource: entry.id, revision: this.revision(entry.id), label: title },
+			});
+		// The list itself is read on demand; the counter only tells a client its copy is stale.
+		if (update.sessionUpdate === "available_commands_update")
+			this.publish({
+				type: "session.telemetry",
+				payload: {
+					resource: entry.id,
+					revision: this.revision(entry.id),
+					telemetry: { commandsRevision: (this.snapshot(entry.id).telemetry?.commandsRevision ?? 0) + 1 },
+				},
+			});
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({
@@ -1022,12 +1136,12 @@ export class Supervisor {
 			const details = Value.Clean(TurnDetails, { ...record(meta[ACP_TURN_META_KEY]) });
 			if (Value.Check(TurnDetails, details)) entry.replayDetails = details;
 		}
-		if (!entry.turnId) throw new AppProblem("upstream_acp", "ACP update arrived without a turn.");
+		if (!entry.turnId) throw new FrameFault("no active turn", "ACP update arrived without a turn.");
 		const origin = entry.replay === null ? ("live" as const) : ("replay" as const);
 		const attribution = meta[ACP_AGENT_META_KEY];
 		const projected = attribution === undefined ? undefined : Value.Clean(Provenance, attribution);
 		if (projected !== undefined && !Value.Check(Provenance, projected))
-			throw new AppProblem("upstream_acp", "ACP agent attribution is invalid.");
+			throw new FrameFault("attribution", "ACP agent attribution is invalid.");
 		const provenance = projected;
 		const common = {
 			resource: entry.id,
@@ -1040,7 +1154,7 @@ export class Supervisor {
 		if (kind === "agent_message_chunk" || kind === "agent_thought_chunk" || kind === "user_message_chunk") {
 			const content = record(update.content);
 			if (content.type !== "text" || typeof content.text !== "string")
-				throw new AppProblem("upstream_acp", "ACP message is not a text chunk.");
+				throw new FrameFault("non-text chunk", "ACP message is not a text chunk.");
 			if (kind === "agent_message_chunk" && meta[ACP_NOTICE_META_KEY] !== undefined) {
 				this.notice(entry, content.text);
 				// A ceiling stop also stands as state until the turn moves again, so the
@@ -1155,29 +1269,42 @@ export class Supervisor {
 		return {};
 	}
 	decide(id: string, permissionId: string, decision: PermissionDecision) {
-		this.active(id).permissions?.decide(permissionId, decision);
+		const permissions = this.active(id).permissions;
+		if (!permissions) throw new AppProblem("conflict", "This task has no approval waiting.");
+		permissions.decide(permissionId, decision);
 		return {};
 	}
 	async cancel(id: string, turnId: string) {
 		const entry = this.active(id);
+		// Only the running turn can be stopped. Answering a stale id with success would tell the
+		// operator a stop landed while the current turn runs on.
 		if (entry.turnId !== turnId) {
-			if (this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running")) return {};
-			throw new AppProblem("conflict", "Turn is not active in this session.");
+			const ended = this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running");
+			const another = entry.turnId !== null ? " Another turn is running now; stop that one instead." : "";
+			throw new AppProblem(
+				"conflict",
+				`${ended ? "That turn already ended" : "That turn is not running in this session"}, so CLIO Coder stopped nothing.${another}`,
+			);
 		}
 		// A queued turn never reached the agent, so there is nothing to cancel there.
 		if (entry.queued) this.finish(entry, "cancelled", null, null, new Date().toISOString());
-		else await this.cancelEntry(entry);
+		else if (entry.stopUnconfirmedAt !== undefined) {
+			// The operator asked twice and the agent confirmed neither. The child goes, the saved session stays.
+			this.failTurn(entry, new AppProblem("upstream_acp", STOP_FORCED));
+			entry.parking = true;
+			await this.retire(entry);
+		} else await this.cancelEntry(entry);
 		return {};
 	}
+	/** A stop the agent has not confirmed keeps the session: a busy agent answering late is normal. */
 	private async cancelEntry(entry: Entry) {
 		try {
-			await entry.client.request("session/cancel", { sessionId: entry.id }, 2000);
+			await entry.client.request("session/cancel", { sessionId: entry.id }, this.cancelTimeoutMs);
 			entry.permissions?.cancel();
 			entry.interviews?.cancel();
-		} catch (error) {
-			this.failTurn(entry, acpProblem(error));
-			await this.retire(entry);
-			throw error;
+		} catch {
+			if (entry.turnId !== null) entry.stopUnconfirmedAt = performance.now();
+			throw new AppProblem("upstream_acp", STOP_UNCONFIRMED);
 		}
 	}
 	private async projected<S extends TSchema>(
@@ -1227,7 +1354,7 @@ export class Supervisor {
 	async targets(id: string) {
 		const client = this.active(id).client;
 		if (!client.capabilities.targets?.list)
-			throw new AppProblem("unsupported", "This Clio build does not expose target inventory.");
+			throw new AppProblem("unsupported", "This CLIO Coder build does not expose target inventory.");
 		const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
 		if (!Value.Check(AcpTargetList, raw)) throw new AppProblem("upstream_acp", "Clio returned an invalid target list.");
 		const projected = Value.Clean(SessionTargets, {
@@ -1240,7 +1367,7 @@ export class Supervisor {
 	}
 	probe(id: string, targetId: string) {
 		if (!this.active(id).client.capabilities.targets?.probe)
-			throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
+			throw new AppProblem("unsupported", "This CLIO Coder build does not expose target probes.");
 		return this.projected(id, ACP_TARGETS_PROBE_METHOD, { targetId }, TargetProbe);
 	}
 	async autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
@@ -1264,7 +1391,7 @@ export class Supervisor {
 	private steering(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.steering)
-			throw new AppProblem("conflict", "This Clio build does not expose mid-turn steering.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not expose mid-turn steering.");
 		if (entry.queued)
 			throw new AppProblem("conflict", "This turn is waiting for a slot. It can take a message once it starts.");
 		return entry;
@@ -1366,7 +1493,7 @@ export class Supervisor {
 				this.finish(entry, outcome.cancelled ? "cancelled" : "end_turn", null, null, new Date().toISOString());
 			})
 			.catch((error) => {
-				if (entry.turnId === turnId) this.failTurn(entry, acpProblem(error));
+				if (entry.turnId === turnId) this.failTurn(entry, this.turnFailure(entry, error));
 			});
 		return { turnId };
 	}
@@ -1382,7 +1509,7 @@ export class Supervisor {
 	steerDispatchRun(id: string, body: Static<typeof DispatchSteerRequest>) {
 		const entry = this.steering(id);
 		if (!entry.client.capabilities.steering?.dispatch)
-			throw new AppProblem("conflict", "This Clio build has no fleet to steer.");
+			throw new AppProblem("conflict", "This CLIO Coder build has no fleet to steer.");
 		// `cancel` carries no operator text and the engine refuses one, so the
 		// message is dropped here rather than sent to be refused.
 		const { runId, action, message } = body;
@@ -1396,7 +1523,7 @@ export class Supervisor {
 	board(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.board)
-			throw new AppProblem("conflict", "This Clio build does not report tasks and decisions.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not report tasks and decisions.");
 		return this.projected(id, ACP_BOARD_METHOD, { sessionId: id }, SessionBoard);
 	}
 	private branching(id: string) {
@@ -1514,19 +1641,19 @@ export class Supervisor {
 	artifacts(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.artifacts)
-			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not expose session artifacts.");
 		return this.projected(id, ACP_ARTIFACTS_LIST_METHOD, { sessionId: id }, ArtifactList, BRANCH_TIMEOUT_MS);
 	}
 	artifact(id: string, body: Static<typeof ArtifactRead>) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.artifacts)
-			throw new AppProblem("conflict", "This Clio build does not expose session artifacts.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not expose session artifacts.");
 		return this.projected(id, ACP_ARTIFACTS_READ_METHOD, { sessionId: id, ...body }, ArtifactPage, BRANCH_TIMEOUT_MS);
 	}
 	async usage(id: string) {
 		const methods = this.active(id).client.capabilities.telemetry?.methods;
 		if (!methods?.session || !methods.cost || !methods.quota)
-			throw new AppProblem("conflict", "This Clio build does not report telemetry.");
+			throw new AppProblem("conflict", "This CLIO Coder build does not report telemetry.");
 		const [session, cost, telemetryQuota] = await Promise.all([
 			this.projected(
 				id,
@@ -1648,7 +1775,7 @@ export class Supervisor {
 	async contextStatus(id: string) {
 		const entry = this.active(id);
 		if (entry.client.capabilities.context?.status !== ACP_CONTEXT_STATUS_METHOD)
-			throw new AppProblem("unsupported", "This Clio build does not report context operations.");
+			throw new AppProblem("unsupported", "This CLIO Coder build does not report context operations.");
 		const before = this.snapshot(id).contextWork;
 		const status = await this.projected(id, ACP_CONTEXT_STATUS_METHOD, { sessionId: id }, ContextOperationStatus);
 		if (status.active && !status.active.operation)
@@ -1758,7 +1885,7 @@ export class Supervisor {
 	async commands(id: string) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
-			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
+			throw new AppProblem("conflict", "This CLIO Coder build exposes no operator commands.");
 		const catalog = await this.projected(id, ACP_COMMANDS_LIST_METHOD, {}, CommandCatalog);
 		// The command form submits single-token flags and one text field. A predicate, a program and its
 		// arguments, or a follow-up task need more than that, so they are not offered rather than offered and refused.
@@ -1784,7 +1911,7 @@ export class Supervisor {
 	async invokeCommand(id: string, body: Static<typeof CommandRequest>) {
 		const entry = this.active(id);
 		if (!entry.client.capabilities.commands)
-			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
+			throw new AppProblem("conflict", "This CLIO Coder build exposes no operator commands.");
 		const catalog = await this.commands(id);
 		const command = catalog.commands.find((row) => row.name === body.command);
 		// A command, or one of its subcommands, whose work belongs to a conversation turn is sent as one.
@@ -1984,7 +2111,10 @@ export class Supervisor {
 		} catch {
 			await entry.client.transport.forceTerminate();
 		}
-		this.failTurn(entry, new AppProblem("upstream_acp", "ACP session closed during its turn."));
+		this.failTurn(
+			entry,
+			new AppProblem("upstream_acp", entry.crashed ? ENGINE_ENDED : "ACP session closed during its turn."),
+		);
 		if (!(await childRunning(entry.row.pid))) {
 			await this.recoverLedger({ ...entry.row, sessionId: entry.id });
 			await this.children.remove(entry.row);
@@ -2000,7 +2130,8 @@ export class Supervisor {
 				if (level?.source === "session") this.parkedAutonomy.set(entry.id, level.level);
 			}
 			this.state(entry.id, parks ? "parked" : "closed");
-			if (entry.parking && !parks) this.snapshots.delete(entry.id);
+			// An empty task whose child ended on its own still closes as it always has, so its window can say so.
+			if (entry.parking && !parks && !entry.crashed) this.snapshots.delete(entry.id);
 		} else this.state(entry.id, "unknown");
 		this.entries.delete(entry.id);
 		this.prune();
@@ -2029,5 +2160,30 @@ export class Supervisor {
 		await Promise.allSettled(this.controls);
 		await Promise.allSettled([...this.entries.values()].map((entry) => this.retire(entry)));
 		await Promise.all(this.reapers);
+	}
+	/** The workspace snapshots the engine took for this task, newest first: the terminal's /rewind list. */
+	snapshotList(id: string) {
+		const { methods } = this.snapshotting(id);
+		return this.projected(id, methods.list, { sessionId: id }, SnapshotList);
+	}
+	snapshotPreview(id: string, n: number) {
+		const { methods } = this.snapshotting(id);
+		return this.projected(id, methods.preview, { sessionId: id, n }, SnapshotPlan);
+	}
+	/** Restoring changes files a running turn may be reading, so it waits for the turn as the engine does. */
+	snapshotRestore(id: string, n: number) {
+		const { entry, methods } = this.snapshotting(id);
+		if (entry.turnId || entry.rebase || entry.contextCommand || this.configuring.has(id))
+			throw new AppProblem(
+				"conflict",
+				"CLIO Coder is working, so nothing restores now. Wait for the turn to finish, or stop it.",
+			);
+		return this.projected(id, methods.restore, { sessionId: id, n }, SnapshotOutcome, BRANCH_TIMEOUT_MS);
+	}
+	private snapshotting(id: string) {
+		const entry = this.active(id);
+		const methods = entry.client.capabilities.snapshots;
+		if (!methods) throw new AppProblem("conflict", "File snapshots are not available for this task.");
+		return { entry, methods };
 	}
 }

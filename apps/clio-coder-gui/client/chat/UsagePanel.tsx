@@ -1,16 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
 import { memo, useId, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
-import { routes } from "../../contracts/runtime-routes.js";
 import type { LiveUsage } from "../../contracts/session-telemetry.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
-import { sessionReadScope } from "../api/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { SessionDiagnostics } from "../pages/operator-metrics.js";
 import { Explained } from "../telemetry/Explained.js";
-import { useTelemetrySession } from "./session-telemetry.js";
-import { quotaCards, quotaTone, usageCoverageNotes, usageRows, usageSummary } from "./session-usage-model.js";
+import { useSessionUsage, useTelemetrySession } from "./session-telemetry.js";
+import {
+	quotaCards,
+	quotaTone,
+	usageCoverageNotes,
+	usageReadable,
+	usageRows,
+	usageSummary,
+} from "./session-usage-model.js";
 import "./session-board.css";
 import "./usage-panel.css";
 import "./pane-inspection.css";
@@ -35,22 +39,13 @@ export const UsagePanel = memo(function UsagePanel({
 	settledTurns: number;
 	liveUsage?: LiveUsage;
 }) {
-	const supported = !!capabilities?.telemetry;
-	const scope = sessionReadScope(sessionId);
+	const supported = usageReadable(capabilities);
 	const id = useId();
 	const refreshButton = useRef<HTMLButtonElement>(null);
-	const usage = useQuery({
-		meta: { errorSurface: "inline" },
-		queryKey: ["session-usage", sessionId, settledTurns, scope],
-		queryFn: ({ signal }) =>
-			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
-		enabled: sessionOpen && supported,
-		retry: false,
-		// The next settled turn changes the key; the last answer stays on screen until the new one lands,
-		// so rows (and the focus a row holds) do not vanish between the two reads.
-		placeholderData: (previous, previousQuery) =>
-			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
-	});
+	// The header chips hold the same read, so opening this view costs no second request. The next settled turn
+	// changes its key; the last answer stays on screen until the new one lands, so rows (and the focus a row
+	// holds) do not vanish between the two reads.
+	const usage = useSessionUsage(client, sessionId, settledTurns, sessionOpen && supported);
 	// A closed task has no live usage read; the cold telemetry route folds its journal instead (#434).
 	const cold = useTelemetrySession(client, sessionId, !sessionOpen);
 	const summary = usageSummary(sessionOpen, usage.data, liveUsage, cold.data);
@@ -77,7 +72,13 @@ export const UsagePanel = memo(function UsagePanel({
 				</p>
 			)}
 			{!sessionOpen ? <p className="pane-empty">{summary.note}</p> : null}
-			{sessionOpen && !supported ? <p className="pane-empty">CLIO Coder does not report usage for this task.</p> : null}
+			{sessionOpen && !supported ? (
+				<p className="pane-empty">
+					{capabilities?.telemetry
+						? "This CLIO Coder build does not report model details or provider quota for this task."
+						: "CLIO Coder does not report usage for this task."}
+				</p>
+			) : null}
 			{usage.isPending && sessionOpen && supported ? <p className="pane-empty">Reading usage…</p> : null}
 			{sessionOpen && usage.error ? (
 				<p role="alert" className="pane-empty">
@@ -157,24 +158,28 @@ export const UsagePanel = memo(function UsagePanel({
 										{card.message ? <small className="drill__note">{card.message}</small> : null}
 										{card.credits ? <small className="drill__note">Credits: {card.credits}</small> : null}
 										{card.windows.map((window) => (
-											<div key={window.label} className="usage-panel__window" data-tone={quotaTone(window.share)}>
-												<span className="usage-panel__label">
-													{window.label}
-													{window.binding ? <small> · the binding limit</small> : null}
-												</span>
+											<div
+												key={window.label}
+												className="usage-panel__window"
+												{...(window.share === null ? {} : { "data-tone": quotaTone(window.share) })}
+											>
+												<span className="usage-panel__label">{window.label}</span>
 												<span className="drill__num usage-panel__used">{window.used}</span>
-												{/* biome-ignore lint/a11y/useSemanticElements: the native meter's chrome differs per browser and theme; the role keeps its value announced. */}
-												<span
-													className="usage-panel__bar"
-													role="meter"
-													aria-label={`${window.label} used`}
-													aria-valuemin={0}
-													aria-valuemax={100}
-													aria-valuenow={Math.round(Math.min(100, Math.max(0, window.share)))}
-													aria-valuetext={`${window.used} used`}
-												>
-													<span style={{ width: `${Math.min(100, Math.max(0, window.share))}%` }} />
-												</span>
+												{/* An unreported share draws no bar: an empty one would read as an unused window. */}
+												{window.share === null ? null : (
+													// biome-ignore lint/a11y/useSemanticElements: the native meter's chrome differs per browser and theme; the role keeps its value announced.
+													<span
+														className="usage-panel__bar"
+														role="meter"
+														aria-label={`${window.label} used`}
+														aria-valuemin={0}
+														aria-valuemax={100}
+														aria-valuenow={Math.round(Math.min(100, Math.max(0, window.share)))}
+														aria-valuetext={`${window.used} used`}
+													>
+														<span style={{ width: `${Math.min(100, Math.max(0, window.share))}%` }} />
+													</span>
+												)}
 												<small>{window.resetsAt ? `Resets ${formatTime(window.resetsAt)}` : "Reset time not reported"}</small>
 											</div>
 										))}

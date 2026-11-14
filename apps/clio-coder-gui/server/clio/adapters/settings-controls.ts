@@ -38,6 +38,9 @@ const HIDDEN = [
 	"interface.panes.workers.ratio",
 	"interface.panes.files.ratio",
 	"interface.keybindings",
+	// Consent records the terminal's one-time yolo warning card writes; a switch here would skip the card.
+	"safety.yoloAccepted",
+	"safety.yoloUnconfinedAccepted",
 ];
 const READ_ONLY: Array<[prefix: string, reason: string]> = [
 	[
@@ -46,7 +49,7 @@ const READ_ONLY: Array<[prefix: string, reason: string]> = [
 	],
 	[
 		"interface.desktopNotifications",
-		"This is the terminal's notification setting. The app keeps its own notification preference.",
+		"This is the terminal's notification setting. This app does not send desktop notifications.",
 	],
 	[
 		"interface.panes",
@@ -80,6 +83,16 @@ const CONFIRM: Record<string, string> = {
 	"integrations.runtimePlugins":
 		"These package names are loaded as code when the next session starts. Only name packages you trust.",
 };
+/** A confirmation that applies only to writes of one value; other values save without it. */
+const CONFIRM_VALUE: Record<string, { value: string; text: string }> = {
+	"safety.yoloConfinement": {
+		value: "unconfined",
+		text:
+			"Unconfined yolo runs commands outside the OS sandbox and without the safety judge's refusal. It takes effect only after the one-time acceptance in a terminal session. Only choose it on a machine you can afford to lose.",
+	},
+};
+/** ACP runs never fire the review, so the engine's timing for these rows describes terminal sessions only. */
+const TERMINAL_ONLY_TIMING = "Terminal sessions only";
 const STRUCTURED_REASON =
 	"A structured collection. It needs a guided editor this app does not have yet; edit it with /settings in a terminal session.";
 
@@ -137,6 +150,7 @@ export function readSettingsControls(cwd: string): SettingsControls {
 					? "This value exceeds the GUI's 64 KiB editor limit. Edit it in your user settings file."
 					: undefined;
 			const reason = readOnlyReason(control) ?? overridden ?? oversized;
+			const valueConfirm = CONFIRM_VALUE[control.path];
 			const suggestions =
 				control.path.endsWith(".target") || ["fleet.profiles", "fleet.rosters"].includes(control.path)
 					? targets
@@ -161,7 +175,9 @@ export function readSettingsControls(cwd: string): SettingsControls {
 				access: reason ? "read-only" : "writable",
 				...(reason ? { reason } : {}),
 				...(NOTES[control.path] ? { note: NOTES[control.path] } : {}),
+				...(control.path.startsWith("safety.review.") ? { timingNote: TERMINAL_ONLY_TIMING } : {}),
 				...(CONFIRM[control.path] && !reason ? { confirm: CONFIRM[control.path] } : {}),
+				...(valueConfirm && !reason ? { confirm: valueConfirm.text, confirmValue: valueConfirm.value } : {}),
 			};
 		});
 	return {
@@ -183,7 +199,11 @@ export function writeSettingControl(cwd: string, write: SettingWrite): SettingWr
 			"conflict",
 			"This setting changed while you were editing. Refresh it and review your draft before saving again.",
 		);
-	if (control.confirm && write.confirmed !== true)
+	if (
+		control.confirm &&
+		(control.confirmValue === undefined || write.value === control.confirmValue) &&
+		write.confirmed !== true
+	)
 		throw new AppProblem("validation", `This change needs confirmation. ${control.confirm}`);
 	try {
 		updateLayeredSettings(cwd, (settings) => applyControlValue(settings, write.path, write.value));

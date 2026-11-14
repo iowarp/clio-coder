@@ -4,8 +4,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { THEME_COLORS } from "../design/navigation.js";
 import { AppPreferencesPanel } from "../design/pwa.js";
-import { KEYBINDINGS } from "../interaction/keybindings.js";
-import { chordHint } from "../shell/chords.js";
+import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
 import { setThemeChoice, type ThemeChoice, useTheme } from "../shell/theme.js";
@@ -26,6 +25,7 @@ const SHORTCUTS = [
 	"focusComposer",
 	"sessionPanel",
 	"cancelTurn",
+	"modelPicker",
 ] as const;
 
 export function GeneralPage({ client }: { client: Client }) {
@@ -109,7 +109,7 @@ export function GeneralPage({ client }: { client: Client }) {
 			<section className="general__block" aria-labelledby="general-keys">
 				<div className="general__label">
 					<h2 id="general-keys">Keyboard</h2>
-					<p>Every shortcut is also in the command palette.</p>
+					<p>The common shortcuts. The full reference lists every one, and the command palette runs most actions by name.</p>
 				</div>
 				<div className="general__control">
 					<dl className="shortcut-list">
@@ -117,7 +117,7 @@ export function GeneralPage({ client }: { client: Client }) {
 							<div key={id}>
 								<dt>{KEYBINDINGS[id].action}</dt>
 								<dd>
-									<kbd>{chordHint(id)}</kbd>
+									<kbd>{formatKeybinding(KEYBINDINGS[id])}</kbd>
 								</dd>
 							</div>
 						))}

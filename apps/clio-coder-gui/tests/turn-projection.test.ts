@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
+import { browserClamp, sentPrompt } from "../client/render/follow-latest.js";
 import { routes } from "../contracts/routes.js";
 import { applySessionDelta, emptySession, encodeMeter, SessionBuffer } from "../contracts/session-projection.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot, type TimelineItem } from "../contracts/sessions.js";
 import { harness, json } from "./harness/app.js";
 
 const CHUNK = "0123456789 ";
-function streamed(count: number, text = CHUNK) {
+function streamed(count: number, text: string | ((index: number) => string) = CHUNK) {
 	let revision = 0;
 	let snapshot = applySessionDelta(emptySession("session", "workspace"), {
 		type: "turn.started",
@@ -31,7 +32,13 @@ function streamed(count: number, text = CHUNK) {
 	for (let index = 0; index < count; index++)
 		snapshot = applySessionDelta(snapshot, {
 			type: "turn.text",
-			payload: { resource: "session", revision: ++revision, turnId: "turn", text, origin: "live" },
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId: "turn",
+				text: typeof text === "string" ? text : text(index),
+				origin: "live",
+			},
 		});
 	return { snapshot, encoded: encodeMeter.bytes - before };
 }
@@ -135,13 +142,276 @@ test("retention accounting stays linear: quadrupling the deltas must not quadrup
 	);
 });
 
+const SLICE = 16 * 1024;
+/** One answer of `total` bytes, cut into the 16 KiB chunks an agent streams. */
+function answer(total: number) {
+	return streamed(Math.ceil(total / SLICE), (index) => "y".repeat(Math.min(SLICE, total - index * SLICE))).snapshot;
+}
+
 test("a run past its byte limit keeps the marker, drops later appends, and flags the snapshot", () => {
-	const { snapshot } = streamed(1200, "x".repeat(64));
+	const { snapshot } = streamed(70, "x".repeat(SLICE));
 	const run = snapshot.timeline[0];
 	assert.equal(snapshot.timelineTruncated, true);
 	assert.ok(run?.text.endsWith("\n[… stream truncated …]"));
-	assert.equal(new TextEncoder().encode(run?.text).byteLength, 65536);
-	assert.equal(streamed(2400, "x".repeat(64)).snapshot.timeline[0]?.text, run?.text);
+	assert.equal(new TextEncoder().encode(run?.text).byteLength, 1024 * 1024);
+	assert.equal(streamed(140, "x".repeat(SLICE)).snapshot.timeline[0]?.text, run?.text);
+});
+
+test("a 200 KB answer arrives whole; only an answer past the 1 MiB run limit is cut", () => {
+	const whole = answer(200_000);
+	assert.equal(whole.timeline.length, 1);
+	assert.equal(whole.timeline[0]?.text.length, 200_000);
+	assert.ok(!whole.timeline[0]?.text.endsWith("\n[… stream truncated …]"));
+	assert.equal(whole.timelineTruncated, false);
+	const cut = answer(1_100_000);
+	assert.ok(cut.timeline[0]?.text.endsWith("\n[… stream truncated …]"));
+	assert.equal(cut.timelineTruncated, true);
+});
+
+/**
+ * The projection's timeline upsert as it was before the newest-item fast path, with its retention measured from
+ * scratch instead of carried forward, and only the deltas the recording below sends. Text bounds at the same
+ * 1 MiB run limit so the comparison isolates the upsert.
+ */
+const REFERENCE_MARKER = "\n[… stream truncated …]";
+const utf8 = (value: string) => new TextEncoder().encode(value).byteLength;
+function referenceBound(value: string) {
+	const limit = 1024 * 1024;
+	if (utf8(value) <= limit) return value;
+	const budget = limit - utf8(REFERENCE_MARKER);
+	let used = 0,
+		output = "";
+	for (const character of value) {
+		const size = utf8(character);
+		if (used + size > budget) break;
+		output += character;
+		used += size;
+	}
+	return output + REFERENCE_MARKER;
+}
+const referenceIdentity = (provenance: TimelineItem["provenance"]) =>
+	provenance ? `:${provenance.map((agent) => `${agent.agentId}:${agent.runId ?? ""}`).join("|")}` : "";
+function referenceNarrativeId(
+	timeline: readonly TimelineItem[],
+	turnId: string,
+	kind: "text" | "thought",
+	identity: string,
+) {
+	const base = `${turnId}:${kind}${identity}`;
+	let broken = false;
+	for (let index = timeline.length - 1; index >= 0; index -= 1) {
+		const item = timeline[index];
+		if (item === undefined || item.turnId !== turnId) break;
+		if (item.id === base || item.id.startsWith(`${base}#`)) {
+			if (!broken) return item.id;
+			return `${base}#${(timeline.at(-1)?.sequence ?? 0) + 1}`;
+		}
+		if (item.kind === "tool" || item.kind === "notice") broken = true;
+		else if ((item.kind === "text" || item.kind === "thought") && referenceIdentity(item.provenance) === identity)
+			broken = true;
+	}
+	return base;
+}
+function referenceApply(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
+	let state: SessionSnapshot = { ...current, revision: event.payload.revision };
+	const upsert = (item: Omit<TimelineItem, "sequence">, append = false) => {
+		const previous = state.timeline.find((row) => row.id === item.id);
+		const sequence = previous?.sequence ?? (state.timeline.at(-1)?.sequence ?? 0) + 1;
+		const text =
+			append && previous
+				? previous.text.endsWith(REFERENCE_MARKER)
+					? previous.text
+					: referenceBound(previous.text + item.text)
+				: referenceBound(item.text);
+		const next = { ...previous, ...item, text, sequence };
+		let timeline = previous ? state.timeline.map((row) => (row.id === item.id ? next : row)) : [...state.timeline, next];
+		let truncated = state.timelineTruncated;
+		const cost = (row: TimelineItem) => utf8(JSON.stringify(row)) + 1;
+		let bytes = timeline.reduce((sum, row) => sum + cost(row), 0);
+		let dropped = 0;
+		for (const removed of timeline) {
+			const retained = timeline.length - dropped;
+			if (retained <= 1 || (retained <= 2048 && bytes <= 2 * 1024 * 1024)) break;
+			bytes -= cost(removed);
+			dropped++;
+			truncated = true;
+		}
+		if (dropped) timeline = timeline.slice(dropped);
+		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(REFERENCE_MARKER) };
+	};
+	switch (event.type) {
+		case "turn.started": {
+			const turn = event.payload.turn;
+			state = { ...state, turns: [...state.turns, turn].slice(-128) };
+			if (turn.prompt)
+				upsert({
+					id: `${turn.id}:user`,
+					turnId: turn.id,
+					kind: "user",
+					text: turn.prompt,
+					status: "completed",
+					origin: turn.origin,
+				});
+			break;
+		}
+		case "turn.text":
+		case "turn.thought": {
+			const { turnId, text, origin, provenance } = event.payload,
+				kind = event.type === "turn.text" ? "text" : "thought";
+			upsert(
+				{
+					id: referenceNarrativeId(state.timeline, turnId, kind, referenceIdentity(provenance)),
+					turnId,
+					kind,
+					text,
+					origin,
+					status: origin === "replay" ? "completed" : "in_progress",
+					...(provenance ? { provenance } : {}),
+				},
+				true,
+			);
+			break;
+		}
+		case "turn.tool":
+			upsert(event.payload.item);
+			break;
+		case "turn.finished": {
+			const { turnId, stopReason, usage, problem, finishedAt } = event.payload;
+			const status = stopReason === "cancelled" ? "cancelled" : problem ? "failed" : "succeeded";
+			state = {
+				...state,
+				turns: state.turns.map((turn) => {
+					if (turn.id !== turnId) return turn;
+					const { queued: _queued, ...settled } = turn;
+					return { ...settled, status, stopReason, usage, problem, finishedAt };
+				}),
+				timeline: state.timeline.map((item) =>
+					item.turnId === turnId && (item.status === "in_progress" || item.status === "pending")
+						? { ...item, status: item.kind === "tool" ? "unknown" : status === "succeeded" ? "completed" : status }
+						: item,
+				),
+			};
+			break;
+		}
+		default:
+			throw new Error(`The recording sends no ${event.type}.`);
+	}
+	return state;
+}
+
+/**
+ * Two turns as an agent streams them: prose and reasoning in chunks, a worker writing between the lead's chunks
+ * (so the lead appends to an item that is not the newest), tool calls that update after later text, and a second
+ * turn large enough to cut its runs and evict the first turn from the timeline.
+ */
+function recording(): SessionDelta[] {
+	const deltas: SessionDelta[] = [];
+	let revision = 0;
+	const worker = [{ version: 1 as const, role: "worker" as const, agentId: "scout", runId: "r1" }];
+	const started = (id: string, prompt: string) =>
+		deltas.push({
+			type: "turn.started",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turn: {
+					id,
+					prompt,
+					origin: "live",
+					status: "running",
+					startedAt: null,
+					finishedAt: null,
+					stopReason: null,
+					usage: null,
+					problem: null,
+				},
+			},
+		});
+	const narrate = (type: "turn.text" | "turn.thought", turnId: string, text: string, provenance?: typeof worker) =>
+		deltas.push({
+			type,
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId,
+				text,
+				origin: "live",
+				...(provenance ? { provenance } : {}),
+			},
+		});
+	const tool = (turnId: string, call: string, status: TimelineItem["status"]) =>
+		deltas.push({
+			type: "turn.tool",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				item: {
+					id: `${turnId}:tool:${call}`,
+					turnId,
+					sequence: 0,
+					kind: "tool",
+					text: `Read ${call}`,
+					status,
+					origin: "live",
+					title: `Read ${call}`,
+					toolCallId: call,
+				},
+			},
+		});
+	const finished = (turnId: string) =>
+		deltas.push({
+			type: "turn.finished",
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId,
+				stopReason: "end_turn",
+				usage: null,
+				problem: null,
+				finishedAt: null,
+			},
+		});
+	started("one", "Explain the café menu.");
+	for (let index = 0; index < 6; index++) {
+		narrate("turn.thought", "one", `Considering ${index}. `);
+		narrate("turn.text", "one", `Lead paragraph ${index} — é. `);
+		narrate("turn.text", "one", `Scout note ${index}. `, worker);
+	}
+	tool("one", "a", "in_progress");
+	narrate("turn.text", "one", "After the first call. ");
+	tool("one", "b", "in_progress");
+	tool("one", "a", "completed");
+	narrate("turn.text", "one", "Still after the calls. ", worker);
+	narrate("turn.text", "one", "Lead closes. ");
+	tool("one", "b", "failed");
+	finished("one");
+	started("two", "Write everything down.");
+	const block = "z".repeat(300 * 1024);
+	for (let index = 0; index < 5; index++) {
+		narrate("turn.text", "two", block);
+		narrate("turn.text", "two", block, worker);
+	}
+	for (let index = 0; index < 3; index++) {
+		tool("two", `c${index}`, "in_progress");
+		narrate("turn.text", "two", `Between calls ${index}. `);
+		if (index > 0) tool("two", `c${index - 1}`, "completed");
+	}
+	tool("one", "a", "completed");
+	finished("two");
+	return deltas;
+}
+
+test("projecting a recorded stream yields the same snapshot as the upsert that searched the whole timeline", () => {
+	let actual = emptySession("session", "workspace"),
+		expected = actual;
+	for (const [index, delta] of recording().entries()) {
+		actual = applySessionDelta(actual, delta);
+		expected = referenceApply(expected, delta);
+		assert.deepEqual(actual, expected, `Snapshots diverged at delta ${index} (${delta.type}).`);
+	}
+	assert.equal(actual.timelineTruncated, true);
+	assert.ok(actual.timeline.some((item) => item.text.endsWith(REFERENCE_MARKER)));
+	assert.ok(!actual.timeline.some((item) => item.turnId === "one" && item.kind === "text"));
 });
 
 test("the oldest timeline entries are dropped once the entry bound is passed", () => {
@@ -248,4 +518,93 @@ test("a session cost ceiling stop stands until model output or a tool call follo
 		undefined,
 		"a branch switch drops it; the replay brings it back if it stands",
 	);
+});
+
+test("a prompt sent into the same timeline returns the reader to the live edge; a replay or another task does not", () => {
+	const item = (id: string, kind: TimelineItem["kind"], origin: TimelineItem["origin"] = "live") => ({
+		id,
+		kind,
+		origin,
+	});
+	const before = [item("a:user", "user"), item("a:text", "text")];
+	const answered = [...before, item("a:tool", "tool")];
+	const sent = [...answered, item("b:user", "user")];
+	assert.equal(sentPrompt(before, answered), false, "output is not a send");
+	assert.equal(sentPrompt(answered, sent), true);
+	assert.equal(sentPrompt(answered, [...sent, item("b:text", "text")]), true, "a batch that also starts the answer");
+	assert.equal(sentPrompt(answered, [...answered, item("r:user", "user", "replay")]), false, "history replays");
+	assert.equal(sentPrompt(answered, [item("x:user", "user"), item("y:user", "user")]), false, "another task");
+	assert.equal(sentPrompt([], sent), false, "nothing to compare with");
+});
+
+test("only an unprompted move onto content just seen to shrink is a browser clamp; any other upward move is the reader's", () => {
+	// Pinned at 5000; a tool group folded and a ResizeObserver pass saw the bottom drop to 4800.
+	const clamp = {
+		top: 4800,
+		pinnedTop: 5000,
+		viewport: 900,
+		following: true,
+		running: true,
+		intended: false,
+		shrunkTo: 4800,
+	};
+	assert.equal(browserClamp(clamp), true);
+	assert.equal(browserClamp({ ...clamp, top: 4802 }), true, "within the 2px slack");
+	assert.equal(browserClamp({ ...clamp, top: 4803 }), false, "above the shrunk bottom");
+	assert.equal(browserClamp({ ...clamp, top: 4200 }), true, "content may shrink again before the scroll event");
+	assert.equal(browserClamp({ ...clamp, top: 4000 }), false, "more than a viewport above the pin");
+	assert.equal(
+		browserClamp({ ...clamp, shrunkTo: null }),
+		false,
+		"no shrink seen: a script, find-in-page or AT moved it",
+	);
+	assert.equal(browserClamp({ ...clamp, top: 0 }), false, "scrollTop = 0 lands far above any clamp");
+	assert.equal(
+		browserClamp({ ...clamp, top: 0, pinnedTop: 600, shrunkTo: null }),
+		false,
+		"a short scripted move within a viewport, with no shrink seen, ends follow",
+	);
+	assert.equal(browserClamp({ ...clamp, intended: true }), false, "the reader scrolled");
+	assert.equal(browserClamp({ ...clamp, running: false }), false, "no turn runs");
+	assert.equal(browserClamp({ ...clamp, following: false }), false, "not following");
+	assert.equal(browserClamp({ ...clamp, top: 4999.5 }), false, "not an upward move");
+});
+
+test("a layout sampled as changed since the pin, or a send's hold, explains an unprompted move; an unchanged layout does not", () => {
+	// Pinned at 7060 with scrollHeight 7741 and a 681px viewport, as a send's first ResizeObserver pass left it.
+	const pinned = {
+		top: 7060,
+		pinnedTop: 7060,
+		viewport: 681,
+		following: true,
+		running: true,
+		intended: false,
+		shrunkTo: null,
+		height: 7741,
+		pinnedHeight: 7741,
+		pinnedViewport: 681,
+	};
+	const scripted = { ...pinned, top: 7060 - 340 };
+	assert.equal(browserClamp(scripted), false, "nothing changed: a script, find-in-page or AT moved it");
+	// The dock reflowed after the send: it clamped through a taller viewport and settled at 709px (INT 2a F1).
+	const reflowed = { ...pinned, top: 6990, viewport: 709 };
+	assert.equal(browserClamp(reflowed), true, "the viewport changed height since the pin");
+	assert.equal(browserClamp({ ...reflowed, intended: true }), false, "the reader scrolled while the dock moved");
+	assert.equal(browserClamp({ ...reflowed, top: 0 }), false, "scrollTop = 0 is more than a viewport above the pin");
+	assert.equal(browserClamp({ ...reflowed, running: false }), false, "no turn runs and no send holds");
+	// No ResizeObserver pass saw it, but scrollHeight sampled in the scroll event dropped by 200px.
+	const shrank = { ...pinned, top: 6860, height: 7541 };
+	assert.equal(browserClamp(shrank), true, "content shrank since the pin");
+	assert.equal(browserClamp({ ...shrank, top: 6863 }), false, "above the shrunk bottom");
+	assert.equal(browserClamp({ ...shrank, height: 7740 }), false, "a 1px rounding is not a shrink");
+	// Just after a send, before the turn shows as running, the send's own reflow is a clamp too.
+	const held = { ...reflowed, running: false, held: true };
+	assert.equal(browserClamp(held), true);
+	assert.equal(
+		browserClamp({ ...held, viewport: 681 }),
+		false,
+		"a scripted move just after a send, onto an unchanged layout",
+	);
+	assert.equal(browserClamp({ ...held, intended: true }), false, "reader input ends the hold");
+	assert.equal(browserClamp({ ...held, top: 0 }), false, "more than a viewport above the pin");
 });

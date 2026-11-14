@@ -97,6 +97,8 @@ export interface ParsedDiff {
 	readonly noNewlineAtEof: boolean;
 	/** True when rows were dropped by MAX_RENDERED_DIFF_ROWS rather than by a producer. */
 	readonly rowsDropped: number;
+	/** A proposal built from a whole-file write: every row is the new text, so it has no removals to count. */
+	readonly wholeFile?: boolean;
 }
 
 const EMPTY: ParsedDiff = {
@@ -295,7 +297,7 @@ export interface DiffPanel {
 const PROVENANCE_LABEL: Readonly<Record<DiffProvenance, string>> = {
 	applied: "Applied",
 	proposed: "Proposed · not yet applied",
-	rejected: "Not applied · not approved",
+	rejected: "Not applied · refused",
 	unverified: "Application unverified · the call did not complete",
 	skipped: "No diff available",
 	unchanged: "No textual change",
@@ -359,6 +361,7 @@ export function synthesizeProposedDiff(input: Record<string, unknown> | undefine
 				: null,
 		noNewlineAtEof: false,
 		rowsDropped: rows.length - bounded.length,
+		...(Array.isArray(edits) && edits.length > 0 ? {} : { wholeFile: true }),
 	};
 }
 
@@ -370,6 +373,8 @@ export interface DiffInputs {
 	readonly resultText: string | null;
 	readonly status: string;
 	readonly isError: boolean;
+	/** The operator's answer to this call's approval, when the session still holds it. */
+	readonly decision?: string | undefined;
 }
 
 /**
@@ -448,7 +453,9 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 		const label =
 			provenance === "unverified" && inputs.status === "unknown"
 				? "Application unverified · no terminal result"
-				: PROVENANCE_LABEL[provenance];
+				: provenance === "rejected" && inputs.decision === "rejected"
+					? "Not applied · rejected"
+					: PROVENANCE_LABEL[provenance];
 		return { provenance, label, diff: proposed, note, firstChangedLine, path };
 	}
 
@@ -552,7 +559,8 @@ export function changeSpans(rows: readonly DiffRow[]): ReadonlyMap<string, Chang
 
 /** `+12 −3` for the header strip, with the real minus sign. */
 export function diffCounts(diff: ParsedDiff): string {
-	return `+${diff.adds} −${diff.dels}`;
+	// A whole-file proposal cannot know what it removes until it lands, so it claims no "−0".
+	return diff.wholeFile === true ? `+${diff.adds} · replaces file` : `+${diff.adds} −${diff.dels}`;
 }
 
 /** The text an operator copies: code only, no markers, no line numbers. */

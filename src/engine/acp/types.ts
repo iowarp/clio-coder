@@ -146,6 +146,10 @@ export const ACP_BRANCHES_META_KEY = "clio-coder/branches";
 export const ACP_SESSION_TREE_METHOD = "_clio-coder/session/tree";
 export const ACP_SESSION_SWITCH_TURN_METHOD = "_clio-coder/session/switch_turn";
 export const ACP_SESSION_FORK_METHOD = "_clio-coder/session/fork";
+export const ACP_SNAPSHOTS_META_KEY = "clio-coder/snapshots";
+export const ACP_SNAPSHOTS_LIST_METHOD = "_clio-coder/session/snapshots";
+export const ACP_SNAPSHOT_PREVIEW_METHOD = "_clio-coder/session/snapshot_preview";
+export const ACP_SNAPSHOT_RESTORE_METHOD = "_clio-coder/session/snapshot_restore";
 export const ACP_HANDOFF_META_KEY = "clio-coder/handoff";
 export const ACP_HANDOFF_PREPARE_METHOD = "_clio-coder/session/handoff/prepare";
 export const ACP_HANDOFF_COMMIT_METHOD = "_clio-coder/session/handoff/commit";
@@ -529,6 +533,11 @@ export const AcpBranchesCapability = Type.Object(
 	closed,
 );
 export type AcpBranchesCapability = Static<typeof AcpBranchesCapability>;
+export const AcpSnapshotsCapability = Type.Object(
+	{ version: Type.Literal(1), list: wireMethod, preview: wireMethod, restore: wireMethod },
+	closed,
+);
+export type AcpSnapshotsCapability = Static<typeof AcpSnapshotsCapability>;
 export const AcpHandoffCapability = Type.Object(
 	{ version: Type.Literal(1), prepare: wireMethod, commit: wireMethod, cancel: wireMethod },
 	closed,
@@ -778,6 +787,7 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_TOOLS_META_KEY]?: "mediated";
 	[ACP_BOARD_META_KEY]?: AcpBoardCapability;
 	[ACP_BRANCHES_META_KEY]?: AcpBranchesCapability;
+	[ACP_SNAPSHOTS_META_KEY]?: AcpSnapshotsCapability;
 	[ACP_EXTENSIONS_META_KEY]?: AcpExtensionsCapability;
 	[ACP_LIBRARY_META_KEY]?: AcpLibraryCapability;
 	[ACP_WORKSPACE_META_KEY]?: { version: 1; update: "session_info_update" };
@@ -1949,6 +1959,93 @@ export const AcpSessionTreeSchema = Type.Object(
 	},
 	closed,
 );
+
+/** Snapshot path lists are capped per list; `truncated` says one was cut. */
+export const ACP_SNAPSHOT_PATH_LIST_MAX = 500;
+/** The snapshot list carries the newest rows only. */
+export const ACP_SNAPSHOT_LIST_MAX = 100;
+
+const wireSnapshotN = Type.Integer({ minimum: 1 });
+const wireSnapshotPath = Type.String({ maxLength: 4096 });
+const wireSnapshotReason = Type.String({ maxLength: 512 });
+const wireSnapshotPaths = Type.Array(wireSnapshotPath, { maxItems: ACP_SNAPSHOT_PATH_LIST_MAX });
+const wireSnapshotKept = Type.Array(Type.Object({ path: wireSnapshotPath, why: wireSnapshotReason }, closed), {
+	maxItems: ACP_SNAPSHOT_PATH_LIST_MAX,
+});
+const wireSnapshotRefs = Type.Array(
+	Type.Object(
+		{
+			kind: Type.Union([Type.Literal("head"), Type.Literal("stash"), Type.Literal("branch")]),
+			label: Type.String({ maxLength: 512 }),
+			state: Type.Union([Type.Literal("in-place"), Type.Literal("moved"), Type.Literal("gone"), Type.Literal("unknown")]),
+			recover: Type.Union([Type.String({ maxLength: 1024 }), Type.Null()]),
+		},
+		closed,
+	),
+	{ maxItems: 64 },
+);
+
+export const AcpSnapshotListSchema = Type.Object(
+	{
+		snapshots: Type.Array(
+			Type.Object(
+				{
+					n: wireSnapshotN,
+					at: Type.String({ maxLength: 64 }),
+					reason: wireSnapshotReason,
+					tool: Type.Optional(Type.String({ maxLength: 128 })),
+					turnId: Type.Optional(wireBranchesTurnId),
+					/** Files differing from the current workspace; null when the store cannot tell. */
+					differs: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+					skipped: Type.Integer({ minimum: 0 }),
+				},
+				closed,
+			),
+			{ maxItems: ACP_SNAPSHOT_LIST_MAX },
+		),
+		truncated: Type.Boolean(),
+	},
+	closed,
+);
+export type AcpSnapshotList = Static<typeof AcpSnapshotListSchema>;
+
+export const AcpSnapshotPlanSchema = Type.Union([
+	Type.Object(
+		{
+			kind: Type.Literal("plan"),
+			n: wireSnapshotN,
+			restore: wireSnapshotPaths,
+			remove: wireSnapshotPaths,
+			kept: wireSnapshotKept,
+			refs: wireSnapshotRefs,
+			truncated: Type.Boolean(),
+		},
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("unavailable"), reason: wireSnapshotReason }, closed),
+]);
+export type AcpSnapshotPlan = Static<typeof AcpSnapshotPlanSchema>;
+
+export const AcpSnapshotOutcomeSchema = Type.Union([
+	Type.Object(
+		{
+			kind: Type.Literal("restored"),
+			n: wireSnapshotN,
+			/** The snapshot taken of the files just before this restore, so it can be undone. */
+			undo: wireSnapshotN,
+			restored: wireSnapshotPaths,
+			removed: wireSnapshotPaths,
+			kept: wireSnapshotKept,
+			failed: wireSnapshotKept,
+			refs: wireSnapshotRefs,
+			truncated: Type.Boolean(),
+		},
+		closed,
+	),
+	Type.Object({ kind: Type.Literal("unavailable"), reason: wireSnapshotReason }, closed),
+	Type.Object({ kind: Type.Literal("failed"), reason: wireSnapshotReason, undo: wireSnapshotN }, closed),
+]);
+export type AcpSnapshotOutcome = Static<typeof AcpSnapshotOutcomeSchema>;
 
 export const AcpBranchSwitchedSchema = Type.Object(
 	{ leafId: wireBranchesTurnId, replayedTurns: Type.Integer({ minimum: 0 }) },

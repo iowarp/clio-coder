@@ -72,9 +72,15 @@
 .markdown .md-link:hover {
 	text-decoration-color: var(--accent);
 }
+/* A refused destination reads as plain text with its own note, so nothing about it invites a click. */
 .markdown .md-link--blocked {
-	border-bottom: 1px dotted var(--muted);
-	color: var(--muted);
+	border: 0;
+	text-decoration: none;
+	color: var(--ink-muted);
+	cursor: default;
+}
+.markdown .md-link--blocked small {
+	font-size: var(--text-meta);
 }
 .markdown .md-image,
 .markdown .md-html {
@@ -232,10 +238,14 @@
 	color: var(--code-ink-muted);
 	font: var(--text-meta) / 1.4 var(--font-ui);
 }
-.code-block__head button:hover:not(:disabled),
-.code-block__head button[aria-pressed="true"] {
+.code-block__head button:hover:not(:disabled) {
 	border-color: transparent;
 	background: var(--code-surface);
+	color: var(--code-ink);
+}
+/* A pressed toggle keeps a rule under its word at rest, so its state never rests on weight alone. */
+.code-block__head button[aria-pressed="true"] {
+	box-shadow: inset 0 -2px 0 var(--accent);
 	color: var(--code-ink);
 }
 /* "Copied" and "Copy failed" are words; the ink only confirms that something changed. */

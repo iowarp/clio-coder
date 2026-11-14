@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 import { tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { createCredentials } from "../client/api/credentials.js";
+import { dropStoredToken, refusalReason } from "../client/api/token.js";
 import { ClientCredential, LaunchChallenge } from "../contracts/auth.js";
 import { Problem } from "../contracts/common.js";
 import { routes } from "../contracts/routes.js";
@@ -301,4 +302,37 @@ test("a window that signs out is refused by the server and hands nothing to the 
 	// The reload that follows a sign-out must not carry the credential, or the id, into the next document.
 	for (const listener of listeners.get("pagehide") ?? []) listener();
 	assert.deepEqual([...stored.keys()], []);
+});
+
+test("two concurrent refreshes spend the launch ticket in exactly one exchange", async (t) => {
+	browserPage(t);
+	const clients = new ClientRegistry();
+	const tickets: (string | undefined)[] = [];
+	const fetcher = (async (_input: string | URL | Request, init: RequestInit = {}) => {
+		const body = JSON.parse(String(init.body)) as { label?: string; ticket?: string };
+		tickets.push(body.ticket);
+		return Response.json(clients.open(body.label));
+	}) as typeof fetch;
+	const credentials = createCredentials({ ticket: "ticket-once" }, fetcher);
+	t.after(() => credentials.dispose());
+	const [first, second] = await Promise.all([credentials.bearer(), credentials.bearer()]);
+	assert.equal(first, second);
+	assert.deepEqual(tickets, ["ticket-once"]);
+});
+
+test("a refused credential and a refused launch ticket are told apart", async (t) => {
+	const { stored } = browserPage(t);
+	// Builds before the reason was recorded stored "1": that reads as this browser's credential.
+	stored.set("clio-coder-token-refused", "1");
+	assert.equal(refusalReason(), "credential");
+	dropStoredToken();
+	assert.equal(refusalReason(), "credential");
+	stored.clear();
+	// Runs last: a refusal marks this module's token rejected for the rest of the file.
+	const credentials = createCredentials({ ticket: "spent-ticket" }, (async () =>
+		Response.json({ status: 401 }, { status: 401 })) as typeof fetch);
+	t.after(() => credentials.dispose());
+	await assert.rejects(credentials.bearer(), /launch link/);
+	assert.equal(refusalReason(), "ticket");
+	assert.equal(stored.get("clio-coder-token-refused"), "ticket");
 });

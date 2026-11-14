@@ -6,6 +6,7 @@ import { type Client, emptyInput } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import {
 	discoverSkills,
 	type Resource,
@@ -81,6 +82,7 @@ export function SkillsPage({ client }: { client: Client }) {
 	const searchId = useId();
 	const [search, setSearch] = useSearchParams();
 	const filter = search.get("q") ?? "";
+	const searchBox = useSearchDraft(filter, (value) => setSearch(liveSearchWith("q", value), { replace: true }));
 	const access = SKILL_ACCESS.find((value) => value === search.get("access")) ?? "all";
 	const origin = search.get("origin") ?? "";
 	const discover = (key: string, value: string) =>
@@ -138,8 +140,8 @@ export function SkillsPage({ client }: { client: Client }) {
 							<input
 								id={searchId}
 								type="search"
-								value={filter}
-								onChange={(event) => discover("q", event.target.value)}
+								value={searchBox.value}
+								onChange={searchBox.onChange}
 								placeholder="Search names, capabilities or source files"
 							/>
 							<div className="skills__source">

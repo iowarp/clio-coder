@@ -13,6 +13,7 @@ import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { announce } from "../interaction/announcer.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { useMenuShortcut } from "../interaction/use-shortcut.js";
 import {
 	ACP_TARGET_MODEL_LIMIT,
 	catalogMayBeCut,
@@ -66,16 +67,20 @@ export function RoutePicker({
 	route,
 	running,
 	capabilities,
+	chord,
 }: {
 	client: Client;
 	sessionId: string;
 	route: RouteFacts;
 	running: boolean;
 	capabilities: AgentCapabilities | undefined;
+	/** Alt+M opens the picker; false while the task is not open. */
+	chord: boolean;
 }) {
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(panel, open);
+	useMenuShortcut("modelPicker", panel, open, setOpen, { enabled: chord && !!route.config?.options.length });
 	useEffect(() => {
 		const reveal = () => {
 			const details = panel.current;

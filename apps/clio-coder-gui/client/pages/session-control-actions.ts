@@ -2,10 +2,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
-import { emptyInput } from "../api/client.js";
+import { ApiProblem, emptyInput } from "../api/client.js";
 import { sessionBuffer } from "../api/sessions.js";
 import type { SessionControlRequest, SessionControlTarget } from "./session-control-model.js";
-import { createSessionControlStore, observedControlOutcome } from "./session-control-model.js";
+import { createSessionControlStore, observedControlOutcome, stopRefusal } from "./session-control-model.js";
 
 const clients = new WeakMap<Client, ReturnType<typeof createSessionControlStore>>();
 export function useSessionControls(client: Client) {
@@ -64,13 +64,18 @@ export function useSessionControls(client: Client) {
 				);
 				store.patch(original.key, {
 					stage: "complete",
-					message:
-						"CLIO Coder accepted the stop request for the original turn. Refresh or open the session to inspect its outcome.",
+					message: "CLIO Coder confirmed the stop. The turn shows as stopped once its last update arrives.",
 				});
 			}
 			refreshLists();
 			void queries.invalidateQueries({ queryKey: ["session", original.sessionId] });
 		} catch (error) {
+			const refused = original.action === "stop" && error instanceof ApiProblem ? stopRefusal(error.problem) : null;
+			if (refused !== null) {
+				store.patch(original.key, { stage: "complete", message: refused, nothingStopped: true });
+				void queries.invalidateQueries({ queryKey: ["session", original.sessionId] });
+				return;
+			}
 			store.patch(original.key, { stage: "unresolved", message: error instanceof Error ? error.message : String(error) });
 		}
 	};

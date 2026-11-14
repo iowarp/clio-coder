@@ -2,6 +2,8 @@ import type { ScrollPosition } from "../render/follow-latest.js";
 import type { ChatTurn } from "./turns.js";
 
 export const TRANSCRIPT_PAGE_SIZE = 24;
+/** Turns mounted per frame while a page opens, so no single task mounts a whole page. */
+export const TRANSCRIPT_SLICE_SIZE = 8;
 export type TranscriptView = ScrollPosition & { startTurnId: string | null };
 
 /** Keep the displayed start anchored as later turns arrive; search still reads the complete projection. */

@@ -19,7 +19,10 @@ export interface ContextWorkView {
 	live: boolean;
 	/** Elapsed time for the header: `21s` once measured by the runtime, `~2s` while the clock estimates it. */
 	elapsed: string | null;
-	/** The one sentence a live or unavailable operation says; a result speaks through `summary` and `issues`. */
+	/**
+	 * The one sentence a live or unavailable operation says. A result speaks through `summary` and `issues`, except
+	 * a compaction that summarized nothing, which says what it did instead.
+	 */
 	message: string | null;
 	/** `step 2 of 5` while the runtime reports more than one stage. */
 	step: string | null;
@@ -93,6 +96,13 @@ const FACT_UNITS: Readonly<Record<ContextOperationFact["unit"], readonly [string
 	entries: ["entry", "entries"],
 	observations: ["observation", "observations"],
 };
+
+/**
+ * The summarizer is the only compaction stage that records a summarized fact, so a completed compaction without one
+ * only evicted or masked tool output. Unqualified, a brief eviction pass reads exactly like a summarizer checkpoint.
+ */
+const NO_SUMMARY = " · no summary";
+const NO_SUMMARY_MESSAGE = "Older tool output was evicted or masked; nothing was summarized. It stays recallable.";
 
 /** The summary line holds a handful of facts; the rest wait in the details. */
 const SUMMARY_PARTS = 4;
@@ -176,6 +186,10 @@ export function contextWorkView(
 		current: key === stage,
 	}));
 	const position = phases.findIndex((phase) => phase.current);
+	const unsummarized =
+		operation.kind === "compaction" &&
+		operation.outcome === "completed" &&
+		(operation.facts ?? []).every((fact) => fact.kind !== "summarized");
 
 	const facts = (operation.facts ?? []).map((fact, index) => ({
 		fact,
@@ -219,10 +233,11 @@ export function contextWorkView(
 	return {
 		id: operation.id,
 		title: TITLES[operation.kind],
-		label:
+		label: `${
 			operation.outcome === "completed" && warnings.length > 0
 				? `Complete, ${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`
-				: (result?.label ?? (live ? "Running" : "Status unavailable")),
+				: (result?.label ?? (live ? "Running" : "Status unavailable"))
+		}${unsummarized ? NO_SUMMARY : ""}`,
 		tone: result
 			? result.tone === "success" && warnings.length > 0
 				? "warn"
@@ -233,7 +248,9 @@ export function contextWorkView(
 		live,
 		elapsed: clock,
 		message: result
-			? null
+			? unsummarized
+				? NO_SUMMARY_MESSAGE
+				: null
 			: live
 				? sentence(oneLine(activity?.message ?? "")) || "Working on context…"
 				: "The operation's final result was not reported.",
