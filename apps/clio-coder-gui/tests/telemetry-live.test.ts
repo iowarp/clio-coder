@@ -393,14 +393,14 @@ test("a page entering the back/forward cache closes its event stream and a resto
 	stop = subscribe(client, queries, () => {});
 	for (let turn = 0; turn < 50 && sources.length === 0; turn += 1) await setTimeout(1);
 	assert.equal(sources.length, 1);
-	page.dispatchEvent(Object.assign(new Event("pagehide"), { persisted: true }));
+	page.dispatchEvent(Object.assign(new globalThis.Event("pagehide"), { persisted: true }));
 	assert.equal(sources[0]?.closed, true);
-	page.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+	page.dispatchEvent(Object.assign(new globalThis.Event("pageshow"), { persisted: true }));
 	for (let turn = 0; turn < 100 && sources.length < 2; turn += 1) await setTimeout(5);
 	assert.equal(sources.length, 2);
 	assert.equal(sources[1]?.closed, false);
 	// A first load fires pageshow too, and must not open a second stream.
-	page.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: false }));
+	page.dispatchEvent(Object.assign(new globalThis.Event("pageshow"), { persisted: false }));
 	await setTimeout(20);
 	assert.equal(sources.length, 2);
 });
