@@ -35,6 +35,10 @@
 .session-control-notice__message {
 	min-width: 0;
 }
+/* The summary is the part that ellipsizes; the outcome word beside it never wraps mid-word. */
+.session-control-notice__message > :first-child {
+	flex: none;
+}
 .session-control-notice__message > span:last-child {
 	overflow: hidden;
 	text-overflow: ellipsis;
