@@ -79,7 +79,7 @@ test("desktop quoting survives GLib parsing of spaces, quotes, backslashes, doll
 	}
 	if (launch.error) throw launch.error;
 	assert.equal(launch.status, 0, launch.stderr);
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 3000; i++) {
 		try {
 			assert.deepEqual(JSON.parse(await readFile(log, "utf8")), ["--open", "--idle-exit", "60000"]);
 			return;

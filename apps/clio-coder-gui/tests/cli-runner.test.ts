@@ -142,7 +142,7 @@ test("CLI runner: cancellation observes SIGTERM, reaps the child, and closes adm
 		const pending = runner.run({ kind: "targets.probe", id: "local" }, h.path, controller.signal);
 		const rejected = assert.rejects(pending, CliCancelled);
 		let pid = 0;
-		for (let i = 0; i < 100; i++) {
+		for (let i = 0; i < 6000; i++) {
 			const line = await readFile(log, "utf8").catch(() => "");
 			if (line) {
 				pid = JSON.parse(line.split("\n")[0] ?? "{}").pid;

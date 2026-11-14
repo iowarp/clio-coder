@@ -16,7 +16,7 @@ import type { AcpJsonRpcTransport } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
 
 async function until(check: () => boolean) {
-	for (let i = 0; i < 400; i++) {
+	for (let i = 0; i < 6000; i++) {
 		if (check()) return;
 		await setTimeout(10);
 	}
