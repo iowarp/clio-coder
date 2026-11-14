@@ -487,9 +487,11 @@ A line whose first word is not a catalog command or a prompt template is checked
 | `Esc`, `Esc` | In the composer while a turn runs: stop it. |
 | `Up` / `Down` | In the composer with the caret at the start: recall sent messages. |
 | `Ctrl/Cmd+Shift+L`, `Ctrl/Cmd+Shift+N`, `Ctrl/Cmd+Alt+A` | Focus the composer, open the task in a new window, open the live agents view. |
-| `F2` | With the task name in the header focused: rename the task. |
+| `F2` | With the task name in the header focused: rename the task. `Enter` or `Esc` ends the rename and leaves focus on the name. |
+| `Up` / `Down`, `j` / `k`, `Home` / `End` | In the rail's task list: move between tasks. |
+| `Left` / `Right`, `Home` / `End` | On a focused tab (Help topics, Library, run details): move to and show the next topic. |
 
-The palette opens near the top of the window and names pages as the rail does (`Usage`, `Other coding agents`). `Esc` closes it and returns focus to where it was, or to the message box when nothing had focus. `Ctrl/Cmd+.` in the message box stops the turn and types nothing. Alt chords match the physical key, so they work on macOS where Option types a character. The model and autonomy chords do nothing while the task is parked or closed, and every global chord is silent while a dialog is open.
+The palette opens near the top of the window and names pages as the rail does (`Usage`, `Other coding agents`). `Esc` closes it and returns focus to where it was, or to the message box when nothing had focus. `Ctrl/Cmd+.` in the message box stops the turn and types nothing. Alt chords match the physical key, so they work on macOS where Option types a character. The model and autonomy chords do nothing while the task is parked or closed, and every global chord is silent while a dialog is open. The palette and the reference open at once, before their code has loaded, and what you type lands in their search field. `New task`, by chord, by the rail or from the palette, leaves focus in the new task's message box. `Report a problem` from the reference opens over it: `Esc` closes the report and returns to the reference's button. The reference writes chords one way everywhere, keys joined by ` + ` and drawn as keycaps.
 
 ### Report a problem
 

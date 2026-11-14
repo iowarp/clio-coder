@@ -4,6 +4,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { THEME_COLORS } from "../design/navigation.js";
 import { AppPreferencesPanel } from "../design/pwa.js";
+import { Keycaps } from "../interaction/Keycaps.js";
 import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
 import { useShell } from "../shell/shell-context.js";
 import { settingsDestination } from "../shell/shell-model.js";
@@ -117,7 +118,7 @@ export function GeneralPage({ client }: { client: Client }) {
 							<div key={id}>
 								<dt>{KEYBINDINGS[id].action}</dt>
 								<dd>
-									<kbd>{formatKeybinding(KEYBINDINGS[id])}</kbd>
+									<Keycaps chord={formatKeybinding(KEYBINDINGS[id])} />
 								</dd>
 							</div>
 						))}

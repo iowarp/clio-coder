@@ -31,7 +31,7 @@ function activeScope(): ShortcutScope {
  * inside a dialog whose own buttons must stay unambiguous. Layers are removed by id rather than
  * popped, because React does not guarantee unmount effect order between siblings.
  */
-export function useShortcutLayer(scope: ShortcutScope, active: boolean): void {
+export function useShortcutLayer(scope: ShortcutScope, active: boolean): string {
 	const id = useId();
 	useEffect(() => {
 		if (!active) return;
@@ -43,6 +43,12 @@ export function useShortcutLayer(scope: ShortcutScope, active: boolean): void {
 			notify();
 		};
 	}, [id, scope, active]);
+	return id;
+}
+
+/** True while the layer `id` is the innermost one: a dialog stacked on another owns Escape and Tab alone. */
+export function isTopLayer(id: string): boolean {
+	return layers.at(-1)?.id === id;
 }
 
 /** True while any layer is claimed. The shell reads this to inert and hide the obscured background. */
@@ -57,6 +63,8 @@ export function useLayersActive(): boolean {
 export interface ShortcutOptions {
 	/** Default true. Pass the precondition: an approval exists, a turn is running. */
 	readonly enabled?: boolean;
+	/** A layer id from `useShortcutLayer`: the binding fires only while that layer is the innermost. */
+	readonly layer?: string;
 }
 
 /**
@@ -69,7 +77,7 @@ export function useShortcut(
 	handler: (event: KeyboardEvent) => void,
 	options: ShortcutOptions = {},
 ): void {
-	const { enabled = true } = options;
+	const { enabled = true, layer } = options;
 	const latest = useRef(handler);
 	latest.current = handler;
 	useEffect(() => {
@@ -77,13 +85,14 @@ export function useShortcut(
 		const binding = KEYBINDINGS[id];
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (activeScope() !== binding.scope) return;
+			if (layer !== undefined && !isTopLayer(layer)) return;
 			if (!matchesKeybinding(binding, event)) return;
 			event.preventDefault();
 			latest.current(event);
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [id, enabled]);
+	}, [id, enabled, layer]);
 }
 
 /** The control a menu opened from the keyboard starts on: its current choice, else its first live control. */
