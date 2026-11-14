@@ -58,7 +58,7 @@ export class SessionService {
 			workspaceId,
 			async (client, cwd) => {
 				if (!client.capabilities.session?.list)
-					throw new AppProblem("unsupported", "This Clio build does not expose session history.");
+					throw new AppProblem("unsupported", "This CLIO Coder build does not expose session history.");
 				const history: SessionSummary[] = [];
 				const cursors = new Set<string>();
 				let cursor: string | undefined;

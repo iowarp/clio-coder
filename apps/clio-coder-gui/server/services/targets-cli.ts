@@ -35,7 +35,7 @@ function items(value: unknown): unknown[] {
 }
 async function readTargets(client: AcpClient): Promise<CliTargets> {
 	if (!client.capabilities.targets?.list)
-		throw new AppProblem("unsupported", "This Clio build does not expose target inventory.");
+		throw new AppProblem("unsupported", "This CLIO Coder build does not expose target inventory.");
 	const raw = Value.Clean(AcpTargetList, await client.request(ACP_TARGETS_LIST_METHOD, {}));
 	if (!Value.Check(AcpTargetList, raw))
 		throw new AppProblem("upstream_acp", "Clio returned an invalid target inventory.");
@@ -93,7 +93,7 @@ export class TargetsService {
 							workspaceId,
 							async (client) => {
 								if (!client.capabilities.targets?.probe)
-									throw new AppProblem("unsupported", "This Clio build does not expose target probes.");
+									throw new AppProblem("unsupported", "This CLIO Coder build does not expose target probes.");
 								const probe = Value.Clean(
 									AcpTargetProbe,
 									await client.request(ACP_TARGETS_PROBE_METHOD, { targetId: id }, 60_000),

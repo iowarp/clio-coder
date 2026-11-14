@@ -172,6 +172,8 @@ test("an unconfirmed stop keeps the session, and a second stop forces the turn a
 			CLIO_CODER_WEB_CLI: fileURLToPath(new URL("./fixtures/acp-fixture-child.mjs", import.meta.url)),
 			CLIO_CODER_WEB_FIXTURE_SCENARIO: "cancel-unanswered",
 			CLIO_CODER_WEB_FIXTURE_LOG: join(h.home.path, "stop.jsonl"),
+			// The fixture looks for its own row in the children file of this supervisor's state directory.
+			CLIO_CODER_STATE_DIR: join(h.home.path, "stop-state"),
 		},
 		4,
 		undefined,
