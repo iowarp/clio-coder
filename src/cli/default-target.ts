@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../core/config.js";
 import { readSettings } from "../core/config.js";
 import { projectChosenTargetUrl } from "../core/project-target-urls.js";
+import { readSettingsDocument } from "../core/settings-document.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import {
 	describeMissing,
@@ -40,12 +39,9 @@ export type DefaultTargetVerdict =
  * returning. Call this before `initializeClioHome()`, which writes the file.
  */
 export function homeIsReturning(): boolean {
-	let raw: { targets?: unknown; chat?: { target?: unknown } } | null;
-	try {
-		raw = parseYaml(readFileSync(join(resolveClioDirs().config, "settings.yaml"), "utf8"));
-	} catch {
-		return false;
-	}
+	const read = readSettingsDocument(join(resolveClioDirs().config, "settings.yaml"));
+	if (read.kind !== "parsed") return false;
+	const raw = read.document as { targets?: unknown; chat?: { target?: unknown } } | null;
 	if (!raw || typeof raw !== "object") return false;
 	return (Array.isArray(raw.targets) && raw.targets.length > 0) || (raw.chat?.target ?? null) !== null;
 }

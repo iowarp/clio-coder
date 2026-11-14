@@ -39,6 +39,31 @@ export function yieldToEventLoop(): Promise<void> {
 }
 
 /**
+ * A queue that runs each task in its own event-loop iteration, in the order given.
+ *
+ * `setImmediate` callbacks queued together all run in the same check phase, so their costs add up to one block in
+ * which no key is read: four after-paint tasks held a real session's first keystrokes for 640 ms. Chained, the loop
+ * polls for input between every pair.
+ */
+export function immediateSequence(): (task: () => void) => void {
+	const queue: Array<() => void> = [];
+	let scheduled = false;
+	const step = (): void => {
+		const task = queue.shift();
+		scheduled = queue.length > 0;
+		// Queued before the task runs, so a task that throws does not strand the ones behind it.
+		if (scheduled) setImmediate(step);
+		task?.();
+	};
+	return (task) => {
+		queue.push(task);
+		if (scheduled) return;
+		scheduled = true;
+		setImmediate(step);
+	};
+}
+
+/**
  * Elapsed between two reads of the same clock, signed.
  *
  * A negative result means the clock moved backwards between the two reads —

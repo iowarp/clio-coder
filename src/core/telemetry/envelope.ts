@@ -8,6 +8,7 @@ import type { JournalEventName, JournalPayload } from "./events.js";
 import { isJournalEvent, journalDefinition, validPayload } from "./events.js";
 import { UUID_V7_PATTERN } from "./id-schemas.js";
 import { newRecordId } from "./ids.js";
+import { checkRecordSchema } from "./record-check.js";
 import { UtcSchema } from "./schemas.js";
 
 const closed = { additionalProperties: false };
@@ -135,7 +136,7 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
 	if (isRetiredRecord(raw)) return { kind: "retired", k: raw.k };
-	if (!Value.Check(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
+	if (!checkRecordSchema(EnvelopeSchema, value)) return { kind: "skipped", reason: "invalid-record" };
 	if (!isJournalEvent(value.k)) return { kind: "skipped", reason: "unknown-kind" };
 	const definition = journalDefinition(value.k);
 	if (value.kv !== definition.version) return { kind: "skipped", reason: "unknown-version" };
