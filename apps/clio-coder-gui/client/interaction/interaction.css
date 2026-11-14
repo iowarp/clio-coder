@@ -291,8 +291,8 @@
 
 /* The stack floats over the work instead of taking a row of the app layout: a row cost the workbench
    its height, and with a few notices the composer fell out of the window. It sits above the
-   workbench's own menus (20) and below dialogs and the phone drawer (30). On a task page it rises
-   above the composer dock where the browser can anchor it, so a notice never covers Send or Stop. */
+   workbench's own menus (20) and below dialogs and the phone drawer (30). On a task page it is not an
+   overlay at all: notifications.tsx places it in the composer dock (.notice-dock below). */
 .notice-region {
 	position: fixed;
 	right: var(--space-4);
@@ -311,20 +311,28 @@
 .notice-region > * {
 	pointer-events: auto;
 }
-@supports (anchor-name: --notice-dock) {
-	.conversation__dock {
-		anchor-name: --notice-dock;
-	}
-	.notice-region {
-		bottom: calc(var(--space-2) + anchor(--notice-dock top, calc(var(--space-2) + env(safe-area-inset-bottom, 0px))));
-	}
-}
 /* A phone-width window spans the stack across the page gutter. */
 @media (max-width: 599.98px) {
 	.notice-region {
 		left: var(--space-3);
 		right: var(--space-3);
 		width: auto;
+	}
+}
+/* In the dock the stack is a row above the composer, so it never covers the approval card, the
+   transcript's controls or Send and Stop. Its height is capped and the list scrolls, which keeps the
+   composer in the window with a full stack; a phone gets a quarter of the window. */
+.notice-dock .notice-region {
+	position: static;
+	width: min(480px, 100%);
+	margin: 0 0 var(--space-2) auto;
+	max-height: min(35dvh, 22rem);
+}
+@media (max-width: 599.98px) {
+	.notice-dock .notice-region {
+		width: auto;
+		margin-inline: 0;
+		max-height: min(25dvh, 20rem);
 	}
 }
 .notice-region__controls {

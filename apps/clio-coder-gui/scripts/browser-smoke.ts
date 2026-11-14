@@ -746,7 +746,8 @@ try {
 						title: "Notice layout check",
 						status: 503,
 						code: "unavailable",
-						detail: "The request could not complete. ".repeat(8),
+						// Notices fold by visible text, so each refused read names its path to stay its own notice.
+						detail: `${new URL(route.request().url()).pathname}: ${"The request could not complete. ".repeat(8)}`,
 						instance: new URL(route.request().url()).pathname,
 					},
 				});

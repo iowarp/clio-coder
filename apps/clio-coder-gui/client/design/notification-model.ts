@@ -10,7 +10,7 @@ export interface Notice {
 	/** Problem code and instance when the notice came from an ApiProblem. */
 	readonly code?: string;
 	readonly reference?: string;
-	/** Repeated failures of one background read share a notice; different resources stay distinct. */
+	/** The background read that raised the notice; repeats are matched by visible content, not by scope. */
 	readonly problemScope?: string;
 	readonly occurrences?: number;
 	/** ms before auto-dismissal; null pins the notice until dismissed. */
@@ -70,22 +70,14 @@ export function problemHeading(problem: { readonly code: string; readonly title:
 }
 
 /**
- * Only an identical failure is one repeated problem. A background read names its resource as the
- * scope, so two different resources failing the same way stay distinct; without a scope, the same code,
- * heading and detail are the same problem, whatever request raised it.
+ * A repeat is judged by what the operator reads: the same heading and detail is one notice, whichever
+ * request or background read raised it. Two reads refused with the same sentence would otherwise
+ * show the same card twice.
  */
-function matchingProblem(
-	notices: readonly Notice[],
-	scope: string | undefined,
-	problem: ProblemFields,
-): Notice | undefined {
+function matchingProblem(notices: readonly Notice[], problem: ProblemFields): Notice | undefined {
 	const heading = problemHeading(problem);
 	return notices.find(
-		(notice) =>
-			(scope === undefined || notice.problemScope === scope) &&
-			notice.code === problem.code &&
-			notice.title === heading &&
-			notice.detail === problem.detail,
+		(notice) => notice.code !== undefined && notice.title === heading && notice.detail === problem.detail,
 	);
 }
 
@@ -98,7 +90,7 @@ export function problemNotice(
 	scope: string | undefined,
 	freshId: string,
 ): NoticeInput & { id: string } {
-	const previous = matchingProblem(notices, scope, problem);
+	const previous = matchingProblem(notices, problem);
 	const problemScope = scope ?? previous?.problemScope;
 	return {
 		// Client-side failures all use "browser" as their reference, not as a notification identity.

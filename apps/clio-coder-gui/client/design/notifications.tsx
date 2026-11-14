@@ -2,8 +2,9 @@
 // problem-only toast had no way to express. The store is a module singleton rather than React state
 // because the events transport that raises most notices is not a component.
 
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactElement } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { ApiProblem } from "../api/client.js";
 import { useLiveState } from "../interaction/announcer.js";
 import type { Notice, NoticeInput, NoticeTone } from "./notification-model.js";
@@ -128,9 +129,50 @@ function useVisibleCap(): number {
 	return narrow ? 2 : 3;
 }
 
+/**
+ * On a task page the stack is a row at the top of the composer dock instead of an overlay. An overlay
+ * there has nowhere to go: the approval card can sit anywhere in the transcript and the composer fills
+ * the bottom, so on a short or narrow window it covered "Allow once" or Send. In the dock it takes
+ * space from the transcript, which scrolls, and the workbench keeps its full height. The task page
+ * renders the dock, so the slot is moved into it here and follows it from task to task.
+ */
+const DOCK = ".conversation__dock";
+function useDockSlot(): HTMLElement | null {
+	const [slot, setSlot] = useState<HTMLElement | null>(null);
+	useEffect(() => {
+		if (typeof MutationObserver !== "function") return;
+		const element = document.createElement("div");
+		element.className = "notice-dock";
+		let frame = 0;
+		const place = () => {
+			frame = 0;
+			const dock = document.querySelector<HTMLElement>(DOCK);
+			if (dock) {
+				if (dock.firstElementChild !== element) dock.prepend(element);
+				setSlot(element);
+			} else {
+				element.remove();
+				setSlot(null);
+			}
+		};
+		const observer = new MutationObserver(() => {
+			if (frame === 0) frame = requestAnimationFrame(place);
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+		place();
+		return () => {
+			observer.disconnect();
+			cancelAnimationFrame(frame);
+			element.remove();
+		};
+	}, []);
+	return slot;
+}
+
 export function NoticeToasts() {
 	const values = useNotices();
 	const cap = useVisibleCap();
+	const dockSlot = useDockSlot();
 	const shown = values.slice(-cap);
 	const hidden = values.length - shown.length;
 	const region = useRef<HTMLElement>(null);
@@ -183,6 +225,7 @@ export function NoticeToasts() {
 		if (arrivedCalm) setStatusText(spoken(arrivedCalm));
 		else if (!newest(values, false)) setStatusText("");
 	}, [values]);
+	const inDock = (stack: ReactElement) => (dockSlot ? createPortal(stack, dockSlot) : stack);
 	return (
 		<>
 			{/* The toasts themselves are not a live region: a toast that is its own `role="alert"`
@@ -193,87 +236,89 @@ export function NoticeToasts() {
 			<div className="sr-only" role="alert" aria-atomic="true">
 				{alertText}
 			</div>
-			<section
-				ref={region}
-				className="notice-region"
-				aria-label="Notifications"
-				onMouseEnter={() => setHovered(true)}
-				onMouseLeave={() => setHovered(false)}
-				onFocusCapture={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget instanceof HTMLElement)
-						enteredFrom.current = event.relatedTarget;
-					setFocused(true);
-				}}
-				onBlurCapture={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
-				}}
-			>
-				{values.length > 1 && (
-					<div className="notice-region__controls">
-						<span>
-							{values.length} notifications
-							{hidden > 0 ? <span className="notice-region__more"> · +{hidden} more</span> : null}
-						</span>
-						<button
-							type="button"
-							onMouseDown={keepFocus}
-							onClick={() => {
-								if (region.current?.contains(document.activeElement)) {
-									refocus.current = null;
-									refocusPending.current = true;
-								}
-								dismissAll();
-							}}
-						>
-							Dismiss all
-						</button>
-					</div>
-				)}
-				{values.length > 0 && (
-					<div className="notice-region__list">
-						{shown.map((notice) => (
-							<article className={`notice notice--${notice.tone}`} data-notice-id={notice.id} key={notice.id}>
-								<div className="notice__heading">
-									<span className="notice__glyph" aria-hidden="true">
-										{GLYPHS[notice.tone]}
-									</span>
-									<strong>{notice.title}</strong>
-									{notice.occurrences && notice.occurrences > 1 ? (
-										<span className="notice__repeat">Repeated {notice.occurrences} times</span>
+			{inDock(
+				<section
+					ref={region}
+					className="notice-region"
+					aria-label="Notifications"
+					onMouseEnter={() => setHovered(true)}
+					onMouseLeave={() => setHovered(false)}
+					onFocusCapture={(event) => {
+						if (!event.currentTarget.contains(event.relatedTarget) && event.relatedTarget instanceof HTMLElement)
+							enteredFrom.current = event.relatedTarget;
+						setFocused(true);
+					}}
+					onBlurCapture={(event) => {
+						if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+					}}
+				>
+					{values.length > 1 && (
+						<div className="notice-region__controls">
+							<span>
+								{values.length} notifications
+								{hidden > 0 ? <span className="notice-region__more"> · +{hidden} more</span> : null}
+							</span>
+							<button
+								type="button"
+								onMouseDown={keepFocus}
+								onClick={() => {
+									if (region.current?.contains(document.activeElement)) {
+										refocus.current = null;
+										refocusPending.current = true;
+									}
+									dismissAll();
+								}}
+							>
+								Dismiss all
+							</button>
+						</div>
+					)}
+					{values.length > 0 && (
+						<div className="notice-region__list">
+							{shown.map((notice) => (
+								<article className={`notice notice--${notice.tone}`} data-notice-id={notice.id} key={notice.id}>
+									<div className="notice__heading">
+										<span className="notice__glyph" aria-hidden="true">
+											{GLYPHS[notice.tone]}
+										</span>
+										<strong>{notice.title}</strong>
+										{notice.occurrences && notice.occurrences > 1 ? (
+											<span className="notice__repeat">Repeated {notice.occurrences} times</span>
+										) : null}
+										<button
+											type="button"
+											onMouseDown={keepFocus}
+											aria-label={`Dismiss ${notice.title}`}
+											onClick={(event) => {
+												if (event.currentTarget.contains(document.activeElement)) {
+													refocus.current = noticeAfterDismissal(
+														shown.map((item) => item.id),
+														notice.id,
+													);
+													refocusPending.current = true;
+												}
+												dismiss(notice.id);
+											}}
+										>
+											×
+										</button>
+									</div>
+									{notice.detail ? <p>{notice.detail}</p> : null}
+									{notice.code || notice.reference ? (
+										<details className="notice__meta">
+											<summary>Technical details</summary>
+											<div>
+												{notice.code ? <code>{notice.code}</code> : null}
+												{notice.reference ? <small>Reference: {notice.reference}</small> : null}
+											</div>
+										</details>
 									) : null}
-									<button
-										type="button"
-										onMouseDown={keepFocus}
-										aria-label={`Dismiss ${notice.title}`}
-										onClick={(event) => {
-											if (event.currentTarget.contains(document.activeElement)) {
-												refocus.current = noticeAfterDismissal(
-													shown.map((item) => item.id),
-													notice.id,
-												);
-												refocusPending.current = true;
-											}
-											dismiss(notice.id);
-										}}
-									>
-										×
-									</button>
-								</div>
-								{notice.detail ? <p>{notice.detail}</p> : null}
-								{notice.code || notice.reference ? (
-									<details className="notice__meta">
-										<summary>Technical details</summary>
-										<div>
-											{notice.code ? <code>{notice.code}</code> : null}
-											{notice.reference ? <small>Reference: {notice.reference}</small> : null}
-										</div>
-									</details>
-								) : null}
-							</article>
-						))}
-					</div>
-				)}
-			</section>
+								</article>
+							))}
+						</div>
+					)}
+				</section>,
+			)}
 		</>
 	);
 }

@@ -38,17 +38,29 @@ test("three identical unscoped problems are one notice counted three times", () 
 	assert.equal(list.length, 2);
 });
 
-test("a scoped problem only repeats within its scope, and the list keeps the newest five", () => {
-	const problem = { code: "unavailable", title: "unavailable", detail: "Down.", instance: "req" };
+test("two background reads refused with the same text are one notice, and the list keeps the newest five", () => {
+	const problem = {
+		code: "unsupported",
+		title: "unsupported",
+		detail: "This CLIO Coder build does not report telemetry.",
+		instance: "req",
+	};
 	let list: Notice[] = [];
-	list = withNotice(list, { ...problemNotice(list, problem, "sessions", "a"), ttl: null, at: 0 });
-	list = withNotice(list, { ...problemNotice(list, problem, "workspaces", "b"), ttl: null, at: 1 });
+	list = withNotice(list, { ...problemNotice(list, problem, "usage", "a"), ttl: null, at: 0 });
+	list = withNotice(list, { ...problemNotice(list, problem, "usage-summary", "b"), ttl: null, at: 1 });
+	assert.deepEqual(
+		list.map((notice) => [notice.id, notice.occurrences]),
+		[["a", 2]],
+	);
+	// Different visible text from another scope is a different notice.
+	const other = { ...problem, detail: "This CLIO Coder build does not report costs." };
+	list = withNotice(list, { ...problemNotice(list, other, "usage-summary", "c"), ttl: null, at: 2 });
 	assert.deepEqual(
 		list.map((notice) => notice.id),
-		["a", "b"],
+		["a", "c"],
 	);
 	for (let at = 0; at < 6; at += 1) {
-		list = withNotice(list, { id: `n-${at}`, tone: "info", title: `Notice ${at}`, ttl: null, at: 2 + at });
+		list = withNotice(list, { id: `n-${at}`, tone: "info", title: `Notice ${at}`, ttl: null, at: 3 + at });
 	}
 	assert.deepEqual(
 		list.map((notice) => notice.id),
