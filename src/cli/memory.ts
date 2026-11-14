@@ -4,6 +4,7 @@ import { claimsProjectRoot, readClaims } from "../domains/claims/index.js";
 import { inspectRunFlowProvenance } from "../domains/evidence/index.js";
 import {
 	approveMemoryRecord,
+	type ClearedMemoryRegressions,
 	canonicalMemoryRepositoryIdentity,
 	loadMemoryRecords,
 	type MemoryRecord,
@@ -17,6 +18,7 @@ import {
 	proposeMemoryPromotion,
 	pruneStaleMemory,
 	type ReviewedTaskMemoryHandoffSnapshot,
+	readClearedMemoryRegressions,
 	rejectMemoryRecord,
 	type TaskMemoryHandoffEntry,
 } from "../domains/memory/index.js";
@@ -268,7 +270,7 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 		if (parsed.command === "list") {
 			const records = await loadMemoryRecords(dataDir);
 			if (parsed.json) process.stdout.write(`${JSON.stringify({ records: records.map(publicMemoryRecord) })}\n`);
-			else renderMemoryList(records);
+			else renderMemoryList(records, readClearedMemoryRegressions(dataDir));
 			return 0;
 		}
 		if (parsed.command === "propose" && parsed.claimId !== undefined)
@@ -572,7 +574,10 @@ function publicMemoryRecord(record: MemoryRecord) {
 	};
 }
 
-function renderMemoryList(records: ReadonlyArray<MemoryRecord>): void {
+function renderMemoryList(
+	records: ReadonlyArray<MemoryRecord>,
+	cleared: ReadonlyArray<ClearedMemoryRegressions>,
+): void {
 	process.stdout.write(`${records.length} memory record${records.length === 1 ? "" : "s"}\n`);
 	if (records.length === 0) return;
 	process.stdout.write("\n");
@@ -591,5 +596,9 @@ function renderMemoryList(records: ReadonlyArray<MemoryRecord>): void {
 		process.stdout.write(`  lesson: ${record.lesson}\n`);
 		// A record with a regression is out of the prompt and recall; say why, since approve clears it.
 		for (const regression of record.regressions ?? []) process.stdout.write(`  regression: ${regression}\n`);
+		// Re-approval clears regressions from the record; the clearing is kept so the history stays visible.
+		for (const entry of cleared.filter((item) => item.id === record.id))
+			for (const regression of entry.regressions)
+				process.stdout.write(`  cleared by operator approval ${entry.at}: ${regression}\n`);
 	}
 }

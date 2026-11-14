@@ -212,6 +212,11 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 export interface VerifyRunOptions {
 	signal?: AbortSignal;
 	shellSandbox?: MainSandboxPolicy;
+	/**
+	 * The checkout a declared check's cwd, reference and baseline resolve against; the process working directory when
+	 * absent. A caller running a check in another checkout passes it here rather than changing the process directory.
+	 */
+	workspaceRoot?: string;
 }
 
 /** The main-session sandbox's write hint for a contained check's failed output, on its own line, or "". */
@@ -531,6 +536,7 @@ async function runJudgedCheck(
 	try {
 		result = await runCommandVector(file, vector, {
 			cwd,
+			...(options?.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
 			timeoutMs: check.timeoutMs,
 			maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
 			...(options?.signal !== undefined ? { signal: options.signal } : {}),
@@ -561,9 +567,9 @@ async function runJudgedCheck(
 	}
 	const report =
 		check.kind === "numeric-compare" && check.numeric !== undefined
-			? judgeNumericCompare(result.stdout, check.numeric, process.cwd())
+			? judgeNumericCompare(result.stdout, check.numeric, options?.workspaceRoot ?? process.cwd())
 			: check.kind === "perf-budget" && check.perf !== undefined
-				? judgePerfBudget(result.durationMs, check.perf, process.cwd())
+				? judgePerfBudget(result.durationMs, check.perf, options?.workspaceRoot ?? process.cwd())
 				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
 	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
@@ -628,7 +634,7 @@ async function runReproduceCheck(check: DeclaredCheck, options?: VerifyRunOption
 		cwd: check.cwd,
 		timeoutMs: check.timeoutMs,
 		spec: check.reproduce,
-		workspaceRoot: process.cwd(),
+		workspaceRoot: options?.workspaceRoot ?? process.cwd(),
 		...(options?.signal !== undefined ? { signal: options.signal } : {}),
 		...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 	});
@@ -638,7 +644,7 @@ async function runReproduceCheck(check: DeclaredCheck, options?: VerifyRunOption
 export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunOptions): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
-	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
+	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, options?.workspaceRoot ?? process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
 	if (check.kind === "reproduce") return withDeclaredEvidence(await runReproduceCheck(check, options), check);
 	if (check.kind !== "command") {

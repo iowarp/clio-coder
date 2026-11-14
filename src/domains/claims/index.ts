@@ -35,6 +35,7 @@ export {
 	createClaimCaptureRegistration,
 	createHypothesisCaptureRegistration,
 	recordAcceptedWorkerSlates,
+	recordClaims,
 	recordHostVerificationClaims,
 	snapshotAcceptedWorkerSlates,
 } from "./record.js";
