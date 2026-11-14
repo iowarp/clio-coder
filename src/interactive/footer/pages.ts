@@ -12,10 +12,12 @@
 import { clioBuildLabel } from "../../core/build-info.js";
 import { outputStyleLabel } from "../../core/defaults.js";
 import { renderUsdLimit } from "../../core/telemetry/render.js";
+import { autonomyModeReadout, autonomyWindowReadout } from "../../domains/safety/autonomy-readout.js";
 import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { tokensPerSecondText } from "../../session-control/assistant-generation-timing.js";
 import { contextPercentRole, renderContextMeterBar } from "../context-meter.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import { dispatchBoardItems, renderDispatchActivity, runTableRows } from "../dispatch-board.js";
@@ -495,27 +497,9 @@ function fitNames(prefix: string, names: readonly string[], room: number): strin
  * narrow, and the way back once it has paused.
  */
 function autonomyWindowFact(theme: ClioTheme, status: AutonomyStatus, narrow: boolean): string {
-	if (status.halted !== null) {
-		return theme.fg("warning", narrow ? "yolo paused" : `yolo paused ${GLYPH.dot} Enter continues`);
-	}
-	const { caps, usage } = status;
-	const minutes = Math.floor(usage.activeMs / 60_000);
-	const meters = [
-		{ used: usage.toolCalls, cap: caps.toolCalls, text: `${usage.toolCalls}/${caps.toolCalls} calls` },
-		{ used: minutes, cap: caps.minutes, text: `${minutes}/${caps.minutes} min` },
-		{
-			used: usage.tokens,
-			cap: caps.tokens,
-			text: `${formatFooterTokens(usage.tokens)}/${formatFooterTokens(caps.tokens)} tok`,
-		},
-	].filter((meter) => meter.cap > 0);
-	if (meters.length === 0) return "";
-	const nearest = meters.reduce((best, meter) => (meter.used / meter.cap > best.used / best.cap ? meter : best));
-	const shown = narrow ? [nearest] : meters;
-	return theme.fg(
-		nearest.used / nearest.cap >= 0.8 ? "warning" : "counter",
-		shown.map((meter) => meter.text).join(` ${GLYPH.dot} `),
-	);
+	const readout = autonomyWindowReadout(status, { narrow, dot: GLYPH.dot, resumeHint: "Enter continues" });
+	if (readout === null) return "";
+	return theme.fg(readout.tone === "neutral" ? "counter" : "warning", readout.text);
 }
 
 /** The widest stats a row carries, `272K/272K (100.0%) · last 999 tok/s`. */
@@ -530,24 +514,16 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const learning = !minimal && state.demo !== false;
 	const autonomy = state.session.autonomy;
 	const narrow = w <= 60;
-	// Contained yolo is the warning tone; the unconfined opt-out is the error tone and shouts (ob-yolo D9).
-	const unconfined = autonomy === "yolo" && state.session.yoloConfinement === "unconfined";
-	// Contained with no OS sandbox backend keeps only the judge and the floor, and says so (D9).
-	const unsandboxed = autonomy === "yolo" && !unconfined && state.session.autonomyWindow?.osSandbox === false;
-	const mode = autonomy
-		? autonomy === "yolo"
-			? theme.fg(
-					unconfined ? "error" : "warning",
-					unconfined
-						? `YOLO ${GLYPH.dot} UNCONFINED`
-						: unsandboxed
-							? narrow
-								? `YOLO ${GLYPH.dot} no sandbox`
-								: `YOLO ${GLYPH.dot} contained (no OS sandbox)`
-							: `YOLO ${GLYPH.dot} contained`,
-				)
-			: theme.fg("annotation", clean(autonomy))
-		: "";
+	const yolo =
+		autonomy === "yolo"
+			? autonomyModeReadout({
+					confinement: state.session.yoloConfinement === "unconfined" ? "unconfined" : "contained",
+					osSandbox: state.session.autonomyWindow?.osSandbox !== false,
+					narrow,
+					dot: GLYPH.dot,
+				})
+			: null;
+	const mode = autonomy ? (yolo ? theme.fg(yolo.tone, yolo.text) : theme.fg("annotation", clean(autonomy))) : "";
 	const modeLead = mode ? `${mode}${theme.fg("separator", ` ${GLYPH.dot} `)}` : "";
 	const identityWidth = Math.max(1, w - visibleWidth(modeLead));
 	const fit = (text: string, room = w) =>
@@ -571,7 +547,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const flowing = state.throughput !== null && (state.status.phase === "writing" || state.status.phase === "thinking");
 	const speed =
 		typeof rate === "number" && Number.isFinite(rate) && rate > 0
-			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`, "tok/s")}`
+			? `${flowing ? "" : theme.fg("annotation", "last ")}${metricText(theme, tokensPerSecondText(rate, estimated), "tok/s")}`
 			: "";
 	// The row's one separator: a `|` beside the `·` of the workspace read as a table rule with nothing under it (F3).
 	const metrics = [counter, speed].filter(Boolean).join(separator);

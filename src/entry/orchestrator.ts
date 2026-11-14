@@ -4188,6 +4188,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					activeAcpSessionAutonomy = level;
 				},
 				yoloRefusal: () => yoloRefusal,
+				autonomyPosture: () => ({
+					confinement: effectiveYoloConfinement(getCurrentSettings().safety),
+					osSandbox: mainShellContained(getCurrentSettings().safety.sandbox, sandboxAvailability()),
+				}),
 				cwd: process.cwd(),
 				version: readClioVersionLabel(),
 				// Stdout belongs to JSON-RPC. Text this process did not author, such

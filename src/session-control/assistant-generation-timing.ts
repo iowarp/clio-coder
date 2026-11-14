@@ -1,5 +1,6 @@
 import { assistantOutputChars } from "../core/assistant-output.js";
 import { ceilChars } from "../domains/session/context-accounting.js";
+import type { TokenThroughputSnapshot } from "../domains/telemetry/index.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 
 type TimingEvent = {
@@ -93,4 +94,23 @@ export function createAssistantGenerationTiming() {
 			return { durationMs: Math.max(1, settledMs + (activeSince === null ? 0 : Math.max(0, at - activeSince))) };
 		},
 	};
+}
+
+export type AssistantGenerationTiming = ReturnType<typeof createAssistantGenerationTiming>;
+
+/** The streaming run's rate and output count at `at`, or null before the first token. */
+export function liveThroughput(timing: AssistantGenerationTiming, at: number): TokenThroughputSnapshot | null {
+	const snapshot = timing.snapshot(at);
+	if (!snapshot) return null;
+	const { outputTokens, estimated } = timing.output();
+	if (outputTokens <= 0) return null;
+	const { durationMs } = snapshot;
+	// Zero reads as no rate; the output count still shows while the window is too short to divide (RATE_MIN_WINDOW_MS).
+	const tokensPerSecond = durationMs >= RATE_MIN_WINDOW_MS ? outputTokens / (durationMs / 1000) : 0;
+	return { tokensPerSecond, outputTokens, estimated, durationMs };
+}
+
+/** A rate as it reads: `≈` when any of it is estimated, a whole number at 10 or above, else one decimal. */
+export function tokensPerSecondText(rate: number, estimated: boolean): string {
+	return `${estimated ? "≈" : ""}${rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10}`;
 }

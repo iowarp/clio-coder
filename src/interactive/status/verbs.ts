@@ -1,18 +1,12 @@
 import type { ModelAdmissionWait } from "../../core/model-admission.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { ordinal } from "../../session-control/retry-status-text.js";
 import type { AgentStatus, RetryOverlay } from "../../session-control/status-types.js";
 import { formatCompactMs, GLYPH, spinnerFrame as themeSpinnerFrame } from "../theme/index.js";
 
 export interface VerbRender {
 	text: string;
 	toneHint: "normal" | "warn" | "ok" | "error" | "muted";
-}
-
-/** `3rd`, `11th`, `22nd`: how a count of waits reads, since a stated wait has no limit to count against. */
-export function ordinal(n: number): string {
-	const teens = n % 100 >= 11 && n % 100 <= 13;
-	const tail = !teens && n % 10 === 1 ? "st" : !teens && n % 10 === 2 ? "nd" : !teens && n % 10 === 3 ? "rd" : "th";
-	return `${n}${tail}`;
 }
 
 /**
