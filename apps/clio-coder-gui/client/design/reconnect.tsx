@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { originFromLaunchInput, ticketFromLaunchInput } from "../api/auth-state.js";
-import { adoptLaunchSecret } from "../api/token.js";
+import { adoptLaunchSecret, refusalReason } from "../api/token.js";
 
 /**
  * Shown when this browser has no launch link or the server refused the one it had. A refused link
@@ -11,13 +11,21 @@ export function Reconnect({ refused }: { refused: boolean }) {
 	const [text, setText] = useState("");
 	const ticket = ticketFromLaunchInput(text);
 	const secret = ticket !== null ? { ticket } : null;
+	const reason = refused ? (refusalReason() ?? "credential") : null;
 	return (
 		<div className="reconnect" role="alert">
 			<h1>{refused ? "This browser is no longer connected" : "Open your launch link"}</h1>
 			<p>
-				{refused
-					? "The server refused this browser's launch link. That happens when the server restarted, or the app was reinstalled. Nothing is wrong with your data, and the old credential has been removed from this browser."
-					: "This browser has no launch link yet."}
+				{reason === "ticket" ? (
+					<>
+						This launch link was already used or has expired. A link works once, within a minute of being printed. Run{" "}
+						<code className="reconnect__command">clio-coder gui</code> for a fresh one.
+					</>
+				) : reason === "credential" ? (
+					"The server refused this browser's launch link. That happens when the server restarted, or the app was reinstalled. Nothing is wrong with your data, and the old credential has been removed from this browser."
+				) : (
+					"This browser has no launch link yet."
+				)}
 			</p>
 			<p>
 				Run <code className="reconnect__command">clio-coder gui</code> in a terminal. It reopens the background app when one
@@ -35,7 +43,7 @@ export function Reconnect({ refused }: { refused: boolean }) {
 					value={text}
 					autoComplete="off"
 					spellCheck={false}
-					placeholder="http://127.0.0.1:4343/#ticket=…"
+					placeholder={`${location.origin}/#ticket=…`}
 					onChange={(event) => setText(event.target.value)}
 				/>
 				{text.trim() !== "" && !secret && <p className="reconnect__problem">That text is not a launch link.</p>}

@@ -125,8 +125,9 @@ export function configMap(graph: ConfigGraph, settings: SettingsReport | null): 
 		}))
 		.filter((row) => row.count > 0);
 
+	// Surfaces can overlap in what they put into the context, so their estimates are not added up: each entry
+	// keeps its own, and the figure says how many reported one.
 	const costed = graph.entries.filter((entry) => entry.contextCostTokens !== undefined);
-	const contextTokens = costed.reduce((total, entry) => total + (entry.contextCostTokens ?? 0), 0);
 	const issues = graph.issues.reduce((total, issue) => total + issue.count, 0);
 	const restarts = graph.entries.filter((entry) => entry.reloadClass === "restart").length;
 
@@ -141,13 +142,9 @@ export function configMap(graph: ConfigGraph, settings: SettingsReport | null): 
 				note: `${layers.length} represented ${layers.length === 1 ? "category" : "categories"}`,
 			},
 			{
-				label: "Estimated context cost",
-				// No costed entry is a different fact from costed entries that sum to zero.
-				value: costed.length === 0 ? "—" : `~${count(contextTokens)}`,
-				note:
-					costed.length === 0
-						? "no surface reported a cost"
-						: `tokens across ${count(costed.length)} costed ${costed.length === 1 ? "entry" : "entries"}`,
+				label: "Context cost",
+				value: `${count(costed.length)} of ${count(graph.entries.length)}`,
+				note: `${graph.entries.length === 1 ? "surface reports" : "surfaces report"} a context cost`,
 			},
 			{
 				label: "Needs a restart",

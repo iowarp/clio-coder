@@ -70,10 +70,6 @@
 	margin-top: var(--space-1);
 	font-size: var(--text-meta);
 }
-.usage-panel__label small {
-	font-size: var(--text-instrument);
-	color: var(--ink-muted);
-}
 .usage-panel__used {
 	font-size: var(--text-exact);
 }
@@ -104,4 +100,22 @@
 	grid-column: 1 / -1;
 	font-size: var(--text-instrument);
 	color: var(--ink-muted);
+}
+
+/* The header's quota warning takes the status ramp the context ring uses at the same severity. The bar's
+   hover rules colour a figure chip with the accent, so the warning keeps its tone when pointed at too. */
+.wb-chip--quota[data-tone="warn"],
+.wb-bar .wb-chip--quota[data-tone="warn"]:hover:not(:disabled) {
+	color: var(--status-warn-fg);
+}
+.wb-chip--quota[data-tone="fail"],
+.wb-bar .wb-chip--quota[data-tone="fail"]:hover:not(:disabled) {
+	color: var(--status-fail-fg);
+}
+/* A parked task's ring is its last reading, not a live gauge, so it drops the accent. */
+.wb-chip--meter[data-tone="neutral"] {
+	color: var(--status-neutral-fg);
+}
+.wb-chip--meter[data-tone="neutral"] .wb-ring__fill {
+	stroke: var(--status-neutral-line);
 }

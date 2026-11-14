@@ -1,4 +1,5 @@
 import { type Static, Type } from "typebox";
+import { TrustSurface } from "./review.js";
 
 const closed = { additionalProperties: false };
 export const SettingsOrigin = Type.Union([
@@ -29,7 +30,17 @@ export const SettingsReport = Type.Object(
 		rows: Type.Array(SettingRow),
 		layers: Type.Array(Type.Object({ origin: SettingsOrigin, path: Type.String(), present: Type.Boolean() }, closed)),
 		issues: Type.Array(
-			Type.Object({ origin: SettingsOrigin, path: Type.String(), kind: Type.String(), message: Type.String() }, closed),
+			Type.Object(
+				{
+					origin: SettingsOrigin,
+					path: Type.String(),
+					kind: Type.String(),
+					message: Type.String(),
+					/** Set on a `trust` issue: the project surface whose review would apply the ignored file. */
+					surface: Type.Optional(TrustSurface),
+				},
+				closed,
+			),
 		),
 	},
 	closed,

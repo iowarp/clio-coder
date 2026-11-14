@@ -18,7 +18,7 @@
 
 import { memo } from "react";
 import type { Permission } from "../../contracts/permissions.js";
-import type { SessionSnapshot, Turn } from "../../contracts/sessions.js";
+import type { SessionSnapshot, TimelineItem, Turn } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatClock, formatDuration, formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
@@ -162,6 +162,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 	const startedAt = turnStartedAt(row);
 	const prompt = request.missing ? null : request.text;
 	const requestPreview = prompt === null ? null : longRequestPreview(prompt);
+	const response = responseText(turn);
 	return (
 		<article
 			className={`chat-turn${live ? " is-live" : " is-settled"}${turn.origin === "replay" ? " is-replay" : ""}`}
@@ -212,7 +213,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 						sessionId={session.id}
 						row="request"
 						requestText={prompt}
-						responseText={responseText(turn)}
+						responseText={response}
 						status={row?.status ?? "running"}
 					/>
 				</div>
@@ -263,7 +264,8 @@ export const ChatTurnView = memo(function ChatTurnView({
 										client={client}
 										session={session}
 										workspaceRoot={workspaceRoot}
-										nowMs={nowMs}
+										// Only a running call reads the clock; the rest skip the once-a-second tick.
+										nowMs={segment.items.some(isRunningItem) ? nowMs : 0}
 									/>
 								);
 						}
@@ -284,7 +286,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 						sessionId={session.id}
 						row="response"
 						requestText={prompt}
-						responseText={responseText(turn)}
+						responseText={response}
 						status={row?.status ?? "running"}
 					/>
 				</div>
@@ -292,5 +294,9 @@ export const ChatTurnView = memo(function ChatTurnView({
 		</article>
 	);
 }, sameChatTurn);
+
+function isRunningItem(item: TimelineItem): boolean {
+	return item.status === "in_progress";
+}
 
 export { NO_NOTICES };

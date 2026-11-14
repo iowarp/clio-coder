@@ -3,21 +3,39 @@ import { Icon } from "../design/icons.js";
 import { TopBar } from "../shell/TopBar.js";
 import "./session-states.css";
 
-/** What a task screen shows while its first snapshot loads. Placeholder shapes, not a spinner: nothing is working yet. */
-export function TaskSkeleton() {
+/**
+ * What a task screen shows while its first snapshot loads. Placeholder shapes, not a spinner: nothing is
+ * working yet. A task this tab just started already knows the operator's words, so it shows them at once
+ * rather than letting them vanish for the moment the first snapshot takes.
+ */
+export function TaskSkeleton({ request }: { request?: string | null | undefined } = {}) {
 	return (
 		<section className="conversation" data-pane="closed" aria-busy="true">
 			<div className="conversation__main task-skeleton">
 				<TopBar />
-				<span className="sr-only" role="status">
-					Loading task
-				</span>
-				<div className="task-skeleton__body" aria-hidden="true">
-					<span className="task-skeleton__line task-skeleton__line--request" />
-					<span className="task-skeleton__line" />
-					<span className="task-skeleton__line task-skeleton__line--wide" />
-					<span className="task-skeleton__line task-skeleton__line--short" />
-				</div>
+				{request ? (
+					<div className="task-skeleton__body task-skeleton__body--request">
+						<div className="chat-request">
+							<span className="sr-only">You</span>
+							<p className="chat-request__prompt">{request}</p>
+						</div>
+						<p className="task-skeleton__starting" role="status">
+							Starting…
+						</p>
+					</div>
+				) : (
+					<>
+						<span className="sr-only" role="status">
+							Loading task
+						</span>
+						<div className="task-skeleton__body" aria-hidden="true">
+							<span className="task-skeleton__line task-skeleton__line--request" />
+							<span className="task-skeleton__line" />
+							<span className="task-skeleton__line task-skeleton__line--wide" />
+							<span className="task-skeleton__line task-skeleton__line--short" />
+						</div>
+					</>
+				)}
 			</div>
 		</section>
 	);

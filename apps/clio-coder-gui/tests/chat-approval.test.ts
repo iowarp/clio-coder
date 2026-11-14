@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { currentSecond, subscribeSecond } from "../client/api/second-clock.js";
 import {
 	accessSentence,
 	approvalActions,
+	approvalAnnouncement,
 	BUDGET_SECONDS,
 	bannerEyebrow,
 	CARD_EYEBROW,
+	callDecisions,
 	clampText,
 	decisionChips,
+	decisionRecord,
 	decisionRows,
 	decisionTone,
 	deriveApprovalTimings,
@@ -35,11 +40,13 @@ import {
 	guidanceReady,
 	isLiveRun,
 	presentFleetFact,
+	reconcileRuns,
 	STEER_REFUSALS,
 	steerOutcome,
 } from "../client/chat/fleet-facts.js";
 import type { Permission } from "../contracts/permissions.js";
 import { Permissions } from "../server/acp/permissions.js";
+import { harness } from "./harness/app.js";
 
 const REQUESTED = Date.parse("2026-09-20T10:00:00.000Z");
 
@@ -110,7 +117,7 @@ test("the safety facts carry access, countdown, posture and wait, in that order 
 	const timings = deriveApprovalTimings(value, REQUESTED + 30_000);
 	const facts = safetyFacts(value, [{ path: "src/core/config.ts", line: 11 }], timings);
 	assert.equal(facts.length, 4);
-	assert.equal(facts[0], "edit access to src/core/config.ts:12.");
+	assert.equal(facts[0], "Edits src/core/config.ts:12.");
 	assert.match(facts[1] ?? "", /^If unanswered, this turn stops in .+ \(at .+\)\.$/);
 	assert.equal(facts[2], SAFETY_POSTURE);
 	assert.equal(facts[2], "Nothing runs until you answer. The GUI never answers for you.");
@@ -118,8 +125,8 @@ test("the safety facts carry access, countdown, posture and wait, in that order 
 });
 
 test("a permission with no locations says so rather than naming nothing", () => {
-	assert.equal(accessSentence({ kind: "bash" }, undefined), "bash access to this turn.");
-	assert.equal(accessSentence({ kind: "bash" }, []), "bash access to this turn.");
+	assert.equal(accessSentence({ kind: "bash" }, undefined), "Acts on this turn.");
+	assert.equal(accessSentence({ kind: "bash" }, []), "Acts on this turn.");
 });
 
 test("locations are one-based for display and the fourth onward is counted, never dropped", () => {
@@ -409,6 +416,33 @@ test("progress is a working run, not a phase of its own, and a failure carries i
 	assert.equal(fleetSummaryLabel(runs), "Fleet · 2 running of 3");
 });
 
+test("a stopped worker reads as stopped, never as a failure (inspection F10)", () => {
+	const runs = foldFleetRuns([
+		fact("fleet.started", { runId: "r1", agentId: "builder" }),
+		fact("fleet.failed", {
+			runId: "r1",
+			agentId: "builder",
+			outcome: "canceled",
+			reason: "canceled",
+			outcomeDetail: "operator abort",
+			durationMs: 2500,
+		}),
+		fact("fleet.failed", { runId: "r2", agentId: "judge", outcome: "failed", reason: "failed", durationMs: 12 }),
+	]);
+	const [stopped, failed] = runs;
+	assert.ok(stopped && failed);
+	assert.equal(stopped.state, "stopped");
+	assert.ok(!isLiveRun(stopped));
+	assert.equal(fleetRunDetail(stopped), "Stopped · operator abort · 2.5s");
+	assert.equal(failed.state, "failed");
+	const presented = presentFleetFact({
+		type: "fleet.failed",
+		payload: { outcome: "cancelled", reason: "operator_cancel" },
+	});
+	assert.deepEqual([presented.label, presented.tone], ["Run stopped", "neutral"]);
+	assert.equal(presentFleetFact({ type: "fleet.failed", payload: { outcome: "failed" } }).label, "Run failed");
+});
+
 test("events arriving out of order are folded in reported sequence, not in array order", () => {
 	const started = fact("fleet.started", { runId: "r1", agentId: "a" });
 	const completed = fact("fleet.completed", {
@@ -419,6 +453,59 @@ test("events arriving out of order are folded in reported sequence, not in array
 		tokenCount: 1,
 	});
 	assert.equal(foldFleetRuns([completed, started])[0]?.state, "done");
+});
+
+test("a late progress or start frame does not bring a settled run back to life", () => {
+	const runs = foldFleetRuns([
+		fact("fleet.started", { runId: "r1", agentId: "a" }),
+		fact("fleet.completed", { runId: "r1", agentId: "a", outcome: "succeeded", durationMs: 5, tokenDisplay: "12" }),
+		fact("fleet.progress", { runId: "r1", agentId: "a", progressCount: 3, truncated: false }),
+	]);
+	assert.equal(runs[0]?.state, "done");
+	assert.ok(runs[0] && !isLiveRun(runs[0]));
+});
+
+test("the feed is checked against the server's live runs without inventing what neither reported", () => {
+	const at = "2026-09-20T10:00:00.000Z";
+	const folded = foldFleetRuns([
+		fact("fleet.started", { runId: "both", agentId: "builder" }, at),
+		fact("fleet.started", { runId: "feed-only", agentId: "judge" }, at),
+		fact("fleet.started", { runId: "done", agentId: "a" }, at),
+		fact("fleet.completed", { runId: "done", agentId: "a", outcome: "succeeded", durationMs: 1, tokenDisplay: "1" }, at),
+	]);
+	const later = "2026-09-20T10:00:05.000Z";
+	const runs = reconcileRuns(
+		folded,
+		[
+			{ runId: "both", agentId: "builder", state: "active", node: null },
+			{ runId: "server-only", agentId: "scout", state: "queued", node: "blade" },
+		],
+		later,
+	);
+	const byId = new Map(runs.map((run) => [run.runId, run]));
+	assert.equal(
+		byId.get("both"),
+		folded.find((run) => run.runId === "both"),
+		"the feed's row stands unchanged",
+	);
+	const lost = byId.get("server-only");
+	assert.ok(lost && isLiveRun(lost));
+	assert.equal(lost.state, "queued");
+	assert.equal(lost.agentId, "scout");
+	assert.equal(lost.node, "blade");
+	assert.equal(lost.taskPreview, null);
+	const ended = byId.get("feed-only");
+	assert.ok(ended && !isLiveRun(ended));
+	assert.match(fleetRunDetail(ended), /^Ended \(final event not received\)/);
+	assert.equal(byId.get("done")?.state, "done", "a settled run is never re-read");
+
+	assert.equal(reconcileRuns(folded, undefined), folded, "without a server list the feed stands");
+	const early = reconcileRuns(folded, [], "2026-09-20T09:59:59.000Z");
+	assert.equal(
+		early.find((run) => run.runId === "feed-only")?.state,
+		"running",
+		"a run newer than the list may simply not be in it yet",
+	);
 });
 
 test("the cap drops the oldest settled run first and never a live one", () => {
@@ -628,7 +715,7 @@ test("a forwarded worker ask names the worker, who may discharge it, and what ha
 	);
 	assert.equal(rows[0]?.value, "scout (run run-7)");
 	assert.match(rows[1]?.value ?? "", /^Operator only\./);
-	assert.equal(rows[2]?.value, "The worker is denied after 60 seconds.");
+	assert.equal(rows[2]?.value, "The worker is refused after 60 seconds.");
 	const forwarded = workerAskRows({ ...WORKER, approvalAuthority: "main", forwardedByMain: true, fallback: "fail" });
 	assert.match(forwarded[1]?.value ?? "", /below yolo/);
 	assert.equal(forwarded[2]?.value, "The worker fails the call after 60 seconds.");
@@ -674,6 +761,133 @@ test("a worker ask is read from the agent's meta, answered once, and withdrawn w
 	assert.deepEqual(await next, { outcome: { outcome: "selected", optionId: "allow-once" } });
 });
 
+// ---- asks the app shows, and asks it declines without ending the session ------------------------
+
+const CHOICES = [
+	{ optionId: "allow-once", kind: "allow_once", name: "Approve once" },
+	{ optionId: "reject-once", kind: "reject_once", name: "Deny" },
+];
+const ROW = [
+	{ turnId: "turn-1", toolCallId: "dispatch-1", status: "in_progress", title: "dispatch", toolKind: "other" },
+] as never;
+function bridge(timing?: { escalateMs: number; budgetMs: number }) {
+	const published: Array<[string, Permission]> = [];
+	const declined: string[] = [];
+	let cancelled = 0;
+	const permissions = new Permissions(
+		(type, permission) => published.push([type, permission]),
+		async () => {
+			cancelled += 1;
+		},
+		timing,
+		(reason) => declined.push(reason),
+	);
+	return { permissions, published, declined, cancels: () => cancelled };
+}
+
+test("an ask titled differently from its tool row is shown with the ask's own title", async () => {
+	const { permissions, published } = bridge();
+	const ask = {
+		sessionId: "s-1",
+		toolCall: { toolCallId: "dispatch-1", title: "Scout read-only root: /data", kind: "read", rawInput: { other: 1 } },
+		options: CHOICES,
+	};
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	assert.equal(published[0]?.[0], "permission.requested");
+	assert.equal(published[0]?.[1].title, "Scout read-only root: /data");
+	assert.equal(published[0]?.[1].toolCallId, "dispatch-1");
+	assert.equal(published[0]?.[1].kind, "read");
+	permissions.decide(published[0]?.[1].id ?? "", "reject");
+	assert.deepEqual(await response, { outcome: { outcome: "selected", optionId: "reject-once" } });
+});
+
+test("an ask with no tool row, like the report-bundle consent, still raises a card that Allow answers", async () => {
+	const { permissions, published } = bridge();
+	const ask = { sessionId: "s-1", toolCall: { toolCallId: "report-bundle-1" }, options: CHOICES };
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	assert.equal(published[0]?.[0], "permission.requested");
+	assert.equal(published[0]?.[1].toolCallId, "report-bundle-1");
+	assert.equal(published[0]?.[1].title, "Approval needed");
+	assert.equal(published[0]?.[1].kind, "other");
+	permissions.decide(published[0]?.[1].id ?? "", "allow-once");
+	assert.deepEqual(await response, { outcome: { outcome: "selected", optionId: "allow-once" } });
+});
+
+test("an ask the app cannot present is declined as cancelled and says why", async () => {
+	const { permissions, published, declined } = bridge();
+	const call = { toolCallId: "dispatch-1", title: "dispatch" };
+	const allowOnly = [CHOICES[0]];
+	const cancelled = { outcome: { outcome: "cancelled" } };
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: allowOnly }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-2", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(
+		await permissions.request("s-1", null, { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.deepEqual(published, []);
+	assert.deepEqual(declined, ["no one-time allow or reject choice", "foreign session", "no active turn"]);
+	// A second ask while one waits is declined; the first keeps its card.
+	const first = permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW);
+	assert.deepEqual(
+		await permissions.request("s-1", "turn-1", { sessionId: "s-1", toolCall: call, options: CHOICES }, ROW),
+		cancelled,
+	);
+	assert.equal(declined.at(-1), "another approval is waiting");
+	assert.equal(published.length, 1);
+	permissions.cancel();
+	assert.deepEqual(await first, cancelled);
+});
+
+test("a worker ask expires on the worker's own window and leaves the turn running", async () => {
+	const { permissions, published, cancels } = bridge({ escalateMs: 10, budgetMs: 1000 });
+	const ask = {
+		sessionId: "s-1",
+		toolCall: { toolCallId: "dispatch-1", title: "dispatch" },
+		options: CHOICES,
+		_meta: { "clio-coder/workerAsk": { version: 1, ...WORKER, timeoutMs: 50 } },
+	};
+	const response = permissions.request("s-1", "turn-1", ask, ROW);
+	const requested = published[0]?.[1];
+	assert.equal(Date.parse(requested?.expiresAt ?? "") - Date.parse(requested?.requestedAt ?? ""), 50);
+	assert.deepEqual(await response, { outcome: { outcome: "cancelled" } });
+	assert.equal(published.at(-1)?.[0], "permission.expired");
+	assert.equal(cancels(), 0);
+});
+
+test("a session declines an unpresentable ask, stays open, and refuses a decision it has no bridge for", {
+	timeout: 20000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "permission-no-reject", lanes: false });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await h.supervisor.open(workspace.id);
+	h.supervisor.startTurn(session.id, "Write");
+	for (let index = 0; index < 1000 && h.supervisor.get(session.id).turns.at(-1)?.status === "running"; index += 1)
+		await delay(20);
+	const snapshot = h.supervisor.get(session.id);
+	assert.equal(snapshot.state, "open");
+	assert.equal(snapshot.turns.at(-1)?.status, "succeeded");
+	assert.deepEqual(snapshot.permissions, []);
+	assert.equal(
+		snapshot.telemetry?.notices?.filter((notice) => notice.startsWith("CLIO Coder asked for an approval")).length,
+		1,
+	);
+	// No session runs without a bridge, so take it away to reach the guard.
+	const entries = (h.supervisor as unknown as { entries: Map<string, { permissions?: unknown }> }).entries;
+	const entry = entries.get(session.id);
+	if (entry) delete entry.permissions;
+	assert.throws(
+		() => h.supervisor.decide(session.id, "any", "allow-once"),
+		(error: unknown) => (error as { problem?: { code?: string } }).problem?.code === "conflict",
+	);
+});
+
 test("fleet failures show their outcome code and recovery detail in the row and fact", () => {
 	const payload = {
 		runId: "held",
@@ -693,4 +907,51 @@ test("fleet failures show their outcome code and recovery detail in the row and 
 		presentFleetFact({ type: "fleet.failed", payload }).summary,
 		/merge_withheld: Host check also fails on base abc/,
 	);
+});
+
+// ---- inspection round 1: one vocabulary, one record, one second ------------------------------------
+
+test("the access sentence is a verb phrase, never a raw ACP kind", () => {
+	const at = [{ path: "fixture.txt" }];
+	assert.equal(accessSentence({ kind: "edit" }, at), "Edits fixture.txt.");
+	assert.equal(accessSentence({ kind: "execute" }, undefined), "Runs a command in this turn.");
+	assert.equal(accessSentence({ kind: "other" }, undefined), "Acts on this turn.");
+	assert.equal(accessSentence({ kind: "switch_mode" }, at), "Acts on fixture.txt.");
+	const spoken = approvalAnnouncement({ title: "write", kind: "edit" }, at);
+	assert.equal(spoken, "Approval needed: write. Edits fixture.txt. Nothing runs until you answer.");
+	assert.doesNotMatch(spoken, /access/);
+});
+
+test("an answered call keeps a record of its newest settled request, and waiting ones keep none", () => {
+	assert.equal(decisionRecord([permission()], "call-1"), null, "an awaiting request is the card, not a record");
+	const permissions = [
+		permission({ id: "p1", status: "rejected" }),
+		permission({ id: "p2", status: "allowed" }),
+		permission({ id: "p3", toolCallId: "call-2", status: "pending" }),
+	];
+	assert.deepEqual(decisionRecord(permissions, "call-1"), {
+		status: "allowed",
+		summary: resolutionSummary("allowed"),
+	});
+	assert.equal(decisionRecord(permissions, "call-2"), null);
+	assert.equal(decisionRecord(permissions, "call-9"), null);
+	const decisions = callDecisions(permissions);
+	assert.equal(decisions.get("call-1"), "allowed", "the newest request for a call wins");
+	assert.equal(decisions.get("call-2"), "pending");
+});
+
+test("every subscriber reads the same second, and the interval stops with the last one", (t) => {
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	let calls = 0;
+	const first = subscribeSecond(() => (calls += 1));
+	const second = subscribeSecond(() => (calls += 1));
+	const start = currentSecond();
+	t.mock.timers.tick(1000);
+	assert.equal(calls, 2, "one tick notifies every subscriber");
+	assert.ok(currentSecond() >= start);
+	assert.equal(currentSecond(), currentSecond(), "the snapshot is cached between ticks");
+	first();
+	second();
+	t.mock.timers.tick(3000);
+	assert.equal(calls, 2, "no subscriber, no interval");
 });

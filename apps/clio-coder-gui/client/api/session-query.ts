@@ -11,6 +11,10 @@ export function sessionQuery(client: Client, id: string) {
 			const snapshot = await client.call(routes.session, { params: { id }, query: {}, body: {} }, undefined, signal);
 			return sessionBuffer(id).snapshot(snapshot) ?? snapshot;
 		},
-		staleTime: 5_000,
+		// The event stream keeps the snapshot current: deltas fold into it, a revision gap and a reconnect
+		// invalidate it, and invalidation refetches an active query whatever its staleTime.
+		staleTime: Number.POSITIVE_INFINITY,
+		refetchOnWindowFocus: false,
+		refetchOnReconnect: false,
 	});
 }

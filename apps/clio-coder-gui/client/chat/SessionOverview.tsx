@@ -32,7 +32,8 @@ import {
 	useTelemetrySession,
 } from "./session-telemetry.js";
 import { sessionSpend } from "./session-usage-model.js";
-import { livePlanView } from "./telemetry-model.js";
+import { livePlanView, planCancellation } from "./telemetry-model.js";
+import { isStoppedEarly, turnEnding } from "./turns.js";
 
 function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
 	if (tone === "success")
@@ -235,7 +236,9 @@ export function SessionOverview({
 							: last?.status === "cancelled"
 								? "Stopped"
 								: last
-									? "Complete"
+									? isStoppedEarly(turnEnding(last))
+										? "Stopped early"
+										: "Complete"
 									: "Not started";
 	const done = plan?.rows.filter((row) => row.tone === "success").length ?? 0;
 	const openTasks = view?.tasks.filter((task) => task.actions.length > 0).length ?? 0;
@@ -295,7 +298,12 @@ export function SessionOverview({
 			</section>
 			{session.telemetry?.trust?.ignored.length ? (
 				<Section id="pane-trust" title="Project trust" icon="shield">
-					<ProjectTrustNotice trust={session.telemetry.trust} />
+					<ProjectTrustNotice
+						client={client}
+						sessionId={session.id}
+						running={overview.running}
+						trust={session.telemetry.trust}
+					/>
 				</Section>
 			) : null}
 			{health.attention ? healthSection : null}
@@ -359,9 +367,12 @@ export function SessionOverview({
 					<p className="pane-empty">
 						{capabilities.data?.board === undefined && !session.telemetry?.plan
 							? "This session does not report a plan."
-							: "No plan published yet."}
+							: (planCancellation(session.telemetry?.plan) ?? "No plan published yet.")}
 					</p>
 				)}
+				{plan && plan.rows.length > 0 && planCancellation(session.telemetry?.plan) ? (
+					<p className="pane-card__facts">{planCancellation(session.telemetry?.plan)}</p>
+				) : null}
 				{capabilities.data?.board && plan && plan.rows.length > 5 ? (
 					<p className="pane-card__facts">{plan.rows.length - 5} more steps in the full plan.</p>
 				) : null}

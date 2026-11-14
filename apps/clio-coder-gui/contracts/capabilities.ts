@@ -35,6 +35,7 @@ import { ExtensionsCapability, LibraryCapability } from "./extensions.js";
 import { FleetCapability } from "./fleet-run.js";
 import { HandoffCapability } from "./handoff.js";
 import { InterviewCapability } from "./interviews.js";
+import { SnapshotsCapability } from "./rewind.js";
 import { TelemetryCapability } from "./telemetry.js";
 
 const closed = { additionalProperties: false };
@@ -81,6 +82,8 @@ export const AgentCapabilities = Type.Object(
 		board: Type.Optional(BoardCapability),
 		/** Session tree, branch switch and fork. */
 		branches: Type.Optional(BranchesCapability),
+		/** List, preview and restore the workspace snapshots the engine took. */
+		snapshots: Type.Optional(SnapshotsCapability),
 		/** Draw up, review and commit a handoff to a new session. */
 		handoff: Type.Optional(HandoffCapability),
 		/** Preview a playbook and start only the approved plan. */

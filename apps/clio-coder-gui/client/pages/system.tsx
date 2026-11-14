@@ -8,6 +8,7 @@ import { humanizeKey } from "../design/facts-model.js";
 import { PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import {
 	adapterText,
 	decisionOffer,
@@ -61,6 +62,7 @@ export function SystemPage({
 	const [sidebarAttention, setSidebarAttention] = useState(false);
 	const filter = compact ? sidebarFilter : (search.get("q") ?? ""),
 		attentionOnly = compact ? sidebarAttention : search.get("attention") === "true";
+	const searchBox = useSearchDraft(filter, (value) => setSearch(liveSearchWith("q", value), { replace: true }));
 	const discover = (key: string, value: string | null, replace = false) =>
 		setSearch(
 			(current) => {
@@ -140,7 +142,7 @@ export function SystemPage({
 						{!compact && (
 							<label className="settings-filter">
 								Find a diagnostic
-								<input type="search" value={filter} onChange={(event) => discover("q", event.target.value, true)} />
+								<input type="search" value={searchBox.value} onChange={searchBox.onChange} />
 							</label>
 						)}
 						<button
@@ -315,6 +317,7 @@ export function InteropPage({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const filter = INTEROP_FILTERS.find((value) => value === search.get("show")) ?? "all";
 	const query = search.get("q") ?? "";
+	const searchBox = useSearchDraft(query, (value) => setSearch(liveSearchWith("q", value), { replace: true }));
 	const discover = (key: string, value: string) =>
 		setSearch(
 			(current) => {
@@ -392,7 +395,7 @@ export function InteropPage({ client }: { client: Client }) {
 					<div className="interop-discovery">
 						<label className="settings-filter">
 							Find an agent or resource
-							<input type="search" value={query} onChange={(event) => discover("q", event.target.value)} />
+							<input type="search" value={searchBox.value} onChange={searchBox.onChange} />
 						</label>
 						<fieldset className="interop-filters">
 							<legend>Show agents</legend>

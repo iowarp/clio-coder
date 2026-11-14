@@ -5,7 +5,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
-import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/composer-model.js";
+import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/prompt-limit.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
@@ -17,6 +17,7 @@ import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
 import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS } from "./home-draft-model.js";
+import { settleStarted } from "./started-request.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
 import "./home.css";
@@ -172,6 +173,8 @@ export function Home({ client }: { client: Client }) {
 	const draft = useSyncExternalStore(subscribeHomeDraft, homeDraft);
 	const busy = useSyncExternalStore(subscribeHomeDraft, firstRequestBusy);
 	const { text, pending } = draft;
+	// A start whose task screen never mounted (a later navigation won) must not leave Home busy.
+	useEffect(() => settleStarted(), []);
 	const limitId = `${fieldId}-limit`;
 	const textIssue =
 		draft.textIssue === "too-large"
@@ -390,11 +393,16 @@ export function Home({ client }: { client: Client }) {
 						<summary>
 							<Icon name="models" />
 							<span>
-								{ready
-									? (setup.data?.model ?? setup.data?.targetId ?? "Connected model")
-									: setup.isPending
-										? "Checking model connection…"
-										: "Model connection needs attention"}
+								{ready ? (
+									(setup.data?.model ?? setup.data?.targetId ?? "Connected model")
+								) : setup.isPending ? (
+									<>
+										<span className="newtask__skeleton" aria-hidden="true" />
+										<span className="sr-only">Checking model connection…</span>
+									</>
+								) : (
+									"Model connection needs attention"
+								)}
 							</span>
 							<span className="newtask__context-label">
 								Task settings <Icon name="chevronDown" />

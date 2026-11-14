@@ -1,6 +1,12 @@
 import type { SessionDelta } from "./sessions.js";
 
-export { ACP_MAX_JOBS } from "../server/clio/wire-runtime.js";
+export {
+	ACP_MAX_JOBS,
+	ACP_TARGET_MODEL_LIMIT,
+	ASIDE_TEXT_MAX_CHARACTERS,
+	MAX_SERVED_ARTIFACT_IDS,
+	MODEL_TARGET_PATHS,
+} from "../server/clio/wire-runtime.js";
 
 export const API_VERSION = 1;
 

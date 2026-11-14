@@ -22,11 +22,16 @@ import type {
 	QueueSnapshot,
 	SteerMode,
 } from "../../contracts/steering.js";
+import { DRAFT_INDEX, DRAFT_KEY, MAX_DRAFT_STORES, storedDraftIds, stores } from "./draft-registry.js";
 import { compactDuration } from "./overview-model.js";
+import { PROMPT_TEXT_MAX_CHARACTERS } from "./prompt-limit.js";
 import { quantityValue } from "./session-usage-model.js";
+import { isSlashAlias } from "./slash-model.js";
+import type { TurnEnding } from "./turns.js";
+import { endingSentence, isStoppedEarly, turnEnding } from "./turns.js";
 
-/** `routes.turn` bounds its text at this many characters, so the composer refuses past it locally. */
-export const PROMPT_TEXT_MAX_CHARACTERS = 32000;
+export { discardDraftStore, MAX_DRAFT_STORES, resetDraftStores } from "./draft-registry.js";
+export { PROMPT_TEXT_MAX_CHARACTERS };
 /** The mode the engine itself defaults to when a steer carries none. */
 export const DEFAULT_STEER_MODE: SteerMode = "next-slot";
 
@@ -159,21 +164,6 @@ export class DraftStore {
 	}
 }
 
-/** Drafts are kept per session and capped, the same way `sessionBuffer` caps projections. */
-export const MAX_DRAFT_STORES = 32;
-const DRAFT_KEY = "clio-coder-draft:";
-const DRAFT_INDEX = "clio-coder-draft-index";
-const stores = new Map<string, DraftStore>();
-
-function storedDraftIds(): string[] {
-	try {
-		const value: unknown = JSON.parse(sessionStorage.getItem(DRAFT_INDEX) ?? "[]");
-		return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
-	} catch {
-		return [];
-	}
-}
-
 function savedDraft(id: string): SavedDraft | undefined {
 	try {
 		const raw = sessionStorage.getItem(`${DRAFT_KEY}${id}`);
@@ -240,20 +230,6 @@ export function draftStore(id: string): DraftStore {
 	stores.delete(id);
 	stores.set(id, store);
 	return store;
-}
-
-export function discardDraftStore(id: string): void {
-	stores.delete(id);
-	try {
-		sessionStorage.removeItem(`${DRAFT_KEY}${id}`);
-		sessionStorage.setItem(DRAFT_INDEX, JSON.stringify(storedDraftIds().filter((entry) => entry !== id)));
-	} catch {
-		/* Deletion still removes the in-memory draft when browser storage is unavailable. */
-	}
-}
-
-export function resetDraftStores(): void {
-	stores.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +332,11 @@ export interface ComposerSituation {
 	readonly shell?: boolean;
 	/** The label of the other window that controls this task; this one only views it until it takes control. */
 	readonly viewing?: string;
+	/**
+	 * `slashNotice`'s warning for a `/name` the session does not serve. The child refuses that line,
+	 * so the composer holds it rather than warning and sending it anyway.
+	 */
+	readonly unknownSlash?: string;
 }
 
 /** Why a viewing window's composer takes nothing: the server refuses every message from a window without control. */
@@ -424,6 +405,7 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
 	if (text === "") return blocked("Write a message first.");
+	if (situation.unknownSlash !== undefined) return blocked(situation.unknownSlash);
 	const line = situation.shell ? shellLine(text) : null;
 	if (line !== null) {
 		if (line.command === "") return blocked("Write a command after the !.");
@@ -468,29 +450,22 @@ export function submitLabel(intent: SubmitIntent, situation: ComposerSituation, 
 const SLASH_TOKEN = /^\/([A-Za-z][A-Za-z0-9:-]*)(?:\s|$)/u;
 
 /**
- * Says before sending what the agent will say after: a `/name` that no command
- * and no loaded prompt template owns is refused and never reaches the model.
- * It warns and does not block, because the agent screens the line itself and
- * a template loaded since the catalog was read is still honored there. A
- * catalog without its template list cannot tell a template from a typo, so it
- * says nothing rather than guess.
+ * Says before sending what the agent will say after: a `/name` that no command,
+ * no loaded prompt template and no terminal name the app answers owns is
+ * refused and never reaches the model. A catalog command never gets here: the
+ * composer parses it as a command line first. It warns and does not block,
+ * because the agent screens the line itself and a template loaded since the
+ * catalog was read is still honored there. A catalog without its template list
+ * cannot tell a template from a typo, so it says nothing rather than guess.
  */
 export function slashNotice(text: string, catalog: CommandCatalog | undefined): ComposerNotice | null {
 	const token = SLASH_TOKEN.exec(text.trim())?.[1];
 	if (token === undefined || catalog?.prompts === undefined) return null;
-	const command = catalog.commands.find((entry) => entry.name === token);
-	if (command) {
-		// The agent invokes a command typed in a prompt only when its result belongs to that prompt.
-		if (command.streams === undefined || command.injectsUserTurn || command.promptTurn) return null;
-		return {
-			tone: "warn",
-			message: `/${token} runs from the command list, not from a message. Sending it will be refused.`,
-		};
-	}
-	if (catalog.prompts.includes(token)) return null;
+	if (catalog.commands.some((entry) => entry.name === token) || catalog.prompts.includes(token) || isSlashAlias(token))
+		return null;
 	return {
 		tone: "warn",
-		message: `/${token} is not a command or prompt template in this task, so sending it will be refused. Start the line with \\/ to send it as text.`,
+		message: `/${token} is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.`,
 	};
 }
 
@@ -752,6 +727,8 @@ export interface MessageActionContext {
 	/** The response segments joined by a blank line, as raw Markdown. */
 	readonly responseText: string;
 	readonly status: Turn["status"];
+	/** How the turn ended, from `turnEnding`. A turn that stopped early can be tried again. */
+	readonly ending?: TurnEnding | null;
 }
 
 /**
@@ -762,7 +739,7 @@ export interface MessageActionContext {
 export function messageActionOffers(context: MessageActionContext): readonly MessageActionOffer[] {
 	const hasRequest = (context.requestText ?? "").trim() !== "";
 	const hasResponse = context.responseText.trim() !== "";
-	const retryable = context.status === "failed" || context.status === "cancelled";
+	const retryable = context.status === "failed" || context.status === "cancelled" || isStoppedEarly(context.ending);
 	return [
 		{
 			id: "copy-request",
@@ -838,9 +815,18 @@ export interface TurnActivity {
 	readonly toolMs: number;
 	readonly slowest: { readonly name: string; readonly ms: number } | null;
 	readonly compactions: number;
+	/** Changes settled at their approval gate, rejected or refused, so nothing reached the file. */
+	readonly notApplied: number;
 }
 
-export const NO_ACTIVITY: TurnActivity = { tools: 0, timed: 0, toolMs: 0, slowest: null, compactions: 0 };
+export const NO_ACTIVITY: TurnActivity = {
+	tools: 0,
+	timed: 0,
+	toolMs: 0,
+	slowest: null,
+	compactions: 0,
+	notApplied: 0,
+};
 
 export function usageSummary(usage: Usage): string {
 	return usage.quantities
@@ -872,6 +858,13 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 	cancelled: { tone: "neutral", glyph: "–", label: "Stopped" },
 };
 
+// A succeeded row whose stop reason says the answer is not whole: never a success mark.
+const STOPPED_EARLY: { tone: OutcomeTone; glyph: string; label: string } = {
+	tone: "warn",
+	glyph: "!",
+	label: "Stopped early",
+};
+
 /**
  * The footer carries per-turn facts: how long the turn took, what it read and wrote, what it spent
  * and how many tool calls it made. The time is the difference of the two recorded instants, so a
@@ -881,7 +874,9 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOutcomeView {
 	const counted = typeof activity === "number" ? { ...NO_ACTIVITY, tools: activity } : activity;
 	const toolCount = counted.tools;
-	const shape = OUTCOME[turn.status];
+	const ending = turnEnding(turn);
+	const early = ending !== null && isStoppedEarly(ending);
+	const shape = early ? STOPPED_EARLY : OUTCOME[turn.status];
 	const facts: string[] = [];
 	const nerd: OutcomeFact[] = [];
 	const elapsed =
@@ -933,7 +928,6 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 		nerd.push({ label: "Speed", value: tokenRate(rate) });
 	}
 	if (quantities) {
-		// The share of the prompt the provider served from its cache: what a warm session saves.
 		const read = quantityValue(quantities.cacheRead);
 		const prompt = quantityValue(quantities.prompt);
 		if (prompt !== null) {
@@ -958,11 +952,7 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 			value: quantities.cacheRead.display,
 			factRef: quantities.cacheRead.ref,
 		});
-		if (read !== null && prompt !== null && prompt > 0) {
-			const share = `${Math.round((100 * read) / prompt)}%`;
-			breakdown.push({ group: "Cache", label: "Hit share", value: share });
-			nerd.push({ label: "Cache hit", value: share });
-		}
+		// Provider token fields do not establish a cache hit rate, so no share is derived from them.
 		breakdown.push({
 			group: "Cache",
 			label: "Written",
@@ -994,12 +984,21 @@ export function turnOutcome(turn: Turn, activity: TurnActivity | number): TurnOu
 	if (usageLabel !== null && quantities && quantityValue(quantities.output) !== null) facts.push(usageLabel);
 	if (quantities && quantityValue(quantities.usd) !== null) facts.push(quantities.usd.display);
 	if (toolCount > 0) facts.push(`${toolCount} tool ${toolCount === 1 ? "call" : "calls"}`);
+	const notApplied = counted.notApplied;
+	// A turn that finished with a change left unapplied did what it could, but it is not a clean success.
+	const unapplied = turn.status === "succeeded" && !early && notApplied > 0;
+	if (unapplied) facts.push(`${notApplied} ${notApplied === 1 ? "change" : "changes"} not applied`);
 	return {
-		tone: shape.tone,
+		tone: unapplied ? "neutral" : shape.tone,
 		glyph: shape.glyph,
 		label: shape.label,
-		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
-		stopReason: turn.status === "failed" ? turn.stopReason : null,
+		detail:
+			early && ending !== null
+				? endingSentence(ending, turn.stopReason)
+				: turn.status === "succeeded"
+					? null
+					: (turn.problem?.detail ?? null),
+		stopReason: early || turn.status === "failed" ? turn.stopReason : null,
 		facts,
 		usageLabel,
 		usage: turn.usage,
@@ -1125,7 +1124,7 @@ export function draftEstimate(
 		...(attached.images > 0 ? [attached.images === 1 ? "the image" : "the images"] : []),
 	];
 	return {
-		text: `~${approximateCount(tokens)} tokens`,
+		text: `~${approximateCount(tokens)} ${tokens === 1 ? "token" : "tokens"}`,
 		tokens,
 		title:
 			`Estimated at about ${ESTIMATE_CHARACTERS_PER_TOKEN} characters a token for the typed text` +

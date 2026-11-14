@@ -87,7 +87,13 @@ function PaletteBody({ commands, onClose }: { commands: readonly Command[]; onCl
 		heading: index === 0 || results[index - 1]?.group !== command.group ? command.group : null,
 	}));
 	return (
-		<Dialog title="Run a command" eyebrow="COMMAND PALETTE" onClose={onClose} initialFocus={input}>
+		<Dialog
+			title="Run a command"
+			eyebrow="COMMAND PALETTE"
+			onClose={onClose}
+			initialFocus={input}
+			className="dialog--palette"
+		>
 			<div className="palette">
 				<div className="filter__field">
 					<span aria-hidden="true">⌕</span>
@@ -112,7 +118,9 @@ function PaletteBody({ commands, onClose }: { commands: readonly Command[]; onCl
 				</div>
 				<small role="status">{query.trim().length === 0 ? "" : `${results.length} of ${total} commands`}</small>
 				{results.length === 0 ? (
-					<p className="palette__empty">No command matches. Type a view name such as traces, or an action such as cancel.</p>
+					<p className="palette__empty">
+						No command matches. Type a view name such as traces, or an action such as new task.
+					</p>
 				) : (
 					<div className="palette__list" id={listId} role="listbox" aria-label="Commands">
 						{rows.map(({ command, index, heading }) => (

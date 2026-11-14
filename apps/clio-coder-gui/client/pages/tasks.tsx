@@ -5,6 +5,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSummary } from "../../contracts/sessions.js";
 import { ApiProblem, type Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
 import { Icon } from "../design/icons.js";
 import { InventoryMore } from "../interaction/InventoryMore.js";
 import { useInventoryWindow } from "../interaction/use-inventory-window.js";
@@ -14,6 +15,7 @@ import { InlineRename } from "../shell/InlineRename.js";
 import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useMinuteClock, useRenameTask, useSessionOverview, useTaskActions } from "../shell/tasks.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { PROJECT_TASK_FILTERS, PROJECT_TASK_SORTS, projectTaskInventory } from "./project-tasks-model.js";
 import { DeleteSession } from "./session-controls.js";
 import "./tasks.css";
@@ -85,6 +87,7 @@ export function Sessions({ client }: { client: Client }) {
 	const now = useMinuteClock();
 	const actions = useTaskActions(client);
 	const query = search.get("q") ?? "";
+	const searchBox = useSearchDraft(query, (value) => setSearch(liveSearchWith("q", value), { replace: true }));
 	const deferredQuery = useDeferredValue(query);
 	const filter = PROJECT_TASK_FILTERS.find((item) => item === search.get("status")) ?? "all";
 	const sort = PROJECT_TASK_SORTS.find((item) => item === search.get("sort")) ?? "recent";
@@ -109,7 +112,7 @@ export function Sessions({ client }: { client: Client }) {
 	const history = useQuery({
 		queryKey: ["session-history", workspaceId],
 		queryFn: ({ signal }) => client.call(routes.sessionHistory, input, undefined, signal),
-		retry: false,
+		...SESSION_HISTORY_FRESHNESS,
 		meta: { errorSurface: "inline" },
 	});
 	const overview = useSessionOverview(client);
@@ -209,9 +212,9 @@ export function Sessions({ client }: { client: Client }) {
 							<span className="sr-only">Find a task</span>
 							<input
 								type="search"
-								value={query}
+								value={searchBox.value}
 								maxLength={256}
-								onChange={(event) => set("q", event.target.value)}
+								onChange={searchBox.onChange}
 								placeholder="Search tasks, models or connections…"
 							/>
 						</label>

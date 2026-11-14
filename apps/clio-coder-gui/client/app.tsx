@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router";
+import type { AgentCapabilities } from "../contracts/capabilities.js";
 import { API_VERSION } from "../contracts/runtime.js";
 import { routes } from "../contracts/runtime-routes.js";
 import type { SessionSummary } from "../contracts/sessions.js";
@@ -8,6 +9,7 @@ import { useTokenRejected } from "./api/auth-state.js";
 import { BUNDLE_VERSION } from "./api/bundle-version.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { type ConnectionState, subscribe } from "./api/events.js";
+import { sessionQuery } from "./api/session-query.js";
 import { lastTokenWasRefused } from "./api/token.js";
 import { Icon } from "./design/icons.js";
 import { RouteFocus, SIDEBAR_ID, useSidebarCollapsed } from "./design/navigation.js";
@@ -15,7 +17,7 @@ import { dismissAll, LiveRegions, NoticeToasts, notify, useNotices } from "./des
 import { PwaBoot } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { LEFT_SIDEBAR, RIGHT_SIDEBAR, Splitter } from "./design/Splitter.js";
-import { appCommands, type PaletteTask } from "./interaction/commands.js";
+import { appCommands, liveStopTarget, type PaletteTask } from "./interaction/commands.js";
 import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
 import { useSetupStatus } from "./pages/target-onboarding.js";
 import { onReportRequest, type ReportRequest } from "./report/report-events.js";
@@ -97,6 +99,10 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [reportRequest, setReportRequest] = useState<ReportRequest | null>(null);
 	useEffect(() => onReportRequest((request) => setReportRequest(request)), []);
+	useEffect(() => {
+		// Help offers "Report a problem": warm its chunk so the dialog's first frame is the dialog.
+		if (helpOpen) void import("./report/ReportDialog.js");
+	}, [helpOpen]);
 	const openReport = useCallback(() => setReportRequest({}), []);
 	const [workspaceOpen, setWorkspaceOpen] = useState(false);
 	const [drawer, setDrawer] = useState(false);
@@ -154,10 +160,11 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	const mode = isSettingsPath(location.pathname) ? "settings" : "work";
 	const pageAside = mode === "work" && location.pathname !== "/sessions";
 	// `enabled: false` reads the cache the conversation already filled and re-renders when it
-	// changes, without this component ever fetching a session of its own.
+	// changes, without this component ever fetching a session of its own. The options are the
+	// conversation's own: an observer's query function replaces the shared query's, so a different one
+	// here would make the next refetch skip the session buffer and fold an out-of-order snapshot.
 	const session = useQuery({
-		queryKey: ["session", sessionId ?? ""],
-		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
+		...sessionQuery(client, sessionId ?? ""),
 		select: (value) => ({
 			workspaceId: value.workspaceId,
 			title: taskTitle(value),
@@ -292,6 +299,18 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			current = false;
 		};
 	}, [paletteOpen, workspaces.data, overview.data, queries, client]);
+	// The open task's commands, read with the composer's own query and only while the palette is open.
+	const taskCatalog = useQuery({
+		queryKey: ["session-commands", sessionId ?? ""],
+		queryFn: () => client.call(routes.sessionCommands, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
+		enabled:
+			paletteOpen &&
+			sessionId !== null &&
+			snapshot?.state === "open" &&
+			!!queries.getQueryData<AgentCapabilities>(["session-capabilities", sessionId])?.commands,
+		staleTime: 30_000,
+		retry: false,
+	});
 	const openTask = useCallback(
 		(id: string) => {
 			const sessions = overview.data?.sessions ?? [];
@@ -314,6 +333,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 					sessionOpen: snapshot?.state === "open",
 					hasNotices: notices.length > 0,
 					tasks: paletteTasks,
+					catalog: snapshot?.state === "open" ? taskCatalog.data : undefined,
 				},
 				{
 					navigate: (path) => void navigate(path),
@@ -325,9 +345,25 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 					openWorkspace,
 					openTask,
 					openWindow,
-					cancelTurn: (turnId) => {
-						if (sessionId === null || !snapshot) return;
-						controls.start({ id: sessionId, ...snapshot, currentTurnId: turnId }, "stop");
+					// The row's turn id was read when the palette rendered; the stop names the turn running now.
+					cancelTurn: () => {
+						if (sessionId === null) return;
+						const target = liveStopTarget(sessionId, queries.getQueryData(sessionQuery(client, sessionId).queryKey));
+						if (target) controls.start(target, "stop");
+					},
+					runTaskCommand: (name) => {
+						if (sessionId === null) return;
+						void import("./chat/Composer.js").then((module) => {
+							if (!module.runComposerCommand(sessionId, name))
+								requestAnimationFrame(() => requestAnimationFrame(() => module.fillComposer(sessionId, `/${name}`)));
+						});
+					},
+					fillTaskCommand: (name) => {
+						if (sessionId === null) return;
+						// The palette hands focus back a frame after it closes; the composer takes it after that.
+						void import("./chat/Composer.js").then((module) =>
+							requestAnimationFrame(() => requestAnimationFrame(() => module.fillComposer(sessionId, `/${name} `))),
+						);
 					},
 					closeSession: () => {
 						if (sessionId === null || !snapshot) return;
@@ -351,6 +387,9 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			paletteTasks,
 			openTask,
 			openWindow,
+			queries,
+			client,
+			taskCatalog.data,
 		],
 	);
 	const shell = useMemo<ShellApi>(
@@ -476,6 +515,21 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			<a className="skip-link" href="#main">
 				Skip to content
 			</a>
+			{sessionId !== null ? (
+				// biome-ignore lint/a11y/useValidAnchor: a skip link is an anchor by convention; the composer field has no id this block can point at, so the click moves focus itself.
+				<a
+					className="skip-link"
+					href="#composer"
+					onClick={(event) => {
+						const field = document.querySelector<HTMLTextAreaElement>(".composer__field");
+						if (!field) return;
+						event.preventDefault();
+						field.focus();
+					}}
+				>
+					Skip to message box
+				</a>
+			) : null}
 			<aside
 				className="wb-sidebar"
 				id={SIDEBAR_ID}

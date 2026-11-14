@@ -15,8 +15,17 @@ import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
 import { routeFacts } from "../client/chat/route.js";
 import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
+import { settledKey, settledTurns } from "../client/chat/session-telemetry.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
-import { activeTurn, type ChatTurn, groupTurns, sameTurnView, turnStatuses } from "../client/chat/turns.js";
+import {
+	activeTurn,
+	type ChatTurn,
+	endingSentence,
+	groupTurns,
+	sameTurnView,
+	turnEnding,
+	turnStatuses,
+} from "../client/chat/turns.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
 import { applySessionDelta, emptySession } from "../contracts/session-projection.js";
@@ -232,7 +241,11 @@ test("summarizeActivity derives a label and a tone from statuses alone", () => {
 	const cases: ReadonlyArray<readonly [readonly TimelineItem[], string, string]> = [
 		[[tool("a", "completed"), tool("b", "completed"), tool("c", "completed")], "3 tools completed", "success"],
 		[[tool("a", "completed")], "1 tool completed", "success"],
-		[[tool("a", "in_progress"), tool("b", "pending"), tool("c", "completed")], "2 tools running · 1 done", "action"],
+		[
+			[tool("a", "in_progress"), tool("b", "pending"), tool("c", "completed")],
+			"1 tool running · 1 done · 1 queued",
+			"action",
+		],
 		[[tool("a", "failed"), tool("b", "completed"), tool("c", "completed")], "1 tool failed · 2 completed", "error"],
 		[[tool("a", "cancelled"), tool("b", "rejected")], "2 tools stopped", "neutral"],
 		[[tool("a", "completed"), tool("b", "expired")], "1 tool completed · 1 stopped", "success"],
@@ -404,6 +417,13 @@ test("the live status machine reaches all nine states from one realistic sequenc
 		record(liveStatus(chatTurn([user], "running"), turnRow({ id: "t", status: "running" }), null)),
 		"starting",
 	);
+	// Once the server admits the turn the agent holds it: the line says Working, as the header does (inspection F14).
+	const admitted = liveStatus(
+		chatTurn([user], "running"),
+		turnRow({ id: "t", status: "running", startedAt: "2026-09-20T00:00:00.000Z" }),
+		null,
+	);
+	assert.deepEqual([admitted.state, admitted.label], ["acting", "Working"]);
 	// A live worker outranks the orchestrator's silent timeline: "Starting" through a five-minute
 	// dispatch is a lie.
 	const waitingOnWorker = liveStatus(chatTurn([user], "running"), undefined, null, false, 2);
@@ -424,7 +444,8 @@ test("the live status machine reaches all nine states from one realistic sequenc
 	);
 	assert.equal(record(parked), "waiting");
 	assert.equal(parked.detail, "Write src/lexer.ts");
-	assert.equal(record(liveStatus(chatTurn([user, notice], "running"), undefined, null)), "waiting");
+	// A trailing notice is not a pending approval; only a real `Permission` parks the chip.
+	assert.equal(record(liveStatus(chatTurn([user, notice], "running"), undefined, null)), "acting");
 	assert.equal(
 		record(liveStatus(chatTurn([user, running], "running"), turnRow({ id: "t", status: "running" }), null, true)),
 		"stopping",
@@ -498,6 +519,53 @@ test("a terminal row outranks everything, and a replayed turn is an earlier reco
 	assert.equal(isLive({ state: "done", label: "", detail: null }), false);
 	assert.equal(isLive({ state: "failed", label: "", detail: null }), false);
 	assert.equal(isLive({ state: "stopped", label: "", detail: null }), false);
+});
+
+test("turnEnding reads a settled turn's stop reason, and the chip never calls an early stop complete", () => {
+	const ending = (status: Turn["status"], stopReason: string | null) => turnEnding({ status, stopReason });
+	assert.equal(ending("succeeded", "max_tokens"), "output-limit");
+	assert.equal(ending("succeeded", "max_turn_requests"), "step-limit");
+	assert.equal(ending("succeeded", "refusal"), "refusal");
+	assert.equal(ending("succeeded", "end_turn"), "complete");
+	assert.equal(ending("succeeded", null), "complete");
+	assert.equal(ending("succeeded", "provider_quirk"), "other");
+	assert.equal(ending("failed", "max_tokens"), "failed");
+	assert.equal(ending("cancelled", "cancelled"), "stopped");
+	assert.equal(ending("running", null), null);
+	assert.equal(endingSentence("complete", "end_turn"), null);
+	assert.equal(endingSentence("other", "provider_quirk"), "The turn ended with stop reason provider_quirk.");
+
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const chip = liveStatus(
+		chatTurn([user], "succeeded"),
+		turnRow({ id: "t", status: "succeeded", stopReason: "max_turn_requests" }),
+		null,
+	);
+	assert.deepEqual(chip, {
+		state: "stopped",
+		label: "Stopped early",
+		detail: "CLIO Coder ended this turn at a step limit or loop guard. Check the last steps before you continue.",
+	});
+});
+
+test("a trailing notice with no pending permission reads as working, not as waiting for approval", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const resolved = item({ id: "2", turnId: "t", kind: "notice", status: "completed", title: "Allowed: run tests" });
+	const status = liveStatus(chatTurn([user, resolved], "running"), turnRow({ id: "t", status: "running" }), null);
+	assert.deepEqual(status, { state: "acting", label: "Working", detail: null });
+});
+
+test("a pending permission on the running turn still parks the chip on the approval", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user" });
+	const asked = item({ id: "2", turnId: "t", kind: "notice", status: "pending", title: "Run tests" });
+	const status = liveStatus(
+		chatTurn([user, asked], "running"),
+		turnRow({ id: "t", status: "running" }),
+		permission({ id: "p", turnId: "t", title: "Run tests" }),
+	);
+	assert.equal(status.state, "waiting");
+	assert.equal(status.label, "Waiting for your approval");
+	assert.equal(status.detail, "Run tests");
 });
 
 let healthSequence = 0;
@@ -766,12 +834,12 @@ test("a group only says it changed a file when the change landed", () => {
 		"changed 2 files",
 		"edits and writes share one phrase",
 	);
-	assert.equal(activityDigest([change("a", "write", "a.py", "failed", refusal)]), "1 change not approved");
+	assert.equal(activityDigest([change("a", "write", "a.py", "failed", refusal)]), "1 change refused");
 	assert.equal(activityDigest([change("a", "write", "a.py", "failed", broke)]), "1 change failed");
 	assert.equal(activityDigest([change("a", "edit", "a.py", "cancelled")]), "1 change stopped");
 	assert.equal(
 		activityDigest([change("a", "edit", "a.py", "completed"), change("b", "write", "b.py", "failed", refusal)]),
-		"changed 1 file, 1 change not approved",
+		"changed 1 file, 1 change refused",
 	);
 });
 
@@ -879,6 +947,23 @@ test("conversation routing takes reported current values and keeps target change
 	assert.equal(routeDraft(undefined, undefined, "conversation"), null);
 });
 
+test("a session config without a model option says the model is not reported, never the saved one", () => {
+	const route = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [{ id: "thinkingLevel" as const, currentValue: "high", options: [{ value: "high", name: "High" }] }],
+	});
+	assert.equal(route.text, "alpha · model not reported");
+	assert.equal(route.model, "Model not reported");
+	assert.match(route.title, /Model: not reported\./);
+	assert.doesNotMatch(`${route.text} ${route.model} ${route.title}`, /saved-model/);
+	const bare = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [],
+	});
+	assert.equal(bare.thinking, undefined, "a thinking level the session did not report is not the saved one");
+	assert.doesNotMatch(bare.title, /Thinking: off/);
+});
+
 test("config projection drops unknown controls and private metadata, and refuses malformed known options", () => {
 	const raw = [
 		{ id: "autonomy", internal: "private" },
@@ -937,10 +1022,10 @@ test("a refused call and a stopped run end without breaking, so groups count the
 		},
 	});
 	const alone = summarizeActivity([refused]);
-	assert.deepEqual([alone.label, alone.tone, alone.failed, alone.declined], ["1 tool not approved", "neutral", 0, 1]);
+	assert.deepEqual([alone.label, alone.tone, alone.failed, alone.declined], ["1 tool refused", "neutral", 0, 1]);
 	assert.equal(activityGlyph(alone), "–");
 	const both = summarizeActivity([refused, stopped]);
-	assert.deepEqual([both.label, both.tone, both.attention], ["1 tool not approved · 1 stopped", "neutral", false]);
+	assert.deepEqual([both.label, both.tone, both.attention], ["1 tool refused · 1 stopped", "neutral", false]);
 	const mixed = summarizeActivity([tool("a", "completed"), tool("b", "completed"), stopped]);
 	assert.deepEqual([mixed.label, mixed.tone], ["2 tools completed · 1 stopped", "success"]);
 	// A real failure still outranks them.
@@ -967,6 +1052,18 @@ test("engine notices stay out of the conversation segments", () => {
 		only(turns).segments.map((segment) => segment.kind),
 		["activity", "response"],
 	);
+});
+
+test("the usage and context reads re-key on every settle, past the projection's 128-turn window", () => {
+	const window = (first: number) =>
+		Array.from({ length: 128 }, (_, index) => turnRow({ id: `t${first + index}`, status: "succeeded" }));
+	// One more turn settled: the projection dropped the oldest and appended the newest.
+	const before = window(1);
+	const after = window(2);
+	assert.equal(settledTurns(before), settledTurns(after), "a count stops moving at the window");
+	assert.notEqual(settledKey(before), settledKey(after));
+	assert.equal(settledKey([...after, turnRow({ id: "t130", status: "running" })]), settledKey(after));
+	assert.equal(settledKey([turnRow({ id: "t1", status: "running" })]), "none");
 });
 
 test("a call the safety judge is holding says so in the engine's words, and a held call without it is Running", () => {

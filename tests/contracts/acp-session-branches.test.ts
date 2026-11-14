@@ -1,12 +1,15 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DomainContext } from "../../src/core/domain-loader.js";
+import { clioStateDir } from "../../src/core/xdg.js";
 import { collectSessionEntries } from "../../src/domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { createWorkspaceSnapshots } from "../../src/domains/workspace-snapshots/index.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { ACP_SESSION_TREE_MAX_NODES, projectSessionTree } from "../../src/engine/acp/session-tree.js";
@@ -327,4 +330,80 @@ test("the session tree projection keeps the active path whole when it cuts", () 
 	const kept = new Set(tree.nodes.map((node) => node.id));
 	for (let index = 0; index <= Math.floor(total / 2); index++) ok(kept.has(`n${index}`), `active n${index} kept`);
 	for (const node of tree.nodes) ok(node.parentId === null || kept.has(node.parentId), "no dangling parent");
+});
+
+test("ACP workspace snapshots list, preview and restore the files the store saved", async () => {
+	const agent = await peer();
+	try {
+		const init = (await agent.call("initialize", { protocolVersion: 1 })) as {
+			agentCapabilities: { _meta: Record<string, unknown> };
+		};
+		deepStrictEqual(init.agentCapabilities._meta["clio-coder/snapshots"], {
+			version: 1,
+			list: "_clio-coder/session/snapshots",
+			preview: "_clio-coder/session/snapshot_preview",
+			restore: "_clio-coder/session/snapshot_restore",
+		});
+		const git = (...args: string[]) =>
+			execFileSync("git", ["-c", "user.name=fixture", "-c", "user.email=fixture@invalid", ...args], {
+				cwd: agent.cwd,
+				encoding: "utf8",
+			});
+		// The scratch home's own directories sit in the workspace; ignored files are never snapshotted or touched.
+		writeFileSync(join(agent.cwd, ".gitignore"), "/data/\n/config/\n/state/\n/cache/\n/verification-slot/\n");
+		writeFileSync(join(agent.cwd, "a.txt"), "first\n");
+		git("init", "-q");
+		git("add", ".");
+		git("commit", "-qm", "init");
+		await agent.call("session/new", { cwd: agent.cwd, mcpServers: [] });
+		const sessionId = agent.contract.current()?.id as string;
+		const empty = (await agent.call("_clio-coder/session/snapshots", { sessionId })) as { snapshots: unknown[] };
+		deepStrictEqual(empty, { snapshots: [], truncated: false });
+		const store = createWorkspaceSnapshots({ stateDir: clioStateDir(), sessionId, cwd: agent.cwd });
+		const taken = await store.snapshot({ reason: "before write", tool: "write", turnId: "u1" });
+		strictEqual(taken.kind, "taken");
+		writeFileSync(join(agent.cwd, "a.txt"), "second\n");
+		writeFileSync(join(agent.cwd, "new.txt"), "added\n");
+
+		const listed = (await agent.call("_clio-coder/session/snapshots", { sessionId })) as {
+			snapshots: Array<Record<string, unknown>>;
+			truncated: boolean;
+		};
+		strictEqual(listed.truncated, false);
+		strictEqual(listed.snapshots.length, 1);
+		deepStrictEqual(
+			{ ...listed.snapshots[0], at: undefined },
+			{ n: 1, at: undefined, reason: "before write", tool: "write", turnId: "u1", differs: 2, skipped: 0 },
+		);
+
+		const plan = (await agent.call("_clio-coder/session/snapshot_preview", { sessionId, n: 1 })) as Record<
+			string,
+			unknown
+		>;
+		strictEqual(plan.kind, "plan");
+		deepStrictEqual(plan.restore, ["a.txt"]);
+		deepStrictEqual(plan.remove, ["new.txt"]);
+		strictEqual(plan.truncated, false);
+		await refusal(agent.call("_clio-coder/session/snapshot_preview", { sessionId, n: 0 }), "invalid_params");
+
+		agent.streaming = true;
+		await refusal(agent.call("_clio-coder/session/snapshot_restore", { sessionId, n: 1 }), "prompt_active");
+		strictEqual(readFileSync(join(agent.cwd, "a.txt"), "utf8"), "second\n");
+		agent.streaming = false;
+
+		const outcome = (await agent.call("_clio-coder/session/snapshot_restore", { sessionId, n: 1 })) as Record<
+			string,
+			unknown
+		>;
+		strictEqual(outcome.kind, "restored");
+		strictEqual(outcome.n, 1);
+		strictEqual(outcome.undo, 2);
+		deepStrictEqual(outcome.restored, ["a.txt"]);
+		deepStrictEqual(outcome.removed, ["new.txt"]);
+		strictEqual(readFileSync(join(agent.cwd, "a.txt"), "utf8"), "first\n");
+		strictEqual(existsSync(join(agent.cwd, "new.txt")), false);
+		await refusal(agent.call("_clio-coder/session/snapshots", { sessionId: "not-bound" }), "session_unknown");
+	} finally {
+		await agent.stop();
+	}
 });

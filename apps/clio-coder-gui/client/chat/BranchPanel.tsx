@@ -16,8 +16,9 @@ const excerpt = (text: string) => (text.length > 80 ? `${text.slice(0, 79)}…` 
 
 /**
  * The terminal's /tree and /fork. Continue moves where the next request lands and keeps every other
- * branch; Fork starts a new conversation from a turn. Neither rewinds files in the project, and both
- * wait for a running turn, because each replaces the context that turn is reading.
+ * branch; Fork starts a new conversation from a turn. Neither rewinds files in the project; the task
+ * menu's "Restore files…" (RewindDialog) does that. Both wait for a running turn, because each replaces
+ * the context that turn is reading.
  */
 export const BranchPanel = memo(function BranchPanel({
 	client,

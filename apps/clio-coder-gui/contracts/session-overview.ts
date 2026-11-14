@@ -17,6 +17,17 @@ export const SessionActivity = Type.Union([
 	Type.Literal("unknown"),
 	Type.Literal("starting"),
 ]);
+const runId = Type.String({ maxLength: 128 });
+export const SessionWorkerRun = Type.Object(
+	{
+		runId,
+		agentId: Type.Union([runId, Type.Null()]),
+		state: Type.Union([Type.Literal("active"), Type.Literal("queued")]),
+		node: Type.Union([Type.String({ maxLength: 256 }), Type.Null()]),
+	},
+	closed,
+);
+export type SessionWorkerRun = Static<typeof SessionWorkerRun>;
 export const SessionOverviewItem = Type.Object(
 	{
 		id: Id,
@@ -37,6 +48,8 @@ export const SessionOverviewItem = Type.Object(
 		workersComplete: Type.Boolean(),
 		activeJobs: Type.Integer({ minimum: 0 }),
 		nodes: Type.Array(Type.String({ maxLength: 256 }), { maxItems: 128 }),
+		/** The runs the server holds live, active first; outlives the snapshot's bounded fleet feed. */
+		runs: Type.Array(SessionWorkerRun, { maxItems: 64 }),
 		recoveredOrphan: Type.Boolean(),
 		untouched: Type.Boolean(),
 	},

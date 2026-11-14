@@ -1,0 +1,54 @@
+/* "Restore workspace files": the snapshot list beside the chosen snapshot's preview. Layout only. */
+.rewind__layout {
+	display: grid;
+	grid-template-columns: minmax(14rem, 2fr) 3fr;
+	gap: var(--space-4);
+	align-items: start;
+}
+@media (max-width: 720px) {
+	.rewind__layout {
+		grid-template-columns: 1fr;
+	}
+}
+.rewind__list {
+	display: grid;
+	gap: var(--space-1);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	max-height: 60vh;
+	overflow-y: auto;
+}
+.rewind__row {
+	display: flex;
+	gap: var(--space-2);
+	align-items: start;
+}
+.rewind__row > button:first-child {
+	display: grid;
+	flex: 1;
+	gap: var(--space-1);
+	text-align: start;
+}
+.rewind__row[data-chosen] > button:first-child {
+	border-color: var(--accent);
+}
+.rewind__when {
+	font-variant-numeric: tabular-nums;
+}
+.rewind__quiet {
+	color: var(--muted);
+}
+.rewind__preview {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.rewind__paths ul,
+.rewind__notes {
+	margin: var(--space-1) 0 0;
+	padding-inline-start: var(--space-4);
+}
+.rewind__paths code {
+	overflow-wrap: anywhere;
+}

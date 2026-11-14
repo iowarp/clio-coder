@@ -8,6 +8,7 @@ import type { Permission } from "../../contracts/permissions.js";
 import type { Turn } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
 import type { ChatTurn } from "./turns.js";
+import { endingSentence, isStoppedEarly, turnEnding } from "./turns.js";
 
 export type LiveState =
 	| "queued"
@@ -94,6 +95,9 @@ export function liveStatus(
 	if (row !== undefined && row.status !== "running") {
 		if (row.status === "failed") return { state: "failed", label: "Failed", detail: row.problem?.detail ?? null };
 		if (row.status === "cancelled") return { state: "stopped", label: "Stopped", detail: null };
+		const ending = turnEnding(row);
+		if (ending !== null && isStoppedEarly(ending))
+			return { state: "stopped", label: "Stopped early", detail: endingSentence(ending, row.stopReason) };
 		return { state: "done", label: "Complete", detail: null };
 	}
 	if (turn.origin === "replay") return { state: "done", label: "Earlier record", detail: null };
@@ -111,7 +115,12 @@ export function liveStatus(
 			detail: null,
 		};
 	const last = turn.items.at(-1);
-	if (last === undefined || last.kind === "user") return { state: "starting", label: "Starting", detail: null };
+	// Once the server has admitted the turn the agent holds the prompt, so a silent agent is working, as the header
+	// says; "Starting" is only the gap before that admission.
+	if (last === undefined || last.kind === "user")
+		return row?.startedAt
+			? { state: "acting", label: "Working", detail: null }
+			: { state: "starting", label: "Starting", detail: null };
 	// The safety judge is reviewing the call before it runs, in the engine's words.
 	if (last.kind === "tool" && last.status === "in_progress" && last.admission)
 		return { state: "waiting", label: capitalized(last.admission), detail: last.title ?? null };
@@ -119,8 +128,8 @@ export function liveStatus(
 		return { state: "acting", label: "Running", detail: last.title ?? null };
 	if (last.kind === "thought") return { state: "thinking", label: "Thinking", detail: null };
 	if (last.kind === "text") return { state: "writing", label: "Writing", detail: null };
-	if (last.kind === "notice")
-		return { state: "waiting", label: "Waiting for your approval", detail: last.title ?? null };
+	// A trailing notice is not a pending approval: resolved permissions and shell outcomes land as
+	// notices too. Only the `pending` branch above reads the real permission.
 	return { state: "acting", label: "Working", detail: null };
 }
 

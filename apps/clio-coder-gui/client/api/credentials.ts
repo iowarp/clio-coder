@@ -210,7 +210,7 @@ export function createCredentials(
 		});
 		if (response.status === 401) {
 			// Only what opens a client was refused here, so a reload would fail the same way.
-			dropStoredToken();
+			dropStoredToken(spend ? "ticket" : "credential");
 			markTokenRejected();
 			throw new CredentialProblem(unauthorizedProblem());
 		}

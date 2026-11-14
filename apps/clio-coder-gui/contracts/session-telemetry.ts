@@ -45,6 +45,8 @@ export const SessionPlan = Type.Object(
 			{ maxItems: 100 },
 		),
 		truncated: Type.Boolean(),
+		/** Tasks dropped from the board, which the engine leaves out of `entries` and counts here. */
+		cancelled: Type.Optional(count),
 	},
 	closed,
 );
@@ -123,6 +125,8 @@ export const SessionTelemetry = Type.Object(
 		trust: Type.Optional(ProjectTrust),
 		budget: Type.Optional(BudgetBlock),
 		notices: Type.Optional(Type.Array(Type.String({ maxLength: 16384 }), { maxItems: 32 })),
+		/** Moves on each `available_commands_update`, so a client re-reads the command list (it carries no list itself). */
+		commandsRevision: Type.Optional(count),
 		readouts: Type.Optional(SessionReadouts),
 	},
 	closed,

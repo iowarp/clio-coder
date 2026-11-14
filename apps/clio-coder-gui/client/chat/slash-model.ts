@@ -31,7 +31,7 @@ interface EntryBase {
 	readonly group: SlashGroup;
 }
 
-export type SlashGroup = "CLIO Coder commands" | "Session" | "Open beside";
+export type SlashGroup = "CLIO Coder commands" | "Session" | "Open beside" | "Also works";
 
 export type SlashEntry =
 	| (EntryBase & {
@@ -42,7 +42,8 @@ export type SlashEntry =
 			readonly needsArgs: boolean;
 	  })
 	| (EntryBase & { readonly kind: "action"; readonly action: SlashAction; readonly title: string })
-	| (EntryBase & { readonly kind: "pane"; readonly view: SlashPaneView });
+	| (EntryBase & { readonly kind: "pane"; readonly view: SlashPaneView })
+	| (EntryBase & { readonly kind: "alias"; readonly alias: SlashAlias });
 
 type ArgsSpec = NonNullable<CommandDescriptor["args"]>;
 type LeafArgs = Pick<ArgsSpec, "flags" | "positionals">;
@@ -262,7 +263,10 @@ export function slashQuery(text: string): string | null {
 export function filterSlashEntries(entries: readonly SlashEntry[], query: string): readonly SlashEntry[] {
 	const needle = query.trimStart().replace(/\s+/gu, " ");
 	if (needle.trim() === "") return entries;
-	if (/\s$/u.test(needle) && entries.some((entry) => entry.kind === "command" && entry.name === needle.trim()))
+	if (
+		/\s$/u.test(needle) &&
+		entries.some((entry) => (entry.kind === "command" || entry.kind === "alias") && entry.name === needle.trim())
+	)
 		return [];
 	return entries
 		.map((entry, index) => {
@@ -281,12 +285,215 @@ export function completedDraft(entry: SlashEntry): string {
 	return `/${entry.name} `;
 }
 
-/** A session action or pane view named exactly by the line, for Enter with the palette closed. */
+/** A session action, pane view or terminal name named exactly by the line, for Enter with the palette closed. */
 export function exactEntry(entries: readonly SlashEntry[], text: string): SlashEntry | null {
 	const query = slashQuery(text.trim());
 	if (query === null) return null;
 	const name = query.trim().replace(/\s+/gu, " ");
 	return entries.find((entry) => entry.kind !== "command" && entry.name === name) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Terminal names the app answers
+// ---------------------------------------------------------------------------
+
+/** What a terminal habit does here. A notice keeps the draft and says why nothing ran. */
+export type SlashAliasTarget =
+	| { readonly kind: "command"; readonly command: string; readonly subcommand: string; readonly passRest: boolean }
+	| { readonly kind: "control"; readonly control: "model" | "new" | "help" | "rename" }
+	| { readonly kind: "pane"; readonly view: SlashPaneView }
+	| { readonly kind: "navigate"; readonly path: string }
+	| { readonly kind: "action"; readonly action: SlashAction }
+	| { readonly kind: "notice"; readonly message: string };
+
+export interface SlashAlias {
+	/** As typed after the slash, `status` or `extensions dev`. */
+	readonly name: string;
+	readonly summary: string;
+	readonly target: SlashAliasTarget;
+	/** Picking completes `/name ` for the operator to finish instead of running it. */
+	readonly needsText: boolean;
+}
+
+export interface SlashAliasSpec {
+	readonly names: readonly string[];
+	readonly summary: string;
+	readonly target: SlashAliasTarget;
+	readonly hint?: string;
+	readonly needsText?: boolean;
+	/** Absent when the name always works. */
+	readonly available?: (facts: SlashFacts) => boolean;
+}
+
+const hasSubcommand = (facts: SlashFacts, command: string, subcommand: string): boolean =>
+	!!facts.capabilities?.commands &&
+	!!facts.catalog?.commands.some(
+		(entry) => entry.name === command && Object.hasOwn(entry.args.subcommands ?? {}, subcommand),
+	);
+
+const terminalOnly = (name: string): SlashAliasSpec => ({
+	names: [name],
+	summary: "Terminal commands with no equivalent in this app",
+	target: {
+		kind: "notice",
+		message: `/${name} is a terminal command and has no equivalent in this app.`,
+	},
+});
+
+/** Names follow `src/interactive/slash-commands.ts`; each one lands on the app's own control for it. */
+export const SLASH_ALIASES: readonly SlashAliasSpec[] = [
+	{
+		names: ["compact"],
+		summary: "Compact this conversation's context. Words after the name guide the summary",
+		hint: "[instructions]",
+		target: { kind: "command", command: "context", subcommand: "compact", passRest: true },
+		available: (facts) => hasSubcommand(facts, "context", "compact"),
+	},
+	{
+		names: ["init"],
+		summary: "Run /context init in this task",
+		target: { kind: "command", command: "context", subcommand: "init", passRest: false },
+		available: (facts) => hasSubcommand(facts, "context", "init"),
+	},
+	{
+		names: ["model", "thinking"],
+		summary: "Choose the model and thinking level for this conversation",
+		target: { kind: "control", control: "model" },
+	},
+	{ names: ["new", "clear"], summary: "Start a new task in this project", target: { kind: "control", control: "new" } },
+	{
+		names: ["status", "cost", "usage"],
+		summary: "Open usage and cost beside the conversation",
+		target: { kind: "pane", view: "usage" },
+		available: (facts) => !!facts.capabilities?.telemetry && facts.paneAvailable,
+	},
+	{ names: ["help"], summary: "Open shortcuts and help", target: { kind: "control", control: "help" } },
+	{ names: ["settings", "config"], summary: "Open Settings", target: { kind: "navigate", path: "/settings" } },
+	{
+		names: ["login"],
+		summary: "Manage saved connections in Settings",
+		target: { kind: "navigate", path: "/settings/targets" },
+	},
+	{
+		names: ["tree"],
+		summary: "Continue from an earlier turn or fork from it",
+		target: { kind: "action", action: "tree" },
+		available: (facts) => !!facts.capabilities?.branches,
+	},
+	{
+		names: ["fork"],
+		summary: "Start a new conversation from a turn",
+		target: { kind: "action", action: "fork" },
+		available: (facts) => !!facts.capabilities?.branches?.fork,
+	},
+	{
+		names: ["resume"],
+		summary: "Open Sessions to continue another task",
+		target: { kind: "navigate", path: "/sessions" },
+	},
+	{ names: ["library"], summary: "Open the Library", target: { kind: "navigate", path: "/library" } },
+	{ names: ["research"], summary: "Open Research", target: { kind: "navigate", path: "/research" } },
+	{
+		names: ["quit", "exit"],
+		summary: "Close this task from the task menu",
+		target: {
+			kind: "notice",
+			message: "Close this task from the task menu, or close the window. CLIO Coder keeps running.",
+		},
+	},
+	{
+		names: ["rename"],
+		summary: "Rename this task",
+		hint: "<name>",
+		needsText: true,
+		target: { kind: "control", control: "rename" },
+	},
+	{
+		names: ["rewind", "undo"],
+		summary: "Restore files from a snapshot",
+		// The task page opens its restore dialog from the URL; the dialog says so when the engine keeps no snapshots.
+		target: { kind: "navigate", path: "?rewind=1" },
+	},
+	...["restart", "upgrade", "panes", "music", "files", "extensions dev"].map(terminalOnly),
+	// x090 spec 12
+	{
+		names: ["trust"],
+		summary: "Review the project files this task ignored",
+		target: { kind: "notice", message: "Open Project trust in the task pane to review the files this task ignored." },
+	},
+];
+
+const ALIAS_BY_NAME = new Map<string, SlashAliasSpec>(
+	SLASH_ALIASES.flatMap((spec) => spec.names.map((name) => [name, spec] as const)),
+);
+
+// `extensions` starts `/extensions dev`, so a line's first word alone is enough to know the table answers it.
+const ALIAS_FIRST_WORDS = new Set([...ALIAS_BY_NAME.keys()].map((name) => name.split(" ")[0]));
+
+/** True for a name, or a two-word name's first word, the alias table answers, whether or not this task can serve it. */
+export function isSlashAlias(name: string): boolean {
+	return ALIAS_FIRST_WORDS.has(name);
+}
+
+function aliasFor(name: string, spec: SlashAliasSpec): SlashAlias {
+	return { name, summary: spec.summary, target: spec.target, needsText: spec.needsText === true };
+}
+
+/**
+ * The terminal name a line starts with, and what follows it. A name the catalog or a prompt template
+ * owns is theirs, so this returns null for it as it does for a name nobody owns. A name this task
+ * cannot serve resolves to a notice that says so, rather than reaching the agent as a prompt.
+ */
+export function resolveAlias(text: string, facts: SlashFacts): { alias: SlashAlias; rest: string } | null {
+	const match = COMMAND_LINE.exec(text.trim());
+	const typed = match?.[1];
+	if (!match || typed === undefined) return null;
+	if (facts.catalog?.commands.some((entry) => entry.name === typed) || facts.catalog?.prompts?.includes(typed))
+		return null;
+	const rest = (match[2] ?? "").trim();
+	const second = /^\S+/u.exec(rest)?.[0];
+	const pair = second === undefined ? undefined : ALIAS_BY_NAME.get(`${typed} ${second}`);
+	const name = pair ? `${typed} ${second}` : typed;
+	const spec = pair ?? ALIAS_BY_NAME.get(typed);
+	if (!spec) return null;
+	const after = pair && second !== undefined ? rest.slice(second.length).trim() : rest;
+	if (spec.available && !spec.available(facts))
+		return {
+			alias: { ...aliasFor(name, spec), target: { kind: "notice", message: `/${name} is not available in this task.` } },
+			rest: after,
+		};
+	return { alias: aliasFor(name, spec), rest: after };
+}
+
+/**
+ * The palette's last group: every terminal name this task can serve that no earlier row already
+ * lists. Notices are left out; a row that only explains itself is not something to pick.
+ */
+export function aliasEntries(facts: SlashFacts, listed: readonly SlashEntry[]): readonly SlashEntry[] {
+	if (!facts.capabilities) return [];
+	const taken = new Set([
+		...listed.map((entry) => entry.name),
+		...(facts.catalog?.commands.map((entry) => entry.name) ?? []),
+		...(facts.catalog?.prompts ?? []),
+	]);
+	const entries: SlashEntry[] = [];
+	for (const spec of SLASH_ALIASES) {
+		if (spec.target.kind === "notice" || (spec.available && !spec.available(facts))) continue;
+		for (const name of spec.names) {
+			if (taken.has(name)) continue;
+			taken.add(name);
+			entries.push({
+				kind: "alias",
+				id: `alias:${name}`,
+				name,
+				summary: spec.summary,
+				hint: spec.hint ?? "",
+				group: "Also works",
+				alias: aliasFor(name, spec),
+			});
+		}
+	}
+	return entries;
 }
 
 export type SlashLine =

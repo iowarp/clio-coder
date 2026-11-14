@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import "./splitter.css";
 
 export interface SplitterSpec {
@@ -83,6 +83,16 @@ export function Splitter({
 	const [width, setWidth] = useState(() => storedWidth(spec) ?? spec.initial);
 	const current = useRef(width);
 	const frame = useRef(0);
+	// A panel collapsed to no width keeps its grip out of the Tab order, so focus never lands on a
+	// control that cannot be seen.
+	const [collapsed, setCollapsed] = useState(false);
+	useEffect(() => {
+		const panel = grip.current?.parentElement;
+		if (!panel || typeof ResizeObserver !== "function") return;
+		const observer = new ResizeObserver(() => setCollapsed(panel.getBoundingClientRect().width < 1));
+		observer.observe(panel);
+		return () => observer.disconnect();
+	}, []);
 
 	const write = useCallback(
 		(next: number) => {
@@ -141,7 +151,8 @@ export function Splitter({
 			aria-valuemax={spec.max}
 			aria-valuenow={width}
 			title={`${label}. Double-click to reset.`}
-			tabIndex={0}
+			tabIndex={collapsed ? -1 : 0}
+			aria-hidden={collapsed || undefined}
 			onDoubleClick={reset}
 			onPointerDown={(event) => {
 				if (event.button !== 0) return;
