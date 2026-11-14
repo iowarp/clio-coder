@@ -412,15 +412,15 @@
 			"alt": "Terminal recording: clio-coder doctor's shell sandbox row lists the writable roots and masked secret files. On a scratch branch the agent deletes dist/, rebuilds it with node build.mjs, and runs the declared test check with 7 passed. /rewind lists the snapshot taken before the delete; its preview says the workspace already matches and gitignored files are never touched, and Esc leaves without restoring.",
 			"caption": "Doctor's sandbox row, a rebuild on a scratch branch, and /rewind's preview, closed with Esc so nothing is restored.",
 			"interface": "Terminal",
-			"version": "0.8.0",
-			"capturedAt": "2026-11-13",
-			"source": "CLIO Coder 0.8.0 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-let-it-work) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Chat: Qwen 3.8 27B served through a LiteLLM gateway; the capture harness exposes it under a loopback alias.",
+			"version": "0.8.1",
+			"capturedAt": "2026-11-14",
+			"source": "CLIO Coder 0.8.1 installed with npm install -g, recorded by site/capture/run.mjs (scenario cast-let-it-work) in a fresh profile: home /home/researcher, host lab, 120x36 terminal, asciinema v2, idle capped at 1s. Settings: interface: { mode: fullscreen, outputDetail: compact }. Chat: Claude Haiku 5.5 through a Claude subscription (target anthropic-max).",
 			"cast": "assets/casts/cast-let-it-work.cast",
 			"transcript": "assets/casts/cast-let-it-work.txt",
 			"cols": 120,
 			"rows": 36,
-			"duration": 39,
-			"posterAt": 30.495
+			"duration": 30.7,
+			"posterAt": 22.498
 		},
 		"tui-verify-table": {
 			"image": "assets/guides/tui-verify-table.webp",

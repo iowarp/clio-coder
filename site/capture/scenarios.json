@@ -111,13 +111,6 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "Saved\\. Chat and workers use this model",
-					"timeout": 60
-				},
-				{
-					"marker": "saved"
-				},
-				{
 					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 2

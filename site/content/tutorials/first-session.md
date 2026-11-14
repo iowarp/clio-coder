@@ -29,7 +29,7 @@ No model target is configured. Clio needs a model before it can do anything else
 
 Setup looks for a provider key in your environment, a stored sign-in and a local model server, and lists what it found. Pick one, or choose **Set up something else** and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Use a model that supports tool calling.
 
-CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the recording, setup found the stored ChatGPT sign-in, recommended gpt-6-luna and saved it:
+CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the first recording, setup found the stored ChatGPT sign-in and recommended gpt-6-luna. Choosing it printed these lines before chat opened:
 
 ```text
 ◇  Testing openai-codex / gpt-6-luna ... answered in 1.5 s.
