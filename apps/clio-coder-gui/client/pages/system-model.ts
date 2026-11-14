@@ -18,6 +18,8 @@ export function systemStatus(
 	connection: ConnectionState,
 	findings: readonly Finding[] | undefined,
 	failed: boolean,
+	/** The check is scheduled or running, so "Not checked" would undersell it. */
+	checking = false,
 ): { tone: StatusTone; label: string; detail: string } {
 	if (connection !== "Connected") {
 		return connection === "Connecting…"
@@ -27,6 +29,8 @@ export function systemStatus(
 				: { tone: "fail", label: "Offline", detail: "The CLIO Coder runtime is not connected." };
 	}
 	if (failed) return { tone: "unverified", label: "Unverified", detail: "Installation diagnostics are unavailable." };
+	if (!findings && checking)
+		return { tone: "unverified", label: "Checking", detail: "Checking CLIO Coder installation diagnostics." };
 	if (!findings)
 		return {
 			tone: "unverified",

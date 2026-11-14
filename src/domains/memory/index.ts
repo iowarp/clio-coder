@@ -69,10 +69,13 @@ export { traceObservation } from "./observation-events.js";
 export { isMemoryConsumptionReceipt, OBSERVATION_PROMPT } from "./observations.js";
 export {
 	approveMemoryRecord,
+	type ClearedMemoryRegressions,
 	canonicalMemoryRepositoryIdentity,
 	eligibleMemoryRecords,
+	memoryRegressionsClearedPath,
 	primeMemoryRepositoryFingerprint,
 	pruneStaleMemory,
+	readClearedMemoryRegressions,
 	rejectMemoryRecord,
 } from "./operations.js";
 export {

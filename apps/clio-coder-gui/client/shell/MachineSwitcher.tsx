@@ -21,14 +21,24 @@ export function MachineSwitcher({
 	current: string | null;
 	remoteHost: string | undefined;
 }) {
-	const { attachments, error, loading, pending, open } = useMachineAttach(local);
+	// The list costs a registry read on the server, and only the open menu shows it: read it when the menu first
+	// opens, not on every page load.
+	const [wanted, setWanted] = useState(false);
+	const { attachments, error, loading, pending, open } = useMachineAttach(local, wanted);
 	const ref = useRef<HTMLDetailsElement>(null);
 	const [opened, setOpened] = useState(false);
 	useDetailsDismiss(ref, opened);
 	const choices = machineChoices(attachments, current);
 	const label = switcherLabel(current, remoteHost);
 	return (
-		<details className="wb-menu wb-machine" ref={ref} onToggle={(event) => setOpened(event.currentTarget.open)}>
+		<details
+			className="wb-menu wb-machine"
+			ref={ref}
+			onToggle={(event) => {
+				setOpened(event.currentTarget.open);
+				if (event.currentTarget.open) setWanted(true);
+			}}
+		>
 			<summary className="wb-action" aria-label={`Machine: ${label}. Switch machine`} title="Switch machine">
 				<Icon name="system" />
 				<span className="wb-machine__label">{label}</span>

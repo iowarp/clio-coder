@@ -93,9 +93,9 @@ export async function measurePairs(
 }
 
 /**
- * Run a declared check as `verify` would from `worktree`. `runProjectCheck` resolves the check's cwd and any
- * reference file against the process working directory, so the process enters the worktree for the call. The
- * research loop is the only work in its process while this runs.
+ * Run a declared check as `verify` would from `worktree`. The check's cwd, reference and baseline resolve against the
+ * worktree passed as the workspace root; the process working directory never changes, so nothing else in the process
+ * that keys on it (claim capture, delivery, project lookups) can observe the worktree mid-run.
  */
 export async function runGateIn(
 	worktree: string,
@@ -103,16 +103,11 @@ export async function runGateIn(
 	signal?: AbortSignal,
 	shellSandbox?: MainSandboxPolicy,
 ): Promise<ToolResult> {
-	const previous = process.cwd();
-	process.chdir(worktree);
-	try {
-		return await runProjectCheck(check, {
-			...(signal !== undefined ? { signal } : {}),
-			...(shellSandbox !== undefined ? { shellSandbox } : {}),
-		});
-	} finally {
-		process.chdir(previous);
-	}
+	return runProjectCheck(check, {
+		workspaceRoot: worktree,
+		...(signal !== undefined ? { signal } : {}),
+		...(shellSandbox !== undefined ? { shellSandbox } : {}),
+	});
 }
 
 /** `target` as a repository-relative posix path under `rootReal`, or null when it lies outside. */

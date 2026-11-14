@@ -53,7 +53,7 @@ safety:
 	assert.ok(!refused.ok);
 	const errors = refused.errors.join("\n");
 	for (const key of ["targets[0].auth.apiKey", "targets[0].trustedUnmediated", "safety"])
-		assert.match(errors, new RegExp(key.replace(/[[\].]/g, "\\$&")));
+		assert.ok(errors.includes(key), errors);
 });
 
 test("importing adds the target and both defaults, re-importing is a no-op, and a different id is refused", async (t) => {

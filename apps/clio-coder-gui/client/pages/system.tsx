@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useSearchParams } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
+import { BUNDLE_VERSION } from "../api/bundle-version.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { humanizeKey } from "../design/facts-model.js";
@@ -27,7 +28,21 @@ import {
 import { findingAction, findingCollapsed, healthGroups, healthOverview, SYSTEM_FOLDERS } from "./system-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
 import "../design/facts.css";
+// The System views tab row is the same nav pattern as Settings', whose rules live there.
+import "./settings.css";
 import "./system.css";
+
+/** A jump to a closed disclosure opens it, so the link lands on its contents and not on a closed summary. */
+function useOpenJumpTargets() {
+	useEffect(() => {
+		const open = () => {
+			const target = window.location.hash ? document.getElementById(window.location.hash.slice(1)) : null;
+			if (target instanceof HTMLDetailsElement) target.open = true;
+		};
+		window.addEventListener("hashchange", open);
+		return () => window.removeEventListener("hashchange", open);
+	}, []);
+}
 
 function SystemTabs() {
 	return (
@@ -48,6 +63,7 @@ export function SystemPage({
 	compact?: boolean;
 	filter?: string;
 }) {
+	useOpenJumpTargets();
 	const report = useQuery({
 		meta: { errorSurface: "inline" },
 		queryKey: ["system"],
@@ -226,7 +242,8 @@ export function SystemPage({
 					<dl className="settings-list">
 						{Object.entries({
 							"CLIO Coder": meta.data.clio,
-							"Web application": meta.data.app,
+							// The server's own constant is not the app's version; the build stamps that from package.json.
+							"Web application": BUNDLE_VERSION ?? meta.data.app,
 							Node: meta.data.node,
 							Platform: meta.data.platform,
 							"Pi agent core": meta.data.piAgentCore,

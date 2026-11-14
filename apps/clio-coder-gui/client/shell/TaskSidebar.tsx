@@ -10,6 +10,8 @@ import type { ConnectionState } from "../api/events.js";
 import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
 import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
+import { focusComposerSoon } from "../interaction/focus-return.js";
+import { moveRowFocus } from "../interaction/row-keys.js";
 import { platformLabel, systemStatus } from "../pages/system-model.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
@@ -27,6 +29,7 @@ import "./task-sidebar-actions.css";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
+const moveTaskFocus = moveRowFocus(".wb-task__main");
 export function TaskSidebar({
 	client,
 	local,
@@ -52,7 +55,8 @@ export function TaskSidebar({
 	connection: ConnectionState;
 	activeWorkspaceId: string | null;
 	onOpenWorkspace: () => void;
-	onSearch: () => void;
+	/** Opens the palette; the Search button is its opener, so Esc returns there even when a click did not focus it. */
+	onSearch: (opener: HTMLElement) => void;
 	onToggle: () => void;
 	onHelp: () => void;
 	/** Called after navigation to finish any open navigation interaction. */
@@ -78,13 +82,23 @@ export function TaskSidebar({
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const overview = useSessionOverview(client);
+	// The installation check runs once the app is connected and idle, so the footer states a result, not "Not checked".
+	const [checkSystem, setCheckSystem] = useState(false);
+	const connected = connection === "Connected";
+	useEffect(() => {
+		if (!connected || checkSystem) return;
+		return afterBootIdle(() => setCheckSystem(true));
+	}, [connected, checkSystem]);
 	const system = useQuery({
 		queryKey: ["system"],
 		queryFn: () => client.call(routes.system, emptyInput),
-		enabled: false,
+		enabled: checkSystem,
 		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+		retry: false,
+		meta: { errorSurface: "inline" },
 	});
-	const status = systemStatus(connection, system.data?.findings, system.isError);
+	const status = systemStatus(connection, system.data?.findings, system.isError, true);
 	const platformName = platformLabel(platform);
 	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
 	const activeTask = sessionIdFromPath(location.pathname);
@@ -129,7 +143,12 @@ export function TaskSidebar({
 			<MachineSwitcher local={local} current={client.machine} remoteHost={remoteHost} />
 
 			<nav className="wb-side__discover" aria-label="Find and explore">
-				<button type="button" className="wb-action" onClick={onSearch} title="Search tasks and commands">
+				<button
+					type="button"
+					className="wb-action"
+					onClick={(event) => onSearch(event.currentTarget)}
+					title="Search tasks and commands"
+				>
 					<Icon name="search" />
 					<span>Search</span>
 				</button>
@@ -169,7 +188,10 @@ export function TaskSidebar({
 							type="button"
 							className="wb-action wb-action--primary"
 							disabled={actions.launch.busy}
-							onClick={() => actions.newTask(activeWorkspaceId ?? undefined)}
+							onClick={() => {
+								actions.newTask(activeWorkspaceId ?? undefined);
+								focusComposerSoon();
+							}}
 							title="Open your task composer"
 						>
 							{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
@@ -185,8 +207,9 @@ export function TaskSidebar({
 						</button>
 					</nav>
 
+					{/* Up and Down (j and k) move between task rows, as Help says. */}
 					{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
-					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace">
+					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace" onKeyDown={moveTaskFocus}>
 						<div className="wb-side__heading">
 							<h2>Workspaces</h2>
 						</div>
@@ -325,7 +348,10 @@ function ProjectGroup({
 					aria-label={`New task in ${workspace.name}`}
 					title={`New task in ${workspace.name}`}
 					disabled={actions.launch.busy}
-					onClick={() => actions.newTask(workspace.id)}
+					onClick={() => {
+						actions.newTask(workspace.id);
+						focusComposerSoon();
+					}}
 				>
 					<Icon name="plus" />
 				</button>
@@ -523,4 +549,19 @@ function TaskItem({
 			)}
 		</div>
 	);
+}
+
+const SYSTEM_CHECK_DELAY_MS = 3_000;
+
+/** Runs `run` a few seconds after boot, when the browser is idle; returns the cancel. */
+function afterBootIdle(run: () => void): () => void {
+	let idle: number | null = null;
+	const timer = setTimeout(() => {
+		if (typeof requestIdleCallback === "function") idle = requestIdleCallback(run, { timeout: 5_000 });
+		else run();
+	}, SYSTEM_CHECK_DELAY_MS);
+	return () => {
+		clearTimeout(timer);
+		if (idle !== null) cancelIdleCallback(idle);
+	};
 }

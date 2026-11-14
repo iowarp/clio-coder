@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { parseDocument } from "yaml";
+import type { DeclaredProof } from "../../core/hoare.js";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { isProjectVerifierCheckId } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
 import { normalizePerfBudget, normalizePerfTolerance, type PerfBudgetSpec } from "./perf.js";
+import { parseDeclaredProof } from "./proof.js";
 import { type DeclaredReproduce, normalizeReproduce, REPRODUCE_CATALOG_FIELDS } from "./reproduce.js";
 
 export const PROJECT_VERIFIER_CATALOG_RELATIVE_PATH = ".clio-coder/verifiers.yaml";
@@ -90,6 +93,8 @@ export interface DeclaredCheck {
 	numeric?: DeclaredNumericCompare;
 	perf?: DeclaredPerfBudget;
 	reproduce?: DeclaredReproduce;
+	proof?: DeclaredProof;
+	proofCatalogDigest?: string;
 	/**
 	 * Repository-relative directory whose subdirectories are the runs of one sweep. A check that declares it judges
 	 * one run per call, named `<id>/<run>`, with the run directory appended to its argv; it is never run bare.
@@ -114,7 +119,7 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
  * keeps the original strict-conjunction, non-finite-fails judgement.
  */
 const KIND_FIELDS = [...new Set(["reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS])];
-const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", ...KIND_FIELDS]);
+const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", "proof", ...KIND_FIELDS]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([
 	"bash",
@@ -479,6 +484,14 @@ export function parseProjectVerifierCatalogText(
 		if (tags instanceof Error) return catalogDiagnostic(tags.message);
 		const kindFields = validateCheckKind(value, location, version);
 		if (kindFields instanceof Error) return catalogDiagnostic(kindFields.message);
+		let proof: DeclaredProof | undefined;
+		if (Object.hasOwn(value, "proof")) {
+			if (kindFields.kind !== "command" || Object.hasOwn(value, "runs"))
+				return catalogDiagnostic(`${location}.proof requires a command check without runs`);
+			const parsed = parseDeclaredProof(value.proof);
+			if (parsed instanceof Error) return catalogDiagnostic(`${location}.${parsed.message}`);
+			proof = parsed;
+		}
 		let runs: string | undefined;
 		if (Object.hasOwn(value, "runs")) {
 			// A perf-budget baseline times one fixed command, and a reproduce check runs in a clean environment holding
@@ -501,6 +514,7 @@ export function parseProjectVerifierCatalogText(
 			tags,
 			source: { ...sourceRef },
 			...kindFields,
+			...(proof !== undefined ? { proof, proofCatalogDigest: createHash("sha256").update(text).digest("hex") } : {}),
 			...(runs !== undefined ? { runs } : {}),
 		});
 	}

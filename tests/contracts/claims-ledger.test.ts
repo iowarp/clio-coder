@@ -1,12 +1,16 @@
 import { strict as assert, match } from "node:assert";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
+import { runClaimsCommand } from "../../src/cli/claims.js";
 import { runCommandVector } from "../../src/core/safe-exec.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { RunResultObjectSchema } from "../../src/core/telemetry/schemas.js";
+import { UNTRUSTED_CONTENT_BANNER } from "../../src/core/untrusted-content.js";
+import { clioDataDir } from "../../src/core/xdg.js";
 import { claimLogRecordId } from "../../src/domains/claims/edges.js";
 import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
@@ -33,6 +37,17 @@ import {
 } from "../../src/domains/claims/index.js";
 import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
 import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
+import {
+	approveMemoryRecord,
+	loadMemoryRecords,
+	type MemoryRecord,
+	readClearedMemoryRegressions,
+} from "../../src/domains/memory/index.js";
+import { memoryRecordEligible } from "../../src/domains/memory/operations.js";
+import { insertMemoryRecordIfAbsent } from "../../src/domains/memory/store.js";
+import { runGateIn } from "../../src/domains/research/measure.js";
+import { finishIterationRecord } from "../../src/domains/research/record.js";
+import type { ResearchCampaign } from "../../src/domains/research/types.js";
 import type { DeclaredReproduce } from "../../src/tools/verify/reproduce.js";
 import { runProjectCheck } from "../../src/tools/verify/scripts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
@@ -391,6 +406,8 @@ describe("claims ledger (#406)", () => {
 			const first = turn("why does the stats check fail?");
 			assert.equal(first.length, 1);
 			match(first[0]?.kind === "inject_reminder" ? first[0].message : "", /^\[Claims\] Check 'stats'.*Contested/u);
+			// Check ids and paths come from the project's catalog, so the note marks itself as data.
+			assert.ok(first[0]?.kind === "inject_reminder" && first[0].message.includes(UNTRUSTED_CONTENT_BANNER));
 			// The same state is not offered again in the session.
 			assert.equal(turn("rerun stats please").length, 0);
 		} finally {
@@ -1028,6 +1045,178 @@ describe("claims ledger (#406)", () => {
 				],
 			);
 		} finally {
+			process.chdir(previousCwd);
+			env.restore();
+		}
+	});
+
+	it("regresses memory on the research iteration that records a contradiction, not on a later append", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const details = (passed: boolean) => ({
+				...numericDetails(passed, passed ? "passed" : "failed"),
+				checkout: { commit: "c".repeat(40), trackedTreeClean: true },
+			});
+			const agreed = claimFromVerifyResult({ details: details(true), project, at: "2026-11-06T00:00:01.000Z", source });
+			assert.ok(agreed);
+			await appendClaims([agreed]);
+			const memory: MemoryRecord = {
+				id: "mem-0123456789abcdef",
+				scope: "global",
+				key: "stats-agree",
+				lesson: "stats agrees with its reference",
+				evidenceRefs: [`claim:${agreed.id}`],
+				appliesWhen: [],
+				avoidWhen: [],
+				confidence: 0.9,
+				createdAt: "2026-11-06T00:00:00.000Z",
+				approved: true,
+			};
+			await insertMemoryRecordIfAbsent(clioDataDir(), memory);
+			assert.equal((await loadMemoryRecords(clioDataDir())).length, 1);
+			const campaign = { id: "r1", project } as unknown as ResearchCampaign;
+			const iterate = (iteration: number, passed: boolean, at: string) =>
+				finishIterationRecord({
+					campaign,
+					iteration,
+					at,
+					bindings: new Map(),
+					outcomes: [
+						{ check: "stats", execution: "succeeded", result: { kind: "ok", output: "", details: details(passed) } },
+					],
+				});
+			await iterate(1, false, "2026-11-06T00:00:02.000Z");
+			// The iteration itself carried the contradiction into memory; nothing else was appended.
+			const [regressed] = await loadMemoryRecords(clioDataDir());
+			assert.equal(regressed?.regressions?.length, 1);
+			assert.equal(regressed !== undefined && memoryRecordEligible(regressed), false);
+			assert.equal(readClaims(project).regressions.length, 1);
+			// A flip back to agreement adds a contradicts edge but withdraws nothing and grants nothing.
+			await iterate(2, true, "2026-11-06T00:00:03.000Z");
+			const log = readClaims(project);
+			assert.equal(log.edges.filter((edge) => edge.kind === "contradicts").length, 2);
+			assert.equal(log.regressions.length, 1);
+			const [after] = await loadMemoryRecords(clioDataDir());
+			assert.equal(after?.regressions?.length, 1);
+			assert.equal(after !== undefined && memoryRecordEligible(after), false);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("keeps the regressions an operator re-approval clears, and only operator approval clears them", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const note = "check 'stats': claim x disagrees with claim y";
+			await insertMemoryRecordIfAbsent(clioDataDir(), {
+				id: "mem-fedcba9876543210",
+				scope: "global",
+				key: "k",
+				lesson: "l",
+				evidenceRefs: ["claim:y"],
+				appliesWhen: [],
+				avoidWhen: [],
+				confidence: 0.5,
+				createdAt: "2026-11-06T00:00:00.000Z",
+				approved: true,
+				regressions: [note],
+			});
+			const now = new Date("2026-11-07T00:00:00.000Z");
+			const approved = await approveMemoryRecord(clioDataDir(), "mem-fedcba9876543210", now);
+			assert.equal(approved.regressions, undefined);
+			assert.ok(memoryRecordEligible(approved));
+			assert.deepEqual(readClearedMemoryRegressions(clioDataDir(), approved.id), [
+				{ id: approved.id, at: now.toISOString(), by: "operator", regressions: [note] },
+			]);
+			// Approving a record with nothing to clear records nothing.
+			await approveMemoryRecord(clioDataDir(), approved.id);
+			assert.equal(readClearedMemoryRegressions(clioDataDir()).length, 1);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("runs a research gate in its worktree without changing the process working directory", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const worktree = join(env.dir, "worktree");
+			mkdirSync(worktree, { recursive: true });
+			const before = process.cwd();
+			const pending = runGateIn(worktree, {
+				id: "where",
+				description: "print the cwd",
+				command: [process.execPath, "-e", "process.stdout.write(process.cwd())"],
+				cwd: ".",
+				timeoutMs: 10_000,
+				tags: [],
+				source: { kind: "project-catalog", path: ".clio-coder/verifiers.json" },
+				kind: "command",
+			});
+			// Claim capture keys on process.cwd(); it must never observe the worktree while the gate runs.
+			assert.equal(process.cwd(), before);
+			const result = await pending;
+			assert.equal(process.cwd(), before);
+			assert.equal(result.kind, "ok", result.kind === "error" ? result.message : "");
+			match(
+				result.kind === "ok" ? result.output : "",
+				new RegExp(realpathSync(worktree).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")),
+			);
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("lists a claim recorded at a commit HEAD has moved past as stale, and one at HEAD as not", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		const previousCwd = process.cwd();
+		const log = console.log;
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(repo, { recursive: true });
+			const git = (...args: string[]) =>
+				execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], {
+					cwd: repo,
+					encoding: "utf8",
+				}).trim();
+			git("init", "-q");
+			git("commit", "-q", "--allow-empty", "-m", "one");
+			const first = git("rev-parse", "HEAD");
+			const project = claimsProjectRoot(repo);
+			const claim = (commit: string, at: string) => {
+				const built = claimFromVerifyResult({
+					details: { ...numericDetails(true, "passed"), checkout: { commit, trackedTreeClean: true } },
+					project,
+					at,
+					source,
+				});
+				assert.ok(built);
+				return built;
+			};
+			const old = claim(first, "2026-11-06T00:00:01.000Z");
+			await appendClaims([old]);
+			git("commit", "-q", "--allow-empty", "-m", "two");
+			const current = claim(git("rev-parse", "HEAD"), "2026-11-06T00:00:02.000Z");
+			await appendClaims([current]);
+			process.chdir(repo);
+			const printed: string[] = [];
+			console.log = (text: string) => printed.push(text);
+			assert.equal(runClaimsCommand(["--json"]), 0);
+			const listed = (JSON.parse(printed.join("\n")) as { claims: Array<{ id: string; stale: boolean }> }).claims;
+			assert.deepEqual(
+				listed.map((item) => [item.id, item.stale]),
+				[
+					[old.id, true],
+					[current.id, false],
+				],
+			);
+			printed.length = 0;
+			assert.equal(runClaimsCommand([]), 0);
+			match(printed.join("\n"), new RegExp(`stale: recorded at commit ${first.slice(0, 12)}; HEAD is now`, "u"));
+		} finally {
+			console.log = log;
 			process.chdir(previousCwd);
 			env.restore();
 		}
