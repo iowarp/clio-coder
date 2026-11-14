@@ -4068,9 +4068,10 @@ export interface OpenSettingsOverlayDeps {
 	/**
 	 * Scoped commit for a single edit. When present, the overlay routes session
 	 * and global saves through it; when absent it falls back to writeSettings
-	 * (every edit goes global, the legacy behavior).
+	 * (every edit goes global, the legacy behavior). It returns false when a
+	 * gate held the change instead of applying it (the yolo acceptance card).
 	 */
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => unknown;
 	notice?: (level: SettingsNoticeLevel, text: string, key?: string) => void;
 	onClose: () => void;
 	/** Open focused on this section (deep link from `/settings <section>`). */
@@ -4194,7 +4195,16 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 		...(deps.settingOrigin ? { originFor: (item) => deps.settingOrigin?.(item.configPath) ?? null } : {}),
 		onApply: (plan, scope) => {
 			if (deps.commitSetting) {
-				for (const leaf of plan.leaves) deps.commitSetting(leaf.path, plan.proposed as ClioSettings, scope);
+				let held = false;
+				for (const leaf of plan.leaves) {
+					if (deps.commitSetting(leaf.path, plan.proposed as ClioSettings, scope) === false) held = true;
+				}
+				// A held change (turning yolo on waits for its acceptance card, which
+				// reports the outcome) is not announced as set (#407).
+				if (held) {
+					refreshRows();
+					return;
+				}
 			} else deps.writeSettings(plan.proposed as ClioSettings);
 			// Only a committed edit counts: a canceled or refused one never reaches this line.
 			if (isShortcutRow(items.find((entry) => entry.id === plan.rowId)))

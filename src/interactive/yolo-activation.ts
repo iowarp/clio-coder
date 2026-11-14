@@ -76,8 +76,12 @@ export interface YoloActivationDeps {
 }
 
 export interface YoloActivation {
-	/** The settings commit every interactive surface uses, with yolo gated. */
-	commit(id: string, next: ClioSettings, scope: SettingScope, source?: ConfigChangeSource): void;
+	/**
+	 * The settings commit every interactive surface uses, with yolo gated. False
+	 * means the change was held (refused, or waiting on the acceptance card, which
+	 * reports its own outcome), so the caller must not announce it as applied.
+	 */
+	commit(id: string, next: ClioSettings, scope: SettingScope, source?: ConfigChangeSource): boolean;
 	/** Ask for acceptance of a yolo the session was started with and is holding at default. */
 	requestHeldAtBoot(): Promise<void>;
 }
@@ -173,24 +177,25 @@ export function createYoloActivation(deps: YoloActivationDeps): YoloActivation {
 				current?.safety.yoloUnconfinedAccepted !== true
 			) {
 				void Promise.resolve().then(() => acceptUnconfined(scope, source));
-				return;
+				return false;
 			}
 			const turningOn = id === "safety.autonomy" && next.safety.autonomy === "yolo" && current?.safety.autonomy !== "yolo";
 			if (!turningOn) {
 				deps.commitSetting(id, next, scope, source);
-				return;
+				return true;
 			}
 			if (deps.refusal !== null) {
 				deps.notify("warning", deps.refusal, "safety:yolo-refused");
-				return;
+				return false;
 			}
 			if (current?.safety.yoloAccepted === true) {
 				deps.commitSetting(id, next, scope, source);
-				return;
+				return true;
 			}
 			// The caller (a keypress, the /settings overlay) finishes its own frame
 			// first; the card then takes the screen.
 			void Promise.resolve().then(() => accept(scope, true, source));
+			return false;
 		},
 		requestHeldAtBoot() {
 			if (deps.getSettings() === undefined || deps.refusal !== null) return Promise.resolve();

@@ -87,6 +87,14 @@ export const ACP_NOTICE_META_KEY = "clio-coder/notice";
 export const ACP_EGGS_META_KEY = "clio-coder/eggs";
 /** `{ state }` of the always-on memory guardian, pushed on `session_info_update` when it changes. */
 export const ACP_MEMORY_META_KEY = "clio-coder/memory";
+/**
+ * Beside `_meta["clio-coder/notice"]` on the chunk that reports an operator
+ * memory capture ("remember that ...", `# ...`, `/remember`):
+ * `{ version: 1, captureId, action: "remembered" | "forgot" | "undone" | "refused", scope?: "session" | "project" | "global", kind?, text }`.
+ * A client draws the chip from it; its actions are `remember scope <scope> <captureId>` and `remember undo <captureId>`
+ * through `_clio-coder/commands/invoke`.
+ */
+export const ACP_MEMORY_CAPTURE_META_KEY = "clio-coder/memory-capture";
 export const ACP_TURN_META_KEY = "clio-coder/turn";
 /**
  * `{ durationMs }` on a terminal `tool_call_update`: the engine's own span for

@@ -954,6 +954,34 @@ async function closeOperatorChoiceUnanswered(
 	};
 }
 
+/** Clio answered a round of this interview for an absent operator. */
+function closedUnattended(policy: AskUserToolPolicy): boolean {
+	return policy.rounds.some((round) => round.answers.some((answer) => answer.auto === true));
+}
+
+/**
+ * A plan card asked after Clio closed the interview for an absent operator. The
+ * card is not shown, since another round would only wait out the window again,
+ * but the generic closed-interview reply ("approval means do the work") read as
+ * a go-ahead nobody gave: a local model was told to act on a plan whose card
+ * the operator never saw. A choice Clio made never authorizes a plan, so the
+ * turn ends on the plan.
+ */
+function planCloseAfterUnattendedResult(policy: AskUserToolPolicy): ToolResult {
+	const interview = compactInterview(policy, "plan_not_approved");
+	return {
+		kind: "ok",
+		output: [
+			"ask_user result: plan_not_approved",
+			"The interview already closed because the operator did not answer, so this plan card was not shown and nobody approved the plan. The turn ends here with the plan as written: make no edits, run no commands that change files and dispatch no workers on it. The plan waits for the operator's go-ahead in their next message.",
+			"",
+			JSON.stringify({ interview }, null, 2),
+		].join("\n"),
+		details: { interview, answers: [], decisions: policy.decisions },
+		terminate: true,
+	};
+}
+
 async function defaultAskUserHandler(): Promise<AskUserResult> {
 	return cancelledAskUserResult();
 }
@@ -990,7 +1018,12 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 						"ask_user: action=complete closes an interview that asked questions, and none was asked. Give the answer or result as plain text.",
 				};
 			}
-			if (policy.status === "complete") return okInterviewResult(policy, "already_complete");
+			if (policy.status === "complete") {
+				if (call.action === "ask" && closedUnattended(policy) && (call.questions ?? []).some(isPlanCloseQuestion)) {
+					return planCloseAfterUnattendedResult(policy);
+				}
+				return okInterviewResult(policy, "already_complete");
+			}
 
 			if (call.action === "complete") {
 				return completeInterview(policy, "complete", options, call.summary, call.decisions ?? []);

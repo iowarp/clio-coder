@@ -45,6 +45,7 @@ import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
+import { withOperatorSessionNotes } from "../domains/memory/index.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
@@ -183,6 +184,12 @@ import {
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
+import {
+	createOperatorMemory,
+	type OperatorMemoryChip,
+	type OperatorMemoryCommands,
+	type OperatorMemoryStorePort,
+} from "./operator-memory.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
@@ -331,6 +338,12 @@ export interface ChatNoticeEvent {
 	 * the text. A notice without a source is an event and keeps its gutter row.
 	 */
 	source?: NoticeSource;
+	/**
+	 * Present only on the notice that reports an operator memory capture
+	 * ("remember that ...", `# ...`, `/remember`). ACP carries it as
+	 * `_meta["clio-coder/memory"]` so a client can draw the chip's actions.
+	 */
+	memory?: OperatorMemoryChip;
 }
 
 /**
@@ -694,6 +707,8 @@ export interface ChatLoop {
 	activeEggs?(): readonly string[];
 	eggsCommand?(action: "status" | "off", id?: string): string;
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
+	/** `/remember` and the capture chip's actions: change scope, undo. */
+	operatorMemory?: OperatorMemoryCommands;
 	submitMachineTurn?(request: MachineTurnRequest): Promise<MachineTurnResult>;
 	/** Bound attended hosts project this ordinary turn through their existing lifecycle (#411). */
 	bindMachineTurnProjection?(host: MachineTurnProjectionHost): () => void;
@@ -1063,6 +1078,11 @@ export interface CreateChatLoopDeps {
 	/** Runs before any turn is written, so a ledger fact can precede the text it describes. */
 	beforeTurnRecorded?: (session: SessionContract) => void;
 	getMemoryRecordStatuses?: TurnContextDeps["getMemoryRecordStatuses"];
+	/**
+	 * The memory store an operator's "remember that ..." writes, lent by the
+	 * memory runtime. Absent, typed memory keywords reach the model unchanged.
+	 */
+	operatorMemory?: OperatorMemoryStorePort;
 	/** Told when an operator submits a task, before anything else about the turn runs. Never told about a continuation. */
 	onOperatorTurn?: (input: { task: string }) => void;
 	/** The operator request the run is working on, for the steering triage round. Absent, triage sends no task. */
@@ -1540,6 +1560,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	let guardStoppedOwner: AbortController | null = null;
 	let submitGeneration = 0;
 	let disposed = false;
+	const operatorMemory = createOperatorMemory({
+		store: deps.operatorMemory,
+		session: deps.session,
+		parentTurnId: () => state.lastTurnId,
+		emit: (report) =>
+			emit({
+				type: "notice",
+				level: report.level,
+				surface: "transcript",
+				text: report.text,
+				...(report.chip ? { memory: report.chip } : {}),
+			}),
+	});
 	const context = createTurnContext({
 		isTurnActive: () => turnActive,
 		turnSignal: () => submitOwner?.signal,
@@ -1560,9 +1593,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		bus: deps.bus,
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
-		getMemorySection: deps.getMemorySection,
+		// Notes the operator pinned to this session ride in the same `# Memory` section as stored records.
+		getMemorySection: (request) =>
+			withOperatorSessionNotes(deps.getMemorySection?.(request) ?? "", operatorMemory.sessionNotes()),
 		...(deps.memoryEnabled ? { memoryEnabled: deps.memoryEnabled } : {}),
-		getMemoryRecordStatuses: deps.getMemoryRecordStatuses,
+		getMemoryRecordStatuses: (ids) =>
+			new Map([...(deps.getMemoryRecordStatuses?.(ids) ?? []), ...operatorMemory.noteStandings(ids)]),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
 		...(deps.getRouteSources ? { getRouteSources: deps.getRouteSources } : {}),
@@ -2695,6 +2731,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	};
 
 	const api: ChatLoop = {
+		operatorMemory,
 		steer: (text) => queues.steer(text) !== null,
 		queueFollowUp: (text, display, origin) =>
 			queues.queueFollowUp(text, display, origin === undefined ? undefined : { origin }) !== null,
@@ -2748,6 +2785,32 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const submittedAt = performance.now();
 			const submittedWallAt = Date.now();
 			const continuedMessage = options.queued ?? options.continuesMessage;
+			// Memory hot keywords read only words the operator typed: never a continuation, a machine or peer turn, a
+			// queued resubmit (read when it was first submitted), a worker's shared answer, or file and skill bodies
+			// an expansion inlined without keeping the typed line.
+			const typedWords =
+				options.origin !== undefined ||
+				options.machineTurn !== undefined ||
+				options.requestContinuation === true ||
+				options.yoloContinuation === true ||
+				continuedMessage !== undefined ||
+				isWorkerShareNote(text)
+					? null
+					: (options.display?.text ??
+						((options.workingContextPaths?.length ?? 0) + (options.pendingSkillRequests?.length ?? 0) > 0 ? null : text));
+			const memoryCapture = typedWords === null ? null : operatorMemory.handleTyped(typedWords);
+			if (memoryCapture !== null) {
+				const { captureOnly } = await memoryCapture;
+				if (captureOnly) {
+					// The statement was the whole submission: it is stored, and no model turn follows.
+					options.onAdmitted?.();
+					return;
+				}
+				if (!admissionCurrent()) {
+					returnUnstarted();
+					return;
+				}
+			}
 			let interrupted = false;
 			if (state.streaming) {
 				if (options.machineTurn !== undefined) return;

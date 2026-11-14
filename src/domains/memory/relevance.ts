@@ -135,6 +135,8 @@ export function selectRelevantMemory(
 			const shared = [...task].filter((term) => own.has(term)).length;
 			// An exact active path or symbol is the strongest signal the gate has, so it carries even a demoted record.
 			if (candidate.matches.paths.length + candidate.matches.symbols.length > 0) return true;
+			// The operator said to remember it: a standing instruction applies whatever the turn is about.
+			if (candidate.record.provenance?.sourceKind === "operator-stated") return true;
 			return shared >= (demoted.has(candidate.record.id) ? MEMORY_GATE_DEMOTED_MIN_TERMS : MEMORY_GATE_MIN_TERMS);
 		})
 		.map((candidate) => (candidate.fallback ? { ...candidate, fallback: false } : candidate))

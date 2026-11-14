@@ -328,6 +328,19 @@ describe("ask_user tool", () => {
 		deepStrictEqual(decision?.alternatives, ["Node id"]);
 	});
 
+	it("ends the turn unapproved on a plan card asked after Clio answered for an absent operator", async () => {
+		const f = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }]);
+		await f.call({ questions: [CACHE_QUESTION] });
+		const result = await f.call({
+			questions: [{ question: "Carry out this plan?", options: [{ label: "Yes, proceed (Recommended)" }] }],
+		});
+		strictEqual(f.shown.length, 1, "the plan card waits for the operator's next message");
+		if (result.kind !== "ok") throw new Error("expected ok");
+		ok(result.output.startsWith("ask_user result: plan_not_approved\n"), result.output);
+		ok(!result.output.includes("approval means do the work"), result.output);
+		strictEqual(result.terminate, true);
+	});
+
 	// Yolo drops approval cards, not the operator: a round reaches the surface at every level.
 	it("asks the operator at yolo, of either confinement, and records their answer as theirs", async () => {
 		for (const admission of ["yolo", "default"] as const) {

@@ -16,9 +16,22 @@ import {
 	type MemoryScope,
 	type MemoryStoreValidationResult,
 	type MemoryValidationIssue,
+	OPERATOR_STATED_KINDS,
+	type OperatorStatedKind,
 } from "./types.js";
 
 const ID_PATTERN = /^mem-[a-f0-9]{16}$/;
+
+const PROVENANCE_SOURCE_KINDS: ReadonlyArray<string> = [
+	"evidence",
+	"task-bank-entry",
+	"handoff-snapshot",
+	"operator-stated",
+];
+
+function isOperatorStatedKind(value: string): value is OperatorStatedKind {
+	return (OPERATOR_STATED_KINDS as ReadonlyArray<string>).includes(value);
+}
 
 function isMemoryScope(value: string): value is MemoryScope {
 	return (MEMORY_SCOPES as ReadonlyArray<string>).includes(value);
@@ -306,12 +319,23 @@ function readOptionalMemoryProvenance(
 			"sourceEntryCreatedAt",
 			"sourceEntryLastTouchedAt",
 			"redaction",
+			"statedKind",
 		],
 		issues,
 	);
 	const sourceKind = readString(value, `${path}.sourceKind`, issues);
-	if (sourceKind !== null && !["evidence", "task-bank-entry", "handoff-snapshot"].includes(sourceKind)) {
-		issues.push({ path: `${path}.sourceKind`, message: "expected evidence, task-bank-entry, or handoff-snapshot" });
+	if (sourceKind !== null && !PROVENANCE_SOURCE_KINDS.includes(sourceKind)) {
+		issues.push({
+			path: `${path}.sourceKind`,
+			message: "expected evidence, task-bank-entry, handoff-snapshot, or operator-stated",
+		});
+	}
+	const statedKind = readOptionalSourceString(value, `${path}.statedKind`, issues);
+	if (statedKind !== undefined && (sourceKind !== "operator-stated" || !isOperatorStatedKind(statedKind))) {
+		issues.push({
+			path: `${path}.statedKind`,
+			message: "expected fact, preference, rule, or command on an operator-stated source",
+		});
 	}
 	const evidenceId = readOptionalSourceString(value, `${path}.evidenceId`, issues);
 	const sourceSessionId = readOptionalSourceString(value, `${path}.sourceSessionId`, issues);
@@ -344,10 +368,14 @@ function readOptionalMemoryProvenance(
 			issues.push({ path: `${path}.redaction`, message: "promotion source requires redaction provenance" });
 		}
 	}
-	if (sourceKind === null || !["evidence", "task-bank-entry", "handoff-snapshot"].includes(sourceKind)) {
+	if (sourceKind === "operator-stated" && (sourceEntryId !== undefined || sourceEntryKind !== undefined)) {
+		issues.push({ path, message: "operator-stated source must not carry task-memory entry fields" });
+	}
+	if (sourceKind === null || !PROVENANCE_SOURCE_KINDS.includes(sourceKind)) {
 		return undefined;
 	}
 	const provenance: MemoryRecordProvenance = { sourceKind: sourceKind as MemoryRecordProvenance["sourceKind"] };
+	if (statedKind !== undefined && isOperatorStatedKind(statedKind)) provenance.statedKind = statedKind;
 	if (evidenceId !== undefined) provenance.evidenceId = evidenceId;
 	if (sourceSessionId !== undefined) provenance.sourceSessionId = sourceSessionId;
 	if (sourceEntryId !== undefined) provenance.sourceEntryId = sourceEntryId;

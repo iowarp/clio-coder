@@ -33,7 +33,7 @@ export interface OverlayModelSelectorsDeps {
 	closeOverlay: () => void;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => unknown;
 	/** Settings shows which layer set each value when the host can say. */
 	settingOrigin?: (path: string) => SettingValueOrigin;
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
@@ -293,8 +293,9 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			...(deps.commitSetting
 				? {
 						commitSetting: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => {
-							deps.commitSetting?.(id, next, scope);
+							const applied = deps.commitSetting?.(id, next, scope);
 							deps.refreshFooter();
+							return applied;
 						},
 					}
 				: {}),
