@@ -1,6 +1,6 @@
 import { dirname, join, relative, resolve } from "node:path";
 import type { Metafile, Plugin } from "esbuild";
-import { type OutputChunk, type RollupCache, rollup } from "rollup";
+import { type OutputChunk, rollup } from "rollup";
 
 /**
  * Merges esbuild's split chunks into the few files each boot path loads.
@@ -27,10 +27,11 @@ import { type OutputChunk, type RollupCache, rollup } from "rollup";
  *      that needed three chunks of a group now parses and evaluates all of it.
  *      Guards split a group along a command's own closure until no command is
  *      estimated to lose more than {@link GUARD_FLOOR_MS} or
- *      {@link GUARD_SHARE} of its load time, and commands that tolerate one
- *      split share a bit, which keeps the count near six.
+ *      {@link GUARD_SHARE} of its load time. Commands that tolerate one split
+ *      share a bit, and fragments a guard cut for no gain are folded back.
  * If chunk A imports chunk B, B's stage is no later and its bits are a
- * superset, so the merged files form a DAG exactly as the chunks did.
+ * superset, so the merged files form a DAG exactly as the chunks did; the
+ * fold-back step re-checks that for every merge it makes.
  */
 
 /** The interactive session's `import()` crossings, in boot order (src/cli/clio.ts, src/entry/stage1-preload.ts). */
@@ -107,108 +108,131 @@ type Outputs = Metafile["outputs"];
  */
 export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>): Map<string, string> {
 	const names = Object.keys(outputs);
-	const output = (name: string) => {
-		const found = outputs[name];
-		if (!found) throw new Error(`chunk-merge: ${name} is imported but was not built`);
+	const index = new Map(names.map((name, at) => [name, at]));
+	const at = (name: string): number => {
+		const found = index.get(name);
+		if (found === undefined) throw new Error(`chunk-merge: ${name} is imported but was not built`);
 		return found;
 	};
-	const closures = new Map<string, Set<string>>();
-	const closure = (name: string): Set<string> => {
-		let seen = closures.get(name);
-		if (seen) return seen;
-		seen = new Set<string>();
-		const stack = [name];
+	const size = names.map((name) => outputs[name]?.bytes ?? 0);
+	const imports = names.map((name) =>
+		(outputs[name]?.imports ?? [])
+			.filter((edge) => edge.kind !== "dynamic-import" && !edge.external)
+			.map((edge) => at(edge.path)),
+	);
+	const closures = new Map<number, number[]>();
+	const closure = (root: number): number[] => {
+		let reached = closures.get(root);
+		if (reached) return reached;
+		const seen = new Set<number>();
+		const stack = [root];
 		for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
 			if (seen.has(next)) continue;
 			seen.add(next);
-			for (const edge of output(next).imports) {
-				if (edge.kind !== "dynamic-import" && !edge.external) stack.push(edge.path);
-			}
+			stack.push(...(imports[next] ?? []));
 		}
-		closures.set(name, seen);
-		return seen;
+		reached = [...seen];
+		closures.set(root, reached);
+		return reached;
 	};
-	const byEntryPoint = new Map<string, string>();
-	for (const name of names) {
-		const source = output(name).entryPoint;
-		if (source !== undefined) byEntryPoint.set(source, name);
-	}
-	const reach = (roots: ReadonlyArray<string>): Set<string> => {
-		const all = new Set<string>();
+	const byEntryPoint = new Map<string, number>();
+	names.forEach((name, chunk) => {
+		const source = outputs[name]?.entryPoint;
+		if (source !== undefined) byEntryPoint.set(source, chunk);
+	});
+	const reach = (roots: ReadonlyArray<string>): Set<number> => {
+		const all = new Set<number>();
 		for (const root of roots) {
-			const name = byEntryPoint.get(root);
+			const chunk = byEntryPoint.get(root);
 			// A stale root would silently leave its stage unmerged, so it fails the build instead.
-			if (name === undefined) {
+			if (chunk === undefined) {
 				throw new Error(
 					`chunk-merge: ${root} is no longer an entry or import() target; update the roots in scripts/chunk-merge.ts`,
 				);
 			}
-			for (const chunk of closure(name)) all.add(chunk);
+			for (const reached of closure(chunk)) all.add(reached);
 		}
 		return all;
 	};
-	const bytes = (chunks: Iterable<string>): number => {
-		let total = 0;
-		for (const chunk of chunks) total += output(chunk).bytes;
-		return total;
-	};
 
-	const stageOf = new Map<string, string>();
+	// A chunk's cell is its stage and exact paths. Chunks never merge across cells, which is what keeps those exact.
+	const stageOf = new Map<number, string>();
 	for (const [stage, roots] of SESSION_STAGES) {
 		for (const chunk of reach(roots)) if (!stageOf.has(chunk)) stageOf.set(chunk, stage);
 	}
-	const bits = new Map<string, Set<string>>(EXACT_PATHS.map(([name, roots]) => [name, reach(roots)]));
+	const exact = EXACT_PATHS.map(([name, roots]) => [name, reach(roots)] as const);
+	const cellOf = names.map((name, chunk) => {
+		if (entries.has(name)) return undefined;
+		const held = exact.filter(([, chunks]) => chunks.has(chunk)).map(([path]) => path);
+		return `${stageOf.get(chunk) ?? ""}|${held.join("+")}`;
+	});
 
-	let keyOf = new Map<string, string>();
-	let members = new Map<string, string[]>();
+	// group[chunk] is the group the chunk merges into, or -1 for a file of its own. A group is named by a member.
+	const group = new Int32Array(names.length).fill(-1);
+	const members = new Map<number, number[]>();
+	const weight = (id: number): number => (members.get(id) ?? []).reduce((total, chunk) => total + (size[chunk] ?? 0), 0);
+	const guards: Array<{ chunks: Set<number>; roots: ColdRoot[] }> = [];
 	const regroup = (): void => {
-		keyOf = new Map();
-		members = new Map();
-		for (const name of names) {
-			if (entries.has(name)) continue;
-			const held = [...bits].filter(([, chunks]) => chunks.has(name)).map(([bit]) => bit);
-			const stage = stageOf.get(name);
-			if (stage === undefined && held.length === 0) continue;
-			const key = `${stage ?? ""}|${held.join("+")}`;
-			keyOf.set(name, key);
-			const group = members.get(key);
-			if (group) group.push(name);
-			else members.set(key, [name]);
+		const byKey = new Map<string, number[]>();
+		cellOf.forEach((cell, chunk) => {
+			if (cell === undefined) return;
+			const held = guards.flatMap((guard, bit) => (guard.chunks.has(chunk) ? [bit] : []));
+			if (cell === "|" && held.length === 0) return;
+			const key = `${cell}|${held.join("+")}`;
+			const mates = byKey.get(key);
+			if (mates) mates.push(chunk);
+			else byKey.set(key, [chunk]);
+		});
+		group.fill(-1);
+		members.clear();
+		for (const mates of byKey.values()) {
+			const id = mates[0] ?? -1;
+			members.set(id, mates);
+			for (const chunk of mates) group[chunk] = id;
 		}
 	};
-	regroup();
 
 	// A cold root is a command or auxiliary entry that starts its own process and loads its closure from nothing.
-	const hot = new Set([...SESSION_STAGES, ...EXACT_PATHS].flatMap(([, roots]) => roots));
-	const cli = byEntryPoint.get("src/cli/index.ts");
-	const coldRoots = new Set<string>();
-	for (const edge of cli === undefined ? [] : output(cli).imports) {
-		if (edge.kind === "dynamic-import" && !edge.external) coldRoots.add(edge.path);
+	interface ColdRoot {
+		chunks: number[];
+		bytes: number;
+		allowance: number;
 	}
-	for (const entry of entries) coldRoots.add(entry);
-	for (const root of [...coldRoots]) if (hot.has(output(root).entryPoint ?? "")) coldRoots.delete(root);
-
-	/** Estimated milliseconds the merge costs `root` beyond its allowance, or 0 inside it. */
-	const excess = (root: string): number => {
-		const before = closure(root);
-		const loaded = new Set(before);
-		const files = new Set<string>();
-		for (const chunk of before) {
-			const key = keyOf.get(chunk);
-			files.add(key ?? chunk);
-			for (const mate of key === undefined ? [] : (members.get(key) ?? [])) loaded.add(mate);
+	const megabytes = (count: number): number => (count / 1e6) * MS_PER_MEGABYTE;
+	const hot = new Set([...SESSION_STAGES, ...EXACT_PATHS].flatMap(([, roots]) => roots));
+	const coldChunks = new Set<number>();
+	for (const edge of outputs[names[byEntryPoint.get("src/cli/index.ts") ?? -1] ?? ""]?.imports ?? []) {
+		if (edge.kind === "dynamic-import" && !edge.external) coldChunks.add(at(edge.path));
+	}
+	for (const entry of entries) coldChunks.add(at(entry));
+	const cold: ColdRoot[] = [];
+	for (const root of coldChunks) {
+		if (hot.has(outputs[names[root] ?? ""]?.entryPoint ?? "")) continue;
+		const chunks = closure(root);
+		const bytes = chunks.reduce((total, chunk) => total + (size[chunk] ?? 0), 0);
+		const allowance = Math.max(GUARD_FLOOR_MS, GUARD_SHARE * (megabytes(bytes) + chunks.length * MS_PER_FILE));
+		cold.push({ chunks, bytes, allowance });
+	}
+	/** Estimated milliseconds the merge costs a cold root beyond its allowance, or 0 inside it. */
+	const excess = (root: ColdRoot): number => {
+		const files = new Set<number>();
+		let loaded = 0;
+		for (const chunk of root.chunks) {
+			const id = group[chunk] ?? -1;
+			if (id === -1) loaded += size[chunk] ?? 0;
+			else if (!files.has(id)) loaded += weight(id);
+			files.add(id === -1 ? chunk : id);
 		}
-		const megabytes = (count: number): number => (count / 1e6) * MS_PER_MEGABYTE;
-		const beforeBytes = bytes(before);
-		const cost = megabytes(bytes(loaded) - beforeBytes) - (before.size - files.size) * MS_PER_FILE;
-		const allowance = Math.max(GUARD_FLOOR_MS, GUARD_SHARE * (megabytes(beforeBytes) + before.size * MS_PER_FILE));
-		return cost > allowance ? cost : 0;
+		const cost = megabytes(loaded - root.bytes) - (root.chunks.length - files.size) * MS_PER_FILE;
+		return cost > root.allowance ? cost : 0;
 	};
-	const guards: Array<{ bit: string; roots: string[] }> = [];
+
+	// Guards: split along the closure of whichever cold root loses most, until none is over its allowance.
+	regroup();
 	for (;;) {
-		let worst: string | undefined;
+		let worst: ColdRoot | undefined;
 		let worstExcess = 0;
-		for (const root of coldRoots) {
+		for (const root of cold) {
 			const over = excess(root);
 			if (over > worstExcess) {
 				worst = root;
@@ -219,32 +243,84 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 		const guarded = worst;
 		// Prefer widening a guard that already exists: every new bit splits every group it crosses.
 		const joined = guards.some((guard) => {
-			const previous = bits.get(guard.bit) ?? new Set<string>();
-			bits.set(guard.bit, new Set([...previous, ...closure(guarded)]));
+			const previous = guard.chunks;
+			guard.chunks = new Set([...previous, ...guarded.chunks]);
 			regroup();
 			if (excess(guarded) === 0 && guard.roots.every((root) => excess(root) === 0)) {
 				guard.roots.push(guarded);
 				return true;
 			}
-			bits.set(guard.bit, previous);
+			guard.chunks = previous;
 			return false;
 		});
-		if (!joined) {
-			const bit = `guard${guards.length}`;
-			guards.push({ bit, roots: [guarded] });
-			bits.set(bit, new Set(closure(guarded)));
-		}
+		if (!joined) guards.push({ chunks: new Set(guarded.chunks), roots: [guarded] });
 		regroup();
+	}
+
+	// A guard splits every group it crosses, including ones where the split saves its command nothing. Undo those:
+	// fold the smallest group of a cell into another whenever every cold root stays inside its allowance and the
+	// merged files still form a DAG (two groups with a third between them on an import path cannot merge).
+	const acyclic = (): boolean => {
+		const node = (chunk: number): number => ((group[chunk] ?? -1) === -1 ? chunk : (group[chunk] ?? -1));
+		// Kahn's algorithm over the merged files: every file settles exactly when no import cycle joins them.
+		const importers = new Map<number, number>();
+		const nodes = new Set<number>();
+		imports.forEach((targets, chunk) => {
+			nodes.add(node(chunk));
+			for (const target of targets) {
+				if (node(target) !== node(chunk)) importers.set(node(target), (importers.get(node(target)) ?? 0) + 1);
+			}
+		});
+		const ready = [...nodes].filter((id) => !importers.has(id));
+		let settled = 0;
+		for (let id = ready.pop(); id !== undefined; id = ready.pop()) {
+			settled += 1;
+			for (const chunk of members.get(id) ?? [id]) {
+				for (const target of imports[chunk] ?? []) {
+					const other = node(target);
+					if (other === id) continue;
+					const left = (importers.get(other) ?? 0) - 1;
+					importers.set(other, left);
+					if (left === 0) ready.push(other);
+				}
+			}
+		}
+		return settled === nodes.size;
+	};
+	if (!acyclic()) throw new Error("chunk-merge: the staged groups import each other in a cycle");
+	const bySize = (a: number, b: number): number => weight(a) - weight(b) || a - b;
+	for (let folded = true; folded; ) {
+		folded = false;
+		for (const small of [...members.keys()].sort(bySize)) {
+			const chunks = members.get(small);
+			if (chunks === undefined) continue;
+			const hosts = [...members.keys()].filter((id) => id !== small && cellOf[id] === cellOf[small]).sort(bySize);
+			for (const host of hosts.reverse()) {
+				const into = members.get(host) ?? [];
+				members.delete(small);
+				members.set(host, [...into, ...chunks]);
+				for (const chunk of chunks) group[chunk] = host;
+				if (acyclic() && cold.every((root) => excess(root) === 0)) {
+					folded = true;
+					break;
+				}
+				members.set(host, into);
+				members.set(small, chunks);
+				for (const chunk of chunks) group[chunk] = small;
+			}
+		}
 	}
 
 	const plan = new Map<string, string>();
 	const counters = new Map<string, number>();
-	for (const key of [...members.keys()].sort()) {
-		const stage = key.slice(0, key.indexOf("|"));
+	const ordered = [...members.keys()].sort((a, b) => (names[a] ?? "").localeCompare(names[b] ?? "", "en"));
+	for (const id of ordered) {
+		const cell = cellOf[id] ?? "|";
+		const stage = cell.slice(0, cell.indexOf("|"));
 		const prefix = stage === "" ? "shared" : `boot-${stage}`;
-		const index = (counters.get(prefix) ?? 0) + 1;
-		counters.set(prefix, index);
-		for (const chunk of members.get(key) ?? []) plan.set(chunk, `${prefix}-${index}`);
+		const count = (counters.get(prefix) ?? 0) + 1;
+		counters.set(prefix, count);
+		for (const chunk of members.get(id) ?? []) plan.set(names[chunk] ?? "", `${prefix}-${count}`);
 	}
 	return plan;
 }
@@ -264,8 +340,6 @@ export interface MergeOptions {
 	entries: ReadonlySet<string>;
 	/** The banner esbuild put on every chunk; it is removed from each and written once per merged file. */
 	banner: string;
-	/** The previous merge's parsed chunks; a watch rebuild then parses only the chunks that changed. */
-	cache?: RollupCache;
 }
 
 /** Rollup notes that describe esbuild's output rather than a defect in the merge. */
@@ -277,9 +351,7 @@ const EXPECTED_NOTES = new Set(["THIS_IS_UNDEFINED", "EVAL"]);
  * source inputs of every chunk it absorbed, so byte budgets and the release
  * artifact keep reading true numbers.
  */
-export async function mergeChunks(
-	options: MergeOptions,
-): Promise<{ files: BuiltFile[]; metafile: Metafile; cache: RollupCache | undefined }> {
+export async function mergeChunks(options: MergeOptions): Promise<{ files: BuiltFile[]; metafile: Metafile }> {
 	const { metafile, outdir, entries, banner } = options;
 	const stray = options.files.find((file) => !file.path.endsWith(".js"));
 	// Source maps would need composing through the merge; the build ships none.
@@ -321,7 +393,6 @@ export async function mergeChunks(
 	for (const entry of entries) input[relative(prefix, entry).slice(0, -".js".length)] = resolve(entry);
 	const bundle = await rollup({
 		input,
-		...(options.cache === undefined ? {} : { cache: options.cache }),
 		treeshake: false,
 		preserveEntrySignatures: "strict",
 		plugins: [
@@ -394,7 +465,7 @@ export async function mergeChunks(
 			...(entryPoint === undefined ? {} : { entryPoint }),
 		};
 	}
-	return { files, metafile: { inputs: metafile.inputs, outputs }, cache: bundle.cache };
+	return { files, metafile: { inputs: metafile.inputs, outputs } };
 }
 
 /**
@@ -405,7 +476,6 @@ export function chunkMergePlugin(banner: string): Plugin {
 	return {
 		name: "clio-chunk-merge",
 		setup(build) {
-			let cache: RollupCache | undefined;
 			build.onEnd(async (result) => {
 				if (result.errors.length > 0 || !result.metafile || !result.outputFiles) return;
 				const outdir = resolve(build.initialOptions.outdir ?? "dist");
@@ -419,9 +489,7 @@ export function chunkMergePlugin(banner: string): Plugin {
 					outdir,
 					entries,
 					banner,
-					...(cache === undefined ? {} : { cache }),
 				});
-				cache = merged.cache;
 				result.metafile = merged.metafile;
 				result.outputFiles = merged.files.map((file) => ({
 					path: file.path,

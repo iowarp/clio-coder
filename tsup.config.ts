@@ -249,8 +249,9 @@ const entries = {
 export default defineConfig({
 	entry: entries,
 	define: { __CLIO_GUI_BUNDLED__: "true", ...buildProvenanceDefines() },
-	// The merge rewrites the build result, so it runs before the build id plugin reads the output list.
-	esbuildPlugins: [chunkMergePlugin(REQUIRE_BANNER), buildIdPlugin],
+	// The merge rewrites the build result, so it runs before the build id plugin reads the output list. It adds
+	// about eight seconds, so a watch rebuild skips it and keeps esbuild's chunks: same code, slower module loading.
+	esbuildPlugins: [...(process.argv.includes("--watch") ? [] : [chunkMergePlugin(REQUIRE_BANNER)]), buildIdPlugin],
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
