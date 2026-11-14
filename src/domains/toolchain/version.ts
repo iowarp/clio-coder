@@ -63,6 +63,10 @@ export function probeBinaryVersion(binaryPath: string, args: ReadonlyArray<strin
 			// A version probe must never inherit a terminal or wait on input: some
 			// of these binaries are full-screen programs when given a tty.
 			stdio: ["ignore", "pipe", "pipe"],
+			// Closing stdin is not enough: yazi opens /dev/tty itself, puts it in raw mode to query the terminal and
+			// reads the reply, and took the operator's next keystroke with it when probed from a pane. A session of
+			// its own has no controlling terminal to open. Windows has none either way, and would get a console.
+			detached: process.platform !== "win32",
 		});
 		if (result.error === undefined) {
 			version = parseVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
