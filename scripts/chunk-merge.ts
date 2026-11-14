@@ -1,3 +1,4 @@
+import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import type { Metafile, Plugin } from "esbuild";
 import { type OutputChunk, rollup } from "rollup";
@@ -124,12 +125,17 @@ const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<st
 /**
  * Load-cost model for the guards, measured on the v081 build (Node 24, 24-core
  * WSL2 host): a megabyte of chunk costs about 25 ms to parse without the
- * compile cache and evaluate, and a file costs about 0.33 ms.
+ * compile cache and evaluate, and a file costs about 0.33 ms. The allowance
+ * sits inside the run-to-run noise of a cold command; the session's file count
+ * barely depends on it (132 files at 8 ms and 15%, 136 at these values, 154 at
+ * zero).
  */
 const MS_PER_MEGABYTE = 25;
 const MS_PER_FILE = 0.33;
-const GUARD_FLOOR_MS = 8;
-const GUARD_SHARE = 0.15;
+/** pi-ai, the heaviest external, links 125 files in about 25 ms; every external package is costed as that megabyte. */
+const EXTERNAL_PACKAGE_BYTES = 1_000_000;
+const GUARD_FLOOR_MS = 3;
+const GUARD_SHARE = 0.08;
 
 type Outputs = Metafile["outputs"];
 
@@ -159,18 +165,33 @@ interface LoadUnit {
  * outputs) always are.
  */
 export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>): Map<string, string> {
-	const names = Object.keys(outputs);
+	// A package left external loads as its own tree of files the first time anything imports it, so each one is a
+	// node of the graph too: a file of its own that no group absorbs, weighed by EXTERNAL_PACKAGE_BYTES.
+	const packageOf = (specifier: string): string | undefined => {
+		const name = specifier.split("/", specifier.startsWith("@") ? 2 : 1).join("/");
+		return isBuiltin(name) ? undefined : `package:${name}`;
+	};
+	const packages = new Set<string>();
+	for (const built of Object.values(outputs)) {
+		for (const edge of built.imports) {
+			const name = edge.external ? packageOf(edge.path) : undefined;
+			if (name !== undefined) packages.add(name);
+		}
+	}
+	const names = [...Object.keys(outputs), ...packages];
 	const index = new Map(names.map((name, chunk) => [name, chunk]));
 	const at = (name: string): number => {
 		const found = index.get(name);
 		if (found === undefined) throw new Error(`chunk-merge: ${name} is imported but was not built`);
 		return found;
 	};
-	const size = names.map((name) => outputs[name]?.bytes ?? 0);
+	const size = names.map((name) => (packages.has(name) ? EXTERNAL_PACKAGE_BYTES : (outputs[name]?.bytes ?? 0)));
 	const internal = (name: string, dynamic: boolean): number[] =>
 		(outputs[name]?.imports ?? [])
-			.filter((edge) => !edge.external && (edge.kind === "dynamic-import") === dynamic)
-			.map((edge) => at(edge.path));
+			.filter((edge) => (edge.kind === "dynamic-import") === dynamic)
+			.map((edge) => (edge.external ? packageOf(edge.path) : edge.path))
+			.filter((target) => target !== undefined)
+			.map(at);
 	const imports = names.map((name) => internal(name, false));
 	const emptySet = (): ChunkSet => new Uint32Array(Math.ceil(names.length / 32));
 	const closures: Array<ChunkSet | undefined> = [];
@@ -207,7 +228,7 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 	const stages = SESSION_STAGES.map(([stage, roots]) => [stage, reach(roots)] as const);
 	const exact = EXACT_PATHS.map(([path, roots]) => [path, reach(roots)] as const);
 	const cellOf = names.map((name, chunk) => {
-		if (entries.has(name)) return undefined;
+		if (entries.has(name) || packages.has(name)) return undefined;
 		const stage = stages.find(([, chunks]) => holds(chunks, chunk))?.[0] ?? "";
 		const held = exact.filter(([, chunks]) => holds(chunks, chunk)).map(([path]) => path);
 		return `${stage}|${held.join("+")}`;
@@ -297,7 +318,7 @@ export function planChunkGroups(outputs: Outputs, entries: ReadonlySet<string>):
 	const isRooted = (chunk: number): boolean => rooted.has(outputs[names[chunk] ?? ""]?.entryPoint ?? "");
 	const units: LoadUnit[] = [];
 	const addUnit = (from: number, to: number): void => {
-		if (isRooted(to) || (from !== -1 && holds(closure(from), to))) return;
+		if (isRooted(to) || packages.has(names[to] ?? "") || (from !== -1 && holds(closure(from), to))) return;
 		const unit = { from, to, bytes: 0, files: 0, allowance: 0 };
 		const held = from === -1 ? emptySet() : closure(from);
 		names.forEach((_, chunk) => {
