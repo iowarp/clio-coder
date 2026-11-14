@@ -210,6 +210,7 @@ export function shortAge(iso: string | undefined, nowMs: number): string {
 	return `${Math.round(days / 7)}w`;
 }
 
+/** The one set of state words a task shows in the sidebar, on a project's page and on Sessions. */
 export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
 	starting: "Starting",
 	working: "Working",
@@ -221,6 +222,8 @@ export const STATE_LABELS: Readonly<Record<TaskState, string>> = {
 	unknown: "Needs recovery",
 	idle: "",
 };
+/** An open task with nothing running or waiting; the sidebar shows its age instead. */
+export const READY_LABEL = "Ready";
 
 /** Settings mode owns every route that is not a task. */
 const SETTINGS_SEGMENTS = new Set([

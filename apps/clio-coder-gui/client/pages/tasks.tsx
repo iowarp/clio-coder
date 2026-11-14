@@ -14,6 +14,7 @@ import { HomeAside } from "../shell/HomeAside.js";
 import { InlineRename } from "../shell/InlineRename.js";
 import {
 	answeredInOverview,
+	READY_LABEL,
 	renameBlocker,
 	STATE_LABELS,
 	shortAge,
@@ -263,8 +264,10 @@ export function Sessions({ client }: { client: Client }) {
 								const session = held.get(row.id);
 								const meta = [
 									session?.model ?? summary?.model,
-									summary?.messageCount == null ? null : `${summary.messageCount.toLocaleString()} messages`,
-									STATE_LABELS[row.state] || (row.open ? "Ready to continue" : "Saved conversation"),
+									summary?.messageCount == null
+										? null
+										: `${summary.messageCount.toLocaleString()} ${summary.messageCount === 1 ? "message" : "messages"}`,
+									STATE_LABELS[row.state] || (row.open ? READY_LABEL : "Saved conversation"),
 								].filter(Boolean);
 								const body = (
 									<>
@@ -343,9 +346,13 @@ export function Sessions({ client }: { client: Client }) {
 							)}
 						</div>
 					) : null}
-					{!loading ? (
+					{loading ? null : inventory.shown.length || !inventory.counts.all ? (
 						<InventoryMore total={inventory.shown.length} limit={page.limit} label="tasks" list={list} onMore={page.more} />
-					) : null}
+					) : (
+						<div className="inventory-more">
+							<p role="status">Showing 0 of {inventory.counts.all} tasks</p>
+						</div>
+					)}
 					<footer className="taskpage__scope">
 						<Link to="/sessions">All sessions</Link>
 						<span>·</span>

@@ -19,7 +19,7 @@ import { useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { useSessionIntent } from "../shell/use-session-intent.js";
 import type { SessionFilter } from "./mission-control-model.js";
-import { ACTIVITY, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
+import { ACTIVITY, activityLabel, SESSION_FILTERS, sessionInventory } from "./mission-control-model.js";
 import { OperatorMetrics, SessionMetricFigures, useOperatorMetrics } from "./operator-metrics.js";
 import type { SessionControls } from "./session-control-actions.js";
 import "./mission-control.css";
@@ -124,7 +124,8 @@ export function MissionControl({ client }: { client: Client }) {
 							</span>
 						</span>
 					</header>
-					{!connected ? (
+					{/* The first connection is not a recovery: saying so for a moment only shifts the page. */}
+					{!connected && connection !== "Connecting…" ? (
 						<p className="mission__notice" role="status">
 							Session status may be out of date while the connection recovers. Controls return when CLIO Coder reconnects.
 						</p>
@@ -134,7 +135,7 @@ export function MissionControl({ client }: { client: Client }) {
 							[
 								["attention", "Needs you", counts.attention, "Approval, questions or recovery"],
 								["working", "Working", counts.working, "Running, starting or queued"],
-								["ready", "Ready to continue", counts.ready, "Idle or paused sessions"],
+								["ready", FILTER_NAMES.ready, counts.ready, "Idle or paused sessions"],
 							] as const
 						).map(([key, label, value, detail]) => (
 							<button
@@ -197,7 +198,7 @@ export function MissionControl({ client }: { client: Client }) {
 						))}
 					</nav>
 					{metrics.data ? <OperatorMetrics client={client} {...metrics.data} workspace={project} compact /> : null}
-					{metrics.isPending ? <p role="status">Reading recorded session metrics…</p> : null}
+					{metrics.isPending ? <MetricsPending /> : null}
 					{metrics.error ? (
 						<p role="alert">
 							Recorded metrics unavailable: {metrics.error.message}{" "}
@@ -229,8 +230,12 @@ export function MissionControl({ client }: { client: Client }) {
 							/>
 						))}
 					</div>
-					{items ? (
+					{items && shown.length ? (
 						<InventoryMore total={shown.length} limit={page.limit} label="open sessions" list={list} onMore={page.more} />
+					) : items?.length ? (
+						<div className="inventory-more">
+							<p role="status">Showing 0 of {items.length} open sessions</p>
+						</div>
 					) : null}
 					{items && shown.length === 0 ? (
 						<div className="mission__empty">
@@ -253,10 +258,13 @@ export function MissionControl({ client }: { client: Client }) {
 							)}
 						</div>
 					) : null}
-					<footer className="mission__scope">
-						Sessions held by this CLIO Coder server. Saved project history stays in each project's task list. SSH worker
-						activity appears within its owning session.
-					</footer>
+					{/* Below the cards only once they are read, so their arrival pushes nothing that was already painted. */}
+					{items || overview.error ? (
+						<footer className="mission__scope">
+							Sessions held by this CLIO Coder server. Saved project history stays in each project's task list. SSH worker
+							activity appears within its owning session.
+						</footer>
+					) : null}
 				</div>
 			</div>
 		</>
@@ -281,7 +289,7 @@ const SessionCard = memo(function SessionCard({
 	const { requestClose } = useSessionCommands();
 	const intent = useSessionIntent(client, item.id, connected);
 	const control = controls.records.find((record) => record.sessionId === item.id);
-	const state = ACTIVITY[item.activity];
+	const state = { ...ACTIVITY[item.activity], label: activityLabel(item) };
 	const held = item.state === "open" || item.state === "parked" || item.state === "starting";
 	const busy = control !== undefined && control.stage !== "complete";
 	return (
@@ -377,3 +385,24 @@ const SessionCard = memo(function SessionCard({
 		</article>
 	);
 });
+
+const METRIC_COUNTERS = ["Observed tool calls", "Tool errors", "Blocked calls", "Compactions"] as const;
+
+/** Holds the compact metrics' place while they are read, so the cards below do not move when they land. */
+function MetricsPending() {
+	return (
+		<div className="operator-metrics" aria-busy="true">
+			<dl className="operator-counters">
+				{METRIC_COUNTERS.map((label) => (
+					<div key={label}>
+						<dt>{label}</dt>
+						<dd>—</dd>
+					</div>
+				))}
+			</dl>
+			<p className="mission__metrics-pending" role="status">
+				Reading recorded session metrics…
+			</p>
+		</div>
+	);
+}

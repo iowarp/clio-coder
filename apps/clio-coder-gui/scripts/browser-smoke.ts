@@ -1934,8 +1934,7 @@ try {
 			);
 			await eventually(
 				async () =>
-					Number(await contextPanel.locator(".context-panel__meter [role=meter]").getAttribute("aria-valuenow")) >
-					15.625,
+					Number(await contextPanel.locator(".context-panel__meter [role=meter]").getAttribute("aria-valuenow")) > 15.625,
 				true,
 				"the context meter did not grow past the fixture's opening 15.6% with the answered turns",
 			);

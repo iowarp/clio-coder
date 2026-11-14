@@ -82,13 +82,23 @@ export function TaskSidebar({
 	const [shown, setShown] = useState(PROJECTS_SHOWN);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
 	const overview = useSessionOverview(client);
+	// The installation check runs once the app is connected and idle, so the footer states a result, not "Not checked".
+	const [checkSystem, setCheckSystem] = useState(false);
+	const connected = connection === "Connected";
+	useEffect(() => {
+		if (!connected || checkSystem) return;
+		return afterBootIdle(() => setCheckSystem(true));
+	}, [connected, checkSystem]);
 	const system = useQuery({
 		queryKey: ["system"],
 		queryFn: () => client.call(routes.system, emptyInput),
-		enabled: false,
+		enabled: checkSystem,
 		staleTime: 60_000,
+		refetchOnWindowFocus: false,
+		retry: false,
+		meta: { errorSurface: "inline" },
 	});
-	const status = systemStatus(connection, system.data?.findings, system.isError);
+	const status = systemStatus(connection, system.data?.findings, system.isError, true);
 	const platformName = platformLabel(platform);
 	const systemDetail = `CLIO Coder runtime · ${platform ?? "Local"}\n${status.detail}${system.data ? `\nLast checked ${formatTime(system.data.checkedAt)}` : ""}`;
 	const activeTask = sessionIdFromPath(location.pathname);
@@ -539,4 +549,19 @@ function TaskItem({
 			)}
 		</div>
 	);
+}
+
+const SYSTEM_CHECK_DELAY_MS = 3_000;
+
+/** Runs `run` a few seconds after boot, when the browser is idle; returns the cancel. */
+function afterBootIdle(run: () => void): () => void {
+	let idle: number | null = null;
+	const timer = setTimeout(() => {
+		if (typeof requestIdleCallback === "function") idle = requestIdleCallback(run, { timeout: 5_000 });
+		else run();
+	}, SYSTEM_CHECK_DELAY_MS);
+	return () => {
+		clearTimeout(timer);
+		if (idle !== null) cancelIdleCallback(idle);
+	};
 }

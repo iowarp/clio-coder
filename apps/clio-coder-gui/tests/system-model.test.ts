@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Value } from "typebox/value";
+import { ACTIVITY, activityLabel } from "../client/pages/mission-control-model.js";
 import { findingAction, healthGroups, systemStatus } from "../client/pages/system-model.js";
+import { READY_LABEL, STATE_LABELS } from "../client/shell/shell-model.js";
 import { SystemReport } from "../contracts/system.js";
 
 const report = {
@@ -51,4 +53,18 @@ test("an event connection never presents deferred diagnostics as running or heal
 	});
 	assert.equal(systemStatus("Connected", report.findings, false).label, "1 issue");
 	assert.equal(systemStatus("Reconnecting…", report.findings, false).label, "Reconnecting");
+});
+
+test("a scheduled idle check reads as checking, not as never checked", () => {
+	assert.equal(systemStatus("Connected", undefined, false, true).label, "Checking");
+	assert.equal(systemStatus("Connected", report.findings, false, true).label, "1 issue");
+	assert.equal(systemStatus("Connected", undefined, true, true).label, "Unverified");
+});
+
+test("Sessions cards use the sidebar's state words", () => {
+	assert.equal(ACTIVITY.ready.label, READY_LABEL);
+	assert.equal(ACTIVITY.queued.label, STATE_LABELS.waiting);
+	assert.equal(ACTIVITY.parked.label, STATE_LABELS.paused);
+	assert.equal(activityLabel({ activity: "failed", state: "open" }), STATE_LABELS.failed);
+	assert.equal(activityLabel({ activity: "failed", state: "failed" }), "Session failed");
 });

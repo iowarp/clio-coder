@@ -12,6 +12,7 @@ import type { Client } from "./client.js";
 import { clock } from "./clock.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { advanceSessionReadScope, resetSessionBuffers, SESSION_CACHES, sessionBuffer } from "./sessions.js";
+import { releaseStreamReads } from "./stream-gate.js";
 
 type OperationEntry = { resource: string; revision: number; operation?: Operation };
 export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
@@ -35,13 +36,18 @@ const liveTimers: RefreshTimers = {
 export function subscribe(
 	client: Client,
 	queries: QueryClient,
-	connection: (state: ConnectionState) => void,
+	reportConnection: (state: ConnectionState) => void,
 	/** A launch found this app open and named a page for the window it focused. */
 	launch: (path: string) => void = () => {},
 	/** Another window took control of a session this one held. */
 	controlLost: (notice: { title: string; detail: string }) => void = () => {},
 	timers: RefreshTimers = liveTimers,
 ) {
+	// Reads held for the first hello go ahead once the stream is open, or is not about to be.
+	const connection = (state: ConnectionState) => {
+		if (state !== "Connecting…") releaseStreamReads(client);
+		reportConnection(state);
+	};
 	let stream: EventSource | null = null;
 	let cursor: string | undefined;
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
