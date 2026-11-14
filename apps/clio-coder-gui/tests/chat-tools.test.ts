@@ -892,6 +892,22 @@ test("a note the host adds to a command's result for the model reads as a note, 
 	const card = presentTool(item);
 	assert.equal(card.output.text, "ok");
 	assert.equal(card.note, `Note to the model: ${nudge}`);
+	// The operator's copy of a bounded result carries the note too, and it is the one the pane prints.
+	const presented = toolItem({
+		status: "completed",
+		rawOutput: {
+			result: {
+				content: [{ type: "text", text }],
+				details: {
+					exitCode: 0,
+					resultDisposition: { presentation: { content: `ok\n1 gamma.txt\n\n\n[middleware:info] ${nudge}` } },
+				},
+			},
+			isError: false,
+		},
+	});
+	assert.equal(presentTool(presented).output.text, "ok\n1 gamma.txt");
+	assert.equal(presentTool(presented).note, `Note to the model: ${nudge}`);
 	// Output that merely mentions the tag mid-text is the command's own.
 	const quoted = toolItem({
 		status: "completed",

@@ -342,8 +342,9 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 	const operator = operatorText(details);
 	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
-	const split = operator === null && modelText !== null ? splitModelNotes(stripResultEnvelope(modelText)) : null;
-	const printed = operator ?? split?.body ?? null;
+	const shown = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
+	const split = shown === null ? null : splitModelNotes(shown);
+	const printed = split?.body ?? null;
 	return {
 		input,
 		result,
