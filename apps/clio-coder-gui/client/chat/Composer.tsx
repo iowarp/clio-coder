@@ -76,7 +76,6 @@ import { contextBaseline, invokeContextCommand } from "./context-command.js";
 import type { ContextOperationRef } from "./context-command-model.js";
 import { commandPresentation, contextCommandKind, startedByCommand } from "./context-command-model.js";
 import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
-import { HistorySearch } from "./HistorySearch.js";
 import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
 import {
 	applyMention,
@@ -86,6 +85,7 @@ import {
 	resolveSteerTarget,
 	steerCandidates,
 } from "./mention-model.js";
+import { HistorySearch, preloadPanels } from "./on-demand-panels.js";
 import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
@@ -371,6 +371,8 @@ export const Composer = memo(function Composer({
 	const browse = useRef<(HistoryBrowse & { readonly text: string }) | null>(null);
 	// Ctrl+R: the sent messages read when the search opened, or null while it is closed.
 	const [historySearch, setHistorySearch] = useState<readonly string[] | null>(null);
+	// History search and the slash dialogs load apart from the task page; fetch them once it is idle.
+	useEffect(() => preloadPanels(), []);
 	const slash = slashDraft && line === null && !paletteOpen ? slashNotice(draft.text, commandCatalog.data) : null;
 
 	const queuePolicy = queueAccess(steering, sessionState, running);

@@ -24,7 +24,6 @@ import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { compactionRows, summarizeHealth } from "../chat/health.js";
-import { Interview } from "../chat/Interview.js";
 import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
@@ -61,12 +60,12 @@ import "../chat/conversation.css";
 
 // The rewind dialog and transcript downloads open only from `?rewind=1` and `?download=`, so their code waits for the task page.
 const RewindHost = lazy(() => import("../chat/RewindDialog.js").then((module) => ({ default: module.RewindHost })));
+const Interview = lazy(() => import("../chat/Interview.js").then((module) => ({ default: module.Interview })));
 
 /** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
 export function Workspaces() {
 	return <Navigate to="/" replace />;
 }
-export { Sessions } from "./tasks.js";
 
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
@@ -710,12 +709,14 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								route={route}
 							/>
 						</div>
-						<Interview
-							client={client}
-							sessionId={snapshot.id}
-							sessionOpen={snapshot.state === "open"}
-							capabilities={capabilities.data}
-						/>
+						<Suspense fallback={null}>
+							<Interview
+								client={client}
+								sessionId={snapshot.id}
+								sessionOpen={snapshot.state === "open"}
+								capabilities={capabilities.data}
+							/>
+						</Suspense>
 					</div>
 					<SessionPane
 						open={pane.open}
