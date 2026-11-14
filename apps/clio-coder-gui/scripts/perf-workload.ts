@@ -356,7 +356,9 @@ try {
 	await page.waitForURL(/\/sessions\/[^/]+$/);
 	const composer = page.getByLabel("Message CLIO Coder", { exact: true });
 	await composer.waitFor();
-	const stop = page.getByRole("button", { name: "Stop turn", exact: true });
+	// A CSS match, not a role query: Playwright polls this for the whole turn, and a role query walks
+	// the accessibility of every node in a 200 KB transcript, which showed up as the page's own long tasks.
+	const stop = page.locator('button[aria-label="Stop turn"]');
 	await stop.waitFor({ state: "detached" });
 	await page.waitForTimeout(500);
 	const working = page.locator('.wb-chip--status[data-tone="working"]');

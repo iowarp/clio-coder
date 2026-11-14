@@ -61,8 +61,40 @@ function pinnedConditions(claim: ClaimRecord): Record<string, unknown> | null {
 	};
 }
 
+/**
+ * What edge derivation reads of a claim: identity, verdict, line of work, the keys that name its check and run, and
+ * the digest of its pinned conditions. The append path keeps these, not whole claims, in the log's index, so deriving
+ * an append's edges never re-reads or re-hashes the log.
+ */
+export interface ClaimEdgeSubject {
+	id: string;
+	kind: ClaimRecord["kind"];
+	verdict: ClaimRecord["verdict"];
+	worktree?: string;
+	keys: { check: string; command: string[]; run?: string };
+	/** `claimConditionsKey`, computed once. */
+	pins: string | null;
+}
+
+export function claimEdgeSubject(claim: ClaimRecord): ClaimEdgeSubject {
+	return {
+		id: claim.id,
+		kind: claim.kind,
+		verdict: claim.verdict,
+		...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
+		keys: {
+			check: claim.keys.check,
+			command: [...claim.keys.command],
+			...(claim.keys.run !== undefined ? { run: claim.keys.run } : {}),
+		},
+		pins: claimConditionsKey(claim),
+	};
+}
+
+type Keyed = { keys: { check: string; command: ReadonlyArray<string>; run?: string } };
+
 /** Where a sweep check's runs sit, both as its argv names them and as the repository-relative runs directory. */
-interface SweepRunLayout {
+export interface SweepRunLayout {
 	argumentDir: string;
 	runsDir: string;
 }
@@ -74,20 +106,25 @@ const RUN_NAME = /^[A-Za-z0-9._-]+$/u;
  * relative to the check's cwd, as the last argument. Null when the claims disagree or the argument has no directory
  * part, because then a run cannot be told from any other argument.
  */
-function sweepRunLayouts(claims: ReadonlyArray<ClaimRecord>): Map<string, SweepRunLayout | null> {
+function sweepRunLayouts(claims: ReadonlyArray<Keyed>): Map<string, SweepRunLayout | null> {
 	const layouts = new Map<string, SweepRunLayout | null>();
-	for (const claim of claims) {
+	for (const claim of claims) foldSweepRunLayout(layouts, claim);
+	return layouts;
+}
+
+/** Fold one claim into the layouts, as `sweepRunLayouts` does for each claim in log order. */
+export function foldSweepRunLayout(layouts: Map<string, SweepRunLayout | null>, claim: Keyed): void {
+	{
 		const run = claim.keys.run;
 		const last = claim.keys.command.at(-1);
 		const known = layouts.get(claim.keys.check);
-		if (run === undefined || last === undefined || known === null) continue;
+		if (run === undefined || last === undefined || known === null) return;
 		const argument = posix.normalize(last);
 		const layout = { argumentDir: posix.dirname(argument), runsDir: posix.dirname(run) };
 		const usable = layout.argumentDir !== "." && posix.basename(argument) === posix.basename(run);
 		const agrees = known === undefined || (known.argumentDir === layout.argumentDir && known.runsDir === layout.runsDir);
 		layouts.set(claim.keys.check, usable && agrees ? layout : null);
 	}
-	return layouts;
 }
 
 /**
@@ -95,7 +132,7 @@ function sweepRunLayouts(claims: ReadonlyArray<ClaimRecord>): Map<string, SweepR
  * when the command names exactly one directory under the check's runs directory. Used for edges only; the stored claim
  * and its id are unchanged. Any other run-less claim stays keyed by its check alone.
  */
-function claimRun(claim: ClaimRecord, layouts: ReadonlyMap<string, SweepRunLayout | null>): string | undefined {
+function claimRun(claim: Keyed, layouts: ReadonlyMap<string, SweepRunLayout | null>): string | undefined {
 	if (claim.keys.run !== undefined) return claim.keys.run;
 	const layout = layouts.get(claim.keys.check);
 	if (!layout) return undefined;
@@ -114,7 +151,7 @@ function claimRun(claim: ClaimRecord, layouts: ReadonlyMap<string, SweepRunLayou
  * What edges treat as one check: the check id, and for a sweep check the run it judged. Sibling runs of one sweep are
  * separate subjects, so they never supersede or contradict each other; a rerun of the same run still does (Q7).
  */
-function edgeIdentity(claim: ClaimRecord, layouts: ReadonlyMap<string, SweepRunLayout | null>): string {
+function edgeIdentity(claim: Keyed, layouts: ReadonlyMap<string, SweepRunLayout | null>): string {
 	const run = claimRun(claim, layouts);
 	return run === undefined ? claim.keys.check : `${claim.keys.check}\0${run}`;
 }
@@ -182,7 +219,7 @@ export function claimLogRecordId(record: object): string {
 	return sha256(canonicalClaimJson(rest));
 }
 
-function edge(kind: ClaimEdgeRecordV1["kind"], from: ClaimRecord, to: ClaimRecord): ClaimEdgeRecordV1 {
+function edge(kind: ClaimEdgeRecordV1["kind"], from: ClaimRecord, to: { id: string }): ClaimEdgeRecordV1 {
 	const body: Omit<ClaimEdgeRecordV1, "id"> = {
 		v: CLAIM_RECORD_VERSION,
 		type: "edge",
@@ -200,53 +237,96 @@ function edge(kind: ClaimEdgeRecordV1["kind"], from: ClaimRecord, to: ClaimRecor
  * The edges each incoming claim adds against the log, in order; an incoming claim also counts as history for the
  * ones after it.
  *
- * - `contradicts` the latest earlier claim with equal pinned conditions (`pinnedConditions`) when its verdict differs. Only a flip adds one,
- *   so a run of agreeing claims followed by a disagreeing one adds one edge, not one per agreement.
- * - `supersedes` every earlier claim of the same check, run and kind whose pinned conditions differ, unless already
- *   superseded.
- *   Each claim is superseded at most once, so these edges never outnumber claims.
+ * - `contradicts` the latest earlier claim with equal pinned conditions (`pinnedConditions`) when its verdict differs.
+ *   Only a flip adds one, so a run of agreeing claims followed by a disagreeing one adds one edge, not one per
+ *   agreement. Not scoped to a line of work: equal pins mean the same command judged the same commit.
+ * - `supersedes` every earlier claim of the same check, run, kind and line of work (`worktree`) whose pinned
+ *   conditions differ, unless already superseded. Each claim is superseded at most once, so these edges never
+ *   outnumber claims.
  */
 export function deriveClaimEdges(
 	history: { claims: ReadonlyArray<ClaimRecord>; edges: ReadonlyArray<ClaimEdgeRecordV1> },
 	incoming: ReadonlyArray<ClaimRecord>,
 ): ClaimEdgeRecordV1[] {
-	const claims = [...history.claims];
-	const layouts = sweepRunLayouts([...history.claims, ...incoming]);
-	const known = new Set(claims.map((claim) => claim.id));
-	const superseded = new Set(history.edges.filter((item) => item.kind === "supersedes").map((item) => item.to));
+	const subjects = history.claims.map(claimEdgeSubject);
+	const state: ClaimEdgeState = {
+		subjects,
+		superseded: new Set(history.edges.filter((item) => item.kind === "supersedes").map((item) => item.to)),
+		layouts: sweepRunLayouts(subjects),
+		known: new Set(subjects.map((subject) => subject.id)),
+	};
+	return deriveClaimEdgesFrom(state, incoming);
+}
+
+/** The state edge derivation runs against: the log's claims as subjects, the superseded set and the run layouts. */
+export interface ClaimEdgeState {
+	subjects: ClaimEdgeSubject[];
+	superseded: Set<string>;
+	layouts: Map<string, SweepRunLayout | null>;
+	/** Claim ids already in the log, so a repeated append derives nothing. */
+	known: Set<string>;
+}
+
+/**
+ * `deriveClaimEdges` over a prepared state, which it advances: each incoming claim joins the subjects, its supersede
+ * targets join the superseded set, and the layouts fold it in. The index-backed append calls this directly.
+ */
+export function deriveClaimEdgesFrom(state: ClaimEdgeState, incoming: ReadonlyArray<ClaimRecord>): ClaimEdgeRecordV1[] {
+	for (const claim of incoming) foldSweepRunLayout(state.layouts, claim);
+	const layouts = state.layouts;
 	const added: ClaimEdgeRecordV1[] = [];
 	for (const claim of incoming) {
-		if (known.has(claim.id)) continue;
-		const key = claimConditionsKey(claim);
+		if (state.known.has(claim.id)) continue;
+		const subject = claimEdgeSubject(claim);
+		const key = subject.pins;
 		const identity = edgeIdentity(claim, layouts);
-		const sameCheck = claims.filter(
+		const sameCheck = state.subjects.filter(
 			(earlier) => earlier.kind === claim.kind && edgeIdentity(earlier, layouts) === identity,
 		);
-		const sameConditions = key === null ? [] : sameCheck.filter((earlier) => claimConditionsKey(earlier) === key);
-		const latest = sameConditions.at(-1);
+		const latest = key === null ? undefined : sameCheck.filter((earlier) => earlier.pins === key).at(-1);
 		if (latest !== undefined && latest.verdict !== claim.verdict) added.push(edge("contradicts", claim, latest));
 		for (const earlier of sameCheck) {
-			if (superseded.has(earlier.id) || (key !== null && claimConditionsKey(earlier) === key)) continue;
+			if (state.superseded.has(earlier.id) || (key !== null && earlier.pins === key)) continue;
+			// Supersession stays within one line of work: a lane at its own commit does not replace the main checkout's
+			// verdict at another, nor the reverse (#406). Equal pins still contradict across worktrees, above.
+			if ((earlier.worktree ?? null) !== (claim.worktree ?? null)) continue;
 			added.push(edge("supersedes", claim, earlier));
-			superseded.add(earlier.id);
+			state.superseded.add(earlier.id);
 		}
-		claims.push(claim);
-		known.add(claim.id);
+		state.subjects.push(subject);
+		state.known.add(claim.id);
 	}
 	return added;
 }
 
-/** Status of every claim from the log's edges. */
+/**
+ * Status of every claim from the log's edges. A pass a later grounded failure overturned under equal pinned conditions
+ * is `retired`: it no longer stands, and the failure that retired it is `contested` until a later claim settles the
+ * pair. A failure is never retired by a later pass, because a contradiction may withdraw a pass but never restore one.
+ */
 export function claimStatuses(
 	claims: ReadonlyArray<ClaimRecord>,
 	edges: ReadonlyArray<ClaimEdgeRecordV1>,
 ): Map<string, ClaimStatus> {
 	const superseded = new Set(edges.filter((item) => item.kind === "supersedes").map((item) => item.to));
-	const contested = new Set(edges.filter((item) => item.kind === "contradicts").flatMap((item) => [item.from, item.to]));
+	const contradictions = edges.filter((item) => item.kind === "contradicts");
+	const contested = new Set(contradictions.flatMap((item) => [item.from, item.to]));
+	const byId = new Map(claims.map((claim) => [claim.id, claim]));
+	const retired = new Set<string>();
+	for (const item of contradictions) {
+		if (byId.get(item.from)?.verdict !== "disagrees" || byId.get(item.to)?.verdict !== "agrees") continue;
+		for (const claim of overturnedAgreements(item, claims, edges)) retired.add(claim.id);
+	}
 	return new Map(
 		claims.map((claim) => [
 			claim.id,
-			superseded.has(claim.id) ? "superseded" : contested.has(claim.id) ? "contested" : "standing",
+			superseded.has(claim.id)
+				? "superseded"
+				: retired.has(claim.id)
+					? "retired"
+					: contested.has(claim.id)
+						? "contested"
+						: "standing",
 		]),
 	);
 }

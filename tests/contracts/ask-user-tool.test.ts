@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { skillInstallOfferTag } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
+import {
+	AWAY_ASK_WINDOW_MS,
+	askUserWindowMs,
+	YOLO_ASK_WINDOW_FLOOR_SECONDS,
+} from "../../src/domains/safety/unattended.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createAskUserToolPolicy } from "../../src/session-control/chat-loop-messages.js";
 import {
@@ -323,43 +328,63 @@ describe("ask_user tool", () => {
 		deepStrictEqual(decision?.alternatives, ["Node id"]);
 	});
 
-	// #407: the operator is away by contract at yolo, so nobody is asked and nothing waits.
-	it("resolves a yolo round at once, outward included, without showing it, as Clio's decisions", async () => {
-		const f = fixture([], "yolo", true);
-		const result = await f.call({ exposure: "outward", questions: [CACHE_QUESTION, { question: "Anything to add?" }] });
-		strictEqual(f.shown.length, 0, "the surface never sees a yolo round");
-		const interview = interviewOf(result);
-		strictEqual(interview.event, "round_auto_resolved");
-		strictEqual(interview.status, "complete");
-		deepStrictEqual(interview.latest_answers, [
-			{ question: CACHE_QUESTION.question, answer: "Capability tuple", options: ["Capability tuple"], auto: true },
-			{ question: "Anything to add?", answer: UNATTENDED_FREE_TEXT_ANSWER, auto: true },
-		]);
-		if (result.kind !== "ok") throw new Error("expected ok");
-		strictEqual(result.terminate, undefined, "the turn continues");
-		deepStrictEqual(result.details?.unattended, { afterSeconds: 0, autoResolved: 2, away: true });
-		match(result.output, /operator is away by contract/);
-		match(result.output, /state each assumption in your final reply/);
-		const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
-		strictEqual(decision?.source, "agent");
-		match(String(decision?.rationale), /Autonomy is yolo/);
-		// The same tool at default still asks the operator.
-		const asked = fixture([{ answers: [{ question: "Q?", answer: "A" }] }], "default", true);
-		await asked.call({ questions: [{ question: "Q?" }] });
-		strictEqual(asked.shown.length, 1);
+	// Yolo drops approval cards, not the operator: a round reaches the surface at every level.
+	it("asks the operator at yolo, of either confinement, and records their answer as theirs", async () => {
+		for (const admission of ["yolo", "default"] as const) {
+			const f = fixture(
+				[{ answers: [{ question: CACHE_QUESTION.question, answer: "Node id", options: ["Node id"] }] }],
+				"yolo",
+				true,
+				admission,
+			);
+			const result = await f.call({ questions: [CACHE_QUESTION] });
+			strictEqual(f.shown.length, 1, `a ${admission} yolo round reaches the operator`);
+			const interview = interviewOf(result);
+			deepStrictEqual(interview.latest_answers, [
+				{ question: CACHE_QUESTION.question, answer: "Node id", options: ["Node id"] },
+			]);
+			const decision = (interview.decisions as Array<Record<string, unknown>>)[0];
+			strictEqual(decision?.value, "Node id", admission);
+			strictEqual(decision?.source, undefined, "an operator's answer is not recorded as Clio's choice");
+			if (result.kind !== "ok") throw new Error("expected ok");
+			strictEqual(result.details?.unattended, undefined);
+			ok(!/away by contract/u.test(result.output), result.output);
+		}
 	});
 
-	it("at contained yolo answers an outward round no at once, and an inward one as unconfined does", async () => {
-		const outward = fixture([], "yolo", true, "default");
-		const result = await outward.call({ exposure: "outward", questions: [CACHE_QUESTION] });
-		strictEqual(outward.shown.length, 0, "contained yolo never shows a round either");
+	it("runs a multi-round interview at yolo, such as plan-interview's, on the operator's answers", async () => {
+		const f = fixture(
+			[
+				{ answers: [{ question: "Which scope?", answer: "Phase 1 only", options: ["Phase 1 only"] }] },
+				{ answers: [{ question: "Carry out this plan?", answer: "Proceed", options: ["Proceed"] }] },
+			],
+			"yolo",
+			true,
+			"default",
+		);
+		const scope = { question: "Which scope?", options: [{ label: "Phase 1 only" }, { label: "Everything" }] };
+		const close = {
+			question: "Carry out this plan?",
+			options: [{ label: "Proceed" }, { label: "Revise the plan first" }],
+		};
+		strictEqual(interviewOf(await f.call({ questions: [scope] })).event, "round_answered");
+		strictEqual(interviewOf(await f.call({ questions: [close] })).event, "complete", "Proceed closes the plan");
+		strictEqual(f.shown.length, 2);
+	});
+
+	it("at yolo takes the recommended option when the operator's window lapses, and an outward round is a no", async () => {
+		const local = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }], "yolo", true, "default");
+		const result = await local.call({ questions: [CACHE_QUESTION] });
+		strictEqual(local.shown.length, 1);
 		deepStrictEqual(interviewOf(result).latest_answers, [
-			{ question: CACHE_QUESTION.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true },
-		]);
-		const inward = fixture([], "yolo", true, "default");
-		deepStrictEqual(interviewOf(await inward.call({ questions: [CACHE_QUESTION] })).latest_answers, [
 			{ question: CACHE_QUESTION.question, answer: "Capability tuple", options: ["Capability tuple"], auto: true },
 		]);
+		strictEqual(result.kind === "ok" ? result.terminate : undefined, undefined, "the turn continues");
+		const outward = fixture([{ answers: [], timedOut: { afterSeconds: 300 } }], "yolo", true, "yolo");
+		deepStrictEqual(
+			interviewOf(await outward.call({ exposure: "outward", questions: [CACHE_QUESTION] })).latest_answers,
+			[{ question: CACHE_QUESTION.question, answer: UNATTENDED_OUTWARD_ANSWER, auto: true }],
+		);
 	});
 
 	it("answers an unanswered outward round no, whatever the model listed first", async () => {
@@ -393,15 +418,23 @@ describe("ask_user tool", () => {
 		strictEqual(f.shown.length, 2);
 	});
 
-	it("parks an outward or misspelled exposure for the operator at default instead of asking ungated", async () => {
-		const f = fixture([]);
-		for (const exposure of ["outward", "public"]) {
-			const verdict = await f.invoke({ exposure, questions: [{ question: "Publish the release?" }] });
-			strictEqual(verdict.kind, "blocked", JSON.stringify(verdict));
-			strictEqual(verdict.kind === "blocked" ? verdict.deniedPark : undefined, true);
+	// The question is the operator's gate on an outward step; a permission card to ask it was a second dialog.
+	it("shows an outward round with no approval card first, at default and contained yolo, and rejects a misspelled tier", async () => {
+		for (const [autonomy, admission] of [
+			["default", undefined],
+			["yolo", "default"],
+		] as const) {
+			const f = fixture([{ answers: [{ question: "Publish the release?", answer: "No" }] }], autonomy, true, admission);
+			const verdict = await f.invoke({ exposure: "outward", questions: [{ question: "Publish the release?" }] });
+			strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+			strictEqual(f.shown.length, 1, autonomy);
 		}
+		const f = fixture([]);
+		match(
+			errorMessage(await f.call({ exposure: "public", questions: [{ question: "Publish the release?" }] })),
+			/exposure must be local or outward/,
+		);
 		deepStrictEqual(f.shown, []);
-		strictEqual(f.policy.status, "idle");
 	});
 
 	it("never answers an operator_only choice for the operator, and only their answer carries operator_choice", async () => {
@@ -414,7 +447,7 @@ describe("ask_user tool", () => {
 		match(errorMessage(await fixture([]).call({ questions: [CHOICE, CACHE_QUESTION] })), /asked alone/);
 		const unattended: Array<[Reply[], AutonomyLevel]> = [
 			[[{ answers: [], timedOut: { afterSeconds: 300 } }], "default"],
-			[[], "yolo"],
+			[[{ answers: [], timedOut: { afterSeconds: 300 } }], "yolo"],
 		];
 		for (const [replies, autonomy] of unattended) {
 			const f = fixture(replies, autonomy, true);
@@ -422,7 +455,7 @@ describe("ask_user tool", () => {
 			strictEqual(interviewOf(result).event, "operator_choice_unanswered", autonomy);
 			deepStrictEqual(interviewOf(result).decisions, [], autonomy);
 			strictEqual(result.kind === "ok" ? result.terminate : undefined, true, autonomy);
-			strictEqual(f.shown.length, autonomy === "yolo" ? 0 : 1);
+			strictEqual(f.shown.length, 1, autonomy);
 		}
 		const f = fixture([{ answers: [{ question: CHOICE.question, answer: "H2", options: ["H2"] }] }]);
 		await f.call({ questions: [CHOICE] });
@@ -431,5 +464,56 @@ describe("ask_user tool", () => {
 			f.policy.decisions.map(({ key, value, operator_choice }) => ({ key, value, operator_choice })),
 			[{ key: "hypothesis_choice", value: "H2", operator_choice: true }],
 		);
+	});
+});
+
+describe("ask_user: who answered, and how long a round waits", () => {
+	let scratch: IsolatedClioEnv;
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-coder-ask-user-answers-");
+	});
+	afterEach(() => scratch.restore());
+
+	it("tells the main session only what the operator answered themselves", async () => {
+		const seen: Array<ReadonlyArray<{ question: string; answer: string }>> = [];
+		const registry = createRegistry({
+			safety: createWorkerSafety(),
+			autonomy: () => "default",
+			onOperatorAnswered: (answers) => seen.push(answers),
+		});
+		const replies: AskUserResult[] = [
+			{ answers: [{ question: "Push main?", answer: "Yes, push", options: ["Yes, push"] }] },
+			{ answers: [], timedOut: { afterSeconds: 300 } },
+		];
+		registerAllTools(registry, {
+			mcpCapabilities: false,
+			askUser: async () => replies.shift() ?? { answers: [], cancelled: true },
+		});
+		const policy = createAskUserToolPolicy([{ name: ToolNames.AskUser }]);
+		if (!policy) throw new Error("the chat loop creates no interview policy for ask_user");
+		const call = (question: string) =>
+			registry.invoke(
+				{
+					tool: ToolNames.AskUser,
+					args: { questions: [{ question, options: [{ label: "Yes, push" }, { label: "No" }] }] },
+				},
+				{ askUserPolicy: policy, sessionId: "s", turnId: "t" },
+			);
+		await call("Push main?");
+		await call("Tag the release?");
+		deepStrictEqual(
+			seen,
+			[[{ question: "Push main?", answer: "Yes, push" }]],
+			"Clio's pick for an absent operator is not theirs",
+		);
+	});
+
+	it("bounds a yolo round's window, and shortens it once the operator was seen away", () => {
+		strictEqual(askUserWindowMs(300, { yolo: false, away: false }), 300_000);
+		strictEqual(askUserWindowMs(0, { yolo: false, away: false }), 0, "default honors wait-forever");
+		strictEqual(askUserWindowMs(0, { yolo: true, away: false }), YOLO_ASK_WINDOW_FLOOR_SECONDS * 1000);
+		strictEqual(askUserWindowMs(300, { yolo: true, away: true }), AWAY_ASK_WINDOW_MS);
+		strictEqual(askUserWindowMs(10, { yolo: false, away: true }), 10_000);
+		strictEqual(askUserWindowMs(0, { yolo: false, away: true }), 0);
 	});
 });

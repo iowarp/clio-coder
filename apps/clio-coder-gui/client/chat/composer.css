@@ -1106,13 +1106,22 @@
 	gap: var(--space-2);
 	padding: var(--space-4);
 }
+/* One line, whatever it says: a turn starting or ending changes the note's words, never the dock's
+   height, so the transcript's live edge stays where it is. A longer detail ends in an ellipsis. */
 .composer__delivery-note {
 	display: flex;
 	align-items: baseline;
 	gap: var(--space-3);
+	min-width: 0;
 	color: var(--ink-muted);
 	font-size: var(--text-instrument);
 	line-height: var(--leading-body);
+	white-space: nowrap;
+}
+.composer__delivery-note > span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 .composer__delivery-note strong {
 	color: var(--ink);
@@ -1138,10 +1147,29 @@
 	padding: 0;
 	min-width: 0;
 }
+/* One line too, so the shortcuts a running turn adds (Alt + S) never wrap the hint onto a second one.
+   The hint describes the field, so a screen reader still hears the whole of it. */
 .composer--conversation .composer__keyboard-hint {
 	margin: 0;
+	overflow: hidden;
 	color: var(--ink-muted);
 	font-size: var(--text-instrument);
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+/* The shared keycaps, sized to the hint's line so a key never makes the line taller. */
+.composer__keyboard-hint .keycaps {
+	display: inline;
+}
+.composer__keyboard-hint .keycaps kbd {
+	min-width: 0;
+	padding: 0 4px;
+	border-bottom-width: 1px;
+	font-size: inherit;
+	line-height: inherit;
+}
+.composer__keyboard-hint .keycaps kbd + kbd {
+	margin-inline-start: var(--space-1);
 }
 /* The draft's size leads the hint's far end, where a glance from Send finds it. */
 .composer__estimate {
@@ -1152,17 +1180,16 @@
 	color: var(--ink);
 }
 /*
- * At rest the composer is a field and a send button. The idle note restates the placeholder, so it stays for screen
+ * At rest the composer is a field and a send button. The idle note restates the placeholder, so it is drawn for screen
  * readers only; the keyboard hint comes in while the composer holds focus, and stays while files are attached because
- * it names them. Anything that needs saying (a refusal, a paused session, a running turn) is not quiet and stays.
+ * it names them. Anything that needs saying (a refusal, a paused session, a running turn) is not quiet and shows.
+ * The quiet note keeps its line, unseen, so the dock does not grow by a line each time a turn starts and shrink
+ * again when it ends, moving the transcript's live edge with it. Both lines hold to one line, which is what keeps
+ * the resting composer as short as it was when the quiet note took no line.
  */
 .composer__delivery-note[data-quiet] {
-	position: absolute;
-	width: 1px;
-	height: 1px;
 	overflow: hidden;
 	clip-path: inset(50%);
-	white-space: nowrap;
 }
 /*
  * Hidden, not removed: pressing any composer control moves focus into the composer, and a hint that took its line only

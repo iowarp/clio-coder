@@ -32,6 +32,7 @@ import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { Keycaps } from "../interaction/Keycaps.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
@@ -158,6 +159,14 @@ export function runComposerCommand(sessionId: string, name: string): boolean {
 /** Dialog openers keyed by session, so the Task actions menu and the palette open what the slash list opens. */
 const actionOpeners = new Map<string, (action: SlashAction) => void>();
 
+/** Form openers keyed by session: the Task actions menu opens the Actions dialog at one command's form. */
+const formOpeners = new Map<string, (name: string) => void>();
+
+/** Open the Actions dialog over this session's composer at the named command's form. */
+export function openComposerForm(sessionId: string, name: string): void {
+	formOpeners.get(sessionId)?.(name);
+}
+
 /** Open one session action's dialog over this session's composer; false when no composer for it is on screen. */
 export function openComposerAction(sessionId: string, action: SlashAction): boolean {
 	const open = actionOpeners.get(sessionId);
@@ -223,6 +232,7 @@ export const Composer = memo(function Composer({
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [actionsOpen, setActionsOpen] = useState(false);
+	const [actionsInitial, setActionsInitial] = useState<string | null>(null);
 	const [actionDrafts, setActionDrafts] = useState<Record<string, CommandFields>>({});
 	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
@@ -572,9 +582,15 @@ export const Composer = memo(function Composer({
 			setDialogSeed("");
 			setDialog(action);
 		};
+		const form = (name: string) => {
+			setActionsInitial(name);
+			setActionsOpen(true);
+		};
 		actionOpeners.set(sessionId, open);
+		formOpeners.set(sessionId, form);
 		return () => {
 			if (actionOpeners.get(sessionId) === open) actionOpeners.delete(sessionId);
+			if (formOpeners.get(sessionId) === form) formOpeners.delete(sessionId);
 		};
 	}, [sessionId]);
 	useEffect(() => {
@@ -998,18 +1014,18 @@ export const Composer = memo(function Composer({
 							keys={
 								mention !== null ? (
 									<>
-										<kbd>Enter</kbd> or <kbd>Tab</kbd>{" "}
+										<Keycaps chord="Enter" /> or <Keycaps chord="Tab" />{" "}
 										{mentionActive < agents.length
 											? "steer"
 											: fileMatches[mentionActive - agents.length]?.directory
 												? "open"
 												: "add"}{" "}
-										· <kbd>Esc</kbd> close{files.data?.truncated ? " · keep typing to narrow" : ""}
+										· <Keycaps chord="Esc" /> close{files.data?.truncated ? " · keep typing to narrow" : ""}
 									</>
 								) : (
 									<>
-										<kbd>Tab</kbd> pick · <kbd>Enter</kbd> {line?.kind === "command" ? "runs the line" : "pick"} · <kbd>Esc</kbd>{" "}
-										close
+										<Keycaps chord="Tab" /> pick · <Keycaps chord="Enter" /> {line?.kind === "command" ? "runs the line" : "pick"}{" "}
+										· <Keycaps chord="Esc" /> close
 									</>
 								)
 							}
@@ -1024,7 +1040,7 @@ export const Composer = memo(function Composer({
 								<p className="slash-palette__error">{slashError}</p>
 							) : (
 								<p className="slash-palette__keys">
-									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd + Enter"}</kbd> runs{" "}
+									<Keycaps chord={enterSends ? "Enter" : "Ctrl/Cmd + Enter"} /> runs{" "}
 									{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
 								</p>
 							)}
@@ -1405,7 +1421,7 @@ export const Composer = memo(function Composer({
 					)}
 					{stopArmed && running ? (
 						<p className="composer__notice" role="status">
-							Press <kbd>Esc</kbd> again to stop this turn.
+							Press <Keycaps chord="Esc" /> again to stop this turn.
 						</p>
 					) : null}
 					{steerNote ? (
@@ -1433,9 +1449,23 @@ export const Composer = memo(function Composer({
 								{estimate.text}
 							</span>
 						) : null}
-						{enterSends ? "Shift + Enter adds a line" : "Enter adds a line · Ctrl/Cmd + Enter sends"}
-						{running && modes.some((offer) => offer.mode === "next-slot") ? " · Alt+S sends now" : ""} · / lists commands · @
-						adds a file or folder · ↑ recalls earlier messages, Ctrl/Cmd+R searches them
+						{enterSends ? (
+							<>
+								<Keycaps chord="Shift + Enter" /> adds a line
+							</>
+						) : (
+							<>
+								<Keycaps chord="Enter" /> adds a line · <Keycaps chord="Ctrl/Cmd + Enter" /> sends
+							</>
+						)}
+						{running && modes.some((offer) => offer.mode === "next-slot") ? (
+							<>
+								{" "}
+								· <Keycaps chord="Alt + S" /> sends now
+							</>
+						) : null}{" "}
+						· <Keycaps chord="/" /> lists commands · <Keycaps chord="@" /> adds a file or folder · <Keycaps chord="↑" />{" "}
+						recalls earlier messages, <Keycaps chord="Ctrl/Cmd + R" /> searches them
 						{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 					</p>
 					<div className="composer__actions">
@@ -1477,7 +1507,10 @@ export const Composer = memo(function Composer({
 								aria-haspopup="dialog"
 								aria-expanded={actionsOpen}
 								disabled={sessionState !== "open"}
-								onClick={() => setActionsOpen(true)}
+								onClick={() => {
+									setActionsInitial(null);
+									setActionsOpen(true);
+								}}
 							>
 								<Icon name="overview" />
 								Actions
@@ -1535,8 +1568,17 @@ export const Composer = memo(function Composer({
 										Enter sends
 									</label>
 									<p className="composer__options-note">
-										{enterSends ? "Shift + Enter adds a line." : "Enter adds a line. Ctrl/Cmd + Enter sends."} @ adds a file or
-										folder. ↑ recalls earlier messages and Ctrl/Cmd+R searches them.
+										{enterSends ? (
+											<>
+												<Keycaps chord="Shift + Enter" /> adds a line.
+											</>
+										) : (
+											<>
+												<Keycaps chord="Enter" /> adds a line. <Keycaps chord="Ctrl/Cmd + Enter" /> sends.
+											</>
+										)}{" "}
+										<Keycaps chord="@" /> adds a file or folder. <Keycaps chord="↑" /> recalls earlier messages and{" "}
+										<Keycaps chord="Ctrl/Cmd + R" /> searches them.
 									</p>
 								</div>
 							</details>
@@ -1740,6 +1782,7 @@ export const Composer = memo(function Composer({
 						running={running}
 						formDrafts={actionDrafts}
 						onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
+						{...(actionsInitial !== null ? { initial: actionsInitial } : {})}
 						onClose={() => setActionsOpen(false)}
 						onPick={(entry) => {
 							setActionsOpen(false);
