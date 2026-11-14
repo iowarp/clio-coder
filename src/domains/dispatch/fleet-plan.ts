@@ -52,6 +52,7 @@ export interface FleetPlanAgentResolution {
 	/** Null makes the plan an approval request that cannot execute. */
 	approvedAuthority: AgentAutomationAuthority | null;
 	expectedResultContract: ResultContract["kind"];
+	resultContract?: ResultContract;
 	executionRole: ExecutionRole;
 }
 
@@ -176,7 +177,7 @@ export function compileFleetExecutionPlan(input: CompileFleetPlanInput): Executi
 			agentId: context.agentId,
 			scope: context.scope,
 			dependencies: [...dependencies],
-			task: renderFleetNodeTask(task, resolved.expectedResultContract, context.stepId),
+			task: renderFleetNodeTask(task, resolved.expectedResultContract, context.stepId, resolved.resultContract),
 			expectedResultContract: resolved.expectedResultContract,
 			requestedAuthority: resolved.requestedAuthority,
 			approvedAuthority: resolved.approvedAuthority,

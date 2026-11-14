@@ -441,7 +441,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 				),
 		];
 
-		equal(packagePaths.length, 39, `expected 39 curated library packages, found ${packagePaths.length}`);
+		equal(packagePaths.length, 40, `expected 40 curated library packages, found ${packagePaths.length}`);
 
 		// Ensure Materio is explicitly included and verified
 		const materioPath = join(libraryDir, "plugins", "materio");
@@ -472,11 +472,11 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			entries: Array<{ name: string; sourceUrl: string }>;
 		};
 
-		// 42 = 41 locally scanned packages (34 skills, the Materio, HPC, science-data,
-		// literature and life-science plugins, and the Materio and local-status
+		// 43 = 42 locally scanned packages (34 skills, the Materio, HPC, science-data,
+		// literature, life-science and Hoare plugins, and the Materio and local-status
 		// extensions) + 1 blessed remote package (wtfp),
 		// which has no local directory under library/ and so is never in packagePaths.
-		equal(libraryRegistry.entries.length, 42, "library registry must contain exactly 42 packages");
+		equal(libraryRegistry.entries.length, 43, "library registry must contain exactly 43 packages");
 
 		// None of the entries should reference _authoring or templates
 		for (const entry of libraryRegistry.entries) {

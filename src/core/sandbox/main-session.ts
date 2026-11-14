@@ -138,7 +138,8 @@ export interface MainSandboxPolicy {
 	 * it, under a writable cache root, with contents Clio later trusts.
 	 */
 	clioDirs: ReadonlyArray<string>;
-	network: true;
+	/** Main calls retain network; declared proof checks explicitly disable it. */
+	network: boolean;
 	/**
 	 * Where each launch looks for secret files to mask: the workspace, the
 	 * source checkout of a task worktree, then the scratch roots.

@@ -2,6 +2,12 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- A `hoare` library pack for Hoare-logic correctness reviews of C, C++, Python and Fortran functions, contributed by Keith Bateman (#454). `clio-coder library install plugin:hoare` adds the `hoare-verification` skill, a read-only `hoare-verifier` agent that returns a verifier report with one check per proof obligation, `/hoare:review` for a Markdown correctness report, and the `hoare-build-review` playbook, which gates a coder on that review. Each obligation is marked `mechanized`, `modeled`, `argued`, `assumed`, `refuted` or `unknown`, and counts as `mechanized` only when a prover check declared in `.clio-coder/verifiers.yaml` proved it.
+
 ## 0.8.0 - 2026-11-12
 
 0.8.0 is the stable release of 0.8.0-rc.1, with the same product code; the notes below are the 0.8.0 notes.

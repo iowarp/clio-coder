@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { stripAuthoredTrailers } from "../../core/commit-message.js";
+import {
+	type HoareAssurance,
+	type HoareObligation,
+	hoareEvidenceError,
+	hoarePasses,
+	isHoareAssurance,
+	type ObservedProof,
+	parseHoareObligation,
+} from "../../core/hoare.js";
 import { parseJsonObjectPayload, parseVerifierPayload } from "../../core/json-payload.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
 import type { AgentAutomationAuthority } from "./spec.js";
@@ -9,7 +18,7 @@ import { AGENT_AUTOMATION_AUTHORITIES } from "./spec.js";
 export type ResultContract =
 	| { kind: "architect-plan"; path: string }
 	| { kind: "scout-report" }
-	| { kind: "verifier-report" }
+	| { kind: "verifier-report"; assurance?: HoareAssurance }
 	| { kind: "council-report" }
 	/**
 	 * One council member's ballot under `synthesis: "vote"`.
@@ -279,6 +288,7 @@ export type ObservedReadRanges = ReadonlyMap<string, ReadonlyArray<readonly [num
  * the tool stream (`domains/safety/run-effects.ts`).
  */
 export interface ObservedRunEffects {
+	proofs?: ReadonlyMap<string, ObservedProof>;
 	/** Absolute paths the run's successful tool calls aimed a mutation at. */
 	mutatedPaths: ReadonlySet<string>;
 	/** Absolute paths whose only mutation attempt came back blocked or errored. */
@@ -406,12 +416,18 @@ export interface VerifierCheck {
 	name: string;
 	passed: boolean;
 	evidence: string;
+	obligation?: HoareObligation;
 }
 
 /** Parsed `verifier-report` payload, for callers that need the verdict itself. */
 export interface VerifierResult {
 	verdict: "pass" | "fail";
 	checks: ReadonlyArray<VerifierCheck>;
+	assurance?: HoareAssurance;
+}
+
+export function isHoareResultContract(contract: ResultContract | undefined | null): boolean {
+	return contract?.kind === "verifier-report" && contract.assurance !== undefined;
 }
 
 export interface DelegationPlanResultTask {
@@ -1211,18 +1227,36 @@ function verifierPayload(output: string | null): ReturnType<typeof parseJson> {
 	return parsed.ok ? { ok: false, reason: "result carries more than one report" } : parsed;
 }
 
-function validateVerifier(contract: ResultContract, output: string | null): ResultContractValidation {
+function validateVerifier(
+	contract: ResultContract,
+	output: string | null,
+	ground = false,
+	proofs?: ReadonlyMap<string, ObservedProof>,
+): ResultContractValidation {
 	const parsed = verifierPayload(output);
 	if (!parsed.ok) return failure(contract, "fail", `Verifier result payload failed: ${parsed.reason}`);
 	const value = parsed.value;
-	const unknown = Object.keys(value).filter((key) => key !== "verdict" && key !== "checks");
+	const unknown = Object.keys(value).filter((key) => key !== "verdict" && key !== "checks" && key !== "assurance");
 	if (unknown.length > 0) {
 		return failure(
 			contract,
 			"fail",
-			`Verifier result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are verdict and checks`,
+			`Verifier result field${unknown.length === 1 ? "" : "s"} ${unknown.join(", ")} ${unknown.length === 1 ? "is" : "are"} not legal; legal top-level fields are verdict, checks and optional assurance`,
 		);
 	}
+	const requiredAssurance = contract.kind === "verifier-report" ? contract.assurance : undefined;
+	if (
+		(requiredAssurance !== undefined && value.assurance !== requiredAssurance) ||
+		(value.assurance !== undefined && !isHoareAssurance(value.assurance))
+	)
+		return failure(
+			contract,
+			"fail",
+			`Verifier assurance must be ${requiredAssurance ?? "argued, modeled or mechanized"}`,
+		);
+	const assurance = isHoareAssurance(value.assurance) ? value.assurance : undefined;
+	if (assurance !== undefined && (output === null || Buffer.byteLength(output, "utf8") > 32_768))
+		return failure(contract, "fail", "Hoare report must fit within 32768 UTF-8 bytes");
 	if (value.verdict !== "pass" && value.verdict !== "fail") {
 		return failure(contract, "fail", 'Verifier field "verdict" must be one of: pass | fail');
 	}
@@ -1234,17 +1268,21 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
 		);
 	}
 	const checks: VerifierCheck[] = [];
+	const names = new Set<string>();
+	if (assurance !== undefined && value.checks.length > 128)
+		return failure(contract, "fail", "Hoare report must contain at most 128 obligations");
 	for (const [index, raw] of value.checks.entries()) {
 		if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
 			return failure(contract, "fail", `Verifier field "checks[${index}]" must be an object`);
 		}
 		const check = raw as Record<string, unknown>;
-		const checkUnknown = Object.keys(check).filter((key) => key !== "name" && key !== "passed" && key !== "evidence");
+		const legal = assurance === undefined ? ["name", "passed", "evidence"] : ["name", "passed", "evidence", "obligation"];
+		const checkUnknown = Object.keys(check).filter((key) => !legal.includes(key));
 		if (checkUnknown.length > 0) {
 			return failure(
 				contract,
 				"fail",
-				`Verifier field "checks[${index}].${checkUnknown[0]}" is not legal; legal check fields are name, passed, and evidence`,
+				`Verifier field "checks[${index}].${checkUnknown[0]}" is not legal; legal check fields are ${legal.join(", ")}`,
 			);
 		}
 		if (!string(check.name)) {
@@ -1256,7 +1294,32 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
 		if (!string(check.evidence)) {
 			return failure(contract, "fail", `Verifier field "checks[${index}].evidence" must be a non-empty string`);
 		}
-		checks.push({ name: check.name, passed: check.passed, evidence: check.evidence });
+		let obligation: HoareObligation | undefined;
+		if (assurance !== undefined) {
+			if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(check.name) || names.has(check.name))
+				return failure(contract, "fail", `Hoare obligation name is invalid or duplicated: ${check.name}`);
+			names.add(check.name);
+			const parsedObligation = parseHoareObligation(check.obligation);
+			if (parsedObligation instanceof Error)
+				return failure(contract, "fail", `${check.name}: ${parsedObligation.message}`);
+			obligation = parsedObligation;
+			if (check.passed !== hoarePasses(assurance, obligation.status))
+				return failure(
+					contract,
+					"fail",
+					`${check.name}: passed must follow ${assurance} assurance for status ${obligation.status}`,
+				);
+			if (ground) {
+				const reason = hoareEvidenceError(check.name, obligation, proofs);
+				if (reason !== null) return failure(contract, "fail", reason);
+			}
+		}
+		checks.push({
+			name: check.name,
+			passed: check.passed,
+			evidence: check.evidence,
+			...(obligation ? { obligation } : {}),
+		});
 	}
 	if ((value.verdict === "pass") !== checks.every((check) => check.passed)) {
 		return failure(
@@ -1265,8 +1328,16 @@ function validateVerifier(contract: ResultContract, output: string | null): Resu
 			'Verifier field "verdict" must agree with every checks[].passed value; verdict legal values are pass | fail and checks[].passed legal values are true | false',
 		);
 	}
-	const verifier: VerifierResult = { verdict: value.verdict, checks };
-	return success(contract, value.verdict, verifier, { verifier });
+	const verifier: VerifierResult = { verdict: value.verdict, checks, ...(assurance ? { assurance } : {}) };
+	const evidence =
+		ground && assurance !== undefined
+			? checks.flatMap((check) => {
+					const id = check.obligation?.check;
+					const proof = id === undefined ? undefined : proofs?.get(id);
+					return proof === undefined ? [] : [proof];
+				})
+			: [];
+	return success(contract, value.verdict, evidence.length > 0 ? { verifier, evidence } : verifier, { verifier });
 }
 
 /**
@@ -1455,6 +1526,7 @@ export function withResultSummaryAllowance(contract: ResultContract, maxSummaryB
  */
 export function resultContractOutputBytes(contract: ResultContract | null | undefined): number | null {
 	if (contract === null || contract === undefined) return null;
+	if (isHoareResultContract(contract)) return 32_768;
 	if (contract.kind !== "mutation-report" && (INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind))
 		return STRUCTURED_HELPER_RESULT_MAX_BYTES;
 	if (contract.kind !== "mutation-report") return null;
@@ -1955,7 +2027,9 @@ export function validateResultContract(input: ResultContractValidationInput): Re
 				: failure(input.contract, "fail", citations.reason);
 		}
 		case "verifier-report":
-			return validateVerifier(input.contract, input.output);
+			if (input.outputTruncated)
+				return failure(input.contract, "fail", "Verifier report was truncated; shorten the report");
+			return validateVerifier(input.contract, input.output, true, input.observedRunEffects?.proofs);
 		case "council-report": {
 			const report = parseCouncilReport(input.output);
 			return report === null
@@ -2075,6 +2149,8 @@ export function resultContractShape(contract: ResultContract): string {
 			// run already failed twice, so it is told the cheaper exit as well.
 			return '{"findings":[{"claim":"what you observed","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]} or {"findings":[],"needsSplit":true,"proposedSubtasks":[{"id":"inspect","task":"Inspect the boundary","dependencies":[],"expectedResultContract":"scout-report","requestedAuthority":"read-only"}]} or, if you cannot produce a citation you are sure of, at least {"findings":[{"claim":"what you observed"}]}, which is accepted as an ungrounded lead rather than losing the run';
 		case "verifier-report":
+			if (contract.assurance !== undefined)
+				return `{"verdict":"fail","assurance":"${contract.assurance}","checks":[{"name":"f.post","passed":false,"evidence":"specification source and argument, trace or missing proof evidence","obligation":{"target":"src/file.c:f","kind":"post","pre":"input contract","post":"output contract","formula":"verification condition","status":"unknown"}}]}. Every check requires an obligation; optional fields are invariant, hazard and check (an exact declared proof check ID). Statuses: mechanized, modeled, argued, assumed, refuted, unknown. Assurance is fixed at ${contract.assurance}. Assumed, refuted and unknown never pass. Machine claims require this run's matching native verify proof evidence on unchanged inputs; missing evidence must be unknown with passed=false, never an invented execution.`;
 			return 'one of {"verdict":"pass","checks":[{"name":"npm run typecheck","passed":true,"evidence":"exit 0"}]} or {"verdict":"fail","checks":[{"name":"npm run typecheck","passed":false,"evidence":"exit 1"}]}; verdict legal values are pass | fail and checks[].passed legal values are true | false';
 		case "council-report":
 			return '{"members":[{"label":"alpha","runId":"run-1","round":1,"answer":"..."}],"synthesis":{"kind":"none"}}';
@@ -2322,6 +2398,13 @@ function parseContract(
 		} catch (error) {
 			throw new Error(`agent recipe: ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+	if (record.kind === "verifier-report" && kinds.includes(record.kind)) {
+		if (!only("kind", "assurance") || (record.assurance !== undefined && !isHoareAssurance(record.assurance)))
+			throw new Error(
+				`agent recipe: ${sourcePath}: verifier-report accepts only kind and assurance (argued, modeled, mechanized)`,
+			);
+		return { kind: "verifier-report", ...(record.assurance !== undefined ? { assurance: record.assurance } : {}) };
 	}
 	if (!kinds.includes(record.kind) || !only("kind")) {
 		throw new Error(`agent recipe: ${sourcePath}: resultContract.kind is unsupported or has unknown keys`);
