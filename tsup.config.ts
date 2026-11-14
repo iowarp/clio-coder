@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineConfig } from "tsup";
 import { artifactBytes, buildVerbose, reportBuildStage } from "./scripts/build-output.js";
+import { chunkMergePlugin } from "./scripts/chunk-merge.js";
 import {
 	FETCHED_GRAMMAR_PACKAGE,
 	FETCHED_GRAMMARS,
@@ -228,6 +229,10 @@ function vendorGrammars(): void {
 	}
 }
 
+/** Bundled CommonJS dependencies call `require`; every output file gets one bound to its own location. */
+const REQUIRE_BANNER =
+	'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);';
+
 const entries = {
 	"cli/index": "src/cli/index.ts",
 	"extensions/testing": "src/domains/extensions/authoring/test-kit.ts",
@@ -244,7 +249,8 @@ const entries = {
 export default defineConfig({
 	entry: entries,
 	define: { __CLIO_GUI_BUNDLED__: "true", ...buildProvenanceDefines() },
-	esbuildPlugins: [buildIdPlugin],
+	// The merge rewrites the build result, so it runs before the build id plugin reads the output list.
+	esbuildPlugins: [chunkMergePlugin(REQUIRE_BANNER), buildIdPlugin],
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
@@ -308,9 +314,7 @@ export default defineConfig({
 	// The shebang comes from the hashbang line in each entry source file;
 	// esbuild hoists it above this banner on the entry chunks and never puts
 	// one on a shared chunk.
-	banner: {
-		js: 'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);',
-	},
+	banner: { js: REQUIRE_BANNER },
 	async onSuccess() {
 		reportBuildStage(
 			"Node bundles",
