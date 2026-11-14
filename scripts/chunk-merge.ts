@@ -62,7 +62,10 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
 			"src/interactive/terminal-lease.ts",
 		],
 	],
-	["providers", ["src/entry/stage1-preload.ts", "src/domains/providers/index.ts"]],
+	// The preloader stands alone: sharing a file with the stage it is about to load would link that whole stage
+	// as its own import, in one task, before it could yield once.
+	["preload", ["src/entry/stage1-preload.ts"]],
+	["providers", ["src/domains/providers/index.ts"]],
 	["session", ["src/domains/session/index.ts"]],
 	[
 		"domains",
@@ -475,6 +478,14 @@ export interface MergeOptions {
 	banner: string;
 }
 
+/** The string src/entry/stage1-preload.ts carries where the build writes the Stage 1 file list. */
+const STAGE1_FILES_MARKER = "clio:stage1-files";
+/** The stages that module loads file by file, and the ones already loaded when it runs. */
+const PRELOADED_STAGES = new Set(["providers", "session", "domains", "orchestrator"]);
+const LOADED_BEFORE_PRELOAD = new Set(["entry", "launch", "shell", "preload"]);
+/** A module that exists only inside the merge: it imports every export of every chunk. */
+const EVERY_EXPORT = "\0every-chunk-export";
+
 /** Rollup notes that describe esbuild's output rather than a defect in the merge. */
 const EXPECTED_NOTES = new Set(["THIS_IS_UNDEFINED", "EVAL"]);
 
@@ -524,6 +535,22 @@ export async function mergeChunks(options: MergeOptions): Promise<{ files: Built
 
 	const input: Record<string, string> = {};
 	for (const entry of entries) input[relative(prefix, entry).slice(0, -".js".length)] = resolve(entry);
+	// A merged file exports only what another file imports, so a symbol every importer was merged with would stop
+	// being reachable from outside. One more entry that imports every chunk export keeps each one exported from
+	// the file it lands in, as esbuild's chunks exported them; its own output is discarded.
+	const everyExport = [...nameOf]
+		.filter(([, name]) => !entries.has(name))
+		.map(([id, name], chunk) => {
+			const exported = (metafile.outputs[name]?.exports ?? []).map((binding, at) => `${binding} as e${chunk}_${at}`);
+			return `export{${exported.join(",")}}from${JSON.stringify(id)};`;
+		});
+	input["every-chunk-export"] = EVERY_EXPORT;
+	const sourceOf = (source: string): string => {
+		const name = Object.keys(metafile.outputs).find((output) => metafile.outputs[output]?.entryPoint === source);
+		if (name === undefined) throw new Error(`chunk-merge: ${source} is no longer an entry or import() target`);
+		return resolve(name);
+	};
+	let preloadLists = 0;
 	const bundle = await rollup({
 		input,
 		treeshake: false,
@@ -532,13 +559,40 @@ export async function mergeChunks(options: MergeOptions): Promise<{ files: Built
 			{
 				name: "esbuild-chunks",
 				resolveId(source, importer) {
-					if (importer === undefined) return source;
+					if (importer === undefined || importer === EVERY_EXPORT) return source;
 					if (!source.startsWith(".")) return { id: source, external: true };
 					const id = resolve(dirname(importer), source);
 					if (!code.has(id)) throw new Error(`chunk-merge: ${importer} imports ${source}, which was not built`);
 					return id;
 				},
-				load: (id) => code.get(id) ?? null,
+				load: (id) => (id === EVERY_EXPORT ? everyExport.join("\n") : (code.get(id) ?? null)),
+				// File names here still carry rollup's hash placeholders, which it resolves in the code it is handed
+				// back and counts into this file's own hash.
+				renderChunk(text, chunk, _options, meta) {
+					if (!text.includes(STAGE1_FILES_MARKER)) return null;
+					preloadLists += 1;
+					const fileOf = new Map<string, string>();
+					for (const rendered of Object.values(meta.chunks)) {
+						for (const id of rendered.moduleIds) fileOf.set(id, rendered.fileName);
+					}
+					const seen = new Set([chunk.fileName]);
+					const order: string[] = [];
+					const visit = (file: string | undefined): void => {
+						const rendered = file === undefined ? undefined : meta.chunks[file];
+						if (rendered === undefined || seen.has(rendered.fileName)) return;
+						seen.add(rendered.fileName);
+						for (const imported of rendered.imports) visit(imported);
+						order.push(rendered.fileName);
+					};
+					const roots = (stages: ReadonlySet<string>): string[] =>
+						SESSION_STAGES.flatMap(([stage, sources]) => (stages.has(stage) ? sources : []));
+					for (const source of roots(LOADED_BEFORE_PRELOAD)) visit(fileOf.get(sourceOf(source)));
+					const loaded = order.length;
+					// Imports first, in statement order: the order Node evaluates the same graph in.
+					for (const source of roots(PRELOADED_STAGES)) visit(fileOf.get(sourceOf(source)));
+					const files = order.slice(loaded).map((file) => `./${file}`);
+					return { code: text.replaceAll(STAGE1_FILES_MARKER, files.join(",")), map: null };
+				},
 			},
 		],
 		onLog(level, log) {
@@ -562,7 +616,14 @@ export async function mergeChunks(options: MergeOptions): Promise<{ files: Built
 	});
 	await bundle.close();
 
-	const chunks = generated.output.filter((item): item is OutputChunk => item.type === "chunk");
+	if (preloadLists !== 1) {
+		throw new Error(
+			`chunk-merge: ${preloadLists} files carry ${STAGE1_FILES_MARKER}; src/entry/stage1-preload.ts must hold it once`,
+		);
+	}
+	const chunks = generated.output.filter(
+		(item): item is OutputChunk => item.type === "chunk" && item.facadeModuleId !== EVERY_EXPORT,
+	);
 	const built = new Set(chunks.map((chunk) => chunk.fileName));
 	const outputs: Outputs = {};
 	const files: BuiltFile[] = [];

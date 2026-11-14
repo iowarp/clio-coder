@@ -26,6 +26,13 @@ const SLICES: ReadonlyArray<() => Promise<unknown>> = [
 ];
 
 /**
+ * The merged files the slices and the composition root load, in the order Node would evaluate them. The build
+ * writes the list over this marker (scripts/chunk-merge.ts); a source run and a watch build keep the marker and
+ * load by slice alone.
+ */
+const MERGED = { files: "clio:stage1-files" };
+
+/**
  * Give the loop a full iteration, input poll included. One setImmediate queued from the poll phase runs in that same
  * iteration's check phase, so the next slice would follow before any keystroke was read; the second one is queued
  * from the check phase and so waits for the next iteration's poll.
@@ -40,6 +47,19 @@ export async function nextTurn(): Promise<void> {
  * boundary with the lease's own reason, which the boot path already reads as an operator stop.
  */
 export async function preloadStage1(signal: AbortSignal): Promise<void> {
+	// A slice is one task however many files it links: the providers slice held the loop for about 75 ms and the
+	// session slice for about 170 ms. Imported one at a time, after everything it imports, a file costs only its
+	// own link and evaluation, so a key typed during Stage 1 waits for one file instead of one slice.
+	try {
+		for (const file of MERGED.files.startsWith("clio:") ? [] : MERGED.files.split(",")) {
+			await nextTurn();
+			signal.throwIfAborted();
+			await import(new URL(file, import.meta.url).href);
+		}
+	} catch (error) {
+		if (signal.aborted) throw error;
+		// A file that will not load fails the same way in its slice below, where the boot path reports it.
+	}
 	for (const slice of SLICES) {
 		// The first turn also separates the Stage 0 commit's own work from the first slice.
 		await nextTurn();
