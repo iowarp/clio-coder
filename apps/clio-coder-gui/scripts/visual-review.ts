@@ -232,7 +232,10 @@ if (values.serve) {
 				await page.waitForURL(/\/sessions\/[^/]+$/);
 				const field = page.getByLabel("Message CLIO Coder", { exact: true });
 				await field.waitFor();
-				// The route picker locks while a turn runs, so the opening turn settles first.
+				// The route picker locks while a turn runs, so the opening turn settles first. Stop may not have
+				// appeared yet when the page lands, so the turn itself must read as settled.
+				await page.locator(".chat-turn.is-settled").first().waitFor();
+				await page.locator(".chat-turn.is-live").waitFor({ state: "detached" });
 				await page.getByRole("button", { name: "Stop turn", exact: true }).waitFor({ state: "detached" });
 				// The route picker needs the route facts, so it is photographed only with --route.
 				if (want("picker") && values.route) {

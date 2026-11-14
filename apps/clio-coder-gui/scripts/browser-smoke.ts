@@ -8,6 +8,7 @@ import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator, type Route } from "playwright-core";
 import { SETTINGS_SECTIONS } from "../client/shell/shell-model.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
+import { resolveClioCommand } from "../server/process-policy.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -37,6 +38,18 @@ assert.ok(
 	widths.length > 0 && widths.every((width) => [1600, 1440, 1050, 400, 390, 320].includes(width)),
 	"widths: 1600, 1440, 1050, 400, 390, 320",
 );
+// Models, usage, library and system read through the real CLI; without one those flows fail as if broken.
+if (
+	!(await resolveClioCommand().then(
+		() => true,
+		() => false,
+	))
+) {
+	console.error(
+		"browser-smoke: no Clio CLI found; run `pnpm run build` at the repository root or export CLIO_CODER_WEB_CLI=<absolute path to dist/cli/index.js>.",
+	);
+	process.exit(1);
+}
 // Keep browser profiles and failure captures under the caller's private temp root too.
 const scratch = process.env.TMPDIR
 	? join(process.env.TMPDIR, "clio-coder-gui-validation")
@@ -2043,8 +2056,13 @@ try {
 		await step("refused launch link", async () => {
 			// A refused launch link must not brick the app: the shell says what happened, stops reconnecting, and a
 			// pasted launch link brings the same tab back.
+			// The document reads the ticket, clears it from the address bar and exchanges it at once; a reload would
+			// abort that exchange and reconnect on the remembered credential, so the refusal itself is awaited.
+			const exchange = page.waitForResponse(
+				(response) => new URL(response.url()).pathname === "/api/auth/clients" && response.request().method() === "POST",
+			);
 			await page.goto(`${origin}/#ticket=${"s".repeat(43)}`);
-			await page.reload();
+			assert.equal((await exchange).status(), 401, "the refused launch ticket was not refused at the exchange");
 			await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
 			// The refused shell shows no task rail, so nothing behind the panel keeps reading.
 			assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a refused token still renders the task rail");
