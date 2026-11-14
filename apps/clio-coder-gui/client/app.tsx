@@ -290,6 +290,7 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 	useShortcut("sidebar", revealSidebar);
 	useShortcut("newTask", startTask);
 	useShortcut("openWorkspace", openWorkspace);
+	useShortcut("library", () => void navigate("/library"));
 
 	// The rail only loads the projects that are expanded, so opening the palette lists what is cached,
 	// then fills in the other projects' saved tasks once (fresh results are reused for 30 seconds).

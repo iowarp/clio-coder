@@ -184,6 +184,12 @@ test("the reference lists the conversation chords and the message-box keys", () 
 	assert.ok(keyboard);
 	const terms = keyboard.entries.map((entry) => entry.term);
 	for (const chord of [
+		"Alt + L",
+		"Alt + U",
+		"Alt + W",
+		"Alt + E",
+		"Alt + Q",
+		"Ctrl/Cmd + J",
 		"Ctrl/Cmd + .",
 		"F2",
 		"Alt + M",
@@ -205,4 +211,16 @@ test("the reference lists the conversation chords and the message-box keys", () 
 	const stop = searchHelp("stop").find((match) => match.section.id === "keyboard");
 	assert.ok(stop?.entries.some((entry) => entry.term === "Ctrl/Cmd + ."));
 	assert.ok(stop?.entries.some((entry) => entry.term === "Esc, Esc"));
+});
+
+test("the terminal's Alt chords keep their meaning here, and the queue and file keys stay in the message box", () => {
+	const chord = (id: keyof typeof KEYBINDINGS) => [formatKeybinding(KEYBINDINGS[id]), KEYBINDINGS[id].scope];
+	assert.deepEqual(chord("library"), ["Alt + L", "global"]);
+	assert.deepEqual(chord("overview"), ["Alt + U", "global"]);
+	assert.deepEqual(chord("workers"), ["Alt + W", "global"]);
+	assert.deepEqual(chord("mentionFile"), ["Alt + E", "composer"]);
+	assert.deepEqual(chord("queue"), ["Alt + Q", "composer"]);
+	assert.deepEqual(chord("newLine"), ["Ctrl/Cmd + J", "composer"]);
+	assert.ok(matchesKeybinding(KEYBINDINGS.workers, press("∑", { altKey: true, code: "KeyW" })));
+	assert.ok(!matchesKeybinding(KEYBINDINGS.workers, press("w", { altKey: true, ctrlKey: true })));
 });

@@ -1,8 +1,8 @@
 import { createContext, useContext } from "react";
 import type { PaneView } from "./pane-model.js";
 
-/** A part of a drill-in the pane can open at: the board's Decisions, for the terminal's `/decisions`. */
-export type PaneSection = "decisions";
+/** A part of a drill-in the pane can open at: the board's Decisions and memory, for `/decisions` and `/memory`. */
+export type PaneSection = "decisions" | "memory";
 
 /** A view, or a view opened at one of its sections. */
 export type PaneTarget = PaneView | { readonly view: PaneView; readonly section: PaneSection };

@@ -27,6 +27,7 @@ import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { FilePreviewDialog } from "../chat/on-demand-panels.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
+import { type PaneView, ROOT_VIEW } from "../chat/pane-model.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
 import { routeFacts } from "../chat/route.js";
@@ -178,6 +179,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
 	useShortcut("agents", () => pane.show("agents", ids.pane));
+	// The terminal's Alt+U dashboard and Alt+W workers dock: a second press closes what the first opened.
+	const togglePane = (view: PaneView) => (pane.open && pane.view === view ? pane.close() : pane.show(view, ids.pane));
+	useShortcut("overview", () => togglePane(ROOT_VIEW));
+	useShortcut("workers", () => togglePane("agents"));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const { controls, requestClose } = useSessionCommands();

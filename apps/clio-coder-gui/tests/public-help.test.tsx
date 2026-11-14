@@ -72,3 +72,26 @@ test("the former native reader API no longer serves Markdown, search, or navigat
 	const meta = await (await h.request("/api/meta")).json();
 	assert.match(meta.bundledDocsPath, /[/\\]docs$/u);
 });
+
+test("Help prints the terminal's Alt chords and every terminal name the app answers", () => {
+	const shortcuts = helpContent("", "shortcuts").shortcuts.flatMap((group) => group.bindings);
+	for (const [id, keys] of [
+		["library", "Alt + L"],
+		["overview", "Alt + U"],
+		["workers", "Alt + W"],
+		["mentionFile", "Alt + E"],
+		["queue", "Alt + Q"],
+		["newLine", "Ctrl/Cmd + J"],
+	])
+		assert.ok(
+			shortcuts.some((row) => row.id === id && row.keys === keys),
+			`${keys} is missing from the Shortcuts view`,
+		);
+	const commands = helpContent("", "guide").sections.find((match) => match.section.id === "commands");
+	assert.ok(commands);
+	const terms = commands.entries.map((entry) => entry.term).join(" ");
+	for (const name of ["/btw [question]", "/draft [request]", "/reload", "/view", "/files", "/trust", "/restart"])
+		assert.ok(terms.includes(name), `${name} is missing from the command reference`);
+	const html = renderToStaticMarkup(<HelpEntries match={commands} bundledDocsPath="/installed/clio/docs" />);
+	assert.match(html, /\/music/u);
+});
