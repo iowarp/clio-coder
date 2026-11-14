@@ -151,7 +151,11 @@
 			"summary": "a live first task: the model finds the absolute-zero bug, fixes it, and runs the declared test check",
 			"title": "A first task in CLIO Coder: fix a failing test and verify",
 			"live": true,
-			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
+			"model": {
+				"target": "openai-codex",
+				"model": "gpt-6-luna",
+				"source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)"
+			},
 			"settings": ["interface: { mode: fullscreen }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
@@ -250,7 +254,11 @@
 			"summary": "clio-coder run --json on a task, its last frame and exit status",
 			"title": "An unattended CLIO Coder run with JSON output",
 			"live": true,
-			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"cols": 100,
@@ -328,7 +336,11 @@
 			"summary": "the agent is asked for a token in an untracked .env; the read is hard-blocked",
 			"title": "CLIO Coder refuses to read a project secret",
 			"live": true,
-			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
 			"settings": ["interface: { mode: fullscreen, outputDetail: compact }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
@@ -414,7 +426,11 @@
 			"summary": "doctor's sandbox row, then a scratch-branch task that deletes and rebuilds dist/, then /rewind's preview",
 			"title": "Letting CLIO Coder work: sandbox, snapshot and rewind",
 			"live": true,
-			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
 			"settings": ["interface: { mode: fullscreen, outputDetail: compact }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
@@ -553,7 +569,11 @@
 			"summary": "a fresh launch in a configured workspace: the welcome panel with the workspace, its Git state, the model, and the composer",
 			"title": "Terminal at start",
 			"live": true,
-			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
+			"model": {
+				"target": "openai-codex",
+				"model": "gpt-6-luna",
+				"source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)"
+			},
 			"stillsOnly": true,
 			"profile": "configured",
 			"repo": "calibration-lab",
@@ -622,7 +642,11 @@
 			"summary": "terminal stills: plugin list, /context after one turn, Settings Models and Workers, Library browse and installed, interop",
 			"title": "Terminal stills",
 			"live": true,
-			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
+			"model": {
+				"target": "openai-codex",
+				"model": "gpt-6-luna",
+				"source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)"
+			},
 			"settings": ["interface: { mode: fullscreen }"],
 			"stillsOnly": true,
 			"peers": ["claude", "codex", "opencode", "copilot"],
@@ -1208,7 +1232,11 @@
 			"summary": "a live turn in a project with the temperature-calibration example under examples/: verify and a table, the check in /view, then an approval card for git push, denied",
 			"title": "Verify, view and approval stills",
 			"live": true,
-			"model": { "target": "anthropic-max", "model": "claude-opus-5-5", "source": "Claude Opus 5.5 through a Claude subscription (target anthropic-max)" },
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-opus-5-5",
+				"source": "Claude Opus 5.5 through a Claude subscription (target anthropic-max)"
+			},
 			"stillsOnly": true,
 			"profile": "configured",
 			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "safety: { judge: { enabled: false } }"],
@@ -1728,7 +1756,10 @@
 			"live": true,
 			"cols": 100,
 			"rows": 30,
-			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "chat: { target: openai-codex, model: gpt-6-luna }"],
+			"settings": [
+				"interface: { mode: fullscreen, outputDetail: compact }",
+				"chat: { target: openai-codex, model: gpt-6-luna }"
+			],
 			"sourceNote": "Chat: GPT-6 Luna through a ChatGPT subscription (target openai-codex); the session had no other model.",
 			"markers": [
 				{ "label": "ready", "match": "is ready" },
@@ -1755,7 +1786,10 @@
 			"live": false,
 			"cols": 100,
 			"rows": 30,
-			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "chat: { target: openai-codex, model: gpt-6-luna }"],
+			"settings": [
+				"interface: { mode: fullscreen, outputDetail: compact }",
+				"chat: { target: openai-codex, model: gpt-6-luna }"
+			],
 			"sourceNote": "Two targets are configured: openai-codex with gpt-6-luna and anthropic-max with claude-haiku-5-5. No message is sent; the take only switches the session model.",
 			"markers": [
 				{ "label": "ready", "match": "is ready" },

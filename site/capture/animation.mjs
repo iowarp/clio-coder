@@ -110,8 +110,14 @@ const castText = `${[JSON.stringify(header), ...all.map((event) => JSON.stringif
 const duration = all.at(-1)[0];
 
 const hits = [
-	...scanChunks(kept.map(([, , data]) => plain(data)), secrets),
-	...scanChunks(kept.map(([, , data]) => data), secrets),
+	...scanChunks(
+		kept.map(([, , data]) => plain(data)),
+		secrets,
+	),
+	...scanChunks(
+		kept.map(([, , data]) => data),
+		secrets,
+	),
 	...privacyHits([JSON.stringify(header), ...cutMarkers.map((marker) => marker.label)].join("\n"), secrets),
 ];
 if (hits.length) throw new Error(`${scenario.id}: privacy scan failed: ${[...new Set(hits)].join("; ")}`);
@@ -121,7 +127,12 @@ writeFileSync(join(outDir, `${scenario.id}.cast`), castText);
 const poster = cutMarkers.find((marker) => marker.label === scenario.poster);
 if (!poster) throw new Error(`${scenario.id}: the poster marker ${scenario.poster} was not reached.`);
 const frames = cutMarkers.map((marker) => ({ id: marker.label, time: marker.time, rows: scenario.rows }));
-const rendered = await renderStills(castText, [{ id: scenario.id, time: poster.time, rows: scenario.rows }, ...frames], outDir, values.chrome);
+const rendered = await renderStills(
+	castText,
+	[{ id: scenario.id, time: poster.time, rows: scenario.rows }, ...frames],
+	outDir,
+	values.chrome,
+);
 const chapters = rendered.slice(1).map(({ id, text }) => {
 	const body = text.map((line) => line.trimEnd());
 	while (body.length && !body.at(-1)) body.pop();
@@ -129,7 +140,8 @@ const chapters = rendered.slice(1).map(({ id, text }) => {
 });
 const transcript = `${scenario.title}\nRecorded with CLIO Coder ${values.version}. Each section is the terminal screen at that moment.\n\n${chapters.join("\n\n")}\n`;
 const transcriptHits = privacyHits(transcript, secrets);
-if (transcriptHits.length) throw new Error(`${scenario.id}: privacy scan failed on the transcript: ${transcriptHits.join("; ")}`);
+if (transcriptHits.length)
+	throw new Error(`${scenario.id}: privacy scan failed on the transcript: ${transcriptHits.join("; ")}`);
 writeFileSync(join(outDir, `${scenario.id}.txt`), transcript);
 const main = rendered[0];
 run("python3", [
@@ -159,9 +171,12 @@ const gifSeconds = Math.round(((duration - spec.idleCap) / (gifSpec.speed ?? 1) 
 const gifSize = readFileSync(gif);
 const gifWidth = gifSize.readUInt16LE(6);
 const gifHeight = gifSize.readUInt16LE(8);
-console.log(`${scenario.id}: cast ${Math.round(duration)}s ${castText.length} B, gif ${gifWidth}x${gifHeight} ${gifBytes} B, about ${gifSeconds}s`);
+console.log(
+	`${scenario.id}: cast ${Math.round(duration)}s ${castText.length} B, gif ${gifWidth}x${gifHeight} ${gifBytes} B, about ${gifSeconds}s`,
+);
 if (gifBytes > 2_000_000) throw new Error(`${scenario.id}: the GIF is ${gifBytes} B; raise speed or trim the take.`);
-if (gifSeconds > 22) throw new Error(`${scenario.id}: the GIF runs about ${gifSeconds}s; raise speed or trim the take.`);
+if (gifSeconds > 22)
+	throw new Error(`${scenario.id}: the GIF runs about ${gifSeconds}s; raise speed or trim the take.`);
 
 const today = new Date().toISOString().slice(0, 10);
 const png = readFileSync(main.path);
@@ -186,7 +201,8 @@ const entry = {
 	posterAt: poster.time,
 };
 const registryHits = privacyHits(JSON.stringify(entry), secrets);
-if (registryHits.length) throw new Error(`${scenario.id}: privacy scan failed on the registry entry: ${registryHits.join("; ")}`);
+if (registryHits.length)
+	throw new Error(`${scenario.id}: privacy scan failed on the registry entry: ${registryHits.join("; ")}`);
 writeFileSync(join(outDir, "captures.json"), `${JSON.stringify({ [scenario.id]: entry }, null, "\t")}\n`);
 
 const alts = altCheck({ scratch, ids: [scenario.id], entries: { [scenario.id]: entry } });
@@ -196,7 +212,8 @@ if (alts.misses.length) {
 	console.log("alt-check: nothing published; fix the alt or caption in scenarios.json and rerun.");
 } else if (values.publish) {
 	mkdirSync(join(site, "assets/casts"), { recursive: true });
-	for (const ext of ["cast", "txt"]) copyFileSync(join(outDir, `${scenario.id}.${ext}`), join(site, `assets/casts/${scenario.id}.${ext}`));
+	for (const ext of ["cast", "txt"])
+		copyFileSync(join(outDir, `${scenario.id}.${ext}`), join(site, `assets/casts/${scenario.id}.${ext}`));
 	mkdirSync(dirname(join(site, entry.image)), { recursive: true });
 	copyFileSync(main.path, join(site, entry.original));
 	copyFileSync(main.path.replace(/\.png$/, ".webp"), join(site, entry.image));

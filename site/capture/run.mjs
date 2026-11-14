@@ -40,11 +40,11 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { homedir, hostname, userInfo } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ALIAS, startAliasProxy } from "./alias-proxy.mjs";
 import { altCheck, printAltCheck } from "./alt-check.mjs";
 import { compactEvents } from "./compact.mjs";
@@ -234,7 +234,12 @@ function prepareHome(dir, scenario) {
 // privacy scan so nothing that echoes one can be published.
 function writeSubscriptionHome(home, scenario) {
 	const { target, model } = scenario.model ?? { target: scenario.login };
-	const real = parseYaml(readFileSync(join(process.env.CLIO_CODER_REAL_CONFIG_DIR ?? join(homedir(), ".config/clio-coder"), "credentials.yaml"), "utf8"));
+	const real = parseYaml(
+		readFileSync(
+			join(process.env.CLIO_CODER_REAL_CONFIG_DIR ?? join(homedir(), ".config/clio-coder"), "credentials.yaml"),
+			"utf8",
+		),
+	);
 	const entry = real?.entries?.[target];
 	if (!entry) throw new Error(`${scenario.id}: no stored login for ${target}; sign in once with clio-coder first.`);
 	for (const value of [entry.access, entry.refresh, entry.key]) if (typeof value === "string") secrets.push(value);
