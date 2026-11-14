@@ -2,11 +2,85 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.1 - 2026-11-14
 
-### Added
+CLIO Coder is an open-source coding-agent harness that works with any model you have and ties every claim about your code to a check it actually ran. It is the coding harness of the CLIO ecosystem from the Gnosis Research Center at Illinois Tech, and it is built for everyday developers as much as for people who write and run science on supercomputers: HPC researchers, storage and I/O engineers, developers of scientific libraries and data formats, and teams bringing LLM agents onto shared clusters. It runs the models your lab already has, from GPU servers on your own network to institutional endpoints and cloud subscriptions, on a login node without root, inside a sandbox built for shared systems.
 
-- A `hoare` library pack for Hoare-logic correctness reviews of C, C++, Python and Fortran functions, contributed by Keith Bateman (#454). `clio-coder library install plugin:hoare` adds the `hoare-verification` skill, a read-only `hoare-verifier` agent that returns a verifier report with one check per proof obligation, `/hoare:review` for a Markdown correctness report, and the `hoare-build-review` playbook, which gates a coder on that review. Each obligation is marked `mechanized`, `modeled`, `argued`, `assumed`, `refuted` or `unknown`, and counts as `mechanized` only when a prover check declared in `.clio-coder/verifiers.yaml` proved it.
+This release starts faster, keeps you in the conversation when you hand it a long job, and remembers what you tell it to remember. It adds Hoare-logic correctness reviews for the C, C++, Python and Fortran functions that simulation and I/O codes depend on, and it brings a second round of fixes to the desktop app (alpha). To try it on a laptop or a login node, run `curl -fsSL https://coder.iowarp.ai/install.sh | sh`, then `clio-coder`, which walks you through connecting a model. The [HPC cluster guide](https://coder.iowarp.ai/docs/guide/hpc-clusters.html) covers old glibc, `module load` and proxies on login nodes. `clio-coder library install plugin:hpc --with-requirements` adds skills for Slurm job arrays and parameter sweeps, Lmod and Spack environments, parallel HDF5 and MPI-IO, Darshan I/O analysis and ChronoLog run records, all driving your cluster's own tools.
+
+### Highlights
+
+- **Ready when it appears.** The interactive session now starts before your shell's startup files run, and it finishes its own startup work in smaller steps that no longer freeze the screen. On one WSL2 laptop (warm cache, median of five launches) the first frame dropped from 1.6 s to 0.6 s, every subsystem was ready at 1.1 s instead of 2.9 s, the longest freeze while typing fell from 467 ms to 166 ms, and a headless `run` finished 0.6 s sooner. On login nodes with heavy `module load` or conda startup files, the session no longer waits for them.
+- **Hoare-logic correctness reviews, contributed by Keith Bateman (#454).** `clio-coder library install plugin:hoare` adds a review that writes one check per proof obligation for C, C++, Python and Fortran functions. Each check says whether a prover mechanized it, a model argued it, or it is still open, and only a prover check you declared counts as proof.
+- **Tell it to remember.** Typing `remember that ...`, `from now on ...`, a one-line message starting with `# `, or `/remember` saves your words as memory for this project, everywhere, or just this session. The terminal and the desktop app show what was saved with a way to change its scope or undo it, and `forget that ...` takes it back.
+- **Yolo still asks you questions.** Yolo removes approval cards, not your say in the work. Interviews, the close of a plan you asked for, and choices only you can make now reach you at yolo as at `default`. A question nobody answers takes its recommended option after a bounded wait.
+- **A claims ledger that follows your worktrees (#406).** Results that `verify` recorded are shared between a checkout and its linked worktrees, a failure at the same commit retires an earlier pass, claims recorded before the current commit read as stale, and `clio-coder claims export` and `import` move them between projects as leads to re-check.
+- **A steadier desktop app (alpha).** Approvals, the queue after a stop, offline sends, keyboard focus, narrow windows and phone widths, live usage and the Task actions menu were all reworked from hands-on use against the real engine.
+
+### Upgrade notes
+
+- **Yolo asks questions again.** In 0.8.0 a question at yolo took its recommended option at once. Now it waits for you like at `default`, for at most `safety.unattendedAfterSeconds` (300 s by default; `0` reads as 300 s at yolo), then takes the recommended option; an outward question is answered no. Once one lapses with no key pressed since, later questions wait 30 seconds until you type again. Approval cards still never wait at yolo. A desktop app or ACP client question lapses the same way on the shorter of that window and the client's timeout, instead of ending the turn.
+- **Your shell startup files run after the session, not before it.** On macOS and Linux the multiplexer pane runs `clio-coder` first and hands the pane to your shell when the session ends. A session started from a parent that never ran your startup files, and that needs what they export, can set `CLIO_CODER_PANE_LAUNCH=shell` to keep the 0.8.0 behavior. Windows is unchanged.
+- **Linked worktrees share their main checkout's claims and memory.** A worktree's claims supersede only claims made in the same worktree, and equal commits contradict anywhere. Worktree logs written before 0.8.1 are still read. A `.git` pointer that the main repository does not vouch for records nothing.
+
+### Memory
+
+- Capture happens when you submit a turn, from your own words only, never from tool output, model text or a worker's answer. `everywhere`, `in this project` and `just for now` choose the scope; without them the note is saved for this project at once, and the background memory route may move it or refine its kind without repeating the notice.
+- Session notes stay pinned in the session ledger and survive compaction. Project and global notes are operator-approved records that pass the relevance gate and rank first in `# Memory`.
+- A secret is refused and pointed at credential storage, a duplicate updates the existing record, `/remember undo` and `/remember scope <scope>` act on the last capture, and `/remember forget <text>` retracts like `forget that ...`. ACP clients receive the capture as `_meta["clio-coder/memory-capture"]`.
+
+### Verification and claims
+
+- The `hoare` pack ships the `hoare-verification` skill, a read-only `hoare-verifier` agent, `/hoare:review` for a Markdown correctness report, and the `hoare-build-review` playbook, which gates a coder on that review. Obligations are marked `mechanized`, `modeled`, `argued`, `assumed`, `refuted` or `unknown`, and are `mechanized` only when a prover check declared in `.clio-coder/verifiers.yaml` proved them.
+- Numeric claims record the host platform, and every claim sentence names its commit, platform and command. A failing agent-ledger review is kept as a dispute that later sessions see with both sides.
+- Recording a claim costs the same with 2,000 claims as with 100. `clio-coder claims compact` rewrites the log atomically, and `memory list --json` shows open and cleared regressions.
+- A research iteration that contradicts a claim regresses the memory built on it, and delivered claim notes are marked as untrusted data in the prompt.
+- `verify` derives a unittest check for test modules at the root of a flat Python project, and a worker's receipt names the check `verify` actually ran.
+
+### Sessions, yolo and safety
+
+- Your own answer to a question reaches the safety judge as your words, so a push you approve in an answer can run, and no approval card appears before an outward question.
+- Read-only `git -C <dir>` inside the workspace and pathspec globs such as `git diff -- *.py` run without an ask. `-C` outside the workspace and every write form still ask.
+- A printed `$?` exit status no longer refuses a repair worker's compound command.
+- A plan request that asked for an interview first returns to the interview, and a plan card after CLIO Coder answered for an absent operator ends the turn unapproved. "Don't implement yet" reads as plan-only.
+- `/settings` no longer says yolo is on while its acceptance card still holds the change.
+- The third identical blocked call in a row locks tools, whatever run budget a worker has left.
+
+### Fleet and terminal
+
+- Fleet history counts an earlier run's steps and loops as the live run did, a loop checkpoint reads as progress, a settled plan names its resolved loops, and a loop repair opens its own worker card.
+- `/fleet run` with a typed task points at `--var task`.
+- Long streamed answers render in chunks, the composer keeps one height while idle and running, and composer hints show key caps.
+- The pane host ends cleanly when the session dies without its exit marker, and stops when it is left holding only the replacement shell.
+- `clio-coder doctor` reads a fresh home with no state root as empty instead of an error.
+
+### Desktop app (alpha) and ACP
+
+- The engine's live readouts and the safety judge's admission decisions reach the desktop app and opted-in ACP clients. A held tool row clears once the judge admits it, and turn usage waits for the turn's last call to settle.
+- ACP clients can list, preview and restore workspace snapshots.
+- Session dialogs, advisor, team, agent, loop and skill forms live in the Task actions menu and the command palette, with terminal key chords and slash names shown on the matching controls. Commands the app serves through its own controls are no longer listed as slash commands.
+- Approvals take focus and read `Waiting for approval`, the queue holds after a stop, offline sends retry, error toasts expire, `Jump to latest` appears only with content below, and a report needs a title.
+- A session is renamed after its first answer, model and thinking come from one derivation, settings show their bounds inline, and line breaks render as in the terminal.
+- Top bars on Sessions and a project's work page keep Machines, Refresh and Start task on screen from phone width to 1051 px, the phone task menu scrolls, and Actions is one column.
+- Pasted launch links reconnect, stale workspaces no longer hide a ready model, pages restored from the browser's back/forward cache release their event stream, and the route picker says when a connection cannot list models.
+- Dispatch replies say where progress appears instead of naming wire events.
+
+### Performance
+
+- Startup work after the first frame runs one task per event-loop turn, the model SDK loads after the first frame, a settings file is parsed once per version, the footer polls git with two forks instead of five, and unchanged plugin trees are vouched for by entry identity.
+- The build merges esbuild's chunks into the files each startup path loads, cutting module loading from 448 ms to 330 ms on the same laptop.
+- Journal readers compile their record checks once and scan a sealed run's journal once per read, and tool version probes run without a controlling terminal.
+
+### Security
+
+- Hono and the Node server are patched for their published security advisories.
+- Adopted rules strip HTML comments until none remain, the macOS process-line parser no longer uses a backtracking regex, and sandbox paths in tests pass as arguments instead of shell text.
+
+### Known limits
+
+- The safety judge's verdicts depend on the judge model. A small local judge can refuse a destructive command the operator named explicitly; answer the question it raises or use a stronger judge route.
+- Startup times above come from one WSL2 laptop with a warm cache. A cold cache, a network home directory or a slow login node will be slower.
+- The desktop app is still alpha and Linux-first. Native Windows remains best effort; WSL is the recommended route.
 
 ## 0.8.0 - 2026-11-12
 
