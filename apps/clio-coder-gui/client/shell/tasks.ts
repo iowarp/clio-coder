@@ -10,6 +10,7 @@ import type { SessionOverview } from "../../contracts/session-overview.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
+import { afterStreamHello } from "../api/stream-gate.js";
 import { discardDraftStore } from "../chat/draft-registry.js";
 import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
@@ -50,10 +51,17 @@ export interface TaskActions {
 	readonly error: Error | null;
 }
 
+/** Read after the event stream opens: its first hello supersedes any overview read before it (one request per load). */
+async function readOverview(client: Client, signal: AbortSignal) {
+	await afterStreamHello(client, signal);
+	signal.throwIfAborted();
+	return client.call(routes.sessionOverview, emptyInput, undefined, signal);
+}
+
 export function useSessionOverview(client: Client, enabled = true) {
 	return useQuery({
 		queryKey: ["session-overview"],
-		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
+		queryFn: ({ signal }) => readOverview(client, signal),
 		staleTime: Number.POSITIVE_INFINITY,
 		refetchOnWindowFocus: "always",
 		enabled,
@@ -68,7 +76,7 @@ export function useSessionWorkers(client: Client, sessionId: string) {
 	const select = useCallback((overview: SessionOverview) => sessionWorkers(overview, sessionId), [sessionId]);
 	return useQuery({
 		queryKey: ["session-overview"],
-		queryFn: ({ signal }) => client.call(routes.sessionOverview, emptyInput, undefined, signal),
+		queryFn: ({ signal }) => readOverview(client, signal),
 		staleTime: Number.POSITIVE_INFINITY,
 		refetchOnWindowFocus: "always",
 		select,

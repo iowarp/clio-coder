@@ -90,6 +90,7 @@ import { preloadPanels } from "./on-demand-panels.js";
 import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
+import { queuePollInterval } from "./queue-poll-model.js";
 import { openRoutePicker, RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import { SlashActionDialog, SlashPalette, slashOptionId } from "./SlashPalette.js";
@@ -382,8 +383,9 @@ export const Composer = memo(function Composer({
 		queryFn: () => client.call(routes.sessionQueue, params),
 		enabled: queuePolicy.read,
 		retry: false,
-		// An agent with the queue capability pushes every change; an older one is asked.
-		refetchInterval: queuePolicy.read && !capabilities.data?.queue ? 3_000 : false,
+		// An agent with the queue capability pushes every change; an older one is asked while the queue can move.
+		refetchInterval: (query) =>
+			queuePollInterval(queuePolicy.read, Boolean(capabilities.data?.queue), running, query.state.data),
 	});
 	const queued = projectQueue(queue.data);
 	const queueOps = capabilities.data?.queue?.ops;
