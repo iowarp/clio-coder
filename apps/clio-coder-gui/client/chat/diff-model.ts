@@ -103,19 +103,12 @@ export interface ParsedDiff {
 	readonly newFile?: boolean;
 }
 
-/** A whole-file write's proposal compared line by line with the file it replaces (`baseline-diff.ts`). */
-export interface BaselineDiff {
-	readonly rows: DiffRow[];
-	readonly adds: number;
-	readonly dels: number;
-}
-
 /**
  * What a whole-file write would replace, as the workspace read it before the write: its comparison with the
- * proposal, `null` when no file is there, or undefined when it was not read or cannot be compared (a binary, a
+ * proposal (`baseline-diff.ts`), `null` when no file is there, or undefined when it was not read or cannot be compared (a binary, a
  * cut-short preview, a file too large to compare here).
  */
-export type ProposalBaseline = BaselineDiff | null | undefined;
+export type ProposalBaseline = ParsedDiff | null | undefined;
 
 /** The workspace path a whole-file write proposes to replace, or null for any other call. */
 export function wholeFileWritePath(input: Record<string, unknown> | undefined): string | null {
@@ -351,22 +344,8 @@ export function synthesizeProposedDiff(
 	baseline?: ProposalBaseline,
 ): ParsedDiff | null {
 	if (input === undefined) return null;
-	const compared = baseline ?? null;
-	if (compared !== null && compared.rows.length > 0) {
-		const bounded = withIds(compared.rows.slice(0, MAX_PROPOSED_ROWS));
-		const cut = compared.rows.length > bounded.length;
-		return {
-			format: "clio",
-			rows: bounded,
-			adds: compared.adds,
-			dels: compared.dels,
-			elisions: tally(bounded).elisions,
-			truncated: cut,
-			truncationNote: cut ? `This preview stops at ${MAX_PROPOSED_ROWS} lines. The proposal itself is longer.` : null,
-			noNewlineAtEof: false,
-			rowsDropped: compared.rows.length - bounded.length,
-		};
-	}
+	// A comparison with the file now (`baseline-diff.ts`) is already the whole proposal.
+	if (baseline) return baseline;
 	const rows: DiffRow[] = [];
 	const edits = input.edits;
 	if (Array.isArray(edits) && edits.length > 0) {

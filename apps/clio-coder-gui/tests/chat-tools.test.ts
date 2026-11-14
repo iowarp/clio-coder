@@ -793,7 +793,7 @@ test("a whole-file proposal compared with the file now counts what the applied r
 			resultText: "",
 			status: "pending",
 			isError: false,
-			baseline: before === null ? null : baselineRows(before, "approved"),
+			baseline: before === null ? null : baselineRows(before, "approved", MAX_PROPOSED_ROWS),
 		});
 	const replaced = pending("draft\n").diff ?? parseDiff("");
 	const applied = parseDiff("-1 draft\n+1 approved");
@@ -808,7 +808,11 @@ test("a whole-file proposal compared with the file now counts what the applied r
 		resultText: "",
 		status: "pending",
 		isError: false,
-		baseline: baselineRows(long.join("\n"), [...long.slice(0, 10), "changed", ...long.slice(11)].join("\n")),
+		baseline: baselineRows(
+			long.join("\n"),
+			[...long.slice(0, 10), "changed", ...long.slice(11)].join("\n"),
+			MAX_PROPOSED_ROWS,
+		),
 	}).diff;
 	assert.equal(edited && diffCounts(edited), "+1 −1");
 	assert.deepEqual(

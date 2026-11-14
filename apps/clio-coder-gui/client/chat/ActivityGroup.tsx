@@ -31,7 +31,7 @@ import {
 } from "./activity.js";
 import { callDecisions, isAwaitingAnswer } from "./approval-model.js";
 import { observeStart } from "./chat-turn.js";
-import { type ProposalBaseline, wholeFileWritePath } from "./diff-model.js";
+import { MAX_PROPOSED_ROWS, type ProposalBaseline, wholeFileWritePath } from "./diff-model.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerRunRecord } from "./RunRecordLine.js";
 import { ToolCard } from "./tool-cards.js";
@@ -85,7 +85,7 @@ function useProposalBaseline(client: Client, workspaceId: string, item: Timeline
 			if (file.status === "missing") return { baseline: null };
 			const content = item.rawInput?.content;
 			if (file.status !== "text" || file.truncated || typeof content !== "string") return { baseline: undefined };
-			return { baseline: baselineRows(file.text, content) ?? undefined };
+			return { baseline: baselineRows(file.text, content, MAX_PROPOSED_ROWS) ?? undefined };
 		},
 		enabled: path !== null && (item.status === "pending" || item.status === "in_progress"),
 		staleTime: Number.POSITIVE_INFINITY,

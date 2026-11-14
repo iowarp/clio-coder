@@ -1,7 +1,7 @@
 // The line diff behind a whole-file write's proposal: the file now against the proposed text. A lazy chunk, loaded
 // only when such a write is read for approval, so the session route does not carry it.
 
-import type { BaselineDiff, DiffRow, DiffRowKind } from "./diff-model.js";
+import type { DiffRow, DiffRowKind, ParsedDiff } from "./diff-model.js";
 
 // Type-only imports keep this chunk from pulling `diff-model.ts` out of the route's shared chunk. A whole file's
 // own lines never carry the engine's line-cap marker, so no row here is capped.
@@ -21,9 +21,10 @@ const BASELINE_CONTEXT = 2;
 
 /**
  * A line diff of the file now against the proposed text, so the preview counts what the write will add and remove
- * exactly as the applied result will. Null when the files are too large to compare here.
+ * exactly as the applied result will. It shows at most `limit` rows. Null when nothing differs or the files are too
+ * large to compare here.
  */
-export function baselineRows(before: string, after: string): BaselineDiff | null {
+export function baselineRows(before: string, after: string, limit: number): ParsedDiff | null {
 	const old = lines(before);
 	const next = lines(after);
 	let head = 0;
@@ -91,5 +92,18 @@ export function baselineRows(before: string, after: string): BaselineDiff | null
 			newLine += 1;
 		}
 	});
-	return { rows, adds, dels };
+	if (rows.length === 0) return null;
+	const shown = rows.slice(0, limit).map((entry, index) => ({ ...entry, id: `r${index}` }));
+	const cut = rows.length > shown.length;
+	return {
+		format: "clio",
+		rows: shown,
+		adds,
+		dels,
+		elisions: shown.filter((entry) => entry.kind === "elision").length,
+		truncated: cut,
+		truncationNote: cut ? `This preview stops at ${limit} lines. The proposal itself is longer.` : null,
+		noNewlineAtEof: false,
+		rowsDropped: rows.length - shown.length,
+	};
 }
