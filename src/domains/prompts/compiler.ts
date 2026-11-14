@@ -279,8 +279,8 @@ function safetyOneLiner(level: string, confinement?: YoloConfinement): string {
 			return "workspace edits run; shell commands run contained in the OS sandbox when the host has one, and what would need approval is first reviewed by the safety judge.";
 		case "yolo":
 			return confinement === "unconfined"
-				? "unconfined: nothing stops for approval and nobody answers questions; only the yolo floor and operator-authored rules block."
-				: "contained: default's sandbox and safety judge apply, nothing waits for the operator, and a call the judge does not allow is refused instead of asked.";
+				? "unconfined: nothing stops for approval; only the yolo floor and operator-authored rules block."
+				: "contained: default's sandbox and safety judge apply, nothing waits for the operator's approval, and a call the judge does not allow is refused instead of asked.";
 		default:
 			return "follow the active safety contract.";
 	}
@@ -327,33 +327,15 @@ function safetyFragmentFor(
 	return lookupFragment(table, `safety.${level}`, "safety");
 }
 
-/**
- * Safety text true for the session that reads it. Row conditions already
- * dropped what a headless run lacks (/rewind, ask_user); an attended yolo
- * session with ask_user attached has an operator who may answer, so the
- * "nobody will answer" sentences become what holds there (S-89).
- */
-function sessionSafetyBody(body: string, headless: boolean, askUserAttached: boolean): string {
-	if (headless || !askUserAttached) return body;
-	return body
-		.replace(/ and is away by contract: nothing waits for them\./u, ": nothing waits for their approval.")
-		.replace(/ and is away by contract\./u, ".")
-		.replace(
-			/Nobody will answer a question\. When a choice is open,/u,
-			"An operator may be present, but approvals are not requested. Use ask_user only for a decision that is the operator's to make, never to confirm an action. When a choice is open,",
-		);
-}
-
 function renderSafetySection(
 	safetyFragment: LoadedFragment,
 	level: string,
 	headless: boolean,
 	confinement?: YoloConfinement,
-	askUserAttached = false,
 	headlessApprovalInContract = false,
 ): string {
 	const oneLine = `Autonomy: ${level}. ${safetyOneLiner(level, confinement)}`;
-	const body = sessionSafetyBody(safetyFragment.body.trim(), headless, askUserAttached);
+	const body = safetyFragment.body.trim();
 	// Nothing parks under yolo of either confinement (#407): contained yolo
 	// refuses what would park, which its body says, so no line says what parking means.
 	// Under v2 the headless contract carries this sentence instead (D-02 4.4).
@@ -379,13 +361,7 @@ export function renderSessionPostureUpdate(table: FragmentTable, level: string, 
 		"[Clio Coder host policy update]",
 		"Effective for the following turn and subsequent turns. This supersedes the compiled # Safety posture, all earlier posture updates, and the posture-dependent turn-ending and settings-change guidance. Other instructions still apply.",
 		"# Safety",
-		renderSafetySection(
-			safety,
-			level,
-			inputs.headless === true,
-			inputs.yoloConfinement,
-			toolSurfaceHasTool(inputs.toolNames, "ask_user"),
-		),
+		renderSafetySection(safety, level, inputs.headless === true, inputs.yoloConfinement),
 		...(hasEnding
 			? [renderTurnEndingContract((inputs.toolNames ?? []).includes("ask_user"), level === "yolo").join("\n")]
 			: []),
@@ -606,29 +582,15 @@ function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
 	const askUserCall = direct
 		? "an ask_user call"
 		: 'an ask_user call through gateway(op="call", capability="ask_user", args={...})';
-	if (yolo) {
-		// The operator is away by contract (#407): no waiting state, and no
-		// question to ask, so the variant never names the interview tool.
-		return [
-			"## Ending a turn",
-			'Under yolo every turn ends Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
-			"Ambiguity does not end the turn. Take the recommended default, state the assumption in the final reply, and keep working. Tools settle workspace facts.",
-			'A requested plan shows its steps with their stated assumptions, and the turn stops there; when the operator asked for the work to be carried out, carry the plan out instead. A plan never ends on an approval card or a "Carry out this plan?" question.',
-			"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without re-confirming.",
-			"Examples:",
-			'- "Want me to dive deeper into refresh?": stop after the explanation.',
-			'- A finished change closing "Let me know if you want tests.": stop after the change.',
-			'- "Chart a losing week" with a backtest and a thin live log in the workspace: chart the backtest, name that choice as an assumption in the final reply, and finish.',
-			'- "Delete the test folder and commit.": run the rm and the commit; no "Delete tests?" interview first.',
-		];
-	}
 	return [
 		"## Ending a turn",
 		"Every turn ends in one of two states:",
 		'1. Done: the deliverable is complete and the reply stops there, without an offer, a courtesy question, "let me know", or a menu of next steps in prose.',
 		`2. Waiting on the operator: the turn's last act is ${askUserCall} with a clear question, the context needed to answer it, and 2 to 4 options, each described by what choosing it leads to, recommended first.`,
 		"Use ask_user for clarification, plan approval, yes/no decisions, and going deeper. A question inside an explanation is fine; waiting for a typed answer is not. Tools settle workspace facts. Act on answers; a decline or 'enough' ends in one sentence without restating earlier output.",
-		"An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous or lies outside the workspace.",
+		yolo
+			? "An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation. Ask only when the target is ambiguous or lies outside the workspace."
+			: "An explicit, specific operator instruction is its own consent, destructive or not: carry it out without an ask_user re-confirmation, because the approval cards on the risky commands are the safety gate. Ask only when the target is ambiguous or lies outside the workspace.",
 		"Examples:",
 		'- "Want me to dive deeper into refresh?": stop after the explanation, or ask_user "Go deeper on refresh?" [Trace the refresh path | That covers it].',
 		'- A finished change closing "Let me know if you want tests.": stop after the change.',
@@ -636,7 +598,9 @@ function renderTurnEndingContract(direct: boolean, yolo: boolean): string[] {
 		'The plan text itself never ends with a question such as "Should I keep this as the plan only?" or "Want me to proceed?". The card is the only question, so the plan stops at its last step or its stated assumptions.',
 		'When the operator asks for the plan only, show the plan first and list assumptions and open decisions inside it, then make the card\'s first option "Keep the plan (Recommended)", then Proceed, then "Revise the plan first". Prefer options on the closing card over a preliminary interview, unless a missing fact prevents a useful plan.',
 		'Choosing Proceed on "Carry out this plan?" authorizes implementation of the displayed plan now, even if the earlier request was "plan only". Complete the interview and implement in this same turn; do not stop at approval or ask for a second message. Respect any limits in the answer. If explicit host/tool restrictions prevent implementation, offer plan review or revision instead of Proceed.',
-		'- "Delete the test folder and commit.": run the rm and the commit and let their approval cards gate them; no "Delete tests?" interview first.',
+		yolo
+			? '- "Delete the test folder and commit.": run the rm and the commit; no "Delete tests?" interview first.'
+			: '- "Delete the test folder and commit.": run the rm and the commit and let their approval cards gate them; no "Delete tests?" interview first.',
 		'- "Clean up the config" with two configs in play: ask_user "Which config?" before any work, one option per candidate saying what cleaning it changes.',
 	];
 }
@@ -1358,17 +1322,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 						.join("\n")
 				: "",
 		],
-		[
-			"safety",
-			renderSafetySection(
-				safety,
-				autonomyLevel,
-				session.headless === true,
-				session.yoloConfinement,
-				toolSurfaceHasTool(session.toolNames, "ask_user"),
-				v2,
-			),
-		],
+		["safety", renderSafetySection(safety, autonomyLevel, session.headless === true, session.yoloConfinement, v2)],
 		["runtime", [renderRuntimeBlock(session), v2RuntimePaths, modelNotes?.body.trim()].filter(Boolean).join("\n\n")],
 		["tool-contract", renderToolContractBlock(session, autonomyLevel)],
 		["retrieval-hints", renderRetrievalHintsBlock(session)],

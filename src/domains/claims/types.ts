@@ -75,8 +75,19 @@ export interface NumericClaimConditions {
 	trackedTreeClean?: boolean;
 	/** Host verification's digest of HEAD plus the working-tree content the check saw. */
 	treeFingerprint?: string;
+	/**
+	 * The host the check ran on. Recorded, never pinned: claims recorded before it existed keep their pins, so an
+	 * upgrade supersedes nothing. Absent on those older claims, whose text then says the platform was not recorded.
+	 */
+	platform?: ClaimPlatform;
 	keys: Array<{ key: string; passed: boolean; failed: NumericFailureReason[] }>;
 	keysOmitted: number;
+}
+
+export interface ClaimPlatform {
+	os: string;
+	arch: string;
+	nodeVersion: string;
 }
 
 export type ClaimConditions = ReproduceClaimConditions | NumericClaimConditions;
@@ -102,8 +113,17 @@ export interface ClaimRecordV1 {
 	id: string;
 	/** ISO time the claim was captured. */
 	at: string;
-	/** Realpath of the project root the claim is scoped to; the log file is keyed by its digest. */
+	/**
+	 * The canonical project root the claim is scoped to (`canonicalCheckout`): a linked worktree folds into its main
+	 * checkout, so the lane and the checkout it merges into share one log. The log file is keyed by its digest.
+	 */
 	project: string;
+	/**
+	 * The linked worktree the check ran in, absent for the main checkout. Supersession stays within one line of work, so
+	 * a lane at its own commit never retires the main checkout's claims; a contradiction is not scoped, because equal
+	 * pins mean the same command judged the same commit wherever it ran.
+	 */
+	worktree?: string;
 	kind: ClaimKind;
 	verdict: ClaimVerdict;
 	/** One sentence that never states more than the conditions below. */
@@ -174,10 +194,85 @@ export type ClaimEdgeRecord = ClaimEdgeRecordV1;
 export type ClaimRegressionRecord = ClaimRegressionRecordV1;
 
 /**
- * Where a claim stands after its edges: `superseded` once a later claim replaced it under changed conditions,
- * `contested` while a claim with equal pinned conditions disagrees with it, else `standing`.
+ * Where a claim stands after its edges: `superseded` once a later claim replaced it under changed conditions;
+ * `retired` once a later grounded failure under equal pinned conditions overturned it (an agreeing claim only: a
+ * contradiction may withdraw a pass, never restore one); `contested` while a claim with equal pinned conditions
+ * disagrees with it; else `standing`.
  */
-export type ClaimStatus = "standing" | "contested" | "superseded";
+export type ClaimStatus = "standing" | "contested" | "retired" | "superseded";
+
+/**
+ * A worker disagreement that outlives its dispatch (#406): an agent-ledger `review` that did not pass, against the
+ * entry it targeted. Both posts are model-authored, so the record is `inferred`: it never forms an edge with a
+ * grounded claim, never backs memory and carries no merged verdict. Texts are clipped and screened at capture; a post
+ * the information-flow policy restricted keeps its ids and agents but not its text.
+ */
+export interface ClaimDisputePost {
+	/** The ledger entry id, `e<sequence>`. */
+	entry: string;
+	runId: string;
+	agentId: string;
+	kind: "finding" | "claim" | "review" | "message";
+	text: string;
+	path?: string;
+	line?: number;
+}
+
+export interface ClaimDisputeRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "dispute";
+	id: string;
+	at: string;
+	project: string;
+	/** The agent ledger the two posts were on. */
+	ledger: string;
+	target: ClaimDisputePost;
+	review: ClaimDisputePost;
+	evidence: "inferred";
+	flagged?: "instruction-markers";
+	withheld?: "flow-restricted";
+}
+
+export type ClaimDisputeRecord = ClaimDisputeRecordV1;
+
+/**
+ * Where an exported claim came from, without the operator's local paths: the digest of the origin's project key, its
+ * root commit and `origin` remote when it had them.
+ */
+export interface ClaimOrigin {
+	projectDigest: string;
+	rootCommit: string | null;
+	remote?: string;
+}
+
+/**
+ * A claim another project exported and the operator imported here (#406). It arrives `inferred`, carries its origin
+ * and the original record verbatim, and stays a lead: it never enters edge derivation, so it can neither contest nor
+ * ground a claim of this project, and memory never accepts it as backing.
+ */
+export interface ClaimImportRecordV1 {
+	v: typeof CLAIM_RECORD_VERSION;
+	type: "import";
+	id: string;
+	at: string;
+	project: string;
+	origin: ClaimOrigin;
+	claim: ClaimRecord;
+	evidence: "inferred";
+	/** Screened again here; the origin's own flag is not trusted. */
+	flagged?: "instruction-markers";
+}
+
+export type ClaimImportRecord = ClaimImportRecordV1;
+
+export const CLAIMS_EXPORT_SCHEMA = "clio-coder.claims-export.v1";
+
+export interface ClaimsExportBundle {
+	schema: typeof CLAIMS_EXPORT_SCHEMA;
+	origin: ClaimOrigin;
+	exportedAt: string;
+	claims: ClaimRecord[];
+}
 
 /**
  * The schema a hypothesis-workflow slate declares (`library/plugins/literature/skills/hypothesis-workflow`). The slate

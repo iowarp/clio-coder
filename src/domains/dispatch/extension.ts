@@ -19,6 +19,7 @@ import {
 	type AcceptedWorkerSlates,
 	bindHostVerificationHypotheses,
 	recordAcceptedWorkerSlates,
+	recordAgentLedgerDispute,
 	recordHostVerificationClaims,
 	snapshotAcceptedWorkerSlates,
 } from "../claims/index.js";
@@ -7841,8 +7842,18 @@ export function createDispatchBundle(
 				{ ...attribution, ...(carried ? { flowRestrictions: carried } : {}) },
 				body,
 			)
-				.then((result) => {
-					if (result.ok) publishAgentLedgerEntry(agentLedgerId, result.entry);
+				.then(async (result) => {
+					if (!result.ok) return;
+					publishAgentLedgerEntry(agentLedgerId, result.entry);
+					// A failing review outlives this dispatch as a dispute in the project's claims log (#406); the ledger
+					// itself is a ring of recent dispatches no later session reads.
+					if (result.entry.body.kind === "review" && !result.entry.body.passed)
+						await recordAgentLedgerDispute({
+							ledgerId: agentLedgerId,
+							review: result.entry,
+							entries: readAgentLedger(agentLedgerId)?.entries ?? [],
+							projectCwd: lifecycle.cwd,
+						});
 				})
 				.catch((error) => reportDispatchDiagnostic(`append agent ledger entry for ${attribution.runId}`, error));
 		};

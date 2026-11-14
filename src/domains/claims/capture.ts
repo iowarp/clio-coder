@@ -98,6 +98,8 @@ function numericConditions(
 	tree: { head: string; fingerprint: string } | undefined,
 	checkout?: { commit: string; trackedTreeClean: boolean },
 ): NumericClaimConditions {
+	// Both channels run the check on this host (main-thread verify, and host verification of a worker run), so the
+	// host's platform is the one the judgement holds on.
 	const reference = digestRef(project, report.reference);
 	// Failing keys first, so the cap never drops the reason a claim disagrees.
 	const ordered = [...report.keys.filter((key) => !key.passed), ...report.keys.filter((key) => key.passed)];
@@ -114,6 +116,7 @@ function numericConditions(
 		commit: tree?.head ?? checkout?.commit ?? null,
 		...(tree === undefined && checkout !== undefined ? { trackedTreeClean: checkout.trackedTreeClean } : {}),
 		...(tree !== undefined ? { treeFingerprint: tree.fingerprint } : {}),
+		platform: { os: process.platform, arch: process.arch, nodeVersion: process.version },
 		keys: kept.map((key) => ({ key: key.key, passed: key.passed, failed: [...key.failed] })),
 		keysOmitted: report.keys.length - kept.length,
 	};
@@ -127,6 +130,12 @@ function outputToken(token: string): string {
 function list(items: ReadonlyArray<string>, limit = 4): string {
 	const shown = items.slice(0, limit).join(", ");
 	return items.length > limit ? `${shown} and ${items.length - limit} more` : shown;
+}
+
+/** The canonical command as one clipped, shell-like string; argv entries come from the catalog, so the charset is narrowed. */
+function commandText(argv: ReadonlyArray<string>): string {
+	const text = argv.map((part) => (/^[A-Za-z0-9_./:=@+-]+$/u.test(part) ? part : JSON.stringify(part))).join(" ");
+	return `\`${text.length <= 160 ? text : `${text.slice(0, 157)}...`}\``;
 }
 
 /** The claim sentence. Every clause comes from the conditions, and an unrecorded condition is said to be unrecorded. */
@@ -150,7 +159,7 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 			conditions.inputs.length === 0
 				? "no pinned inputs"
 				: `inputs ${list(conditions.inputs.map((input) => `${input.path}@${short(input.sha256)}`))}`;
-		return `${head}, ${commit} ${platform}, ${seed}, ${inputs}.`;
+		return `${head}, ${commit} ${platform}, command ${commandText(conditions.argv)}, ${seed}, ${inputs}.`;
 	}
 	const failed = conditions.keys.filter((key) => !key.passed).map((key) => outputToken(key.key));
 	const total = conditions.keys.length + conditions.keysOmitted;
@@ -165,7 +174,11 @@ export function claimText(check: string, conditions: ClaimConditions, passed: bo
 		conditions.commit === null
 			? "commit not recorded"
 			: `at commit ${short(conditions.commit)}${conditions.trackedTreeClean === false ? " with uncommitted changes to tracked files" : ""}`;
-	return `${head}, ${commit}.`;
+	const platform =
+		conditions.platform === undefined
+			? "platform not recorded"
+			: `on ${conditions.platform.os}/${conditions.platform.arch}, node ${conditions.platform.nodeVersion}`;
+	return `${head}, ${commit} ${platform}, command ${commandText(conditions.argv)}.`;
 }
 
 function checkLabel(check: string, run: string | undefined): string {
@@ -202,6 +215,8 @@ function keysOf(
 
 function buildClaim(input: {
 	project: string;
+	/** The linked worktree the check ran in, when it was not the main checkout. */
+	worktree?: string;
 	at: string;
 	check: string;
 	declaredCommand: ReadonlyArray<string>;
@@ -217,6 +232,7 @@ function buildClaim(input: {
 		type: "claim",
 		at: input.at,
 		project: input.project,
+		...(input.worktree !== undefined && input.worktree !== input.project ? { worktree: input.worktree } : {}),
 		kind: input.conditions.kind,
 		verdict: passed ? "agrees" : "disagrees",
 		text,
@@ -245,6 +261,8 @@ function judgedReport(value: unknown): ReproduceReport | NumericCompareReport | 
 export function claimFromVerifyResult(input: {
 	details: Readonly<Record<string, unknown>> | undefined;
 	project: string;
+	/** The checkout the check ran in: a linked worktree of `project`, or `project` itself. Paths are relative to it. */
+	checkout?: string;
 	at: string;
 	source: Extract<ClaimSource, { channel: "verify" }>;
 }): ClaimRecordV1 | null {
@@ -262,12 +280,14 @@ export function claimFromVerifyResult(input: {
 	const declaredCommand = Array.isArray(details.declaredCommand)
 		? details.declaredCommand.filter((part): part is string => typeof part === "string")
 		: [];
+	const base = input.checkout ?? input.project;
 	const conditions =
 		report.kind === "reproduce"
-			? reproduceConditions(input.project, report)
-			: numericConditions(input.project, report, declaredCommand, undefined, checkoutOf(details.checkout));
+			? reproduceConditions(base, report)
+			: numericConditions(base, report, declaredCommand, undefined, checkoutOf(details.checkout));
 	return buildClaim({
 		project: input.project,
+		...(input.checkout !== undefined ? { worktree: input.checkout } : {}),
 		at: input.at,
 		check,
 		declaredCommand,
@@ -307,8 +327,11 @@ export function claimsFromHostVerification(input: {
 	receiptDigest: string;
 	checks: ReadonlyArray<SealedHostCheck>;
 	project: string;
+	/** The checkout the checks ran against: a linked worktree of `project`, or `project` itself. */
+	checkout?: string;
 	at: string;
 }): ClaimRecordV1[] {
+	const base = input.checkout ?? input.project;
 	const claims: ClaimRecordV1[] = [];
 	for (const check of input.checks) {
 		if (check.memo || check.evidenceRunId !== undefined) continue;
@@ -316,11 +339,12 @@ export function claimsFromHostVerification(input: {
 		if (report === null) continue;
 		const conditions =
 			report.kind === "reproduce"
-				? reproduceConditions(input.project, report)
-				: numericConditions(input.project, report, check.argv, check.tree);
+				? reproduceConditions(base, report)
+				: numericConditions(base, report, check.argv, check.tree);
 		claims.push(
 			buildClaim({
 				project: input.project,
+				...(input.checkout !== undefined ? { worktree: input.checkout } : {}),
 				at: input.at,
 				check: check.check,
 				declaredCommand: check.argv,

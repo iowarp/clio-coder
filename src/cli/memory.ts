@@ -269,8 +269,12 @@ export async function runMemoryCommand(args: ReadonlyArray<string>): Promise<num
 	try {
 		if (parsed.command === "list") {
 			const records = await loadMemoryRecords(dataDir);
-			if (parsed.json) process.stdout.write(`${JSON.stringify({ records: records.map(publicMemoryRecord) })}\n`);
-			else renderMemoryList(records, readClearedMemoryRegressions(dataDir));
+			const cleared = readClearedMemoryRegressions(dataDir);
+			if (parsed.json)
+				process.stdout.write(
+					`${JSON.stringify({ records: records.map((record) => publicMemoryRecord(record, cleared)) })}\n`,
+				);
+			else renderMemoryList(records, cleared);
 			return 0;
 		}
 		if (parsed.command === "propose" && parsed.claimId !== undefined)
@@ -431,8 +435,19 @@ async function proposeFromClaim(dataDir: string, prefix: string): Promise<number
 		return 2;
 	}
 	const project = claimsProjectRoot(process.cwd());
-	const matches = readClaims(project).records.filter((claim) => claim.id.startsWith(prefix));
+	const read = readClaims(project);
+	const matches = read.records.filter((claim) => claim.id.startsWith(prefix));
 	const [claim] = matches;
+	// An imported claim is another project's lead, inferred here (#406): it never backs a lesson in this project.
+	if (
+		claim === undefined &&
+		read.imports.some((record) => record.claim.id.startsWith(prefix) || record.id.startsWith(prefix))
+	) {
+		printError(
+			`claim '${prefix}' was imported from another project and is inferred here; only a claim this project's own checks recorded can back a memory. Run the check here first.`,
+		);
+		return 1;
+	}
 	if (claim === undefined || matches.length > 1) {
 		printError(
 			claim === undefined
@@ -556,8 +571,13 @@ function renderProposal(record: MemoryRecord, created: boolean): void {
 	process.stdout.write(`review: clio-coder memory approve ${record.id}\n`);
 }
 
-/** The fields a reviewer decides on, for `memory list --json`; absent optionals stay absent. */
-function publicMemoryRecord(record: MemoryRecord) {
+/**
+ * The fields a reviewer decides on, for `memory list --json`; absent optionals stay absent. Open regressions say why a
+ * record is out of the prompt, and the regressions an operator re-approval cleared stay listed (#406), so a reader of
+ * the JSON sees a record was once contradicted just as the text listing shows it.
+ */
+function publicMemoryRecord(record: MemoryRecord, cleared: ReadonlyArray<ClearedMemoryRegressions>) {
+	const clearings = cleared.filter((entry) => entry.id === record.id);
 	return {
 		id: record.id,
 		scope: record.scope,
@@ -571,6 +591,18 @@ function publicMemoryRecord(record: MemoryRecord) {
 		approved: record.approved,
 		...(record.rejectedAt !== undefined ? { rejectedAt: record.rejectedAt } : {}),
 		...(record.repository !== undefined ? { repository: record.repository } : {}),
+		...(record.regressions !== undefined && record.regressions.length > 0
+			? { regressions: [...record.regressions] }
+			: {}),
+		...(clearings.length > 0
+			? {
+					regressionsCleared: clearings.map((entry) => ({
+						at: entry.at,
+						by: entry.by,
+						regressions: [...entry.regressions],
+					})),
+				}
+			: {}),
 	};
 }
 

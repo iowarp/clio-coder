@@ -1684,6 +1684,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let reportOffers: import("../domains/report/extension.js").ReportOfferWatcher | null = null;
 	let lastOperatorInputAt = Date.now();
 	overlayLifecycle = createOverlayLifecycle({
+		lastOperatorInputAt: () => lastOperatorInputAt,
 		dismissNotification: (key) => notifications.dismiss(key),
 		takeReportOffer: () => {
 			const offer = reportOffers?.take() ?? null;

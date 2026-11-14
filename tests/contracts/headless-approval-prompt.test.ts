@@ -76,7 +76,10 @@ describe("headless approval wording in the session prompt", () => {
 			const section = safetySection("yolo", inputs);
 			ok(!section.includes(HEADLESS_SESSION_APPROVAL_SEMANTICS), section);
 			ok(!section.includes(SESSION_APPROVAL_SEMANTICS), section);
-			match(section, /nothing waits for the operator, and a call the judge does not allow is refused instead of asked/);
+			match(
+				section,
+				/nothing waits for the operator's approval, and a call the judge does not allow is refused instead of asked/,
+			);
 		}
 	});
 

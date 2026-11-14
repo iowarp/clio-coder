@@ -246,6 +246,7 @@ import type { ProtectedArtifactState } from "../domains/safety/protected-artifac
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { SAFETY_JUDGE_CONSECUTIVE_BLOCKS, type SafetyJudgeSeat } from "../domains/safety/safety-judge.js";
 import { createSessionCodeConsent } from "../domains/safety/session-code-consent.js";
+import { unattendedWindowMs } from "../domains/safety/unattended.js";
 import { createRunCostCap, runCostCeilingUsd } from "../domains/scheduling/budget.js";
 import { createSchedulingDomainModule } from "../domains/scheduling/index.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
@@ -559,6 +560,8 @@ function readFlowSessionEntries(sessionId: string): ReadonlyArray<unknown> {
  * *shape*, not session *length*.
  */
 const FINISH_CONTRACT_TAIL_ENTRIES = DEFAULT_RECENT_ENTRY_LIMIT * 2;
+/** ask_user answers the safety judge keeps per session as operator words; older ones age out. */
+const OPERATOR_ANSWER_MEMORY = 32;
 
 function readRecentSessionEntriesForContract(sessionId: string): SessionEntry[] {
 	return collectSessionEntries(
@@ -798,7 +801,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const acpHandshake = options.acp?.handshake;
 	const acpInterviews = acpHandshake?.initialized === true && acpHandshake.interviewsEnabled;
 	const acpWorkerPermissions = acpHandshake?.initialized === true && acpHandshake.workerPermissionsEnabled;
-	const acpInterviewChannel = acpInterviews ? createAcpInterviewChannel() : undefined;
+	const acpInterviewChannel = acpInterviews
+		? createAcpInterviewChannel({
+				unattendedWindowMs: () => unattendedWindowMs(getCurrentSettings().safety.unattendedAfterSeconds),
+			})
+		: undefined;
 	// The rung is settled once, before the config contract loads, off the
 	// `--with-panes` flag and whether this process runs in a pane host. An
 	// inactive rung loads nothing: the whole extension, mux domain included,
@@ -1807,6 +1814,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	bus.subscribe("call.settled", (payload, context) => {
 		if (context?.agent.role === "main") autonomyWindow.tokens(settledCallTokens(payload.usage));
 	});
+	// What the operator answered on ask_user rounds, per session: at contained yolo an
+	// answer that names an outward step is the operator's word for it, as a typed message is.
+	const operatorAnswersBySession = new Map<string, string[]>();
+	const recordOperatorAnswers = (answers: ReadonlyArray<{ question: string; answer: string }>): void => {
+		const id = session?.current()?.id;
+		if (id === undefined || answers.length === 0) return;
+		const kept = operatorAnswersBySession.get(id) ?? [];
+		for (const { question, answer } of answers) kept.push(`Asked "${question}", the operator answered: ${answer}`);
+		operatorAnswersBySession.set(id, kept.slice(-OPERATOR_ANSWER_MEMORY));
+	};
 	// The safety judge reviews what autonomy default would park for the operator
 	// against the operator's own messages. Its round goes through System One's
 	// one-shot port and request admission, built further down; nothing calls the
@@ -1820,6 +1837,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 		session: () => session,
 		safety,
+		operatorAnswers: (sessionId) => operatorAnswersBySession.get(sessionId) ?? [],
 		// Past either threshold every later review would refuse in silence, so contained yolo ends the run (D4).
 		// A main-session escalation fires inside the review of the block that crossed the line; the window halts once the
 		// registry records that block, still inside the call. A worker's block has no such record and halts at once.
@@ -1894,6 +1912,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		operatorAutonomy: resolveEffectiveAutonomy,
 		hookDrift: () => hookDrift,
 	};
+	// The operator spoke, typed or on an ask_user round: a fresh autonomy window.
+	const operatorReturned = (): void => {
+		const cleared = autonomyWindow.reopen();
+		if (cleared === null) return;
+		lastAutonomyHalt = null;
+		// Resuming after a block streak is the operator's approval to review again.
+		if (cleared.kind === "judge") safetyJudge.operatorApproved();
+	};
 	// Sessions whose snapshot start-of-session prune has run in this process.
 	const snapshotPrunedSessions = new Set<string>();
 	const toolRegistry = createRegistry({
@@ -1904,6 +1930,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		absorbAwaitedEffects: (effects, input) => protectedArtifactsGuard.absorbAwaited(input, effects),
 		autonomy: resolveAdmissionAutonomy,
 		unattendedAsks: unattendedYolo,
+		// An operator's own answer speaks for them: the judge reads it, and a yolo window reopens.
+		onOperatorAnswered: (answers) => {
+			recordOperatorAnswers(answers);
+			operatorReturned();
+		},
 		onUnattendedRefusal: (call, decision, kind, rule) =>
 			autonomyWindow.openDecision(describeOpenDecision(call, decision, kind, rule)),
 		// Only this registry carries the operator's own scope (#419): its yolo,
@@ -2597,7 +2628,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					settings.report = { ...settings.report, offers: "off" };
 				}, "settings-ui"),
 			...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
-			attended: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
+			attended: () => askUserHandler !== null,
 			openReview: () => reportReviewOpener,
 		},
 		...(agents ? { getAgentCatalog: () => renderAgentCatalogSectionsFromSpecs(agents.listSpecs()).stable } : {}),
@@ -3130,10 +3161,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (!options.headless && !options.acp) {
 		middlewareRegistrar.registerHook(
 			createPlanCloseRegistration({
-				// Yolo's turn-ending contract stops a plan at its stated assumptions
-				// instead of a "Carry out this plan?" card, which parked unattended
-				// runs (#421), so the close nudge would contradict it there.
-				canAsk: () => askUserHandler !== null && resolveEffectiveAutonomy() !== "yolo",
+				// Yolo asks too; an unanswered card takes its recommended option
+				// once the unattended window passes, so it never parks a run (#421).
+				canAsk: () => askUserHandler !== null,
 			}),
 		);
 		// Demo guidance: operator-only capability tips after a turn. Everything it
@@ -3185,13 +3215,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getAutonomy: resolveEffectiveAutonomy,
 		autonomy: {
 			halted: () => autonomyWindow.halted(),
-			operatorSpoke: () => {
-				const cleared = autonomyWindow.reopen();
-				if (cleared === null) return;
-				lastAutonomyHalt = null;
-				// Resuming after a block streak is the operator's approval to review again.
-				if (cleared.kind === "judge") safetyJudge.operatorApproved();
-			},
+			operatorSpoke: operatorReturned,
 			turnStarted: () => autonomyWindow.turnStarted(),
 			turnSettled: () => autonomyWindow.turnSettled(),
 			status: () => {

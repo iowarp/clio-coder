@@ -27,8 +27,8 @@ function yoloAcceptanceQuestion(): AskUserQuestion {
 	return {
 		header: "Yolo",
 		question: [
-			"Turn on yolo? It is built for long unattended jobs:",
-			"- Nothing waits for you. Questions take their recommended option, and a call that would need your approval is refused back to Clio instead of asking.",
+			"Turn on yolo? It runs long jobs without approval stops:",
+			"- No approval cards: a call that would need your approval is refused back to Clio instead. Clio still asks you questions (interviews, plan closes, choices only you can make); one nobody answers in time takes its recommended option.",
 			"- Commands stay in the OS sandbox: the workspace and scratch roots are writable, credentials and secret files are hidden. Risky calls (leaving the sandbox, writes outside the workspace, destructive git, pushes and publishes) go to the safety judge, which allows only what your request asked for.",
 			"- The floor still blocks deleting /, your home directory or a system tree, mkfs, writes to a block device, fork bombs, and writes into Clio's own state. Rules in an approved .clio-coder/safety.yaml hold.",
 			"- Workspace snapshots and the telemetry journals stay on, so /rewind can restore files. Yolo is refused as root outside a container.",
@@ -50,7 +50,7 @@ function yoloUnconfinedAcceptanceQuestion(): AskUserQuestion {
 			"- No approval stops and no safety judge. Edits, commands, scripts, git history changes and outward actions run as called.",
 			"- No sandbox by default. Commands and scripts run as you, with your credentials, unless safety.sandbox is required.",
 			"- The floor still blocks deleting or overwriting /, your home directory or a system tree, mkfs, wipefs, writes to a block device, fork bombs, and writes into Clio's own config, state and trust records. Rules in an approved .clio-coder/safety.yaml hold.",
-			"Contained yolo already runs without stopping for you; choose unconfined only when your work needs what the sandbox hides.",
+			"Contained yolo already runs without approval stops; choose unconfined only when your work needs what the sandbox hides.",
 			"You accept once; safety.yoloUnconfinedAccepted in your user settings records it.",
 		].join("\n"),
 		options: [
