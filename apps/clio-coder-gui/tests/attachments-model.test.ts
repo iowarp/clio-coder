@@ -5,6 +5,7 @@ import {
 	acceptsType,
 	admitAttachment,
 	attachmentRefusal,
+	attachmentSize,
 	attachmentSummary,
 	decodeTextFile,
 	fittedSize,
@@ -105,4 +106,12 @@ test("mixed attachments are summarized by kind", () => {
 		"1 image and 2 files, about 4 KiB",
 	);
 	assert.match(attachmentRefusal([file("a", "x")], true) ?? "", /Attachments go with a new request/);
+});
+
+test("a small attachment reads in bytes, never as 0 KiB", () => {
+	// A 64×64 PNG is a few hundred bytes.
+	assert.equal(attachmentSummary([image("a", 400)]), "1 image, about 300 bytes");
+	assert.equal(attachmentSize(1), "1 byte");
+	assert.equal(attachmentSize(1023), "1023 bytes");
+	assert.equal(attachmentSize(1024), "1 KiB");
 });

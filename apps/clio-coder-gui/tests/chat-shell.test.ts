@@ -278,6 +278,14 @@ test("observeStart records the first sighting and never moves it", () => {
 	assert.equal(observeStart("call-1", 42), 42);
 });
 
+test("observeStart never starts a row before its turn, so a row's clock cannot run ahead of the header", () => {
+	resetObservedStarts();
+	// The shared second still reads 7_700 when the row appears in a turn that started at 8_000.
+	assert.equal(observeStart("call-1", 7_700, 8_000), 8_000);
+	assert.equal(observeStart("call-2", 9_000, 8_000), 9_000);
+	assert.equal(observeStart("call-3", 0, 8_000), 0);
+});
+
 const handlers = () => {
 	const calls: string[] = [];
 	return {

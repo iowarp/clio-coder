@@ -46,6 +46,8 @@
 	font: inherit;
 	font-size: var(--text-reading);
 	line-height: var(--leading-body);
+	/* The width code blocks use (markdown.css), so a pasted snippet lines up the same in both. */
+	tab-size: 4;
 	color: var(--ink);
 	background: transparent;
 }

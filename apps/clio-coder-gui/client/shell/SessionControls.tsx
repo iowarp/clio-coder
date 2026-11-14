@@ -130,8 +130,17 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 		});
 	if (!shown) return null;
 	const needsReview = unresolved.length > 0 || controls.notice !== null;
-	const label = needsReview ? "Check session" : pending.length ? "Request in progress" : "Request checked";
 	const idle = !needsReview && !pending.length && latest?.nothingStopped === true;
+	// A settled request is titled by what happened, so a stop reads "Stopped" rather than a generic check.
+	const label = needsReview
+		? "Check session"
+		: pending.length
+			? "Request in progress"
+			: latest?.action === "close"
+				? "Closed"
+				: idle
+					? "Nothing to stop"
+					: "Stopped";
 	const summary = needsReview
 		? `${unresolved.length || 1} session ${unresolved.length > 1 ? "requests need" : "request needs"} your review.`
 		: pending.length > 1

@@ -67,10 +67,26 @@ function useAnchored(id: string | null): boolean {
 }
 const anchorId = (permissionId: string) => `approval-${permissionId}`;
 
-/** Someone writing a message keeps their caret; an approval only announces itself to them. */
+/** When the operator last changed a field's text, so an approval that lands mid-word leaves their caret alone. */
+let lastInputAt = Number.NEGATIVE_INFINITY;
+const TYPING_GRACE_MS = 500;
+if (typeof document !== "undefined")
+	document.addEventListener(
+		"input",
+		() => {
+			lastInputAt = performance.now();
+		},
+		{ capture: true, passive: true },
+	);
+
+/**
+ * Someone writing a message keeps their caret; an approval only announces itself to them. A composer still showing
+ * the message it just sent (marked `data-sent` until the server acknowledges it) is not being written.
+ */
 function isTyping(element: Element | null): boolean {
+	if (performance.now() - lastInputAt < TYPING_GRACE_MS) return true;
 	if (element instanceof HTMLElement && element.isContentEditable) return (element.textContent ?? "").trim() !== "";
-	if (element instanceof HTMLTextAreaElement) return element.value.trim() !== "";
+	if (element instanceof HTMLTextAreaElement) return !element.hasAttribute("data-sent") && element.value.trim() !== "";
 	return (
 		element instanceof HTMLInputElement &&
 		["text", "search", "url", "email", "tel", "password", ""].includes(element.type) &&
@@ -448,7 +464,8 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	}, [id]);
 	useEffect(() => {
 		if (id === null) return;
-		announce(`${spoken} Request ${queue.position}.`, "assertive");
+		// Someone typing keeps their caret and hears the request politely; Alt+A and Alt+R still answer it.
+		announce(`${spoken} Request ${queue.position}.`, isTyping(document.activeElement) ? "polite" : "assertive");
 	}, [id, spoken, queue.position]);
 	useApprovalFocus(id);
 	// The declared window, not the observed wait: say what the product promised.
@@ -518,7 +535,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 				call={call}
 				answer={answer}
 				eyebrow={`${bannerEyebrow(escalated)} · ${queue.position}`}
-				hint={permission.canStopTurn ? `${KEYBOARD_HINT} · Alt+X rejects and stops the turn` : KEYBOARD_HINT}
+				hint={permission.canStopTurn ? `${KEYBOARD_HINT} · Alt + X rejects and stops the turn` : KEYBOARD_HINT}
 				variant="banner"
 			/>
 		</section>
