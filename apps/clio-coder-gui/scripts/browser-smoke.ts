@@ -1120,11 +1120,12 @@ try {
 			await page.goto(workspaceUrl);
 			await page.locator("main button.primary", { hasText: "New task" }).click();
 			await page.waitForURL(`${origin}/`);
-			await page
-				.getByLabel("Message CLIO Coder", { exact: true })
-				.fill("Show the fixture findings with code and a diagram.");
-			await page.getByRole("button", { name: "Start task", exact: true }).click();
+			const firstField = page.getByLabel("Message CLIO Coder", { exact: true });
+			await firstField.fill("Show the fixture findings with code and a diagram.");
+			// Sent from the keyboard, the next message goes in the task's own box without tabbing back to it.
+			await firstField.press("Enter");
 			await page.waitForURL(/\/sessions\/[^/]+$/);
+			await page.waitForFunction(() => document.activeElement?.matches(".composer__field") === true);
 			// The fixture first streams and then settles. Inspect its final Markdown subtree,
 			// which replaces the streaming subtree before deferred diagrams are rendered.
 			await page.locator(".chat-turn.is-settled .diagram").waitFor();
@@ -1507,6 +1508,12 @@ try {
 			assert.ok(
 				menuBounds && menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= (zoom === 2 ? 800 : width),
 				`Task actions are outside the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
+			);
+			// Twenty items outgrow a phone's height; the panel scrolls itself so Close task stays reachable.
+			const viewportHeight = page.viewportSize()?.height ?? 0;
+			assert.ok(
+				menuBounds && menuBounds.y + menuBounds.height <= viewportHeight,
+				`Task actions run past the bottom of the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
 			);
 			await page.keyboard.press("Escape");
 			assert.equal(await taskMenu.evaluate((element) => (element as HTMLDetailsElement).open), false);
