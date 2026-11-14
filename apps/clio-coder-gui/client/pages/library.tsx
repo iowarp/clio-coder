@@ -372,7 +372,7 @@ export function LibraryPage({
 						{visible.length} of {entries[active].length} {active.toLowerCase()} · workspace inventory
 					</p>
 				)}
-				<div className="library-resources">
+				<div className="library-resources" data-searching={filter ? "" : undefined}>
 					{visible.slice(0, limit).map((row) => (
 						<article className="library-resource" key={row.id}>
 							<div className="library-resource__identity">

@@ -19,13 +19,13 @@ import { ConversationOutline } from "../chat/ConversationOutline.js";
 import { compactionsByTurn, STARTER_PROMPTS, TRUNCATION_NOTE } from "../chat/chat-turn.js";
 import { useContextOperationRef, useStopContext } from "../chat/context-command.js";
 import { contextWorkView } from "../chat/context-work-model.js";
-import { FilePreviewDialog } from "../chat/FilePreviewDialog.js";
 import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { compactionRows, summarizeHealth } from "../chat/health.js";
 import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
+import { FilePreviewDialog } from "../chat/on-demand-panels.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
@@ -55,7 +55,7 @@ import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
-import { startedRequest } from "./home-draft.js";
+import { settleStarted, startedRequest } from "./started-request.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
 
@@ -166,6 +166,8 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 function SessionView({ client, id }: { client: Client; id: string }) {
 	countRender("session-view");
 	const navigate = useNavigate();
+	// Home is gone once this screen has committed, so clearing its draft can no longer blank the request.
+	useEffect(() => settleStarted(id), [id]);
 	const ids = { changes: useId(), pane: useId(), transcript: useId() };
 	const pane = usePaneState(ids.pane);
 	const paneActions = useMemo(
@@ -745,12 +747,14 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						/>
 					) : null}
 					{previewing ? (
-						<FilePreviewDialog
-							client={client}
-							workspaceId={snapshot.workspaceId}
-							target={previewing}
-							onClose={() => setPreviewing(null)}
-						/>
+						<Suspense fallback={null}>
+							<FilePreviewDialog
+								client={client}
+								workspaceId={snapshot.workspaceId}
+								target={previewing}
+								onClose={() => setPreviewing(null)}
+							/>
+						</Suspense>
 					) : null}
 				</section>
 			</PathOpenerContext.Provider>

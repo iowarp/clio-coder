@@ -2136,7 +2136,7 @@ try {
 			const cdp = await context.newCDPSession(page);
 			await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
 			const settledQuery = async (value: string) => {
-				await page.waitForFunction((expected) => new URL(location.href).searchParams.get("q") === expected, value);
+				await page.waitForFunction((expected) => (new URL(location.href).searchParams.get("q") ?? "") === expected, value);
 			};
 			const typeFast = async (box: Locator, where: string) => {
 				await box.waitFor();
@@ -2165,6 +2165,8 @@ try {
 				const libraryBox = page.getByRole("searchbox", { name: "Search skills", exact: true });
 				await libraryBox.waitFor();
 				assert.ok((await libraryBox.getAttribute("placeholder"))?.trim(), "the library search has no placeholder");
+				// Focus first: at 200% the box starts below the fold, and the press would scroll it into view.
+				await libraryBox.focus();
 				const before = await libraryBox.boundingBox();
 				await libraryBox.press("a");
 				await settledQuery("a");
