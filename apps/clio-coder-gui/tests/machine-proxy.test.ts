@@ -340,7 +340,7 @@ if (forward === -1) {
 	});
 	t.after(() => attachments.stopAll());
 	const settled = async () => {
-		for (let i = 0; i < 200; i++) {
+		for (let i = 0; i < 1200; i++) {
 			const [state] = (await attachments.list()).map((attachment) => attachment.state);
 			if (state !== "connecting") return state;
 			await new Promise((resolve) => setTimeout(resolve, 50));

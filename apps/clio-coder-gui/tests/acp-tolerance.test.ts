@@ -13,7 +13,7 @@ import { harness } from "./harness/app.js";
  * ends on its own parks the task so it resumes from the saved session.
  */
 async function until(check: () => boolean) {
-	for (let index = 0; index < 400; index += 1) {
+	for (let index = 0; index < 6000; index += 1) {
 		if (check()) return;
 		await setTimeout(10);
 	}

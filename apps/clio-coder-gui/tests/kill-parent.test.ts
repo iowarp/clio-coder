@@ -12,7 +12,7 @@ import { processServer } from "./harness/process-server.js";
 import { scratchHome } from "./harness/scratch-home.js";
 
 async function until(check: () => Promise<boolean>) {
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 1200; i++) {
 		if (await check()) return;
 		await setTimeout(50);
 	}

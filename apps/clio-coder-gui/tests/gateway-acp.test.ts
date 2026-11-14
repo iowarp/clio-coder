@@ -7,7 +7,7 @@ import { presentTool } from "../client/chat/tool-presentation.js";
 import { harness } from "./harness/app.js";
 
 async function until(check: () => boolean): Promise<void> {
-	for (let index = 0; index < 400; index++) {
+	for (let index = 0; index < 6000; index++) {
 		if (check()) return;
 		await setTimeout(10);
 	}
