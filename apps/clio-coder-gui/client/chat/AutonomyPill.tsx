@@ -6,31 +6,17 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
+import { type AutonomyLevel, autonomyMenu, currentAutonomy, UNRECOGNIZED_MODE_NOTE } from "./autonomy-model.js";
+import { useSessionTelemetry } from "./session-telemetry.js";
 
-/** The two levels the agent reports, as the contract spells them. */
-type AutonomyLevel = "default" | "yolo";
-
-const LEVELS: Readonly<
-	Record<AutonomyLevel, { label: string; short: string; lands: string; icon: "shield" | "bolt" }>
-> = {
-	default: {
-		label: "Ask first",
-		short: "Ask first",
-		lands:
-			"Reads, edits and recognised commands run. Unrecognised shell commands, plan-scale dispatch and anything that publishes outside the project wait for your approval.",
-		icon: "shield",
-	},
-	yolo: {
-		label: "Run without asking",
-		short: "Auto-run",
-		lands: "Nothing waits for approval in this task. CLIO Coder runs commands and edits on its own judgement.",
-		icon: "bolt",
-	},
+const LEVELS: Readonly<Record<AutonomyLevel, { label: string; short: string; icon: "shield" | "bolt" }>> = {
+	default: { label: "Ask first", short: "Ask first", icon: "shield" },
+	yolo: { label: "Run without asking", short: "Auto-run", icon: "bolt" },
 };
 
 /**
- * How much Clio may do without asking, for this task only. Turning approvals off takes a second,
- * explicit press, because the cost of a slip here is a command nobody saw.
+ * How much CLIO Coder may do without stopping for you, for this task only. Each mode reads as the
+ * engine describes it. Running without asking takes a second, explicit press.
  */
 export function AutonomyPill({
 	client,
@@ -45,6 +31,7 @@ export function AutonomyPill({
 	locked: boolean;
 }) {
 	const queries = useQueryClient();
+	const pushed = useSessionTelemetry(client, sessionId)?.autonomy;
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
@@ -73,55 +60,68 @@ export function AutonomyPill({
 		},
 	});
 	if (!supported || !current.data) return null;
-	const level = current.data.level;
-	const meta = LEVELS[level];
+	const autonomy = currentAutonomy(current.data, pushed);
+	const level = autonomy.level;
+	const menu = autonomyMenu(autonomy);
+	const selected = menu.rows.find((row) => row.current);
+	const meta =
+		menu.unrecognized !== undefined
+			? {
+					title: `Mode: ${menu.unrecognized}. ${UNRECOGNIZED_MODE_NOTE}`,
+					short: `Mode: ${menu.unrecognized}`,
+					icon: "shield" as const,
+				}
+			: {
+					title: `${LEVELS[level].label}. ${selected?.description ?? ""}`,
+					short: LEVELS[level].short,
+					icon: LEVELS[level].icon,
+				};
 	const choose = (next: AutonomyLevel) => {
-		if (next === level) return;
+		if (menu.unrecognized !== undefined || next === level) return;
 		if (next === "yolo" && !confirming) setConfirming(true);
 		else set.mutate(next);
 	};
 	return (
 		<details
 			className="autonomy"
-			data-level={level}
+			data-level={menu.unrecognized !== undefined ? "unrecognized" : level}
 			ref={panel}
 			onToggle={(event) => {
 				setOpen(event.currentTarget.open);
 				if (!event.currentTarget.open) setConfirming(false);
 			}}
 		>
-			<summary title={`${meta.label}. ${meta.lands}`}>
+			<summary title={meta.title}>
 				<Icon name={meta.icon} />
 				<span>{meta.short}</span>
 				<Icon name="chevronDown" />
 			</summary>
 			<fieldset className="autonomy__panel">
 				<legend className="autonomy__title">Working freedom for this task</legend>
-				{(Object.keys(LEVELS) as AutonomyLevel[]).map((value) => (
+				{menu.rows.map((row) => (
 					<button
-						key={value}
+						key={row.level}
 						type="button"
 						className="autonomy__option"
-						aria-pressed={value === level}
-						disabled={locked || set.isPending}
-						onClick={() => choose(value)}
+						aria-pressed={row.current}
+						disabled={locked || set.isPending || row.disabled}
+						onClick={() => choose(row.level)}
 					>
-						<Icon name={value === level ? "check" : LEVELS[value].icon} />
+						<Icon name={row.current ? "check" : LEVELS[row.level].icon} />
 						<span>
-							<strong>{LEVELS[value].label}</strong>
-							<small>{LEVELS[value].lands}</small>
+							<strong>{LEVELS[row.level].label}</strong>
+							{/* Engine text renders as plain text, never as markup. */}
+							<small>{row.description}</small>
 						</span>
 					</button>
 				))}
-				{confirming ? (
+				{menu.unrecognized !== undefined ? <p className="autonomy__note">{UNRECOGNIZED_MODE_NOTE}</p> : null}
+				{confirming && menu.unrecognized === undefined ? (
 					<div className="autonomy__confirm" role="alert">
-						<p>
-							Turn off approvals for this task? CLIO Coder will run commands and edits without asking. It lasts until the task
-							closes.
-						</p>
+						<p>{menu.confirmation}</p>
 						<div>
 							<button type="button" className="primary" disabled={set.isPending} onClick={() => set.mutate("yolo")}>
-								{set.isPending ? "Turning off…" : "Turn off approvals"}
+								{set.isPending ? "Switching…" : "Run without asking"}
 							</button>
 							<button type="button" onClick={() => setConfirming(false)}>
 								Keep asking

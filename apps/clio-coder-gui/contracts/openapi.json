@@ -10858,6 +10858,9 @@
 													"timing": {
 														"$ref": "#/components/schemas/Union_d85bd6b4"
 													},
+													"timingNote": {
+														"type": "string"
+													},
 													"value": {
 														"type": "string"
 													},
@@ -10883,6 +10886,9 @@
 														"type": "string"
 													},
 													"confirm": {
+														"type": "string"
+													},
+													"confirmValue": {
 														"type": "string"
 													}
 												},
@@ -11130,6 +11136,9 @@
 															"timing": {
 																"$ref": "#/components/schemas/Union_d85bd6b4"
 															},
+															"timingNote": {
+																"type": "string"
+															},
 															"value": {
 																"type": "string"
 															},
@@ -11155,6 +11164,9 @@
 																"type": "string"
 															},
 															"confirm": {
+																"type": "string"
+															},
+															"confirmValue": {
 																"type": "string"
 															}
 														},
@@ -18303,7 +18315,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_08414a54"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9e57213e"
 								}
 							}
 						},
@@ -18367,7 +18379,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_level_source_ac199f39"
+									"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
 								}
 							}
 						},
@@ -18459,7 +18471,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_level_source_ac199f39"
+									"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
 								}
 							}
 						},
@@ -19340,7 +19352,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_08414a54"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9e57213e"
 								}
 							}
 						},
@@ -19435,7 +19447,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_08414a54"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9e57213e"
 								}
 							}
 						},
@@ -19485,7 +19497,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_08414a54"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_9e57213e"
 									}
 								}
 							}
@@ -19976,7 +19988,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_08414a54"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_9e57213e"
 								}
 							}
 						},
@@ -23142,6 +23154,13 @@
 				},
 				"maxItems": 16
 			},
+			"Array_356271b9": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_description_id_name_8cbb3cb6"
+				},
+				"maxItems": 8
+			},
 			"Array_3610e4f1": {
 				"type": "array",
 				"items": {
@@ -24232,7 +24251,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_600db2bd"
+										"$ref": "#/components/schemas/Object_autonomy_budget_eggs_ef56fbdb"
 									}
 								},
 								"additionalProperties": false
@@ -27003,10 +27022,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_eggs_600db2bd": {
+			"Object_autonomy_budget_eggs_ef56fbdb": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_dd926476"
+					"$ref": "#/components/schemas/Shape_f0214d76"
 				},
 				"additionalProperties": false
 			},
@@ -28204,7 +28223,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_08414a54": {
+			"Object_config_contextWork_fleet_9e57213e": {
 				"type": "object",
 				"required": [
 					"id",
@@ -28221,7 +28240,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_73d6480a"
+					"$ref": "#/components/schemas/Shape_d320cfb2"
 				},
 				"additionalProperties": false
 			},
@@ -28584,6 +28603,25 @@
 					},
 					"failover": {
 						"enum": ["none", "approved"]
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_description_id_name_8cbb3cb6": {
+				"type": "object",
+				"required": ["id", "name", "description"],
+				"properties": {
+					"id": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"description": {
+						"type": "string",
+						"maxLength": 512
 					}
 				},
 				"additionalProperties": false
@@ -29809,17 +29847,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_level_source_ac199f39": {
+			"Object_level_modes_source_c5f9dc23": {
 				"type": "object",
 				"required": ["level", "source"],
 				"properties": {
-					"level": {
-						"$ref": "#/components/schemas/Union_0657f444"
-					},
-					"source": {
-						"type": "string",
-						"maxLength": 64
-					}
+					"$ref": "#/components/schemas/Shape_fa4ddc88"
 				},
 				"additionalProperties": false
 			},
@@ -33028,66 +33060,6 @@
 					"$ref": "#/components/schemas/Union_5f05c598"
 				}
 			},
-			"Shape_73d6480a": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_cc43feb8"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_600db2bd"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_74fd8979": {
 				"operation": {
 					"$ref": "#/components/schemas/Object_cwd_elapsedMs_facts_bed7a8ed"
@@ -34225,6 +34197,66 @@
 					"$ref": "#/components/schemas/Object_at_fact_id_cdcc8a27"
 				}
 			},
+			"Shape_d320cfb2": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_cc43feb8"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_eggs_ef56fbdb"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_d3a517a5": {
 				"key": {
 					"type": "string",
@@ -34357,35 +34389,6 @@
 				},
 				"cache": {
 					"$ref": "#/components/schemas/Union_46b9d05f"
-				}
-			},
-			"Shape_dd926476": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_source_ac199f39"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
 				}
 			},
 			"Shape_e120b9e1": {
@@ -34560,6 +34563,35 @@
 					"$ref": "#/components/schemas/Object_conflictingAttempts_damaged_droppedRecords_48ebcd87"
 				}
 			},
+			"Shape_f0214d76": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
+				},
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
+				},
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_entries_title_truncated_0b4b308b"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
+				}
+			},
 			"Shape_f0cf5df2": {
 				"type": {
 					"type": "string",
@@ -34655,6 +34687,22 @@
 				},
 				"changedAfterCommit": {
 					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				}
+			},
+			"Shape_fa4ddc88": {
+				"level": {
+					"$ref": "#/components/schemas/Union_0657f444"
+				},
+				"source": {
+					"type": "string",
+					"maxLength": 64
+				},
+				"modes": {
+					"$ref": "#/components/schemas/Array_356271b9"
+				},
+				"unrecognized": {
+					"type": "string",
+					"maxLength": 64
 				}
 			},
 			"Shape_fd2af4a0": {
