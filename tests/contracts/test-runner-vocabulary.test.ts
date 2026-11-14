@@ -288,6 +288,54 @@ describe("test runner vocabulary (#377)", () => {
 		strictEqual(worker("rm -rf /; echo $?", true), "deny");
 	});
 
+	it("admits read-only git inspection through -C inside the workspace and through pathspec globs", () => {
+		// The worker Git gate read `-C` as a repository redirect and asked, and the
+		// recognizer refused every unquoted glob, so `git diff -- *.py` asked too.
+		const safety = createWorkerSafety({ cwd: scratch });
+		const worker = (command: string, yolo: boolean) =>
+			evaluateAdmission({
+				principal: "worker",
+				effects: [{ tool: ToolNames.Bash, args: { command, cwd: scratch } }],
+				safety,
+				cwd: scratch,
+				...(yolo ? { workerExecuteAutonomy: "yolo" as const } : {}),
+			}).kind;
+		writeFileSync(join(scratch, "solver.py"), "");
+		try {
+			for (const command of [
+				"git -C . diff; git status",
+				"git -C build status",
+				"git diff -- *.py",
+				"git -C . diff --stat -- *.py; git status --short",
+				"git log --oneline -- *.rs",
+			]) {
+				strictEqual(worker(command, false), "allow", command);
+				strictEqual(worker(command, true), "allow", command);
+				strictEqual(disposition(policy, command, "default"), "allow", command);
+			}
+			for (const command of [
+				"git -C /etc diff",
+				"git -C .. status",
+				"git push",
+				"git checkout -- *.py",
+				"git -C . checkout -- solver.py",
+				"git -C . -c core.pager=cat diff",
+				"git diff -- ../*",
+				"git d* -- solver.py",
+			]) {
+				strictEqual(worker(command, false), "ask", command);
+				strictEqual(disposition(policy, command, "default"), "ask", command);
+			}
+			// A match that Git would read as an option is refused.
+			writeFileSync(join(scratch, "--output=x.py"), "");
+			strictEqual(disposition(policy, "git diff *.py", "default"), "ask");
+			rmSync(join(scratch, "--output=x.py"));
+			strictEqual(worker("git diff -- *.py; rm -rf /", true), "deny");
+		} finally {
+			rmSync(join(scratch, "solver.py"), { force: true });
+		}
+	});
+
 	it("asks the main session once before its first test runner, whoever wrote the code", async () => {
 		for (const command of ["pytest -q tests", "cd build && ctest", "PYTHONPATH=src python3 -m pytest -q"]) {
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).runsWorkspaceCode, true, command);

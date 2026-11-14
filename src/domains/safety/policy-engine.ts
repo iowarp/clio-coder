@@ -5151,6 +5151,9 @@ function recognizeCommandChain(
 
 const GIT_INSPECT_RULE_ID = "builtin:git-inspect";
 
+/** A glob match Git may receive: plain file-name characters that rejoin and rescan as the same one word. */
+const GIT_GLOB_MATCH = /^[A-Za-z0-9_./@%+,=-]+$/u;
+
 /**
  * A plain `git` command the shared Git policy classifies as inspection only.
  * The fixed regexes above recognize `git log --oneline -n 3` but asked for
@@ -5171,10 +5174,37 @@ function isGitInspection(
 	// Every word is judged as written. One the shell expands or substitutes
 	// names files the checks below cannot see.
 	if (words.some((word) => (word.substitutions?.length ?? 0) > 0)) return false;
-	if (words.some((word) => hasUnquotedExpansion(source.slice(word.start, word.end), true))) return false;
+	// A `*` or `?` pathspec glob (`git diff -- *.py`) is expanded the way bash
+	// would expand it, as readOnlyInspectionRule does, and Git receives the
+	// matches. Every match is judged below like a literal operand; one that
+	// would read as an option or reparse as shell is refused. Any other
+	// expansion hides the real argument.
+	const gitArgs: string[] = [];
+	const expanded = new Set<number>();
+	for (const word of words.slice(1)) {
+		const raw = source.slice(word.start, word.end);
+		if (!hasUnquotedExpansion(raw, true)) {
+			gitArgs.push(word.value);
+			continue;
+		}
+		const matches = expandOperandGlob(raw, cwd, readScope);
+		if (matches === null) return false;
+		if (matches.length === 0) {
+			// bash passes an unmatched glob through, and Git reads it as a pathspec pattern.
+			expanded.add(gitArgs.length);
+			gitArgs.push(word.value);
+			continue;
+		}
+		if (matches.some((match) => match.startsWith("-") || !GIT_GLOB_MATCH.test(match))) return false;
+		if (matches.some((match) => !readScope.readable(path.resolve(cwd, match)))) return false;
+		for (const match of matches) {
+			expanded.add(gitArgs.length);
+			gitArgs.push(match);
+		}
+	}
 	// `git -C <dir> ...` runs as plain git from <dir>. The directories are held
 	// to the workspace like a read path and the rest is judged from the last one.
-	const split = splitGitChdir(words.slice(1).map((word) => word.value));
+	const split = splitGitChdir(gitArgs);
 	if (split === null) return false;
 	let gitCwd = cwd;
 	for (const dir of split.dirs) {
@@ -5192,7 +5222,12 @@ function isGitInspection(
 	// to the workspace as readOnlyInspectionRule holds an operand, so an option
 	// value that names a file (`--contents /etc/hosts`, `-S /proc/self/environ`)
 	// or a pathspec outside the tree is not recognized.
-	const operands = values.slice(values.indexOf(verdict.subcommand) + 1);
+	const subcommandAt = values.indexOf(verdict.subcommand);
+	// A glob is a pathspec: in the global options or the subcommand word it
+	// would pick what Git runs. `values` drops the `-C` pairs, so count from the end.
+	const earliestFromEnd = Math.max(0, ...[...expanded].map((at) => gitArgs.length - at));
+	if (earliestFromEnd >= values.length - subcommandAt) return false;
+	const operands = values.slice(subcommandAt + 1);
 	for (const value of operands) {
 		if (value === "--" || value === "-") continue;
 		if (value.startsWith("-")) {
