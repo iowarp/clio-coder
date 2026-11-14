@@ -858,6 +858,13 @@ async function handle(frame) {
 												: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
+				if (promptText.includes("[rename]")) {
+					// The engine announces a title it chose; a repeat of the same title is not a new rename.
+					update({ sessionUpdate: "session_info_update", title: "Renamed" });
+					update({ sessionUpdate: "session_info_update", title: "Renamed" });
+					// A skill or an extension came or went mid-session; the session/new announcement predates the binding.
+					update({ sessionUpdate: "available_commands_update", availableCommands: [] });
+				}
 				if (promptText.startsWith("/context recover ")) {
 					await delay(40);
 					text("The paused turn continued from the handoff.\n\nHandoff delivered.");

@@ -136,7 +136,12 @@ import { JOB_QUIET_MS, jobChangeIsStructural, scheduledTurnPrompt } from "./jobs
 import { Permissions, type PermissionTimers } from "./permissions.js";
 import { projectConfigOptions } from "./session-config.js";
 import { projectSessionOverview, SessionWorkers } from "./session-overview.js";
-import { projectTelemetryValue, sessionResultTelemetry, sessionUpdateTelemetry } from "./telemetry.js";
+import {
+	projectTelemetryValue,
+	sessionInfoTitle,
+	sessionResultTelemetry,
+	sessionUpdateTelemetry,
+} from "./telemetry.js";
 
 /**
  * The text of an ACP tool-call content array, or undefined when the frame
@@ -482,12 +487,13 @@ export class Supervisor {
 			// The workspace may have vanished or the ledger be unreadable; the record then keeps its terminal-resume path.
 		}
 	}
-	async open(workspaceId: string, existingId?: string) {
+	/** `label` is a saved session's ledger name; the replayed transcript cannot restore it, so the snapshot starts with it. */
+	async open(workspaceId: string, existingId?: string, label?: string) {
 		if (existingId && this.snapshots.get(existingId)?.state === "parked") {
 			await this.wake(existingId);
 			return this.get(existingId);
 		}
-		return this.track(this.openSession(workspaceId, existingId));
+		return this.track(this.openSession(workspaceId, existingId, false, label));
 	}
 	private async track(pending: Promise<SessionSnapshot>) {
 		this.opening.add(pending);
@@ -551,7 +557,7 @@ export class Supervisor {
 		if (this.snapshot(id).state === "parked") await this.wake(id);
 		return {};
 	}
-	private async openSession(workspaceId: string, existingId?: string, resume = false) {
+	private async openSession(workspaceId: string, existingId?: string, resume = false, label?: string) {
 		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
 		if (existingId && (this.entries.has(existingId) || this.loading.has(existingId)))
 			throw new AppProblem("conflict", "Session is already open in this server.");
@@ -593,7 +599,9 @@ export class Supervisor {
 			if (!resume)
 				this.snapshots.set(
 					id,
-					existingId ? { ...emptySession(id, workspaceId), revision: this.floor + 1 } : emptySession(id, workspaceId),
+					existingId
+						? { ...emptySession(id, workspaceId), revision: this.floor + 1, label: label || null }
+						: emptySession(id, workspaceId),
 				);
 			this.entries.set(id, entry);
 			this.starting--;
@@ -725,7 +733,7 @@ export class Supervisor {
 				this.snapshots.delete(id);
 				entry.id = boundId;
 				this.entries.set(boundId, entry);
-				this.snapshots.set(boundId, emptySession(boundId, workspaceId));
+				this.snapshots.set(boundId, { ...emptySession(boundId, workspaceId), label: label || null });
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;
@@ -1040,6 +1048,24 @@ export class Supervisor {
 		const sessionNotice = record(record(update._meta)[ACP_NOTICE_META_KEY]);
 		if (update.sessionUpdate === "session_info_update" && typeof sessionNotice.text === "string")
 			this.notice(entry, sessionNotice.text);
+		// A rename from another client of this session, or by the engine itself. A title equal to the held label is a
+		// repeat or an echo and publishes nothing.
+		const title = sessionInfoTitle(update);
+		if (title !== undefined && title !== (this.snapshot(entry.id).label ?? null))
+			this.publish({
+				type: "session.labelled",
+				payload: { resource: entry.id, revision: this.revision(entry.id), label: title },
+			});
+		// The list itself is read on demand; the counter only tells a client its copy is stale.
+		if (update.sessionUpdate === "available_commands_update")
+			this.publish({
+				type: "session.telemetry",
+				payload: {
+					resource: entry.id,
+					revision: this.revision(entry.id),
+					telemetry: { commandsRevision: (this.snapshot(entry.id).telemetry?.commandsRevision ?? 0) + 1 },
+				},
+			});
 		const telemetry = sessionUpdateTelemetry(update);
 		if (telemetry)
 			this.publish({

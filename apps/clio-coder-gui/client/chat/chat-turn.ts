@@ -209,6 +209,8 @@ const observedStarts = new Map<string, number>();
 export function observeStart(id: string, nowMs: number): number {
 	const seen = observedStarts.get(id);
 	if (seen !== undefined) return seen;
+	// No clock is running (a settled or not yet live turn); a zero is not a sighting.
+	if (nowMs <= 0) return nowMs;
 	if (observedStarts.size >= MAX_OBSERVED_STARTS) {
 		const oldest = observedStarts.keys().next();
 		if (!oldest.done) observedStarts.delete(oldest.value);

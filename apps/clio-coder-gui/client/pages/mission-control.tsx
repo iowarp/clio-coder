@@ -228,16 +228,16 @@ export function MissionControl({ client }: { client: Client }) {
 						))}
 					</div>
 					{items ? (
-						<InventoryMore total={shown.length} limit={page.limit} label="sessions" list={list} onMore={page.more} />
+						<InventoryMore total={shown.length} limit={page.limit} label="open sessions" list={list} onMore={page.more} />
 					) : null}
 					{items && shown.length === 0 ? (
 						<div className="mission__empty">
 							<Icon name="sessions" />
-							<h3>{items.length ? "No sessions match this view" : "A place for your next discovery"}</h3>
+							<h3>{items.length ? "No sessions match this view" : "No session is open on this server"}</h3>
 							<p>
 								{items.length
 									? "Try another project, search, or activity filter."
-									: "Start a task in a project. Its progress and agents will appear here."}
+									: "Saved tasks stay in each project's task list and in the sidebar, where you can resume them. A task you start or resume appears here with its progress and agents."}
 							</p>
 							{items.length ? (
 								<button type="button" onClick={() => setSearch({})}>

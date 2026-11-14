@@ -36,6 +36,7 @@ import {
 	guidanceReady,
 	isLiveRun,
 	presentFleetFact,
+	reconcileRuns,
 	STEER_REFUSALS,
 	steerOutcome,
 } from "../client/chat/fleet-facts.js";
@@ -411,6 +412,33 @@ test("progress is a working run, not a phase of its own, and a failure carries i
 	assert.equal(fleetSummaryLabel(runs), "Fleet · 2 running of 3");
 });
 
+test("a stopped worker reads as stopped, never as a failure (inspection F10)", () => {
+	const runs = foldFleetRuns([
+		fact("fleet.started", { runId: "r1", agentId: "builder" }),
+		fact("fleet.failed", {
+			runId: "r1",
+			agentId: "builder",
+			outcome: "canceled",
+			reason: "canceled",
+			outcomeDetail: "operator abort",
+			durationMs: 2500,
+		}),
+		fact("fleet.failed", { runId: "r2", agentId: "judge", outcome: "failed", reason: "failed", durationMs: 12 }),
+	]);
+	const [stopped, failed] = runs;
+	assert.ok(stopped && failed);
+	assert.equal(stopped.state, "stopped");
+	assert.ok(!isLiveRun(stopped));
+	assert.equal(fleetRunDetail(stopped), "Stopped · operator abort · 2.5s");
+	assert.equal(failed.state, "failed");
+	const presented = presentFleetFact({
+		type: "fleet.failed",
+		payload: { outcome: "cancelled", reason: "operator_cancel" },
+	});
+	assert.deepEqual([presented.label, presented.tone], ["Run stopped", "neutral"]);
+	assert.equal(presentFleetFact({ type: "fleet.failed", payload: { outcome: "failed" } }).label, "Run failed");
+});
+
 test("events arriving out of order are folded in reported sequence, not in array order", () => {
 	const started = fact("fleet.started", { runId: "r1", agentId: "a" });
 	const completed = fact("fleet.completed", {
@@ -421,6 +449,59 @@ test("events arriving out of order are folded in reported sequence, not in array
 		tokenCount: 1,
 	});
 	assert.equal(foldFleetRuns([completed, started])[0]?.state, "done");
+});
+
+test("a late progress or start frame does not bring a settled run back to life", () => {
+	const runs = foldFleetRuns([
+		fact("fleet.started", { runId: "r1", agentId: "a" }),
+		fact("fleet.completed", { runId: "r1", agentId: "a", outcome: "succeeded", durationMs: 5, tokenDisplay: "12" }),
+		fact("fleet.progress", { runId: "r1", agentId: "a", progressCount: 3, truncated: false }),
+	]);
+	assert.equal(runs[0]?.state, "done");
+	assert.ok(runs[0] && !isLiveRun(runs[0]));
+});
+
+test("the feed is checked against the server's live runs without inventing what neither reported", () => {
+	const at = "2026-09-20T10:00:00.000Z";
+	const folded = foldFleetRuns([
+		fact("fleet.started", { runId: "both", agentId: "builder" }, at),
+		fact("fleet.started", { runId: "feed-only", agentId: "judge" }, at),
+		fact("fleet.started", { runId: "done", agentId: "a" }, at),
+		fact("fleet.completed", { runId: "done", agentId: "a", outcome: "succeeded", durationMs: 1, tokenDisplay: "1" }, at),
+	]);
+	const later = "2026-09-20T10:00:05.000Z";
+	const runs = reconcileRuns(
+		folded,
+		[
+			{ runId: "both", agentId: "builder", state: "active", node: null },
+			{ runId: "server-only", agentId: "scout", state: "queued", node: "blade" },
+		],
+		later,
+	);
+	const byId = new Map(runs.map((run) => [run.runId, run]));
+	assert.equal(
+		byId.get("both"),
+		folded.find((run) => run.runId === "both"),
+		"the feed's row stands unchanged",
+	);
+	const lost = byId.get("server-only");
+	assert.ok(lost && isLiveRun(lost));
+	assert.equal(lost.state, "queued");
+	assert.equal(lost.agentId, "scout");
+	assert.equal(lost.node, "blade");
+	assert.equal(lost.taskPreview, null);
+	const ended = byId.get("feed-only");
+	assert.ok(ended && !isLiveRun(ended));
+	assert.match(fleetRunDetail(ended), /^Ended \(final event not received\)/);
+	assert.equal(byId.get("done")?.state, "done", "a settled run is never re-read");
+
+	assert.equal(reconcileRuns(folded, undefined), folded, "without a server list the feed stands");
+	const early = reconcileRuns(folded, [], "2026-09-20T09:59:59.000Z");
+	assert.equal(
+		early.find((run) => run.runId === "feed-only")?.state,
+		"running",
+		"a run newer than the list may simply not be in it yet",
+	);
 });
 
 test("the cap drops the oldest settled run first and never a live one", () => {

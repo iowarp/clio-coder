@@ -413,6 +413,13 @@ test("the live status machine reaches all nine states from one realistic sequenc
 		record(liveStatus(chatTurn([user], "running"), turnRow({ id: "t", status: "running" }), null)),
 		"starting",
 	);
+	// Once the server admits the turn the agent holds it: the line says Working, as the header does (inspection F14).
+	const admitted = liveStatus(
+		chatTurn([user], "running"),
+		turnRow({ id: "t", status: "running", startedAt: "2026-09-20T00:00:00.000Z" }),
+		null,
+	);
+	assert.deepEqual([admitted.state, admitted.label], ["acting", "Working"]);
 	// A live worker outranks the orchestrator's silent timeline: "Starting" through a five-minute
 	// dispatch is a lie.
 	const waitingOnWorker = liveStatus(chatTurn([user], "running"), undefined, null, false, 2);
@@ -934,6 +941,23 @@ test("conversation routing takes reported current values and keeps target change
 	assert.match(route.title, /Thinking: high/);
 	assert.equal(route.config, config);
 	assert.equal(routeDraft(undefined, undefined, "conversation"), null);
+});
+
+test("a session config without a model option says the model is not reported, never the saved one", () => {
+	const route = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [{ id: "thinkingLevel" as const, currentValue: "high", options: [{ value: "high", name: "High" }] }],
+	});
+	assert.equal(route.text, "alpha · model not reported");
+	assert.equal(route.model, "Model not reported");
+	assert.match(route.title, /Model: not reported\./);
+	assert.doesNotMatch(`${route.text} ${route.model} ${route.title}`, /saved-model/);
+	const bare = routeFacts({ target: "saved-target", model: "saved-model", thinking: "off" }, summarizeHealth([]), {
+		target: "alpha",
+		options: [],
+	});
+	assert.equal(bare.thinking, undefined, "a thinking level the session did not report is not the saved one");
+	assert.doesNotMatch(bare.title, /Thinking: off/);
 });
 
 test("config projection drops unknown controls and private metadata, and refuses malformed known options", () => {

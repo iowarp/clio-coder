@@ -52,7 +52,7 @@ import { Menu, MenuItem } from "../shell/Menu.js";
 import { useSessionCommands } from "../shell/SessionControls.js";
 import { taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
-import { rememberedWorkspace, useRenameTask } from "../shell/tasks.js";
+import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
@@ -119,6 +119,13 @@ export async function locateTask(
  */
 function useSecond(active: boolean): number {
 	const [now, setNow] = useState(() => clock.now());
+	const [wasActive, setWasActive] = useState(active);
+	// The second held from the last live stretch is stale the moment a new one starts. Taking a fresh one during this
+	// render keeps a row that first appears now from recording that old second as its start.
+	if (active !== wasActive) {
+		setWasActive(active);
+		if (active) setNow(clock.now());
+	}
 	useEffect(() => {
 		if (!active) return;
 		setNow(clock.now());
@@ -239,7 +246,13 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		return next;
 	}, [snapshot?.timeline, statuses]);
 	const fleet = snapshot?.fleet;
-	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
+	// The server's count outlives the feed's bound; the feed counts only while the overview does not list this task.
+	const serverWorkers = useSessionWorkers(client, id)?.count;
+	const foldedWorkers = useMemo(
+		() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length),
+		[fleet],
+	);
+	const liveWorkers = serverWorkers ?? foldedWorkers;
 	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
 	const compactions = useMemo(
 		() => compactionsByTurn(compactionRows(snapshot?.health ?? []), snapshot?.turns ?? []),
@@ -382,7 +395,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					? { tone: "quiet", label: "Waiting for a slot" }
 					: {
 							tone: "working",
-							label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+							label: [
+								liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : turn?.startedAt ? "Working" : "Starting",
+								elapsed ?? null,
+							]
 								.filter(Boolean)
 								.join(" · "),
 						}

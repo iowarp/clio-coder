@@ -195,6 +195,28 @@ const telemetryUpdate = (resource: string, seq: number) => ({
 	},
 });
 
+test("a new command list from the engine refreshes the session's command read, and other telemetry does not", async (t) => {
+	const queries = new QueryClient();
+	t.after(() => queries.clear());
+	const stream = await liveStream(t, queries);
+	const commands = () => queries.getQueryState(["session-commands", "commands-session"])?.isInvalidated;
+	queries.setQueryData(["session-commands", "commands-session"], []);
+	stream.deliver({
+		type: "session.telemetry",
+		payload: {
+			resource: "commands-session",
+			revision: 1,
+			telemetry: { plan: { title: null, entries: [], truncated: false } },
+		},
+	});
+	assert.equal(commands(), false, "telemetry without a new command list leaves the command read alone");
+	stream.deliver({
+		type: "session.telemetry",
+		payload: { resource: "commands-session", revision: 2, telemetry: { commandsRevision: 1 } },
+	});
+	assert.equal(commands(), true);
+});
+
 test("only a label or a task leaving the held set refreshes the saved-task list", async (t) => {
 	const queries = new QueryClient();
 	t.after(() => queries.clear());

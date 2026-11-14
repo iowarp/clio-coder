@@ -213,6 +213,7 @@ export const guiTests = [
 	"machine-proxy",
 	"client-auth",
 	"session-control",
+	"session-overview",
 	"openapi",
 	"boundaries",
 ]

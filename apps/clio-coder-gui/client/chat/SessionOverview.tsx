@@ -32,7 +32,7 @@ import {
 	useTelemetrySession,
 } from "./session-telemetry.js";
 import { sessionSpend } from "./session-usage-model.js";
-import { livePlanView } from "./telemetry-model.js";
+import { livePlanView, planCancellation } from "./telemetry-model.js";
 import { isStoppedEarly, turnEnding } from "./turns.js";
 
 function PlanGlyph({ tone }: { tone: PlanRow["tone"] }) {
@@ -362,9 +362,12 @@ export function SessionOverview({
 					<p className="pane-empty">
 						{capabilities.data?.board === undefined && !session.telemetry?.plan
 							? "This session does not report a plan."
-							: "No plan published yet."}
+							: (planCancellation(session.telemetry?.plan) ?? "No plan published yet.")}
 					</p>
 				)}
+				{plan && plan.rows.length > 0 && planCancellation(session.telemetry?.plan) ? (
+					<p className="pane-card__facts">{planCancellation(session.telemetry?.plan)}</p>
+				) : null}
 				{capabilities.data?.board && plan && plan.rows.length > 5 ? (
 					<p className="pane-card__facts">{plan.rows.length - 5} more steps in the full plan.</p>
 				) : null}

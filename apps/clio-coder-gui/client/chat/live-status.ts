@@ -113,7 +113,12 @@ export function liveStatus(
 			detail: null,
 		};
 	const last = turn.items.at(-1);
-	if (last === undefined || last.kind === "user") return { state: "starting", label: "Starting", detail: null };
+	// Once the server has admitted the turn the agent holds the prompt, so a silent agent is working, as the header
+	// says; "Starting" is only the gap before that admission.
+	if (last === undefined || last.kind === "user")
+		return row?.startedAt
+			? { state: "acting", label: "Working", detail: null }
+			: { state: "starting", label: "Starting", detail: null };
 	if (last.kind === "tool" && last.status === "in_progress")
 		return { state: "acting", label: "Running", detail: last.title ?? null };
 	if (last.kind === "thought") return { state: "thinking", label: "Thinking", detail: null };
