@@ -61,6 +61,11 @@ Setup sends the model one short test request and saves when it answers. After a 
 Guided setup in the terminal: a model server it found, the routes it offers, and the saved connection.
 :::
 
+After setup, `/model` lists the models of every connected target and switches the conversation between them:
+
+::: capture anim-model-switch
+:::
+
 ::: result
 When setup shows a model list, the list says whether it is live, cached, or the provider's catalog; a server that lists one model skips the list. The test request shows that the model answers; it does not test tool calling. An answer is useful, but it is not a coding benchmark.
 :::

@@ -6,14 +6,14 @@
 			"path": "assets/social/cast-first-launch.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "162942eaa41c422b521dbeddb312b252bb4848b90ee7483110cef0d70c19cc7c"
+			"sha256": "c0720f98c07d46ff5b140519e66e8e0876b9f6867f6efbbbfc93d03f8e0d726c"
 		},
 		"cast-headless-run": {
 			"source": "assets/guides/cast-headless-run.png",
 			"path": "assets/social/cast-headless-run.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "944b5e870a465831ee42d01070fb0009ca7994236c9dd05c60dcc0e2b3c8e7be"
+			"sha256": "6e98ce7d8a0cb21aa481c7fdf3c6c39eb2d9592935ab78b6bc4016bc993c0b0a"
 		},
 		"cast-let-it-work": {
 			"source": "assets/guides/cast-let-it-work.png",
@@ -76,7 +76,7 @@
 			"path": "assets/social/tui-verify-result.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "4e8873a4aa2f8e8c167e022da79c01d94f124412ce982abb43d3b8790867491e"
+			"sha256": "727407fea06b70146664aafebd5f57fd1b6a74b401d0a8114dd59a0c5232e6b9"
 		},
 		"tui-view-result": {
 			"source": "assets/guides/tui-view-result.png",
