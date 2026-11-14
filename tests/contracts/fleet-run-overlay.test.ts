@@ -6,6 +6,8 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sumPricing } from "../../src/core/telemetry/pricing.js";
 import type { DispatchContract, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { FleetRunOutcome } from "../../src/domains/dispatch/fleet-run.js";
+import { writeFleetRunSync } from "../../src/domains/dispatch/state.js";
+import { readDurableFleetPlans } from "../../src/interactive/fleet-plan-history.js";
 import { createFleetPlanRuns } from "../../src/interactive/fleet-plan-runs.js";
 import {
 	createOverlayGeneralOpeners,
@@ -265,4 +267,42 @@ test("a task typed after the playbook name points at --var task", () => {
 		reason: 'Unexpected argument: Add; a playbook takes its task as --var task="<text>"',
 		subcommand: "run",
 	});
+});
+
+test("an earlier fleet read from its record counts steps and loops as the live run did", async () => {
+	const scratch = await isolateClioEnv("clio-coder-fleet-history-loops-");
+	try {
+		const root = realpathSync(scratch.dir);
+		const result = (succeeded: boolean) => ({ succeeded, output: "" }) as never;
+		writeFleetRunSync({
+			version: 1,
+			id: "fleet-0123456789ab",
+			cwd: root,
+			fleet: "build-test",
+			planHash: "hash",
+			stepIds: ["build", "suite.check.1", "suite.repair.1", "suite.check.2"],
+			planSteps: [
+				{ id: "build", kind: "agent", agentId: "coder" },
+				{ id: "suite.check.1", kind: "code", argv: ["pytest"], loop: { loopId: "suite", role: "check", attempt: 1 } },
+				{ id: "suite.repair.1", kind: "agent", agentId: "coder", loop: { loopId: "suite", role: "repair", attempt: 1 } },
+				{ id: "suite.check.2", kind: "code", argv: ["pytest"], loop: { loopId: "suite", role: "check", attempt: 2 } },
+			],
+			vars: {},
+			startedAt: "2026-11-14T10:00:00.000Z",
+			endedAt: "2026-11-14T10:01:00.000Z",
+			resumedFrom: null,
+			steps: [
+				{ stepId: "build", result: result(true) },
+				{ stepId: "suite.check.1", result: result(true) },
+			],
+		});
+		const [plan] = readDurableFleetPlans(root);
+		ok(plan);
+		strictEqual(plan.state, "passed");
+		strictEqual(plan.requiredStepCount, 1);
+		strictEqual(plan.succeededStepCount, 1);
+		deepStrictEqual(plan.loops, { resolved: 1, total: 1 });
+	} finally {
+		scratch.restore();
+	}
 });
