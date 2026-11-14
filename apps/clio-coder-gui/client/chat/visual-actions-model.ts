@@ -21,6 +21,8 @@ const PANE_COPY: Readonly<Record<string, { title: string; icon: IconName }>> = {
 	usage: { title: "Usage and quota", icon: "usage" },
 	tasks: { title: "Tasks and decisions", icon: "listChecks" },
 	decisions: { title: "Decisions", icon: "evidence" },
+	fleet: { title: "Live agents", icon: "fleet" },
+	memory: { title: "What CLIO Coder learned", icon: "archive" },
 };
 const ACTION_COPY: Readonly<Record<string, { title: string; description: string }>> = {
 	tree: { title: "Conversation history", description: "Return to an earlier point or try another direction" },

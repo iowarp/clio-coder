@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	aliasEntries,
 	exactEntry,
+	parseSlashLine,
 	resolveAlias,
 	SLASH_ALIASES,
 	type SlashFacts,
@@ -146,4 +147,24 @@ test("every terminal command a browser can serve lands on a control, and the res
 	for (const name of ["restart", "upgrade", "panes", "music"])
 		assert.equal(resolveAlias(`/${name}`, full)?.alias.target.kind, "notice", name);
 	assert.ok(!SLASH_ALIASES.some((spec) => spec.names.includes("files") && spec.target.kind === "notice"));
+});
+
+test("commands the app serves elsewhere are not listed, and still run when typed", () => {
+	const withHostWriters = {
+		...catalog,
+		commands: [
+			...catalog.commands,
+			command("export"),
+			command("archive"),
+			command("eggs"),
+			command("report", { requiresSubcommand: true, args: { subcommands: { bug: {}, status: {} } } }),
+		],
+	};
+	const listed = slashEntries(facts({ catalog: withHostWriters })).map((entry) => entry.name);
+	for (const name of ["export", "archive", "eggs", "report bug", "report status"])
+		assert.ok(!listed.includes(name), `${name} is listed`);
+	assert.ok(listed.includes("doctor"));
+	assert.ok(listed.includes("report"), "the Report a problem dialog keeps the name");
+	assert.equal(parseSlashLine("/export", withHostWriters)?.kind, "command");
+	assert.equal(parseSlashLine("/report status", withHostWriters)?.kind, "command");
 });

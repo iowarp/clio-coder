@@ -15,9 +15,9 @@ import type { CommandCatalog, CommandDescriptor } from "../../contracts/steering
 import { prefixScore } from "../interaction/prefix-score.js";
 import { type CommandFields, type CommandPlan, planCommand } from "./command-model.js";
 import type { PaneTarget } from "./pane-context.js";
+import { ACTIONS, type SlashAction, UNLISTED_COMMANDS } from "./slash-actions.js";
 
-/** Session actions hosted in a dialog over the conversation. */
-export type SlashAction = "tree" | "fork" | "handoff" | "btw" | "draft" | "extensions" | "fleet-run" | "report";
+export type { SlashAction };
 /** Pane views a slash name opens beside the conversation, `/decisions` at the board's Decisions. */
 export type SlashPaneView = PaneTarget;
 
@@ -68,6 +68,7 @@ export function argumentHint(args: LeafArgs | undefined): string {
 function commandEntries(catalog: CommandCatalog | undefined): SlashEntry[] {
 	const entries: SlashEntry[] = [];
 	for (const command of catalog?.commands ?? []) {
+		if (UNLISTED_COMMANDS.has(command.name)) continue;
 		// The bare form of a hub command is refused over ACP, so only its verbs are listed.
 		if (!command.requiresSubcommand)
 			entries.push({
@@ -96,75 +97,6 @@ function commandEntries(catalog: CommandCatalog | undefined): SlashEntry[] {
 	}
 	return entries;
 }
-
-interface ActionSpec {
-	readonly action: SlashAction;
-	readonly name: string;
-	readonly title: string;
-	readonly summary: string;
-	readonly supported: (capabilities: AgentCapabilities) => boolean;
-}
-
-/** Names follow `src/interactive/slash-commands.ts`, so a terminal habit works here unchanged. */
-const ACTIONS: readonly ActionSpec[] = [
-	{
-		action: "tree",
-		name: "tree",
-		title: "Branches",
-		summary: "Continue from an earlier turn or fork from it",
-		supported: (capabilities) => !!capabilities.branches,
-	},
-	{
-		action: "fork",
-		name: "fork",
-		title: "Fork the conversation",
-		summary: "Start a new conversation from a turn",
-		supported: (capabilities) => !!capabilities.branches?.fork,
-	},
-	{
-		action: "handoff",
-		name: "handoff",
-		title: "Hand off to a new conversation",
-		summary: "Draw up a reviewed handoff and continue in a new conversation",
-		supported: (capabilities) => !!capabilities.handoff,
-	},
-	{
-		action: "btw",
-		name: "btw",
-		title: "Side question",
-		summary: "Ask beside the conversation without adding a turn",
-		supported: (capabilities) => !!capabilities.aside?.ask,
-	},
-	{
-		action: "draft",
-		name: "draft",
-		title: "Drafts",
-		summary: "Draft a request several ways and compare them",
-		supported: (capabilities) => !!capabilities.aside?.draft,
-	},
-	{
-		action: "extensions",
-		name: "extensions",
-		title: "Extensions",
-		summary: "What this task loaded, and reload",
-		supported: (capabilities) => !!capabilities.extensions,
-	},
-	{
-		action: "fleet-run",
-		name: "fleet run",
-		title: "Run a playbook",
-		summary: "Preview a playbook and start the approved plan",
-		supported: (capabilities) => !!capabilities.fleet,
-	},
-	{
-		// The app's own dialog over the host's report plan, in place of the text preview other ACP clients get (R-24).
-		action: "report",
-		name: "report",
-		title: "Report a problem",
-		summary: "Review exactly what would be sent, then send it yourself",
-		supported: () => true,
-	},
-];
 
 interface PaneSpec {
 	readonly id: string;
