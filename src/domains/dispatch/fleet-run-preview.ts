@@ -220,6 +220,7 @@ export function compileFleetRunPreview(input: FleetRunPreviewInput): FleetRunPre
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,
+					resultContract: spec.resultContract,
 					// A gate decider answers the coordinator's question, so its
 					// postcondition is the gate result contract, not its recipe's.
 					expectedResultContract:

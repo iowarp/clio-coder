@@ -38,6 +38,7 @@
 
 import { parseVerifierPayload } from "../../core/json-payload.js";
 import type { ResultContract } from "../agents/result-contract.js";
+import { parseVerifierResult } from "../agents/result-contract.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 
 /** Contract kinds whose terminal payload carries a correctness claim to ground. */
@@ -174,6 +175,9 @@ function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
  */
 export function groundClaimedValidations(input: ValidationGroundingInput): ValidationGrounding | null {
 	if (input.contractKind === null || !GROUNDED_CONTRACT_KINDS.has(input.contractKind)) return null;
+	// Hoare machine claims use exact native proof records, while argued obligations claim no command execution.
+	if (input.contractKind === "verifier-report" && parseVerifierResult(input.output)?.assurance !== undefined)
+		return null;
 	const claims = claimedValidationNames(input.output).filter((name) => {
 		if (!input.readOnly || input.contractKind !== "mutation-report") return true;
 		if (detectValidationCommand(name, "grounding").kind === "validation") return true;

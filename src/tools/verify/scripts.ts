@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
-import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
+import {
+	type MainSandboxPolicy,
+	mainSandboxWriteHint,
+	readOnlyMainSandboxPolicy,
+} from "../../core/sandbox/main-session.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { ToolResult } from "../registry.js";
 import { runVectorTool } from "../safe-exec.js";
@@ -35,6 +40,7 @@ import {
 	parsePerfBaseline,
 	renderPerfBaseline,
 } from "./perf.js";
+import { captureProofSnapshot } from "./proof.js";
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
 import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
@@ -638,8 +644,64 @@ export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunO
 	if (check.kind !== "command") {
 		return withDeclaredEvidence(await runJudgedCheck(check, file, vector, cwd, options), check);
 	}
+	if (check.proof !== undefined)
+		return withDeclaredEvidence(await runProofCheck(check, file, vector, cwd, options), check);
 	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
 	return withDeclaredEvidence(result, check);
+}
+
+async function runProofCheck(
+	check: DeclaredCheck,
+	file: string,
+	vector: string[],
+	cwd: string,
+	options?: VerifyRunOptions,
+): Promise<ToolResult> {
+	const proof = check.proof;
+	if (proof === undefined || check.proofCatalogDigest === undefined)
+		return { kind: "error", message: "verify: proof declaration or catalog fingerprint is missing" };
+	let scratch: string | undefined;
+	try {
+		const snapshot = captureProofSnapshot(process.cwd(), proof.inputs, check.proofCatalogDigest);
+		scratch = mkdtempSync(path.join(tmpdir(), "clio-proof-"));
+		const sandbox = readOnlyMainSandboxPolicy({
+			workspace: process.cwd(),
+			scratchRoots: [],
+			scratchDir: scratch,
+		});
+		const result = await runVectorTool(
+			"verify",
+			file,
+			vector,
+			{ cwd, timeout_ms: check.timeoutMs },
+			{ ...options, shellSandbox: { ...sandbox, network: false } },
+		);
+		if (result.kind === "error") return result;
+		if (
+			result.details?.launched !== true ||
+			result.details.exitCode !== 0 ||
+			result.details.aborted === true ||
+			result.details.timedOut === true ||
+			result.details.outputCapped === true ||
+			captureProofSnapshot(process.cwd(), proof.inputs) !== snapshot
+		)
+			return {
+				kind: "error",
+				message: `verify: proof '${check.id}' has incomplete execution or changed inputs; no proof evidence recorded`,
+			};
+		return {
+			...result,
+			output: `${result.output}\nDeclared proof result: ${proof.status} (${proof.goals.map((goal) => goal.id).join(", ")})`,
+			details: { ...result.details, proof: { check: check.id, proof, snapshot } },
+		};
+	} catch (error) {
+		return {
+			kind: "error",
+			message: `verify: proof '${check.id}' unavailable: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	} finally {
+		if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
+	}
 }
 
 /**
