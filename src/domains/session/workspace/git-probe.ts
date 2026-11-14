@@ -21,6 +21,15 @@ export function nextStatusTimeout(current: number, ranOut: boolean): number {
 	return ranOut ? Math.min(current * 2, STATUS_MAX_TIMEOUT_MS) : current;
 }
 
+/**
+ * The footer polls every five seconds, and each Git subprocess is a fork of the whole session: 7 ms at 500 MB of
+ * resident memory, on the event loop. Whether the workspace is a work tree, whether it is ignored, and its remote
+ * rarely change, so a positive answer stands this long and a poll in between asks only for the branch and the
+ * status: two forks instead of five.
+ */
+const SETTLED_FACTS_MS = 60_000;
+const settledFacts = new Map<string, { at: number; remoteUrl: string | null }>();
+
 async function statusAsync(cwd: string): Promise<string | null> {
 	const timeout = statusTimeouts.get(cwd) ?? TIMEOUT_MS;
 	const answer = await askGit(cwd, ["status", "--porcelain", "--", "."], timeout);
@@ -273,24 +282,37 @@ export async function probeGitAsync(cwd: string): Promise<GitProbeResult> {
  * the interactive footer polls and re-reads at the end of every turn.
  */
 export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeResult> {
-	const inside = await gateAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
-	if (inside.timedOut) return UNDETERMINED_STATUS_PROBE;
-	if (inside.out !== "true") return EMPTY_STATUS_PROBE;
-	const ignored = await gateAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
-	if (ignored.timedOut) return UNDETERMINED_STATUS_PROBE;
-	if (ignored.out !== null) return EMPTY_STATUS_PROBE;
+	const kept = settledFacts.get(cwd);
+	const settled = kept !== undefined && performance.now() - kept.at < SETTLED_FACTS_MS ? kept : null;
+	if (settled === null) {
+		settledFacts.delete(cwd);
+		const inside = await gateAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
+		if (inside.timedOut) return UNDETERMINED_STATUS_PROBE;
+		if (inside.out !== "true") return EMPTY_STATUS_PROBE;
+		const ignored = await gateAsync(cwd, ["check-ignore", "--quiet", "--", "."]);
+		if (ignored.timedOut) return UNDETERMINED_STATUS_PROBE;
+		if (ignored.out !== null) return EMPTY_STATUS_PROBE;
+	}
 	const [branch, status, remoteRaw] = await Promise.all([
 		gateAsync(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]),
 		statusAsync(cwd),
-		gitOkAsync(cwd, ["remote", "get-url", "origin"]),
+		settled === null ? gitOkAsync(cwd, ["remote", "get-url", "origin"]) : null,
 	]);
 	if (branch.timedOut) return UNDETERMINED_STATUS_PROBE;
+	if (settled !== null && branch.out === null) {
+		// Git no longer names a branch here, which is also what a removed repository looks like: ask in full.
+		settledFacts.delete(cwd);
+		return probeGitStatusAsync(cwd);
+	}
+	const remoteUrl = settled === null ? remoteFrom(remoteRaw) : settled.remoteUrl;
+	// Only a repository that answered is kept; "no repository" is asked again every time.
+	if (settled === null && branch.out !== null) settledFacts.set(cwd, { at: performance.now(), remoteUrl });
 	const detached = branch.out === "HEAD" ? detachedFrom(await gitOkAsync(cwd, DETACHED_SHA_ARGS)) : {};
 	return {
 		isGit: true,
 		branch: branchFrom(branch.out),
 		dirty: dirtyFrom(status),
-		remoteUrl: remoteFrom(remoteRaw),
+		remoteUrl,
 		...detached,
 	};
 }

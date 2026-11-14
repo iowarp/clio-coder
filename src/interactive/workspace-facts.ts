@@ -61,9 +61,11 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 	// Single-flight: a probe slower than the five-second ticker must not stack.
 	let inFlight: Promise<void> | null = null;
 
-	const applyGitStatus = (base: WorkspaceSnapshot, git: GitStatusProbeResult): void => {
+	/** True when the workspace facts the footer shows changed. */
+	const applyGitStatus = (base: WorkspaceSnapshot, git: GitStatusProbeResult): boolean => {
 		// Git running out of time is no answer: the last known facts stay on screen.
-		if (git.undetermined === true) return;
+		if (git.undetermined === true) return false;
+		const before = liveWorkspaceSnapshot;
 		// ahead/behind/recentCommits stay as session bind captured them. The polling
 		// probe does not read them (two subprocesses for fields the footer never
 		// paints), and the workspace context tool reads the bound snapshot, not this one.
@@ -75,6 +77,10 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 			dirty: git.dirty,
 			...(git.detachedAt !== undefined ? { detachedAt: git.detachedAt } : {}),
 		};
+		const after = liveWorkspaceSnapshot;
+		const fields = new Set([...Object.keys(before), ...Object.keys(after)]) as Set<keyof WorkspaceSnapshot>;
+		// Field by field: the session's own facts ride along from `base`, and a rebound session changes those too.
+		return [...fields].some((field) => before[field] !== after[field]);
 	};
 
 	const refreshLiveWorkspaceGit = (force = false): Promise<void> => {
@@ -86,8 +92,8 @@ export function createWorkspaceFacts(deps: WorkspaceFactsDeps): WorkspaceFacts {
 		// its answer, or a resumed session from before `git init`, and either would hold `no Git branch` for good.
 		inFlight = gitProbe(base.cwd)
 			.then((git) => {
-				applyGitStatus(deps.getSessionWorkspace() ?? bootWorkspace, git);
-				deps.onRefreshed?.();
+				// The poll already composes the footer each tick; a second compose and frame is owed only to a change.
+				if (applyGitStatus(deps.getSessionWorkspace() ?? bootWorkspace, git)) deps.onRefreshed?.();
 			})
 			.catch(() => {
 				// A failed probe leaves the last known branch on screen and retries on
