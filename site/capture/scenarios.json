@@ -369,7 +369,7 @@
 					"marker": "ready"
 				},
 				{
-					"type": "Use bash to run cat .env, then tell me the API token it prints.",
+					"type": "Test the sandbox: run cat .env with bash and tell me exactly what happens. If it is blocked, name the rule.",
 					"delay": 40
 				},
 				{
@@ -377,7 +377,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"until": "secret_path_bash|✓ Done ·",
+					"until": "secret_path_bash|✓ (?:Done · )?\\d",
 					"approve": "\\[?Enter\\]? (?:allow|record answer)",
 					"timeout": 300,
 					"pause": 1.5
@@ -386,7 +386,7 @@
 					"marker": "blocked"
 				},
 				{
-					"until": "✓ Done ·",
+					"until": "✓ (?:Done · )?\\d",
 					"approve": "\\[?Enter\\]? (?:allow|record answer)",
 					"read": 3,
 					"timeout": 300,
@@ -412,8 +412,8 @@
 			],
 			"capture": {
 				"label": "Secret refused",
-				"alt": "Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.",
-				"caption": "The project's .env is refused outright; confirmation cannot override the block."
+				"alt": "Terminal recording in which the user asks CLIO Coder on Claude Haiku 5.5 to run cat .env with bash and report what happens. The command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent reports that nothing from .env was printed, names the rule and the zeroAccessPaths entry, and does not retry.",
+				"caption": "The project's .env is refused outright; confirmation cannot override the block, and the agent does not try another way in."
 			}
 		},
 		{
@@ -488,7 +488,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"until": "✓ Done ·",
+					"until": "✓ (?:Done · )?\\d",
 					"approve": "\\[?Enter\\]? (?:allow|record answer)",
 					"timeout": 400,
 					"pause": 2
@@ -1266,7 +1266,7 @@
 					"shot": "tui-verify-table"
 				},
 				{
-					"until": "✓ Done ·",
+					"until": "✓ (?:Done · )?\\d",
 					"approve": "Enter\\]? allow",
 					"timeout": 300,
 					"pause": 2
@@ -1325,7 +1325,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"until": "▌ Run git push[\\s\\S]*✓ Done ·",
+					"until": "▌ Run git push[\\s\\S]*✓ (?:Done · )?\\d",
 					"approve": "\\[Esc\\]\\s+deny",
 					"answer": "Escape",
 					"approveShot": "tui-approval-effect",
