@@ -1,5 +1,4 @@
 import type { Static, TSchema } from "typebox";
-import { Value } from "typebox/value";
 import type { JobChangedPayload } from "../job-types.js";
 import type { CaptureFlag } from "./capture.js";
 import type { ContentClass, Tier } from "./enums.js";
@@ -47,6 +46,7 @@ import type {
 	TurnAbortedPayload,
 	TurnContinuedPayload,
 } from "./live-events.js";
+import { checkRecordSchema } from "./record-check.js";
 import type { CallSettled, ObjectRef } from "./schemas.js";
 import * as S from "./schemas.js";
 
@@ -590,7 +590,7 @@ const MESSAGE_STEP_FIELDS: Readonly<
 
 /** Schema validation plus the cross-field invariants that JSON Schema cannot express (#434). */
 export function validPayload<K extends JournalEventName>(kind: K, data: unknown): data is JournalPayload<K> {
-	if (!Value.Check(journalDefinition(kind).schema, data)) return false;
+	if (!checkRecordSchema(journalDefinition(kind).schema, data)) return false;
 	if (kind === "prompt.text_captured") {
 		const prompt = data as EventPayload<"prompt.text_captured">;
 		return (
