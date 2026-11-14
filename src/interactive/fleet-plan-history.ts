@@ -15,6 +15,16 @@ function textField(step: Record<string, unknown>, field: string): string | null 
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** The loop a planned step belongs to, as the compiled plan records it, so history counts steps as the live run does. */
+function plannedLoopOf(entry: unknown): { loopId: string; role: string } | null {
+	if (typeof entry !== "object" || entry === null) return null;
+	const loop = (entry as Record<string, unknown>).loop;
+	if (typeof loop !== "object" || loop === null) return null;
+	const loopId = textField(loop as Record<string, unknown>, "loopId");
+	const role = textField(loop as Record<string, unknown>, "role");
+	return loopId === null || role === null ? null : { loopId, role };
+}
+
 function plannedStepOf(entry: unknown): { id: string; kind: "agent" | "code"; label: string } | null {
 	if (typeof entry !== "object" || entry === null) return null;
 	const step = entry as Record<string, unknown>;
@@ -81,10 +91,29 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 	}
 	const lastLine = journal?.lines.at(-1);
 	const seal = journal?.broken === null && lastLine?.type === "fleet_sealed" ? lastLine : null;
-	const succeededStepCount = steps.filter((step) => step.state === "passed").length;
+	// The live run counts steps outside loops and reports each loop as resolved when one of its checks passed; a step a
+	// resolved loop never needed is not a step the run failed to run.
+	const loopOf = new Map<string, { loopId: string; role: string }>();
+	for (const entry of record.planSteps ?? []) {
+		const id = plannedStepOf(entry)?.id;
+		const loop = plannedLoopOf(entry);
+		if (id !== undefined && loop !== null) loopOf.set(id, loop);
+	}
+	const required = steps.filter((step) => !loopOf.has(step.stepId));
+	const succeededStepCount = required.filter((step) => step.state === "passed").length;
+	const loopIds = [...new Set([...loopOf.values()].map((loop) => loop.loopId))];
+	const resolvedLoops = loopIds.filter((loopId) =>
+		steps.some((step) => {
+			const loop = loopOf.get(step.stepId);
+			return loop?.loopId === loopId && loop.role === "check" && step.state === "passed";
+		}),
+	).length;
 	const ended = seal !== null || record.endedAt !== null;
 	const cancelled = seal?.outcome === "aborted";
-	const passed = seal !== null ? seal.outcome === "succeeded" : succeededStepCount === steps.length;
+	const passed =
+		seal !== null
+			? seal.outcome === "succeeded"
+			: succeededStepCount === required.length && resolvedLoops === loopIds.length;
 	const lastAt = Date.parse(record.endedAt ?? lastLine?.at ?? record.startedAt);
 	return {
 		rootId: record.id,
@@ -101,8 +130,9 @@ function fleetPlanFromRecord(record: FleetRunRecord): FleetPlanRunView {
 				}
 			: {}),
 		steps,
-		requiredStepCount: steps.length,
+		requiredStepCount: required.length,
 		succeededStepCount,
+		...(loopIds.length > 0 ? { loops: { resolved: resolvedLoops, total: loopIds.length } } : {}),
 		costText: recordedCost(record, steps),
 		...(!ended ? { failure: "no end recorded" } : {}),
 		earlier: true,
