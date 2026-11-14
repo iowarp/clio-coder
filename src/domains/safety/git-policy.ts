@@ -360,17 +360,26 @@ export function splitGitChdir(argv: ReadonlyArray<string>): { dirs: string[]; re
 	return { dirs, rest };
 }
 
-/** Classify the argv Git reads after its executable. */
+/**
+ * Classify the argv Git reads after its executable. `-C <dir>` only moves
+ * where Git runs, so it leaves an inspection an inspection: the worker Git
+ * gate then defers to command recognition, whose {@link splitGitChdir} caller
+ * holds every `-C` directory to the workspace, instead of asking for
+ * `git -C . diff` as a repository mutation. A task mutation behind `-C` still
+ * escalates, since the task set is judged in the run's own cwd.
+ */
 export function classifyGitArgv(argv: ReadonlyArray<string>): GitArgvVerdict {
 	let index = 0;
 	let redirect: string | null = null;
+	let chdir = false;
 	while (index < argv.length) {
 		const word = argv[index] ?? "";
 		if (!word.startsWith("-") || word === "-" || word === "--") break;
 		if (word === "--version" || word === "--help" || word === "-h") {
 			return { class: "inspect", subcommand: null, reason: `git ${word} prints information` };
 		}
-		if (!NEUTRAL_GLOBAL_OPTIONS.has(word)) redirect ??= word;
+		if (word === "-C") chdir = true;
+		else if (!NEUTRAL_GLOBAL_OPTIONS.has(word)) redirect ??= word;
 		index += GLOBAL_VALUE_OPTIONS.has(word) ? 2 : 1;
 	}
 	const subcommand = argv[index] ?? null;
@@ -380,6 +389,7 @@ export function classifyGitArgv(argv: ReadonlyArray<string>): GitArgvVerdict {
 	} else {
 		verdict = { subcommand, ...subcommandClass(subcommand, argv.slice(index + 1)) };
 	}
+	if (redirect === null && chdir && verdict.class === "task-mutation") redirect = "-C";
 	if (redirect !== null && SEVERITY[verdict.class] < SEVERITY["other-local-mutation"]) {
 		verdict = {
 			...verdict,
