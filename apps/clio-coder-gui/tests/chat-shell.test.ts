@@ -439,3 +439,40 @@ test("a refused stop reads as nothing stopped, never as accepted", () => {
 	);
 	assert.match(actions, /stopRefusal\(error\.problem\)/);
 });
+
+test("appCommands opens the task's session dialogs by name, only those its agent can serve", () => {
+	const { calls, handlers: on } = handlers();
+	const opened: string[] = [];
+	const open = { ...on, openSessionAction: (action: string) => opened.push(action) };
+	const situation = { sessionId: "s1", runningTurnId: null, sessionOpen: true, hasNotices: false };
+	const rows = (capabilities: unknown) =>
+		appCommands({ ...situation, capabilities: capabilities as never }, open).filter((command) =>
+			command.id.startsWith("session.action."),
+		);
+	const full = rows({
+		branches: { fork: true },
+		handoff: true,
+		aside: { ask: true, draft: true },
+		extensions: true,
+		fleet: true,
+	});
+	assert.deepEqual(
+		full.map((command) => command.title),
+		["Branches…", "Hand off to a new conversation…", "Side question…", "Drafts…", "Extensions…", "Run a playbook…"],
+	);
+	assert.ok(full.find((command) => command.title === "Side question…")?.keywords?.includes("btw"));
+	full.find((command) => command.title === "Drafts…")?.run();
+	assert.deepEqual(opened, ["draft"]);
+	assert.deepEqual(calls, []);
+	assert.deepEqual(
+		rows({ aside: { ask: true } }).map((command) => command.id),
+		["session.action.btw"],
+	);
+	assert.deepEqual(rows(undefined), [], "no capabilities read yet offers no dialog");
+	assert.equal(
+		appCommands({ ...situation, sessionOpen: false, capabilities: { handoff: true } as never }, open).some((command) =>
+			command.id.startsWith("session.action."),
+		),
+		false,
+	);
+});

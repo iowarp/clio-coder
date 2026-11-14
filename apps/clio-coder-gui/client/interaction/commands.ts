@@ -9,8 +9,10 @@
 // sends from a visible button. A row that cannot run right now is marked unavailable and the palette
 // hides it, rather than showing it greyed and inviting the question of why.
 
+import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { CommandCatalog } from "../../contracts/steering.js";
+import { menuActions, type SlashAction } from "../chat/slash-actions.js";
 import type { SessionControlTarget } from "../pages/session-control-model.js";
 import { taskTitle } from "../shell/shell-model.js";
 import type { KeybindingId } from "./keybindings.js";
@@ -86,6 +88,8 @@ export interface CommandSituation {
 	readonly tasks?: readonly PaletteTask[];
 	/** The command catalog the open task announced, once the palette has read it. */
 	readonly catalog?: CommandCatalog | undefined;
+	/** What the open task's agent announced it can do, which decides the session dialogs offered. */
+	readonly capabilities?: AgentCapabilities | undefined;
 }
 
 export interface PaletteTask {
@@ -118,6 +122,8 @@ export interface CommandHandlers {
 	runTaskCommand?(name: string): void;
 	/** Put `/name ` in the open task's composer for the operator to finish. */
 	fillTaskCommand?(name: string): void;
+	/** Open one of the open task's session dialogs: Branches, Side question, Drafts and the rest. */
+	openSessionAction?(action: SlashAction): void;
 }
 
 /**
@@ -254,6 +260,17 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 				run: () => handlers.navigate(`/sessions/${sessionId}?download=${format}`),
 			});
 	}
+	const { openSessionAction } = handlers;
+	if (sessionId !== null && sessionOpen && openSessionAction)
+		for (const spec of menuActions(situation.capabilities))
+			commands.push({
+				id: `session.action.${spec.action}`,
+				title: `${spec.title}…`,
+				group: "Session",
+				keywords: [spec.name, ...spec.summary.toLowerCase().split(" ")],
+				available: true,
+				run: () => openSessionAction(spec.action),
+			});
 	const { runTaskCommand, fillTaskCommand } = handlers;
 	if (sessionId !== null && sessionOpen && situation.catalog && runTaskCommand && fillTaskCommand)
 		for (const row of taskCommands(situation.catalog))

@@ -155,6 +155,16 @@ export function runComposerCommand(sessionId: string, name: string): boolean {
 	return commandRunners.get(sessionId)?.(name) ?? false;
 }
 
+/** Dialog openers keyed by session, so the Task actions menu and the palette open what the slash list opens. */
+const actionOpeners = new Map<string, (action: SlashAction) => void>();
+
+/** Open one session action's dialog over this session's composer; false when no composer for it is on screen. */
+export function openComposerAction(sessionId: string, action: SlashAction): boolean {
+	const open = actionOpeners.get(sessionId);
+	open?.(action);
+	return open !== undefined;
+}
+
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
 export function fillComposer(sessionId: string, text: string): void {
 	draftStore(sessionId).write(text);
@@ -556,6 +566,17 @@ export const Composer = memo(function Composer({
 		runCommand(parsed.plan, null);
 		return true;
 	};
+	useEffect(() => {
+		const open = (action: SlashAction) => {
+			if (action === "report") return requestReport({ sessionId });
+			setDialogSeed("");
+			setDialog(action);
+		};
+		actionOpeners.set(sessionId, open);
+		return () => {
+			if (actionOpeners.get(sessionId) === open) actionOpeners.delete(sessionId);
+		};
+	}, [sessionId]);
 	useEffect(() => {
 		const run = (name: string) => runNamed.current(name);
 		commandRunners.set(sessionId, run);
