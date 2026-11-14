@@ -84,6 +84,7 @@ import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibili
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
 import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL, isAutonomyLevel } from "../../domains/safety/autonomy.js";
+import type { AutonomyStatus } from "../../domains/safety/autonomy-window.js";
 import { describeMainCallConsequences, mainCallExposure } from "../../domains/safety/call-consequence.js";
 import { describeCallTarget, sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { COMMAND_CONSEQUENCE_MAX_SEVERE } from "../../domains/safety/command-consequence.js";
@@ -202,6 +203,8 @@ import {
 	sessionUsageTotals,
 	turnUsageMeta,
 } from "./live-telemetry.js";
+import type { AcpAutonomyPosture, AcpReadoutsSession } from "./readouts.js";
+import { createAcpReadoutsEmitter } from "./readouts.js";
 import {
 	ACP_SESSION_FORK_METHOD,
 	ACP_SESSION_SWITCH_TURN_METHOD,
@@ -219,6 +222,7 @@ import {
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import { ACP_TRUST_CAPABILITY, ACP_TRUST_META_KEY, trustResultMeta } from "./trust-notice.js";
 import type {
+	AcpAdmissionMeta,
 	AcpCeiling,
 	AcpCommandsCapability,
 	AcpContentBlock,
@@ -254,6 +258,7 @@ import type {
 	AcpToolKind,
 } from "./types.js";
 import {
+	ACP_ADMISSION_META_KEY,
 	ACP_AGENT_META_KEY,
 	ACP_BRANCHES_META_KEY,
 	ACP_CEILING_FIELDS,
@@ -283,6 +288,9 @@ import {
 	ACP_QUEUE_CHANGED_NOTIFICATION,
 	ACP_QUEUE_EDIT_METHOD,
 	ACP_QUEUE_META_KEY,
+	ACP_READOUTS_CAPABILITY,
+	ACP_READOUTS_META_KEY,
+	ACP_READOUTS_NOTIFICATION,
 	ACP_REPLAY_META_KEY,
 	ACP_RUN_RESULT_META_KEY,
 	ACP_SESSION_META_KEY,
@@ -422,6 +430,10 @@ export interface AcpServerChat {
 	setQueuedEntryKind?(id: string, kind: AcpQueuedEntryKind): boolean;
 	/** Why an interrupt would be refused right now, or null when it would cancel the run. */
 	interruptRefusal?(): string | null;
+	/** The yolo window's usage, caps and halt for the readouts; null outside yolo. */
+	autonomyStatus?(): AutonomyStatus | null;
+	/** The skills armed for the next turn, by name, for the readouts. */
+	activeSkillSurface?(): ReadonlyArray<string>;
 	dispose?(): void;
 }
 
@@ -637,6 +649,8 @@ export interface ClioAcpServerOptions {
 	 * the explicit choice counts as the operator's acceptance.
 	 */
 	yoloRefusal?: () => string | null;
+	/** The yolo containment the readouts name; absent means the autonomy readout is null. */
+	autonomyPosture?: () => AcpAutonomyPosture;
 	cwd?: string;
 	version?: string;
 	permissionTimeoutMs?: number;
@@ -2066,7 +2080,9 @@ function handleChatEvent(
 	// Clio lifecycle events (agent_start, retry_status, clio_coder_plan_update) have
 	// no ACP v1 SessionUpdate equivalent. The prompt turn is bounded by the
 	// session/prompt response, so emitting non-spec `progress` updates would
-	// break strict clients. They are intentionally dropped. The same protocol
+	// break strict clients. They are intentionally dropped here; a client that
+	// opted in to `clio-coder/readouts` sees retries as `readouts.retry` on the
+	// `_clio-coder/session/readouts` notification instead. The same protocol
 	// gap applies to routing advisories (external settings divergence, active
 	// target removed): ACP v1 has no agent-initiated advisory channel, so the
 	// orchestrator records those as `custom` session-ledger entries
@@ -3747,6 +3763,8 @@ export interface AcpHandshake {
 	readonly workerPermissionsEnabled: boolean;
 	/** The client advertised `clio-coder/queue` and is sent `_clio-coder/session/queue_changed`. */
 	readonly queueEventsEnabled: boolean;
+	/** The client advertised `clio-coder/readouts`: it is sent readouts frames and admission `_meta`. */
+	readonly readoutsEnabled: boolean;
 	readonly workspaceInstanceId: string;
 	/** The surface a settings change from this client is attributed to, from `clientInfo.name` (#434). */
 	readonly settingsSource: AcpSettingsSource;
@@ -3763,6 +3781,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 	let interviewsEnabled = false;
 	let workerPermissionsEnabled = false;
 	let queueEventsEnabled = false;
+	let readoutsEnabled = false;
 	let settingsSource: AcpSettingsSource = "acp";
 	const enabledEventKinds = new Set<AcpForwardableEventKind>();
 	const workspaceInstanceId = randomUUID();
@@ -3797,6 +3816,9 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		},
 		get queueEventsEnabled() {
 			return queueEventsEnabled;
+		},
+		get readoutsEnabled() {
+			return readoutsEnabled;
 		},
 		workspaceInstanceId,
 		get settingsSource() {
@@ -3870,6 +3892,10 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 			const queueRequest =
 				clientMeta !== null && isRecord(clientMeta[ACP_QUEUE_META_KEY]) ? clientMeta[ACP_QUEUE_META_KEY] : null;
 			queueEventsEnabled = features.queueEdit === true && queueRequest !== null && queueRequest.version === 1;
+			// Readouts and admission phases are pushed several times a second while a turn runs, so only on request.
+			const readoutsRequest =
+				clientMeta !== null && isRecord(clientMeta[ACP_READOUTS_META_KEY]) ? clientMeta[ACP_READOUTS_META_KEY] : null;
+			readoutsEnabled = readoutsRequest !== null && readoutsRequest.version === 1;
 			const canLoadSession = features.loadSession;
 			initialized = true;
 			return {
@@ -3950,6 +3976,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 						// client can tell "this agent produced nothing" apart from "this
 						// peer does not report identity at all".
 						[ACP_AGENT_META_KEY]: { version: 1, meta: ACP_AGENT_META_KEY },
+						[ACP_READOUTS_META_KEY]: ACP_READOUTS_CAPABILITY,
 						// The bounds are announced, not just applied: a client sizing a
 						// progress buffer needs to know where the stream stops, and a
 						// client that never receives a second frame has to be able to
@@ -4792,6 +4819,60 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				}
 			})
 		: () => {};
+	// Readouts go to the session a queue change would name, and only to a client that opted in. The chat's
+	// events still reach the emitter without one, so its rate clock stays whole.
+	const readouts = createAcpReadoutsEmitter({
+		now,
+		send: (params) => {
+			try {
+				options.transport.notify(ACP_READOUTS_NOTIFICATION, params);
+			} catch {
+				options.diagnostics?.("failed to send a readouts notification");
+			}
+		},
+		...(options.autonomyPosture !== undefined ? { autonomyPosture: options.autonomyPosture } : {}),
+		...(options.chat.autonomyStatus !== undefined
+			? { autonomyStatus: () => options.chat.autonomyStatus?.() ?? null }
+			: {}),
+		...(options.chat.activeSkillSurface !== undefined
+			? { activeSkillSurface: () => options.chat.activeSkillSurface?.() ?? [] }
+			: {}),
+	});
+	const readoutsSession = (id: string | null): AcpReadoutsSession | null => {
+		if (id === null || !handshake.initialized || !handshake.readoutsEnabled) return null;
+		const session = sessions.get(id);
+		return session === undefined ? null : { id, autonomy: session.autonomy, holdsPrompt: activeSessionId === id };
+	};
+	const publishReadouts = (id: string): void => {
+		const session = readoutsSession(id);
+		if (session !== null) readouts.publish(session);
+	};
+	const unsubscribeReadouts = options.chat.onEvent((raw) =>
+		readouts.chatEvent(raw, readoutsSession(activeSessionId ?? boundSessionId)),
+	);
+	// The judge's hold on a call the client already drew, as a non-terminal update of that row. The terminal
+	// update still arrives once, last, and these frames spend none of the call's progress budget.
+	const unsubscribeAdmission =
+		options.toolRegistry?.onAdmissionReview?.((event) => {
+			const active = activePromptState;
+			if (!handshake.initialized || !handshake.readoutsEnabled || active === null || activeSessionId === null) return;
+			const wireId = openWireIdFor(active, event.toolCallId);
+			if (wireId === null) return;
+			const admission: AcpAdmissionMeta =
+				event.state === "judging"
+					? { version: 1, state: "judging", display: "waiting for the safety judge" }
+					: { version: 1, state: "admitted" };
+			try {
+				sendUpdate(options.transport, activeSessionId, active, {
+					sessionUpdate: "tool_call_update",
+					toolCallId: wireId,
+					status: "in_progress",
+					_meta: { [ACP_ADMISSION_META_KEY]: admission },
+				});
+			} catch {
+				options.diagnostics?.("failed to send an admission update");
+			}
+		}) ?? (() => {});
 
 	/**
 	 * Records a delegated agent against the tool call that spawned it and
@@ -5178,7 +5259,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const ceilingEcho = applySessionCeiling(session);
 			announceCommands(id);
 			telemetry.bind(false);
-			return {
+			const opened = {
 				sessionId: id,
 				...sessionConfig(session),
 				_meta: {
@@ -5188,6 +5269,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...trustResultMeta(session.cwd),
 				},
 			};
+			// After the result is written, so the client has bound the session id the frame names.
+			setImmediate(() => publishReadouts(id));
+			return opened;
 		});
 	});
 
@@ -5360,7 +5444,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			sessionCreated = true;
 			const ceilingEcho = applySessionCeiling(session);
 			bindRestored(session, replay);
-			return {
+			const loaded = {
 				...sessionConfig(session),
 				_meta: {
 					...ceilingEcho,
@@ -5373,6 +5457,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					...trustResultMeta(session.cwd),
 				},
 			};
+			// After the result is written, so the client has bound the session id the frame names.
+			setImmediate(() => publishReadouts(id));
+			return loaded;
 		});
 	};
 	options.transport.onRequest("session/load", (params) => restoreSession(params, true));
@@ -6307,6 +6394,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const request = assertParamKeys(params, new Set(["sessionId", "modeId"]));
 		const session = getSession(request);
 		setAutonomy(session, request.modeId);
+		publishReadouts(session.id);
 		return {};
 	});
 
@@ -7519,6 +7607,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (session.activePrompt === active) session.activePrompt = null;
 			if (activePromptState === active) activePromptState = null;
 			if (activeSessionId === session.id) {
+				// The turn's closing frame follows its last update and reads the window while the session still holds it.
+				const closing = readoutsSession(session.id);
+				if (closing !== null) readouts.turnEnd(closing);
 				activeSessionId = null;
 				options.onActiveSessionAutonomyChange?.(null);
 			}
@@ -7602,6 +7693,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			unsubscribeEventStream();
 			permission.cancelPending("ACP transport closed");
 			unsubscribeQueueEvents();
+			unsubscribeReadouts();
+			unsubscribeAdmission();
 			const aside = asideRound;
 			aside?.abort.abort();
 			for (const session of sessions.values()) cancelSession(session, "ACP transport closed");
