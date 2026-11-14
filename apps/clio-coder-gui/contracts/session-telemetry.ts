@@ -2,6 +2,7 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import { Autonomy } from "./autonomy.js";
 import { ContextLedger } from "./context-ledger.js";
+import { SessionReadouts } from "./readouts.js";
 
 import { TelemetrySession } from "./telemetry.js";
 import { AcpUsageMetaSchema } from "./wire.js";
@@ -122,6 +123,7 @@ export const SessionTelemetry = Type.Object(
 		trust: Type.Optional(ProjectTrust),
 		budget: Type.Optional(BudgetBlock),
 		notices: Type.Optional(Type.Array(Type.String({ maxLength: 16384 }), { maxItems: 32 })),
+		readouts: Type.Optional(SessionReadouts),
 	},
 	closed,
 );

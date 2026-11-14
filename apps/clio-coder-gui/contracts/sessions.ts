@@ -175,6 +175,8 @@ export const TimelineItem = Type.Object(
 		partialOutput: Type.Optional(Type.String({ maxLength: 32768 })),
 		/** The engine's span for a settled call (`clio-coder/toolTiming`), live or recorded; absent when it reported none. */
 		durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
+		/** The engine's words while the safety judge holds this open call (`clio-coder/admission`); gone once admitted. */
+		admission: Type.Optional(Type.String({ maxLength: 128 })),
 		provenance: Type.Optional(Provenance),
 	},
 	closed,

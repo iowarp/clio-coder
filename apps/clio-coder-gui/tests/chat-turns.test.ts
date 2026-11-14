@@ -968,3 +968,19 @@ test("engine notices stay out of the conversation segments", () => {
 		["activity", "response"],
 	);
 });
+
+test("a call the safety judge is holding says so in the engine's words, and a held call without it is Running", () => {
+	const user = item({ id: "1", turnId: "t", kind: "user", text: "write the notes" });
+	const tool = { id: "2", turnId: "t", kind: "tool", status: "in_progress", title: "Write notes.md" } as const;
+	const judged = item({ ...tool, admission: "waiting for the safety judge" });
+	assert.deepEqual(liveStatus(chatTurn([user, judged], "running"), undefined, null), {
+		state: "waiting",
+		label: "Waiting for the safety judge",
+		detail: "Write notes.md",
+	});
+	assert.deepEqual(liveStatus(chatTurn([user, item(tool)], "running"), undefined, null), {
+		state: "acting",
+		label: "Running",
+		detail: "Write notes.md",
+	});
+});

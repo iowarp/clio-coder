@@ -74,6 +74,8 @@ export const LIVE_TONES: Readonly<Record<LiveState, StatusTone>> = {
 export const isLive = (status: LiveStatus): boolean =>
 	status.state !== "done" && status.state !== "failed" && status.state !== "stopped";
 
+const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 /**
  * `row` is the `Turn` row for this turn, which carries the outcome; `pending` is the permission the
  * conversation is currently parked on, if any; `stopping` is the cancel mutation's own in-flight
@@ -110,6 +112,9 @@ export function liveStatus(
 		};
 	const last = turn.items.at(-1);
 	if (last === undefined || last.kind === "user") return { state: "starting", label: "Starting", detail: null };
+	// The safety judge is reviewing the call before it runs, in the engine's words.
+	if (last.kind === "tool" && last.status === "in_progress" && last.admission)
+		return { state: "waiting", label: capitalized(last.admission), detail: last.title ?? null };
 	if (last.kind === "tool" && last.status === "in_progress")
 		return { state: "acting", label: "Running", detail: last.title ?? null };
 	if (last.kind === "thought") return { state: "thinking", label: "Thinking", detail: null };

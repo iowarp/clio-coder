@@ -463,6 +463,28 @@ const telemetryDto = (name, sessionId) => {
 	const dto = JSON.parse(readFileSync(TELEMETRY, "utf8"))[name];
 	return sessionId && "sessionId" in dto ? { ...dto, sessionId } : dto;
 };
+// The `readouts` scenario pushes the engine's live readouts (spec 15a) only to a client whose initialize asked for
+// them, so a test proves the GUI opts in. READOUTS_BAD adds, after the turn-end frame, three frames the GUI must
+// drop: one with an unknown property, one of another version and one older than the newest applied.
+let readoutsOptIn = false,
+	readoutsSequence = 0;
+const READOUTS_BAD = process.env.CLIO_CODER_WEB_FIXTURE_READOUTS_BAD === "1";
+const READOUTS_SKILLS = { names: ["review"], display: "skill review" };
+const READOUTS_YOLO = {
+	level: "yolo",
+	confinement: "contained",
+	osSandbox: true,
+	label: "YOLO · contained",
+	tone: "warning",
+	window: { display: "3/600 calls", tone: "neutral", halted: false },
+};
+const readoutsFrame = (readouts, params = {}) => {
+	if (readoutsOptIn)
+		send({
+			method: "_clio-coder/session/readouts",
+			params: { version: 1, sessionId, sequence: readoutsSequence++, readouts, ...params },
+		});
+};
 const queues = { steer: [], followUp: [] };
 let queueReadFails = false;
 const queueChanged = () => {
@@ -631,6 +653,8 @@ async function handle(frame) {
 				const rows = JSON.parse(readFileSync(join(process.env.CLIO_CODER_STATE_DIR, "gui/children.json"), "utf8"));
 				if (!rows.some((row) => row.pid === process.pid && row.ownerPid === process.ppid))
 					throw Error("not_recorded_before_initialize");
+				if (scenario === "readouts")
+					readoutsOptIn = frame.params?.clientCapabilities?._meta?.["clio-coder/readouts"]?.version === 1;
 				result = {
 					protocolVersion: 1,
 					agentInfo: { name: "fixture", version: "1" },
@@ -723,6 +747,18 @@ async function handle(frame) {
 									},
 								}
 							: {}),
+						...(scenario === "readouts"
+							? {
+									_meta: {
+										"clio-coder/readouts": {
+											version: 1,
+											notification: "_clio-coder/session/readouts",
+											minIntervalMs: 250,
+											admission: "clio-coder/admission",
+										},
+									},
+								}
+							: {}),
 					},
 				};
 				break;
@@ -748,6 +784,9 @@ async function handle(frame) {
 						() => event("provider.health_changed", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
 						50,
 					);
+				// As the engine does, the open frame follows the session/new result rather than preceding it.
+				if (scenario === "readouts")
+					setImmediate(() => readoutsFrame({ autonomy: null, throughput: null, skills: READOUTS_SKILLS, retry: null }));
 				break;
 			case "session/list":
 				result = {
@@ -967,6 +1006,47 @@ async function handle(frame) {
 					// kind the app DOES handle stays fatal, because continuing there means
 					// drawing a shape no contract describes.
 					update({ sessionUpdate: "future_unknown_kind", anything: true });
+					if (scenario === "readouts") {
+						readoutsFrame({
+							autonomy: READOUTS_YOLO,
+							throughput: { display: "42 tok/s", estimated: false, flowing: true },
+							skills: READOUTS_SKILLS,
+							retry: { phase: "waiting", active: true, display: "provider retry 1/3 in 4s" },
+						});
+						update({
+							sessionUpdate: "tool_call",
+							toolCallId: "write-1",
+							title: "Write notes.md",
+							kind: "edit",
+							status: "in_progress",
+							rawInput: { path: "notes.md" },
+						});
+						// The engine puts the judge's phase on the update's own _meta, not the notification's.
+						const admission = (state) =>
+							update({
+								sessionUpdate: "tool_call_update",
+								toolCallId: "write-1",
+								status: "in_progress",
+								_meta: {
+									"clio-coder/admission": {
+										version: 1,
+										state,
+										...(state === "judging" ? { display: "waiting for the safety judge" } : {}),
+									},
+								},
+							});
+						admission("judging");
+						await delay(150);
+						admission("admitted");
+						update({
+							sessionUpdate: "tool_call_update",
+							toolCallId: "write-1",
+							title: "Write notes.md",
+							kind: "edit",
+							status: "completed",
+							rawOutput: { result: "written" },
+						});
+					}
 					// The engine's coalesced telemetry_update: a bare invalidation naming the topics that moved (#434).
 					if (scenario === "telemetry")
 						send({
@@ -1080,6 +1160,16 @@ async function handle(frame) {
 						if (cancelled) break;
 						text(chunk);
 						await delay(30);
+					}
+					if (scenario === "readouts") {
+						const end = { autonomy: READOUTS_YOLO, throughput: null, skills: READOUTS_SKILLS, retry: null };
+						readoutsFrame(end);
+						if (READOUTS_BAD) {
+							const stray = { ...end, skills: { names: ["stray"], display: "skill stray" } };
+							readoutsFrame(stray, { unexpected: true });
+							readoutsFrame(stray, { version: 2 });
+							readoutsFrame(stray, { sequence: 1 });
+						}
 					}
 				}
 				result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
