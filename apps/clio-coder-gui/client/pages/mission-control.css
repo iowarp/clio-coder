@@ -289,3 +289,10 @@
 	color: var(--status-warn-fg);
 	font-size: var(--text-meta);
 }
+/* As tall as the compact metrics' disclosure line it stands in for. */
+.mission__metrics-pending {
+	margin-block: var(--space-3);
+	padding-block: var(--space-2);
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+}
