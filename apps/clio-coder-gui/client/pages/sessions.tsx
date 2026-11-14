@@ -129,11 +129,11 @@ export async function locateTask(
 const ACTION_ICONS: Readonly<Record<SlashAction, IconName>> = {
 	tree: "branch",
 	fork: "branch",
-	handoff: "arrowUp",
+	handoff: "external",
 	btw: "sessions",
 	draft: "compose",
 	extensions: "toolchain",
-	"fleet-run": "fleet",
+	"fleet-run": "play",
 	report: "warn",
 };
 

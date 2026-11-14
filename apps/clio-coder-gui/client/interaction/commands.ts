@@ -12,7 +12,7 @@
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { CommandCatalog } from "../../contracts/steering.js";
-import { menuActions, type SlashAction } from "../chat/slash-actions.js";
+import { menuActions, type SlashAction, UNLISTED_COMMANDS } from "../chat/slash-actions.js";
 import type { SessionControlTarget } from "../pages/session-control-model.js";
 import { taskTitle } from "../shell/shell-model.js";
 import type { KeybindingId } from "./keybindings.js";
@@ -149,6 +149,7 @@ function taskCommands(catalog: CommandCatalog): readonly TaskCommand[] {
 	const required = (args: { readonly positionals?: readonly { readonly required: boolean }[] } | undefined) =>
 		(args?.positionals ?? []).some((positional) => positional.required);
 	for (const command of catalog.commands) {
+		if (UNLISTED_COMMANDS.has(command.name)) continue;
 		// A hub command's bare form is refused, so only its verbs are rows.
 		if (!command.requiresSubcommand)
 			rows.push({ name: command.name, summary: command.summary, needsArgs: required(command.args) });

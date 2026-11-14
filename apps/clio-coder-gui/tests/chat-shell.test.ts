@@ -476,3 +476,25 @@ test("appCommands opens the task's session dialogs by name, only those its agent
 		false,
 	);
 });
+
+test("the palette's task commands leave out what Download transcript and Report a problem already do", () => {
+	const { handlers: on } = handlers();
+	const command = (name: string) => ({ name, summary: `${name} summary`, usage: `/${name}`, group: "Work", args: {} });
+	const rows = appCommands(
+		{
+			sessionId: "s1",
+			runningTurnId: null,
+			sessionOpen: true,
+			hasNotices: false,
+			catalog: {
+				version: 1,
+				commands: [command("doctor"), command("export"), command("archive"), command("eggs")],
+			} as never,
+		},
+		{ ...on, runTaskCommand: () => undefined, fillTaskCommand: () => undefined },
+	).filter((row) => row.group === "This task");
+	assert.deepEqual(
+		rows.map((row) => row.id),
+		["task-command.doctor"],
+	);
+});

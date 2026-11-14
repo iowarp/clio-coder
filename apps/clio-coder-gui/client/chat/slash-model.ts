@@ -15,7 +15,7 @@ import type { CommandCatalog, CommandDescriptor } from "../../contracts/steering
 import { prefixScore } from "../interaction/prefix-score.js";
 import { type CommandFields, type CommandPlan, planCommand } from "./command-model.js";
 import type { PaneTarget } from "./pane-context.js";
-import { ACTIONS, type SlashAction } from "./slash-actions.js";
+import { ACTIONS, type SlashAction, UNLISTED_COMMANDS } from "./slash-actions.js";
 
 export type { SlashAction };
 /** Pane views a slash name opens beside the conversation, `/decisions` at the board's Decisions. */
@@ -68,6 +68,7 @@ export function argumentHint(args: LeafArgs | undefined): string {
 function commandEntries(catalog: CommandCatalog | undefined): SlashEntry[] {
 	const entries: SlashEntry[] = [];
 	for (const command of catalog?.commands ?? []) {
+		if (UNLISTED_COMMANDS.has(command.name)) continue;
 		// The bare form of a hub command is refused over ACP, so only its verbs are listed.
 		if (!command.requiresSubcommand)
 			entries.push({
