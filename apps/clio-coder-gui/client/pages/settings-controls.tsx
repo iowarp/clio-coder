@@ -16,6 +16,7 @@ import {
 	emptyMeaning,
 	groupControls,
 	groupNote,
+	numberDraftIssue,
 	OPEN_CHOICES,
 	type OpenChoice,
 	type SettingsScopeId,
@@ -151,7 +152,8 @@ function ControlRow({
 }) {
 	const fieldId = useId(),
 		helpId = useId(),
-		labelId = useId();
+		labelId = useId(),
+		issueId = useId();
 	const submitting = useRef(false);
 	const [structuredValid, setStructuredValid] = useState(true);
 	const [editorRevision, setEditorRevision] = useState(0);
@@ -196,6 +198,7 @@ function ControlRow({
 	// A value-scoped confirmation (confirmValue) asks only before saving that one value.
 	const needsConfirm = !!control.confirm && (control.confirmValue === undefined || value === control.confirmValue);
 	const structured = control.kind === "json" && !!STRUCTURED_SETTINGS[control.path];
+	const issue = dirty ? numberDraftIssue(control, value) : null;
 	return (
 		<div className="setting-control" data-access={control.access} data-dirty={dirty} aria-busy={write.isPending}>
 			<div className="setting-control__about">
@@ -228,7 +231,7 @@ function ControlRow({
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (dirty && structuredValid && !conflict && !refresh.isPending && !submitting.current) {
+							if (dirty && structuredValid && !issue && !conflict && !refresh.isPending && !submitting.current) {
 								submitting.current = true;
 								write.mutate({
 									path: control.path,
@@ -297,10 +300,13 @@ function ControlRow({
 						) : (
 							<input
 								id={fieldId}
-								aria-describedby={helpId}
+								aria-describedby={issue ? `${issueId} ${helpId}` : helpId}
+								aria-invalid={issue ? true : undefined}
 								type={control.kind === "number" ? "number" : "text"}
 								disabled={write.isPending}
-								step={control.kind === "number" ? "any" : undefined}
+								step={control.kind === "number" ? (control.integer ? 1 : "any") : undefined}
+								min={control.minimum}
+								max={control.maximum}
 								value={value}
 								placeholder={emptyMeaning(control)}
 								list={control.suggestions ? `${fieldId}-suggestions` : undefined}
@@ -313,6 +319,11 @@ function ControlRow({
 									<option key={suggestion} value={suggestion} />
 								))}
 							</datalist>
+						)}
+						{issue && (
+							<p id={issueId} className="setting-control__error" role="alert">
+								{issue}
+							</p>
 						)}
 						{control.valueHelp[value] && <p className="setting-control__help">{sentence(control.valueHelp[value])}</p>}
 						{control.kind === "list" && <small>Separate values with commas.</small>}
@@ -341,7 +352,14 @@ function ControlRow({
 								<button
 									type="submit"
 									className="primary"
-									disabled={write.isPending || conflict || refresh.isPending || !structuredValid || (needsConfirm && !confirmed)}
+									disabled={
+										write.isPending ||
+										conflict ||
+										refresh.isPending ||
+										!structuredValid ||
+										!!issue ||
+										(needsConfirm && !confirmed)
+									}
 								>
 									{write.isPaused ? "Waiting…" : write.isPending ? "Saving…" : "Save"}
 								</button>
@@ -552,7 +570,13 @@ export function SettingsControlsView({
 				note: `The target list could not be read${inventory.error ? `: ${inventory.error.message}` : "."}`,
 			};
 		const target = inventory.data.targets.find((row) => row.id === targetId);
-		if (!target) return { models: null, defaultModel: null, note: `${targetId} is not a configured connection.` };
+		// The setting saved a connection the running engine does not list; that is what fails, not the choice itself.
+		if (!target)
+			return {
+				models: null,
+				defaultModel: null,
+				note: `CLIO Coder's engine does not list ${targetId} among its connections, so its models cannot be shown here and new tasks cannot start on it. Repair or add it in Connections.`,
+			};
 		const checking =
 			check?.targetId === targetId &&
 			(startCheck.isPending || checkOperation.data?.status === "queued" || checkOperation.data?.status === "running");
@@ -714,15 +738,25 @@ export function SettingsControlsView({
 				</h2>
 			)}
 			{current && !compact && <p>{current.description}</p>}
-			{unsaved.length > 0 && (
-				<p className="settings-draft-note" role="status">
+			{/* Always in place, so the first edit restyles this line instead of pushing the list down. Both wordings share
+			    one cell, so the line is as tall as the longer one whichever is shown. */}
+			<p className="settings-draft-note" data-state={unsaved.length ? "dirty" : "clean"} role="status">
+				<span aria-hidden={unsaved.length ? undefined : true}>
 					{unsaved.length} unsaved {unsaved.length === 1 ? "change" : "changes"}. Save each control to apply it; filtering
 					preserves drafts in this workspace.{" "}
-					<button type="button" className="setting-control__check" onClick={() => setShowDrafts(!showDrafts)}>
+					<button
+						type="button"
+						className="setting-control__check"
+						tabIndex={unsaved.length ? undefined : -1}
+						onClick={() => setShowDrafts(!showDrafts)}
+					>
 						{showDrafts ? "Show all settings" : "Review changes"}
 					</button>
-				</p>
-			)}
+				</span>
+				<span aria-hidden={unsaved.length ? true : undefined}>
+					No unsaved changes. Each control applies when you save it.
+				</span>
+			</p>
 			{startCheck.error && <p role="alert">Could not start the model check: {startCheck.error.message}</p>}
 			{checkOperation.error && <p role="alert">Model check progress is unavailable: {checkOperation.error.message}</p>}
 			{active === "targets" && (
