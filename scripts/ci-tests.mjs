@@ -200,6 +200,7 @@ export const guiTests = [
 	"chat-interview",
 	"chat-turns",
 	"egress-policy",
+	"http-meta",
 	"sessions-http",
 	"targets-http",
 	"library-http",
