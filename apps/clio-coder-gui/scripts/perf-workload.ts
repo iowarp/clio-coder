@@ -8,9 +8,9 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium, type Page } from "playwright-core";
-import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
+import { fixtureLaunch } from "./fixture-launch.js";
 
 const { values } = parseArgs({
 	options: {
@@ -152,10 +152,8 @@ class Done extends Error {}
  * page took to show its last turn, and what the open transcript costs at rest.
  */
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
-async function launch() {
-	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
-	if (ticket === null) throw new Error("The perf server issued no launch ticket.");
-	return `ticket=${ticket}`;
+function launch() {
+	return fixtureLaunch(origin);
 }
 async function resumeHistory(page: Page, id: string) {
 	await page.goto(`${origin}/#${await launch()}`);
@@ -281,7 +279,7 @@ try {
 	await home.fill("Ready when you are.");
 	await home.press("Enter");
 	await page.waitForURL(/\/sessions\/[^/]+$/);
-	const composer = page.getByLabel("Message Clio Coder", { exact: true });
+	const composer = page.getByLabel("Message CLIO Coder", { exact: true });
 	await composer.waitFor();
 	const stop = page.getByRole("button", { name: "Stop turn", exact: true });
 	await stop.waitFor({ state: "detached" });
@@ -317,10 +315,25 @@ try {
 		}
 		await stop.waitFor({ state: "detached", timeout: 120_000 });
 		const durationMs = performance.now() - started;
-		// Diagrams render after the turn settles; a diagram the view followed past counts as near.
+		// Diagrams render once the turn settles and only near the viewport (600px). A turn that held the view
+		// elsewhere leaves its diagram pending by design, so it is brought into view and timed from there.
 		const turnElement = page.locator(".chat-turn").last();
-		await turnElement.locator(".diagram.is-rendered svg").waitFor();
-		await turnElement.locator(".diagram .diagram__status [role=alert]").waitFor();
+		const drawn = turnElement.locator(".diagram.is-rendered svg");
+		const settledAt = performance.now();
+		const renderedAtSettle = (await drawn.count()) > 0;
+		const diagram = turnElement.locator(".diagram").first();
+		const nearAtSettle =
+			renderedAtSettle ||
+			(await diagram.evaluate((node) => {
+				const box = node.getBoundingClientRect();
+				return box.bottom > -600 && box.top < innerHeight + 600;
+			}));
+		let scrolledAt: number | null = null;
+		if (!nearAtSettle) {
+			await diagram.scrollIntoViewIfNeeded();
+			scrolledAt = performance.now();
+		}
+		await drawn.first().waitFor();
 		const diagramsAt = performance.now();
 		await page.waitForTimeout(1_000);
 		await setRunning(page, false);
@@ -334,7 +347,14 @@ try {
 			turn,
 			quiet,
 			durationMs: Math.round(durationMs),
-			diagramsDrawnMs: Math.round(diagramsAt - started - durationMs),
+			// Null when the diagram had to be scrolled into view; then `diagram.drawnAfterScrollMs` times it.
+			diagramsDrawnMs: scrolledAt === null ? Math.round(diagramsAt - started - durationMs) : null,
+			diagram: {
+				renderedAtSettle,
+				scrolledIntoView: scrolledAt !== null,
+				drawnAfterScrollMs: scrolledAt === null ? null : Math.round(diagramsAt - scrolledAt),
+				settleToDrawnMs: Math.round(diagramsAt - settledAt),
+			},
 			textEvents: after.textEvents,
 			streamMs: Math.round(after.lastTextAt - after.firstTextAt),
 			domNodes: { before: before.domNodes, after: after.domNodes },
