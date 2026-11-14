@@ -1510,7 +1510,7 @@ try {
 				`Task actions are outside the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
 			);
 			// Twenty items outgrow a phone's height; the panel scrolls itself so Close task stays reachable.
-			const viewportHeight = page.viewportSize()?.height ?? 0;
+			const viewportHeight = await page.evaluate(() => innerHeight);
 			assert.ok(
 				menuBounds && menuBounds.y + menuBounds.height <= viewportHeight,
 				`Task actions run past the bottom of the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
