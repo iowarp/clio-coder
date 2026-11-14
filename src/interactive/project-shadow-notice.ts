@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { clioProjectRoot } from "../core/project-root.js";
 import { type PlaybookSource, shadowedPlaybooks } from "../domains/agents/playbook.js";
 import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "../domains/agents/registry.js";
 
@@ -21,6 +24,10 @@ const OWNER: Readonly<Record<PlaybookSource, string>> = {
  * doctor alone.
  */
 function projectShadows(cwd: string): ProjectShadow[] {
+	// Only a project's own files can replace anything, and discovering every source to find none cost 380 ms after
+	// the first frame of each session.
+	if (!["agents", "playbooks"].some((entry) => existsSync(join(clioProjectRoot(cwd, entry), ".clio-coder", entry))))
+		return [];
 	const diagnostics: AgentRecipeDiagnostic[] = [];
 	discoverAgentRecipes(cwd, diagnostics);
 	const agents = diagnostics.flatMap((diagnostic): ProjectShadow[] =>
