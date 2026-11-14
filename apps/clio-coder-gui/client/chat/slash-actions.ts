@@ -17,11 +17,11 @@ export interface ActionSpec {
 }
 
 /**
- * Catalog commands no list offers, though a typed line still runs them. `/export` and `/archive` write a file on
- * the agent's host and answer with its path, where Download transcript hands the file to the browser; `/report`'s
- * verbs are what the Report a problem dialog sends; `/eggs` is a terminal toy.
+ * Catalog commands no list offers, though a typed line still runs them. `/export` writes the transcript on the
+ * agent's host, where Download transcript hands it to the browser; `/report`'s verbs are what the Report a problem
+ * dialog sends; `/eggs` is a terminal toy. `/archive` stays listed: no other control exports or imports a session.
  */
-export const UNLISTED_COMMANDS: ReadonlySet<string> = new Set(["archive", "eggs", "export", "report"]);
+export const UNLISTED_COMMANDS: ReadonlySet<string> = new Set(["eggs", "export", "report"]);
 
 /** Names follow `src/session-control/slash-commands.ts`, so a terminal habit works here unchanged. */
 export const ACTIONS: readonly ActionSpec[] = [
@@ -82,6 +82,18 @@ export const ACTIONS: readonly ActionSpec[] = [
 		summary: "Review exactly what would be sent, then send it yourself",
 		supported: () => true,
 	},
+];
+
+/**
+ * Catalog commands the Task actions menu opens straight at their form in the Actions dialog. The dialog falls back
+ * to its list, searched for the name, when this task's catalog does not carry one.
+ */
+export const MENU_FORMS: readonly { readonly name: string; readonly title: string }[] = [
+	{ name: "oracle", title: "Ask an advisor" },
+	{ name: "council", title: "Ask a team" },
+	{ name: "run", title: "Run an agent" },
+	{ name: "loop", title: "Start a loop" },
+	{ name: "skill", title: "Use a skill" },
 ];
 
 /**

@@ -495,6 +495,6 @@ test("the palette's task commands leave out what Download transcript and Report 
 	).filter((row) => row.group === "This task");
 	assert.deepEqual(
 		rows.map((row) => row.id),
-		["task-command.doctor"],
+		["task-command.doctor", "task-command.archive"],
 	);
 });
