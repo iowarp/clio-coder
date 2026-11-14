@@ -206,6 +206,17 @@ test("a send already on the wire blocks the next one", () => {
 	assert.deepEqual(intent, { kind: "blocked", reason: "The previous send is still on the wire." });
 });
 
+test("a /name the session does not serve is held with its warning, not warned about and sent", () => {
+	const warning =
+		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.";
+	for (const turnRunning of [false, true]) {
+		assert.deepEqual(submitIntent(draft({ text: "/tpyo fix it" }), situation({ turnRunning, unknownSlash: warning })), {
+			kind: "blocked",
+			reason: warning,
+		});
+	}
+});
+
 test("a window that only views the task offers no send, steer or shell line, and says who controls it", () => {
 	const viewing = situation({ viewing: "Firefox on laptop" });
 	for (const text of ["fix the build", "!ls"]) {

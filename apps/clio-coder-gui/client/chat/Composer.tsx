@@ -707,6 +707,8 @@ export const Composer = memo(function Composer({
 			: capabilities.error
 				? "failed"
 				: "checking";
+	const unknownSlashOf = (text: string) => slashNotice(text, commandCatalog.data)?.message;
+	const unknownSlash = unknownSlashOf(draft.text);
 	const situation = {
 		sessionState,
 		turnRunning: running,
@@ -716,6 +718,7 @@ export const Composer = memo(function Composer({
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
 		shell: capabilities.data?.shell !== undefined,
 		...(viewing === null ? {} : { viewing }),
+		...(unknownSlash === undefined ? {} : { unknownSlash }),
 	} as const;
 	const intent = submitIntent(draft, situation);
 	const delivery = composerDelivery(situation, draft.mode, contextRunning, readingAttachments);
@@ -834,7 +837,9 @@ export const Composer = memo(function Composer({
 				return;
 			}
 		}
-		const next = submitIntent(current, situation);
+		const currentSlash = unknownSlashOf(current.text);
+		const { unknownSlash: _, ...rest } = situation;
+		const next = submitIntent(current, currentSlash === undefined ? rest : { ...rest, unknownSlash: currentSlash });
 		if (
 			next.kind !== "blocked" &&
 			shellBlock(next.kind, attached.current.length) === null &&
@@ -1534,7 +1539,10 @@ export const Composer = memo(function Composer({
 							)}
 						</p>
 					) : null}
-					{intent.kind === "blocked" && draft.text.trim() !== "" && intent.reason !== delivery.detail ? (
+					{intent.kind === "blocked" &&
+					draft.text.trim() !== "" &&
+					intent.reason !== delivery.detail &&
+					intent.reason !== slash?.message ? (
 						<p className="composer__blocked" role="status">
 							{intent.reason}
 							{running && steeringUnavailable === "failed" ? (

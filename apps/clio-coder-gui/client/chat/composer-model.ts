@@ -359,6 +359,11 @@ export interface ComposerSituation {
 	readonly shell?: boolean;
 	/** The label of the other window that controls this task; this one only views it until it takes control. */
 	readonly viewing?: string;
+	/**
+	 * `slashNotice`'s warning for a `/name` the session does not serve. The child refuses that line,
+	 * so the composer holds it rather than warning and sending it anyway.
+	 */
+	readonly unknownSlash?: string;
 }
 
 /** Why a viewing window's composer takes nothing: the server refuses every message from a window without control. */
@@ -427,6 +432,7 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
 	if (text === "") return blocked("Write a message first.");
+	if (situation.unknownSlash !== undefined) return blocked(situation.unknownSlash);
 	const line = situation.shell ? shellLine(text) : null;
 	if (line !== null) {
 		if (line.command === "") return blocked("Write a command after the !.");

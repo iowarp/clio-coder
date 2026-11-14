@@ -419,7 +419,7 @@ A draft whose first character is `/` and that has one line opens the slash palet
 | Open beside | `context`, `usage`, `tasks` and `decisions`, which open the Session column's drill-ins. |
 | Also works | The terminal names below that this task can serve and no earlier group lists. |
 
-`\/` at the start of a line sends a literal slash. A `/name` that matches no catalog command, typed name or loaded template shows `/<name> is not available in this app. Type / to see what is. Start the line with \/ to send it as text.` before it is sent; if it is sent, the child refuses it and nothing reaches the model.
+`\/` at the start of a line sends a literal slash. A `/name` that matches no catalog command, typed name or loaded template shows `/<name> is not available in this app. Type / to see what is. Start the line with \/ to send it as text.` and `Send` stays unavailable, so the line is never sent. The child would refuse it anyway. Before the command list loads, the composer cannot tell a template from a typo, so it sends the line and the child decides.
 
 #### Typed commands
 
