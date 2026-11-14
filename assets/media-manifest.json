@@ -12,7 +12,10 @@
 				"height": 750
 			},
 			"role": "Lossless brand banner master",
-			"channels": ["repository", "press"],
+			"channels": [
+				"repository",
+				"press"
+			],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
 			"copies": []
@@ -27,10 +30,15 @@
 				"height": 750
 			},
 			"role": "Web brand banner",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "Clio Coder, IOWarp's terminal coding agent for scientific software.",
 			"representation": "brand-artwork",
-			"copies": ["site/assets/banner.webp"]
+			"copies": [
+				"site/assets/banner.webp"
+			]
 		},
 		{
 			"id": "gui-icon-192",
@@ -42,10 +50,14 @@
 				"height": 192
 			},
 			"role": "GUI PWA application icon",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/icon-192.png"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-192.png"
+			]
 		},
 		{
 			"id": "gui-icon-512",
@@ -57,10 +69,14 @@
 				"height": 512
 			},
 			"role": "GUI PWA application icon",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Clio Coder application icon.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/icon-512.png"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/icon-512.png"
+			]
 		},
 		{
 			"id": "terminal-session-png",
@@ -72,10 +88,15 @@
 				"height": 2104
 			},
 			"role": "Full-resolution terminal product capture",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/session.png"]
+			"copies": [
+				"site/assets/session.png"
+			]
 		},
 		{
 			"id": "terminal-session-webp",
@@ -87,10 +108,14 @@
 				"height": 1052
 			},
 			"role": "Inline website terminal capture",
-			"channels": ["website"],
+			"channels": [
+				"website"
+			],
 			"altTextSeed": "A Clio Coder terminal session showing a failing numerical test, diagnosis, a two-line solver edit, and the passing test run.",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/session.webp"]
+			"copies": [
+				"site/assets/session.webp"
+			]
 		},
 		{
 			"id": "tui-boot-png",
@@ -102,10 +127,15 @@
 				"height": 944
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/tui-boot.png"],
+			"copies": [
+				"site/assets/tui-boot.png"
+			],
 			"capturedVersion": "0.8.0"
 		},
 		{
@@ -118,10 +148,15 @@
 				"height": 944
 			},
 			"role": "Terminal at start with the workspace, its Git state, the selected model, and the composer",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"altTextSeed": "CLIO Coder terminal at start with the workspace, its Git state, the selected model, and the composer",
 			"representation": "real-product-capture",
-			"copies": ["site/assets/tui-boot.webp"],
+			"copies": [
+				"site/assets/tui-boot.webp"
+			],
 			"capturedVersion": "0.8.0"
 		},
 		{
@@ -134,7 +169,9 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -151,7 +188,9 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop conversation reporting seven passing calibration tests and a reference-temperature table",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -168,7 +207,9 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -185,7 +226,9 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -202,10 +245,14 @@
 				"height": 128
 			},
 			"role": "GUI canonical Clio mark",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Cyan Clio ring with a copper C.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/clio-coder-logo.webp"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/clio-coder-logo.webp"
+			]
 		},
 		{
 			"id": "gui-favicon",
@@ -217,10 +264,14 @@
 				"height": 32
 			},
 			"role": "GUI favicon",
-			"channels": ["gui"],
+			"channels": [
+				"gui"
+			],
 			"altTextSeed": "Cyan Clio ring with a copper C.",
 			"representation": "brand-artwork",
-			"copies": ["apps/clio-coder-gui/client/public/favicon.png"]
+			"copies": [
+				"apps/clio-coder-gui/client/public/favicon.png"
+			]
 		},
 		{
 			"id": "gui-trace-png",
@@ -231,7 +282,9 @@
 				"height": 1000
 			},
 			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -248,7 +301,9 @@
 				"height": 1000
 			},
 			"role": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Recorded session trace with actual token usage, unknown cost, and phase selection.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -265,7 +320,9 @@
 				"height": 1000
 			},
 			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -282,7 +339,9 @@
 				"height": 1000
 			},
 			"role": "Library catalog search in the sidebar beside a completed real verification conversation.",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Library catalog search in the sidebar beside a completed real verification conversation.",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -299,7 +358,9 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation with a successful verify result in the Artifacts inspector",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -316,7 +377,9 @@
 				"height": 1000
 			},
 			"role": "Desktop conversation with a successful verify result in the Artifacts inspector",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop conversation with a successful verify result in the Artifacts inspector",
 			"representation": "real-product-capture",
 			"capturedVersion": "0.5.7",
@@ -333,7 +396,9 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -349,7 +414,9 @@
 				"height": 1000
 			},
 			"role": "Desktop overview with a temperature-calibration conversation ready to resume in the light theme",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"altTextSeed": "Clio Coder desktop overview with a temperature-calibration conversation ready to resume in the light theme",
 			"representation": "real-product-capture",
 			"copies": [],
@@ -359,7 +426,9 @@
 		{
 			"id": "gui-conversation-light-png",
 			"source": "assets/screenshots/gui-conversation-light.png",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"representation": "real-product-capture",
 			"copies": [],
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
@@ -375,7 +444,9 @@
 		{
 			"id": "gui-conversation-light-webp",
 			"source": "assets/screenshots/gui-conversation-light.webp",
-			"channels": ["repository"],
+			"channels": [
+				"repository"
+			],
 			"representation": "real-product-capture",
 			"copies": [],
 			"role": "Desktop conversation reporting seven passing calibration tests and a reference-temperature table in the light theme",
@@ -391,7 +462,10 @@
 		{
 			"id": "gui-artifacts-light-png",
 			"source": "assets/screenshots/gui-artifacts-light.png",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"representation": "real-product-capture",
 			"copies": [],
 			"role": "Desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
@@ -407,7 +481,10 @@
 		{
 			"id": "gui-artifacts-light-webp",
 			"source": "assets/screenshots/gui-artifacts-light.webp",
-			"channels": ["repository", "website"],
+			"channels": [
+				"repository",
+				"website"
+			],
 			"representation": "real-product-capture",
 			"copies": [],
 			"role": "Desktop conversation with a successful verify result in the Artifacts inspector in the light theme",
@@ -419,6 +496,42 @@
 			},
 			"sha256": "e73376f0911d3ecf49fba45bf380f1e9116567821ef1891ce9ac74919d537611",
 			"provenance": "Actual capture of the rebuilt Clio Coder v0.5.7 on 2026-09-26 (America/Chicago). Playwright/Chrome, real model-created temperature-calibration session in the repository. No fixture mode or invented conversation content."
+		},
+		{
+			"id": "animation-fix-a-test",
+			"source": "assets/animations/anim-fix-a-test.gif",
+			"sha256": "15254053cdadb90c6b99b6390f78bd2045e6285f866ec1eb8c172308f92dc50c",
+			"provenance": "Rendered by agg from site/assets/casts/anim-fix-a-test.cast, recorded from CLIO Coder 0.8.1 by site/capture/animation.mjs.",
+			"dimensions": {
+				"width": 897,
+				"height": 694
+			},
+			"role": "Fix a test",
+			"channels": [
+				"repository",
+				"readme"
+			],
+			"altTextSeed": "Fullscreen terminal recording of GPT-6 Luna in CLIO Coder through the openai-codex target: asked why the absolute-zero test fails, the agent searches the project, edits one line of temperature.mjs from kelvin <= 0 to kelvin < 0, runs the declared test check with exit 0, and reports that all 7 tests pass.",
+			"representation": "captured-recording",
+			"copies": []
+		},
+		{
+			"id": "animation-model-switch",
+			"source": "assets/animations/anim-model-switch.gif",
+			"sha256": "87991f245e1c062b17e2772bf36d4421a40aab6f5d5e09925451fa794c8a17ae",
+			"provenance": "Rendered by agg from site/assets/casts/anim-model-switch.cast, recorded from CLIO Coder 0.8.1 by site/capture/animation.mjs.",
+			"dimensions": {
+				"width": 897,
+				"height": 694
+			},
+			"role": "Switch models",
+			"channels": [
+				"repository",
+				"readme"
+			],
+			"altTextSeed": "Fullscreen terminal recording of the /model picker in CLIO Coder: the session starts on gpt-6-luna, then claude-haiku-5-5 and claude-opus-5-5 on anthropic-max and gpt-6.1-sol on openai-codex are chosen in turn by typing part of the name, and the session returns to gpt-6-luna.",
+			"representation": "captured-recording",
+			"copies": []
 		}
 	],
 	"socialExports": [
@@ -444,7 +557,12 @@
 				"height": 630
 			},
 			"role": "Dark landscape social preview",
-			"channels": ["open-graph", "x", "linkedin", "release"],
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -470,7 +588,12 @@
 				"height": 630
 			},
 			"role": "Light landscape social preview",
-			"channels": ["open-graph", "x", "linkedin", "release"],
+			"channels": [
+				"open-graph",
+				"x",
+				"linkedin",
+				"release"
+			],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -496,7 +619,12 @@
 				"height": 1080
 			},
 			"role": "Dark square social preview",
-			"channels": ["mastodon", "bluesky", "instagram", "release"],
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		},
@@ -522,7 +650,12 @@
 				"height": 1080
 			},
 			"role": "Light square social preview",
-			"channels": ["mastodon", "bluesky", "instagram", "release"],
+			"channels": [
+				"mastodon",
+				"bluesky",
+				"instagram",
+				"release"
+			],
 			"altTextSeed": "Clio Coder: Good science. Better software. An open-source coding agent for desktop and terminal, with the model you choose.",
 			"representation": "illustrative"
 		}

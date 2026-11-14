@@ -16,7 +16,7 @@ for. Change the model and nothing else changes.
 </p>
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/site/assets/tui-verify.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/site/assets/tui-verify.webp" alt="CLIO Coder in the terminal with a Qwen model: it reads two files, explains why a test fails, edits one line with the diff shown, and reruns the tests, which pass." width="100%" /></a>
+  <a href="https://raw.githubusercontent.com/iowarp/clio-coder/main/site/assets/tui-verify.png"><img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/site/assets/tui-verify.webp" alt="CLIO Coder in the terminal on GPT-6 Luna: it reads two files, runs the failing test check, edits one line with the diff shown, and reruns the check, which passes." width="100%" /></a>
 </p>
 
 ```bash
@@ -159,6 +159,12 @@ Then a focused change with a clear finish line:
 > The test in tests/test_solver.py fails. Make the smallest fix, run the
 > tests, show me the diff, and tell me anything you could not verify.
 
+The same kind of request on a small JavaScript project, recorded on GPT-6 Luna:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/animations/anim-fix-a-test.gif" alt="Animated terminal recording of GPT-6 Luna in CLIO Coder: asked why the absolute-zero test fails, the agent searches the project, edits one line of temperature.mjs from kelvin &lt;= 0 to kelvin &lt; 0, runs the declared test check with exit 0, and reports that all 7 tests pass." width="100%" />
+</p>
+
 CLIO Coder asks before commands it cannot sandbox or recognize, and before
 outward actions such as `git push`. You can ask it about itself too, such as
 "how do I send workers to a different model?", and it searches its own
@@ -288,6 +294,10 @@ and [extensions](docs/guide/harness-extensions.md).
 
 A saved connection is called a **target**. Chat and workers can use different
 targets, models and thinking levels, and `/model` switches the conversation.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/animations/anim-model-switch.gif" alt="Animated terminal recording of the /model picker in CLIO Coder: one session moves from gpt-6-luna to claude-haiku-5-5 and claude-opus-5-5 on a Claude subscription, then gpt-6.1-sol on a ChatGPT subscription, and back to gpt-6-luna." width="100%" />
+</p>
 
 | Connection | Supported |
 | --- | --- |
