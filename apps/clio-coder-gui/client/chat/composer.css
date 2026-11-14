@@ -1152,13 +1152,14 @@
 	color: var(--ink);
 }
 /*
- * At rest the composer is a field and a send button. The idle note restates the placeholder, so it is drawn for screen
+ * At rest the composer is a field and a send button. The idle note restates the placeholder, so it stays for screen
  * readers only; the keyboard hint comes in while the composer holds focus, and stays while files are attached because
- * it names them. Anything that needs saying (a refusal, a paused session, a running turn) is not quiet and shows.
- * The quiet note keeps its line, unseen, so the dock does not grow by a line each time a turn starts and shrink
- * again when it ends, moving the transcript's live edge with it.
+ * it names them. Anything that needs saying (a refusal, a paused session, a running turn) is not quiet and stays.
  */
 .composer__delivery-note[data-quiet] {
+	position: absolute;
+	width: 1px;
+	height: 1px;
 	overflow: hidden;
 	clip-path: inset(50%);
 	white-space: nowrap;
