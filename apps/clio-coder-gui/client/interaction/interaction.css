@@ -144,8 +144,18 @@
 	display: grid;
 	gap: 10px;
 }
+/* The palette hangs from a fixed line instead of centring, so its field stays put while the result
+   count changes under it, and only the result list scrolls. */
+.dialog--palette {
+	align-self: start;
+	margin-top: min(12vh, 120px);
+	max-height: min(76vh, 760px);
+}
+.dialog--palette .dialog__body {
+	overflow: hidden;
+}
 .palette__list {
-	max-height: 46vh;
+	max-height: min(46vh, calc(76vh - 200px));
 	overflow: auto;
 }
 .palette__group {

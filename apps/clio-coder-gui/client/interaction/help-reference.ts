@@ -90,10 +90,11 @@ const VIEW_ENTRIES: readonly HelpEntry[] = Object.values(VIEW_GUIDE).map((view) 
 	meaning: view.meaning,
 }));
 
-/** Message-box keys that are not single chords, so the binding table cannot carry them. */
+/** Keys handled by one control rather than the binding table: the message box and the task name. */
 export const COMPOSER_NOTES: readonly { term: string; action: string; where: string }[] = [
 	{ term: "Esc, Esc", action: "Stop the running turn", where: "Message box · press twice while a turn runs" },
 	{ term: "Up / Down", action: "Recall sent messages", where: "Message box · Up with the caret at the start" },
+	{ term: "F2", action: "Rename the task", where: "Task name in the header focused" },
 ];
 
 const KEYBOARD_ENTRIES: readonly HelpEntry[] = [

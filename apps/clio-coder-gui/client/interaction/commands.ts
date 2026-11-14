@@ -65,12 +65,12 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Skills", path: "/skills", keywords: ["instructions", "components", "capabilities"] },
 	{ label: "Library", path: "/library", keywords: ["packages", "skills", "components", "agents", "extensions"] },
 	{ label: "System", path: "/system", keywords: ["doctor", "health", "paths"] },
-	{ label: "Usage report", path: "/usage", keywords: ["tokens", "cost", "spend"] },
+	{ label: "Usage", path: "/usage", keywords: ["tokens", "cost", "spend", "report"] },
 	{ label: "Targets", path: "/settings/targets", keywords: ["providers", "models"] },
 	{ label: "Routing", path: "/settings/routing", keywords: ["profiles", "bindings", "offline"] },
 	{ label: "Effective settings", path: "/settings/effective", keywords: ["values", "layers", "origin"] },
 	{ label: "Why these settings", path: "/settings/why", keywords: ["provenance", "source"] },
-	{ label: "Interop", path: "/system/interop", keywords: ["agents", "mcp", "external"] },
+	{ label: "Other coding agents", path: "/system/interop", keywords: ["interop", "agents", "mcp", "external"] },
 ];
 
 export interface CommandSituation {

@@ -46,7 +46,7 @@ test("the sidebar chord is Ctrl or Cmd plus backslash and reaches no dialog or i
 		!matchesKeybinding(KEYBINDINGS.sidebar, press("\\", { ctrlKey: true, altKey: true })),
 		"AltGr layouts type it",
 	);
-	assert.equal(formatKeybinding(KEYBINDINGS.sidebar), "Ctrl or Cmd + \\");
+	assert.equal(formatKeybinding(KEYBINDINGS.sidebar), "Ctrl/Cmd + \\");
 	assert.equal(KEYBINDINGS.sidebar.scope, "global");
 });
 
@@ -89,7 +89,7 @@ test("chords print the way the reference reads them", () => {
 	assert.equal(formatKeybinding(KEYBINDINGS.allowOnce), "Alt + A");
 	assert.equal(formatKeybinding(KEYBINDINGS.escape), "Esc");
 	assert.equal(formatKeybinding(KEYBINDINGS.tabNext), "Right arrow");
-	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl or Cmd + K");
+	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl/Cmd + K");
 });
 
 test("the launcher score ranks a whole-value prefix over a word prefix over a substring", () => {
@@ -183,7 +183,8 @@ test("the reference lists the conversation chords and the message-box keys", () 
 	assert.ok(keyboard);
 	const terms = keyboard.entries.map((entry) => entry.term);
 	for (const chord of [
-		"Ctrl or Cmd + .",
+		"Ctrl/Cmd + .",
+		"F2",
 		"Alt + M",
 		"Alt + O",
 		"Alt + Y",
@@ -199,4 +200,8 @@ test("the reference lists the conversation chords and the message-box keys", () 
 	assert.match(commands.lede, /^Type \/ in the message box to see this task's commands\./u);
 	assert.ok(commands.entries.some((entry) => entry.term === "/compact [instructions]"));
 	assert.ok(commands.entries.some((entry) => entry.term.includes("/extensions dev")));
+	// One name for stopping, so searching the reference for it finds the chord and Esc, Esc.
+	const stop = searchHelp("stop").find((match) => match.section.id === "keyboard");
+	assert.ok(stop?.entries.some((entry) => entry.term === "Ctrl/Cmd + ."));
+	assert.ok(stop?.entries.some((entry) => entry.term === "Esc, Esc"));
 });

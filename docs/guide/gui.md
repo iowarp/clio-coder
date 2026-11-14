@@ -447,7 +447,7 @@ A line whose first word is not a catalog command or a prompt template is checked
 
 | Keys | Action |
 | --- | --- |
-| `Ctrl/Cmd+.` | Stop the running turn of the open task, through the same path as `Stop`. Nothing happens when no turn runs. A stop that reaches the server after its turn ended is refused, and the notice reads `Nothing stopped` with the reason instead of reporting the stop as accepted. |
+| `Ctrl/Cmd+.` | Stop the running turn of the open task, through the same path as `Stop`. Nothing happens when no turn runs. A stop that reaches the server after its turn ended is refused, and the notice reads `Nothing stopped` with the reason. A stop the server confirms reads `Stop confirmed`, and the button stays `Stopping…` until the turn's last update arrives. |
 | `Alt+M` | Open the model control beside Send. |
 | `Alt+O` | Open the transcript detail menu. |
 | `Alt+Y` | Open the autonomy menu. It never changes the level by itself. |
@@ -456,8 +456,9 @@ A line whose first word is not a catalog command or a prompt template is checked
 | `Esc`, `Esc` | In the composer while a turn runs: stop it. |
 | `Up` / `Down` | In the composer with the caret at the start: recall sent messages. |
 | `Ctrl/Cmd+Shift+L`, `Ctrl/Cmd+Shift+N`, `Ctrl/Cmd+Alt+A` | Focus the composer, open the task in a new window, open the live agents view. |
+| `F2` | With the task name in the header focused: rename the task. |
 
-Alt chords match the physical key, so they work on macOS where Option types a character. The model and autonomy chords do nothing while the task is parked or closed, and every global chord is silent while a dialog is open.
+The palette opens near the top of the window and names pages as the rail does (`Usage`, `Other coding agents`). `Esc` closes it and returns focus to where it was, or to the message box when nothing had focus. `Ctrl/Cmd+.` in the message box stops the turn and types nothing. Alt chords match the physical key, so they work on macOS where Option types a character. The model and autonomy chords do nothing while the task is parked or closed, and every global chord is silent while a dialog is open.
 
 ### Report a problem
 

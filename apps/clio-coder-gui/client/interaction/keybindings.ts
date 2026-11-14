@@ -237,7 +237,7 @@ export const KEYBINDINGS = {
 		key: ".",
 		modifiers: ["primary"],
 		scope: "global",
-		action: "Cancel running turn",
+		action: "Stop the running turn",
 		where: "While a turn is running",
 	},
 } as const satisfies Readonly<Record<string, Keybinding>>;
@@ -290,7 +290,7 @@ export function matchesKeybinding(binding: Keybinding, event: KeyEventLike): boo
 }
 
 const MODIFIER_LABELS: Readonly<Record<KeyModifier, string>> = {
-	primary: "Ctrl or Cmd",
+	primary: "Ctrl/Cmd",
 	alt: "Alt",
 	shift: "Shift",
 };
@@ -307,7 +307,7 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
 	End: "End",
 };
 
-/** The chord as the reference prints it, for example "Ctrl or Cmd + K", or the row's own label. */
+/** The chord as every list prints it (help, palette, settings), for example "Ctrl/Cmd + K", or the row's own label. */
 export function formatKeybinding(binding: Keybinding): string {
 	if (binding.label !== undefined) return binding.label;
 	const parts = binding.modifiers.map((modifier) => MODIFIER_LABELS[modifier]);

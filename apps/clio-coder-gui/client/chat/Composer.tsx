@@ -464,6 +464,19 @@ export const Composer = memo(function Composer({
 	});
 	const { controls } = useSessionCommands();
 	const control = controls.records.find((row) => row.sessionId === sessionId && row.stage !== "complete");
+	// A confirmed stop settles before the turn's own end arrives. Until it does, the control keeps saying
+	// Stopping rather than flicking back to Stop for the few frames in between.
+	const stopping =
+		control ??
+		controls.records.find(
+			(row) =>
+				row.sessionId === sessionId &&
+				row.action === "stop" &&
+				row.stage === "complete" &&
+				!row.nothingStopped &&
+				row.turnId !== null &&
+				row.turnId === runningTurnId,
+		);
 	const stopTurn = () => {
 		if (!runningTurnId) return;
 		const snapshot = queries.getQueryData<SessionSnapshot>(["session", sessionId]);
@@ -939,7 +952,7 @@ export const Composer = memo(function Composer({
 								<p className="slash-palette__error">{slashError}</p>
 							) : (
 								<p className="slash-palette__keys">
-									<kbd>{enterSends ? "Enter" : "Ctrl/⌘+Enter"}</kbd> runs{" "}
+									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd> runs{" "}
 									{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
 								</p>
 							)}
@@ -1188,6 +1201,11 @@ export const Composer = memo(function Composer({
 								setHistorySearch(readHistory());
 								return;
 							}
+							// The stop chord never types into the draft; the page-level shortcut does the stopping.
+							if (matchesKeybinding(KEYBINDINGS.cancelTurn, event)) {
+								event.preventDefault();
+								return;
+							}
 							// Alt+S delivers the draft as immediate direction, whichever delivery is chosen.
 							if (
 								!event.nativeEvent.isComposing &&
@@ -1249,7 +1267,7 @@ export const Composer = memo(function Composer({
 							// Esc with nothing open stops the turn, as it does in the terminal, on the second press.
 							if (event.key === "Escape" && plain && running && !layerOwned && !optionsOpen) {
 								event.preventDefault();
-								if (stopArmed && !control) stopTurn();
+								if (stopArmed && !stopping) stopTurn();
 								setStopArmed(!stopArmed);
 								return;
 							}
@@ -1326,9 +1344,9 @@ export const Composer = memo(function Composer({
 								{estimate.text}
 							</span>
 						) : null}
-						{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
+						{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/Cmd+Enter sends"}
 						{running && modes.some((offer) => offer.mode === "next-slot") ? " · Alt+S sends now" : ""} · / lists commands · @
-						adds a file or folder · ↑ recalls earlier messages, Ctrl/⌘+R searches them
+						adds a file or folder · ↑ recalls earlier messages, Ctrl/Cmd+R searches them
 						{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 					</p>
 					<div className="composer__actions">
@@ -1428,8 +1446,8 @@ export const Composer = memo(function Composer({
 										Enter sends
 									</label>
 									<p className="composer__options-note">
-										{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/⌘+Enter sends."} @ adds a file or folder.
-										↑ recalls earlier messages and Ctrl/⌘+R searches them.
+										{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/Cmd+Enter sends."} @ adds a file or
+										folder. ↑ recalls earlier messages and Ctrl/Cmd+R searches them.
 									</p>
 								</div>
 							</details>
@@ -1476,14 +1494,14 @@ export const Composer = memo(function Composer({
 								<button
 									className="composer__icon-button composer__stop composer__stop--live"
 									type="button"
-									disabled={!!control}
+									disabled={!!stopping}
 									onClick={() => stopTurn()}
-									aria-label={control ? (control.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
+									aria-label={stopping ? (stopping.stage === "unresolved" ? "Review stop request" : "Stopping…") : "Stop turn"}
 									title="End this turn now. Nothing further is run."
 								>
 									<Icon name="stop" />
 									<span aria-hidden="true">
-										{control ? (control.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
+										{stopping ? (stopping.stage === "unresolved" ? "Check request" : "Stopping") : "Stop"}
 									</span>
 								</button>
 							) : null}

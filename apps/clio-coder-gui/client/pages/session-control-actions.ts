@@ -64,8 +64,7 @@ export function useSessionControls(client: Client) {
 				);
 				store.patch(original.key, {
 					stage: "complete",
-					message:
-						"CLIO Coder accepted the stop request for the original turn. Refresh or open the session to inspect its outcome.",
+					message: "CLIO Coder confirmed the stop. The turn shows as stopped once its last update arrives.",
 				});
 			}
 			refreshLists();

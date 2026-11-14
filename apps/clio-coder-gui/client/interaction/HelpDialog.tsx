@@ -21,7 +21,7 @@ function ShortcutKeys({ chord }: { chord: string }) {
 					)
 				) : (
 					// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed chord never reorder.
-					<kbd key={index}>{part.replace("Ctrl or Cmd", "Ctrl/Cmd")}</kbd>
+					<kbd key={index}>{part}</kbd>
 				),
 			)}
 		</span>

@@ -473,7 +473,7 @@ export const PaneToggles = memo(function PaneToggles({
 				className="wb-icon wb-icon--text"
 				aria-expanded={open}
 				aria-label={`${open ? "Hide" : "Show"} task details${trustAttention ? ", project files need review" : ""}`}
-				title="Task details (Ctrl/⌘ Shift \\)"
+				title="Task details (Ctrl/Cmd + Shift + \)"
 				onClick={() => onToggle(view, ids.pane)}
 			>
 				<Icon name="panelRight" />

@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
@@ -72,6 +72,7 @@ export function SessionControlsProvider({ client, children }: { client: Client; 
 export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const { controls } = useSessionCommands();
 	const [reviewing, setReviewing] = useState(false);
+	const { pathname } = useLocation();
 	const reviewButton = useRef<HTMLButtonElement>(null);
 	const results = useRef<HTMLDivElement>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -103,7 +104,7 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 			? `${pending.length} session requests in progress…`
 			: latest?.action === "close"
 				? `${pending.length ? "Close request" : "Closed"} · ${latest.title}`
-				: `${idle ? "Nothing stopped" : "Stop request"} · ${latest?.title ?? "Session"}`;
+				: `${pending.length ? "Stop request" : idle ? "Nothing stopped" : "Stop confirmed"} · ${latest?.title ?? "Session"}`;
 	const dismissCompleted = () => {
 		for (const row of controls.records) if (row.stage === "complete") controls.dismiss(row.key);
 		controls.clearNotice();
@@ -173,10 +174,12 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 								</header>
 								<p role={record.stage === "unresolved" ? "alert" : "status"}>{record.message}</p>
 								<div className="session-control-result__actions">
-									<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
-										Open session
-										<Icon name="external" />
-									</Link>
+									{pathname === `/sessions/${record.sessionId}` ? null : (
+										<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
+											Open session
+											<Icon name="external" />
+										</Link>
+									)}
 									<button
 										type="button"
 										data-control-wait={record.key}
