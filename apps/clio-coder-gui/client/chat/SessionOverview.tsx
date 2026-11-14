@@ -298,7 +298,12 @@ export function SessionOverview({
 			</section>
 			{session.telemetry?.trust?.ignored.length ? (
 				<Section id="pane-trust" title="Project trust" icon="shield">
-					<ProjectTrustNotice trust={session.telemetry.trust} />
+					<ProjectTrustNotice
+						client={client}
+						sessionId={session.id}
+						running={overview.running}
+						trust={session.telemetry.trust}
+					/>
 				</Section>
 			) : null}
 			{health.attention ? healthSection : null}

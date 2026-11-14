@@ -395,7 +395,19 @@ A terminal fleet frame carries `_meta["clio-coder/run-result"]`, the compact fac
 
 ### Untrusted project files
 
-CLIO Coder ignores project surfaces the operator has not approved. Settings, hooks and safety use exact file bytes; extensions and plugins use installed package identities. The surfaces are `settings`, `hooks`, `safety`, `extensions` and `plugins`. The session's start result lists each ignored file, and the application keeps a persistent disclosure above the transcript titled `Project files were ignored`. It says `Clio has not trusted these project files. Review them, then run the named command in this workspace and reopen the task.` Each row names the file, its surface and verdict (`untrusted` or `changed`), and the command the runtime supplied, `clio-coder config trust <surface>`. For `extensions` and `plugins` the file is the project's `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`, shown as an absolute path. The command is a read-only review; it prints the exact `--hash` form that approves the reviewed surface. The notice reflects trust when the session started or last resumed, so it stays until the task is reopened after the approval. See [Commands and Modes](commands-and-modes.md) for the trust commands.
+CLIO Coder ignores project surfaces the operator has not approved. Settings, hooks and safety use exact file bytes; extensions and plugins use installed package identities. The surfaces are `settings`, `hooks`, `safety`, `extensions` and `plugins`. The session's start result lists each ignored file, and the task pane's `Project trust` section holds a disclosure titled `Project files were ignored`. It says `CLIO Coder ignored these project files because you have not trusted them. Review a surface to see exactly what it contains, then trust it to apply it to this project.` Each surface gets one row with its files, its verdict (`untrusted` or `changed`) and a `Review` button. For `extensions` and `plugins` the file is the project's `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`, shown as an absolute path.
+
+#### Project trust
+
+`Review` opens `Review <surface> for <project>`. The dialog reads `clio-coder config trust <surface> --json` in the project and shows the verdict in words (`Not trusted yet` or `Changed since you trusted it`), every file path with its full text as plain monospaced text, the scripts hooks run, and the packages for extensions and plugins. Control characters and bidirectional overrides show as `\u00XX`. A file longer than 256 KB shows its first 256 KB and `Showing the first 256 KB of <size>.` The content hash sits under `Technical details`.
+
+`Trust <surface>` runs `clio-coder config trust <surface> --hash <contentHash>` with the hash of the preview on screen. It is disabled while a turn runs in the task (`Wait for the current turn to finish.`) and when no file is readable. If the files changed after the preview, the dialog says `The files changed after you opened this review. Review them again.` and reads them again. After an approval the task's engine is asked to re-read trust: a resting task restarts and the surface leaves the list. When the surface is still listed, the dialog says `Trusted. Start a new task or resume this one to apply it.` Revoking trust stays a terminal action.
+
+On the Effective settings page, a source issue for an untrusted project file shows the harness's own message with a `Review` button that opens the same dialog for the selected project. `/trust` in the composer points to the task pane's `Project trust` section. See [Commands and Modes](commands-and-modes.md) for the trust commands.
+
+#### Reviewing lessons
+
+The board's memory section lists `Waiting for review (<n>)`: every pending lesson in the data directory, newest first, at most 200, read through `clio-coder memory list --json`. Each row shows the scope (with the repository for `repo` lessons), key, lesson, `Applies when` and `Avoid when` lines, confidence and evidence references. `Approve` and `Reject` run `clio-coder memory approve <id>` and `clio-coder memory reject <id>`; the row leaves the list and the board says `Approved <id>.` or `Rejected <id>.` A decision that fails shows its reason under the row, for example `Lesson <id> is no longer waiting for review.` when the record is gone. A proposal made from the board now reads `Proposed <id>. Review it under Waiting for review.`
 
 ### Transcript formats
 
@@ -442,7 +454,8 @@ A line whose first word is not a catalog command or a prompt template is checked
 | `/resume`, `/library`, `/research` | Open Sessions, the Library or Research. |
 | `/rename <name>` | Rename the task. Without a name it says how. |
 | `/quit`, `/exit`, `/rewind`, `/undo` | Say where that is done instead; nothing else happens. |
-| `/restart`, `/upgrade`, `/panes`, `/music`, `/files`, `/extensions dev`, `/trust` | Say that the name is terminal-only. |
+| `/restart`, `/upgrade`, `/panes`, `/music`, `/files`, `/extensions dev` | Say that the name is terminal-only. |
+| `/trust` | Points to the task pane's `Project trust` section, where each ignored surface has a `Review` button. |
 
 `/btw` and `/draft` read the conversation and answer in a panel. Neither becomes a turn or context for the next request. `/handoff` drafts a document for the person to read and edit, and starts a new conversation only after approval.
 

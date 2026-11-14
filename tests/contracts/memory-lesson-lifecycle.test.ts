@@ -84,6 +84,68 @@ test("promote --from-handoff finds the source from any directory and refuses onl
 	}
 });
 
+test("memory list --json prints each record's review fields, pending and approved alike", async () => {
+	const env = await isolateClioEnv("memory-list-json-");
+	const write = process.stdout.write;
+	let output = "";
+	try {
+		const base = {
+			scope: "repo",
+			evidenceRefs: ["run:synthetic"],
+			appliesWhen: ["installing dependencies"],
+			avoidWhen: ["offline"],
+			confidence: 0.8,
+			createdAt: "2026-09-21T00:00:00.000Z",
+			repository: { kind: "canonical-path", key: "/work/demo" },
+		};
+		mkdirSync(join(clioDataDir(), "memory"), { recursive: true });
+		writeFileSync(
+			memoryStorePath(clioDataDir()),
+			JSON.stringify({
+				version: 1,
+				records: [
+					{ ...base, id: "mem-00000000000000b1", key: "pending", lesson: "Pending lesson.", approved: false },
+					{ ...base, id: "mem-00000000000000b2", key: "approved", lesson: "Approved lesson.", approved: true },
+				],
+			}),
+		);
+		process.stdout.write = ((chunk: string | Uint8Array) => {
+			output += String(chunk);
+			return true;
+		}) as typeof process.stdout.write;
+		let code: number;
+		try {
+			code = await runMemoryCommand(["list", "--json"]);
+		} finally {
+			process.stdout.write = write;
+		}
+		strictEqual(code, 0, output);
+		const records = (JSON.parse(output) as { records: Record<string, unknown>[] }).records;
+		deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
+			["mem-00000000000000b1", false],
+			["mem-00000000000000b2", true],
+		]);
+		for (const record of records)
+			deepStrictEqual(Object.keys(record).sort(), [
+				"appliesWhen",
+				"approved",
+				"avoidWhen",
+				"confidence",
+				"createdAt",
+				"evidenceRefs",
+				"id",
+				"key",
+				"lesson",
+				"repository",
+				"scope",
+			]);
+		strictEqual(await runMemoryCommand(["list", "--yaml"]), 2);
+	} finally {
+		process.stdout.write = write;
+		env.restore();
+	}
+});
+
 test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
 	const env = await isolateClioEnv("memory-evidence-flow-");
 	const previousCwd = process.cwd();

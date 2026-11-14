@@ -98,7 +98,7 @@ test("board writes are worded as what happened, and a proposal always names its 
 	const { memoryOutcome, supersedeOutcome } = await import("../client/chat/board-model.js");
 	assert.equal(
 		memoryOutcome({ status: "proposed", recordId: "memory-1" }).text,
-		"Proposed memory-1. Review it, then run clio-coder memory approve memory-1.",
+		"Proposed memory-1. Review it under Waiting for review.",
 	);
 	assert.match(memoryOutcome({ status: "existing", recordId: "memory-1" }).text, /^Already proposed as memory-1\./);
 	assert.equal(memoryOutcome({ status: "needs_acknowledgement", reason: "x" }).tone, "warning");

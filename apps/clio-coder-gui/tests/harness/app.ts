@@ -19,6 +19,7 @@ import { FleetService } from "../../server/services/fleet.js";
 import { LibraryService } from "../../server/services/library.js";
 import { MachineAttachments } from "../../server/services/machine-attach.js";
 import { OperationRegistry } from "../../server/services/operations.js";
+import { ProjectReviewService } from "../../server/services/project-review.js";
 import { ReportsService } from "../../server/services/reports.js";
 import { ResearchService } from "../../server/services/research.js";
 import { SessionService } from "../../server/services/sessions.js";
@@ -116,6 +117,7 @@ export async function harness(
 		fleet: new FleetService(reads),
 		system: new SystemService(reads, workspaces, ops),
 		library: new LibraryService(reads, cli, workspaces, ops),
+		review: new ProjectReviewService(cli, workspaces),
 		reports: new ReportsService(cli, workspaces),
 		arena: new ArenaService(cli, workspaces, operations, env),
 		research,

@@ -86,6 +86,14 @@ import {
 	ResearchReport,
 	ResearchStartRequest,
 } from "./research.js";
+import {
+	MemoryDecideRequest,
+	MemoryId,
+	MemoryPending,
+	TrustApproveRequest,
+	TrustPreview,
+	TrustSurface,
+} from "./review.js";
 import { routes as runtimeRoutes } from "./runtime-routes.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
 import { SessionOverview } from "./session-overview.js";
@@ -177,6 +185,7 @@ export type Input<R extends Route> = {
 export type Output<R extends Route> = Static<R["response"]>;
 const toolParams = Type.Object({ toolId: Id }, { additionalProperties: false });
 const operationParams = Type.Object({ id: Id }, { additionalProperties: false });
+const trustParams = Type.Object({ id: Id, surface: TrustSurface }, { additionalProperties: false });
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
@@ -1357,5 +1366,38 @@ export const routes = {
 		response: Operation,
 		summary: "Cancel a cancellable operation",
 		...runtimeRoutes.cancel,
+	}),
+	// x090 spec 12
+	trustPreview: defineRoute({
+		...get,
+		params: trustParams,
+		response: TrustPreview,
+		summary: "Every file, script and package a project trust surface holds, with the digest an approval names",
+		...runtimeRoutes.trustPreview,
+	}),
+	trustApprove: defineRoute({
+		...post,
+		status: 200,
+		params: trustParams,
+		body: TrustApproveRequest,
+		response: Empty,
+		summary: "Trust a project surface at the digest of the preview the operator reviewed",
+		...runtimeRoutes.trustApprove,
+	}),
+	memoryPending: defineRoute({
+		...get,
+		params: operationParams,
+		response: MemoryPending,
+		summary: "Memory lessons waiting for review, newest first",
+		...runtimeRoutes.memoryPending,
+	}),
+	memoryDecide: defineRoute({
+		...post,
+		status: 200,
+		params: Type.Object({ id: Id, memoryId: MemoryId }, { additionalProperties: false }),
+		body: MemoryDecideRequest,
+		response: Empty,
+		summary: "Approve or reject one memory lesson waiting for review",
+		...runtimeRoutes.memoryDecide,
 	}),
 };

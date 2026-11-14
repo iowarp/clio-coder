@@ -1,7 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
+import type { TrustSurface } from "../../contracts/review.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { TrustReview } from "../chat/TrustReview.js";
 import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
@@ -25,6 +28,8 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
 	const [search, setSearch] = useSearchParams();
+	const queries = useQueryClient();
+	const [reviewing, setReviewing] = useState<TrustSurface | null>(null);
 	const filter = search.get("q") ?? "";
 	const setFilter = (query: string) =>
 		setSearch(
@@ -106,11 +111,28 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 											</strong>
 											<br />
 											{issue.message}
+											{issue.surface !== undefined ? (
+												<>
+													{" "}
+													<button type="button" onClick={() => setReviewing(issue.surface ?? null)}>
+														Review
+													</button>
+												</>
+											) : null}
 										</li>
 									))}
 								</ul>
 							</details>
 						)}
+						{reviewing !== null && id ? (
+							<TrustReview
+								client={client}
+								workspaceId={id}
+								surface={reviewing}
+								onClose={() => setReviewing(null)}
+								onTrusted={() => void queries.invalidateQueries({ queryKey: ["workspace-settings", id] })}
+							/>
+						) : null}
 						<label className="settings-filter">
 							Filter settings
 							<input

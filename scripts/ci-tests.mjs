@@ -221,6 +221,9 @@ export const guiTests = [
 	"notification-model",
 	"openapi",
 	"boundaries",
+	// x090 spec 12
+	"review-http",
+	"trust-model",
 ]
 	.map((name) => `tests/${name}.test.ts`)
 	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");

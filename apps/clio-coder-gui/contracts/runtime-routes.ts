@@ -184,6 +184,11 @@ export const routes = {
 	remove: { name: "remove", method: "POST", path: "/api/toolchain/tools/:toolId/remove" },
 	operation: { name: "operation", method: "GET", path: "/api/operations/:id" },
 	cancel: { name: "cancel", method: "POST", path: "/api/operations/:id/cancel" },
+	// x090 spec 12
+	trustPreview: { name: "trustPreview", method: "GET", path: "/api/workspaces/:id/trust/:surface" },
+	trustApprove: { name: "trustApprove", method: "POST", path: "/api/workspaces/:id/trust/:surface" },
+	memoryPending: { name: "memoryPending", method: "GET", path: "/api/workspaces/:id/memory/pending" },
+	memoryDecide: { name: "memoryDecide", method: "POST", path: "/api/workspaces/:id/memory/:memoryId" },
 } as const;
 
 export type RuntimeRoute = (typeof routes)[keyof typeof routes];

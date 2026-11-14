@@ -416,7 +416,13 @@ export const SLASH_ALIASES: readonly SlashAliasSpec[] = [
 			message: "Restoring files is not available in this app yet. Run /rewind in a terminal session.",
 		},
 	},
-	...["restart", "upgrade", "panes", "music", "files", "extensions dev", "trust"].map(terminalOnly),
+	...["restart", "upgrade", "panes", "music", "files", "extensions dev"].map(terminalOnly),
+	// x090 spec 12
+	{
+		names: ["trust"],
+		summary: "Review the project files this task ignored",
+		target: { kind: "notice", message: "Open Project trust in the task pane to review the files this task ignored." },
+	},
 ];
 
 const ALIAS_BY_NAME = new Map<string, SlashAliasSpec>(

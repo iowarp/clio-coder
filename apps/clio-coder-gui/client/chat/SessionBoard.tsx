@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { memo, useEffect, useId, useRef, useState } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
+import type { MemoryDecision } from "../../contracts/review.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
@@ -12,6 +13,12 @@ import {
 	type OperatorTaskAction,
 	supersedeOutcome,
 } from "./board-model.js";
+import {
+	MEMORY_REVIEW_EMPTY,
+	memoryDecisionNote,
+	memoryReviewHeading,
+	memoryReviewRows,
+} from "./memory-review-model.js";
 import type { PaneSection } from "./pane-context.js";
 import { useSessionTelemetry } from "./session-telemetry.js";
 import { livePlanView } from "./telemetry-model.js";
@@ -113,6 +120,12 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		},
 		onError: (error) => setDecisionNote({ tone: "error", text: error.message }),
 	});
+	const workspaceId = useQuery({
+		queryKey: ["session", sessionId],
+		queryFn: () => client.call(routes.session, params),
+		enabled: false,
+		select: (session) => session.workspaceId,
+	}).data;
 	const propose = useMutation({
 		mutationFn: ({ entryId, scope }: { entryId: string; scope: "repo" | "global" }) =>
 			client.call(
@@ -126,6 +139,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		onSuccess: (result, input) => {
 			setPendingGlobal(result.status === "needs_acknowledgement" ? input.entryId : null);
 			setMemoryNote(memoryOutcome(result));
+			if (workspaceId !== undefined) void queries.invalidateQueries({ queryKey: ["memory-pending", workspaceId] });
 		},
 		onError: (error) => setMemoryNote({ tone: "error", text: error.message }),
 	});
@@ -444,6 +458,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 								) : null}
 							</>
 						) : null}
+						{workspaceId !== undefined ? (
+							<MemoryReview client={client} workspaceId={workspaceId} titleId={`${titleId}-review`} />
+						) : null}
 					</section>
 					{view.truncated ? (
 						<p className="drill__note">Only the first 100 of a list are shown; the terminal shows the rest.</p>
@@ -453,3 +470,104 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 		</div>
 	);
 });
+
+// x090 spec 12
+/**
+ * Pending lessons, with what `clio-coder memory list` shows for each, decided here as `memory approve`
+ * and `memory reject` decide them. The list is every pending lesson in the data directory, as approval
+ * is: each row names its scope and repository.
+ */
+function MemoryReview({ client, workspaceId, titleId }: { client: Client; workspaceId: string; titleId: string }) {
+	const queries = useQueryClient();
+	const [notes, setNotes] = useState<Record<string, { tone: "status" | "error"; text: string }>>({});
+	const [decided, setDecided] = useState<string | null>(null);
+	const pending = useQuery({
+		queryKey: ["memory-pending", workspaceId],
+		queryFn: () => client.call(routes.memoryPending, { params: { id: workspaceId }, query: {}, body: {} }),
+		retry: false,
+		meta: { errorSurface: "inline" },
+	});
+	const decide = useMutation({
+		mutationFn: ({ id, decision }: { id: string; decision: MemoryDecision }) =>
+			client.call(
+				routes.memoryDecide,
+				{ params: { id: workspaceId, memoryId: id }, query: {}, body: { decision } },
+				crypto.randomUUID(),
+			),
+		meta: { errorSurface: "inline" },
+		onMutate: ({ id }) => setNotes(({ [id]: _cleared, ...rest }) => rest),
+		onSuccess: async (_result, { id, decision }) => {
+			setDecided(memoryDecisionNote(id, decision));
+			await queries.invalidateQueries({ queryKey: ["memory-pending", workspaceId] });
+		},
+		onError: (error, { id }) => setNotes((current) => ({ ...current, [id]: { tone: "error", text: error.message } })),
+	});
+	const rows = memoryReviewRows(pending.data?.records ?? []);
+	return (
+		<div className="memory-review">
+			<h4 id={titleId}>{memoryReviewHeading(rows.length)}</h4>
+			{pending.isPending ? <p className="drill__note">Reading pending lessons…</p> : null}
+			{pending.error ? (
+				<p role="alert" className="drill__note drill__note--error">
+					{pending.error.message}{" "}
+					<button type="button" className="drill__btn" onClick={() => void pending.refetch()}>
+						Try again
+					</button>
+				</p>
+			) : null}
+			{pending.data && rows.length === 0 ? <p className="drill__note">{MEMORY_REVIEW_EMPTY}</p> : null}
+			{rows.length > 0 ? (
+				<ul className="drill__rows" aria-labelledby={titleId}>
+					{rows.map((row) => {
+						const note = notes[row.id];
+						const busy = decide.isPending && decide.variables?.id === row.id;
+						return (
+							<li key={row.id} className="memory-review__row">
+								<span className="drill__id">{row.id}</span>
+								<span className="drill__main">
+									<small>
+										{row.scope} · {row.key}
+									</small>
+									<span>{row.lesson}</span>
+									{row.appliesWhen ? <small>{row.appliesWhen}</small> : null}
+									{row.avoidWhen ? <small>{row.avoidWhen}</small> : null}
+									<small>{[row.confidence, row.evidence].filter(Boolean).join(" · ")}</small>
+								</span>
+								<span className="drill__actions">
+									<button
+										type="button"
+										className="drill__btn"
+										disabled={busy}
+										onClick={() => decide.mutate({ id: row.id, decision: "approve" })}
+										aria-label={`Approve ${row.id}`}
+									>
+										Approve
+									</button>
+									<button
+										type="button"
+										className="drill__btn"
+										disabled={busy}
+										onClick={() => decide.mutate({ id: row.id, decision: "reject" })}
+										aria-label={`Reject ${row.id}`}
+									>
+										Reject
+									</button>
+								</span>
+								{note ? (
+									<p role="alert" className="drill__note drill__note--error memory-review__error">
+										{note.text}
+									</p>
+								) : null}
+							</li>
+						);
+					})}
+				</ul>
+			) : null}
+			{decided ? (
+				<p role="status" className="drill__note">
+					{decided}
+				</p>
+			) : null}
+		</div>
+	);
+}
