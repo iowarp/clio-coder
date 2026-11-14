@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { currentSecond, subscribeSecond } from "../client/api/second-clock.js";
 import {
 	accessSentence,
 	approvalActions,
+	approvalAnnouncement,
 	BUDGET_SECONDS,
 	bannerEyebrow,
 	CARD_EYEBROW,
+	callDecisions,
 	clampText,
 	decisionChips,
+	decisionRecord,
 	decisionRows,
 	decisionTone,
 	deriveApprovalTimings,
@@ -113,7 +117,7 @@ test("the safety facts carry access, countdown, posture and wait, in that order 
 	const timings = deriveApprovalTimings(value, REQUESTED + 30_000);
 	const facts = safetyFacts(value, [{ path: "src/core/config.ts", line: 11 }], timings);
 	assert.equal(facts.length, 4);
-	assert.equal(facts[0], "edit access to src/core/config.ts:12.");
+	assert.equal(facts[0], "Edits src/core/config.ts:12.");
 	assert.match(facts[1] ?? "", /^If unanswered, this turn stops in .+ \(at .+\)\.$/);
 	assert.equal(facts[2], SAFETY_POSTURE);
 	assert.equal(facts[2], "Nothing runs until you answer. The GUI never answers for you.");
@@ -121,8 +125,8 @@ test("the safety facts carry access, countdown, posture and wait, in that order 
 });
 
 test("a permission with no locations says so rather than naming nothing", () => {
-	assert.equal(accessSentence({ kind: "bash" }, undefined), "bash access to this turn.");
-	assert.equal(accessSentence({ kind: "bash" }, []), "bash access to this turn.");
+	assert.equal(accessSentence({ kind: "bash" }, undefined), "Acts on this turn.");
+	assert.equal(accessSentence({ kind: "bash" }, []), "Acts on this turn.");
 });
 
 test("locations are one-based for display and the fourth onward is counted, never dropped", () => {
@@ -711,7 +715,7 @@ test("a forwarded worker ask names the worker, who may discharge it, and what ha
 	);
 	assert.equal(rows[0]?.value, "scout (run run-7)");
 	assert.match(rows[1]?.value ?? "", /^Operator only\./);
-	assert.equal(rows[2]?.value, "The worker is denied after 60 seconds.");
+	assert.equal(rows[2]?.value, "The worker is refused after 60 seconds.");
 	const forwarded = workerAskRows({ ...WORKER, approvalAuthority: "main", forwardedByMain: true, fallback: "fail" });
 	assert.match(forwarded[1]?.value ?? "", /below yolo/);
 	assert.equal(forwarded[2]?.value, "The worker fails the call after 60 seconds.");
@@ -903,4 +907,51 @@ test("fleet failures show their outcome code and recovery detail in the row and 
 		presentFleetFact({ type: "fleet.failed", payload }).summary,
 		/merge_withheld: Host check also fails on base abc/,
 	);
+});
+
+// ---- inspection round 1: one vocabulary, one record, one second ------------------------------------
+
+test("the access sentence is a verb phrase, never a raw ACP kind", () => {
+	const at = [{ path: "fixture.txt" }];
+	assert.equal(accessSentence({ kind: "edit" }, at), "Edits fixture.txt.");
+	assert.equal(accessSentence({ kind: "execute" }, undefined), "Runs a command in this turn.");
+	assert.equal(accessSentence({ kind: "other" }, undefined), "Acts on this turn.");
+	assert.equal(accessSentence({ kind: "switch_mode" }, at), "Acts on fixture.txt.");
+	const spoken = approvalAnnouncement({ title: "write", kind: "edit" }, at);
+	assert.equal(spoken, "Approval needed: write. Edits fixture.txt. Nothing runs until you answer.");
+	assert.doesNotMatch(spoken, /access/);
+});
+
+test("an answered call keeps a record of its newest settled request, and waiting ones keep none", () => {
+	assert.equal(decisionRecord([permission()], "call-1"), null, "an awaiting request is the card, not a record");
+	const permissions = [
+		permission({ id: "p1", status: "rejected" }),
+		permission({ id: "p2", status: "allowed" }),
+		permission({ id: "p3", toolCallId: "call-2", status: "pending" }),
+	];
+	assert.deepEqual(decisionRecord(permissions, "call-1"), {
+		status: "allowed",
+		summary: resolutionSummary("allowed"),
+	});
+	assert.equal(decisionRecord(permissions, "call-2"), null);
+	assert.equal(decisionRecord(permissions, "call-9"), null);
+	const decisions = callDecisions(permissions);
+	assert.equal(decisions.get("call-1"), "allowed", "the newest request for a call wins");
+	assert.equal(decisions.get("call-2"), "pending");
+});
+
+test("every subscriber reads the same second, and the interval stops with the last one", (t) => {
+	t.mock.timers.enable({ apis: ["setInterval"] });
+	let calls = 0;
+	const first = subscribeSecond(() => (calls += 1));
+	const second = subscribeSecond(() => (calls += 1));
+	const start = currentSecond();
+	t.mock.timers.tick(1000);
+	assert.equal(calls, 2, "one tick notifies every subscriber");
+	assert.ok(currentSecond() >= start);
+	assert.equal(currentSecond(), currentSecond(), "the snapshot is cached between ticks");
+	first();
+	second();
+	t.mock.timers.tick(3000);
+	assert.equal(calls, 2, "no subscriber, no interval");
 });

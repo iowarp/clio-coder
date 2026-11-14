@@ -8,6 +8,7 @@ import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { useOperation } from "../api/queries.js";
 import { Switch } from "../design/Switch.js";
+import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
 import { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "./model-picker-model.js";
 import { ModelSelect } from "./model-select.js";
 import { StructuredSettingsEditor } from "./StructuredSettingsEditor.js";
@@ -455,6 +456,15 @@ export function SettingsControlsView({
 	const [selectedControl, setSelectedControl] = useState<string | null>(null);
 	const section = compact ? localDiscovery.section : search.get("section"),
 		filter = compact ? localDiscovery.q : (search.get("q") ?? "");
+	const searchBox = useSearchDraft(filter, (query) => {
+		setShowDrafts(false);
+		if (compact) {
+			setLocalDiscovery((current) => ({ ...current, q: query }));
+			setSelectedControl(null);
+			return;
+		}
+		setSearch(liveSearchWith("q", query), { replace: true });
+	});
 	const discover = (sectionId: string | null, query: string, replace = false) => {
 		if (compact) {
 			setLocalDiscovery({ section: sectionId, q: query });
@@ -618,14 +628,7 @@ export function SettingsControlsView({
 			</div>
 			<label className="settings-filter">
 				Find a setting
-				<input
-					type="search"
-					value={filter}
-					onChange={(event) => {
-						discover(section, event.target.value, true);
-						setShowDrafts(false);
-					}}
-				/>
+				<input type="search" value={searchBox.value} onChange={searchBox.onChange} />
 			</label>
 			{compact ? (
 				<div className="sidebar-settings__selection">

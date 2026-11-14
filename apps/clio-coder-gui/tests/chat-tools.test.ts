@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { activityDigest, summarizeActivity } from "../client/chat/activity.js";
 import {
 	ACP_TRUNCATION_MARKER,
 	CLIO_TRUNCATION_MARKER,
@@ -15,6 +16,7 @@ import {
 	applyPartialFrame,
 	basename,
 	describeTool,
+	dispatchTasks,
 	FAILURE_EXCERPT_MAX,
 	failureExcerpt,
 	formatBytes,
@@ -200,7 +202,7 @@ test("a refused write arrives as failed and still shows what was refused", () =>
 		isError: true,
 	});
 	assert.equal(panel.provenance, "rejected");
-	assert.equal(panel.label, "Not applied · not approved");
+	assert.equal(panel.label, "Not applied · refused");
 	assert.match(panel.note ?? "", /Nothing was written/);
 	assert.equal(panel.diff?.adds, 1);
 });
@@ -662,7 +664,7 @@ test("rows fold like Clio Coder's terminal: diffs stay visible, failures carry t
 
 // The registry's refusal ends with a line addressed to the model. The folded row must not echo it as
 // the call's one fact, and a refusal is not a tool fault.
-test("a call that was not approved says so on its row instead of echoing the refusal", () => {
+test("a call refused at its gate says so on its row instead of echoing the refusal", () => {
 	const refused = presentTool(
 		toolItem({
 			title: "write",
@@ -679,7 +681,7 @@ test("a call that was not approved says so on its row instead of echoing the ref
 			},
 		}),
 	);
-	assert.equal(refused.statusLabel, "Not approved");
+	assert.equal(refused.statusLabel, "Refused");
 	assert.equal(refused.digest, null);
 	assert.equal(refused.diff?.provenance, "rejected");
 	assert.equal(refused.diff?.diff?.adds, 1, "the refused change stays readable");
@@ -754,4 +756,95 @@ test("a settled call carries the span the engine measured, and only once it sett
 	assert.equal(presentTool(toolItem({ status: "failed", durationMs: 40 })).took, "40ms");
 	assert.equal(presentTool(toolItem({ status: "in_progress", durationMs: 1234 })).took, null);
 	assert.equal(presentTool(toolItem({ status: "completed" })).took, null, "an unreported span is not invented");
+});
+
+// ---- inspection round 1 -------------------------------------------------------------------------
+
+test("a whole-file proposal claims no removals it cannot know", () => {
+	const panel = diffPanel({
+		rawInput: { path: "/repo/fixture.txt", content: "approved\n" },
+		result: undefined,
+		resultText: "",
+		status: "pending",
+		isError: false,
+	});
+	assert.equal(panel.diff?.wholeFile, true);
+	assert.equal(diffCounts(panel.diff ?? parseDiff("")), "+1 · replaces file");
+	const card = presentTool(
+		toolItem({
+			title: "write",
+			toolKind: "edit",
+			status: "pending",
+			rawInput: { path: "/repo/fixture.txt", content: "approved\n" },
+		}),
+	);
+	assert.equal(card.digest, "+1 · replaces file");
+	assert.doesNotMatch(card.digest ?? "", /−0/);
+});
+
+test("a call refused at its gate reads Rejected only when the operator rejected it", () => {
+	const settled = toolItem({
+		title: "write",
+		toolKind: "edit",
+		status: "failed",
+		toolCallId: "c1",
+		rawInput: { path: "/repo/fixture.txt", content: "approved\n" },
+		rawOutput: { result: { kind: "error", message: "write blocked: write was not approved" }, isError: true },
+	});
+	const rejected = presentTool(settled, { decision: "rejected" });
+	assert.equal(rejected.statusLabel, "Rejected");
+	assert.equal(rejected.diff?.label, "Not applied · rejected");
+	const refused = presentTool(settled, { decision: "cancelled" });
+	assert.equal(refused.statusLabel, "Refused");
+	assert.equal(refused.diff?.label, "Not applied · refused");
+	for (const card of [rejected, refused])
+		assert.doesNotMatch(`${card.statusLabel} ${card.diff?.label}`, /not approved|denied/i);
+});
+
+test("a dispatch batch names every run instead of 'no task preview'", () => {
+	const input = {
+		tasks: [
+			{ agent: "scout", task: "map the repo" },
+			{ agent: "writer", task: "draft the notes" },
+		],
+	};
+	assert.deepEqual(dispatchTasks(input), [
+		{ agent: "scout", task: "map the repo" },
+		{ agent: "writer", task: "draft the notes" },
+	]);
+	assert.deepEqual(dispatchTasks({ agent: "scout", tasks: ["a", "b"] }), [
+		{ agent: "scout", task: "a" },
+		{ agent: "scout", task: "b" },
+	]);
+	assert.deepEqual(dispatchTasks({ agent: "scout", task: "one" }), [{ agent: "scout", task: "one" }]);
+	const card = presentTool(toolItem({ title: "dispatch", rawInput: input }));
+	assert.match(card.headline, /^2 runs · scout, writer/);
+	assert.doesNotMatch(card.headline, /no task preview/);
+	assert.deepEqual(
+		card.facts.filter((fact) => fact.label.includes("·")).map((fact) => fact.value),
+		["map the repo", "draft the notes"],
+	);
+});
+
+test("a pending call waits on its approval or is queued, and is never counted as running", () => {
+	const gated = toolItem({ id: "a", toolCallId: "a", status: "pending" });
+	const next = toolItem({ id: "b", toolCallId: "b", status: "pending" });
+	const waiting = summarizeActivity([gated, next], new Map([["a", "pending"]]));
+	assert.deepEqual([waiting.running, waiting.waiting, waiting.queued], [0, 1, 1]);
+	assert.equal(waiting.label, "Approval needed · 1 queued");
+	const queued = summarizeActivity([next]);
+	assert.deepEqual([queued.running, queued.queued, queued.label], [0, 1, "1 tool queued"]);
+	const refusal = { result: { kind: "error", message: "write blocked: write was not approved" }, isError: true };
+	const change = toolItem({
+		id: "w",
+		toolCallId: "w",
+		title: "write",
+		toolKind: "edit",
+		status: "failed",
+		rawInput: { path: "/repo/a.py" },
+		rawOutput: refusal,
+	});
+	assert.equal(activityDigest([change], new Map([["w", "rejected"]])), "1 change rejected");
+	assert.equal(activityDigest([change]), "1 change refused");
+	assert.equal(summarizeActivity([change], new Map([["w", "rejected"]])).label, "1 tool rejected");
 });

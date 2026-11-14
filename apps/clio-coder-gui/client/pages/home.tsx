@@ -17,6 +17,7 @@ import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
 import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS } from "./home-draft-model.js";
+import { settleStarted } from "./started-request.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
 import "./home.css";
@@ -172,6 +173,8 @@ export function Home({ client }: { client: Client }) {
 	const draft = useSyncExternalStore(subscribeHomeDraft, homeDraft);
 	const busy = useSyncExternalStore(subscribeHomeDraft, firstRequestBusy);
 	const { text, pending } = draft;
+	// A start whose task screen never mounted (a later navigation won) must not leave Home busy.
+	useEffect(() => settleStarted(), []);
 	const limitId = `${fieldId}-limit`;
 	const textIssue =
 		draft.textIssue === "too-large"

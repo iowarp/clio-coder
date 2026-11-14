@@ -544,6 +544,7 @@ test("tool time names how many calls it measured, and compactions are counted pe
 		toolMs: 4200,
 		slowest: { name: "Run tests", ms: 3900 },
 		compactions: 1,
+		notApplied: 0,
 	});
 	assert.deepEqual(view.nerd.slice(1), [
 		{ label: "Tool time", value: "4.2 s over 2 of 3" },
@@ -707,4 +708,18 @@ test("Ctrl+R finds sent messages by what they said, newest first, each once", ()
 	assert.ok(taken);
 	assert.deepEqual(stepHistory(sent, { index: taken.index, stash: "my draft" }, "newer", taken.text)?.text, "deploy");
 	assert.deepEqual(stepHistory(sent, { index: 3, stash: "my draft" }, "newer", "x"), { browse: null, text: "my draft" });
+});
+
+test("a finished turn that left a change unapplied is not a green Done, and one token is singular", () => {
+	const clean = turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 1 });
+	assert.equal(clean.tone, "success");
+	const unapplied = turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 1, notApplied: 1 });
+	assert.equal(unapplied.tone, "neutral");
+	assert.ok(unapplied.facts.includes("1 change not applied"));
+	assert.ok(
+		turnOutcome(turn({ usage: null }), { ...NO_ACTIVITY, tools: 2, notApplied: 2 }).facts.includes(
+			"2 changes not applied",
+		),
+	);
+	assert.equal(draftEstimate("hi", { files: [], images: 0 })?.text, "~1 token");
 });

@@ -241,7 +241,11 @@ test("summarizeActivity derives a label and a tone from statuses alone", () => {
 	const cases: ReadonlyArray<readonly [readonly TimelineItem[], string, string]> = [
 		[[tool("a", "completed"), tool("b", "completed"), tool("c", "completed")], "3 tools completed", "success"],
 		[[tool("a", "completed")], "1 tool completed", "success"],
-		[[tool("a", "in_progress"), tool("b", "pending"), tool("c", "completed")], "2 tools running · 1 done", "action"],
+		[
+			[tool("a", "in_progress"), tool("b", "pending"), tool("c", "completed")],
+			"1 tool running · 1 done · 1 queued",
+			"action",
+		],
 		[[tool("a", "failed"), tool("b", "completed"), tool("c", "completed")], "1 tool failed · 2 completed", "error"],
 		[[tool("a", "cancelled"), tool("b", "rejected")], "2 tools stopped", "neutral"],
 		[[tool("a", "completed"), tool("b", "expired")], "1 tool completed · 1 stopped", "success"],
@@ -830,12 +834,12 @@ test("a group only says it changed a file when the change landed", () => {
 		"changed 2 files",
 		"edits and writes share one phrase",
 	);
-	assert.equal(activityDigest([change("a", "write", "a.py", "failed", refusal)]), "1 change not approved");
+	assert.equal(activityDigest([change("a", "write", "a.py", "failed", refusal)]), "1 change refused");
 	assert.equal(activityDigest([change("a", "write", "a.py", "failed", broke)]), "1 change failed");
 	assert.equal(activityDigest([change("a", "edit", "a.py", "cancelled")]), "1 change stopped");
 	assert.equal(
 		activityDigest([change("a", "edit", "a.py", "completed"), change("b", "write", "b.py", "failed", refusal)]),
-		"changed 1 file, 1 change not approved",
+		"changed 1 file, 1 change refused",
 	);
 });
 
@@ -1018,10 +1022,10 @@ test("a refused call and a stopped run end without breaking, so groups count the
 		},
 	});
 	const alone = summarizeActivity([refused]);
-	assert.deepEqual([alone.label, alone.tone, alone.failed, alone.declined], ["1 tool not approved", "neutral", 0, 1]);
+	assert.deepEqual([alone.label, alone.tone, alone.failed, alone.declined], ["1 tool refused", "neutral", 0, 1]);
 	assert.equal(activityGlyph(alone), "–");
 	const both = summarizeActivity([refused, stopped]);
-	assert.deepEqual([both.label, both.tone, both.attention], ["1 tool not approved · 1 stopped", "neutral", false]);
+	assert.deepEqual([both.label, both.tone, both.attention], ["1 tool refused · 1 stopped", "neutral", false]);
 	const mixed = summarizeActivity([tool("a", "completed"), tool("b", "completed"), stopped]);
 	assert.deepEqual([mixed.label, mixed.tone], ["2 tools completed · 1 stopped", "success"]);
 	// A real failure still outranks them.

@@ -138,6 +138,10 @@ export interface ReportControls {
 	readonly gates: readonly string[];
 	/** The credit checkbox label, naming what the current choice sends. */
 	readonly creditLabel: string;
+	/** Next and the step tabs; off until the host has planned a preview to show. */
+	readonly stepsEnabled: boolean;
+	/** The host could not plan the report, so the dialog offers to ask again. */
+	readonly retry: boolean;
 }
 
 function creditLabel(state: ReportDialogState): string {
@@ -146,15 +150,21 @@ function creditLabel(state: ReportDialogState): string {
 
 export function reportControls(state: ReportDialogState): ReportControls {
 	const view = state.view;
-	if (view === null)
+	if (view === null) {
+		const failed = state.error !== null && state.busy === null;
 		return {
-			destination: "Preparing the report; nothing sent yet",
+			destination: failed
+				? "CLIO Coder could not prepare the report; nothing sent"
+				: "Preparing the report; nothing sent yet",
 			sendEnabled: false,
-			sendBlocked: "Preparing",
+			sendBlocked: failed ? "No preview yet" : "Preparing",
 			actions: [],
 			gates: [],
 			creditLabel: creditLabel(state),
+			stepsEnabled: false,
+			retry: failed,
 		};
+	}
 	const sent = state.outcome?.status === "sent";
 	const blocked = sent
 		? "Already sent"
@@ -178,6 +188,8 @@ export function reportControls(state: ReportDialogState): ReportControls {
 		actions: view.plan.actions.map((action, index) => `${index + 1}. ${action}`),
 		gates: view.plan.gates,
 		creditLabel: creditLabel(state),
+		stepsEnabled: true,
+		retry: false,
 	};
 }
 

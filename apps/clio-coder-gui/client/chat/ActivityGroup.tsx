@@ -27,7 +27,7 @@ import {
 	toolStatusLabel,
 	workerLabel,
 } from "./activity.js";
-import { isAwaitingAnswer } from "./approval-model.js";
+import { callDecisions, isAwaitingAnswer } from "./approval-model.js";
 import { observeStart } from "./chat-turn.js";
 import { ReasoningDisclosure } from "./Reasoning.js";
 import { WorkerRunRecord } from "./RunRecordLine.js";
@@ -47,22 +47,37 @@ export interface ActivityGroupProps {
 }
 
 /**
- * A row reads only the session's id and the request gating its own call, so a delta that touches
- * neither leaves it alone; the comparators below check exactly those.
+ * A row reads only the session's id, the request gating its own call and the decision its call last
+ * got, so a delta that touches none of those leaves it alone; the comparators below check exactly those.
+ * A decision is compared by value: an answered request leaves the awaiting set, and its record and the
+ * group's tallies follow what it was answered with.
  */
 function sameSessionFor(previous: SessionSnapshot, next: SessionSnapshot, items: readonly TimelineItem[]) {
 	if (previous.id !== next.id) return false;
 	if (previous.permissions === next.permissions) return true;
-	return items.every((item) => permissionForCall(previous, item) === permissionForCall(next, item));
+	const before = callDecisions(previous.permissions);
+	const after = callDecisions(next.permissions);
+	return items.every(
+		(item) =>
+			permissionForCall(previous, item) === permissionForCall(next, item) &&
+			(item.toolCallId === undefined || before.get(item.toolCallId) === after.get(item.toolCallId)),
+	);
 }
 
-const ActivityRow = memo(function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRowProps) {
+const ActivityRow = memo(function ActivityRow({
+	item,
+	client,
+	session,
+	workspaceRoot,
+	nowMs,
+	decision,
+}: ActivityRowProps) {
 	const startedAtMs = observeStart(item.id, nowMs);
 	const elapsedMs = nowMs === 0 ? 0 : Math.max(0, nowMs - startedAtMs);
 	// A fresh object per render would defeat ToolCard's memo on every streamed delta.
 	const options = useMemo(
-		() => ({ ...(workspaceRoot === undefined ? {} : { workspaceRoot }), nowMs, startedAtMs }),
-		[workspaceRoot, nowMs, startedAtMs],
+		() => ({ ...(workspaceRoot === undefined ? {} : { workspaceRoot }), nowMs, startedAtMs, decision }),
+		[workspaceRoot, nowMs, startedAtMs, decision],
 	);
 	return (
 		<li className="activity__row" data-kind={item.kind}>
@@ -97,6 +112,7 @@ function sameActivityRow(previous: ActivityRowProps, next: ActivityRowProps): bo
 		previous.client === next.client &&
 		previous.workspaceRoot === next.workspaceRoot &&
 		previous.nowMs === next.nowMs &&
+		previous.decision === next.decision &&
 		sameSessionFor(previous.session, next.session, [next.item])
 	);
 }
@@ -107,6 +123,8 @@ interface ActivityRowProps {
 	readonly session: SessionSnapshot;
 	readonly workspaceRoot: string | undefined;
 	readonly nowMs: number;
+	/** The status of the newest approval request for this call, which names a declined change. */
+	readonly decision: string | undefined;
 }
 
 function sameActivityGroup(previous: ActivityGroupProps, next: ActivityGroupProps): boolean {
@@ -134,7 +152,8 @@ export const ActivityGroup = memo(function ActivityGroup({
 }: ActivityGroupProps) {
 	// Null means "nobody has touched this". Once the operator toggles, their choice wins forever.
 	const [userOpen, setUserOpen] = useState<boolean | null>(null);
-	const summary = summarizeActivity(items);
+	const decisions = useMemo(() => callDecisions(session.permissions), [session.permissions]);
+	const summary = summarizeActivity(items, decisions);
 	const running = runningItem(items);
 	// While a request is waiting, its card is the statement; the engine's "pending" notice beside it
 	// says the same thing twice. Once answered, the notice is the record.
@@ -151,7 +170,11 @@ export const ActivityGroup = memo(function ActivityGroup({
 		presentTool(only, workspaceRoot === undefined ? {} : { workspaceRoot }).body !== "diff";
 	const open = solo || activityOpen(userOpen, settled, summary);
 	const detail =
-		summary.waiting > 0 ? null : running !== null ? describeTool(running, workspaceRoot) : activityDigest(items);
+		summary.waiting > 0
+			? null
+			: running !== null
+				? describeTool(running, workspaceRoot)
+				: activityDigest(items, decisions);
 	return (
 		<details
 			className={`activity activity--${summary.tone}${solo ? " activity--solo" : ""}`}
@@ -178,6 +201,7 @@ export const ActivityGroup = memo(function ActivityGroup({
 							session={session}
 							workspaceRoot={workspaceRoot}
 							nowMs={item.status === "in_progress" ? nowMs : 0}
+							decision={item.toolCallId === undefined ? undefined : decisions.get(item.toolCallId)}
 						/>
 					))}
 				</ul>

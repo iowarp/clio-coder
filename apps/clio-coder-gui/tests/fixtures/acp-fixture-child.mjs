@@ -194,6 +194,41 @@ const planPermission = async () => {
 	const result = await promise;
 	const approved = result?.outcome?.optionId === "allow-once";
 	log({ planPermission: result, approved });
+	if (approved) {
+		// The approved plan runs its tasks the way the engine reports them, spaced so the Agents panel
+		// shows each run arrive, start and finish.
+		const runs = tasks.map((task, index) => ({
+			runId: `run-plan-${writeCalls}-${index + 1}`,
+			agentId: task.agent,
+			taskPreview: task.task,
+			node: null,
+			origin: "tool",
+			attempt: 1,
+		}));
+		for (const identity of runs) event("run.enqueued", identity);
+		await delay(40);
+		for (const identity of runs) {
+			event("run.started", identity);
+			await delay(40);
+		}
+		for (const [index, identity] of runs.entries()) {
+			event(
+				"run.completed",
+				{
+					runId: identity.runId,
+					agentId: identity.agentId,
+					outcome: "success",
+					outcomeCode: "done",
+					durationMs: 80 + index * 40,
+					totalTokens: { kind: "measured", value: 23, source: "provider" },
+					apiCalls: { kind: "measured", value: 2, source: "local-count" },
+					tokenDisplay: "23",
+				},
+				true,
+			);
+			await delay(40);
+		}
+	}
 	update({
 		sessionUpdate: "tool_call_update",
 		toolCallId,

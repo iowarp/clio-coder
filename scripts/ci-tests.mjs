@@ -192,6 +192,7 @@ export const coreTests = [
 
 export const guiTests = [
 	"report-dialog-model",
+	"search-draft-model",
 	"setup-wizard-model",
 	"chat-composer",
 	"slash-model",
@@ -199,6 +200,7 @@ export const guiTests = [
 	"chat-interview",
 	"chat-turns",
 	"egress-policy",
+	"http-meta",
 	"sessions-http",
 	"targets-http",
 	"library-http",

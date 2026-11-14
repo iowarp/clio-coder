@@ -9,7 +9,7 @@
 // the model spoke first.
 
 import type { Turn } from "../../contracts/sessions.js";
-import { workerLabel } from "./activity.js";
+import { unappliedChange, workerLabel } from "./activity.js";
 import type { TurnActivity } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
 import type { ChatTurn } from "./turns.js";
@@ -117,16 +117,18 @@ export function turnActivity(turn: ChatTurn, compactions: number): TurnActivity 
 	let timed = 0;
 	let toolMs = 0;
 	let slowest: TurnActivity["slowest"] = null;
+	let notApplied = 0;
 	for (const item of turn.items) {
 		if (item.kind !== "tool") continue;
 		tools += 1;
+		if (unappliedChange(item)) notApplied += 1;
 		if (item.durationMs === undefined) continue;
 		timed += 1;
 		toolMs += item.durationMs;
 		if (slowest === null || item.durationMs > slowest.ms)
 			slowest = { name: (item.title ?? item.text).slice(0, 48), ms: item.durationMs };
 	}
-	return { tools, timed, toolMs, slowest, compactions };
+	return { tools, timed, toolMs, slowest, compactions, notApplied };
 }
 
 export function toolCount(turn: ChatTurn): number {

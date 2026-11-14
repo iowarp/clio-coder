@@ -222,6 +222,11 @@
 .library-resources {
 	border-top: 1px solid var(--line-strong);
 }
+/* A search keeps a screen of room under the box: a narrowed list never shortens the page beneath it, so the
+   scroll is never clamped and the box does not move as the first character is typed. */
+.library-resources[data-searching] {
+	min-block-size: 100dvh;
+}
 .library-resource {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
