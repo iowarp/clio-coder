@@ -861,8 +861,18 @@ export function appendPersistedTelemetry(result: CallJournalRead, batch: { bytes
 	appendReadSegment(result, batch.bytes, batch.origin);
 }
 
+/** A cold read of a journal whose segments, oldest first, the caller already read and scanned. */
+export function callJournalReadOfScans(scans: readonly SegmentScan[]): CallJournalRead {
+	const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+	for (const scan of scans) appendScannedSegment(result, scan);
+	return result;
+}
+
 function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: ClockOrigin): void {
-	const scan = scanTelemetrySegment(bytes);
+	appendScannedSegment(result, scanTelemetrySegment(bytes), continuing);
+}
+
+function appendScannedSegment(result: CallJournalRead, scan: SegmentScan, continuing?: ClockOrigin): void {
 	if (scan.tornTailBytes > 0) result.damaged += 1;
 	if (continuing) result.writer = continuing;
 	foldSegmentRows(result, scan.rows, continuing);
