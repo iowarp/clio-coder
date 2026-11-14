@@ -2424,6 +2424,250 @@ try {
 			for (let index = statuses.length - 1; index >= 0; index--)
 				if (statuses[index]?.path.includes(missing)) statuses.splice(index, 1);
 		});
+		// Geometry from inspection round 1 (spec 16b) at fixed viewports, so it runs once, not per width.
+		if (runIndex === 0 && zoom === 1)
+			await step("polish geometry", async () => {
+				const sizes = [
+					{ width: 1440, height: 900 },
+					{ width: 390, height: 844 },
+				];
+				await page.goto(`${origin}/#${await launch()}`);
+				await page.getByRole("heading", { level: 1 }).waitFor();
+				for (const size of sizes) {
+					await page.setViewportSize(size);
+					const at = `${size.width}x${size.height}`;
+					// Library: the tab row clears the heading, "Show" clears the search row, and a clamped description
+					// carries its whole text.
+					await page.goto(`${origin}/library`);
+					await page.locator("main .library-packages > li").first().waitFor();
+					const library = await page.evaluate(() => {
+						// No named helper: tsx would wrap it in a `__name` call the page does not define.
+						const [tabs, heading, search, show] = [
+							".library-page .settings-tabs",
+							'.library-page > [role="tabpanel"] > h2',
+							'.library-page > [role="tabpanel"] > .settings-filter',
+							".library-facets > legend",
+						].map((selector) => document.querySelector(selector)?.getBoundingClientRect() ?? null);
+						const untitled = [...document.querySelectorAll<HTMLElement>(".library-package__identity p")]
+							.filter((node) => node.scrollHeight > node.clientHeight && !node.title.trim())
+							.map((node) => node.textContent?.slice(0, 40) ?? "");
+						return {
+							tabsGap: tabs && heading ? heading.top - tabs.bottom : null,
+							showGap: search && show ? show.top - search.bottom : null,
+							untitled,
+						};
+					});
+					assert.ok((library.tabsGap ?? -1) >= 16, `library tabs touch the heading at ${at}: ${library.tabsGap}`);
+					assert.ok((library.showGap ?? -1) >= 12, `"Show" hugs the search row at ${at}: ${library.showGap}`);
+					assert.deepEqual(library.untitled, [], `a clamped library description has no title at ${at}`);
+					// Home: the hero stays put while the starters leave and Task settings opens.
+					await page.goto(`${origin}/`);
+					const hero = page.locator(".newtask__title");
+					await hero.waitFor();
+					const heroTop = () => hero.evaluate((node) => node.getBoundingClientRect().top);
+					const resting = await heroTop();
+					await composerField.fill("x");
+					await page.locator(".newtask__starters").waitFor({ state: "detached" });
+					const typed = await heroTop();
+					await page.locator(".newtask__context > summary").click();
+					const settingsOpen = await heroTop();
+					await composerField.fill("");
+					for (const [state, top] of [
+						["typing", typed],
+						["Task settings", settingsOpen],
+					] as const)
+						assert.ok(Math.abs(top - resting) <= 1, `Home's hero moved ${top - resting}px on ${state} at ${at}`);
+					// Evidence: run cards and the bundle heading tell runs by one agent apart; the eyebrow says it reads.
+					await page.goto(`${origin}/evidence`);
+					await page.locator("main .inspection-card-title a").first().waitFor();
+					const titles = await page.locator("main .inspection-card-title").allInnerTexts();
+					assert.equal(new Set(titles).size, titles.length, `two evidence cards share a title at ${at}`);
+					assert.match(await page.locator("main .eyebrow").first().innerText(), /read and recheck$/iu);
+					await page.locator("main .inspection-card-title a").first().click();
+					await page.locator("main").getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
+					assert.match(await page.locator("main .panel-heading h1").innerText(), / · /u);
+					assert.match(await page.locator("main .eyebrow").first().innerText(), /read and recheck$/iu);
+					// Fleet: a run that has not ended promises its record instead of reporting it missing.
+					await page.goto(`${origin}/fleet`);
+					await page.locator("main #fleet-workers").waitFor();
+					await page.locator("main .trace-panel .panel-marks").first().waitFor();
+					const cards = await page.locator("main .trace-panel:has(.panel-marks)").evaluateAll((nodes) =>
+						nodes.map((node) => ({
+							status: node.querySelector(".panel-marks .status-mark")?.textContent?.trim() ?? "",
+							text: (node as HTMLElement).innerText,
+						})),
+					);
+					const running = cards.filter((card) => /running/iu.test(card.status));
+					assert.ok(running.length > 0, `no running dispatch card to check at ${at}`);
+					for (const card of running) {
+						assert.match(card.text, /Record written when the run ends/u);
+						assert.doesNotMatch(card.text, /no run record/iu);
+					}
+					assert.ok(
+						cards.some((card) => !/running/iu.test(card.status) && !/Record written when the run ends/u.test(card.text)),
+						`no settled dispatch card kept its integrity line at ${at}`,
+					);
+				}
+				await page.setViewportSize({ width: 1440, height: 900 });
+				// Sessions: the rail marks the Sessions page, not a task page, and opening a section does not move it.
+				const sessionsLink = page.locator('.wb-sidebar a.wb-action[href="/sessions"]');
+				await page.goto(`${origin}/`);
+				await revealSidebar();
+				const restingShadow = await sessionsLink.evaluate((node) => getComputedStyle(node).boxShadow);
+				await sessionsLink.click();
+				await page.waitForURL(`${origin}/sessions`);
+				assert.equal(await sessionsLink.getAttribute("aria-current"), "page");
+				assert.notEqual(await sessionsLink.evaluate((node) => getComputedStyle(node).boxShadow), restingShadow);
+				const missionInner = page.locator("main .mission__inner");
+				await missionInner.waitFor();
+				assert.equal(
+					await page.locator("main .mission").evaluate((node) => getComputedStyle(node).scrollbarGutter),
+					"stable",
+				);
+				const metrics = page.locator("main .operator-records > summary");
+				if (await metrics.count()) {
+					const box = () => missionInner.evaluate((node) => node.getBoundingClientRect().toJSON() as DOMRect);
+					const before = await box();
+					await metrics.click();
+					const after = await box();
+					assert.ok(
+						Math.abs(after.left - before.left) <= 0.5 && Math.abs(after.width - before.width) <= 0.5,
+						`Sessions shifted when Recorded metrics opened: ${JSON.stringify({ before, after })}`,
+					);
+				}
+				// Task header: a 40-character name is whole at 1440px, and narrower it gives way only to a full bar.
+				await page.goto(workspaceUrl);
+				// The harness Clio never saves a task, so it cannot be renamed here: the name is the first request.
+				const longTitle = "Renamed convergence check for the sensors";
+				await page.locator("main button.primary", { hasText: "New task" }).click();
+				await page.waitForURL(`${origin}/`);
+				await composerField.fill(longTitle);
+				await page.getByRole("button", { name: "Start task", exact: true }).click();
+				await page.waitForURL(/\/sessions\/[^/]+$/);
+				const sessionPath = new URL(page.url()).pathname;
+				await page.locator(".chat-turn.is-settled").first().waitFor();
+				await settled();
+				// A docked task pane narrows the bar; the header is measured on its own.
+				await closePane();
+				assert.equal(await sessionsLink.getAttribute("aria-current"), null, "Sessions is marked current on a task page");
+				await page.locator(".conversation .wb-bar__rename", { hasText: longTitle }).waitFor();
+				const bar = () =>
+					page.locator(".conversation .wb-bar").evaluate((node) => {
+						const style = getComputedStyle(node);
+						const inner = node.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+						const children = [...node.children].filter((child) => getComputedStyle(child).display !== "none");
+						const used =
+							children.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0) +
+							parseFloat(style.columnGap || "0") * Math.max(0, children.length - 1);
+						const title =
+							node.querySelector<HTMLElement>(".wb-bar__rename") ?? node.querySelector<HTMLElement>(".wb-bar__title");
+						const last = children.at(-1)?.getBoundingClientRect();
+						const readings = node.querySelector(".wb-bar__readings");
+						const shelf = readings?.getBoundingClientRect();
+						return {
+							whole: title !== null && title.scrollWidth <= title.clientWidth,
+							unused: inner - used,
+							// A reading that wraps onto the bar's hidden second line is not shown.
+							readingsWhole:
+								shelf === undefined ||
+								[...(readings?.children ?? [])].every((child) => child.getBoundingClientRect().bottom <= shelf.bottom + 0.5),
+							lastInside: last !== undefined && last.right <= node.getBoundingClientRect().right + 0.5,
+						};
+					});
+				for (const size of [
+					{ width: 1440, height: 900 },
+					{ width: 1050, height: 900 },
+					{ width: 768, height: 900 },
+				]) {
+					await page.setViewportSize(size);
+					await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+					const measured = await bar();
+					assert.ok(measured.lastInside, `the bar's last control left the bar at ${size.width}px`);
+					// At 1440px the name gives way only to readings that all show whole and fill the bar.
+					if (size.width === 1440)
+						assert.ok(
+							measured.whole || (measured.readingsWhole && measured.unused < 8),
+							`the task's name is cut beside ${measured.unused}px of free bar at 1440px`,
+						);
+					else
+						assert.ok(
+							measured.whole || measured.unused < 8,
+							`the task's name is cut beside ${measured.unused}px of free bar at ${size.width}px`,
+						);
+				}
+				// Header menu: one line per item, the panel inside the window.
+				for (const size of sizes) {
+					await page.setViewportSize(size);
+					await taskMenu.locator("summary").click();
+					const menu = await taskMenu.locator(".wb-menu__panel").evaluate((panel) => {
+						const heights = [...panel.querySelectorAll('[role="menuitem"]')].map(
+							(item) => item.getBoundingClientRect().height,
+						);
+						return {
+							spread: Math.max(...heights) - Math.min(...heights),
+							right: panel.getBoundingClientRect().right,
+							innerWidth,
+						};
+					});
+					assert.ok(menu.spread <= 1, `a header menu item wraps at ${size.width}px: ${menu.spread}px taller`);
+					assert.ok(menu.right <= menu.innerWidth, `the header menu leaves the window at ${size.width}px`);
+					await page.keyboard.press("Escape");
+				}
+				await page.setViewportSize({ width: 1440, height: 900 });
+				await page.goto(`${origin}${sessionPath}`);
+				await composerField.waitFor();
+				// Help: the Documentation view names itself once, in its tab.
+				await page.keyboard.press("Control+/");
+				const help = page.getByRole("dialog", { name: "Shortcuts & help", exact: true });
+				await help.getByRole("button", { name: "Documentation", exact: true }).click();
+				await help.getByRole("link", { name: "Open public documentation ↗", exact: true }).waitFor();
+				assert.equal(
+					await help.evaluate(
+						(node) =>
+							[...node.querySelectorAll("*")].filter(
+								(element) =>
+									element.textContent?.trim() === "Documentation" &&
+									![...element.children].some((child) => child.textContent?.trim() === "Documentation"),
+							).length,
+					),
+					1,
+					"Documentation is named more than once in its own view",
+				);
+				await page.keyboard.press("Escape");
+				// Markdown: a pressed Wrap shows its state without weight, and a refused link reads as plain text.
+				const wrap = page.locator(".chat-transcript .code-block__head button", { hasText: "Wrap" }).first();
+				await wrap.scrollIntoViewIfNeeded();
+				const wrapLook = async () => {
+					await page.mouse.move(0, 0);
+					return wrap.evaluate((node) => {
+						const style = getComputedStyle(node);
+						return { boxShadow: style.boxShadow, borderColor: style.borderColor };
+					});
+				};
+				assert.equal(await wrap.getAttribute("aria-pressed"), "false");
+				const unpressed = await wrapLook();
+				await wrap.click();
+				assert.equal(await wrap.getAttribute("aria-pressed"), "true");
+				assert.notDeepEqual(await wrapLook(), unpressed, "a pressed Wrap looks like an unpressed one at rest");
+				await wrap.click();
+				const blocked = page.locator(".chat-transcript .md-link--blocked").first();
+				await blocked.scrollIntoViewIfNeeded();
+				const blockedLook = await blocked.evaluate((node) => {
+					const style = getComputedStyle(node);
+					return {
+						border: style.borderBottomStyle,
+						decoration: style.textDecorationLine,
+						cursor: style.cursor,
+						text: (node as HTMLElement).innerText,
+					};
+				});
+				assert.deepEqual(
+					{ border: blockedLook.border, decoration: blockedLook.decoration, cursor: blockedLook.cursor },
+					{ border: "none", decoration: "none", cursor: "default" },
+				);
+				assert.match(blockedLook.text, /\(link blocked\)/u);
+				await page.setViewportSize({ width, height: 1050 });
+			});
 		await context.close();
 		if (zoom === 2) zoomContext = null;
 	}

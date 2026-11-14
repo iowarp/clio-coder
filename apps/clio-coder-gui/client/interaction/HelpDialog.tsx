@@ -67,6 +67,10 @@ export function HelpReferenceBody({
 	const inputId = useId();
 	const contentId = useId();
 	const content = helpContent(query, view);
+	// A view whose only section shares the tab's name would print that name twice; the tab already says it.
+	const viewTitle = HELP_VIEWS.find((item) => item.id === view)?.title;
+	const soleSectionNamed =
+		!content.searching && content.sections.length === 1 && content.sections[0]?.section.title === viewTitle;
 	return (
 		<div className="help-reference">
 			<div className="help-toolbar">
@@ -164,7 +168,7 @@ export function HelpReferenceBody({
 					{content.sections.map((match) =>
 						content.searching || match.section.id === "documentation" ? (
 							<section className="help-topic" key={match.section.id} aria-label={match.section.title}>
-								<h3>{match.section.title}</h3>
+								{soleSectionNamed ? null : <h3>{match.section.title}</h3>}
 								<p>{match.section.lede}</p>
 								<HelpEntries match={match} bundledDocsPath={bundledDocsPath} />
 							</section>

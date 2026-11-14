@@ -28,7 +28,7 @@ export const MUTABILITIES = [
 	"check only",
 	"detect only",
 	"detect and answer offers",
-	"recheck",
+	"read and recheck",
 	"install and remove",
 	"edit your user layer",
 	"add, probe and remove",
@@ -38,13 +38,13 @@ export const MUTABILITIES = [
 
 export const PANELS = {
 	evidenceInventory: {
-		eyebrow: eyebrow("Run evidence", "installation-wide", "recheck"),
+		eyebrow: eyebrow("Run evidence", "installation-wide", "read and recheck"),
 		title: "Evidence",
 		boundary:
 			"Each run's evidence is read from its sealed run scope on this installation. Rechecking runs the same CLIO Coder command you would run yourself, on this machine; no run is edited and nothing is uploaded.",
 	},
 	evidenceBundle: {
-		eyebrow: eyebrow("Run evidence", "one dispatch run", "recheck"),
+		eyebrow: eyebrow("Run evidence", "one dispatch run", "read and recheck"),
 		title: "Evidence",
 		boundary:
 			"A run's assessment is reproduced as it was sealed when the run settled. Its scope stays on this machine, and nothing here re-runs the work it describes.",

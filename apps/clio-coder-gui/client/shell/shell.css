@@ -255,11 +255,12 @@
 	color: var(--ink-muted);
 	letter-spacing: 0.02em;
 }
-.wb-action[data-active="true"] {
+/* A router link marks its page with aria-current; a button marks its view with data-active. */
+.wb-action:is([data-active="true"], [aria-current="page"]) {
 	background: var(--accent-soft);
 	box-shadow: inset 2px 0 0 var(--accent);
 }
-.wb-action[data-active="true"] .icon {
+.wb-action:is([data-active="true"], [aria-current="page"]) .icon {
 	color: var(--accent);
 }
 
@@ -913,7 +914,10 @@ button.wb-chip:hover:not(:disabled) {
 }
 /* The live readings take the room the title leaves, right-aligned, and shrink only once the title and the project's
    name are at their minimums. A reading that still does not fit wraps onto a second line the bar hides, so it shows
-   whole or not at all, and the controls after it never leave the bar. */
+   whole or not at all, and the controls after it never leave the bar.
+   On a wide bar the basis is every reading on one line, so a long title gives way before a reading does. Once the
+   bar is narrow enough that some reading will wrap out anyway, the basis drops to one ring's width, so the title is
+   not squeezed for readings nobody sees. */
 .wb-bar__readings {
 	display: flex;
 	flex: 1 1 auto;
@@ -937,6 +941,21 @@ button.wb-chip:hover:not(:disabled) {
 	.wb-bar__end .wb-icon--text > span:not(.diffstat, .pane-attention),
 	.wb-bar__end .conversation__find > span {
 		display: none;
+	}
+}
+@container bar (max-width: 60rem) {
+	.wb-bar__readings {
+		flex-basis: 0;
+		min-width: 5.5rem;
+	}
+}
+/* On a phone-width bar the readings and the project's name give up their room before the controls leave the bar. */
+@container bar (max-width: 30rem) {
+	.wb-bar__readings {
+		min-width: 0;
+	}
+	.wb-bar .wb-chip--place {
+		min-width: min(6ch, 20%);
 	}
 }
 @container bar (max-width: 760px) {
@@ -1038,6 +1057,8 @@ button.wb-chip:hover:not(:disabled) {
 	z-index: 20;
 	display: grid;
 	gap: 1px;
+	/* As wide as its longest item, so each item is one line; the cap keeps a long project name on screen. */
+	width: max-content;
 	min-width: 12.5rem;
 	max-width: min(28rem, calc(100vw - var(--space-4)));
 	padding: 5px;
@@ -1061,10 +1082,11 @@ button.wb-chip:hover:not(:disabled) {
 	.wb-bar > .wb-menu {
 		position: static;
 	}
+	/* Against the bar, not the viewport, so the panel's right edge stays inside a bar that starts past x = 0. */
 	.wb-bar > .wb-menu > .wb-menu__panel {
 		left: var(--space-2);
 		right: auto;
-		max-width: calc(100vw - 2 * var(--space-2));
+		max-width: calc(100% - 2 * var(--space-2));
 	}
 }
 /* No scale: Menu.tsx measures the panel while it opens to place a floating one. */
@@ -1087,8 +1109,13 @@ button.wb-chip:hover:not(:disabled) {
 	color: var(--ink);
 	text-align: left;
 	font-size: var(--text-meta);
-	white-space: normal;
-	overflow-wrap: anywhere;
+	white-space: nowrap;
+}
+/* Only when the panel's cap binds: the label ends in an ellipsis instead of breaking onto a second line. */
+.wb-menu__item > span {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 .wb-menu__item:hover:not(:disabled) {
 	background: var(--wb-hover);
@@ -1098,6 +1125,7 @@ button.wb-chip:hover:not(:disabled) {
 	background: var(--wb-active);
 }
 .wb-menu__item .icon {
+	flex: none;
 	width: var(--icon-md);
 	height: var(--icon-md);
 	color: var(--ink-muted);

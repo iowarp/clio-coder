@@ -4,12 +4,13 @@
 	gap: var(--space-2);
 	border: 0;
 	padding: 0;
-	margin: 0 0 var(--space-5);
+	margin-block: var(--space-4) var(--space-5);
 }
 .library-facets legend {
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
 	margin-bottom: var(--space-2);
+	padding: 0;
 }
 .library-facets button {
 	border: 1px solid var(--line-strong);
@@ -277,6 +278,10 @@
 	overflow-wrap: anywhere;
 }
 
+/* settings.css spaces the tab row only once Settings has loaded; the library must not depend on that. */
+.library-page .settings-tabs {
+	margin-block-end: var(--space-6);
+}
 .library-page > [role="tabpanel"] > h2 {
 	font-family: var(--font-editorial);
 	margin-bottom: var(--space-2);

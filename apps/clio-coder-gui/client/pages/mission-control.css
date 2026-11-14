@@ -2,6 +2,8 @@
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
+	/* A section that opens and first needs a scrollbar must not narrow the page under the pointer. */
+	scrollbar-gutter: stable;
 	padding: var(--space-8) var(--space-6);
 }
 .mission__inner {
