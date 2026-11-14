@@ -5,7 +5,6 @@ import { createBrowserRouter, RouterProvider, useRouteError } from "react-router
 import { machinePrefix } from "../contracts/pages.js";
 import { ApiProblem, createClient } from "./api/client.js";
 import { createCredentials } from "./api/credentials.js";
-import { sessionQuery } from "./api/session-query.js";
 import { launchSecret, listenForForget } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
@@ -14,6 +13,8 @@ import { ClioPulse, PULSE_SIZE } from "./shell/ClioMark.js";
 import "./styles.css";
 import "./design/tokens.css";
 import "./render/markdown.css";
+// After App, so the bundle keeps the module where App's own imports place it.
+import { sessionQuery } from "./api/session-query.js";
 
 // Under /m/<id> every call goes to that node's own GUI through the app on this machine. The switcher
 // and Machines keep talking to this machine's app, so the window can always come back or move on.
@@ -60,24 +61,10 @@ const queries = new QueryClient({
 	}),
 });
 // Every first read waits on the credential exchange, so it starts now rather than when React mounts the
-// first view. A deep link to a task also fetches its route chunk and snapshot in parallel; the router's
-// `lazy` import and the page's query then reuse both.
+// first view.
 void credentials.bearer().catch(() => {
 	// Ignoring is safe: the first real request retries the exchange and reports any problem where it is seen.
 });
-const deepSession = /^\/sessions\/([^/]+)$/.exec(location.pathname.slice(prefix.length) || "/")?.[1];
-if (deepSession !== undefined) {
-	void import("./pages/sessions.js").catch(() => {
-		// Ignoring is safe: the route's own `lazy` import repeats it and shows the failure.
-	});
-	let id: string | undefined;
-	try {
-		id = decodeURIComponent(deepSession);
-	} catch {
-		// A malformed escape is no task id; the router renders that link's own state.
-	}
-	if (id !== undefined) void queries.prefetchQuery(sessionQuery(client, id));
-}
 function RouteError() {
 	const error = useRouteError();
 	// The boundary swallows the cause; without this line a broken view is a blank apology with no lead.
@@ -327,6 +314,11 @@ const router = createBrowserRouter([
 		],
 	},
 ]);
+// The router matched the URL when it was created and is already loading the route chunk. A deep link to a
+// task also reads its snapshot now, under the decoded id the page's query asks for. A second import site for
+// the route chunk would grow the eager bundle past its budget, so that load is left to the router.
+const opening = router.state.matches.at(-1);
+if (opening?.route.path === "/sessions/:id") void queries.prefetchQuery(sessionQuery(client, opening.params.id ?? ""));
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root.");
 createRoot(root).render(

@@ -5,6 +5,10 @@
 //
 //   node scripts/bundle-report.mjs --client <dir> [--max-eager-js-gzip KB] [--max-eager-css-gzip KB]
 //     [--max-chunk <prefix>=<KB raw>]... [--max-route-js-gzip KB] [--forbid-in-route <string>]...
+//
+// A budget flag that is left out takes the budget below. Eager JS allows no growth over the 172,361 bytes the
+// client measured before the cold-start work, with 0.1 KB of tolerance for the deep-link snapshot read: the
+// lead's restatement of the spec's 172 KB, which that baseline already exceeded.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -25,6 +29,13 @@ function number(flag, value) {
 	return parsed;
 }
 
+const budgets = {
+	eagerJs: 172.5,
+	eagerCss: 22.5,
+	routeJs: 116,
+	chunks: [{ prefix: "model-picker-model", limit: 8 }],
+	forbid: ["~kind"],
+};
 const options = {
 	client: undefined,
 	eagerJs: undefined,
@@ -52,6 +63,11 @@ for (let index = 0; index < argv.length; index += 1) {
 	} else fail(`Unknown argument: ${flag}`);
 }
 if (!options.client) fail("--client is required.");
+options.eagerJs ??= budgets.eagerJs;
+options.eagerCss ??= budgets.eagerCss;
+options.routeJs ??= budgets.routeJs;
+if (options.chunks.length === 0) options.chunks = budgets.chunks;
+if (options.forbid.length === 0) options.forbid = budgets.forbid;
 const client = options.client;
 if (!existsSync(join(client, "index.html"))) fail(`No index.html in ${client}.`);
 
@@ -120,11 +136,11 @@ const violations = [];
 const eager = { js: sum(eagerJs), css: sum(eagerCss) };
 const route = { entry: routeEntry, ...sum(routeFiles), forbidden: [] };
 if (routeEntry.length === 0) violations.push("No lazy assets/sessions-*.js chunk was found.");
-if (options.eagerJs !== undefined && eager.js.gzip > options.eagerJs * KB)
-	violations.push(`Eager JS is ${kb(eager.js.gzip)} KB gzip, over ${options.eagerJs} KB.`);
-if (options.eagerCss !== undefined && eager.css.gzip > options.eagerCss * KB)
+if (eager.js.gzip > options.eagerJs * KB)
+	violations.push(`Eager JS is ${eager.js.gzip} bytes gzip (${kb(eager.js.gzip)} KB), over ${options.eagerJs} KB.`);
+if (eager.css.gzip > options.eagerCss * KB)
 	violations.push(`Eager CSS is ${kb(eager.css.gzip)} KB gzip, over ${options.eagerCss} KB.`);
-if (options.routeJs !== undefined && route.gzip > options.routeJs * KB)
+if (route.gzip > options.routeJs * KB)
 	violations.push(`Session route JS beyond the eager set is ${kb(route.gzip)} KB gzip, over ${options.routeJs} KB.`);
 for (const needle of options.forbid) {
 	const files = routeFiles.filter((file) => measure(file).text.includes(needle));
