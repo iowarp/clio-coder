@@ -328,6 +328,23 @@ describe("operator memory hot keywords", () => {
 		}
 	});
 
+	it("refiles a statement whose kind the background route refines without announcing it twice", async () => {
+		const classifier: TaskMemoryModelClient = {
+			async complete() {
+				return { text: '{"scope":"project","kind":"preference"}' };
+			},
+		};
+		const run = await harness({ classifier });
+		try {
+			await run.loop.submit("Remember that tests here run with python3 -m unittest, never pytest");
+			for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+			const remembered = run.notices.filter((notice) => /Remembered for this project/u.test(notice.text ?? ""));
+			strictEqual(remembered.length, 1, remembered.map((notice) => notice.text).join("\n"));
+		} finally {
+			await run.close();
+		}
+	});
+
 	it("reads a question or a passing reference as no request", () => {
 		strictEqual(detectOperatorMemoryIntent("Do you remember that bug from yesterday?"), null);
 		strictEqual(detectOperatorMemoryIntent("Remember that test we skipped? It fails again."), null);
