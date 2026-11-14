@@ -1,7 +1,7 @@
 A lab or site that runs its own model gateway can connect every member's CLIO Coder with one small YAML file. You publish it once; each member imports it, sees where their prompts will go, and confirms. The file can name models and where to find a key, but it can never carry a key or change what CLIO Coder is allowed to do.
 
 ::: note Version scope
-This tutorial describes v0.8.0. The output below is from `clio-coder configure --import` run against a fresh CLIO Coder home.
+This tutorial describes v0.8.1. The output below is from `clio-coder configure --import` run against a fresh CLIO Coder home.
 :::
 
 ::: needs
@@ -18,11 +18,11 @@ targets:
   - id: lab
     runtime: openai-compat
     url: https://llm.lab.example.org/v1
-    defaultModel: qwen3-coder-480b
+    defaultModel: gpt-oss-120b
     capabilities: { contextWindow: 131072 }
     auth: { apiKeyEnvVar: LAB_API_KEY }
 chat: { target: lab }
-fleet: { target: lab, model: qwen3-coder-480b }
+fleet: { target: lab, model: gpt-oss-120b }
 ```
 
 `targets` lists the model endpoints. `chat` and `fleet` choose which target the main session and its workers use. `notes` is shown to the member before they confirm, so use it to say how to get a key.
@@ -51,6 +51,8 @@ The same rule refuses request headers and safety settings, so a member never has
 clio-coder configure --import lab-clio.yaml
 ```
 
+In a terminal, the command prints what the file will change and asks `Apply these changes? [y/N]`. Answer `n` and nothing changes. `--yes` applies without asking. With `--yes`, and no `LAB_API_KEY` exported yet, the import printed:
+
 ::: result What you should see
 ```text
 Setup file lab-clio.yaml will:
@@ -58,14 +60,15 @@ Lab gateway. Ask #research-computing for a key; export it as LAB_API_KEY.
 
   add target lab (openai-compat)
     prompts go to https://llm.lab.example.org/v1
-    model qwen3-coder-480b; key from $LAB_API_KEY
-  chat uses lab / qwen3-coder-480b
-  fleet uses lab / qwen3-coder-480b
-Apply these changes? [y/N]
+    model gpt-oss-120b; key from $LAB_API_KEY
+  chat uses lab / gpt-oss-120b
+  fleet uses lab / gpt-oss-120b
+Imported 1 target.
+  lab reads its key from LAB_API_KEY, which is not set in this shell.
 ```
 :::
 
-Answer `n` and nothing changes. Answer `y` and it prints `Imported 1 target.` and one line per target: `lab: ready`, or what is still missing, such as `lab reads its key from LAB_API_KEY, which is not set in this shell.`
+After `Imported`, each target gets one line: `lab: ready`, or what is still missing, as here.
 
 A plain `http` address to anything other than this machine or a private network address adds a warning that prompts and keys cross the network unencrypted.
 
@@ -93,7 +96,7 @@ clio-coder configure --import https://lab.example.org/clio-coder/setup.yaml
 
 Only the `lab` target and the chat and fleet routes change. Their other targets, project settings and stored keys stay as they were.
 
-Importing the same file again prints `Setup file already imported; nothing changed` with the status line, so it is safe to put in a login script with `--yes`. Without a terminal and without `--yes`, the command prints the preview and exits 2 without saving.
+Importing the same file again prints `Setup file already imported; nothing changed (lab-clio.yaml).` with the status line, so it is safe to put in a login script with `--yes`. Without a terminal and without `--yes`, the command prints the preview and exits 2 without saving.
 
 ## Change the file later
 
