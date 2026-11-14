@@ -76,6 +76,7 @@ import { contextBaseline, invokeContextCommand } from "./context-command.js";
 import type { ContextOperationRef } from "./context-command-model.js";
 import { commandPresentation, contextCommandKind, startedByCommand } from "./context-command-model.js";
 import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
+import { HistorySearch } from "./HistorySearch.js";
 import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
 import {
 	applyMention,
@@ -85,7 +86,7 @@ import {
 	resolveSteerTarget,
 	steerCandidates,
 } from "./mention-model.js";
-import { HistorySearch, preloadPanels } from "./on-demand-panels.js";
+import { preloadPanels } from "./on-demand-panels.js";
 import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
