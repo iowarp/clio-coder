@@ -1,8 +1,10 @@
 import { deepStrictEqual, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { runMemoryCommand } from "../../src/cli/memory.js";
 import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
@@ -20,7 +22,7 @@ import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js"
 import { cwdHash } from "../../src/engine/session.js";
 import { closedSessionLessonSource } from "../../src/entry/flow-ledger.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
-import { isolateClioEnv } from "../harness/scratch-env.js";
+import { isolateClioEnv, makeScratchHome } from "../harness/scratch-env.js";
 import { writeSettledRun } from "../harness/settled-run.js";
 
 const COMMAND = "node scripts/check.mjs --mode native";
@@ -84,66 +86,61 @@ test("promote --from-handoff finds the source from any directory and refuses onl
 	}
 });
 
-test("memory list --json prints each record's review fields, pending and approved alike", async () => {
-	const env = await isolateClioEnv("memory-list-json-");
-	const write = process.stdout.write;
-	let output = "";
-	try {
-		const base = {
-			scope: "repo",
-			evidenceRefs: ["run:synthetic"],
-			appliesWhen: ["installing dependencies"],
-			avoidWhen: ["offline"],
-			confidence: 0.8,
-			createdAt: "2026-09-21T00:00:00.000Z",
-			repository: { kind: "canonical-path", key: "/work/demo" },
-		};
-		mkdirSync(join(clioDataDir(), "memory"), { recursive: true });
-		writeFileSync(
-			memoryStorePath(clioDataDir()),
-			JSON.stringify({
-				version: 1,
-				records: [
-					{ ...base, id: "mem-00000000000000b1", key: "pending", lesson: "Pending lesson.", approved: false },
-					{ ...base, id: "mem-00000000000000b2", key: "approved", lesson: "Approved lesson.", approved: true },
-				],
-			}),
-		);
-		process.stdout.write = ((chunk: string | Uint8Array) => {
-			output += String(chunk);
-			return true;
-		}) as typeof process.stdout.write;
-		let code: number;
-		try {
-			code = await runMemoryCommand(["list", "--json"]);
-		} finally {
-			process.stdout.write = write;
-		}
-		strictEqual(code, 0, output);
-		const records = (JSON.parse(output) as { records: Record<string, unknown>[] }).records;
-		deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
-			["mem-00000000000000b1", false],
-			["mem-00000000000000b2", true],
+test("memory list --json prints each record's review fields, pending and approved alike", (t) => {
+	// A child process: patching this process's stdout would also catch the test runner's own frames.
+	const home = makeScratchHome("memory-list-json-");
+	t.after(home.cleanup);
+	const dataDir = home.env.CLIO_CODER_DATA_DIR as string;
+	const entry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+	const run = (args: string[]) =>
+		spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), entry, "memory", ...args], {
+			env: { ...process.env, ...home.env },
+			encoding: "utf8",
+			timeout: 20_000,
+		});
+	const base = {
+		scope: "repo",
+		evidenceRefs: ["run:synthetic"],
+		appliesWhen: ["installing dependencies"],
+		avoidWhen: ["offline"],
+		confidence: 0.8,
+		createdAt: "2026-09-21T00:00:00.000Z",
+		repository: { kind: "canonical-path", key: "/work/demo" },
+	};
+	mkdirSync(join(dataDir, "memory"), { recursive: true });
+	writeFileSync(
+		memoryStorePath(dataDir),
+		JSON.stringify({
+			version: 1,
+			records: [
+				{ ...base, id: "mem-00000000000000b1", key: "pending", lesson: "Pending lesson.", approved: false },
+				{ ...base, id: "mem-00000000000000b2", key: "approved", lesson: "Approved lesson.", approved: true },
+			],
+		}),
+	);
+	const listed = run(["list", "--json"]);
+	strictEqual(listed.status, 0, listed.stdout + listed.stderr);
+	const records = (JSON.parse(listed.stdout) as { records: Record<string, unknown>[] }).records;
+	deepStrictEqual(records.map((record) => [record.id, record.approved]).sort(), [
+		["mem-00000000000000b1", false],
+		["mem-00000000000000b2", true],
+	]);
+	for (const record of records)
+		deepStrictEqual(Object.keys(record).sort(), [
+			"appliesWhen",
+			"approved",
+			"avoidWhen",
+			"confidence",
+			"createdAt",
+			"evidenceRefs",
+			"id",
+			"key",
+			"lesson",
+			"repository",
+			"scope",
 		]);
-		for (const record of records)
-			deepStrictEqual(Object.keys(record).sort(), [
-				"appliesWhen",
-				"approved",
-				"avoidWhen",
-				"confidence",
-				"createdAt",
-				"evidenceRefs",
-				"id",
-				"key",
-				"lesson",
-				"repository",
-				"scope",
-			]);
-		strictEqual(await runMemoryCommand(["list", "--yaml"]), 2);
-	} finally {
-		process.stdout.write = write;
-		env.restore();
-	}
+	const refused = run(["list", "--yaml"]);
+	strictEqual(refused.status, 2, refused.stdout + refused.stderr);
 });
 
 test("propose --from-evidence refuses a run or dispatching session that carries a flow label", async () => {
