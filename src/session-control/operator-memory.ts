@@ -266,7 +266,10 @@ export function createOperatorMemory(deps: OperatorMemoryDeps): OperatorMemory {
 				// Restoring the first placement put back any record it replaced, so this write finds that record
 				// again and its predecessor stays what undo restores.
 				capture.placement = await place(store, capture.text, capture.kind, scope);
-				deps.emit({ level: "success", text: rememberedText(scope), chip: chip(capture, "remembered") });
+				// A kind-only refinement leaves the scope the operator was already told;
+				// announcing it again printed the same "Remembered for this project" twice.
+				if (scope !== placement.scope)
+					deps.emit({ level: "success", text: rememberedText(scope), chip: chip(capture, "remembered") });
 			})
 			.catch(() => {
 				// The first placement stands; classification only ever refines it.
