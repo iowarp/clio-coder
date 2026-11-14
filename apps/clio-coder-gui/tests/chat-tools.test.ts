@@ -880,6 +880,27 @@ test("a call the engine opened as in progress but holds at its approval gate wai
 	assert.equal(summarizeActivity([bash], new Map([["g", "approved"]])).running, 1);
 });
 
+test("a note the host adds to a command's result for the model reads as a note, never as the command's output", () => {
+	// Live: `cat beta.txt` showed "ok" and then "[middleware:info] prefer the structured observe tools…" as stdout.
+	const nudge = "prefer the structured observe tools over shell file inspection.";
+	const text = `[tool-result bounded]\nkind=ok capturedBytes=3 displayedBytes=3 truncated=false\nok\n\n\n[middleware:info] ${nudge}`;
+	const item = toolItem({
+		status: "completed",
+		rawInput: { command: "cat beta.txt" },
+		rawOutput: { result: { content: [{ type: "text", text }], details: { exitCode: 0 } }, isError: false },
+	});
+	const card = presentTool(item);
+	assert.equal(card.output.text, "ok");
+	assert.equal(card.note, `Note to the model: ${nudge}`);
+	// Output that merely mentions the tag mid-text is the command's own.
+	const quoted = toolItem({
+		status: "completed",
+		rawOutput: { result: { output: "see [middleware:info] in the log\ndone" }, isError: false },
+	});
+	assert.equal(presentTool(quoted).output.text, "see [middleware:info] in the log\ndone");
+	assert.equal(presentTool(quoted).note, null);
+});
+
 test("a dispatch batch names every run instead of 'no task preview'", () => {
 	const input = {
 		tasks: [

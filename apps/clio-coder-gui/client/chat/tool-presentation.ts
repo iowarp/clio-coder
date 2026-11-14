@@ -217,6 +217,8 @@ export interface ToolWire {
 	readonly styledText: string | null;
 	readonly isError: boolean;
 	readonly rawTruncated: boolean;
+	/** Notes the host added to the result for the model, split from the output it printed. */
+	readonly modelNotes?: readonly string[];
 }
 
 /** Text carried by an ACP content array, used when a terminal frame had no rawOutput. */
@@ -268,6 +270,33 @@ export function stripResultEnvelope(text: string): string {
 	return body;
 }
 
+const MODEL_NOTE_LINE = /^\[middleware:[a-z-]+\] (.+)$/u;
+
+/**
+ * Split the notes the host adds to a result for the model (`[middleware:info] prefer the structured observe
+ * tools…`) from the output they lead or trail, as the terminal's tool rows do. Only whole lines at the start or the
+ * end count, and a tool's own output cannot open a line with the tag (bash neutralizes it), so output that quotes
+ * one stays put.
+ */
+function splitModelNotes(text: string): { body: string; notes: string[] } {
+	const lines = text.split("\n");
+	const leading: string[] = [];
+	for (let note = MODEL_NOTE_LINE.exec(lines[0] ?? "")?.[1]; note !== undefined; ) {
+		leading.push(note);
+		lines.shift();
+		while (lines.length > 0 && (lines[0] ?? "").trim() === "") lines.shift();
+		note = MODEL_NOTE_LINE.exec(lines[0] ?? "")?.[1];
+	}
+	const trailing: string[] = [];
+	for (let note = MODEL_NOTE_LINE.exec(lines.at(-1) ?? "")?.[1]; note !== undefined; ) {
+		trailing.unshift(note);
+		lines.pop();
+		note = MODEL_NOTE_LINE.exec(lines.at(-1) ?? "")?.[1];
+	}
+	if (trailing.length > 0) while (lines.length > 0 && (lines.at(-1) ?? "").trim() === "") lines.pop();
+	return { body: lines.join("\n"), notes: [...leading, ...trailing] };
+}
+
 /**
  * Unwrap `rawInput`/`rawOutput` into the shapes the taxonomy reads.
  *
@@ -313,7 +342,8 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 	const operator = operatorText(details);
 	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
-	const printed = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
+	const split = operator === null && modelText !== null ? splitModelNotes(stripResultEnvelope(modelText)) : null;
+	const printed = operator ?? split?.body ?? null;
 	return {
 		input,
 		result,
@@ -323,6 +353,7 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 		styledText: printed !== null && hasStyle(printed) ? printed : null,
 		isError: output.isError === true || result?.kind === "error",
 		rawTruncated: inputTruncated,
+		...(split && split.notes.length > 0 ? { modelNotes: split.notes } : {}),
 	};
 }
 
@@ -927,6 +958,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 			break;
 	}
 
+	if (wire.modelNotes !== undefined) note = note ?? `Note to the model: ${wire.modelNotes.join(" ")}`;
 	if (wire.rawTruncated)
 		note = note ?? "This call's raw record was larger than the 32 KiB wire limit, so only a snippet reached the browser.";
 
