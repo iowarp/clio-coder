@@ -1859,17 +1859,8 @@ async function handle(frame) {
 							isOrchestrator: true,
 							apiKey: "must-be-stripped",
 						},
-						// The connection the saved settings chose, as the engine lists every configured one.
-						...(savedChat.target && !["fixture", "field-station"].includes(savedChat.target)
-							? [
-									{
-										id: savedChat.target,
-										runtime: "openai-compatible",
-										models: [savedChat.model ?? "fixture-model"],
-										isOrchestrator: true,
-									},
-								]
-							: []),
+						// The list is the configured set and does not follow the chat route: `targets use` changes which
+						// target a task starts on, never what the list holds (targets-http compares the two).
 						// A second target with a catalog, so choosing one in the route picker changes the model list.
 						...(ROUTE
 							? [
