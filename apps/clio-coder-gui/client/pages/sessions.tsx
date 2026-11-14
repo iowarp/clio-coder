@@ -28,6 +28,7 @@ import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
+import { ReadoutStrip } from "../chat/ReadoutStrip.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
@@ -481,6 +482,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									turns={snapshot.turns}
 									onOpen={pane.show}
 								/>
+								<ReadoutStrip client={client} sessionId={snapshot.id} turnRunning={running} />
 							</div>
 							<div className="wb-bar__end">
 								<OutputDetailPicker value={outputDetail} onChange={setOutputDetail} />

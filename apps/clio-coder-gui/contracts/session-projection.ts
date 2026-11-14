@@ -144,6 +144,21 @@ function withoutBudgetBlock(state: SessionSnapshot): SessionSnapshot {
 	return { ...state, telemetry };
 }
 
+/**
+ * A tool item without `admission` means the judge let the call through or it settled. The merge in `upsert`
+ * keeps any key the new item omits (a progress frame relies on that for its partial output), so the hold is
+ * taken off the stored row first, keeping the timeline's byte total in step.
+ */
+function withoutAdmission(state: SessionSnapshot, id: string): SessionSnapshot {
+	const index = state.timeline.findIndex((row) => row.id === id);
+	const row = state.timeline[index];
+	if (row?.admission === undefined) return state;
+	const { admission: _admission, ...cleared } = row;
+	const timeline = state.timeline.map((item, at) => (at === index ? cleared : item));
+	totals.set(timeline, timelineBytes(state.timeline) - itemCost(row).json + itemCost(cleared).json);
+	return { ...state, timeline };
+}
+
 export function applySessionDelta(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
 	if (event.payload.resource !== current.id || event.payload.revision <= current.revision) return current;
 	if (event.payload.revision !== current.revision + 1) throw new Error("Session revision gap requires a snapshot.");
@@ -324,6 +339,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		}
 		case "turn.tool":
 			if (event.payload.item.kind === "tool") state = withoutBudgetBlock(state);
+			if (event.payload.item.admission === undefined) state = withoutAdmission(state, event.payload.item.id);
 			upsert(event.payload.item);
 			break;
 		case "permission.requested":

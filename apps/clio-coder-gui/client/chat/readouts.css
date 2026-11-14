@@ -1,0 +1,39 @@
+/* The readouts sit among the bar's readings as separate chips, so a tight bar wraps one away whole (the readings
+   hide their second line) rather than cutting the strip mid-chip. */
+.wb-readouts {
+	display: contents;
+}
+.wb-bar .wb-readouts__chip {
+	flex: none;
+}
+.wb-bar .wb-readouts__chip[data-readout="throughput"] {
+	font-variant-numeric: tabular-nums;
+}
+.wb-bar .wb-readouts__chip[data-tone="warn"] {
+	color: var(--status-warn-fg);
+}
+.wb-bar .wb-readouts__chip[data-tone="fail"] {
+	color: var(--status-fail-fg);
+}
+.wb-bar .wb-readouts__chip[data-tone="running"] {
+	color: var(--status-running-fg);
+}
+.wb-bar .wb-readouts__chip[data-tone="success"] {
+	color: var(--status-success-fg);
+}
+/* The rate is still reported while a tool runs, but nothing is streaming. */
+.wb-bar .wb-readouts__chip[data-dim="true"] {
+	color: var(--ink-subtle);
+}
+/* A narrow bar keeps only what says yolo is on and whether its window paused it. */
+@container bar (max-width: 760px) {
+	.wb-bar .wb-readouts__chip:not([data-essential]) {
+		display: none;
+	}
+}
+/* The phone bar drops every reading chip; yolo's label and pause stay, as they change what the next call may do. */
+@media (max-width: 560px) {
+	.wb-bar .wb-readouts .wb-chip.wb-readouts__chip[data-essential] {
+		display: inline-flex;
+	}
+}

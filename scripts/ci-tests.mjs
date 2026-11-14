@@ -205,6 +205,8 @@ export const guiTests = [
 	"app-state",
 	"system-model",
 	"telemetry-live",
+	"readouts",
+	"readouts-model",
 	"ssh-model",
 	"arena-model",
 	"research-model",
