@@ -1,6 +1,5 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { Value } from "typebox/value";
 import type { TelemetryContext } from "./context.js";
 import { TelemetryContextSchema } from "./context.js";
 import { ContentClass, Tier, vocabulary } from "./enums.js";
@@ -131,7 +130,7 @@ export function readTelemetryRecord(value: unknown): RecordRead {
 		};
 	}
 	if (raw.k === "segment.open") {
-		return Value.Check(SegmentHeaderSchema, raw)
+		return checkRecordSchema(SegmentHeaderSchema, raw)
 			? { kind: "header", header: raw }
 			: { kind: "skipped", reason: "invalid-record", segment: true };
 	}
