@@ -18,9 +18,13 @@ export interface Notice {
 	readonly at: number;
 }
 
+/**
+ * An error or warning stays long enough to read and act on, then leaves: a pinned one followed the operator from page
+ * to page long after it stopped being true. Hover or focus holds any notice; a caller that must pin passes `ttl: null`.
+ */
 export const DEFAULT_TTL: Readonly<Record<NoticeTone, number | null>> = {
-	error: null,
-	warning: null,
+	error: 20_000,
+	warning: 15_000,
 	info: 10_000,
 	success: 4_000,
 };

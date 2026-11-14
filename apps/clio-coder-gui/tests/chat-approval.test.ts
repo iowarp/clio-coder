@@ -28,6 +28,7 @@ import {
 	waitedSentence,
 	workerAskRows,
 } from "../client/chat/approval-model.js";
+import { dispatchOutcome } from "../client/chat/dispatch-outcome-model.js";
 import {
 	FLEET_RUN_CAP,
 	FLEET_STATE_LABELS,
@@ -954,4 +955,32 @@ test("every subscriber reads the same second, and the interval stops with the la
 	second();
 	t.mock.timers.tick(3000);
 	assert.equal(calls, 2, "no subscriber, no interval");
+});
+
+test("a dispatch row follows its runs to their end, and claims nothing about runs the feed does not hold", () => {
+	const enqueued = (runId: string) => fact("fleet.enqueued", { runId, agentId: "scout" });
+	const live = foldFleetRuns([
+		enqueued("p1"),
+		enqueued("p2"),
+		fact("fleet.completed", { runId: "p1", agentId: "scout" }),
+	]);
+	assert.deepEqual(dispatchOutcome(["p1", "p2"], live), { text: "1 of 2 runs still running", tone: "running" });
+	const done = foldFleetRuns([
+		enqueued("p1"),
+		enqueued("p2"),
+		fact("fleet.completed", { runId: "p1", agentId: "scout" }),
+		fact("fleet.completed", { runId: "p2", agentId: "scout" }),
+	]);
+	assert.deepEqual(dispatchOutcome(["p1", "p2"], done), { text: "2 runs finished: 2 done", tone: "success" });
+	const mixed = foldFleetRuns([
+		enqueued("p1"),
+		enqueued("p2"),
+		fact("fleet.completed", { runId: "p1", agentId: "scout" }),
+		fact("fleet.failed", { runId: "p2", agentId: "scout" }),
+	]);
+	assert.deepEqual(dispatchOutcome(["p1", "p2", "p3"], mixed), {
+		text: "3 runs finished: 1 done · 1 failed · 1 not reported",
+		tone: "fail",
+	});
+	assert.equal(dispatchOutcome(["elsewhere"], done), null);
 });

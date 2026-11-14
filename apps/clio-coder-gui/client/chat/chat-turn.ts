@@ -207,8 +207,12 @@ export const ELAPSED_TITLE = "Measured by this browser since the call first appe
 const MAX_OBSERVED_STARTS = 2048;
 const observedStarts = new Map<string, number>();
 
-/** The first moment this browser saw `id`. Later calls return the original sighting. */
-export function observeStart(id: string, nowMs: number): number {
+/**
+ * The first moment this browser saw `id`. Later calls return the original sighting. The shared second can be up to a
+ * second old when a row first renders, older than the turn the row belongs to; `floorMs`, that turn's start, keeps a
+ * row's clock from ever reading more than its turn's header, which counts from the same start on the same second.
+ */
+export function observeStart(id: string, nowMs: number, floorMs = Number.NaN): number {
 	const seen = observedStarts.get(id);
 	if (seen !== undefined) return seen;
 	// No clock is running (a settled or not yet live turn); a zero is not a sighting.
@@ -217,8 +221,9 @@ export function observeStart(id: string, nowMs: number): number {
 		const oldest = observedStarts.keys().next();
 		if (!oldest.done) observedStarts.delete(oldest.value);
 	}
-	observedStarts.set(id, nowMs);
-	return nowMs;
+	const start = Number.isFinite(floorMs) ? Math.max(nowMs, floorMs) : nowMs;
+	observedStarts.set(id, start);
+	return start;
 }
 
 export function resetObservedStarts(): void {

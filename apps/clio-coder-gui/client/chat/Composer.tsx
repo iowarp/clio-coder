@@ -40,6 +40,7 @@ import {
 	type Attachment,
 	admitAttachment,
 	attachmentRefusal,
+	attachmentSize,
 	attachmentSummary,
 	decodeTextFile,
 	type FileAttachment,
@@ -62,6 +63,7 @@ import {
 	projectQueue,
 	queueAccess,
 	queueActions,
+	queueRowLabel,
 	queueSummary,
 	restoredDraft,
 	type SubmitIntent,
@@ -71,6 +73,8 @@ import {
 	steerModeOffers,
 	submitIntent,
 	submitLabel,
+	UNREACHED,
+	unreachable,
 } from "./composer-model.js";
 import { contextBaseline, invokeContextCommand } from "./context-command.js";
 import type { ContextOperationRef } from "./context-command-model.js";
@@ -392,6 +396,9 @@ export const Composer = memo(function Composer({
 
 	const send = useMutation({
 		meta: { errorSurface: "inline" },
+		// A request that never reached the server is tried again with the same idempotency key, so it lands once;
+		// while the browser is offline the retry waits for the network instead of failing.
+		retry: (failures, error) => failures < 3 && unreachable(error),
 		mutationFn: async ({
 			intent,
 			attachments: sent,
@@ -718,6 +725,9 @@ export const Composer = memo(function Composer({
 		sessionState,
 		turnRunning: running,
 		sending: send.isPending,
+		...(send.isPending && (send.isPaused || send.failureCount > 0)
+			? { unreached: send.isPaused ? ("offline" as const) : ("retrying" as const) }
+			: {}),
 		...(control && control.stage !== "complete" ? { sessionControl: control.stage } : {}),
 		steering,
 		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
@@ -726,6 +736,7 @@ export const Composer = memo(function Composer({
 		...(unknownSlash === undefined ? {} : { unknownSlash }),
 	} as const;
 	const intent = submitIntent(draft, situation);
+	const sendingLabel = situation.unreached ? UNREACHED[situation.unreached].button : send.isPending ? "Sending…" : null;
 	const delivery = composerDelivery(situation, draft.mode, contextRunning, readingAttachments);
 	const reviewedAttachment = attachments.find((item) => item.id === reviewingAttachment) ?? null;
 	const canAttachImages = capabilities.data?.images === true && sessionState === "open";
@@ -962,7 +973,7 @@ export const Composer = memo(function Composer({
 								<p className="slash-palette__error">{slashError}</p>
 							) : (
 								<p className="slash-palette__keys">
-									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd+Enter"}</kbd> runs{" "}
+									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd + Enter"}</kbd> runs{" "}
 									{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
 								</p>
 							)}
@@ -980,7 +991,7 @@ export const Composer = memo(function Composer({
 						<section className="composer__queue" aria-label="Messages waiting on the engine">
 							<div className="composer__queue-head">
 								<p className="composer__queue-summary" role="status">
-									{queueSummary(queued)}
+									{queueSummary(queued, running)}
 								</p>
 								<button
 									className="composer__attachment-action"
@@ -995,7 +1006,7 @@ export const Composer = memo(function Composer({
 							<ol className="composer__queue-list">
 								{queued.map((message) => (
 									<li key={message.id} className="composer__queue-row">
-										<StatusMark tone="warn" label={message.queue === "steer" ? "Now" : "After this turn"} />
+										<StatusMark tone="warn" label={queueRowLabel(message, running)} />
 										<span className="composer__queue-text" title={message.text}>
 											{message.text}
 										</span>
@@ -1041,9 +1052,7 @@ export const Composer = memo(function Composer({
 											{item.name}
 										</button>
 										<small>
-											{item.kind === "image"
-												? `${item.width}×${item.height}`
-												: `text, ${Math.max(1, Math.round(item.bytes / 1024))} KiB`}
+											{item.kind === "image" ? `${item.width}×${item.height}` : `text, ${attachmentSize(item.bytes)}`}
 										</small>
 									</span>
 									<button type="button" className="composer__attachment-action" onClick={() => saveAttachment(item)}>
@@ -1080,7 +1089,7 @@ export const Composer = memo(function Composer({
 						<div className="composer__paste-review" role="status">
 							<div className="composer__paste-head">
 								<StatusMark tone="warn" label="Paste kept for review" />
-								<span className="composer__paste-size">· {Math.max(1, Math.round(pasteReview.bytes / 1024))} KiB</span>
+								<span className="composer__paste-size">· {attachmentSize(pasteReview.bytes)}</span>
 								<span className="composer__paste-actions">
 									<button
 										type="button"
@@ -1126,6 +1135,8 @@ export const Composer = memo(function Composer({
 								: {})}
 						aria-describedby={hintId}
 						value={draft.text}
+						// Text already on its way is not a draft being written: an approval that lands first may take focus.
+						{...(send.isPending && send.variables?.draft.text === draft.text ? { "data-sent": "" } : {})}
 						rows={1}
 						// A paused task keeps its draft editable without waking its agent.
 						disabled={sessionState !== "open" && sessionState !== "parked"}
@@ -1197,7 +1208,7 @@ export const Composer = memo(function Composer({
 								setAttachments(attached.current);
 								setPasteNotice({
 									id: file.id,
-									text: `Full paste attached as ${file.name} · ${Math.max(1, Math.round(file.bytes / 1024))} KiB`,
+									text: `Full paste attached as ${file.name} · ${attachmentSize(file.bytes)}`,
 								});
 							}
 							setPasteReview(null);
@@ -1354,7 +1365,7 @@ export const Composer = memo(function Composer({
 								{estimate.text}
 							</span>
 						) : null}
-						{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/Cmd+Enter sends"}
+						{enterSends ? "Shift + Enter adds a line" : "Enter adds a line · Ctrl/Cmd + Enter sends"}
 						{running && modes.some((offer) => offer.mode === "next-slot") ? " · Alt+S sends now" : ""} · / lists commands · @
 						adds a file or folder · ↑ recalls earlier messages, Ctrl/Cmd+R searches them
 						{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
@@ -1456,7 +1467,7 @@ export const Composer = memo(function Composer({
 										Enter sends
 									</label>
 									<p className="composer__options-note">
-										{enterSends ? "Shift+Enter adds a line." : "Enter adds a line. Ctrl/Cmd+Enter sends."} @ adds a file or
+										{enterSends ? "Shift + Enter adds a line." : "Enter adds a line. Ctrl/Cmd + Enter sends."} @ adds a file or
 										folder. ↑ recalls earlier messages and Ctrl/Cmd+R searches them.
 									</p>
 								</div>
@@ -1520,11 +1531,11 @@ export const Composer = memo(function Composer({
 									className="composer__submit primary"
 									type="submit"
 									disabled={intent.kind === "blocked" || attachBlock !== null || readingAttachments}
-									aria-label={send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
+									aria-label={sendingLabel ?? submitLabel(intent, situation, draft.mode)}
 									title={intent.kind === "blocked" ? intent.reason : (attachBlock ?? submitLabel(intent, situation, draft.mode))}
 								>
 									{send.isPending ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="arrowUp" />}
-									<span aria-hidden="true">{send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}</span>
+									<span aria-hidden="true">{sendingLabel ?? submitLabel(intent, situation, draft.mode)}</span>
 								</button>
 							) : null}
 						</div>

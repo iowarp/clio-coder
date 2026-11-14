@@ -242,6 +242,10 @@ const settledWrite = (toolCallId, executed) => {
 };
 const permission = async () => {
 	const toolCallId = `write-${++writeCalls}`;
+	// The applied diff says the write replaced a "draft" line, so the task's own folder holds that file while the
+	// write waits, as a real workspace would. A fixture run with no task folder never writes outside its own.
+	const target = scenario === "markdown" && taskCwd !== process.cwd() ? join(taskCwd, "fixture.txt") : null;
+	if (target) writeFileSync(target, "draft\n");
 	const toolCall = {
 		sessionUpdate: "tool_call",
 		toolCallId,
@@ -270,6 +274,7 @@ const permission = async () => {
 	const result = await promise;
 	const executed = result?.outcome?.optionId === "allow";
 	log({ permission: result, toolExecuted: executed });
+	if (target && executed) writeFileSync(target, "approved");
 	update(settledWrite(toolCallId, executed));
 	if (!cancelled) text(executed ? "Tool executed." : "Permission rejected.");
 };
@@ -322,48 +327,67 @@ const planPermission = async () => {
 	const result = await promise;
 	const approved = result?.outcome?.optionId === "allow-once";
 	log({ planPermission: result, approved });
+	// The approved plan runs detached, the way src/tools/dispatch-runner.ts reports it: the call settles
+	// naming its runs, the model says the plan is running, and the runs finish after that sentence.
+	const runs = tasks.map((task, index) => ({
+		runId: `run-plan-${writeCalls}-${index + 1}`,
+		agentId: task.agent,
+		taskPreview: task.task,
+		node: null,
+		origin: "tool",
+		attempt: 1,
+	}));
 	if (approved) {
-		// The approved plan runs its tasks the way the engine reports them, spaced so the Agents panel
-		// shows each run arrive, start and finish.
-		const runs = tasks.map((task, index) => ({
-			runId: `run-plan-${writeCalls}-${index + 1}`,
-			agentId: task.agent,
-			taskPreview: task.task,
-			node: null,
-			origin: "tool",
-			attempt: 1,
-		}));
 		for (const identity of runs) event("run.enqueued", identity);
 		await delay(40);
 		for (const identity of runs) {
 			event("run.started", identity);
 			await delay(40);
 		}
-		for (const [index, identity] of runs.entries()) {
-			event(
-				"run.completed",
-				{
-					runId: identity.runId,
-					agentId: identity.agentId,
-					outcome: "success",
-					outcomeCode: "done",
-					durationMs: 80 + index * 40,
-					totalTokens: { kind: "measured", value: 23, source: "provider" },
-					apiCalls: { kind: "measured", value: 2, source: "local-count" },
-					tokenDisplay: "23",
-				},
-				true,
-			);
-			await delay(40);
-		}
 	}
+	const summary = approved ? "Plan dispatched." : "Plan not approved.";
 	update({
 		sessionUpdate: "tool_call_update",
 		toolCallId,
 		status: approved ? "completed" : "failed",
-		content: [{ type: "content", content: { type: "text", text: approved ? "Plan dispatched." : "Plan not approved." } }],
+		content: [{ type: "content", content: { type: "text", text: summary } }],
+		...(approved
+			? {
+					rawOutput: {
+						result: {
+							kind: "ok",
+							output: summary,
+							details: {
+								mode: "detached",
+								batchId: `batch-plan-${writeCalls}`,
+								runs: runs.map(({ runId, agentId }) => ({ runId, assignmentId: runId, agentId })),
+							},
+						},
+						isError: false,
+					},
+				}
+			: {}),
 	});
-	if (!cancelled) text(approved ? "The plan is running." : "The plan was not approved.");
+	if (cancelled) return;
+	text(approved ? "The plan is running." : "The plan was not approved.");
+	if (!approved) return;
+	for (const [index, identity] of runs.entries()) {
+		await delay(40);
+		event(
+			"run.completed",
+			{
+				runId: identity.runId,
+				agentId: identity.agentId,
+				outcome: "success",
+				outcomeCode: "done",
+				durationMs: 80 + index * 40,
+				totalTokens: { kind: "measured", value: 23, source: "provider" },
+				apiCalls: { kind: "measured", value: 2, source: "local-count" },
+				tokenDisplay: "23",
+			},
+			true,
+		);
+	}
 };
 const event = (kind, payload, terminal = false) =>
 	send({
