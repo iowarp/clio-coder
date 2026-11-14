@@ -24,6 +24,7 @@ import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { compactionRows, summarizeHealth } from "../chat/health.js";
 import { LiveJobs } from "../chat/JobStrip.js";
+import { MemoryCaptureChip } from "../chat/MemoryCaptureChip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { FilePreviewDialog } from "../chat/on-demand-panels.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
@@ -658,6 +659,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							) : null}
 							<ControlBanner client={client} session={snapshot} />
 							<BudgetBanner client={client} session={snapshot} />
+							<MemoryCaptureChip client={client} session={snapshot} />
 							<ApprovalBanner client={client} session={snapshot} />
 						</div>
 						<div

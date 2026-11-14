@@ -157,6 +157,7 @@ const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> 
 	skill: ["submitTurn", "parsePendingSkillRequests", "clearSkillSurface"],
 	tasks: ["userTasks", "submitTurn"],
 	memory: ["seedTaskMemory"],
+	remember: ["operatorMemory"],
 	export: ["exportTranscript"],
 	loop: ["jobs"],
 	report: ["reportHost"],
@@ -349,6 +350,7 @@ export type AcpCommandHost = Pick<SlashCommandContext, "dispatch" | "bus" | "pro
 			| "jobs"
 			| "listWorkerRuns"
 			| "oracleBriefing"
+			| "operatorMemory"
 			| "getWorkerRosters"
 			| "reportHost"
 			| "runCouncilDispatch"
@@ -725,6 +727,7 @@ function sessionCommandContext(
 		...(host.importShareArchive ? { importShareArchive: host.importShareArchive } : {}),
 		...(host.runDoctor ? { runDoctor: host.runDoctor } : {}),
 		...(host.oracleBriefing ? { oracleBriefing: host.oracleBriefing } : {}),
+		...(host.operatorMemory ? { operatorMemory: host.operatorMemory } : {}),
 		...(host.getChatTarget ? { getChatTarget: host.getChatTarget } : {}),
 		...(host.getChatModel ? { getChatModel: host.getChatModel } : {}),
 		...(host.getFleetAgentProfiles ? { getFleetAgentProfiles: host.getFleetAgentProfiles } : {}),
