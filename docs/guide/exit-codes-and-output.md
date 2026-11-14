@@ -1,177 +1,119 @@
-# Exit Codes & Machine-Readable Output Contracts
+# Exit Codes and Machine-Readable Output
 
-This document specifies the process exit codes, machine-readable JSON streaming formats, standard I/O separation rules, and `--help` conventions across all CLIO Coder CLI commands in the current source tree.
+Process exit codes, stdout/stderr contracts, `--help` guarantees, and JSONL stream schemas across CLIO Coder CLI commands ([index.ts](../../src/cli/index.ts), [run.ts](../../src/cli/run.ts), [print.ts](../../src/cli/modes/print.ts), [run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
-Source implementations: `src/cli/` and `src/entry/`.
+## Exit code contract
 
----
+Interactive sessions, headless main-agent `run`, and `run --agent` exit `128 + signal` on terminating signals (`129` SIGHUP, `130` SIGINT, `143` SIGTERM). `run` interrupted by SIGINT while reading `@file` inputs exits `130` before sending any request; `clio-coder configure` exits `130` if exited before saving a first target ([configure-import.ts](../../src/cli/configure-import.ts)).
 
-## 1. Global Exit Codes
+| Code | Meaning | Trigger conditions |
+| --- | --- | --- |
+| `0` | Success | Clean completion, `--version`, `--help`, `--dry-run`, declined `reset`/`uninstall`, `upgrade` no-op, passing checks/verifies. |
+| `1` | Operational failure | Runtime/provider error; Node.js `< 22.19.0` ([index.ts](../../src/cli/index.ts)); `doctor` error findings; `run` stream without response, `stopReason=length` without terminal tool, empty closing message after tool calls, `limitation`, unresolved block with no write (`noop` even without `--fail-on-noop`), `--fail-on-noop`, `dispatched_worker_failed`; worker outcomes `merge_withheld`, `worker_no_work`, `worker_partial_work`, `worker_removed_tests`, `information_flow_blocked`; `run --agent verifier` with `verdict: "fail"` (settled run outcome stays `succeeded`); stdout write error other than EPIPE; `reset`/`uninstall` keeping an unproven root; lifecycle/telemetry/playbook failures. |
+| `2` | Usage / admission / layout refusal | Unknown command/flag, missing positional, bad global flag placement (see [Flag positioning](#flag-positioning)), unsupported flag on `run --agent`, unknown target or recipe, unselectable/non-chat model, multiple usable routes with no default target and no `--target`, single route without model and no `--model`, task piped to bare `clio-coder` without `CLIO_CODER_INTERACTIVE=1`, `--autonomy yolo` as root outside a container or under `CLIO_CODER_AUTONOMY_CEILING`, newer-home version mismatch without `CLIO_CODER_ALLOW_OLDER=1` (headless/ACP), unsafe `CLIO_CODER_*_DIR` layout, conflicting lifecycle flags, or `reset`/`uninstall` non-TTY without `--force`/`--dry-run`. |
+| `3` | Permission refusal / judge streak | Dispatched native or Claude SDK worker stopped after 3 `execute`-class policy denials (`deny`/`judge`/`main` mode) or on first refusal of any class (`fleet.permissions.mode: fail`) — `outcomeDetail` starts with `permission_required` ([worker-refusals.ts](../../src/engine/worker-refusals.ts), [worker-runtime.ts](../../src/engine/worker-runtime.ts)). Main-agent `run --autonomy yolo` halted on safety-judge block streak (`outcomeDetail: "judge-streak"`, exits `3` with resume hint on stderr; [autonomy-window.ts](../../src/domains/safety/autonomy-window.ts)). A parent `run` dispatching a worker that hits `3` reports `dispatched_worker_failed` and exits `1`; `run --agent` passes `0`, `2`, `3`, `4` through and maps other non-zero worker codes to `1` ([run.ts](../../src/cli/run.ts)). |
+| `4` | Spend or autonomous cap | `safety.limits.sessionCostUsd` (default `5` USD, `0` disables) or `run --max-cost-usd <N>` reached (`outcomeDetail: "budget_ceiling"`, `budget.ts`: unpriced calls excluded; priced calls missing server usage estimate from request size and streamed output; prior session spend excluded from `--max-cost-usd`). `run --autonomy yolo` reached `safety.limits.autonomousToolCalls`, `autonomousMinutes`, or `autonomousTokens` (`outcomeDetail: "autonomous-cap"`, [autonomy-window.ts](../../src/domains/safety/autonomy-window.ts)). |
+| `75` | Install / upgrade busy (`EX_TEMPFAIL`) | Non-mutating retry signal: `.install-lock` held in installer, `upgrade` blocked by active `pid@host` processes or update lease, or launcher 120s timeout waiting for concurrent update. |
+| `124` | Run timeout | `clio-coder run --timeout <seconds>` elapsed. Runs coordinated shutdown, signals running bash process groups, settles `timed_out`/`failed` (or `canceled` before exit `124` under `--agent`, or no run record if fired pre-turn). |
+| `141` | Broken stdout pipe (EPIPE / SIGPIPE) | Consumer closed `stdout` (`... \| head -1`). Triggers coordinated shutdown, drops later stdout writes, settles run/session, exits `141` ([index.ts](../../src/cli/index.ts)). |
 
-CLIO Coder follows one exit code taxonomy across commands. A signal that ends an interactive session or a headless main-agent run exits `128 + signal`: `129` for SIGHUP, `130` for SIGINT and `143` for SIGTERM. `clio-coder run --agent` exits the same codes: the signal aborts the worker, the run settles and writes its result, and then the process exits. A `clio-coder run` interrupted by SIGINT while it reads `@file` attachments also exits `130`, before any request is sent, after printing `clio-coder run: interrupted while reading file attachments; nothing was sent`. `clio-coder configure` also exits `130` when you leave first-run setup before any target is saved, which a bare `clio-coder` launch reads as "nothing was configured".
+### Subcommand-specific exit codes
 
-| Exit Code | Meaning | Typical Causes & Conditions |
-| :--- | :--- | :--- |
-| **`0`** | **Success** | Successful command execution, clean run settlement, `--version`, `--help` invocation, a `--dry-run`, a declined `reset` or `uninstall` confirmation, an `upgrade` that finds nothing to do, or a `telemetry verify` of a scope that verifies. |
-| **`1`** | **Operational Failure** | Execution error, model target unreachable, doctor diagnosis with unresolved issues, a telemetry scope or archive that fails verification or is unsealed, a `telemetry doctor` that finds a failed seal, an unreadable consent store or damaged journal lines, or a failed install, migration, integrity check or delete in a lifecycle command, including a `reset` or `uninstall` that kept a root it could not prove is CLIO Coder's own. For a headless main-agent `run`, also a provider error, a stream that ended with no assistant response, `output token limit reached (stopReason=length)`, an explicit `limitation`, an unresolved block with no write (`noop`), a dispatched worker that did not deliver, an interrupted turn, a turn that ended with an empty message after narrating beside a tool call (the narration goes to stderr and stdout stays empty), and a stdout write error other than a closed reader, such as a full device, which prints one stderr line after the run and session settle. For `run --agent verifier`, also a verifier verdict of `fail`. |
-| **`1`** | **Worker merge withheld (`merge_withheld`)** | A dispatched worker's task worktree was preserved instead of merged, including when its own report lists a failing validation, asks for a check the host did not run, or the diff removes existing test cases. Headless stderr names the worker, `merge_withheld`, and its reason; the preserved branch can be inspected and merged by the operator. |
-| **`1`** | **Worker did no work (`worker_no_work`)** | A dispatched edit worker finished without doing its assignment: it executed no tools, it recorded a limitation or opened its report with an inability and changed nothing, the operator denied its permission asks and nothing changed, or policy refused every write- and execute-class call it made and nothing changed. A task worktree holding no commits is discarded instead of preserved. Headless stderr names the worker, `worker_no_work`, and the reason it did not deliver. |
-| **`1`** | **Worker did not finish (`worker_partial_work`)** | A dispatched edit worker changed files but its report opens by saying it could not finish the work (not merely that it could not run the tests). The run fails; in a task worktree its changes are committed on the preserved branch under a `partial: <task>` subject and not merged. Headless stderr names the worker, `worker_partial_work`, and the report's opening line. |
-| **`1`** | **Worker removed tests (`worker_removed_tests`)** | A dispatched worker editing the current checkout, without a task worktree, removed existing test cases when the task did not ask for that. The edits stay in the checkout for review. Headless stderr names the worker, `worker_removed_tests`, and the removed test cases. |
-| **`1`** | **Worker information-flow refusal (`information_flow_blocked`)** | Restricted context cannot reach the requested destination under the source policy. The worker run ends with this deterministic outcome code; dispatch never retries or fails over. Review and approve the exact policy bytes when instructed, or start a new session after changing the rule or destination. |
-| **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, an unknown target, an unknown agent recipe, a refused admission or capability request, `clio-coder run --model` naming a model that matches nothing or is not chat-eligible, or `clio-coder run --autonomy yolo` as root outside a detected container. Also a `run` with no saved chat route when several routes are usable (it names each as `--target <id>`) or when the one usable route has no default model and no `--model`, a task piped to a bare `clio-coder` (`clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"`), and a headless `run` or ACP session on a home a newer CLIO Coder last used, unless `CLIO_CODER_ALLOW_OLDER=1` is set. In lifecycle commands, also an unsafe directory layout, a flag conflict (`reset --all` with a level, `upgrade --restart` with `--json`), and `reset` or `uninstall` run without a terminal, `--force` or `--dry-run`. |
-| **`3`** | **Worker permission refusal (`permission_required`)** | The exit code of a dispatched native worker that was ended by the permission refusal limit or by `fleet.permissions.mode: fail`. It appears in the run result as `exit=3`. `clio-coder run --agent` passes result exits 0, 2, 3 and 4 to the shell unchanged and maps every other exit to `1`, so the command itself exits `3`. See [Worker permission refusals](#worker-permission-refusals-exit-3). A main-agent `run --autonomy yolo` exits `3` too when the safety judge's block streak ended it: stderr reads `clio-coder run: judge-streak: the safety judge blocked too many calls (<n> blocks in a row), so yolo ended the run after <usage>; review it, then \`clio-coder run --continue "<prompt>"\` resumes with a fresh window` and `outcomeDetail` is `judge-streak`. |
-| **`4`** | **Priced spend ceiling** | The session ceiling (`safety.limits.sessionCostUsd`, default 5 USD) or a main-agent `run --max-cost-usd <n>` cap was reached. A session stop reads `budget_ceiling: session priced spend $<spent> reached the $<ceiling> ceiling; raise safety.limits.sessionCostUsd`. A run-cap stop reads `budget_ceiling: this run's priced spend $<spent> reached its --max-cost-usd $<cap> cap`; amounts use four decimal places. When the request size is known, either stop adds ` with ~<n> context tokens per call` after the ceiling or cap amount, because that re-sent context is the per-call cost a headless stop cannot go below. A spent amount that includes estimated prices reads `~$<spent> est`, and one beside calls that could not be priced reads `$<spent> +?`. Earlier spend in a continued session does not count against the run cap, but a lower configured session ceiling still holds. Unpriced usage is not counted. Setting `safety.limits.sessionCostUsd: 0` disables the session ceiling; an explicit run cap still holds. Under an active cap, a call on a priced route whose server reports no token usage is charged an estimate from its request size and streamed output at the route's rates, and the session gets one notice that the route's spend is estimated; a provider error status is charged nothing. `--max-cost-usd` with `--agent` exits 2. A main-agent `run --autonomy yolo` also exits `4` when its autonomous window reached `safety.limits.autonomousToolCalls`, `autonomousMinutes` or `autonomousTokens`: stderr reads `clio-coder run: autonomous-cap: yolo paused at the <cap> after <n> tool calls, <m> min, <t> tokens; review it, then \`clio-coder run --continue "<prompt>"\` resumes with a fresh window` and `outcomeDetail` is `autonomous-cap`. |
-| **`75`** | **Install busy (`EX_TEMPFAIL`)** | A retry-later outcome that changed nothing. `install.sh` or `install.ps1` found `.install-lock` held by a live process, another host or a recent crash. `clio-coder upgrade` refused to replace an npm install under other live processes or an update lease and listed them as `pid@host`. The `clio-coder` launcher waited 120 seconds for a package-manager update that was still running. A background update treats 75 as busy rather than failed and tries again later. |
-| **`124`** | **Run Timeout** | `clio-coder run --timeout <seconds>` elapsed. The run took the coordinated shutdown path a SIGTERM takes: the turn was aborted, a running bash tool's process group was signalled, and the run settled and sealed with outcome `timed_out` and run status `failed`, the status a dispatched worker's `timed_out` run settles with. The code matches `timeout(1)`. An external SIGTERM still exits 143 with outcome `canceled`. A timeout that fires during boot, before the turn starts, exits 124 with no run record. With `--agent`, expiry aborts the worker and waits for it to settle, so the run is recorded as `canceled` before the process exits 124. |
-| **`141`** | **Closed stdout reader (SIGPIPE)** | The reader of a `clio-coder run` stdout went away, as in `clio-coder run ... \| head -1`. Later writes are dropped, the run shuts down through the same coordinated path a SIGTERM takes, and the run and session settle before exit. |
+| Subcommand | Codes |
+| --- | --- |
+| `fleet events` | `0` sealed & verified, `1` read/integrity error, `2` usage, `3` intact unsealed journal, `4` `--follow` stopped because fleet can no longer seal ([fleet-events.ts](../../src/cli/fleet-events.ts)). |
+| `telemetry verify` | `0` verified, `1` failed seal or unsealed, `2` usage or missing/unreadable scope ([telemetry-verify.ts](../../src/cli/telemetry-verify.ts)). |
+| `telemetry doctor` | `0` healthy, `1` failed seal / unreadable consent / damaged journal lines / read error, `2` usage ([telemetry-doctor.ts](../../src/cli/telemetry-doctor.ts)). |
+| `telemetry share` | `0` archive written/sent/previewed, `1` nothing to share or failure, `2` usage or non-TTY without scope ([telemetry-share.ts](../../src/cli/telemetry-share.ts)). |
+| `telemetry import` | `0` placed or identical already present, `1` failed verify / unreadable / differing scope, `2` usage ([telemetry-share.ts](../../src/cli/telemetry-share.ts)). |
+| `telemetry consent`, `prune` | `0` success, `1` failure, `2` usage ([telemetry.ts](../../src/cli/telemetry.ts)). |
+| `session terminate` | `0` requested/signaled/released, `1` unknown live session, `2` usage or refused `--force` ([session.ts](../../src/cli/session.ts)). |
+| `research start\|resume\|report` | `0` completed or budget cap (`max-iterations`, `max-wall-minutes`, `max-cost-usd`), `1` error / noisy A/A / unenforceable spend / `report` regrade mismatch, `2` usage, `129`/`130`/`143` signal ([research-and-arena.md](research-and-arena.md#exit-codes)). |
+| `report` | `0` sent/opened/written/previewed, `1` send error or refused bundle, `2` usage or non-TTY without `--yes`, `3` likely duplicate or newer release found (draft saved; [troubleshooting.md](troubleshooting.md#report-a-problem-to-the-maintainers)). |
+| `store` | `0` success (and `store rm`/`rm-tag` dry-run without `--yes`), `1` operational error or `store verify` mismatch, `2` usage ([store.md](store.md)). |
+| `arena run\|show\|vote` | `0` success, `1` match failed / unknown match / `show --reveal` before vote / duplicate `vote` without `--replace`, `2` usage, `129`/`130`/`143` signal ([arena.ts](../../src/cli/arena.ts)). |
 
-These command families reuse small codes for their own states:
+## `--help` and flag positioning
 
-- `clio-coder fleet events` exits `0` for a sealed, intact journal, `1` for an integrity break or read error, `2` for usage, `3` when the journal read so far is intact but not sealed (the fleet may still be running), and `4` when a `--follow` stopped because the fleet can no longer seal its journal.
-- `clio-coder telemetry verify` exits `0` when the scope or archive verifies, `1` when it fails or is unsealed, and `2` for usage or an unreadable path. `telemetry doctor` exits `0` when healthy, `1` for a failed seal, an unreadable consent store or damaged lines in the newest journal, and `2` for usage. `telemetry share` exits `0` when it wrote or previewed an archive, `1` when there is nothing to share or it failed, and `2` for usage, including no scope flag outside a terminal. `telemetry import` exits `0` when every scope was placed or was already present and identical, `1` on a failed verify, an unreadable archive or a differing scope already in place, and `2` for usage. The read commands, `consent` and `prune` exit `0`, `1` on an operational failure, and `2` for usage.
-- `clio-coder session terminate` exits `0` when it wrote a request, signalled the owner or released the session, `1` when no live record names that id, and `2` for usage or a refused `--force`. `session list` exits `0`, and `2` for usage.
-- `clio-coder research start` and `research resume` exit `0` when a budget cap (iterations, wall time or spend) ended the campaign, `1` on an error, a noisy A/A check or unenforceable spend, `2` for usage, and `130`, `143` or `129` when SIGINT, SIGTERM or SIGHUP stopped it. `research report` exits `1` when any regrade disagrees with the journal. See [Research and Arena](research-and-arena.md#exit-codes).
-- `clio-coder report` exits `0` when the report was sent, opened in the browser, written or previewed, `1` when sending failed or a bundle was refused, `2` for usage or outside a terminal without `--yes`, and `3` when a likely duplicate or a newer release stopped it and the draft was saved. See [Report a problem to the maintainers](troubleshooting.md#report-a-problem-to-the-maintainers).
-- `clio-coder store` exits `0` on success, `1` on an operational failure, such as a missing tag or a `store verify` that finds a blob that is not ok, and `2` for usage. `store rm` and `store rm-tag` without `--yes` print what they would delete, delete nothing and exit `0`. See [Store](store.md).
-- `clio-coder arena run` exits `0` when every contender finished, `1` when the match failed, `2` for usage, and `130`, `143` or `129` on SIGINT, SIGTERM or SIGHUP. `arena show --reveal` before a vote and a second `arena vote` without `--replace` exit `1`.
+Subcommand `--help` exits `0` with zero side effects or network probes, writing to `stdout` — except `clio-coder run --help --json` and `clio-coder run --help --json-events <mode>`, which write help to `stderr` so `stdout` stays clean ([run-help.ts](../../src/cli/run-help.ts)).
 
----
+### Flag positioning
 
-## 2. The `--help` Standard
+Global options (`--version`/`-v`, `--help`/`-h`, `--api-key`, `--no-context-files`/`-nc`, `--skill`, `--no-skills`) are recognized globally **only before the subcommand** ([index.ts](../../src/cli/index.ts)):
+- `--api-key`, `--no-context-files`/`-nc`, `--skill`, and `--no-skills` apply only to interactive mode, `run`, and `acp`; placing them before any other subcommand exits `2`. Placing them after a subcommand (`clio-coder run --api-key ...`) prints a remediation line to `stderr` and exits `2`.
+- `--with-panes` (before a subcommand) and `--demo`, `--no-demo`, `--autonomy`, `--allow-tools`, `--delegate-tools`, `--session-file` are interactive-only and exit `2` if a subcommand follows ([index.ts](../../src/cli/index.ts)).
+- `--version`/`-v` after a subcommand passes through to that subcommand (`clio-coder paths -v` exits `2`).
+- Directory overrides use `CLIO_CODER_*_DIR` / `CLIO_CODER_HOME` env vars ([environment-variables.md](environment-variables.md)).
 
-Subcommand help follows these conventions, with the headless JSON exception below:
+## Streams and headless `run` behavior
 
-1. **Standard Output**: Usage instructions and options are printed exclusively to `stdout`.
-2. **Zero Exit**: The process exits with code `0`.
-3. **Zero Side Effects**: Running `clio-coder <subcommand> --help` executes no runtime setup, initiates no network probes, and mutates no state files.
-
-`clio-coder run --help --json` and `run --help --json-events <mode>` print help
-to stderr so stdout stays a machine stream. They still exit 0 without starting
-the run (`src/cli/run.ts`).
-
-### Global vs Subcommand Flag Positioning
-
-Global options (such as `--api-key`, `--no-context-files`, and `-nc`) must precede the subcommand. `--version`, `-v`, `--help` and `-h` are global only there too: after the subcommand or after `--` they belong to that command, so `clio-coder paths -v` exits `2` with `unknown flag: -v` instead of printing the version. `--with-panes`, `--demo`, `--no-demo` and a pre-subcommand `--autonomy` apply to the interactive session only and exit `2` when a subcommand follows them. Directory redirection is configured via the `CLIO_CODER_*_DIR` environment variables (see [docs/guide/environment-variables.md](environment-variables.md)). If a global flag is placed after the subcommand name, CLIO Coder prints a remediation line to `stderr` and exits with code `2`. For `clio-coder run` the message reads:
-
-```text
-clio-coder run: --api-key is a global option and must come before the subcommand: clio-coder --api-key <key> run ...
-```
-
----
-
-## 3. Standard I/O Separation & Headless Execution
-
-In headless execution (`clio-coder run`):
-
-1. **Standard Output (`stdout`)**: Reserved strictly for the final answer, deliverable artifact content, or machine-readable JSON streams.
-2. **Standard Error (`stderr`)**: Reserved for progress notifications, permission denial advisories, telemetry warnings, and error diagnostics.
-3. **Headless Permission Denials**: When a tool requires permission that cannot be granted in headless mode, CLIO Coder emits `HEADLESS_PERMISSION_DENIED_REASON`:
-   ```text
-   clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
-   ```
-   The denial is delivered to the model so it can recover through permitted work or report a limitation. An unresolved block with no successful write exits `1` with run outcome `failed` and `outcomeDetail: "noop"`; this does not require `--fail-on-noop`. A later substantive success of the same action class can resolve a block. A successful `limitation` call fails with detail `limitation`. `--fail-on-noop` also rejects runs whose attempted tools all failed without a block. A run started with `--turn-mode answer` or `proposal` asked for no change, so neither rule applies to it; it exits `0` and names its blocked calls on stderr. The no-op rules are in [commands and modes](commands-and-modes.md).
-
-After the answer, a headless main-agent run that called at least one tool prints one stderr line with what the harness itself saw, beside the model's own account:
-
-```text
-clio-coder run: observed: <N> tool calls, <M> refused · <W> writes · checks passed: <names> · checks failed: <names>
-```
-
-Segments that do not apply are left out, and at most three check names are listed per segment. A run that wrote files with no standing check ends the line with `no check observed after the last write`, or with `no checks declared in the workspace` when `verify` found none declared or derivable. `--json-events terminal` carries the same facts as `turn_end.observed` (`toolCalls`, `refused`, `writes`, `checks` as `{name, passed}`, and `noChecksDeclared` when it applies). The line changes neither stdout nor the exit code.
+For `clio-coder run` in text mode ([print.ts](../../src/cli/modes/print.ts), [run.ts](../../src/cli/run.ts)):
+- `stdout` receives only the final answer (text mode) or NDJSON frames (`--json`, `--json-events`).
+- `stderr` receives progress, permission denials, `observed` summary, `--verify` results, `Recording manifest (relative to Clio state): <path>` (with `--agent --record`), and errors.
+- Unconfirmed permissions in headless mode return `HEADLESS_PERMISSION_DENIED_REASON` (`clio-coder run cannot confirm permission requests; rerun interactively to approve this action.`) as a tool error so the model can adapt or call `limitation` ([headless-permission.ts](../../src/core/headless-permission.ts)).
+- Runs that called `>= 1` tool emit one `stderr` line after completion (`headless-observed.ts`):
+  `clio-coder run: observed: <N> tool call(s), <M> refused [· <W> write(s)] [· check(s) passed: <names>] [· check(s) failed: <names>] [· no check observed after the last write | no checks declared in the workspace]` (max 3 check names per list; does not alter stdout or exit code).
+- `--verify "<cmd>"` runs each check after the turn settles, logs to `stderr`, and emits `verify` (`--json-events full`) or `turn_end.verify` (`--json-events terminal`); it does not override the run's exit code ([print.ts](../../src/cli/modes/print.ts)).
 
 ### Failures before output starts
 
-With `--json` or `--json-events`, a headless main-agent run that fails before it writes any output still ends its stream with one terminal frame, so a consumer never sees an empty stdout. The frame is `{"type":"turn_end","startedAt":…,"endedAt":…,"exitCode":<n>,"text":"","error":…,"outcome":…}`. `error` carries the last diagnostic the run printed, or `clio-coder run failed before output started (exit <n>)` when it printed none. `outcome` is `timed_out` for exit 124 and `failed` for any other nonzero code. A run that exits 0 never gets this frame. In `full` mode the `run_end` frame follows it.
+When `--json` or `--json-events` fails before writing any frame (`stdout` still empty), the failure wrapper emits `{"type":"turn_end","startedAt":...,"endedAt":...,"exitCode":<n>,"text":"","error":...,"outcome":...}` (`outcome` is `timed_out` for exit `124`, else `failed`) so `stdout` is never empty on non-zero exit. In full mode, a `run_end` frame follows ([run-failure.ts](../../src/cli/run-failure.ts)).
 
 ### The `run_end` frame
 
-Every full-mode `clio-coder run --json` stream ends with exactly one `run_end` frame, also after `--timeout` or a signal, when the shutdown path writes it and flushes stdout so a reader that is behind still gets whole lines:
+Every full-mode `clio-coder run --json` / `--json-events full` stream ends with one `run_end` frame (`RUN_JSON_SCHEMA_VERSION = 1`), including after `--timeout` or signals:
 
 ```json
-{"type":"run_end","startedAt":"…","endedAt":"…","exitCode":1,"outcome":"failed","outcomeDetail":"noop","error":"…","safety":{…}}
+{"type":"run_end","startedAt":"...","endedAt":"...","exitCode":1,"outcome":"failed","outcomeDetail":"noop","error":"...","safety":{}}
 ```
 
-`outcome` is `succeeded`, `failed`, `canceled` or `timed_out`; `outcomeDetail`, `error` and `safety` appear when they apply. The model's own `turn_end` and `agent_end` frames say how the model stopped; `run_end` says what the host decided, so a run the host failed after the model finished (a `limitation`, a denied call that changed nothing, a worker that did not deliver) reads as a failure here. Read the result from `run_end`. Terminal mode (`--json-events terminal`) carries the same verdict on its synthesized `turn_end`.
+`outcome` is `succeeded`, `failed`, `canceled`, or `timed_out`; `outcomeDetail`, `error`, and `safety` are present when applicable. Always judge overall success/failure from `run_end` (full mode) or the synthesized `turn_end` (terminal mode), not from model-level `agent_end` ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
 ### Dispatched agent output (`clio-coder run --agent`)
 
-In text mode a dispatched agent prints three things to stdout, in this order:
+In text mode (`formatDispatchHumanOutput`, [run-output.ts](../../src/cli/run-output.ts)), `stdout` prints up to six sections in order (redacting URL credentials):
 
-1. **The answer.** The last assistant message of the final attempt, or when the worker streamed text only, the accumulated text. A failover hop discards the earlier attempt's text. When the worker wrote no prose at all and its sealed result is final, CLIO Coder prints the sealed result itself: a `mutation-report`'s `summary` and `observations`, a `scout-report` or `research-report`'s findings as `- <claim> (<path>:<line>)`, a `world-knowledge-report`'s synthesis and facts, a `provenance-report`'s confirmed facts, an `oracle-report`'s verdict and challenge, and for any other kind the result text.
-2. **A `Not verified:` block**, only when the sealed result is final, not truncated, and names something unchecked. It lists items from the result's own typed fields and never infers limits from narration. One line per item, each clipped at 400 characters:
-   - `mutation-report`: every `declaredChecks` entry and every failed `validations` entry as `<name>: <evidence>`.
-   - `code-report`: every failed `checks` entry as `<name>: <evidence>`.
-   - `verifier-report`: when the verdict is `fail`, its failed checks print under `Failed checks:` instead, as `- <name>: <evidence>`, and `run --agent` exits 1. The run record keeps outcome `succeeded`.
-   - `scout-report`: `degradedReason`, each `ungroundedClaims` entry and each finding without a valid `path` and `line` as `Ungrounded claim: <claim>`, and when `needsSplit` is true each proposed subtask as `Scout requested further work: <task>`.
-   - `world-knowledge-report`: `Discovery: unavailable` or `Discovery: caller-supplied-only`, then `uncertainties` and `followUpVerification`.
-   - `provenance-report`: `missingEvidence` and `nextInspections`.
-   - `debugger-report`: `Reproduction: unknown` or `Reproduction: not-reproduced`.
-3. **One `result:` line**: `result: <runId> agent=<id> exit=<n> target=<id> requested_model_id=<wire id> tokens=<n> start=<iso> end=<iso>`. Optional fields appear in place. `verdict=<verdict>` and, when checks failed, `failed_checks=<N>` follow `exit=` for a verifier report. `verification=unverified not_verified=<N>` follows when the block above printed `N` items. `response_model_id_observation=<state>[,<state>...]` and, for a LiteLLM route, `gateway=litellm route=<group>-><model>@<host>` follow `requested_model_id=` when the run recorded upstream responses. `reasoning=<n>` and `error=<message>` follow `tokens=` when the worker reasoned or the run failed.
+1. **Answer**: Last assistant text (prior attempts discarded on failover), or `sealedResultAnswer` when no prose was written (`mutation-report`: `summary`, `observations`, and `changed: <paths>` when `mutatedPaths` is non-empty; `scout-report` / `research-report`: `- <claim> [(<path>:<line>)|(<evidence>)]`; `world-knowledge-report`: `synthesis` and `facts`; `provenance-report`: `confirmedFacts`; `oracle-report`: `verdict`, `challenge`; fallback `output.text.trim()`). Cut-off partial output passes through `holdCutOffText`.
+2. **`Failed checks:`** (optional): Present only when `verifier-report` has failed checks (`- <name>: <evidence>`), causing exit `1`.
+3. **`Not verified:`** (optional): Typed unchecked items from final non-truncated sealed reports (each clipped to 400 chars): `mutation-report` (`declaredChecks`, failed `validations`), `code-report` (failed `checks`), `scout-report` (`degradedReason`, `ungroundedClaims`, ungrounded findings, `proposedSubtasks` when `needsSplit`), `world-knowledge-report` (`Discovery: unavailable|caller-supplied-only`, `uncertainties`, `followUpVerification`), `provenance-report` (`missingEvidence`, `nextInspections`), `debugger-report` (`Reproduction: unknown|not-reproduced`).
+4. **`Failed: <headline>`** (optional): Shown when `receipt.exitCode !== 0` and a worker failure headline applies.
+5. **`Finished with a caveat: <words>`** (optional): Shown when `receipt.exitCode === 0` and calls were refused/guarded or contract conformance failed (excludes `no-tools`).
+6. **`result:` summary line**:
+   `result: <runId> agent=<id> exit=<n>[ verdict=<v>[ failed_checks=<N>]][ verification=unverified not_verified=<N>] target=<id> requested_model_id=<wireId>[ response_model_id_observation=...][ gateway=litellm route=...] tokens=<n>[ reasoning=<n>][ error=<msg>] start=<iso> end=<iso>`
 
-With `--json`, stdout is JSONL with one frame per line: a `session` header (`mode: "agent"`, `agentId`, `schemaVersion`, `cwd`, `clioCoderVersion` and the `runId` once it is known), one frame per worker event, `dispatch_scope_notice` frames when a scope entry changed what the worker may touch or a peer CLI read instruction files with stale rules (code `peer_instructions_stale`; level `warning`) or a worker merge landed on the checkout (code `worker_merged`, level `info`), and a final `{"type":"result","result":{...}}` frame holding the run result (with `recording` when `--record` captured one, and `verdict` and `failedChecks` for a verifier report). The human layout above is text mode only. The process exit status is the result's `exitCode` when it is 0, 2, 3 or 4, and 1 for every other value; a verifier verdict of `fail` exits 1. When dispatch admission refuses the agent, so that no worker starts and no model is called, the stream holds the `session` header and one `{"type":"admission_refused","agentId":…,"message":…,"exitCode":…}` frame in place of a `result` frame, and the command exits 2.
+With `--json`, `stdout` emits NDJSON frames ([run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)):
+- `session` (`mode: "agent"`, `agentId`, `schemaVersion: 1`, `cwd`, `clioCoderVersion`, `runId` once known),
+- worker events and `dispatch_scope_notice` frames (`peer_instructions_stale` warning, `worker_merged` info),
+- final `result` frame (`{"type":"result","result":{...}}`, plus optional `recording`, `verdict`, `failedChecks`), or `{"type":"admission_refused","agentId":...,"message":...,"exitCode":2}` if admission refused dispatch before spawning any worker ([run.ts](../../src/cli/run.ts)).
+
+Note: `--agent` refuses `--json-events`, `--session`, `--continue`, `--max-cost-usd`, `--fail-on-noop`, `--verify`, `--turn-mode`, `--allow-tools`, `--delegate-tools`, and `--no-delegate` with exit `2` ([run.ts](../../src/cli/run.ts)).
 
 ### Worker permission refusals (exit 3)
 
-A dispatched native worker runs under `fleet.permissions.mode`. Under the default `judge`, the main session's safety judge decides an ordinary ask while the main session runs at `default`; anywhere no judge can answer, `judge` behaves as `deny`. In `deny` mode, and when the judge or, under `main`, the main agent denies an execute call, the refused call returns to the worker model as a tool result and the run continues. A `deny`-mode refusal reads:
+Dispatched workers obey `fleet.permissions.mode` (`judge` default, `deny`, `main`, `fail`):
+- Under `deny` (and denied asks under `judge` or `main`), refused calls return to the worker as tool errors (`permission denied by policy: ...`, command clipped to 200 chars).
+- Reaching **3** `execute`-class policy refusals in one run exits the native or Claude SDK worker with code `3` (`WORKER_EXIT_PERMISSION_REQUIRED`), `outcome: "failed"`, `outcomeDetail: "permission_required; ..."`, and `permission refusal limit reached: the worker ended after 3 refused commands with no approval route: ...` on stderr ([worker-refusals.ts](../../src/engine/worker-refusals.ts)).
+- Non-`execute` refusals and operator/timeout escalation denials do not increment the strike counter.
+- `fleet.permissions.mode: fail` exits `3` immediately on the first permission denial of any class.
+- Dispatch records `permission_required` in route history and blocks identical re-dispatch within the same user turn.
 
-```text
-permission denied by policy: <tool> `<command>` refused by rule <rule>; dispatched workers run non-interactively (fleet.permissions.mode=deny); <tool> requires <class> confirmation
-```
+## JSON output formats (`--json` and `--json-events`)
 
-The command is clipped to 200 characters with secrets redacted. The third execute-class refusal in one run ends the worker with process exit code 3 (`WORKER_EXIT_PERMISSION_REQUIRED`). The dispatch outcome is `failed`, the run's `outcomeDetail` reads `permission_required; <reason>`, and `error=` carries the reason, which names every refused command:
-
-```text
-permission refusal limit reached: the worker ended after 3 refused commands with no approval route: 1) bash `npm install` refused by rule autonomy; 2) ...; 3) ...
-```
-
-The worker also writes that reason to its stderr as `[worker] ...`. Headless main-agent runs report the dispatched worker through `clio-coder run: N dispatched worker(s) did not deliver: <runId> (<agent>, failed): permission_required; ...` and exit 1; that stderr line clips each detail at 600 characters and the settled run keeps the full text.
-
-The limits of the contract:
-
-- Only `execute` refusals count: `deny`-mode refusals and main-authority denials by the safety judge or the main agent. A denied call of any other class, and an operator's or timeout's denial of an escalated call, returns to the worker and never ends the run.
-- `fail` mode ends the run at the first refusal of any class with `permission required for <tool> (<class>); fleet.permissions.mode=fail ends this run`, with the same exit code and outcome.
-- An escalation that has no responder applies its fallback mode, `deny` or `fail`, at once.
-- The Claude SDK worker runtime counts its `deny`-mode execute refusals against the same limit and ends at the first refusal under `fail`. That runtime has not been exercised against a live Claude subscription.
-- The route history labels the run `permission_required`, and dispatch blocks an identical re-dispatch in the same user turn.
-
----
-
-## 4. Machine-Readable Output Formats (`--json` & `--json-events`)
-
-Many CLIO Coder CLI subcommands provide structured JSON output for integration with scripts, CI pipelines, and external orchestrators.
-
-### Subcommand JSON Summary
-
-| Subcommand | Flag | Output Structure |
-| :--- | :--- | :--- |
-| `clio-coder run` | `--json` | Stream of incremental NDJSON event frames. Core frame kinds include `session`, `agent_start`, `turn_start`, `message_start`, `message_end`, `thinking_delta`, `text_delta`, `tool_execution_start`, `tool_execution_end`, `turn_end`, `agent_end`, and the final `run_end`. Full streams can also carry registered `clio_coder_*` tool, permission, plan, and lifecycle frames, and `dispatch_scope_notice` frames, whose code `worker_merged` reports a dispatched worker's change that merged onto the checkout (text mode prints the same notice on stderr); consumers must dispatch on `type` and tolerate additive kinds. Tool frames name the capability that ran; a call through `gateway` adds `via: "gateway"`, and a chain step adds `parentToolCallId` ([commands and modes](commands-and-modes.md), section on JSON event streaming). |
-| `clio-coder run` | `--json-events terminal` | Emits the `session` header, a synthesized `turn_start` (`startedAt`), the `agent_end` and `notice` events that pass the filter, and a synthesized `turn_end` carrying `startedAt`, `endedAt`, `exitCode`, final answer `text`, and `error` when the turn failed. Per-segment token usage rides `agent_end`. Carries no tool activity, dispatch run id or merge outcome; use `full` or the run's settled record for those (#122). |
-| `clio-coder run` | `--json-events full` | Emits the complete event stream with projected assistant messages (`streamed: true`, `textLength`, `thinkingLength`); `turn_end.message.content` also retains the final answer text (#122). |
-| `clio-coder run --agent` | `--json` | JSONL: a `session` header, one frame per worker event and scope notice, and a final `result` frame with the run result. `--json-events` is refused with `--agent` (exit 2). See [Dispatched agent output](#dispatched-agent-output-clio-coder-run---agent). |
-| `clio-coder doctor` | `--json` | `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }` on stdout. Exit 1 when any row is an error. See [Doctor](doctor.md). |
-| `clio-coder upgrade`, `reset`, `uninstall` | `--json` | One report document: `command`, `title`, `method`, `status` (`success`, `skipped`, `dry-run` or `error`), `items` (path, bytes and `remove`, `keep`, `absent`, `skip` or `clean` status), `steps`, `warnings`, `errors`, `advice` and `summary`. The text output carries the same facts. |
-| `clio-coder session list` | `--json` | `{ stateDir, staleAfterMs, sessions: [...], malformed, clockOffsetMs }`. Each session carries its live record (`id`, `host`, `pid`, `surface`, `startedAt`, `cwd`) plus `ageMs`, `skewMs` and `state` (`live`, `stale` or `terminating`). `--stale` keeps only stale sessions. |
-| `clio-coder session terminate` | `--json` | `{ id, host, pid, action, message, ageMs }` with `action` one of `requested`, `signaled`, `released` or `refused`, plus `exited` for a signal and `released` counts after `--force`. |
-| `clio-coder fleet events` | `--json` | The stored hash-chained NDJSON journal lines, verbatim, one per line. `--follow` keeps reading until `fleet_sealed`. |
-| `clio-coder agents` | `--json` | JSON array of registered agent recipe metadata objects. |
-| `clio-coder targets` | `--json` | JSON object containing the configured `targets` array. |
-| `clio-coder models` | `--json` | JSON array of catalog models with capability flags. |
-| `clio-coder fleet status` | `--json` | JSON snapshot object with `generatedAt`, `admission` (`open` or `draining`), `running`, `retrying`, and `totals`. Each run row carries its `node`, defaulting to `local`. The `totals` token numbers are the known part; `totals.coverage` counts the runs and, per field, the runs that recorded the field only in part or not at all, and `totals.display` words each field as a lower bound beside those runs. |
-| `clio-coder playbook validate` | `--json` | JSON report with `valid`, `playbook`, and either successful `checks` plus `planHash` or failure `diagnostics`. Validation failures exit `1`; usage errors exit `2`. |
-| `clio-coder playbook graph` | `--json` | JSON object with `playbook`, `planHash`, compiled `waves`, and expanded `loops`. Playbook failures exit `1`; usage errors exit `2`. |
-| `clio-coder fleet run --resume` | `--json` | NDJSON step records include `status: "replayed"` and the original run reference (`run.runId` and its run `digest`) for replayed prefix steps. Plan or variable mismatches exit `1`. |
-| `clio-coder telemetry inspect`, `calls`, `cost`, `cache`, `timeline`, `why-stopped`, `explain` | `--json` | The read model's DTO for the requested view, the same one the TUI, ACP and GUI serve. |
-| `clio-coder telemetry verify` | `--json` | For a scope directory, `{ path, status, ... }` with `status` `verified`, `unsealed` or `failed` and the seal verdict's fields. For a share archive, `{ path, archive: true, status, failure, manifest, scopes }`. |
-| `clio-coder telemetry doctor` | `--json` | `{ mode, consent, latestSession, seals, failures }`: requested and effective capture mode with its flags, the consent covering the current directory, the newest session journal's health, seal counts per state with scope counts, and every failed seal. |
-| `clio-coder fleet verify` | `--json` (required) | `{ version, verifiedAt, runId, state, reason, axes }` with `state` `pending`, `verified`, `failed` or `unavailable`. |
-| `clio-coder paths` | `--json` | JSON object mapping platform directory names to absolute paths. |
-
-### Incremental Streaming & Deduplication Invariant (#122, #123)
-
-The `--json` stream from `clio-coder run` emits **deltas and increments** without repeated growing message snapshots:
-1. `text_delta` and `thinking_delta` stream incremental content tokens.
-2. `message_end` projects assistant text and thinking blocks to length descriptors (`{ streamed: true, textLength }` and `{ streamed: true, thinkingLength }`). Full-mode `turn_end` retains the final text on those text blocks for answer consumers; thinking bodies and replay signatures remain omitted. Terminal-mode `turn_end.text` carries the final answer without requiring delta reassembly.
-3. Tool calls and results are preserved intact since they carry execution payloads not present in text deltas.
-4. Terminal accounting and token usage remain fully populated for auditability.
-5. Argument validation precedes any state read: unknown flags and missing required positionals exit `2` with usage syntax printed to `stderr` (#123).
+| Command | Flag(s) | Output schema / contract |
+| --- | --- | --- |
+| `run` | `--json` / `--json-events full` | NDJSON: `session` (`schemaVersion: 1`), `agent_start`, `turn_start`, `message_start`, `text_delta`, `thinking_delta`, `message_end` (streamed text/thinking projected to `{streamed: true, textLength\|thinkingLength}`), `tool_execution_start\|update\|end` (gateway calls add `via: "gateway"`; chain steps add `parentToolCallId`), `turn_end` (retains final assistant text), `agent_end`, `dispatch_scope_notice`, `dispatch_settlement`, optional `autonomy`/`verify`, final `run_end`. Unknown frame `type`s must be tolerated ([json-stream.ts](../../src/cli/modes/json-stream.ts), [run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)). |
+| `run` | `--json-events terminal` | NDJSON: `session`, synthesized `turn_start`, filtered `agent_end` + `notice`, synthesized `turn_end` (`startedAt`, `endedAt`, `exitCode`, `text`, optional `error`, `outcome`, `outcomeDetail`, `safety`, `toolRounds`, `autonomy`, `verify`, `observed`). Omits tool execution and `run_end`. |
+| `run --agent` | `--json` | NDJSON worker stream ending with `result` or `admission_refused`. |
+| `doctor` | `--json` | `{ ok, fix, deep, findings: [{ ok, name, level, detail }] }`. |
+| `upgrade`, `reset`, `uninstall` | `--json` | `{ command, title, method?, status ("success"\|"skipped"\|"dry-run"\|"error"), items, steps, warnings, errors, advice, summary? }` ([lifecycle-presenter.ts](../../src/cli/lifecycle-presenter.ts)). |
+| `session list` | `--json` | `{ stateDir, staleAfterMs, sessions: [{ ..., ageMs, skewMs, state }], malformed, clockOffsetMs }` ([session.ts](../../src/cli/session.ts)). |
+| `session terminate` | `--json` | `{ id, host, pid, action ("requested"\|"signaled"\|"released"\|"refused"), message, ageMs, ... }`. |
+| `fleet events` | `--json` | Verbatim hash-chained NDJSON journal lines (`--follow` streams until `fleet_sealed`). |
+| `fleet status` | `--json` | `{ generatedAt, admission ("open"\|"draining"), running, retrying, totals }` (`totals.coverage` and `totals.display` distinguish partial/unrecorded fields). |
+| `fleet run --resume` | `--json` | NDJSON step records (`status: "replayed"`, `run.runId`, `digest` for replayed prefix). |
+| `fleet verify` | `--json` (required) | `{ version, verifiedAt, runId, state ("pending"\|"verified"\|"failed"\|"unavailable"), reason, axes }`. |
+| `agents` / `models` / `targets` | `--json` | JSON arrays (`agents`, `models`) or `{ targets: [...] }` (`targets`). |
+| `playbook validate` / `graph` | `--json` | Validation (`valid`, `playbook`, `checks`+`planHash` or `diagnostics`) or compiled graph (`playbook`, `planHash`, `waves`, `loops`). |
+| `telemetry inspect\|calls\|cost\|cache\|timeline\|why-stopped\|explain` | `--json` | Read-model DTO matching TUI/ACP/GUI payloads. |
+| `telemetry verify` / `doctor` | `--json` | Scope verdict `{ path, status ("verified"\|"unsealed"\|"failed"), ... }` or archive verdict; doctor report `{ mode, consent, latestSession, seals, failures }`. |
+| `paths` | `--json` | `{ config, data, state, cache, install, installActive, launcher, project, tracking }` ([paths.ts](../../src/cli/paths.ts)). |
