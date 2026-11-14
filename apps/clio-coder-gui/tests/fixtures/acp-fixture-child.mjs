@@ -37,12 +37,17 @@ const readSettingsLayer = async (path) => {
 	}
 };
 const savedChat = { target: null, model: null };
+// The connections the layers configure. The engine lists these whichever one chat uses.
+const configuredTargets = new Set();
 for (const path of [
 	...(process.env.CLIO_CODER_CONFIG_DIR ? [join(process.env.CLIO_CODER_CONFIG_DIR, "settings.yaml")] : []),
 	join(process.cwd(), ".clio-coder", "settings.yaml"),
 	join(process.cwd(), ".clio-coder", "settings.local.yaml"),
 ]) {
-	const chat = (await readSettingsLayer(path))?.chat;
+	const layer = await readSettingsLayer(path);
+	for (const target of Array.isArray(layer?.targets) ? layer.targets : [])
+		if (typeof target?.id === "string" && target.id) configuredTargets.add(target.id);
+	const chat = layer?.chat;
 	for (const key of ["target", "model", "thinkingLevel"])
 		if (typeof chat?.[key] === "string" && chat[key]) {
 			settings.chat[key] = chat[key];
@@ -1883,8 +1888,15 @@ async function handle(frame) {
 							isOrchestrator: true,
 							apiKey: "must-be-stripped",
 						},
-						// The list is the configured set and does not follow the chat route: `targets use` changes which
-						// target a task starts on, never what the list holds (targets-http compares the two).
+						// Every connection the settings configure, as the engine lists them, whichever one chat uses.
+						...[...configuredTargets]
+							.filter((id) => !["fixture", "field-station"].includes(id))
+							.map((id) => ({
+								id,
+								runtime: "openai-compatible",
+								models: [(savedChat.target === id && savedChat.model) || "fixture-model"],
+								isOrchestrator: true,
+							})),
 						// A second target with a catalog, so choosing one in the route picker changes the model list.
 						...(ROUTE
 							? [

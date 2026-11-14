@@ -113,6 +113,29 @@ const failures: string[] = [],
 // is 800 CSS pixels inside a 1600px window; neither CSS zoom nor pinch scaling is applied.
 const runs = [...(values["zoom-only"] ? [] : widths.map((width) => ({ width, zoom: 1 }))), { width: 800, zoom: 2 }];
 const statuses: { method: string; path: string; status: number }[] = [];
+// The stale-token step: the shell's first reads (meta, the rail's workspaces and session overview, setup status)
+// start together and wait on one exchange of the launch token, which is refused once per width; the reads then
+// fail in the browser without asking again. A refused stream must stop, not reconnect forever.
+const firstReads = [
+	"/api/auth/clients",
+	"/api/meta",
+	"/api/events",
+	"/api/events/ticket",
+	"/api/workspaces",
+	"/api/sessions/overview",
+	"/api/setup",
+];
+/** A refusal a step asks for on purpose. The report keeps these apart from the error responses. */
+function expectedRefusal(item: { method: string; path: string; status: number }): boolean {
+	return (
+		// The two "does-not-exist" folder steps.
+		(item.method === "POST" && item.path === "/api/workspaces" && item.status === 422) ||
+		// The harness Clio does not expose session history, so the read refuses. The same path also
+		// creates a session, and a refused create must still fail the run.
+		(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) ||
+		(item.status === 401 && firstReads.includes(item.path))
+	);
+}
 /** Set on responses a step fulfils itself; the error-response tally skips them. */
 const stubHeader = "x-clio-smoke-stub";
 const zoomMeasurements: { outerWidth: number; innerWidth: number; devicePixelRatio: number; visualScale: number }[] =
@@ -2867,19 +2890,7 @@ try {
 	await flow("page errors", "all widths", async () => assert.deepEqual(errors, []));
 	await flow("request failures", "all widths", async () => assert.deepEqual(failures, []));
 	await flow("error responses", "all widths", async () => {
-		// The stale-token step: the shell's first reads (meta, the rail's workspaces and session overview,
-		// setup status) start together and wait on one exchange of the launch token, which is refused once per
-		// width; the reads then fail in the browser without asking again. A refused stream must stop, not
-		// reconnect forever. Nothing is read again after the refusal.
-		const firstReads = [
-			"/api/auth/clients",
-			"/api/meta",
-			"/api/events",
-			"/api/events/ticket",
-			"/api/workspaces",
-			"/api/sessions/overview",
-			"/api/setup",
-		];
+		// Nothing is read again after the stale token's refusal.
 		assert.ok(
 			statuses.some((item) => item.path === "/api/auth/clients" && item.status === 401),
 			"the stale launch token was never refused at the exchange",
@@ -2890,14 +2901,7 @@ try {
 				`${path} was refused more than once per width`,
 			);
 		assert.deepEqual(
-			statuses.filter(
-				(item) =>
-					!(item.path === "/api/workspaces" && item.status === 422) &&
-					// The harness Clio does not expose session history, so the read refuses. The same path also
-					// creates a session, and a refused create must still fail the run.
-					!(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
-					!(item.status === 401 && firstReads.includes(item.path)),
-			),
+			statuses.filter((item) => !expectedRefusal(item)),
 			[],
 		);
 	});
@@ -2914,7 +2918,8 @@ try {
 		checks,
 		requestFailures: failures,
 		scriptErrors: errors,
-		errorResponses: statuses,
+		errorResponses: statuses.filter((item) => !expectedRefusal(item)),
+		expectedRefusals: statuses.filter(expectedRefusal),
 	};
 	await writeFile(join(output, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 	console.log(JSON.stringify(report, null, 2));

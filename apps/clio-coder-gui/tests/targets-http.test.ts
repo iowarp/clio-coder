@@ -40,7 +40,7 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 		const listed = await json(await h.request(`${path}/targets`), CliTargets);
 		assert.deepEqual(
 			listed.targets.map((target) => target.id),
-			["fixture", "field-station"],
+			["fixture", "fixture-target", "field-station"],
 		);
 		assert.equal(listed.targets[0]?.runtime, "openai-compatible");
 		assert.equal(listed.targets[0]?.health, "unknown");
@@ -70,7 +70,13 @@ test("targets HTTP: real CLI use/remove, typed follow-up reads, redaction and of
 			assert.ok(op.status === "succeeded" && "kind" in op.result && op.result.kind === "targets");
 			assert.equal(op.result.exitCode, 0);
 			assert.equal(op.cancellable, false);
-			assert.deepEqual(op.result.targets, listed);
+			// `use` keeps the configured connections; `remove` deletes the one it names from the settings.
+			assert.deepEqual(
+				op.result.targets,
+				action === "use"
+					? listed
+					: { ...listed, targets: listed.targets.filter((target) => target.id !== "fixture-target") },
+			);
 			const settings = await json(await h.request(`${path}/settings`), SettingsReport);
 			assert.equal(
 				settings.rows.find((row) => row.key === "chat.target")?.value,
