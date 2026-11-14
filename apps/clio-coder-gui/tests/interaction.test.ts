@@ -85,10 +85,11 @@ test("the matcher is exact: every listed modifier held and no unlisted one", () 
 test("chords print the way the reference reads them", () => {
 	// Plain Enter sends by default; the row says so and names the other two Enter chords.
 	assert.equal(formatKeybinding(KEYBINDINGS.send), "Enter");
-	assert.match(KEYBINDINGS.send.where, /Shift\+Enter adds a line/);
+	assert.match(KEYBINDINGS.send.where, /Shift \+ Enter adds a line/);
 	assert.equal(formatKeybinding(KEYBINDINGS.allowOnce), "Alt + A");
 	assert.equal(formatKeybinding(KEYBINDINGS.escape), "Esc");
-	assert.equal(formatKeybinding(KEYBINDINGS.tabNext), "Right arrow");
+	// Arrow keys read as the composer notes do ("Up / Down"), one notation in every list.
+	assert.equal(formatKeybinding(KEYBINDINGS.tabNext), "Right");
 	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl/Cmd + K");
 });
 
@@ -194,7 +195,7 @@ test("the reference lists the conversation chords and the message-box keys", () 
 		"Up / Down",
 	])
 		assert.ok(terms.includes(chord), `${chord} is missing from the reference`);
-	assert.ok(keyboard.entries.some((entry) => entry.meaning.includes("Shift+Enter")));
+	assert.ok(keyboard.entries.some((entry) => entry.meaning.includes("Shift + Enter")));
 	const commands = HELP_SECTIONS.find((section) => section.id === "commands");
 	assert.ok(commands);
 	assert.match(commands.lede, /^Type \/ in the message box to see this task's commands\./u);
