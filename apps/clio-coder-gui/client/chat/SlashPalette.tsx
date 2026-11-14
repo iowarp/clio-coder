@@ -105,6 +105,7 @@ export function SlashActionDialog({
 	capabilities,
 	running,
 	settledTurns,
+	seed = "",
 	onClose,
 }: {
 	action: SlashAction;
@@ -114,6 +115,8 @@ export function SlashActionDialog({
 	capabilities: AgentCapabilities | undefined;
 	running: boolean;
 	settledTurns: number;
+	/** Words typed after the name, `/btw <question>`, that the side question or draft form starts with. */
+	seed?: string;
 	onClose: () => void;
 }) {
 	const body = useRef<HTMLDivElement>(null);
@@ -154,6 +157,7 @@ export function SlashActionDialog({
 							sessionOpen={sessionOpen}
 							capabilities={capabilities}
 							only={action === "btw" ? "question" : "draft"}
+							seed={seed}
 						/>
 					) : action === "extensions" ? (
 						<ExtensionsPanel {...facts} />

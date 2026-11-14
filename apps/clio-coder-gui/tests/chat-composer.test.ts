@@ -309,7 +309,11 @@ test("Enter sends, Shift and Enter do not, and the declared chord still sends", 
 	assert.equal(composerKeyAction(press("Enter", { shiftKey: true }), idle), "newline");
 	assert.equal(composerKeyAction(press("Enter", { ctrlKey: true }), idle), "send");
 	assert.equal(composerKeyAction(press("Enter", { metaKey: true }), idle), "send");
-	assert.equal(composerKeyAction(press("Enter", { altKey: true }), idle), "newline");
+	// A textarea adds nothing for Alt+Enter or Ctrl+J, the terminal's other newline chords, so the composer does.
+	assert.equal(composerKeyAction(press("Enter", { altKey: true }), idle), "insert-line");
+	assert.equal(composerKeyAction(press("j", { ctrlKey: true }), idle), "insert-line");
+	assert.equal(composerKeyAction(press("j", { ctrlKey: true }), { layerOwned: false, composing: true }), "ignore");
+	assert.equal(composerKeyAction(press("j"), idle), "ignore");
 	assert.equal(composerKeyAction(press("a"), idle), "ignore");
 });
 

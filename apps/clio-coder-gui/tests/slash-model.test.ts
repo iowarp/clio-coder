@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aliasEntries, resolveAlias, type SlashFacts, slashEntries } from "../client/chat/slash-model.js";
+import {
+	aliasEntries,
+	exactEntry,
+	resolveAlias,
+	SLASH_ALIASES,
+	type SlashFacts,
+	slashEntries,
+} from "../client/chat/slash-model.js";
 
 const command = (name: string, extra: Record<string, unknown> = {}) =>
 	({ name, summary: `${name} summary`, usage: `/${name}`, group: "Work", args: {}, ...extra }) as never;
@@ -90,4 +97,53 @@ test("the slash list offers what this task can serve under Also works, after eve
 	);
 	assert.ok(!bare.includes("tree") && !bare.includes("usage"), "a capability the task lacks hides its names");
 	assert.deepEqual(aliasEntries(facts({ capabilities: undefined }), []), []);
+});
+
+test("every terminal command a browser can serve lands on a control, and the rest say why", () => {
+	const full = facts({
+		capabilities: {
+			commands: true,
+			telemetry: true,
+			branches: { fork: true },
+			aside: { ask: true, draft: true },
+			extensions: true,
+			fleet: true,
+			board: true,
+			context: true,
+		} as never,
+		catalog: {
+			...catalog,
+			commands: [
+				...catalog.commands,
+				command("fleet", { requiresSubcommand: true, args: { subcommands: { share: {} } } }),
+				command("memory", { requiresSubcommand: true, args: { subcommands: { seed: {} } } }),
+			],
+		},
+	});
+	const target = (text: string) => resolveAlias(text, full)?.alias.target;
+	// The terminal's own names (src/session-control/slash-commands.ts) that are not catalog commands here.
+	assert.deepEqual(target("/btw what does the retry loop do"), { kind: "action", action: "btw" });
+	assert.equal(resolveAlias("/btw what does the retry loop do", full)?.rest, "what does the retry loop do");
+	assert.deepEqual(target("/draft split the parser"), { kind: "action", action: "draft" });
+	assert.deepEqual(target("/reload"), { kind: "action", action: "extensions" });
+	assert.deepEqual(target("/view"), { kind: "pane", view: "artifacts" });
+	assert.deepEqual(target("/files"), { kind: "control", control: "mention" });
+	assert.deepEqual(target("/trust"), { kind: "pane", view: "session" });
+	// A bare hub the catalog refuses opens what the terminal opens; its verbs stay the catalog's.
+	const entries = slashEntries(full);
+	const pane = (text: string) => {
+		const entry = exactEntry(entries, text);
+		return entry?.kind === "pane" ? entry.view : null;
+	};
+	assert.equal(pane("/fleet"), "agents");
+	assert.deepEqual(pane("/memory"), { view: "board", section: "memory" });
+	assert.equal(exactEntry(entries, "/memory seed note"), null);
+	// Without the capability, the name says so rather than reaching the agent as a prompt.
+	const bare = facts({ capabilities: { commands: true } as never, paneAvailable: false });
+	for (const name of ["btw", "draft", "reload", "view", "trust"])
+		assert.equal(resolveAlias(`/${name}`, bare)?.alias.target.kind, "notice", name);
+	// Every terminal-only name is a notice, never a prompt.
+	for (const name of ["restart", "upgrade", "panes", "music"])
+		assert.equal(resolveAlias(`/${name}`, full)?.alias.target.kind, "notice", name);
+	assert.ok(!SLASH_ALIASES.some((spec) => spec.names.includes("files") && spec.target.kind === "notice"));
 });
