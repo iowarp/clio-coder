@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { sentPrompt } from "../client/render/follow-latest.js";
+import { browserClamp, sentPrompt } from "../client/render/follow-latest.js";
 import { routes } from "../contracts/routes.js";
 import { applySessionDelta, emptySession, encodeMeter, SessionBuffer } from "../contracts/session-projection.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot, type TimelineItem } from "../contracts/sessions.js";
@@ -535,4 +535,37 @@ test("a prompt sent into the same timeline returns the reader to the live edge; 
 	assert.equal(sentPrompt(answered, [...answered, item("r:user", "user", "replay")]), false, "history replays");
 	assert.equal(sentPrompt(answered, [item("x:user", "user"), item("y:user", "user")]), false, "another task");
 	assert.equal(sentPrompt([], sent), false, "nothing to compare with");
+});
+
+test("only an unprompted move onto content just seen to shrink is a browser clamp; any other upward move is the reader's", () => {
+	// Pinned at 5000; a tool group folded and a ResizeObserver pass saw the bottom drop to 4800.
+	const clamp = {
+		top: 4800,
+		pinnedTop: 5000,
+		viewport: 900,
+		following: true,
+		running: true,
+		intended: false,
+		shrunkTo: 4800,
+	};
+	assert.equal(browserClamp(clamp), true);
+	assert.equal(browserClamp({ ...clamp, top: 4802 }), true, "within the 2px slack");
+	assert.equal(browserClamp({ ...clamp, top: 4803 }), false, "above the shrunk bottom");
+	assert.equal(browserClamp({ ...clamp, top: 4200 }), true, "content may shrink again before the scroll event");
+	assert.equal(browserClamp({ ...clamp, top: 4000 }), false, "more than a viewport above the pin");
+	assert.equal(
+		browserClamp({ ...clamp, shrunkTo: null }),
+		false,
+		"no shrink seen: a script, find-in-page or AT moved it",
+	);
+	assert.equal(browserClamp({ ...clamp, top: 0 }), false, "scrollTop = 0 lands far above any clamp");
+	assert.equal(
+		browserClamp({ ...clamp, top: 0, pinnedTop: 600, shrunkTo: null }),
+		false,
+		"a short scripted move within a viewport, with no shrink seen, ends follow",
+	);
+	assert.equal(browserClamp({ ...clamp, intended: true }), false, "the reader scrolled");
+	assert.equal(browserClamp({ ...clamp, running: false }), false, "no turn runs");
+	assert.equal(browserClamp({ ...clamp, following: false }), false, "not following");
+	assert.equal(browserClamp({ ...clamp, top: 4999.5 }), false, "not an upward move");
 });

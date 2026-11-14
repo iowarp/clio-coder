@@ -19,6 +19,42 @@ const BOTTOM_TOLERANCE_PX = 32;
 /** How long after a wheel, touch, pointer or navigation key an upward scroll still counts as the reader's. */
 const INTENT_MS = 1_000;
 const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+/** How long a shrink a ResizeObserver pass saw can still explain a browser clamp: a clamp's scroll event lands a frame or two later. */
+const CLAMP_WINDOW_MS = 250;
+const CLAMP_SLACK_PX = 2;
+
+/** A scroll event weighed against the hook's last write and the content it last measured. */
+export interface ScrollReading {
+	readonly top: number;
+	/** The offset the hook last wrote. */
+	readonly pinnedTop: number;
+	readonly viewport: number;
+	readonly following: boolean;
+	readonly running: boolean;
+	/** A wheel, touch, pointer, focus or navigation key came just before. */
+	readonly intended: boolean;
+	/** The smallest `scrollHeight - clientHeight` a recent ResizeObserver pass saw below `pinnedTop`, or null. */
+	readonly shrunkTo: number | null;
+}
+
+/**
+ * True when an upward move is the browser clamping scrollTop to content that shrank, not anyone
+ * leaving the live edge: a turn runs, the view follows, no reader input preceded it, content was
+ * seen to shrink since the last pin, and the move lands no higher than that shrink allows and within
+ * one viewport of the last pin. Any
+ * other upward move (the reader, find-in-page, assistive technology or a script) ends follow.
+ */
+export function browserClamp(reading: ScrollReading): boolean {
+	return (
+		reading.following &&
+		reading.running &&
+		!reading.intended &&
+		reading.shrunkTo !== null &&
+		reading.top < reading.pinnedTop - 1 &&
+		reading.pinnedTop - reading.top <= reading.viewport &&
+		reading.top <= reading.shrunkTo + CLAMP_SLACK_PX
+	);
+}
 
 /** The parts of a timeline item that say who wrote it; `snapshot.timeline` satisfies this. */
 export interface ActivityItem {
@@ -63,9 +99,10 @@ function editable(target: EventTarget | null): boolean {
  * above our last write and masquerade as the operator scrolling up. It resumes
  * when reading older content, where height changes must retain the reading edge.
  *
- * While a turn runs, a short upward move with no reader input behind it is the browser clamping
- * scrollTop to content that shrank for a moment (a tool group folding as the next paragraph
- * arrives), not the reader leaving; it is pinned back instead of ending follow. Sending a prompt
+ * While a turn runs, an upward move with no reader input behind it, landing no higher than content
+ * a ResizeObserver pass just saw shrink to, is the browser clamping scrollTop (a tool group folding
+ * as the next paragraph arrives), not the reader leaving; it is pinned back instead of ending
+ * follow (`browserClamp`). Any other upward move ends follow. Sending a prompt
  * from anywhere in the transcript returns to the live edge, where its answer will appear.
  */
 export function useFollowLatest(
@@ -112,6 +149,8 @@ export function useFollowLatest(
 		let viewportHeight = element.clientHeight;
 		let intentAt = Number.NEGATIVE_INFINITY;
 		let pressed = false;
+		let shrunk: { readonly to: number; readonly at: number } | null = null;
+		const shrunkTo = () => (shrunk !== null && performance.now() - shrunk.at < CLAMP_WINDOW_MS ? shrunk.to : null);
 		const intended = () => pressed || performance.now() - intentAt < INTENT_MS;
 		const atBottom = () => element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_TOLERANCE_PX;
 		const pin = () => {
@@ -141,16 +180,23 @@ export function useFollowLatest(
 			}
 			if (followingRef.current && settling.current) return;
 			if (
-				followingRef.current &&
-				runningRef.current &&
-				!intended() &&
-				top < programmaticTop.current - 1 &&
-				programmaticTop.current - top <= height
+				browserClamp({
+					top,
+					pinnedTop: programmaticTop.current,
+					viewport: height,
+					following: followingRef.current,
+					running: runningRef.current,
+					intended: intended(),
+					shrunkTo: shrunkTo(),
+				})
 			) {
 				pin();
 				return;
 			}
-			if (top < programmaticTop.current - 1 || !followingRef.current) setFollow(false);
+			if (top < programmaticTop.current - 1 || !followingRef.current) {
+				shrunk = null;
+				setFollow(false);
+			}
 		};
 		const readIntent = (event: Event) => {
 			if (event instanceof KeyboardEvent && !NAV_KEYS.has(event.key)) return;
@@ -177,7 +223,12 @@ export function useFollowLatest(
 			typeof ResizeObserver === "undefined"
 				? null
 				: new ResizeObserver(() => {
-						if (followingRef.current) pin();
+						if (!followingRef.current) return;
+						// Layout is fresh here, so this read costs nothing. Content that shrank below the last
+						// pin lowers how far a browser clamp can move the view before the next pin lands.
+						const max = element.scrollHeight - element.clientHeight;
+						if (max < programmaticTop.current - 1) shrunk = { to: Math.min(max, shrunkTo() ?? max), at: performance.now() };
+						pin();
 					});
 		// The viewport itself changes height as the dock grows, while its child changes
 		// height as output arrives. Both must retain the live edge when follow is on.
