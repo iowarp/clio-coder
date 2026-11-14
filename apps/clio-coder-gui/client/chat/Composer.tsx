@@ -22,6 +22,7 @@ import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { Dialog } from "../interaction/Dialog.js";
+import { Keycaps } from "../interaction/Keycaps.js";
 import { KEYBINDINGS, matchesKeybinding } from "../interaction/keybindings.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
@@ -947,18 +948,18 @@ export const Composer = memo(function Composer({
 							keys={
 								mention !== null ? (
 									<>
-										<kbd>Enter</kbd> or <kbd>Tab</kbd>{" "}
+										<Keycaps chord="Enter" /> or <Keycaps chord="Tab" />{" "}
 										{mentionActive < agents.length
 											? "steer"
 											: fileMatches[mentionActive - agents.length]?.directory
 												? "open"
 												: "add"}{" "}
-										· <kbd>Esc</kbd> close{files.data?.truncated ? " · keep typing to narrow" : ""}
+										· <Keycaps chord="Esc" /> close{files.data?.truncated ? " · keep typing to narrow" : ""}
 									</>
 								) : (
 									<>
-										<kbd>Tab</kbd> pick · <kbd>Enter</kbd> {line?.kind === "command" ? "runs the line" : "pick"} · <kbd>Esc</kbd>{" "}
-										close
+										<Keycaps chord="Tab" /> pick · <Keycaps chord="Enter" /> {line?.kind === "command" ? "runs the line" : "pick"}{" "}
+										· <Keycaps chord="Esc" /> close
 									</>
 								)
 							}
@@ -973,7 +974,7 @@ export const Composer = memo(function Composer({
 								<p className="slash-palette__error">{slashError}</p>
 							) : (
 								<p className="slash-palette__keys">
-									<kbd>{enterSends ? "Enter" : "Ctrl/Cmd + Enter"}</kbd> runs{" "}
+									<Keycaps chord={enterSends ? "Enter" : "Ctrl/Cmd + Enter"} /> runs{" "}
 									{line.kind === "command" ? <code>{line.plan.description}</code> : "it once the arguments are complete"}
 								</p>
 							)}
@@ -1337,7 +1338,7 @@ export const Composer = memo(function Composer({
 					)}
 					{stopArmed && running ? (
 						<p className="composer__notice" role="status">
-							Press <kbd>Esc</kbd> again to stop this turn.
+							Press <Keycaps chord="Esc" /> again to stop this turn.
 						</p>
 					) : null}
 					{steerNote ? (
@@ -1365,9 +1366,23 @@ export const Composer = memo(function Composer({
 								{estimate.text}
 							</span>
 						) : null}
-						{enterSends ? "Shift + Enter adds a line" : "Enter adds a line · Ctrl/Cmd + Enter sends"}
-						{running && modes.some((offer) => offer.mode === "next-slot") ? " · Alt+S sends now" : ""} · / lists commands · @
-						adds a file or folder · ↑ recalls earlier messages, Ctrl/Cmd+R searches them
+						{enterSends ? (
+							<>
+								<Keycaps chord="Shift + Enter" /> adds a line
+							</>
+						) : (
+							<>
+								<Keycaps chord="Enter" /> adds a line · <Keycaps chord="Ctrl/Cmd + Enter" /> sends
+							</>
+						)}
+						{running && modes.some((offer) => offer.mode === "next-slot") ? (
+							<>
+								{" "}
+								· <Keycaps chord="Alt + S" /> sends now
+							</>
+						) : null}{" "}
+						· <Keycaps chord="/" /> lists commands · <Keycaps chord="@" /> adds a file or folder · <Keycaps chord="↑" />{" "}
+						recalls earlier messages, <Keycaps chord="Ctrl/Cmd + R" /> searches them
 						{attachments.length > 0 ? ` · ${attachmentSummary(attachments)}` : ""}
 					</p>
 					<div className="composer__actions">
@@ -1467,8 +1482,17 @@ export const Composer = memo(function Composer({
 										Enter sends
 									</label>
 									<p className="composer__options-note">
-										{enterSends ? "Shift + Enter adds a line." : "Enter adds a line. Ctrl/Cmd + Enter sends."} @ adds a file or
-										folder. ↑ recalls earlier messages and Ctrl/Cmd+R searches them.
+										{enterSends ? (
+											<>
+												<Keycaps chord="Shift + Enter" /> adds a line.
+											</>
+										) : (
+											<>
+												<Keycaps chord="Enter" /> adds a line. <Keycaps chord="Ctrl/Cmd + Enter" /> sends.
+											</>
+										)}{" "}
+										<Keycaps chord="@" /> adds a file or folder. <Keycaps chord="↑" /> recalls earlier messages and{" "}
+										<Keycaps chord="Ctrl/Cmd + R" /> searches them.
 									</p>
 								</div>
 							</details>
