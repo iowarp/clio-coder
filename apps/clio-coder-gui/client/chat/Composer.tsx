@@ -158,6 +158,14 @@ export function runComposerCommand(sessionId: string, name: string): boolean {
 /** Dialog openers keyed by session, so the Task actions menu and the palette open what the slash list opens. */
 const actionOpeners = new Map<string, (action: SlashAction) => void>();
 
+/** Form openers keyed by session: the Task actions menu opens the Actions dialog at one command's form. */
+const formOpeners = new Map<string, (name: string) => void>();
+
+/** Open the Actions dialog over this session's composer at the named command's form. */
+export function openComposerForm(sessionId: string, name: string): void {
+	formOpeners.get(sessionId)?.(name);
+}
+
 /** Open one session action's dialog over this session's composer; false when no composer for it is on screen. */
 export function openComposerAction(sessionId: string, action: SlashAction): boolean {
 	const open = actionOpeners.get(sessionId);
@@ -223,6 +231,7 @@ export const Composer = memo(function Composer({
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [actionsOpen, setActionsOpen] = useState(false);
+	const [actionsInitial, setActionsInitial] = useState<string | null>(null);
 	const [actionDrafts, setActionDrafts] = useState<Record<string, CommandFields>>({});
 	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
@@ -572,9 +581,15 @@ export const Composer = memo(function Composer({
 			setDialogSeed("");
 			setDialog(action);
 		};
+		const form = (name: string) => {
+			setActionsInitial(name);
+			setActionsOpen(true);
+		};
 		actionOpeners.set(sessionId, open);
+		formOpeners.set(sessionId, form);
 		return () => {
 			if (actionOpeners.get(sessionId) === open) actionOpeners.delete(sessionId);
+			if (formOpeners.get(sessionId) === form) formOpeners.delete(sessionId);
 		};
 	}, [sessionId]);
 	useEffect(() => {
@@ -1477,7 +1492,10 @@ export const Composer = memo(function Composer({
 								aria-haspopup="dialog"
 								aria-expanded={actionsOpen}
 								disabled={sessionState !== "open"}
-								onClick={() => setActionsOpen(true)}
+								onClick={() => {
+									setActionsInitial(null);
+									setActionsOpen(true);
+								}}
 							>
 								<Icon name="overview" />
 								Actions
@@ -1740,6 +1758,7 @@ export const Composer = memo(function Composer({
 						running={running}
 						formDrafts={actionDrafts}
 						onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
+						{...(actionsInitial !== null ? { initial: actionsInitial } : {})}
 						onClose={() => setActionsOpen(false)}
 						onPick={(entry) => {
 							setActionsOpen(false);
