@@ -822,12 +822,21 @@ export interface CallJournalRead {
 	writer?: ClockOrigin;
 }
 
-/** Read-only readers preserve future records and never repair a writer's file (#434). */
-export async function readCallJournal(directory: string): Promise<CallJournalRead> {
-	return readCallJournalSnapshot(directory, 3);
+/**
+ * Read-only readers preserve future records and never repair a writer's file (#434). `wanted` is for a caller that
+ * reads only `records` of those kinds: lines `scanTelemetrySegment` proves hold no such record are not decoded, so
+ * `records` may lack other kinds and `skipped` undercounts, while `damaged`, `modes`, `writer` and each wanted
+ * record with its origin are as an unfiltered read's.
+ */
+export async function readCallJournal(directory: string, wanted?: readonly string[]): Promise<CallJournalRead> {
+	return readCallJournalSnapshot(directory, 3, wanted);
 }
 
-async function readCallJournalSnapshot(directory: string, retries: number): Promise<CallJournalRead> {
+async function readCallJournalSnapshot(
+	directory: string,
+	retries: number,
+	wanted: readonly string[] | undefined,
+): Promise<CallJournalRead> {
 	const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
 	let names: string[];
 	try {
@@ -843,14 +852,14 @@ async function readCallJournalSnapshot(directory: string, retries: number): Prom
 			bytes = await readRegularFile(join(directory, file));
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ENOENT" && retries > 0)
-				return readCallJournalSnapshot(directory, retries - 1);
+				return readCallJournalSnapshot(directory, retries - 1, wanted);
 			throw error;
 		}
-		appendReadSegment(result, bytes);
+		appendScannedSegment(result, scanTelemetrySegment(bytes, wanted));
 	}
 	const after = telemetryJournalFiles(await readdir(directory)).sort();
 	if (after.join("\n") !== [...files].sort().join("\n")) {
-		if (retries > 0) return readCallJournalSnapshot(directory, retries - 1);
+		if (retries > 0) return readCallJournalSnapshot(directory, retries - 1, wanted);
 		throw new Error("call journal rotated repeatedly during read");
 	}
 	return result;
@@ -861,8 +870,18 @@ export function appendPersistedTelemetry(result: CallJournalRead, batch: { bytes
 	appendReadSegment(result, batch.bytes, batch.origin);
 }
 
+/** A cold read of a journal whose segments, oldest first, the caller already read and scanned. */
+export function callJournalReadOfScans(scans: readonly SegmentScan[]): CallJournalRead {
+	const result: CallJournalRead = { records: [], skipped: 0, damaged: 0 };
+	for (const scan of scans) appendScannedSegment(result, scan);
+	return result;
+}
+
 function appendReadSegment(result: CallJournalRead, bytes: Buffer, continuing?: ClockOrigin): void {
-	const scan = scanTelemetrySegment(bytes);
+	appendScannedSegment(result, scanTelemetrySegment(bytes), continuing);
+}
+
+function appendScannedSegment(result: CallJournalRead, scan: SegmentScan, continuing?: ClockOrigin): void {
 	if (scan.tornTailBytes > 0) result.damaged += 1;
 	if (continuing) result.writer = continuing;
 	foldSegmentRows(result, scan.rows, continuing);

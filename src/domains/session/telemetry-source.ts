@@ -46,7 +46,7 @@ import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "../telemet
 const MAX_LINEAGE = 32;
 
 type Io =
-	| { op: "journal"; directory: string }
+	| { op: "journal"; directory: string; wanted?: readonly string[] }
 	| { op: "text"; path: string }
 	| { op: "list"; path: string }
 	| { op: "exists"; path: string }
@@ -55,8 +55,12 @@ type Io =
 	| { op: "scope"; directory: string };
 type Load<T> = Generator<Io, T, unknown>;
 
-function* journal(directory: string): Load<CallJournalRead> {
-	return (yield { op: "journal", directory }) as CallJournalRead;
+/**
+ * `wanted` names the only record kinds the caller reads from `records`; the asynchronous read skips decoding lines that
+ * cannot be one (`readCallJournal`). The synchronous read keeps its incremental cache, which other readers share whole.
+ */
+function* journal(directory: string, wanted?: readonly string[]): Load<CallJournalRead> {
+	return (yield { op: "journal", directory, ...(wanted !== undefined ? { wanted } : {}) }) as CallJournalRead;
 }
 /** Null when the file cannot be read for any reason. */
 function* text(path: string): Load<string | null> {
@@ -145,7 +149,9 @@ async function performAsync(stateDir: string, io: Io): Promise<unknown> {
 			if (!(await withinStateRootAsync(stateDir, io.directory))) return null;
 			return readTelemetryScopeFiles(io.directory).catch(() => null);
 		case "journal":
-			return (await withinStateRootAsync(stateDir, io.directory)) ? readCallJournal(io.directory) : { ...EMPTY_READ };
+			return (await withinStateRootAsync(stateDir, io.directory))
+				? readCallJournal(io.directory, io.wanted)
+				: { ...EMPTY_READ };
 		case "text":
 			return readStateFile(stateDir, io.path).then(
 				(bytes) => bytes.toString("utf8"),
@@ -306,6 +312,7 @@ function* loadSession(
 }
 
 const PROCESS_ID = /^prc_[0-9a-f-]+$/u;
+const QUOTA_KINDS = ["quota.read"] as const;
 
 /**
  * The quota readings this host's process journals hold, oldest journal first. A quota window belongs to the account,
@@ -322,7 +329,8 @@ function* hostQuotaRecords(stateDir: string, since: number | null): Load<Telemet
 	const recent = since === null ? null : yield* writtenSince(directories.map(telemetryJournalPath), since);
 	for (const directory of directories) {
 		if (recent !== null && !recent.has(telemetryJournalPath(directory))) continue;
-		for (const { record, origin } of (yield* journal(directory)).records)
+		// Reads only `records`, and of them only quota.read with its origin, which is all `QUOTA_KINDS` keeps exact.
+		for (const { record, origin } of (yield* journal(directory, QUOTA_KINDS)).records)
 			if (record.k === "quota.read" && origin.host === host) records.push(record);
 	}
 	return records;

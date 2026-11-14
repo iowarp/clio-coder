@@ -154,6 +154,7 @@ export const coreTests = [
 	"retired-settings-keys",
 	"doctor-unknown-runtime",
 	"plugin-engine",
+	"plugin-verified-tree",
 	"claims-ledger",
 	"arena",
 	"research-campaign",

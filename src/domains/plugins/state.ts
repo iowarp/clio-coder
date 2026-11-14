@@ -39,6 +39,7 @@ import type {
 	PluginState,
 } from "./types.js";
 import { isForeignPluginOrigin } from "./types.js";
+import { verifiedPluginCandidate } from "./verified-tree.js";
 
 /** sourcePath is a prepared package root containing plugin.json for the declared kind. */
 export function installLibraryPackage(input: LibraryPackageInstallInput): PluginMutationResult {
@@ -443,7 +444,7 @@ function scopeEntries(scope: PluginScope, cwd: string, onlyId?: string): Install
 	const entries: InstalledPlugin[] = [];
 	for (const id of names) {
 		const rootPath = path.join(base, id);
-		const candidate = passPluginCandidate(rootPath, readPluginManifest);
+		const candidate = passPluginCandidate(rootPath, (root) => verifiedPluginCandidate(root, readPluginManifest));
 		const manifest = candidate.manifest;
 		const diagnostics = [...candidate.diagnostics];
 		const saved = state.installed[id];
