@@ -208,6 +208,7 @@ export const guiTests = [
 	"arena-model",
 	"research-model",
 	"research-http",
+	"autonomy-model",
 	"pages",
 	"machine-proxy",
 	"client-auth",

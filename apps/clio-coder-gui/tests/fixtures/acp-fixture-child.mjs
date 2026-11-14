@@ -15,6 +15,21 @@ const settings = {
 	chat: { target: "fixture", model: "fixture-model", thinkingLevel: "off" },
 	safety: { autonomy: "default" },
 };
+// The engine's own mode descriptions (src/engine/acp/server.ts modeState), so the GUI shows real copy.
+const MODES = [
+	{
+		id: "default",
+		name: "default",
+		description:
+			"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.",
+	},
+	{
+		id: "yolo",
+		name: "yolo",
+		description:
+			"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
+	},
+];
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const configOptions = () => [
@@ -737,10 +752,7 @@ async function handle(frame) {
 						: {}),
 					modes: {
 						currentModeId: autonomy,
-						availableModes: [
-							{ id: "default", name: "Default" },
-							{ id: "yolo", name: "Yolo" },
-						],
+						availableModes: MODES,
 					},
 				};
 				if (ROUTE)
@@ -778,10 +790,7 @@ async function handle(frame) {
 						: {}),
 					modes: {
 						currentModeId: autonomy,
-						availableModes: [
-							{ id: "default", name: "Default" },
-							{ id: "yolo", name: "Yolo" },
-						],
+						availableModes: MODES,
 					},
 				};
 				// A long saved conversation for scripts/perf-workload.ts `--history`: N rich exchanges.

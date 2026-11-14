@@ -130,12 +130,12 @@ export const HELP_SECTIONS: readonly HelpSection[] = [
 			{
 				term: "default",
 				meaning:
-					"CLIO Coder can read, edit and run recognised commands. Unrecognised shell commands, dispatching a full plan and publishing outside the project require approval.",
+					"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.",
 			},
 			{
 				term: "yolo",
 				meaning:
-					"CLIO Coder skips ordinary approval prompts. Safety rules can still ask or block an action, and protected paths remain protected.",
+					"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
 			},
 		],
 	},

@@ -5,11 +5,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { Value } from "typebox/value";
+import { Autonomy } from "../contracts/autonomy.js";
 import { Problem } from "../contracts/common.js";
 import { SessionControl } from "../contracts/control.js";
 import { Event } from "../contracts/events.js";
 import { ACP_TO_WEB_EVENT } from "../contracts/fleet-events.js";
 import { routes } from "../contracts/routes.js";
+import { AcpClient } from "../server/acp/client.js";
+import type { AcpJsonRpcTransport } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
 
 async function until(check: () => boolean) {
@@ -315,7 +318,8 @@ test("a branch switch replays only the chosen branch and a fork continues under 
 	assert.ok(!rows.some((row) => row.sessionId === session.id));
 	const mode = await h.request(`/api/sessions/${result.sessionId}/autonomy`);
 	assert.equal(mode.status, 200, "the forked conversation keeps its working freedom");
-	assert.deepEqual(await mode.json(), { level: "default", source: "settings" });
+	const forkedMode = await json(mode, Autonomy);
+	assert.deepEqual([forkedMode.level, forkedMode.source], ["default", "settings"]);
 	assert.equal((await h.post(`/api/sessions/${result.sessionId}/turns`, { text: "Continue here" })).status, 202);
 	await until(() => h.supervisor.get(result.sessionId).turns.at(-1)?.status !== "running");
 	assert.equal(h.supervisor.get(result.sessionId).turns.at(-1)?.status, "succeeded");
@@ -633,6 +637,33 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	);
 	assert.equal(autonomy.level, "default");
 	assert.equal((await h.request(`${base}/autonomy`)).status, 200);
+});
+test("autonomy carries the engine's mode descriptions, and a mode the app does not know keeps the task going", {
+	timeout: 15000,
+}, async (t) => {
+	const h = await harness({}, { scenario: "markdown" });
+	t.after(h.close);
+	const workspace = await h.workspaces.open(h.home.path),
+		session = await h.supervisor.open(workspace.id);
+	const read = await json(await h.request(`/api/sessions/${session.id}/autonomy`), Autonomy);
+	assert.deepEqual(
+		read.modes?.map((mode) => mode.id),
+		["default", "yolo"],
+	);
+	assert.match(read.modes?.find((mode) => mode.id === "yolo")?.description ?? "", /refused instead of asked/);
+
+	const transport = {
+		request: async () => ({ sessionId: "s1", modes: { currentModeId: "yolo", availableModes: read.modes } }),
+	} as unknown as AcpJsonRpcTransport;
+	const client = new AcpClient(transport);
+	assert.equal(await client.open("/"), "s1");
+	assert.doesNotThrow(() => client.modeUpdate("s1", "plan"));
+	const unknown = await client.autonomy("s1");
+	assert.equal(unknown.level, "yolo");
+	assert.equal(unknown.unrecognized, "plan");
+	assert.ok(Value.Check(Autonomy, unknown));
+	client.modeUpdate("s1", "default");
+	assert.equal((await client.autonomy("s1")).unrecognized, undefined);
 });
 test("all twelve opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {
 	timeout: 15000,
