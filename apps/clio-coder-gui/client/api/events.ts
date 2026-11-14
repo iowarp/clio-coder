@@ -6,7 +6,7 @@ import { SessionDeltaKinds as SessionDeltas } from "../../contracts/runtime.js";
 import type { SessionDelta, SessionSnapshot } from "../../contracts/sessions.js";
 import type { QueueSnapshot } from "../../contracts/steering.js";
 import { applyControl, lostControlNotice } from "../chat/control-model.js";
-import { telemetryInvalidations } from "../telemetry/live-model.js";
+import { telemetryInvalidations, telemetryRefresh } from "../telemetry/live-model.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import type { Client } from "./client.js";
 import { clock } from "./clock.js";
@@ -18,6 +18,20 @@ export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" 
 /** A launch older than this was meant for a moment that has passed, such as one replayed after a reconnect. */
 const LAUNCH_FRESH_MS = 10_000;
 
+/** The monotonic clock and the one-shot timer behind the telemetry refresh throttle. */
+interface RefreshTimers {
+	now(): number;
+	/** Runs `run` once after `ms`; the returned function cancels it. */
+	schedule(run: () => void, ms: number): () => void;
+}
+const liveTimers: RefreshTimers = {
+	now: () => performance.now(),
+	schedule: (run, ms) => {
+		const handle = setTimeout(run, ms);
+		return () => clearTimeout(handle);
+	},
+};
+
 export function subscribe(
 	client: Client,
 	queries: QueryClient,
@@ -26,6 +40,7 @@ export function subscribe(
 	launch: (path: string) => void = () => {},
 	/** Another window took control of a session this one held. */
 	controlLost: (notice: { title: string; detail: string }) => void = () => {},
+	timers: RefreshTimers = liveTimers,
 ) {
 	let stream: EventSource | null = null;
 	let cursor: string | undefined;
@@ -77,6 +92,43 @@ export function subscribe(
 			projectAutonomy(snapshot);
 		}
 
+	// Pushed telemetry re-reads its session at most once per interval; later pushes wait in one trailing refresh.
+	const telemetryRefreshed = new Map<string, number>();
+	const telemetryPending = new Map<string, Set<string>>();
+	const telemetryTimers = new Map<string, () => void>();
+	/** Invalidates the keys given and any held for the session; true when the operator window moved too. */
+	const refreshTelemetry = (id: string, keys: ReadonlySet<string>) => {
+		telemetryTimers.get(id)?.();
+		telemetryTimers.delete(id);
+		const due = new Set([...(telemetryPending.get(id) ?? []), ...keys]);
+		telemetryPending.delete(id);
+		if (due.size === 0) return false;
+		telemetryRefreshed.set(id, timers.now());
+		// No cancel first: restarting an in-flight read on every push turned ten pushes into ten reads of a busy agent.
+		for (const key of due) void queries.invalidateQueries({ queryKey: [key, id] });
+		return due.has("telemetry");
+	};
+	const deferTelemetry = (id: string, keys: ReadonlySet<string>, delayMs: number) => {
+		const pending = telemetryPending.get(id) ?? new Set<string>();
+		for (const key of keys) pending.add(key);
+		telemetryPending.set(id, pending);
+		if (telemetryTimers.has(id)) return;
+		telemetryTimers.set(
+			id,
+			timers.schedule(() => {
+				telemetryTimers.delete(id);
+				if (!disposed && refreshTelemetry(id, new Set()))
+					void queries.invalidateQueries({ queryKey: ["operator-metrics"] });
+			}, delayMs),
+		);
+	};
+	const stopTelemetry = () => {
+		for (const cancel of telemetryTimers.values()) cancel();
+		telemetryTimers.clear();
+		telemetryPending.clear();
+		telemetryRefreshed.clear();
+	};
+
 	// One commit per session per display frame, however many chunks landed in it.
 	const buffer = new FrameEventBuffer((events) => {
 		const snapshots = new Map<string, SessionSnapshot>(),
@@ -85,6 +137,8 @@ export function subscribe(
 			reset = new Set<string>(),
 			configured = new Set<string>(),
 			refreshReads = new Map<string, Set<string>>(),
+			telemetry = new Map<string, Set<string>>(),
+			finished = new Set<string>(),
 			contextPushes = new Map<string, number>(),
 			autonomyChanged = new Set<string>(),
 			invalidate = new Set<string>(),
@@ -102,6 +156,8 @@ export function subscribe(
 				reset.clear();
 				configured.clear();
 				refreshReads.clear();
+				telemetry.clear();
+				finished.clear();
 				contextPushes.clear();
 				autonomyChanged.clear();
 				invalidate.clear();
@@ -132,6 +188,7 @@ export function subscribe(
 				// A resumed task answers from a new agent process, so what the old one reported is stale.
 				if (parked && state?.state === "open") resumed.add(state.id);
 				if (delta.type === "session.reset") reset.add(delta.payload.resource);
+				if (delta.type === "turn.finished") finished.add(delta.payload.resource);
 				if (held.hasGap) gaps.add(delta.payload.resource);
 				if (delta.type === "session.configured" || (!hadGap && held.hasGap)) configured.add(delta.payload.resource);
 				if (
@@ -156,11 +213,12 @@ export function subscribe(
 				) {
 					invalidate.add("sessions");
 				}
+				// The saved-task list costs the server an agent process per read. Open and parked tasks are drawn from
+				// the overview, so only a label or a task leaving the held set changes what the list shows.
 				if (
-					delta.type === "session.changed" ||
 					delta.type === "session.labelled" ||
-					delta.type === "session.reset" ||
-					delta.type === "turn.finished"
+					(delta.type === "session.changed" &&
+						(delta.payload.state === "closed" || delta.payload.state === "unknown" || delta.payload.recoveredOrphan))
 				) {
 					invalidate.add("session-history");
 				}
@@ -226,10 +284,9 @@ export function subscribe(
 			if (event.type === "toolchain.changed") invalidate.add("tools");
 			// A coalesced telemetry_update re-reads the moved topics for its session; nothing is folded here (#434).
 			if (event.type === "telemetry.updated") {
-				const keys = refreshReads.get(event.payload.resource) ?? new Set<string>();
+				const keys = telemetry.get(event.payload.resource) ?? new Set<string>();
 				for (const key of telemetryInvalidations(event.payload.update)) keys.add(key);
-				if (keys.has("telemetry")) invalidate.add("operator-metrics");
-				refreshReads.set(event.payload.resource, keys);
+				telemetry.set(event.payload.resource, keys);
 			}
 			if (event.type === "machine.attach") invalidate.add("machine-attachments");
 			if (event.type === "session.control") {
@@ -246,6 +303,7 @@ export function subscribe(
 				launched = event.payload.path;
 		}
 		if (resynced) {
+			stopTelemetry();
 			void queries.cancelQueries();
 			queries.removeQueries({ queryKey: ["session-autonomy"] });
 			queries.removeQueries({ queryKey: ["operation"] });
@@ -279,6 +337,19 @@ export function subscribe(
 				void queries.cancelQueries({ queryKey: [key, id] });
 				void queries.invalidateQueries({ queryKey: [key, id] });
 			}
+		let operatorMetrics = false;
+		for (const id of new Set([...telemetry.keys(), ...finished])) {
+			const keys = telemetry.get(id) ?? new Set<string>();
+			// A key refreshed above already reads the newest state.
+			for (const key of refreshReads.get(id) ?? []) keys.delete(key);
+			// The turn's last numbers land now, not a throttle interval later.
+			const decision = finished.has(id)
+				? ({ refresh: "now" } as const)
+				: telemetryRefresh(timers.now(), telemetryRefreshed.get(id));
+			if (decision.refresh === "now") operatorMetrics = refreshTelemetry(id, keys) || operatorMetrics;
+			else deferTelemetry(id, keys, decision.delayMs);
+		}
+		if (operatorMetrics) invalidate.add("operator-metrics");
 		for (const id of configured) {
 			const held = sessionBuffer(id);
 			if (!resumed.has(id) && (held.hasGap || !held.value?.telemetry?.autonomy)) refreshAutonomy(id);
@@ -310,7 +381,6 @@ export function subscribe(
 			invalidate.add("session-overview");
 		// Invalidation alone reuses a pending first read, which may have captured an older attention state.
 		if (invalidate.has("session-overview")) void queries.cancelQueries({ queryKey: ["session-overview"] });
-		if (invalidate.has("operator-metrics")) void queries.cancelQueries({ queryKey: ["operator-metrics"] });
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 		if (launched !== null) launch(launched);
 	});
@@ -342,7 +412,16 @@ export function subscribe(
 		stream = source;
 		const receive = (message: MessageEvent<string>) => {
 			if (disposed || stream !== source) return;
-			const event = JSON.parse(message.data) as Event;
+			let event: Event;
+			try {
+				event = JSON.parse(message.data) as Event;
+			} catch {
+				// The cursor stays put so a reconnect resumes before this frame; the payload is not logged.
+				console.error(
+					`CLIO Coder skipped a malformed ${message.type || "event"} frame${message.lastEventId ? ` (${message.lastEventId})` : ""}.`,
+				);
+				return;
+			}
 			cursor = `${event.epoch}:${event.seq}`;
 			if (event.type === "hello") retryMs = 1_000;
 			buffer.push(event);
@@ -391,6 +470,7 @@ export function subscribe(
 	return () => {
 		disposed = true;
 		stopSnapshots();
+		stopTelemetry();
 		document.removeEventListener("visibilitychange", onVisibility);
 		stopWatching();
 		if (retryTimer !== null) clearTimeout(retryTimer);

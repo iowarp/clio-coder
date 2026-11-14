@@ -7,6 +7,7 @@ import type { Workspace } from "../../contracts/sessions.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import type { ConnectionState } from "../api/events.js";
+import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
 import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
 import { platformLabel, systemStatus } from "../pages/system-model.js";
@@ -292,7 +293,7 @@ function ProjectGroup({
 		queryKey: ["session-history", workspace.id],
 		queryFn: () => client.call(routes.sessionHistory, { params: { id: workspace.id }, query: {}, body: {} }),
 		enabled: expanded,
-		retry: false,
+		...SESSION_HISTORY_FRESHNESS,
 	});
 	const rows = useMemo(
 		() => taskRows(workspace.id, sessions, history.data ?? []),
