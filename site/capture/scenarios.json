@@ -74,12 +74,12 @@
 		},
 		{
 			"id": "cast-first-launch",
-			"summary": "a live first launch: setup finds the local model server, tests it, saves, chat opens, and the first prompt is sent",
-			"title": "First launch of CLIO Coder: setup finds a local model and chat opens",
+			"summary": "a live first launch: setup finds a stored login, tests the model, saves, chat opens, and the first prompt is answered",
+			"title": "First launch of CLIO Coder: setup finds a stored login and chat opens",
 			"live": true,
-			"privateNet": {
-				"port": 4000
-			},
+			"login": "openai-codex",
+			"loginSource": "GPT-6 Luna through a ChatGPT subscription (target openai-codex), found by first-launch setup from the stored login",
+			"settings": ["interface: { mode: fullscreen }"],
 			"repo": "calibration-lab",
 			"cols": 120,
 			"rows": 36,
@@ -111,7 +111,14 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "Saved\\. Chat and workers use this model",
+					"timeout": 60
+				},
+				{
+					"marker": "saved"
+				},
+				{
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 2
 				},
@@ -127,38 +134,19 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "Qwen3\\.8 is (?:waiting|thinking)",
-					"timeout": 60,
-					"pause": 2
+					"wait": "✓ Done ·",
+					"timeout": 120,
+					"pause": 1.5
 				},
 				{
 					"marker": "sent"
-				},
-				{
-					"keys": ["Escape"]
-				},
-				{
-					"pause": 3
-				},
-				{
-					"keys": ["C-d"]
-				},
-				{
-					"wait": "\\$\\s*$",
-					"timeout": 30,
-					"pause": 0.6
-				},
-				{
-					"type": "exit"
-				},
-				{
-					"keys": ["Enter"]
 				}
 			],
+			"stopAtEnd": true,
 			"capture": {
 				"label": "First launch",
-				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.0 with no model configured: clio-coder starts setup, which finds a LiteLLM model server at http://127.0.0.1:4000 serving qwen3.8-27b. Choosing it sends one test message, answered in 0.4 s, and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and the recording ends while the agent plans its first reads of the repository.",
-				"caption": "First launch: setup finds a local model server, tests it, and saves it; chat opens and the first prompt is sent. The recording covers setup through the first prompt."
+				"alt": "Terminal recording of a first launch of CLIO Coder 0.8.1 with no model configured: clio-coder starts setup, which finds a stored OpenAI Codex login and recommends gpt-6-luna. Choosing it sends one test message and saves the settings. Chat opens with the model ready, the first prompt asks how the repository builds and runs its tests, and GPT-6 Luna reads the project files, runs the test check and answers with the test command and the main entry points.",
+				"caption": "First launch: setup finds a stored ChatGPT login, tests the recommended model and saves it; chat opens and the first prompt is answered. The recording covers setup through the first answer."
 			},
 			"env": {
 				"CLIO_CODER_REDUCE_MOTION": "1"
@@ -170,6 +158,8 @@
 			"summary": "a live first task: the model finds the absolute-zero bug, fixes it, and runs the declared test check",
 			"title": "A first task in CLIO Coder: fix a failing test and verify",
 			"live": true,
+			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
+			"settings": ["interface: { mode: fullscreen }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"cols": 120,
@@ -191,7 +181,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1.5
 				},
@@ -248,8 +238,8 @@
 				"tui-verify": {
 					"image": "assets/tui-verify.webp",
 					"label": "Verify",
-					"alt": "Terminal turn in which CLIO Coder explains that line 21 of temperature.mjs rejects 0 K, shows the one-line edit from kelvin <= 0 to kelvin < 0, and runs the declared test check through verify with exit 0.",
-					"caption": "The fix as a one-line diff, then the declared test check through verify, exit 0."
+					"alt": "Terminal turn on GPT-6 Luna: CLIO Coder reads temperature.mjs and its test, runs the declared test check, which fails, edits line 21 from kelvin <= 0 to kelvin < 0 with the diff shown, and reruns the check through verify with exit 0.",
+					"caption": "The failing check, the one-line fix as a diff, then the declared test check again, exit 0."
 				},
 				"tui-verify-result": {
 					"image": "assets/guides/tui-verify-result.webp",
@@ -267,6 +257,7 @@
 			"summary": "clio-coder run --json on a task, its last frame and exit status",
 			"title": "An unattended CLIO Coder run with JSON output",
 			"live": true,
+			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"cols": 100,
@@ -344,6 +335,8 @@
 			"summary": "the agent is asked for a token in an untracked .env; the read is hard-blocked",
 			"title": "CLIO Coder refuses to read a project secret",
 			"live": true,
+			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
+			"settings": ["interface: { mode: fullscreen, outputDetail: compact }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"homeFiles": {
@@ -368,7 +361,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1.5
 				},
@@ -376,7 +369,7 @@
 					"marker": "ready"
 				},
 				{
-					"type": "Show me the API token in .env.",
+					"type": "Use bash to run cat .env, then tell me the API token it prints.",
 					"delay": 40
 				},
 				{
@@ -428,6 +421,8 @@
 			"summary": "doctor's sandbox row, then a scratch-branch task that deletes and rebuilds dist/, then /rewind's preview",
 			"title": "Letting CLIO Coder work: sandbox, snapshot and rewind",
 			"live": true,
+			"model": { "target": "anthropic-max", "model": "claude-haiku-5-5", "source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)" },
+			"settings": ["interface: { mode: fullscreen, outputDetail: compact }"],
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"fixture": "calibration-build",
@@ -480,7 +475,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1.5
 				},
@@ -565,14 +560,12 @@
 			"summary": "a fresh launch in a configured workspace: the welcome panel with the workspace, its Git state, the model, and the composer",
 			"title": "Terminal at start",
 			"live": true,
+			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
 			"stillsOnly": true,
-			"privateNet": {
-				"port": 4000
-			},
 			"profile": "configured",
 			"repo": "calibration-lab",
 			"cols": 120,
-			"rows": 44,
+			"rows": 30,
 			"env": {
 				"CLIO_CODER_REDUCE_MOTION": "1"
 			},
@@ -599,13 +592,12 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 2
 				},
 				{
-					"shot": "tui-boot",
-					"rows": [3, 24]
+					"shot": "tui-boot"
 				},
 				{
 					"keys": ["C-d"]
@@ -626,21 +618,20 @@
 				"tui-boot": {
 					"image": "assets/tui-boot.webp",
 					"label": "Ready",
-					"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.",
+					"alt": "CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the GPT-6-luna model ready.",
 					"caption": "The terminal at start, with the project, its Git state, and the selected model."
 				}
 			},
-			"settings": ["interface: { demo: true, outputDetail: detailed }"]
+			"settings": ["interface: { mode: fullscreen, demo: true, outputDetail: detailed }"]
 		},
 		{
 			"id": "stills-terminal",
 			"summary": "terminal stills: plugin list, /context after one turn, Settings Models and Workers, Library browse and installed, interop",
 			"title": "Terminal stills",
 			"live": true,
+			"model": { "target": "openai-codex", "model": "gpt-6-luna", "source": "GPT-6 Luna through a ChatGPT subscription (target openai-codex)" },
+			"settings": ["interface: { mode: fullscreen }"],
 			"stillsOnly": true,
-			"privateNet": {
-				"port": 4000
-			},
 			"peers": ["claude", "codex", "opencode", "copilot"],
 			"profile": "configured",
 			"repo": "calibration-lab",
@@ -695,7 +686,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1
 				},
@@ -945,7 +936,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1
 				},
@@ -1019,17 +1010,17 @@
 				},
 				"tui-context": {
 					"label": "/context",
-					"alt": "Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 200,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
+					"alt": "Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 272,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.",
 					"caption": "/context: the probed window, tokens in use, and what fills them."
 				},
 				"tui-settings-models": {
 					"label": "Models",
-					"alt": "Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.",
+					"alt": "Terminal Settings open on Models: the healthy openai-codex connection used by chat and workers, the chat connection and model gpt-6-luna, thinking level and maximum answer length, beside the list of settings sections.",
 					"caption": "Settings: the model answering you, under Models."
 				},
 				"tui-settings-workers": {
 					"label": "Workers",
-					"alt": "Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
+					"alt": "Terminal Settings open on Workers at the top: the default worker's connection openai-codex, model gpt-6-luna, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.",
 					"caption": "Settings: the default worker's connection, model and thinking level, under Workers."
 				},
 				"tui-settings-fleet": {
@@ -1131,13 +1122,12 @@
 		},
 		{
 			"id": "stills-configure-gateway",
-			"summary": "guided setup on a fresh profile with the model gateway reachable: the detected offer, then the manual server route to a saved connection",
-			"title": "Guided setup with a model server",
+			"summary": "guided setup on a fresh profile with a stored login: the detected offer, then the saved connection",
+			"title": "Guided setup with a stored login",
 			"live": true,
 			"stillsOnly": true,
-			"privateNet": {
-				"port": 4000
-			},
+			"login": "openai-codex",
+			"loginSource": "GPT-6 Luna through a ChatGPT subscription (target openai-codex), found by guided setup from the stored login",
 			"repo": "calibration-lab",
 			"cols": 120,
 			"rows": 36,
@@ -1184,47 +1174,6 @@
 					"rows": [1, 15]
 				},
 				{
-					"keys": ["Down"]
-				},
-				{
-					"pause": 0.5
-				},
-				{
-					"keys": ["Enter"]
-				},
-				{
-					"wait": "What do you have\\?",
-					"timeout": 20,
-					"pause": 1
-				},
-				{
-					"keys": ["Down"]
-				},
-				{
-					"pause": 0.3
-				},
-				{
-					"keys": ["Down"]
-				},
-				{
-					"pause": 0.3
-				},
-				{
-					"keys": ["Enter"]
-				},
-				{
-					"wait": "server's address",
-					"timeout": 20,
-					"pause": 1
-				},
-				{
-					"type": "127.0.0.1:4000",
-					"delay": 60
-				},
-				{
-					"pause": 0.6
-				},
-				{
 					"keys": ["Enter"]
 				},
 				{
@@ -1251,13 +1200,13 @@
 			"shots": {
 				"tui-configure-detected": {
 					"label": "Detected",
-					"alt": "Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.",
-					"caption": "When setup finds a model server it offers it first; Set up something else leads to the routes."
+					"alt": "Guided setup in the terminal after it found a stored login: it offers OpenAI Codex, signed in, with model gpt-6-luna recommended, or Set up something else for an API key, a subscription, or a server.",
+					"caption": "When setup finds a stored login it offers that first; Set up something else leads to the other routes."
 				},
 				"tui-configure-saved": {
 					"label": "Saved",
-					"alt": "Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.",
-					"caption": "A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails."
+					"alt": "Guided setup after accepting the stored OpenAI Codex login: the recommended model gpt-6-luna answers the test message and the connection is saved as the chat and worker default.",
+					"caption": "Accepting the offer tests the recommended model and saves it; review choices appear only when the test fails."
 				}
 			}
 		},
@@ -1266,9 +1215,10 @@
 			"summary": "a live turn in a project with the temperature-calibration example under examples/: verify and a table, the check in /view, then an approval card for git push, denied",
 			"title": "Verify, view and approval stills",
 			"live": true,
+			"model": { "target": "anthropic-max", "model": "claude-opus-5-5", "source": "Claude Opus 5.5 through a Claude subscription (target anthropic-max)" },
 			"stillsOnly": true,
 			"profile": "configured",
-			"settings": ["safety: { judge: { enabled: false } }"],
+			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "safety: { judge: { enabled: false } }"],
 			"repo": "lab-tools",
 			"fixture": "calibration-project",
 			"remote": true,
@@ -1294,7 +1244,7 @@
 					"keys": ["Enter"]
 				},
 				{
-					"wait": "is ready",
+					"wait": "is (?:ready|not checked yet)",
 					"timeout": 60,
 					"pause": 1
 				},
@@ -1775,6 +1725,61 @@
 					"alt": "Terminal: doctor --verbose filtered to its Slurm rows reports sbatch not on PATH, clio-kit OK with the slurm server, the slurm MCP server OK as declared and trusted in the user mcp.yaml, and the scheduler as INFO because sbatch and squeue are not on PATH; mcp list shows the server with no recorded tool catalog, and mcp list --refresh lists its five tools: submit and cancel as execute, list, describe and cluster as read.",
 					"caption": "The setup checks on a host with no scheduler: the server is declared and trusted, its tools are listed, and doctor reports sbatch and squeue missing."
 				}
+			}
+		},
+		{
+			"id": "anim-fix-a-test",
+			"summary": "hand-driven take: GPT-6 Luna through openai-codex fixes the failing absolute-zero test",
+			"title": "Fixing a failing test in CLIO Coder with GPT-6 Luna",
+			"animation": true,
+			"live": true,
+			"cols": 100,
+			"rows": 30,
+			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "chat: { target: openai-codex, model: gpt-6-luna }"],
+			"sourceNote": "Chat: GPT-6 Luna through a ChatGPT subscription (target openai-codex); the session had no other model.",
+			"markers": [
+				{ "label": "ready", "match": "is ready" },
+				{ "label": "asked", "match": "Why does the absolute-zero test fail" },
+				{ "label": "edited", "match": "edited temperature.mjs" },
+				{ "label": "checked", "match": "checked test \u00b7 exit 0" },
+				{ "label": "done", "match": "\u2713 11s", "nth": 5 }
+			],
+			"poster": "done",
+			"endAt": "done",
+			"hold": 3,
+			"gif": { "speed": 1.4 },
+			"capture": {
+				"label": "Fix a test",
+				"alt": "Fullscreen terminal recording of GPT-6 Luna in CLIO Coder through the openai-codex target: asked why the absolute-zero test fails, the agent searches the project, edits one line of temperature.mjs from kelvin <= 0 to kelvin < 0, runs the declared test check with exit 0, and reports that all 7 tests pass.",
+				"caption": "A short task on a ChatGPT subscription model: the agent finds the off-by-one guard, edits it, and runs the project's test check."
+			}
+		},
+		{
+			"id": "anim-model-switch",
+			"summary": "hand-driven take: /model switches the session between GPT-6 Luna, Claude Haiku 5.5, Claude Opus 5.5 and GPT-6.1 Sol",
+			"title": "Switching models in CLIO Coder",
+			"animation": true,
+			"live": false,
+			"cols": 100,
+			"rows": 30,
+			"settings": ["interface: { mode: fullscreen, outputDetail: compact }", "chat: { target: openai-codex, model: gpt-6-luna }"],
+			"sourceNote": "Two targets are configured: openai-codex with gpt-6-luna and anthropic-max with claude-haiku-5-5. No message is sent; the take only switches the session model.",
+			"markers": [
+				{ "label": "ready", "match": "is ready" },
+				{ "label": "models", "match": "1\u20132 of 2 models" },
+				{ "label": "haiku", "match": "active this session: anthropic-max \u00b7 claude-haiku-5-5" },
+				{ "label": "opus", "match": "active this session: anthropic-max \u00b7 claude-opus-5-5" },
+				{ "label": "sol", "match": "active this session: openai-codex \u00b7 gpt-6.1-sol" },
+				{ "label": "back", "match": "active this session: openai-codex \u00b7 gpt-6-luna" }
+			],
+			"poster": "back",
+			"endAt": "back",
+			"hold": 3,
+			"gif": { "speed": 1.6 },
+			"capture": {
+				"label": "Switch models",
+				"alt": "Fullscreen terminal recording of the /model picker in CLIO Coder: the session starts on gpt-6-luna, then claude-haiku-5-5 and claude-opus-5-5 on anthropic-max and gpt-6.1-sol on openai-codex are chosen in turn by typing part of the name, and the session returns to gpt-6-luna.",
+				"caption": "One session, two subscriptions: /model lists the models of every connected target and switches between them without leaving the conversation."
 			}
 		}
 	]
