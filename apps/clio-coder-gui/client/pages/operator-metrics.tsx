@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import type { UsagePerformance } from "../../contracts/reports.js";
@@ -45,17 +45,30 @@ export function useScopeTasks(client: Client, workspace: string) {
 		enabled: !workspace,
 	});
 	const ids = workspace ? [workspace] : (workspaces.data ?? []).map((row) => row.id);
-	const histories = useQueries({
-		queries: ids.map((id) => ({
-			queryKey: ["session-history", id],
-			queryFn: ({ signal }: { signal: AbortSignal }) =>
-				client.call(routes.sessionHistory, { params: { id }, query: {}, body: {} }, undefined, signal),
-			...SESSION_HISTORY_FRESHNESS,
-			meta: { errorSurface: "inline" },
-		})),
+	const queries = useQueryClient();
+	// One query over the scope's projects, each read through the shared per-project history cache. useQueries would
+	// pull its observer into the eager framework chunk for this lazy page.
+	const histories = useQuery({
+		queryKey: ["session-history", { scope: ids }],
+		queryFn: () =>
+			Promise.all(
+				ids.map((id) =>
+					queries
+						.fetchQuery({
+							queryKey: ["session-history", id],
+							queryFn: ({ signal }) =>
+								client.call(routes.sessionHistory, { params: { id }, query: {}, body: {} }, undefined, signal),
+							staleTime: SESSION_HISTORY_FRESHNESS.staleTime,
+						})
+						.catch(() => []),
+				),
+			),
+		enabled: ids.length > 0,
+		...SESSION_HISTORY_FRESHNESS,
+		meta: { errorSurface: "inline" },
 	});
 	const sessions = useSessionOverview(client).data?.sessions ?? [];
-	const tasks: ScopeTask[] = ids.flatMap((id, index) => taskRows(id, sessions, histories[index]?.data ?? []));
+	const tasks: ScopeTask[] = ids.flatMap((id, index) => taskRows(id, sessions, histories.data?.[index] ?? []));
 	return { tasks, titles: new Map(tasks.map((task) => [task.id, task.title])) };
 }
 

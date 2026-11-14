@@ -1925,14 +1925,20 @@ try {
 			await chipOrSlash(/Open the context window\.$/, "context");
 			const contextPanel = pane.locator(".context-panel");
 			// The lead reads used, then window and share, each an explainable figure (#434).
-			// The fixture's ledger grows with each answered turn from its opening 20,480 tokens.
-			await contextPanel.locator(".context-panel__figure strong").waitFor();
-			const leadFigure = (await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim();
-			const lead = /^([\d,]+) of 131,072 tokens · ([\d.]+)%$/.exec(leadFigure);
-			assert.ok(lead, `context lead reads ${leadFigure}`);
-			const leadUsed = Number(lead[1]?.replaceAll(",", ""));
-			assert.ok(leadUsed > 20_480, `the context window did not grow with the answered turns: ${leadFigure}`);
-			assert.equal(lead[2], ((leadUsed / 131_072) * 100).toFixed(1));
+			// The lead is the journal's figure, seeded above; the meter is the engine's live ledger, which the fixture
+			// grows with each answered turn from its opening 20,480 tokens (R2-4).
+			await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
+			assert.equal(
+				(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
+				"20,480 of 131,072 tokens · 15.6%",
+			);
+			await eventually(
+				async () =>
+					Number(await contextPanel.locator(".context-panel__meter [role=meter]").getAttribute("aria-valuenow")) >
+					15.625,
+				true,
+				"the context meter did not grow past the fixture's opening 15.6% with the answered turns",
+			);
 			await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 			await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
 			await check("context-window");
