@@ -51,6 +51,7 @@ function resultDetails(result: SafeCommandResult): ToolResultDetails {
 		command: [result.file, ...result.args].join(" "),
 		argv: [result.file, ...result.args],
 		cwd: result.cwd,
+		launched: result.launched === true,
 		exitCode: result.exitCode,
 		durationMs: result.durationMs,
 		aborted: result.aborted,

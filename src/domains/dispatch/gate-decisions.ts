@@ -219,7 +219,11 @@ export function decideReviewGate(input: ReviewGateDecisionInput): ReviewGateDeci
 	return {
 		draft: { ...base, outcome: "revise", detail: `reviewer reported ${failed.length} failed check(s)` },
 		verdict: null,
-		findings: JSON.stringify({ verdict: "fail", checks: failed }),
+		findings: JSON.stringify({
+			verdict: "fail",
+			checks: failed,
+			...(parsed.result.assurance !== undefined ? { assurance: parsed.result.assurance } : {}),
+		}),
 		needsDecision: null,
 	};
 }

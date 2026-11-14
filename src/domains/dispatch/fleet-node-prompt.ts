@@ -40,12 +40,12 @@ import { type ResultContract, resultContractShape } from "../agents/result-contr
  * its recipe keeps sole authority over the shape. Every other kind is fully
  * determined by its kind and can be quoted exactly.
  */
-function fleetNodeAnswerDirective(kind: ResultContract["kind"]): string | null {
+function fleetNodeAnswerDirective(kind: ResultContract["kind"], contract?: ResultContract): string | null {
 	if (kind === "architect-plan") return null;
 	return [
 		`Your result contract for this step is \`${kind}\`.`,
 		"The task above describes the whole chain. Any result shape it states belongs to the step that produces it, and does not apply to you.",
-		`End with exactly this shape and nothing else: ${resultContractShape({ kind })}`,
+		`End with exactly this shape and nothing else: ${resultContractShape(contract?.kind === kind ? contract : { kind })}`,
 		// The wire example carries literal names and evidence, and a small model
 		// handed one on a first attempt copies them: the first run of this
 		// directive came back claiming `npm run typecheck` / `exit 0` in the same
@@ -70,8 +70,13 @@ export function fleetNodeTaskBrief(task: string): string {
 	return at > 0 ? task.slice(0, at).trimEnd() : task;
 }
 
-export function renderFleetNodeTask(task: string, kind: ResultContract["kind"], stepId: string): string {
+export function renderFleetNodeTask(
+	task: string,
+	kind: ResultContract["kind"],
+	stepId: string,
+	contract?: ResultContract,
+): string {
 	const step = `Your step in this chain is \`${stepId}\`. Do that step now. Earlier steps are finished and later ones belong to other workers.`;
-	const directive = fleetNodeAnswerDirective(kind);
+	const directive = fleetNodeAnswerDirective(kind, contract);
 	return [task, step, ...(directive === null ? [] : [directive])].join("\n\n");
 }
