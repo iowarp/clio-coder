@@ -268,6 +268,11 @@ if (values.serve) {
 						.evaluate((element) => element.scrollIntoView({ block: "center" }));
 					await shot("conv-diagram");
 					await transcriptTo("end");
+					// A diagram draws once it nears the viewport, so the last one starts after the jump; wait for it.
+					await page.waitForFunction(() => {
+						const last = [...document.querySelectorAll(".chat-transcript .diagram")].at(-1);
+						return !last || !/\bis-(rendering|pending)\b/.test(last.className);
+					});
 					await shot("conv-end");
 				}
 				if (want("approval")) {

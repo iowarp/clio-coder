@@ -965,13 +965,15 @@ async function handle(frame) {
 								? "plan-permission"
 								: scenario === "markdown" && promptText.includes("[stream]")
 									? "loop"
-									: scenario === "markdown" && promptText.includes("[workload")
-										? "workload"
-										: scenario === "markdown" && promptText.includes("[science]")
-											? "science"
-											: STEERING && promptText.includes("[fleet]")
-												? "held-worker"
-												: scenario;
+									: scenario === "markdown" && promptText.includes("[stream-held]")
+										? "held-stream"
+										: scenario === "markdown" && promptText.includes("[workload")
+											? "workload"
+											: scenario === "markdown" && promptText.includes("[science]")
+												? "science"
+												: STEERING && promptText.includes("[fleet]")
+													? "held-worker"
+													: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (promptText.includes("[rename]")) {
@@ -1069,6 +1071,12 @@ async function handle(frame) {
 						if (cancelled) break;
 						text(chunk);
 						await delay(20);
+					}
+				} else if (turnScenario === "held-stream") {
+					// Streams until cancelled (capped near two minutes), so a check can land mid-turn on any machine.
+					for (let i = 0; i < 40_000 && !cancelled; i++) {
+						text(`${i} `);
+						await delay(3);
 					}
 				} else if (turnScenario === "loop") {
 					for (let i = 0; i < 1400 && !cancelled; i++) {

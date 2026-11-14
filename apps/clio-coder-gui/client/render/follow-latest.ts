@@ -22,6 +22,8 @@ const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", 
 /** How long a shrink a ResizeObserver pass saw can still explain a browser clamp: a clamp's scroll event lands a frame or two later. */
 const CLAMP_WINDOW_MS = 250;
 const CLAMP_SLACK_PX = 2;
+/** How long after a send the dock and the new turn may reflow the viewport without ending follow. */
+const SEND_HOLD_MS = 800;
 
 /** A scroll event weighed against the hook's last write and the content it last measured. */
 export interface ScrollReading {
@@ -35,25 +37,43 @@ export interface ScrollReading {
 	readonly intended: boolean;
 	/** The smallest `scrollHeight - clientHeight` a recent ResizeObserver pass saw below `pinnedTop`, or null. */
 	readonly shrunkTo: number | null;
+	/** `scrollHeight` sampled in the scroll event, and when the hook last wrote. */
+	readonly height?: number;
+	readonly pinnedHeight?: number;
+	/** `clientHeight` when the hook last wrote. */
+	readonly pinnedViewport?: number;
+	/** A prompt was just sent, so its reflow can clamp before the turn shows as running. */
+	readonly held?: boolean;
 }
 
 /**
- * True when an upward move is the browser clamping scrollTop to content that shrank, not anyone
- * leaving the live edge: a turn runs, the view follows, no reader input preceded it, content was
- * seen to shrink since the last pin, and the move lands no higher than that shrink allows and within
- * one viewport of the last pin. Any
- * other upward move (the reader, find-in-page, assistive technology or a script) ends follow.
+ * True when an upward move is the browser clamping scrollTop to a layout that changed under it, not
+ * anyone leaving the live edge. The view follows, no reader input preceded it, the move lands within
+ * one viewport of the last pin, a turn runs (or a prompt was just sent and its turn has not shown as
+ * running yet), and the layout changed since the last pin: a ResizeObserver pass saw content shrink
+ * (and the move lands no higher than that), `scrollHeight` sampled in the event dropped, or the
+ * viewport itself changed height (the dock reflowing, which can clamp and recover between two
+ * observations). Any other upward move (the reader, find-in-page, assistive technology or a script,
+ * even just after a send) ends follow.
  */
 export function browserClamp(reading: ScrollReading): boolean {
-	return (
-		reading.following &&
-		reading.running &&
-		!reading.intended &&
-		reading.shrunkTo !== null &&
-		reading.top < reading.pinnedTop - 1 &&
-		reading.pinnedTop - reading.top <= reading.viewport &&
-		reading.top <= reading.shrunkTo + CLAMP_SLACK_PX
-	);
+	if (
+		!reading.following ||
+		reading.intended ||
+		reading.top >= reading.pinnedTop - 1 ||
+		reading.pinnedTop - reading.top > reading.viewport
+	)
+		return false;
+	if (!reading.running && reading.held !== true) return false;
+	if (reading.shrunkTo !== null && reading.top <= reading.shrunkTo + CLAMP_SLACK_PX) return true;
+	if (
+		reading.height !== undefined &&
+		reading.pinnedHeight !== undefined &&
+		reading.height < reading.pinnedHeight - 1 &&
+		reading.top <= reading.height - reading.viewport + CLAMP_SLACK_PX
+	)
+		return true;
+	return reading.pinnedViewport !== undefined && reading.viewport !== reading.pinnedViewport;
 }
 
 /** The parts of a timeline item that say who wrote it; `snapshot.timeline` satisfies this. */
@@ -99,11 +119,12 @@ function editable(target: EventTarget | null): boolean {
  * above our last write and masquerade as the operator scrolling up. It resumes
  * when reading older content, where height changes must retain the reading edge.
  *
- * While a turn runs, an upward move with no reader input behind it, landing no higher than content
- * a ResizeObserver pass just saw shrink to, is the browser clamping scrollTop (a tool group folding
- * as the next paragraph arrives), not the reader leaving; it is pinned back instead of ending
- * follow (`browserClamp`). Any other upward move ends follow. Sending a prompt
- * from anywhere in the transcript returns to the live edge, where its answer will appear.
+ * While a turn runs, an upward move with no reader input behind it, onto a layout that changed since
+ * the last pin (content shrank, or the viewport resized), is the browser clamping scrollTop (a tool
+ * group folding as the next paragraph arrives, the dock reflowing), not the reader leaving; it is
+ * pinned back instead of ending follow (`browserClamp`). Any other upward move ends follow. Sending
+ * a prompt from anywhere in the transcript returns to the live edge, where its answer will appear;
+ * for `SEND_HOLD_MS` after it, a clamp counts as one even before the new turn shows as running.
  */
 export function useFollowLatest(
 	scrollRef: RefObject<HTMLElement | null>,
@@ -115,12 +136,30 @@ export function useFollowLatest(
 	const [unseen, setUnseen] = useState(false);
 	const followingRef = useRef(true);
 	const programmaticTop = useRef(0);
+	/** `scrollHeight` and `clientHeight` when the hook last wrote. */
+	const pinnedHeight = useRef(0);
+	const pinnedViewport = useRef(0);
+	const heldUntil = useRef(Number.NEGATIVE_INFINITY);
+	const holdTimer = useRef<number | undefined>(undefined);
 	const originalAnchor = useRef<string | null>(null);
 	const wasRunning = useRef(running);
 	const settling = useRef(false);
 	const previousActivity = useRef(activityKey);
 	const runningRef = useRef(running);
 	runningRef.current = running;
+
+	const markPinned = useCallback((element: HTMLElement) => {
+		programmaticTop.current = element.scrollTop;
+		pinnedHeight.current = element.scrollHeight;
+		pinnedViewport.current = element.clientHeight;
+	}, []);
+
+	const endHold = useCallback(() => {
+		heldUntil.current = Number.NEGATIVE_INFINITY;
+		if (holdTimer.current !== undefined) clearTimeout(holdTimer.current);
+		holdTimer.current = undefined;
+		if (scrollRef.current !== null) delete scrollRef.current.dataset.followHold;
+	}, [scrollRef]);
 
 	const setFollow = useCallback(
 		(next: boolean) => {
@@ -155,12 +194,13 @@ export function useFollowLatest(
 		const atBottom = () => element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_TOLERANCE_PX;
 		const pin = () => {
 			element.scrollTop = element.scrollHeight;
-			programmaticTop.current = element.scrollTop;
+			markPinned(element);
 			viewportHeight = element.clientHeight;
 		};
 		const onScroll = () => {
 			const top = element.scrollTop;
 			const height = element.clientHeight;
+			const contentHeight = element.scrollHeight;
 			// Focusing a growing composer can nudge scrollTop a few pixels before
 			// ResizeObserver pins the shorter viewport. Keep that resize at the live
 			// edge; a larger upward move still belongs to the reader.
@@ -174,7 +214,7 @@ export function useFollowLatest(
 			}
 			viewportHeight = height;
 			if (atBottom()) {
-				programmaticTop.current = top;
+				markPinned(element);
 				setFollow(true);
 				return;
 			}
@@ -188,6 +228,10 @@ export function useFollowLatest(
 					running: runningRef.current,
 					intended: intended(),
 					shrunkTo: shrunkTo(),
+					height: contentHeight,
+					pinnedHeight: pinnedHeight.current,
+					pinnedViewport: pinnedViewport.current,
+					held: performance.now() < heldUntil.current,
 				})
 			) {
 				pin();
@@ -202,13 +246,17 @@ export function useFollowLatest(
 			if (event instanceof KeyboardEvent && !NAV_KEYS.has(event.key)) return;
 			if (event.target instanceof Node && element.contains(event.target)) {
 				settling.current = false;
+				endHold();
 				intentAt = performance.now();
 				if (event.type === "pointerdown") pressed = true;
 			}
 		};
 		// Keys scroll the region last pointed at even while focus sits outside it, but not from a field.
 		const readKey = (event: KeyboardEvent) => {
-			if (NAV_KEYS.has(event.key) && !editable(event.target)) intentAt = performance.now();
+			if (NAV_KEYS.has(event.key) && !editable(event.target)) {
+				intentAt = performance.now();
+				endHold();
+			}
 		};
 		const release = () => {
 			pressed = false;
@@ -259,8 +307,9 @@ export function useFollowLatest(
 			observer?.disconnect();
 			if (observer === null) window.removeEventListener("resize", pin);
 			children?.disconnect();
+			endHold();
 		};
-	}, [scrollRef, enabled, setFollow]);
+	}, [scrollRef, enabled, setFollow, markPinned, endHold]);
 
 	useLayoutEffect(() => {
 		const finished = wasRunning.current && !running;
@@ -291,8 +340,8 @@ export function useFollowLatest(
 		const element = scrollRef.current;
 		if (element === null) return;
 		element.scrollTop = element.scrollHeight;
-		programmaticTop.current = element.scrollTop;
-	}, [activityKey, enabled, scrollRef, running]);
+		markPinned(element);
+	}, [activityKey, enabled, scrollRef, running, markPinned]);
 
 	const snapshot = useCallback(
 		(): ScrollPosition => ({ top: scrollRef.current?.scrollTop ?? 0, following: followingRef.current }),
@@ -304,11 +353,12 @@ export function useFollowLatest(
 		(position: ScrollPosition) => {
 			const element = scrollRef.current;
 			if (element === null) return;
+			endHold();
 			setFollow(position.following);
 			element.scrollTop = position.following ? element.scrollHeight : position.top;
-			programmaticTop.current = element.scrollTop;
+			markPinned(element);
 		},
-		[scrollRef, setFollow],
+		[scrollRef, setFollow, markPinned, endHold],
 	);
 
 	const jumpToLatest = useCallback(() => {
@@ -319,17 +369,27 @@ export function useFollowLatest(
 		// live-edge writes. Land once, synchronously, so its intermediate scroll events
 		// cannot look like the operator scrolling away from newly arrived content.
 		element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
-		programmaticTop.current = element.scrollTop;
-	}, [scrollRef, setFollow]);
+		markPinned(element);
+	}, [scrollRef, setFollow, markPinned]);
 
 	useLayoutEffect(() => {
 		const previous = previousActivity.current;
 		previousActivity.current = activityKey;
 		// Restoring an existing transcript is not new activity below the reader.
-		if (previous === undefined || activityKey === undefined || previous === activityKey || followingRef.current) return;
-		if (enabled && sentPrompt(previous, activityKey)) jumpToLatest();
-		else setUnseen(true);
-	}, [activityKey, enabled, jumpToLatest]);
+		if (previous === undefined || activityKey === undefined || previous === activityKey) return;
+		if (enabled && sentPrompt(previous, activityKey)) {
+			// A send lands on the live edge, from wherever the reader was, and stays there while the
+			// cleared composer, the status chip and the new turn reflow the viewport, even before the
+			// turn shows as running.
+			jumpToLatest();
+			endHold();
+			heldUntil.current = performance.now() + SEND_HOLD_MS;
+			const element = scrollRef.current;
+			// Read by browser-smoke, so its scripted move lands after the send's reflow.
+			if (element !== null) element.dataset.followHold = "";
+			holdTimer.current = window.setTimeout(endHold, SEND_HOLD_MS);
+		} else if (!followingRef.current) setUnseen(true);
+	}, [activityKey, enabled, jumpToLatest, endHold, scrollRef]);
 
 	return { following, unseen, jumpToLatest, snapshot, restore };
 }

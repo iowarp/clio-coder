@@ -569,3 +569,42 @@ test("only an unprompted move onto content just seen to shrink is a browser clam
 	assert.equal(browserClamp({ ...clamp, following: false }), false, "not following");
 	assert.equal(browserClamp({ ...clamp, top: 4999.5 }), false, "not an upward move");
 });
+
+test("a layout sampled as changed since the pin, or a send's hold, explains an unprompted move; an unchanged layout does not", () => {
+	// Pinned at 7060 with scrollHeight 7741 and a 681px viewport, as a send's first ResizeObserver pass left it.
+	const pinned = {
+		top: 7060,
+		pinnedTop: 7060,
+		viewport: 681,
+		following: true,
+		running: true,
+		intended: false,
+		shrunkTo: null,
+		height: 7741,
+		pinnedHeight: 7741,
+		pinnedViewport: 681,
+	};
+	const scripted = { ...pinned, top: 7060 - 340 };
+	assert.equal(browserClamp(scripted), false, "nothing changed: a script, find-in-page or AT moved it");
+	// The dock reflowed after the send: it clamped through a taller viewport and settled at 709px (INT 2a F1).
+	const reflowed = { ...pinned, top: 6990, viewport: 709 };
+	assert.equal(browserClamp(reflowed), true, "the viewport changed height since the pin");
+	assert.equal(browserClamp({ ...reflowed, intended: true }), false, "the reader scrolled while the dock moved");
+	assert.equal(browserClamp({ ...reflowed, top: 0 }), false, "scrollTop = 0 is more than a viewport above the pin");
+	assert.equal(browserClamp({ ...reflowed, running: false }), false, "no turn runs and no send holds");
+	// No ResizeObserver pass saw it, but scrollHeight sampled in the scroll event dropped by 200px.
+	const shrank = { ...pinned, top: 6860, height: 7541 };
+	assert.equal(browserClamp(shrank), true, "content shrank since the pin");
+	assert.equal(browserClamp({ ...shrank, top: 6863 }), false, "above the shrunk bottom");
+	assert.equal(browserClamp({ ...shrank, height: 7740 }), false, "a 1px rounding is not a shrink");
+	// Just after a send, before the turn shows as running, the send's own reflow is a clamp too.
+	const held = { ...reflowed, running: false, held: true };
+	assert.equal(browserClamp(held), true);
+	assert.equal(
+		browserClamp({ ...held, viewport: 681 }),
+		false,
+		"a scripted move just after a send, onto an unchanged layout",
+	);
+	assert.equal(browserClamp({ ...held, intended: true }), false, "reader input ends the hold");
+	assert.equal(browserClamp({ ...held, top: 0 }), false, "more than a viewport above the pin");
+});
