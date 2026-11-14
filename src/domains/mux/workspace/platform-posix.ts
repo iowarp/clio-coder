@@ -254,6 +254,27 @@ export function renderPosixShellShim(platform: NodeJS.Platform): string {
 	// is parsed as shell. Every variable is unset before the command starts, so neither it nor the shell after it
 	// can start a second Clio. INT is caught, not ignored: an ignored signal would stay ignored in the command, and
 	// left alone it would end this script while the command handles it, leaving the pane without the shell.
+	// A Clio that ends without its exit marker (killed, or failed before it registered one) would leave the launcher
+	// attached to this pane's shell. The shim writes the marker where markWorkspaceExit puts it (exit-marker.ts), with
+	// the status, only when Clio wrote none, so the launcher ends the workspace exactly as it does for a crash.
+	const markExit = [
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
+		'case "${HERDR_PANE_ID-}:${HERDR_SOCKET_PATH-}" in',
+		"?*:/*.sock)",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion
+		`marker="\${HERDR_SOCKET_PATH%.sock}.exit-$(printf '%s' "$HERDR_PANE_ID" | tr -c 'A-Za-z0-9_-' '_')"`,
+		'if [ ! -e "$marker" ]; then',
+		"header=",
+		'[ "$status" -eq 0 ] || header="clio-coder-exit:$status"',
+		// Staged and renamed like Clio's own, so the launcher never reads a marker half written.
+		`if (umask 077 && { [ -z "$header" ] || printf '%s\\n' "$header"; } >"$marker.$$.tmp") 2>/dev/null; then`,
+		'mv -f "$marker.$$.tmp" "$marker" 2>/dev/null || rm -f "$marker.$$.tmp"',
+		"fi",
+		"fi",
+		"unset marker header",
+		";;",
+		"esac",
+	];
 	const launch = [
 		`if [ -n "\${${SHIM_ARGC}+x}" ]; then`,
 		`argc=$${SHIM_ARGC}; unset ${SHIM_ARGC}`,
@@ -269,8 +290,11 @@ export function renderPosixShellShim(platform: NodeJS.Platform): string {
 		'if [ "$#" -gt 0 ]; then',
 		"trap : INT",
 		'"$@"',
+		"status=$?",
 		"trap - INT",
 		"set --",
+		...markExit,
+		"unset status",
 		"fi",
 		"fi",
 	];
