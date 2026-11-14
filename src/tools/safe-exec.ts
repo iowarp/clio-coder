@@ -70,6 +70,8 @@ export async function runVectorTool(
 		typedGitWritablePaths?: ReadonlyArray<string>;
 		/** The main-session sandbox a contained call runs in (verify's checks). */
 		shellSandbox?: MainSandboxPolicy;
+		/** The root `cwd` must stay inside; the process working directory when absent. */
+		workspaceRoot?: string;
 	},
 ): Promise<ToolResult> {
 	const timeoutMs = timeoutArg(args);
@@ -82,6 +84,7 @@ export async function runVectorTool(
 		if (options?.env !== undefined) runOptions.env = options.env;
 		if (options?.typedGitWritablePaths !== undefined) runOptions.typedGitWritablePaths = options.typedGitWritablePaths;
 		if (options?.shellSandbox !== undefined) runOptions.shellSandbox = options.shellSandbox;
+		if (options?.workspaceRoot !== undefined) runOptions.workspaceRoot = options.workspaceRoot;
 		const result = await runCommandVector(file, vectorArgs, runOptions);
 		const output = truncateUtf8(combineSafeOutput(result), maxOutputBytes, TRUNCATION_MARKER);
 		const details = resultDetails(result);
