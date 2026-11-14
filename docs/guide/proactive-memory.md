@@ -53,6 +53,48 @@ To turn memory off, set `context.memory.enabled: false` in settings, or use `/se
 | Look up the default values and routing example | [Operator setup](#operator-setup) |
 | Understand what survives a handoff | [Handoff continuity](#handoff-continuity) |
 
+### Tell CLIO Coder what to remember
+
+CLIO Coder captures a memory statement from the words you type when you submit them. Your words are the consent, so the statement is stored approved, with no proposal or review step. Only text you typed is read. Tool output, model text, queued resubmits, continuations and inlined file or skill bodies are never scanned ([operator-memory.ts](../../src/session-control/operator-memory.ts)).
+
+These forms are matched case-insensitively ([operator-statement.ts](../../src/domains/memory/operator-statement.ts)):
+
+| You type | Captured as |
+| --- | --- |
+| `# <statement>` as the whole submission, on one line | Remember |
+| `remember that <statement>` or `remember: <statement>` | Remember |
+| `remember <statement>`, when the statement says something (`is`, `are`, `uses`, `runs`, `needs`, `should`, `must`, `has`, `requires` and similar) and does not start with `to` | Remember |
+| `don't forget <statement>` or `do not forget <statement>` | Remember |
+| `from now on <statement>` | Remember, as a rule |
+| `forget that <statement>` or `forget about <statement>` | Forget |
+
+`remember`, `don't forget` and `forget` also match after a leading `please`. A phrase counts only at the start of a sentence that does not end in `?`, so "Do you remember that bug?" stores nothing. Sentences split at line breaks and after `.`, `!` or `?`, and the first matching sentence wins. When the statement is the whole submission, nothing is sent to the model. When the message has other sentences, the statement is captured and the whole message still goes to the model as an ordinary turn.
+
+Each statement gets one of three scopes:
+
+| Scope | Words that pick it | Where it is kept |
+| --- | --- | --- |
+| Session | `for now`, `for this session`, `in this session`, `just this session`, `for the rest of this session`, `temporarily`, `for this task`, `for this conversation` | A pinned `operatorNote` entry in the session ledger. It rides in every turn's `# Memory` section and survives compaction, and it ends with the session. |
+| Project | `in this project`, `for this repo`, `in this repository`, `in this codebase`, `in this workspace`, `in here`, or no scope words | An approved repository-scoped record in `<dataDir>/memory/records.json`, bound to the current repository's identity. Outside a repository the capture fails and asks you to say `everywhere`. |
+| Global | `everywhere`, `globally`, `in all projects`, `in all of my projects`, `for all my projects`, `across my projects` and similar | An approved global record in `<dataDir>/memory/records.json`, applied in every project. |
+
+Session words win over global words, and global words win over project words. A statement with no scope words starts in project scope. When a background memory route is available, it classifies the statement's scope and kind (fact, preference, rule or command) within 20 seconds and moves an unscoped statement when it disagrees, with a new notice. A scope you named, or one you set with `/remember scope`, is never moved. Stating the same words again updates the existing record instead of adding a copy. Operator-stated records go first in the `# Memory` section, labeled `operator-stated <kind>`.
+
+A statement that looks like it holds a credential is refused and never stored, even redacted. Keep a provider key in CLIO Coder's credential storage with `clio-coder auth login <target>` and other secrets in an environment variable or the OS keychain, then tell CLIO Coder the variable's name. A statement longer than 400 characters is refused. With `context.memory.enabled: false` nothing is captured: typed phrases reach the model unchanged, and `/remember` warns that memory is off.
+
+The TUI reports each capture as a transcript line such as `Remembered for this project · change scope: /remember scope session|global · undo: /remember undo`. The `/remember` command does the same work by hand and never starts a model turn:
+
+| Command | Effect |
+| --- | --- |
+| `/remember <text>` | Remember the text as typed. Scope words in it still pick the scope. |
+| `/remember scope session\|project\|global [capture-id]` | Move the latest capture, or the named one, to that scope. |
+| `/remember undo [capture-id]` | Undo the latest capture that is not already undone, or the named one. Undoing a remember removes the record or restores the one it replaced; undoing a forget puts the memory back. |
+| `/remember forget <text>` | Forget, as `forget that <text>` does. |
+
+A forget first looks for a pin in this session with the same words or words that contain each other. Otherwise it picks the approved record applicable here (global, or this repository) that shares the most words with the request, at least half of the shorter one's terms. An operator-stated record is removed. A lesson that came from evidence is rejected instead, so the same evidence does not propose it again. When nothing matches, nothing is forgotten and the notice says so. The process keeps its last 32 captures for undo and rescoping.
+
+In the desktop app the same capture appears as a banner in the conversation, such as `Remembered for this project`, with the kind and text below it. Its buttons `Keep for this session`, `Keep for all projects` (the scopes it is not in) and `Undo` run `/remember scope` and `/remember undo` for that capture, and `Dismiss` hides it. A forget shows `Forgot` with `Undo`. ACP clients receive the capture as `_meta["clio-coder/memory-capture"]` on the notice's `agent_message_chunk` update, and a read-only ceiling refuses `/remember`.
+
 ## Architecture
 
 ```mermaid
