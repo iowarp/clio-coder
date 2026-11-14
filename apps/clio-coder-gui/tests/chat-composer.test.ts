@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { initialEnterSends, touchFirst } from "../client/chat/composer-field.js";
 import { historyExcerpt, searchHistory, stepHistory } from "../client/chat/composer-history.js";
 import {
 	capabilityRefusal,
@@ -315,6 +316,28 @@ test("Enter sends, Shift and Enter do not, and the declared chord still sends", 
 	assert.equal(composerKeyAction(press("j", { ctrlKey: true }), { layerOwned: false, composing: true }), "ignore");
 	assert.equal(composerKeyAction(press("j"), idle), "ignore");
 	assert.equal(composerKeyAction(press("a"), idle), "ignore");
+});
+
+test("only a touch pointer turns Enter into a newline; a keyboard-only device with no pointer sends", () => {
+	const saved = Object.getOwnPropertyDescriptor(globalThis, "matchMedia");
+	const pointer = (kind: "fine" | "coarse" | "none") =>
+		Object.defineProperty(globalThis, "matchMedia", {
+			configurable: true,
+			value: (query: string) => ({ matches: query === `(pointer: ${kind})` }),
+		});
+	try {
+		pointer("none");
+		assert.equal(touchFirst(), false);
+		assert.equal(initialEnterSends(), true);
+		pointer("fine");
+		assert.equal(initialEnterSends(), true);
+		pointer("coarse");
+		assert.equal(touchFirst(), true);
+		assert.equal(initialEnterSends(), false);
+	} finally {
+		if (saved) Object.defineProperty(globalThis, "matchMedia", saved);
+		else Reflect.deleteProperty(globalThis, "matchMedia");
+	}
 });
 
 test("the send key never fires while a dialog or the palette owns the layer, or mid-composition", () => {

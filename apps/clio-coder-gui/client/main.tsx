@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider, useRouteError } from "react-router
 import { machinePrefix } from "../contracts/pages.js";
 import { ApiProblem, createClient } from "./api/client.js";
 import { createCredentials } from "./api/credentials.js";
-import { launchSecret, listenForForget } from "./api/token.js";
+import { launchSecret, listenForForget, listenForLaunchLink } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
 import { Home } from "./pages/home.js";
@@ -20,6 +20,7 @@ import { sessionQuery } from "./api/session-query.js";
 // and Machines keep talking to this machine's app, so the window can always come back or move on.
 const prefix = machinePrefix(location.pathname)?.prefix ?? "";
 const launch = launchSecret();
+listenForLaunchLink();
 // One client identity per window: both clients below speak for it, and the event stream's ticket
 // comes from this machine's app even while the window drives a node.
 const credentials = createCredentials(

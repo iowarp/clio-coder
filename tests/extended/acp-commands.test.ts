@@ -275,7 +275,7 @@ test("a dispatch command reports that it started, because its result is an event
 	const result = await invokeAcpCommand({ command: "run", argv: ["acp:codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);
 	assert.equal(result.level, "info");
-	assert.deepEqual(result.lines, ["run started; progress arrives as _clio-coder/event dispatch kinds"]);
+	assert.deepEqual(result.lines, ["run started; its progress appears in this task as it runs"]);
 	// A run refused at admission never started, so the reply is the refusal and never "started".
 	const refused = await invokeAcpCommand(
 		{ command: "run", argv: ["ghost", "summarize the diff"] },

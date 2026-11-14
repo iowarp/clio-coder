@@ -589,7 +589,7 @@ export function invokeAcpCommand(
 	// A command whose reply waits for its own work (`/oracle`, `/council`) has
 	// finished by then, so it is not described as starting.
 	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted" && pending.length === 0) {
-		push(`${rule.name} started; progress arrives as _clio-coder/event dispatch kinds`);
+		push(`${rule.name} started; its progress appears in this task as it runs`);
 	}
 	return pending.length === 0 ? Promise.resolve(finish()) : Promise.all(pending).then(finish);
 }
@@ -758,9 +758,9 @@ function sessionCommandContext(
 		awaitDispatchStart: (admission) => {
 			pending.push(
 				admission.then((started) => {
-					if (started === "started") push(`${commandName} started; progress arrives as _clio-coder/event dispatch kinds`);
+					if (started === "started") push(`${commandName} started; its progress appears in this task as it runs`);
 					else if (started === "queued")
-						push(`${commandName} queued for a worker slot; progress arrives as _clio-coder/event dispatch kinds`);
+						push(`${commandName} queued for a worker slot; its progress appears in this task once it starts`);
 				}),
 			);
 		},

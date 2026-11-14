@@ -36,12 +36,34 @@ const ACTION_COPY: Readonly<Record<string, { title: string; description: string 
 	extensions: { title: "Tools and add-ons", description: "See the tools available to this task" },
 	"fleet-run": { title: "Run a workflow", description: "Choose a saved workflow and review it before starting" },
 };
+// Every command the engine offers gets a written title; a bare command name ("Mcp", "Oracle") reads as jargon.
 const COMMAND_TITLES: Readonly<Record<string, string>> = {
 	doctor: "Check CLIO Coder",
 	"context compact": "Make room in conversation",
-	"context reset": "Reset conversation memory",
-	"context recover": "Recover conversation memory",
+	// Reset clears the project's context files (it can delete CLIO.md), not this conversation.
+	"context reset": "Reset project context",
+	"context recover": "Resume a paused handoff",
+	"context recall": "Bring back an evicted result",
+	"context init": "Set up project context",
+	"context refresh": "Refresh project context",
 	council: "Ask a team",
+	oracle: "Ask an advisor",
+	run: "Run an agent",
+	poll: "Poll agents",
+	loop: "Start a loop",
+	"loop status": "Loop status",
+	"loop pause": "Pause a loop",
+	"loop resume": "Resume a loop",
+	"loop stop": "Stop a loop",
+	mcp: "MCP servers",
+	"mcp list": "List MCP servers",
+	"mcp trust": "Trust an MCP server",
+	"mcp untrust": "Withdraw MCP trust",
+	archive: "Archive",
+	"archive export": "Export an archive",
+	"archive import": "Import an archive",
+	"fleet share": "Share a worker result",
+	"memory seed": "Seed the task bank",
 	skill: "Use a skill",
 	"tasks add": "Add a task",
 	"tasks hand": "Assign a task",
@@ -57,6 +79,14 @@ const ACTION_ICONS: Readonly<Record<string, IconName>> = {
 	extensions: "toolchain",
 	"fleet-run": "play",
 };
+
+/** An engine summary split at its backtick spans, so `off` and `--deep` read as code rather than as stray marks. */
+export function descriptionParts(text: string): ReadonlyArray<{ readonly code: boolean; readonly text: string }> {
+	const parts = text.split("`");
+	// An unmatched backtick is ordinary text.
+	if (parts.length % 2 === 0) return [{ code: false, text }];
+	return parts.map((part, index) => ({ code: index % 2 === 1, text: part })).filter((part) => part.text !== "");
+}
 
 export function visualActions(entries: readonly SlashEntry[], query: string): readonly VisualAction[] {
 	const words = query.toLowerCase().trim().split(/\s+/u).filter(Boolean);
