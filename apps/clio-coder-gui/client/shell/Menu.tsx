@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 
@@ -12,8 +12,33 @@ function placeFloating(details: HTMLDetailsElement): void {
 	const below = anchor.bottom + 6;
 	const top = below + box.height > window.innerHeight - 8 ? Math.max(8, anchor.top - 6 - box.height) : below;
 	const left = Math.max(8, Math.min(anchor.right - box.width, window.innerWidth - box.width - 8));
-	panel.style.setProperty("--menu-top", `${Math.round(top)}px`);
-	panel.style.setProperty("--menu-left", `${Math.round(left)}px`);
+	// "Fixed" is relative to the window only while no ancestor is a containing block (a transform, a
+	// filter, containment). A probe at 0,0 in the same layer finds where that layer really starts.
+	const probe = document.createElement("span");
+	probe.style.cssText = "position:fixed;top:0;left:0;width:0;height:0;visibility:hidden";
+	details.append(probe);
+	const origin = probe.getBoundingClientRect();
+	probe.remove();
+	panel.style.setProperty("--menu-top", `${Math.round(top - origin.top)}px`);
+	panel.style.setProperty("--menu-left", `${Math.round(left - origin.left)}px`);
+}
+
+const MENU_ITEMS = '[role="menuitem"]:not([disabled])';
+
+/** Arrow keys walk the items and wrap; Home and End jump to either end. Tab still moves as it does anywhere. */
+function moveFocus(event: KeyboardEvent<HTMLElement>): void {
+	const items = [...event.currentTarget.querySelectorAll<HTMLElement>(MENU_ITEMS)];
+	if (items.length === 0) return;
+	const at = items.indexOf(document.activeElement as HTMLElement);
+	const last = items.length - 1;
+	let next: number;
+	if (event.key === "ArrowDown") next = at < 0 || at === last ? 0 : at + 1;
+	else if (event.key === "ArrowUp") next = at <= 0 ? last : at - 1;
+	else if (event.key === "Home") next = 0;
+	else if (event.key === "End") next = last;
+	else return;
+	event.preventDefault();
+	items[next]?.focus();
 }
 
 /**
@@ -35,17 +60,43 @@ export function Menu({
 	const ref = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useDetailsDismiss(ref, open);
-	// A fixed panel does not follow a scrolling list, so it closes instead of drifting off its button.
+	// A fixed panel does not follow a scrolling list, so it closes instead of drifting off its button. The
+	// exception is the scroll that focusing one of its own items causes: that one moves it along.
 	useEffect(() => {
 		if (!float || !open) return;
 		const close = () => {
 			if (ref.current) ref.current.open = false;
 		};
+		const scrolled = () => {
+			if (ref.current?.contains(document.activeElement)) placeFloating(ref.current);
+			else close();
+		};
+		// The button can also move without a scroll: the rail re-sorts its rows as tasks change state and
+		// animates its width. The fixed panel kept its first coordinates and opened hundreds of pixels
+		// from its button, so it follows the button every frame while open, and closes if it goes away.
+		let frame = 0;
+		let at = "";
+		const follow = () => {
+			const details = ref.current;
+			const anchor = details?.querySelector("summary")?.getBoundingClientRect();
+			if (!details || !anchor || (anchor.width === 0 && anchor.height === 0)) {
+				close();
+				return;
+			}
+			const where = `${anchor.top} ${anchor.right}`;
+			if (where !== at) {
+				at = where;
+				placeFloating(details);
+			}
+			frame = requestAnimationFrame(follow);
+		};
+		frame = requestAnimationFrame(follow);
 		window.addEventListener("resize", close);
-		document.addEventListener("scroll", close, true);
+		document.addEventListener("scroll", scrolled, true);
 		return () => {
+			cancelAnimationFrame(frame);
 			window.removeEventListener("resize", close);
-			document.removeEventListener("scroll", close, true);
+			document.removeEventListener("scroll", scrolled, true);
 		};
 	}, [float, open]);
 	return (
@@ -54,17 +105,22 @@ export function Menu({
 			data-float={float ? "yes" : undefined}
 			ref={ref}
 			onToggle={(event) => {
-				setOpen(event.currentTarget.open);
-				if (float && event.currentTarget.open) placeFloating(event.currentTarget);
+				const details = event.currentTarget;
+				setOpen(details.open);
+				if (float && details.open) placeFloating(details);
+				// A keyboard opening leaves the button focus-visible, a pointer one does not; only the keyboard
+				// hands focus on to the first item.
+				if (details.open && details.querySelector("summary")?.matches(":focus-visible"))
+					details.querySelector<HTMLElement>(`.wb-menu__panel ${MENU_ITEMS}`)?.focus({ preventScroll: float });
 			}}
 		>
 			<summary className="wb-icon" aria-label={label} title={label}>
 				<Icon name={icon} />
 			</summary>
-			{/* biome-ignore lint/a11y/useKeyWithClickEvents: the click only closes the menu after an item, whose own button handles the keyboard. */}
 			<div
 				className="wb-menu__panel"
 				role="menu"
+				onKeyDown={moveFocus}
 				onClick={(event) => {
 					if (event.target instanceof Element && event.target.closest('[role="menuitem"]') && ref.current) {
 						ref.current.open = false;

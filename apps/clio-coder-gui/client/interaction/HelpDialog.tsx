@@ -206,7 +206,7 @@ export function HelpDialog({
 			onClose={onClose}
 		>
 			{onReport ? (
-				<div className="actions">
+				<div className="actions help-dialog__actions">
 					<button type="button" onClick={onReport}>
 						Report a problem
 					</button>

@@ -15,6 +15,18 @@
 	width: min(100%, 720px);
 	margin: 0 auto;
 	padding-bottom: 6dvh;
+	position: relative;
+}
+/* The floating notices' reserve (interaction.css). In flow it would re-centre the page when a notice
+   arrives; as an absolute box below the content it only lengthens the scroll. */
+.newtask__inner::after {
+	content: "";
+	position: absolute;
+	top: 100%;
+	left: 0;
+	width: 1px;
+	height: var(--notice-reserve, 0px);
+	pointer-events: none;
 }
 .newtask__title {
 	margin: 0;
@@ -101,6 +113,22 @@
 .newtask__context > summary > span:first-of-type {
 	min-width: 0;
 	overflow-wrap: anywhere;
+}
+/* While the model check runs, a placeholder holds the row at its resolved height, so the label
+   arrives without moving the row; only opacity breathes, which the compositor runs alone. */
+.newtask__skeleton {
+	display: inline-block;
+	width: min(22ch, 100%);
+	height: 0.9em;
+	vertical-align: middle;
+	border-radius: var(--radius-sm);
+	background: var(--line);
+	animation: newtask-breathe var(--motion-feedback) var(--ease-standard) infinite alternate;
+}
+@keyframes newtask-breathe {
+	to {
+		opacity: 0.45;
+	}
 }
 .newtask__context-label {
 	display: inline-flex;

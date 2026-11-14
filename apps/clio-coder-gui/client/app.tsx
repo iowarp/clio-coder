@@ -511,6 +511,21 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 			<a className="skip-link" href="#main">
 				Skip to content
 			</a>
+			{sessionId !== null ? (
+				// biome-ignore lint/a11y/useValidAnchor: a skip link is an anchor by convention; the composer field has no id this block can point at, so the click moves focus itself.
+				<a
+					className="skip-link"
+					href="#composer"
+					onClick={(event) => {
+						const field = document.querySelector<HTMLTextAreaElement>(".composer__field");
+						if (!field) return;
+						event.preventDefault();
+						field.focus();
+					}}
+				>
+					Skip to message box
+				</a>
+			) : null}
 			<aside
 				className="wb-sidebar"
 				id={SIDEBAR_ID}
