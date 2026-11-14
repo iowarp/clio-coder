@@ -16,7 +16,7 @@ import type {
 import type { SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { ScopeSealed } from "../../core/telemetry/schemas.js";
 import { ScopeSealedSchema, ShareProfileSchema } from "../../core/telemetry/schemas.js";
-import type { TelemetryChain } from "../../core/telemetry/segment.js";
+import type { SegmentScan, TelemetryChain } from "../../core/telemetry/segment.js";
 import {
 	chainTelemetryLine,
 	EMPTY_TELEMETRY_CHAIN,
@@ -255,6 +255,8 @@ export function walkTelemetryChain(
 		scope?: { kind: TelemetryScopeKind; id: string };
 		sealEvent?: string;
 		objects?: ReadonlyMap<string, ScopeObjectEntry>;
+		/** `scanTelemetrySegment` of each file's bytes, by index, when the caller already scanned them. */
+		scans?: readonly SegmentScan[];
 	} = {},
 ): ChainWalk | { mismatch: SealMismatch } {
 	let chain: TelemetryChain = EMPTY_TELEMETRY_CHAIN;
@@ -267,7 +269,7 @@ export function walkTelemetryChain(
 	let tipIsSeal = false;
 	const skipped: ChainWalk["skipped"] = new Map();
 	for (const [index, segment] of files.entries()) {
-		const scan = scanTelemetrySegment(segment.bytes);
+		const scan = check.scans?.[index] ?? scanTelemetrySegment(segment.bytes);
 		if (scan.corruptOffset !== null || scan.tornTailBytes > 0 || scan.validBytes !== segment.bytes.length)
 			return {
 				mismatch: { kind: "chain", name: segment.name, line: scan.rows.length + 1, detail: "segment has a damaged line" },
@@ -389,9 +391,10 @@ function fileMismatch(
  * The seal verdict for a scope's files (#434). Pure: it checks every listed segment and object against its size and
  * sha256 and every object against its content-addressed id, replays the chain checking every seal against its prefix,
  * and binds the manifest to the last seal: its record, head, file lists, timestamp, host and writer version. The first
- * mismatch fails the scope; a scope without `bundle.json` is unsealed.
+ * mismatch fails the scope; a scope without `bundle.json` is unsealed. `scans`, when given, are
+ * `scanTelemetrySegment` of each of `files.segments` by index, made by a caller that folds the same bytes.
  */
-export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
+export function verifyTelemetryScope(files: TelemetryScopeFiles, scans?: readonly SegmentScan[]): SealVerdict {
 	if (files.manifest === null)
 		return { status: "unsealed", reason: files.segments.length === 0 ? "no-journal" : "no-bundle" };
 	let manifest: ScopeBundleManifest;
@@ -424,6 +427,7 @@ export function verifyTelemetryScope(files: TelemetryScopeFiles): SealVerdict {
 		scope: manifest.scope,
 		...(manifest.share !== undefined ? { sealEvent: SHARE_SEAL_EVENT } : {}),
 		objects: new Map(manifest.objects.map((object) => [object.id, object])),
+		...(scans !== undefined ? { scans } : {}),
 	});
 	if ("mismatch" in walk) return failed(walk.mismatch);
 	const last = walk.seals.at(-1);

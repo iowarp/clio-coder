@@ -3280,13 +3280,15 @@ function runAssessmentOf(assessed: Run["assessed"], scope: TelemetryScopeFiles |
 
 /**
  * One run's DTO: its fold, its run.settled facts, and, given the run scope's own files (`readTelemetryScopeFiles`),
- * the seal verdict and the result object the settlement names (#434 §11.1).
+ * the seal verdict and the result object the settlement names (#434 §11.1). `sealVerdict` is `scope`'s verdict when
+ * the caller already verified it.
  */
 export function runTelemetry(
 	runId: string,
 	source: JournalSource,
 	options: ReadOptions = {},
 	scope: TelemetryScopeFiles | null = null,
+	sealVerdict: SealVerdict | null = scope === null ? null : verifyTelemetryScope(scope),
 ): RunTelemetryV1 {
 	const run = analyzeRun(runId, source);
 	const view: View = { run };
@@ -3310,7 +3312,7 @@ export function runTelemetry(
 					repairRounds: quantity(view, { ...base, metric: "repairRounds" }),
 				}
 			: null,
-		seal: scope === null ? null : verifyTelemetryScope(scope),
+		seal: sealVerdict,
 		result: runResultOf(settled, scope),
 		assessment: runAssessmentOf(run.assessed, scope),
 	};
