@@ -26,6 +26,7 @@ import { FleetCapability } from "../../contracts/fleet-run.js";
 import { HandoffCapability } from "../../contracts/handoff.js";
 import { INTERVIEW_CANCEL_METHOD, INTERVIEW_REQUEST_METHOD, InterviewCapability } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD } from "../../contracts/permissions.js";
+import { SnapshotsCapability } from "../../contracts/rewind.js";
 import type { SessionConfig, SetConfigOption } from "../../contracts/session-config.js";
 import type { SessionTelemetry } from "../../contracts/session-telemetry.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
@@ -52,6 +53,7 @@ import {
 	ACP_SESSION_TRUST_METHOD,
 	ACP_SETTINGS_META_KEY,
 	ACP_SHELL_META_KEY,
+	ACP_SNAPSHOTS_META_KEY,
 	ACP_STEERING_META_KEY,
 	ACP_TARGETS_META_KEY,
 	ACP_TELEMETRY_META_KEY,
@@ -124,6 +126,7 @@ function readCapabilities(result: unknown): AgentCapabilities {
 		...maybe("events", optional(EventsCapability, meta[ACP_EVENTS_META_KEY])),
 		...maybe("board", optional(BoardCapability, meta[ACP_BOARD_META_KEY])),
 		...maybe("branches", optional(BranchesCapability, meta[ACP_BRANCHES_META_KEY])),
+		...maybe("snapshots", optional(SnapshotsCapability, meta[ACP_SNAPSHOTS_META_KEY])),
 		...maybe("handoff", optional(HandoffCapability, meta[ACP_HANDOFF_META_KEY])),
 		...maybe("fleet", optional(FleetCapability, meta[ACP_FLEET_META_KEY])),
 		...maybe("jobs", optional(JobsCapability, meta[ACP_JOBS_META_KEY])),

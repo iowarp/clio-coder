@@ -219,6 +219,8 @@ export const guiTests = [
 	"session-control",
 	"session-overview",
 	"notification-model",
+	"rewind-http",
+	"rewind-model",
 	"openapi",
 	"boundaries",
 ]

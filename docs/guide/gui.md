@@ -393,6 +393,18 @@ A code span in an answer that names a file (such as `package.json` or `lib/util.
 
 A terminal fleet frame carries `_meta["clio-coder/run-result"]`, the compact facts of the run's settled and sealed run record, and the server accepts it only when its `runId` equals the run identifier. One line then appears in three places: under a dispatched worker's tool block and response in the transcript, under each settled worker in the Agents drill, and in the Evidence section. The line reads `Execution ok` (or the outcome word), `conformance <pass|fail|not-reached|unmeasured>`, `trust: <status>`, the validation clause, the token count, the elapsed time and the placement (`worktree <branch>` or `current workspace`). The outcome, conformance and trust read `not reported` when absent, and the other parts are left out. A `Run record` link opens the run's dispatch page on Fleet. A run record that could not be read shows `Run record unavailable`. A late record updates a settled worker in place.
 
+### Restoring files
+
+Before a turn first changes files, and before every destructive command, CLIO Coder snapshots the task's files when the project is a Git work tree and safety snapshots are on. **Restore files…** in the task actions menu, the palette row **Restore files from a snapshot**, or typing `/rewind` or `/undo` opens **Restore workspace files**, the terminal's `/rewind`. It reads the snapshots through `_clio-coder/session/snapshots`, available when the agent announces `_meta["clio-coder/snapshots"]`; otherwise it says `File snapshots are not available for this task.`
+
+- **List.** The newest 100 snapshots, newest first: time, why it was taken, the tool that triggered it, a `Turn <n>` link when the turn is in this window, and how many files differ from now.
+- **Preview.** Choosing one lists what it would restore, remove and keep (each kept file with its reason) and Git refs to fix by hand. Each list shows at most 500 paths. Gitignored files, the Git index, HEAD and branches are never changed.
+- **Restore.** `Restore files`, then `Confirm restore`. CLIO Coder first snapshots the current files, so the result names the undo point. Restoring is refused while a turn runs or an approval waits; the list and preview stay readable. A parked or closed task says `Resume the task to use this.`
+
+### Downloading a transcript
+
+**Download transcript as HTML** and **Download transcript as Markdown**, in the task actions menu and the palette, save what the terminal's `/export` writes for the current branch, named `<task title>-<YYYY-MM-DD>.html` or `.md`. The server runs the task's `export` command into `.clio-coder/exports/gui-download-<uuid>`, reads the file (at most 16 MiB), and deletes it, so nothing is left in the project. Typing `/export` is unchanged: it writes into the project as in the terminal.
+
 ### Untrusted project files
 
 CLIO Coder ignores project surfaces the operator has not approved. Settings, hooks and safety use exact file bytes; extensions and plugins use installed package identities. The surfaces are `settings`, `hooks`, `safety`, `extensions` and `plugins`. The session's start result lists each ignored file, and the application keeps a persistent disclosure above the transcript titled `Project files were ignored`. It says `Clio has not trusted these project files. Review them, then run the named command in this workspace and reopen the task.` Each row names the file, its surface and verdict (`untrusted` or `changed`), and the command the runtime supplied, `clio-coder config trust <surface>`. For `extensions` and `plugins` the file is the project's `.clio-coder/extensions/state.json` or `.clio-coder/plugins/state.json`, shown as an absolute path. The command is a read-only review; it prints the exact `--hash` form that approves the reviewed surface. The notice reflects trust when the session started or last resumed, so it stays until the task is reopened after the approval. See [Commands and Modes](commands-and-modes.md) for the trust commands.
@@ -441,7 +453,8 @@ A line whose first word is not a catalog command or a prompt template is checked
 | `/tree`, `/fork` | Open Branches. |
 | `/resume`, `/library`, `/research` | Open Sessions, the Library or Research. |
 | `/rename <name>` | Rename the task. Without a name it says how. |
-| `/quit`, `/exit`, `/rewind`, `/undo` | Say where that is done instead; nothing else happens. |
+| `/rewind`, `/undo` | Open Restore workspace files. |
+| `/quit`, `/exit` | Say where that is done instead; nothing else happens. |
 | `/restart`, `/upgrade`, `/panes`, `/music`, `/files`, `/extensions dev`, `/trust` | Say that the name is terminal-only. |
 
 `/btw` and `/draft` read the conversation and answer in a panel. Neither becomes a turn or context for the next request. `/handoff` drafts a document for the person to read and edit, and starts a new conversation only after approval.

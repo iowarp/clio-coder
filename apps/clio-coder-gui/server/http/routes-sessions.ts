@@ -4,6 +4,7 @@ import type { Commands } from "../services/commands.js";
 import type { EventHub } from "../services/event-hub.js";
 import type { SessionControls } from "../services/session-control.js";
 import type { SessionService } from "../services/sessions.js";
+import { TranscriptDownload } from "../services/transcript-download.js";
 import { requestClient } from "./auth.js";
 import { idempotencyKey, register } from "./validate.js";
 export function sessionRoutes(
@@ -72,6 +73,18 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.sessionTree, ({ params }) => supervisor.tree(params.id));
+	// Workspace snapshots: a restore rewrites files, so a retried request answers from the command ledger.
+	register(app, hub, routes.sessionSnapshots, ({ params }) => supervisor.snapshotList(params.id));
+	register(app, hub, routes.sessionSnapshotPreview, ({ params }) =>
+		supervisor.snapshotPreview(params.id, Number(params.n)),
+	);
+	register(app, hub, routes.sessionSnapshotRestore, ({ params, body }, context) =>
+		commands.run(`snapshot.restore:${params.id}:${params.n}`, idempotencyKey(context), body, () =>
+			supervisor.snapshotRestore(params.id, Number(params.n)),
+		),
+	);
+	const transcripts = new TranscriptDownload(supervisor, workspaces);
+	register(app, hub, routes.sessionTranscript, ({ params, query }) => transcripts.read(params.id, query.format));
 	// A branch change resets the conversation, so a retried request answers from
 	// the command ledger instead of switching or forking a second time.
 	register(app, hub, routes.switchSessionBranch, ({ params, body }, context) =>

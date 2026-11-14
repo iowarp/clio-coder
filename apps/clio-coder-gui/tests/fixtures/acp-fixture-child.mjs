@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { SCIENCE_MARKDOWN, SCIENCE_TOOL_JSON, SCIENCE_TOOL_OUTPUT } from "./science-transcript.mjs";
@@ -304,10 +304,44 @@ const COMMANDS =
 							},
 						},
 					},
+					{
+						name: "export",
+						summary: "Write the transcript to a file",
+						usage: "/export [path]",
+						group: "Session",
+						args: { positionals: [{ name: "path", required: false }] },
+					},
 				],
 				prompts: ["review-pr"],
 			}
 		: null;
+// The markdown scenario keeps workspace snapshots as the engine's store does: newest first, numbered.
+let promptRunning = false,
+	taskCwd = process.cwd();
+const SNAPSHOTS = [
+	{
+		n: 2,
+		at: "2026-01-01T00:05:00.000Z",
+		reason: "before the first change in a turn",
+		tool: "write",
+		turnId: "u2",
+		differs: 2,
+		skipped: 0,
+	},
+	{ n: 1, at: "2026-01-01T00:01:00.000Z", reason: "before a destructive command", tool: "bash", differs: 0, skipped: 1 },
+];
+const snapshotPlan = (n) =>
+	n === 1
+		? { kind: "plan", n, restore: [], remove: [], kept: [], refs: [], truncated: false }
+		: {
+				kind: "plan",
+				n,
+				restore: ["src/solver.py"],
+				remove: ["notes/scratch.md"],
+				kept: [{ path: "data/mesh.bin", why: "larger than the snapshot limit" }],
+				refs: [],
+				truncated: false,
+			};
 // The session board a real agent folds from its ledger: the operator's tasks change through the
 // `tasks` command above; the plan and decisions are the agent's own report.
 const BOARD = {
@@ -721,6 +755,12 @@ async function handle(frame) {
 														count: COMMANDS.commands.length,
 														...(process.env.CLIO_CODER_WEB_FIXTURE_PROMPT_TURNS !== "0" ? { promptTurns: true } : {}),
 													},
+													"clio-coder/snapshots": {
+														version: 1,
+														list: "_clio-coder/session/snapshots",
+														preview: "_clio-coder/session/snapshot_preview",
+														restore: "_clio-coder/session/snapshot_restore",
+													},
 													"clio-coder/board": {
 														version: 1,
 														method: "_clio-coder/session/board",
@@ -781,6 +821,7 @@ async function handle(frame) {
 			}
 			case "session/new":
 				if (["session_limit", "session_cwd_mismatch"].includes(scenario)) throw Error(scenario);
+				if (typeof frame.params?.cwd === "string") taskCwd = frame.params.cwd;
 				update({ sessionUpdate: "available_commands_update", availableCommands: [] });
 				result = {
 					sessionId,
@@ -876,6 +917,7 @@ async function handle(frame) {
 				}
 				break;
 			case "session/prompt": {
+				promptRunning = true;
 				pendingHandoff = null;
 				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
 				if (STEERING && promptText.includes("[unreadable-queue]")) queueReadFails = true;
@@ -1203,6 +1245,19 @@ async function handle(frame) {
 					result = invokeTask(argv);
 					break;
 				}
+				// As the engine's /export: the path is resolved against the task's directory, Markdown for `.md`.
+				if (command === "export") {
+					const target = resolve(taskCwd, argv[0] ?? `.clio-coder/exports/${sessionId}.html`);
+					mkdirSync(dirname(target), { recursive: true });
+					writeFileSync(
+						target,
+						target.endsWith(".md")
+							? "# Fixture transcript\n\nEarlier reply\n"
+							: "<!doctype html><title>Fixture transcript</title>",
+					);
+					result = { level: "info", lines: [`wrote 1 requests to ${target}`] };
+					break;
+				}
 				result =
 					command === "doctor"
 						? { level: "success", lines: [argv.includes("deep") ? "Deep checks completed." : "Checks completed."] }
@@ -1258,6 +1313,41 @@ async function handle(frame) {
 				if (!COMMANDS) throw Error("method_not_found");
 				result = sessionTree();
 				break;
+			case "_clio-coder/session/snapshots":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = { snapshots: SNAPSHOTS, truncated: false };
+				break;
+			case "_clio-coder/session/snapshot_preview":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = SNAPSHOTS.some((row) => row.n === frame.params.n)
+					? snapshotPlan(frame.params.n)
+					: { kind: "unavailable", reason: `snapshot #${frame.params.n} not found` };
+				break;
+			case "_clio-coder/session/snapshot_restore": {
+				if (!COMMANDS) throw Error("method_not_found");
+				if (promptRunning) throw Error("prompt_active");
+				const plan = snapshotPlan(frame.params.n);
+				const undo = SNAPSHOTS[0].n + 1;
+				SNAPSHOTS.unshift({
+					n: undo,
+					at: new Date().toISOString(),
+					reason: `before rewind to #${frame.params.n}`,
+					differs: 0,
+					skipped: 0,
+				});
+				result = {
+					kind: "restored",
+					n: frame.params.n,
+					undo,
+					restored: plan.restore,
+					removed: plan.remove,
+					kept: plan.kept,
+					failed: [],
+					refs: [],
+					truncated: false,
+				};
+				break;
+			}
 			case "_clio-coder/session/switch_turn": {
 				if (!COMMANDS) throw Error("method_not_found");
 				if (!TREE_TURNS[frame.params.turnId]) throw Error("turn_unknown");
@@ -1630,6 +1720,8 @@ async function handle(frame) {
 					data: { _meta: { "clio-coder/error": { version: 1, code: error.message } } },
 				},
 			});
+	} finally {
+		if (frame.method === "session/prompt") promptRunning = false;
 	}
 }
 const input = createInterface({ input: process.stdin });

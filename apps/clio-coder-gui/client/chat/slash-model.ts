@@ -410,11 +410,9 @@ export const SLASH_ALIASES: readonly SlashAliasSpec[] = [
 	},
 	{
 		names: ["rewind", "undo"],
-		summary: "Restore files from an earlier turn, in the terminal",
-		target: {
-			kind: "notice",
-			message: "Restoring files is not available in this app yet. Run /rewind in a terminal session.",
-		},
+		summary: "Restore files from a snapshot",
+		// The task page opens its restore dialog from the URL; the dialog says so when the engine keeps no snapshots.
+		target: { kind: "navigate", path: "?rewind=1" },
 	},
 	...["restart", "upgrade", "panes", "music", "files", "extensions dev", "trust"].map(terminalOnly),
 ];
