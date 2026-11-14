@@ -41,7 +41,7 @@ import { type OutputChunk, rollup } from "rollup";
 /** The interactive session's `import()` crossings, in boot order (src/cli/clio.ts, src/entry/stage1-preload.ts). */
 const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
 	["entry", ["src/cli/index.ts"]],
-	// Everything the workspace launcher loads; the pane session repeats it.
+	// What the workspace launcher loads before it starts the pane host; the pane session repeats it.
 	[
 		"launch",
 		[
@@ -84,13 +84,13 @@ const SESSION_STAGES: ReadonlyArray<readonly [name: string, roots: ReadonlyArray
 ];
 
 /**
- * Processes other than the session whose load set stays exact: each loads the
- * chunks it loaded before the merge and no others. A path lists every root its
- * process crosses from the entry on, so chunks they all load anyway are not
- * split apart. `stage0` is the exception: it is the instant shell's owner
- * alone, because tests/contracts/instant-shell-import-graph.test.ts budgets
- * that module's static closure, and `runHelp` answers `run --help` without the
- * run command, which the same test pins.
+ * Load paths other than the session's that stay exact: each loads the chunks it
+ * loaded before the merge and no others. A path lists every root its process
+ * crosses from the entry on, so chunks all of them load anyway are not split
+ * apart. `stage0` lists the instant shell's owner alone, and `runHelp` exists
+ * although `headless` covers it, because
+ * tests/contracts/instant-shell-import-graph.test.ts budgets the owner's
+ * static closure and pins `run --help` to load nothing of the run command.
  */
 const EXACT_PATHS: ReadonlyArray<readonly [name: string, roots: ReadonlyArray<string>]> = [
 	// The workspace launcher: the launch stage plus what starts the pane host and the session inside it.
