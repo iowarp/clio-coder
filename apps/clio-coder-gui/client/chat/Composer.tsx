@@ -13,7 +13,17 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+	memo,
+	Suspense,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { useNavigate } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
@@ -81,7 +91,6 @@ import { contextBaseline, invokeContextCommand } from "./context-command.js";
 import type { ContextOperationRef } from "./context-command-model.js";
 import { commandPresentation, contextCommandKind, startedByCommand } from "./context-command-model.js";
 import { foldFleetRuns, isLiveRun, steerOutcome } from "./fleet-facts.js";
-import { HistorySearch } from "./HistorySearch.js";
 import { SuggestionPalette, type SuggestionRow, suggestionOptionId } from "./MentionPalette.js";
 import {
 	applyMention,
@@ -91,7 +100,7 @@ import {
 	resolveSteerTarget,
 	steerCandidates,
 } from "./mention-model.js";
-import { preloadPanels } from "./on-demand-panels.js";
+import { HistorySearch, preloadPanels, VisualActions } from "./on-demand-panels.js";
 import { OUTPUT_DETAILS } from "./output-detail-model.js";
 import { usePaneActions } from "./pane-context.js";
 import { LARGE_PASTE_CHARACTERS, planPaste } from "./paste-model.js";
@@ -114,7 +123,6 @@ import {
 	slashQuery,
 } from "./slash-model.js";
 import { useOutputDetail } from "./use-output-detail.js";
-import { VisualActions } from "./VisualActions.js";
 import "./composer-box.css";
 import "./composer.css";
 
@@ -146,6 +154,24 @@ export function focusComposer(sessionId: string): void {
  */
 export function runComposerCommand(sessionId: string, name: string): boolean {
 	return commandRunners.get(sessionId)?.(name) ?? false;
+}
+
+/** Dialog openers keyed by session, so the Task actions menu and the palette open what the slash list opens. */
+const actionOpeners = new Map<string, (action: SlashAction) => void>();
+
+/** Form openers keyed by session: the Task actions menu opens the Actions dialog at one command's form. */
+const formOpeners = new Map<string, (name: string) => void>();
+
+/** Open the Actions dialog over this session's composer at the named command's form. */
+export function openComposerForm(sessionId: string, name: string): void {
+	formOpeners.get(sessionId)?.(name);
+}
+
+/** Open one session action's dialog over this session's composer; false when no composer for it is on screen. */
+export function openComposerAction(sessionId: string, action: SlashAction): boolean {
+	const open = actionOpeners.get(sessionId);
+	open?.(action);
+	return open !== undefined;
 }
 
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
@@ -206,6 +232,7 @@ export const Composer = memo(function Composer({
 	const options = useRef<HTMLDetailsElement | null>(null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [actionsOpen, setActionsOpen] = useState(false);
+	const [actionsInitial, setActionsInitial] = useState<string | null>(null);
 	const [actionDrafts, setActionDrafts] = useState<Record<string, CommandFields>>({});
 	useDetailsDismiss(options, optionsOpen);
 	const [attachments, setAttachments] = useState<Attachment[]>(() => savedAttachments(sessionId));
@@ -291,6 +318,8 @@ export const Composer = memo(function Composer({
 	// Escape closes the palette for the text it was pressed on; typing reopens it.
 	const [dismissed, setDismissed] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<SlashAction | null>(null);
+	// The words a typed `/btw <question>` or `/draft <request>` carried, for the dialog's form to start from.
+	const [dialogSeed, setDialogSeed] = useState("");
 	const [slashError, setSlashError] = useState<string | null>(null);
 	// What a typed terminal name said instead of running, kept until the draft it was said about changes.
 	const [aliasNote, setAliasNote] = useState<{ text: string; message: string } | null>(null);
@@ -548,6 +577,23 @@ export const Composer = memo(function Composer({
 		return true;
 	};
 	useEffect(() => {
+		const open = (action: SlashAction) => {
+			if (action === "report") return requestReport({ sessionId });
+			setDialogSeed("");
+			setDialog(action);
+		};
+		const form = (name: string) => {
+			setActionsInitial(name);
+			setActionsOpen(true);
+		};
+		actionOpeners.set(sessionId, open);
+		formOpeners.set(sessionId, form);
+		return () => {
+			if (actionOpeners.get(sessionId) === open) actionOpeners.delete(sessionId);
+			if (formOpeners.get(sessionId) === form) formOpeners.delete(sessionId);
+		};
+	}, [sessionId]);
+	useEffect(() => {
 		const run = (name: string) => runNamed.current(name);
 		commandRunners.set(sessionId, run);
 		return () => {
@@ -571,6 +617,21 @@ export const Composer = memo(function Composer({
 			setCaret(position);
 		});
 	const placeCaretAtEnd = () => placeCaret(null);
+	// The terminal's Files pane picks a file to mention; here an `@` at the caret opens the same pick.
+	const startMention = () => {
+		const element = field.current;
+		const text = store.snapshot().text;
+		const at = element ? element.selectionEnd : text.length;
+		const before = text.slice(0, at);
+		const insert = before === "" || /\s$/u.test(before) ? "@" : " @";
+		store.write(`${before}${insert}${text.slice(at)}`);
+		placeCaret(at + insert.length);
+	};
+	const insertLine = (element: HTMLTextAreaElement) => {
+		const { selectionStart, selectionEnd, value } = element;
+		store.write(`${value.slice(0, selectionStart)}\n${value.slice(selectionEnd)}`);
+		placeCaret(selectionStart + 1);
+	};
 	const pickSuggestion = (index: number) => {
 		setMentionIndex(0);
 		if (mention === null) {
@@ -665,8 +726,11 @@ export const Composer = memo(function Composer({
 		setAliasNote(null);
 		store.clear();
 		if (target.kind === "pane") pane?.show(target.view);
-		else if (target.kind === "action") setDialog(target.action);
-		else if (target.kind === "navigate") void navigate(target.path);
+		else if (target.kind === "action") {
+			setDialogSeed(rest);
+			setDialog(target.action);
+		} else if (target.kind === "navigate") void navigate(target.path);
+		else if (target.control === "mention") startMention();
 		else if (target.control === "help") shell?.openHelp();
 		else if (target.control === "new") shell?.startTask();
 		else if (target.control === "model" && !openRoutePicker(sessionId))
@@ -921,20 +985,22 @@ export const Composer = memo(function Composer({
 						Message CLIO Coder
 					</label>
 					{historySearch !== null ? (
-						<HistorySearch
-							entries={historySearch}
-							onAccept={(match) => {
-								setHistorySearch(null);
-								store.write(match.text);
-								// From the taken message ↓ steps on to newer ones and back to the draft it replaced.
-								browse.current = { index: match.index, stash: draft.text, text: match.text };
-								placeCaretAtEnd();
-							}}
-							onCancel={(refocus) => {
-								setHistorySearch(null);
-								if (refocus) placeCaretAtEnd();
-							}}
-						/>
+						<Suspense fallback={null}>
+							<HistorySearch
+								entries={historySearch}
+								onAccept={(match) => {
+									setHistorySearch(null);
+									store.write(match.text);
+									// From the taken message ↓ steps on to newer ones and back to the draft it replaced.
+									browse.current = { index: match.index, stash: draft.text, text: match.text };
+									placeCaretAtEnd();
+								}}
+								onCancel={(refocus) => {
+									setHistorySearch(null);
+									if (refocus) placeCaretAtEnd();
+								}}
+							/>
+						</Suspense>
 					) : paletteOpen ? (
 						<SlashPalette listId={listId} entries={matches} activeIndex={active} onActivate={setActiveIndex} onPick={pick} />
 					) : mentionOpen ? (
@@ -1228,6 +1294,18 @@ export const Composer = memo(function Composer({
 								event.preventDefault();
 								return;
 							}
+							if (!event.nativeEvent.isComposing && matchesKeybinding(KEYBINDINGS.mentionFile, event)) {
+								event.preventDefault();
+								startMention();
+								return;
+							}
+							if (matchesKeybinding(KEYBINDINGS.queue, event)) {
+								event.preventDefault();
+								const row = document.querySelector<HTMLElement>(".composer__queue-actions button:not(:disabled)");
+								if (row) row.focus();
+								else setQueueNote({ tone: "warn", message: "No messages are waiting on the engine." });
+								return;
+							}
 							// Alt+S delivers the draft as immediate direction, whichever delivery is chosen.
 							if (
 								!event.nativeEvent.isComposing &&
@@ -1322,6 +1400,11 @@ export const Composer = memo(function Composer({
 								},
 								{ layerOwned, composing: event.nativeEvent.isComposing, plainEnterSends: enterSends },
 							);
+							if (action === "insert-line") {
+								event.preventDefault();
+								insertLine(event.currentTarget);
+								return;
+							}
 							if (action !== "send") return;
 							event.preventDefault();
 							submit();
@@ -1424,7 +1507,10 @@ export const Composer = memo(function Composer({
 								aria-haspopup="dialog"
 								aria-expanded={actionsOpen}
 								disabled={sessionState !== "open"}
-								onClick={() => setActionsOpen(true)}
+								onClick={() => {
+									setActionsInitial(null);
+									setActionsOpen(true);
+								}}
 							>
 								<Icon name="overview" />
 								Actions
@@ -1682,36 +1768,39 @@ export const Composer = memo(function Composer({
 				/>
 			) : null}
 			{actionsOpen ? (
-				<VisualActions
-					entries={entries}
-					paneAvailable={pane !== null}
-					loading={capabilities.isPending || (!!capabilities.data?.commands && commandCatalog.isFetching)}
-					error={capabilities.error?.message ?? commandCatalog.error?.message ?? null}
-					onRetry={() => {
-						void capabilities.refetch();
-						if (capabilities.data?.commands) void commandCatalog.refetch();
-					}}
-					busy={command.isPending || contextRunning || sessionState !== "open" || !!control}
-					running={running}
-					formDrafts={actionDrafts}
-					onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
-					onClose={() => setActionsOpen(false)}
-					onPick={(entry) => {
-						setActionsOpen(false);
-						if (entry.kind === "pane") pane?.show(entry.view);
-						else if (entry.kind === "action" && entry.action === "report") requestReport({ sessionId });
-						else if (entry.kind === "action") setDialog(entry.action);
-					}}
-					onShowChanges={() => {
-						setActionsOpen(false);
-						pane?.show("changes");
-					}}
-					onRun={(plan) => {
-						if (command.isPending || contextRunning || sessionState !== "open" || control) return;
-						runCommand(plan, null);
-						setActionsOpen(false);
-					}}
-				/>
+				<Suspense fallback={null}>
+					<VisualActions
+						entries={entries}
+						paneAvailable={pane !== null}
+						loading={capabilities.isPending || (!!capabilities.data?.commands && commandCatalog.isFetching)}
+						error={capabilities.error?.message ?? commandCatalog.error?.message ?? null}
+						onRetry={() => {
+							void capabilities.refetch();
+							if (capabilities.data?.commands) void commandCatalog.refetch();
+						}}
+						busy={command.isPending || contextRunning || sessionState !== "open" || !!control}
+						running={running}
+						formDrafts={actionDrafts}
+						onFormDraft={(id, fields) => setActionDrafts((drafts) => ({ ...drafts, [id]: fields }))}
+						{...(actionsInitial !== null ? { initial: actionsInitial } : {})}
+						onClose={() => setActionsOpen(false)}
+						onPick={(entry) => {
+							setActionsOpen(false);
+							if (entry.kind === "pane") pane?.show(entry.view);
+							else if (entry.kind === "action" && entry.action === "report") requestReport({ sessionId });
+							else if (entry.kind === "action") setDialog(entry.action);
+						}}
+						onShowChanges={() => {
+							setActionsOpen(false);
+							pane?.show("changes");
+						}}
+						onRun={(plan) => {
+							if (command.isPending || contextRunning || sessionState !== "open" || control) return;
+							runCommand(plan, null);
+							setActionsOpen(false);
+						}}
+					/>
+				</Suspense>
 			) : null}
 			{dialog !== null ? (
 				<SlashActionDialog
@@ -1722,8 +1811,10 @@ export const Composer = memo(function Composer({
 					capabilities={capabilities.data}
 					running={running}
 					settledTurns={settledTurns}
+					seed={dialogSeed}
 					onClose={() => {
 						setDialog(null);
+						setDialogSeed("");
 						placeCaretAtEnd();
 					}}
 				/>

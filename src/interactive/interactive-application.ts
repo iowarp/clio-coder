@@ -1684,6 +1684,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let reportOffers: import("../domains/report/extension.js").ReportOfferWatcher | null = null;
 	let lastOperatorInputAt = Date.now();
 	overlayLifecycle = createOverlayLifecycle({
+		lastOperatorInputAt: () => lastOperatorInputAt,
 		dismissNotification: (key) => notifications.dismiss(key),
 		takeReportOffer: () => {
 			const offer = reportOffers?.take() ?? null;
@@ -2724,7 +2725,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		}
 		// Pay the transcript renderers' first-use cost now, between the hydrated
 		// frame and the first answer, rather than in the middle of that answer.
-		setImmediate(() => {
+		afterPaint(() => {
 			if (!startupAbort.signal.aborted && !deps.chat.isStreaming()) warmTranscriptRender(terminal.columns);
 		});
 		startupTimer = setTimeout(prepareStartup, 1000);

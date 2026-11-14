@@ -12,7 +12,7 @@ import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/s
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { BudgetBanner } from "../chat/BudgetBanner.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
-import { Composer, fillComposer, focusComposer } from "../chat/Composer.js";
+import { Composer, fillComposer, focusComposer, openComposerAction, openComposerForm } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
 import { ControlBanner } from "../chat/ControlBanner.js";
 import { ConversationOutline } from "../chat/ConversationOutline.js";
@@ -27,11 +27,13 @@ import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { FilePreviewDialog } from "../chat/on-demand-panels.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
+import { type PaneView, ROOT_VIEW } from "../chat/pane-model.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
+import { MENU_FORMS, menuActions, type SlashAction } from "../chat/slash-actions.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { memoryGuardianMark } from "../chat/telemetry-model.js";
 import { TRANSCRIPT_PAGE_SIZE } from "../chat/transcript-view-model.js";
@@ -39,7 +41,7 @@ import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { useOutputDetail } from "../chat/use-output-detail.js";
 import { useShown } from "../chat/use-shown.js";
 import { useTranscriptView } from "../chat/use-transcript-view.js";
-import { Icon } from "../design/icons.js";
+import { Icon, type IconName } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
 import { setPageTitle } from "../interaction/announcer.js";
 import { liveStopTarget } from "../interaction/commands.js";
@@ -123,6 +125,18 @@ export async function locateTask(
  * the server-adopted clock rather than `Date.now()`, so an elapsed figure cannot disagree with the
  * server by the connection's clock offset.
  */
+/** The Task actions menu's glyph for each session dialog it opens. */
+const ACTION_ICONS: Readonly<Record<SlashAction, IconName>> = {
+	tree: "branch",
+	fork: "branch",
+	handoff: "external",
+	btw: "sessions",
+	draft: "compose",
+	extensions: "toolchain",
+	"fleet-run": "play",
+	report: "warn",
+};
+
 function useSecond(active: boolean): number {
 	const [now, setNow] = useState(() => clock.now());
 	const [wasActive, setWasActive] = useState(active);
@@ -178,6 +192,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	useShortcut("sessionPanel", () => (pane.open ? pane.close() : pane.show(pane.view, ids.pane)));
 	useShortcut("focusComposer", () => document.querySelector<HTMLTextAreaElement>(".composer__field")?.focus());
 	useShortcut("agents", () => pane.show("agents", ids.pane));
+	// The terminal's Alt+U dashboard and Alt+W workers dock: a second press closes what the first opened.
+	const togglePane = (view: PaneView) => (pane.open && pane.view === view ? pane.close() : pane.show(view, ids.pane));
+	useShortcut("overview", () => togglePane(ROOT_VIEW));
+	useShortcut("workers", () => togglePane("agents"));
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
 	const { controls, requestClose } = useSessionCommands();
@@ -489,6 +507,30 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
 									All tasks in {workspaceName}
 								</MenuItem>
+								{snapshot.state === "open"
+									? menuActions(capabilities.data).map((spec) => (
+											<MenuItem
+												key={spec.action}
+												icon={ACTION_ICONS[spec.action]}
+												disabled={!!controlling}
+												onClick={() => openComposerAction(snapshot.id, spec.action)}
+											>
+												{spec.title}…
+											</MenuItem>
+										))
+									: null}
+								{snapshot.state === "open" && capabilities.data?.commands
+									? MENU_FORMS.map((form) => (
+											<MenuItem
+												key={form.name}
+												icon="bolt"
+												disabled={!!controlling}
+												onClick={() => openComposerForm(snapshot.id, form.name)}
+											>
+												{form.title}…
+											</MenuItem>
+										))
+									: null}
 								<MenuItem icon="clock" disabled={snapshot.state !== "open"} onClick={() => void navigate("?rewind=1")}>
 									Restore files…
 								</MenuItem>

@@ -23,6 +23,7 @@ import { INTEROP_AGENT_KINDS, interopSourceRank, interopUserRoot } from "../../i
 import {
 	committedPluginResourceRoots,
 	enabledPluginResourceRoots,
+	passDerived,
 	pluginBaseDir,
 	withPluginDiscoveryPass,
 } from "../../plugins/index.js";
@@ -237,6 +238,11 @@ export function projectCompatTrusted(explicit?: boolean): boolean {
 	return explicit === true;
 }
 
+/** The installed skill names for `cwd`, asked once per discovery pass. */
+function installedNamesInPass(cwd: string): ReadonlySet<string> {
+	return passDerived(`installed-skill-names\0${path.resolve(cwd)}`, () => installedSkillNames([], cwd));
+}
+
 /**
  * Discovery roots, lowest to highest precedence:
  *  1. plugin skills
@@ -261,9 +267,10 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	// damaged, or awaiting reload; never resurrect it through a source fallback.
 	const selfRepo = detectClioCoderRepo(cwd).repoRoot;
 	if (selfRepo) {
-		const ownedNames = installedSkillNames([], cwd);
+		// Copied: the set is extended below, and the pass keeps the names for the next catalog it loads.
+		const ownedNames = new Set(installedNamesInPass(cwd));
 		if (path.resolve(cwd) !== selfRepo) {
-			for (const name of installedSkillNames([], selfRepo)) ownedNames.add(name);
+			for (const name of installedNamesInPass(selfRepo)) ownedNames.add(name);
 			// Native skills can be flat Markdown files or directories whose
 			// frontmatter name differs from the path. Use the loader's names so
 			// a descendant launch cannot resurrect a hidden root override.

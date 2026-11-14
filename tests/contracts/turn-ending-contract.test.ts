@@ -48,17 +48,35 @@ describe("turn-ending contract in the session prompt", () => {
 		ok(prompt.includes(identityHalf), prompt);
 	});
 
-	// #421: yolo resolves ambiguity with a stated default and never parks a plan on an approval card.
-	it("renders the assume-and-proceed variant under yolo", () => {
+	// Yolo drops approval cards, not the operator: it ends turns as default does and asks where asking is the work.
+	it("keeps both turn-ending states under yolo, with no approval cards and the yolo asking rule", () => {
 		const prompt = systemPrompt({ operatorInterviews: true }, "safety.yolo");
-		ok(prompt.includes("## Ending a turn"), prompt);
-		ok(prompt.includes("Under yolo every turn ends Done"), prompt);
-		ok(prompt.includes("Take the recommended default, state the assumption in the final reply"), prompt);
-		// #407: the operator is away by contract, so the variant never offers a question.
-		ok(!prompt.includes("Reserve an ask_user call"), prompt);
-		ok(!/## Ending a turn[\s\S]*ask_user/u.test(prompt), prompt);
-		ok(!prompt.includes("Every turn ends in one of two states:"), prompt);
-		ok(!prompt.includes('always ends with ask_user "Carry out this plan?"'), prompt);
+		ok(prompt.includes("Every turn ends in one of two states:"), prompt);
+		ok(prompt.includes('A requested plan always ends with ask_user "Carry out this plan?"'), prompt);
+		ok(prompt.includes("The operator can still answer: use `ask_user` for a decision only they can make"), prompt);
+		ok(prompt.includes("An unanswered round takes its recommended option"), prompt);
+		ok(!prompt.includes("away by contract"), prompt);
+		ok(!prompt.includes("Nobody will answer a question"), prompt);
+		ok(!prompt.includes("Under yolo every turn ends Done"), prompt);
+		ok(!prompt.includes("let their approval cards gate them"), prompt);
+	});
+
+	it("leaves the asking rule out of a yolo session with no ask_user, as a headless run has none", () => {
+		const prompt = compile(loadFragments(), {
+			identity: "identity.clio",
+			operatingContract: "operating.contract",
+			safety: "safety.yolo",
+			sessionInputs: {
+				coordinatorCapabilities: [ToolNames.Read],
+				provider: "local",
+				model: "stable-model",
+				providerSupportsTools: true,
+				toolNames: [ToolNames.Read],
+				headless: true,
+			},
+		}).systemPrompt;
+		ok(!prompt.includes("The operator can still answer"), prompt);
+		ok(prompt.includes("Settle every other open choice with the reasonable default"), prompt);
 	});
 
 	it("keeps only the no-offer half in headless and ACP prompts", () => {

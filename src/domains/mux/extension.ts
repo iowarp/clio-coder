@@ -27,16 +27,22 @@ export interface MuxDomainOptions {
 	onSessionOutputStyle?: (listener: (style: OutputStyle) => void) => void;
 }
 
+/** Ask which pane host, if any, this process runs in. */
+export function detectMuxFor(options: MuxDomainOptions): ReturnType<typeof detectMux> {
+	return detectMux({
+		...(options.enabled ? { enabled: options.enabled } : {}),
+		...(options.env ? { env: options.env } : {}),
+		log: options.log ?? ((): void => undefined),
+	});
+}
+
 export async function createMuxBundle(
 	context: DomainContext,
 	options: MuxDomainOptions = {},
+	detecting: ReturnType<typeof detectMux> = detectMuxFor(options),
 ): Promise<DomainBundle<MuxContract>> {
 	const log = options.log ?? ((): void => undefined);
-	const { detection, client } = await detectMux({
-		...(options.enabled ? { enabled: options.enabled } : {}),
-		...(options.env ? { env: options.env } : {}),
-		log,
-	});
+	const { detection, client } = await detecting;
 	// A `none` that nobody asked for is background noise and stays at debug. A
 	// refusal is the operator's own setting being turned down, so it goes to
 	// `warning`, which the orchestrator routes to boot stderr.

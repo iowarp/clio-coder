@@ -76,8 +76,6 @@ export interface CoreToolBootstrapDeps {
 	readRecall?: ReadRecallPort;
 	askUser?: AskUserHandler;
 	getAutonomy?: () => AutonomyLevel;
-	/** The level admission runs at; `default` while `getAutonomy` reads `yolo` means contained yolo. */
-	getAdmissionAutonomy?: () => AutonomyLevel;
 	taskBoard?: TaskBoardStore;
 	/** The session decision board the `decide` tool appends to; absent in worker registries, where the tool refuses. */
 	decisionBoard?: DecisionBoardStore;
@@ -279,12 +277,6 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			...builtin(
 				createAskUserTool({
 					askUser: deps.askUser,
-					...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}),
-					...(deps.getAutonomy && deps.getAdmissionAutonomy
-						? {
-								containedYolo: () => deps.getAutonomy?.() === "yolo" && deps.getAdmissionAutonomy?.() !== "yolo",
-							}
-						: {}),
 				}),
 				{
 					path: "src/tools/ask-user.ts",

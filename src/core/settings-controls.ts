@@ -242,7 +242,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 /** Longer, optional guidance shown beneath the one-line description when there is room. */
 export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	autonomy:
-		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo never waits for you: it keeps default's sandbox and safety judge, and a call that would need your approval is refused back to Clio instead of asking. Unconfined yolo (safety.yoloConfinement, accepted once) skips approvals and the sandbox; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Yolo's first activation asks you to accept it once, and it is refused as root outside a container.",
+		"Default edits the workspace, dispatches routine work, and runs your shell commands without asking inside an OS sandbox where the host has one (workspace and scratch roots writable, credentials hidden). Commands that leave the sandbox, outward actions and former hard blocks are first reviewed by the safety judge against your requests, larger dispatch plans ask you, and destructive workspace operations run after a snapshot /rewind can undo. Yolo shows no approval cards: it keeps default's sandbox and safety judge, and a call that would need your approval is refused back to Clio instead. Both modes still ask you questions. Unconfined yolo (safety.yoloConfinement, accepted once) skips approvals and the sandbox; only the yolo floor and rules in an approved .clio-coder/safety.yaml block. Yolo's first activation asks you to accept it once, and it is refused as root outside a container.",
 	"defaults.maxTokens":
 		"Clamped down to each model's max-output cap and the remaining context window. Set 0 to use per-model caps only.",
 	"context.toolResultMaxBytes":
@@ -655,7 +655,7 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	],
 	"safety.unattendedAfterSeconds": [
 		"Unattended timeout",
-		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option, and the session summary counts both. Any key on the card or question holds it. 0 waits forever. User settings only.",
+		"Seconds a permission card or ask_user question waits for you before Clio resolves it and keeps working: the parked call is denied, each unanswered question takes its recommended option, and the session summary counts both. Any key on the card or question holds it. 0 waits forever, except that a yolo question waits 300 s at most, and after one lapses with no key pressed since, later questions wait at most 30 s. User settings only.",
 	],
 	"safety.yoloAccepted": [
 		"Yolo accepted",

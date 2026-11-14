@@ -286,7 +286,7 @@ export class Supervisor {
 	private readonly waking = new Map<string, Promise<void>>();
 	/** Parked session ids, oldest first. */
 	private parked: string[] = [];
-	/** The autonomy each parked task was at, so "Run without asking" comes back with the task. */
+	/** The autonomy each parked task was at, so "Run without approvals" comes back with the task. */
 	private readonly parkedAutonomy = new Map<string, "default" | "yolo">();
 	/** The highest revision any session here has published. A reloaded session starts above it. */
 	private floor = 0;

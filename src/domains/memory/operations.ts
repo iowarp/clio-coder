@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
-import { clioProjectRoot } from "../../core/project-root.js";
+import { canonicalProjectRoot } from "../../core/project-root.js";
 import {
 	type MemoryMutationOptions,
 	memoryRoot,
@@ -201,9 +201,9 @@ export function canonicalMemoryRepositoryIdentity(repositoryPath: string): Memor
 	if (!isUsableAbsoluteRepositoryPath(repositoryPath)) return null;
 	const canonical = canonicalizeExistingPath(repositoryPath);
 	if (!isUsableAbsoluteRepositoryPath(canonical)) return null;
-	const root = canonicalizeExistingPath(clioProjectRoot(canonical));
-	const toplevel = isUsableAbsoluteRepositoryPath(root) ? root : canonical;
-	const key = linkedWorktreeMainRoot(toplevel) ?? toplevel;
+	// The one project key claims share (#406): the repository root, a linked worktree folded into its main checkout.
+	const root = canonicalProjectRoot(canonical);
+	const key = isUsableAbsoluteRepositoryPath(root) ? root : canonical;
 	const fingerprint = repositoryFingerprints.get(key);
 	return fingerprint ? { kind: "canonical-path", key, fingerprint } : { kind: "canonical-path", key };
 }
@@ -261,36 +261,6 @@ export function primeMemoryRepositoryFingerprint(cwd: string): void {
 		// No git, no commits, or a broken repository: path-only matching.
 	}
 	repositoryFingerprints.set(identity.key, fingerprint);
-}
-
-/**
- * The main checkout a linked Git worktree belongs to, or null for anything
- * else. Fleet lanes each run in their own worktree, and keying memory on the
- * worktree path meant a lesson learned in a lane applied to no other lane and
- * never to the checkout it merges into. Read from the worktree's own `.git`
- * pointer and `commondir`, so no subprocess runs on the prompt-build path.
- */
-function linkedWorktreeMainRoot(root: string): string | null {
-	try {
-		const pointer = readFileSync(join(root, ".git"), "utf8");
-		const gitDir = /^gitdir: (.+)$/mu.exec(pointer)?.[1]?.trim();
-		if (!gitDir) return null;
-		const absoluteGitDir = resolve(root, gitDir);
-		const commonDir = resolve(absoluteGitDir, readFileSync(join(absoluteGitDir, "commondir"), "utf8").trim());
-		if (basename(commonDir) !== ".git") return null;
-		// The main repository must vouch for this worktree: `git worktree add` writes
-		// `<commonDir>/worktrees/<name>/gitdir` naming the worktree's `.git` file. A
-		// directory that only forges its own pointer cannot write there.
-		const backLink = readFileSync(join(commonDir, "worktrees", basename(absoluteGitDir), "gitdir"), "utf8").trim();
-		const backRoot = canonicalizeExistingPath(dirname(resolve(commonDir, backLink.replaceAll("\\", "/"))));
-		if (basename(backLink) !== ".git" || backRoot !== root) return null;
-		const mainRoot = canonicalizeExistingPath(dirname(commonDir));
-		return isUsableAbsoluteRepositoryPath(mainRoot) && mainRoot !== root ? mainRoot : null;
-	} catch {
-		// `.git` is a directory (the main checkout), absent (not a repository), or
-		// unreadable. Each of those keeps the path identity it always had.
-		return null;
-	}
 }
 
 /** Linked worktrees a repository may have before the guardian stops listing them. */

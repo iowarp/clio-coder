@@ -66,7 +66,7 @@ const MODES = [
 		id: "yolo",
 		name: "yolo",
 		description:
-			"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).",
+			"Runs without approval stops: the same sandbox and safety judge, and a call that would need your approval is refused instead of asked (unless the operator's settings chose unconfined yolo). Questions still reach you.",
 	},
 ];
 const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];

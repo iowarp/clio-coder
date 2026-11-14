@@ -3,22 +3,47 @@
  * scope files, so the settled facts, the seal verdict and the result object come from one read.
  */
 
+import { readdirSync } from "node:fs";
 import { assertSafeId } from "../../core/safe-id.js";
 import { withinStateRoot, withinStateRootAsync } from "../../core/state-boundary.js";
 import type { RunTelemetryV1 } from "../../core/telemetry/dto.js";
 import type { TelemetryRecord } from "../../core/telemetry/envelope.js";
 import { scanTelemetrySegment } from "../../core/telemetry/segment.js";
-import { readCallJournal, readCallJournalSync } from "./call-journal.js";
-import { telemetryRunDirectory, telemetrySessionDirectory } from "./paths.js";
+import type { CallJournalRead } from "./call-journal.js";
+import { callJournalReadOfScans, readCallJournal, readCallJournalSync } from "./call-journal.js";
+import { telemetryJournalFiles, telemetryRunDirectory, telemetrySessionDirectory } from "./paths.js";
 import { journalSourceFromRead, runTelemetry } from "./read-model.js";
-import type { TelemetryScopeFiles } from "./seal.js";
+import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 import { readTelemetryScopeFiles, readTelemetryScopeFilesSync, verifyTelemetryScope } from "./seal.js";
 
 /** A run DTO whose run settled: the facts its run.settled recorded are present. */
 export type SettledRunRecord = RunTelemetryV1 & { settled: NonNullable<RunTelemetryV1["settled"]> };
 
-function record(runId: string, read: Parameters<typeof journalSourceFromRead>[0], scope: TelemetryScopeFiles) {
-	return runTelemetry(runId, journalSourceFromRead(read, scope.segments.length > 0, runId), {}, scope);
+function record(runId: string, read: CallJournalRead, scope: TelemetryScopeFiles, sealVerdict?: SealVerdict) {
+	return runTelemetry(runId, journalSourceFromRead(read, scope.segments.length > 0, runId), {}, scope, sealVerdict);
+}
+
+/**
+ * A sealed scope's journal read and seal verdict from one scan of the segment bytes the scope read already holds.
+ * Verifying a sealed scope walks every line, so a second journal read would checksum and decode each line twice. Null
+ * keeps the journal's own read: a live scope's verdict walks nothing and its incremental read is cheaper than a
+ * scan, and a journal listing that differs from the scope read's means a rotation raced it, which that read retries.
+ */
+function sealedRead(
+	directory: string,
+	scope: TelemetryScopeFiles,
+): { read: CallJournalRead; seal: SealVerdict } | null {
+	if (scope.manifest === null) return null;
+	let names: string[];
+	try {
+		names = readdirSync(directory);
+	} catch {
+		// The directory went away after the scope read; the journal read reports that as it always has.
+		return null;
+	}
+	if (telemetryJournalFiles(names).join("\n") !== scope.segments.map(({ name }) => name).join("\n")) return null;
+	const scans = scope.segments.map(({ bytes }) => scanTelemetrySegment(bytes));
+	return { read: callJournalReadOfScans(scans), seal: verifyTelemetryScope(scope, scans) };
 }
 
 /**
@@ -36,7 +61,8 @@ export function readRunRecord(stateDir: string, runId: string): RunTelemetryV1 |
 		// No run directory: the run never opened a journal on this host.
 		return null;
 	}
-	return record(runId, readCallJournalSync(directory), scope);
+	const sealed = sealedRead(directory, scope);
+	return sealed ? record(runId, sealed.read, scope, sealed.seal) : record(runId, readCallJournalSync(directory), scope);
 }
 
 export async function readRunRecordAsync(stateDir: string, runId: string): Promise<RunTelemetryV1 | null> {

@@ -1,3 +1,4 @@
+import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { spawnSync } from "node:child_process";
 
 /**
@@ -57,13 +58,18 @@ export function probeBinaryVersion(binaryPath: string, args: ReadonlyArray<strin
 	if (cached !== undefined) return cached;
 	let version: string | null = null;
 	try {
-		const result = spawnSync(binaryPath, [...args], {
+		const options: SpawnSyncOptionsWithStringEncoding = {
 			timeout: PROBE_TIMEOUT_MS,
 			encoding: "utf8",
 			// A version probe must never inherit a terminal or wait on input: some
 			// of these binaries are full-screen programs when given a tty.
 			stdio: ["ignore", "pipe", "pipe"],
-		});
+		};
+		// Closing stdin is not enough: yazi opens /dev/tty itself, puts it in raw mode to query the terminal and
+		// reads the reply, and took the operator's next keystroke with it when probed from a pane. A session of
+		// its own has no controlling terminal to open. Windows has none either way, and would get a console.
+		// Node's synchronous runner honors `detached` as the asynchronous one does; only its typings omit it.
+		const result = spawnSync(binaryPath, [...args], Object.assign(options, { detached: process.platform !== "win32" }));
 		if (result.error === undefined) {
 			version = parseVersion(`${result.stdout ?? ""}\n${result.stderr ?? ""}`);
 		}

@@ -1,18 +1,39 @@
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { clioProjectRoot } from "../../core/project-root.js";
-import { fsyncDirectory } from "../../core/safe-resource-write.js";
+import {
+	closeSync,
+	copyFileSync,
+	existsSync,
+	fstatSync,
+	fsyncSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	readSync,
+	renameSync,
+	rmSync,
+	writeSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { type CanonicalCheckout, canonicalCheckout, linkedWorktreeRoots } from "../../core/project-root.js";
+import { fsyncDirectory, safeResourceWrite } from "../../core/safe-resource-write.js";
 import { withStateFileLock } from "../../core/state-file-lock.js";
+import { containsInstructionMarkers } from "../../core/untrusted-content.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { claimRecordId } from "./capture.js";
-import { claimLogRecordId, deriveClaimEdges } from "./edges.js";
+import {
+	type ClaimEdgeState,
+	type ClaimEdgeSubject,
+	claimEdgeSubject,
+	claimLogRecordId,
+	deriveClaimEdgesFrom,
+	foldSweepRunLayout,
+	type SweepRunLayout,
+} from "./edges.js";
 import {
 	type CheckRun,
 	deriveHypothesisRecords,
 	deriveHypothesisTests,
 	type HypothesisDraft,
-	hypothesesNaming,
 	hypothesisSubject,
 } from "./hypotheses.js";
 import {
@@ -20,7 +41,9 @@ import {
 	type CheckStartRecord,
 	CLAIM_KINDS,
 	CLAIM_RECORD_VERSION,
+	type ClaimDisputeRecord,
 	type ClaimEdgeRecord,
+	type ClaimImportRecord,
 	type ClaimRecord,
 	type ClaimRegressionRecord,
 	type ClaimSource,
@@ -45,19 +68,41 @@ import {
  * lock that appends them, so two sessions capturing at once derive against each other's records.
  */
 
+/**
+ * The project key a session at `cwd` reads and writes claims under: the canonical project root (`canonicalCheckout`),
+ * so a subdirectory, a symlinked path and a linked worktree of one repository share the main checkout's log, the key
+ * memory uses too (#406).
+ */
 export function claimsProjectRoot(cwd: string): string {
-	const absolute = resolve(cwd);
-	let physical = absolute;
-	try {
-		physical = realpathSync(absolute);
-	} catch {
-		// A cwd that no longer resolves keeps its lexical form; it still keys one log consistently.
-	}
-	return clioProjectRoot(physical);
+	return canonicalCheckout(cwd).project;
+}
+
+/**
+ * Where a capture at `cwd` may record, or null when it may not (#406). A checkout whose `.git` pointer claims a linked
+ * worktree its main repository does not record back is forged: it could otherwise write into another project's log,
+ * so nothing is recorded there. Every other checkout, and a directory outside any repository, records under its key.
+ */
+export function claimsCaptureCheckout(cwd: string): CanonicalCheckout | null {
+	const checkout = canonicalCheckout(cwd);
+	return checkout.trusted ? checkout : null;
+}
+
+/** The linked worktree a capture ran in, for `ClaimRecord.worktree`; undefined in the main checkout. */
+export function captureWorktree(checkout: CanonicalCheckout): string | undefined {
+	return checkout.linked ? checkout.checkout : undefined;
 }
 
 export function claimsLogPath(projectRoot: string): string {
 	return join(clioStateDir(), "claims", `${createHash("sha256").update(projectRoot, "utf8").digest("hex")}.jsonl`);
+}
+
+/** A sibling of the log: `<digest>.<suffix>`. */
+function siblingPath(logPath: string, suffix: string): string {
+	return logPath.replace(/\.jsonl$/u, `.${suffix}`);
+}
+
+export function claimsIndexPath(projectRoot: string): string {
+	return siblingPath(claimsLogPath(projectRoot), "index.json");
 }
 
 /**
@@ -71,64 +116,371 @@ function withinLineBound(line: string): boolean {
 }
 
 /**
- * Write lines to the end of a log under its lock; `lines` sees the log as it stands once the lock is held. A line over
- * the bound is dropped.
+ * The append path's index (#406): `<digest>.index.json` beside the log, a cache of exactly what appending needs, so an
+ * append reads the index and the lines written since it, never the whole log.
+ *
+ * - The edge state: each live claim as a subject (`ClaimEdgeSubject`), the superseded set and the sweep run layouts.
+ *   A claim stays live while nothing superseded it or while it is the latest claim of its check, run and pinned
+ *   conditions, which is all `deriveClaimEdges` ever matches against; older ones are dropped from the index, not the log.
+ * - The contradictions still waiting for their regression line, so `recordClaims` reads the whole log only then.
+ * - The current hypothesis revision of each slate entry and recent check starts, for `appendCheckStarts`.
+ *
+ * It is valid while the log still holds the bytes it was built from: `logBytes` is not past the end and the digest of
+ * the bytes just before `logBytes` matches. An append by an older build is then folded in from `logBytes`; a log that
+ * was rewritten (compaction) or damaged rebuilds the index from a full read, the cost every append paid before. The
+ * index is a cache: deleting it is always safe.
  */
-async function appendLines(path: string, lines: (current: string) => string[]): Promise<void> {
+const CLAIMS_INDEX_VERSION = 1;
+const INDEX_TAIL_BYTES = 4096;
+/** Claim ids kept beyond the live subjects, so an append retried after it landed derives nothing again. */
+const INDEX_RECENT_IDS = 512;
+/** Check-start run identities kept, so a run that starts twice keeps its first binding. */
+const INDEX_RECENT_STARTS = 512;
+
+interface ClaimsIndexFile {
+	v: typeof CLAIMS_INDEX_VERSION;
+	project: string;
+	logBytes: number;
+	tail: string;
+	subjects: ClaimEdgeSubject[];
+	superseded: string[];
+	layouts: Array<[string, SweepRunLayout | null]>;
+	recent: string[];
+	pending: string[];
+	hypotheses: Array<{ key: string; id: string; subject: string; check?: string }>;
+	starts: Array<[string, string[]]>;
+}
+
+interface ClaimsIndex {
+	edges: ClaimEdgeState;
+	recent: string[];
+	pending: Set<string>;
+	hypotheses: Map<string, { id: string; subject: string; check?: string }>;
+	starts: Map<string, string[]>;
+}
+
+function emptyIndex(): ClaimsIndex {
+	return {
+		edges: { subjects: [], superseded: new Set(), layouts: new Map(), known: new Set() },
+		recent: [],
+		pending: new Set(),
+		hypotheses: new Map(),
+		starts: new Map(),
+	};
+}
+
+function sha256Bytes(bytes: Buffer): string {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readRange(fd: number, start: number, end: number): Buffer {
+	const length = Math.max(0, end - start);
+	const buffer = Buffer.alloc(length);
+	let read = 0;
+	while (read < length) {
+		const got = readSync(fd, buffer, read, length - read, start + read);
+		if (got === 0) break;
+		read += got;
+	}
+	return buffer.subarray(0, read);
+}
+
+function tailDigest(fd: number, logBytes: number): string {
+	return sha256Bytes(readRange(fd, Math.max(0, logBytes - INDEX_TAIL_BYTES), logBytes));
+}
+
+/** Fold one parsed line into the index, as a full read would admit it. Idempotent for lines it already holds. */
+function foldIndexLine(index: ClaimsIndex, project: string, value: Record<string, unknown>): void {
+	if (value.v !== CLAIM_RECORD_VERSION || value.project !== project || typeof value.id !== "string") return;
+	if (isClaimRecord(value)) {
+		const claim = value as unknown as ClaimRecord;
+		if (claim.evidence !== "grounded" || !isCheckSource(claim.source) || claimRecordId(claim) !== claim.id) return;
+		foldSweepRunLayout(index.edges.layouts, claim);
+		if (index.edges.known.has(claim.id)) return;
+		index.edges.subjects.push(claimEdgeSubject(claim));
+		index.edges.known.add(claim.id);
+		index.recent.push(claim.id);
+		return;
+	}
+	if (claimLogRecordId(value) !== value.id) return;
+	if (isEdgeRecord(value)) {
+		const edge = value as unknown as ClaimEdgeRecord;
+		if (edge.kind === "supersedes") index.edges.superseded.add(edge.to);
+		else if (index.edges.subjects.find((subject) => subject.id === edge.from)?.verdict === "disagrees")
+			index.pending.add(edge.id);
+		return;
+	}
+	if (isRegressionRecord(value)) {
+		index.pending.delete(value.edge as string);
+		return;
+	}
+	if (isHypothesisRecord(value)) {
+		const record = value as unknown as HypothesisRecord;
+		if (hypothesisSubject(record) !== record.subject) return;
+		const key = `${record.slate}\0${record.hypothesis}`;
+		const current = index.hypotheses.get(key);
+		if (
+			current === undefined
+				? record.revises !== undefined
+				: record.revises !== current.id || current.subject === record.subject
+		)
+			return;
+		index.hypotheses.set(key, {
+			id: record.id,
+			subject: record.subject,
+			...(record.criterion.check !== undefined ? { check: record.criterion.check } : {}),
+		});
+		return;
+	}
+	if (isCheckStartRecord(value)) {
+		const start = value as unknown as CheckStartRecord;
+		const key = runKey(start.run, start.check);
+		if (!index.starts.has(key)) index.starts.set(key, [...start.hypotheses]);
+	}
+}
+
+function foldIndexText(index: ClaimsIndex, project: string, text: string): void {
+	for (const line of text.split("\n")) {
+		if (line.trim().length === 0 || !withinLineBound(line)) continue;
+		try {
+			const value: unknown = JSON.parse(line);
+			if (isObject(value)) foldIndexLine(index, project, value);
+		} catch {
+			// A torn or foreign line: a full read counts it as unreadable, and it carries nothing an append needs.
+		}
+	}
+}
+
+function indexFromRead(read: ClaimsLogRead): ClaimsIndex {
+	const index = emptyIndex();
+	for (const claim of read.records) {
+		foldSweepRunLayout(index.edges.layouts, claim);
+		index.edges.subjects.push(claimEdgeSubject(claim));
+		index.edges.known.add(claim.id);
+		index.recent.push(claim.id);
+	}
+	const verdicts = new Map(read.records.map((claim) => [claim.id, claim.verdict]));
+	for (const edge of read.edges) {
+		if (edge.kind === "supersedes") index.edges.superseded.add(edge.to);
+		else if (verdicts.get(edge.from) === "disagrees") index.pending.add(edge.id);
+	}
+	for (const regression of read.regressions) index.pending.delete(regression.edge);
+	for (const record of read.hypotheses)
+		index.hypotheses.set(`${record.slate}\0${record.hypothesis}`, {
+			id: record.id,
+			subject: record.subject,
+			...(record.criterion.check !== undefined ? { check: record.criterion.check } : {}),
+		});
+	for (const start of read.checkStarts) {
+		const key = runKey(start.run, start.check);
+		if (!index.starts.has(key)) index.starts.set(key, [...start.hypotheses]);
+	}
+	return index;
+}
+
+/**
+ * Superseded claims of one check kept as contradiction candidates, newest first. A new claim contradicts the latest
+ * earlier claim with equal pins, so a superseded claim matters again only when a check returns to old conditions
+ * (rerun at an older commit); this many recent pin sets cover that, and the index stays bounded per check.
+ */
+const INDEX_SUPERSEDED_PER_CHECK = 8;
+
+/**
+ * Drop what no later append can match: superseded subjects past the latest of their pins, and past the newest few
+ * per check; the oldest recent ids and starts past their caps.
+ */
+function pruneIndex(index: ClaimsIndex): void {
+	const subjects = index.edges.subjects;
+	const pinsKey = (subject: ClaimEdgeSubject) =>
+		`${subject.kind}\0${subject.keys.check}\0${subject.keys.run ?? ""}\0${subject.pins ?? subject.id}`;
+	const checkKey = (subject: ClaimEdgeSubject) => `${subject.kind}\0${subject.keys.check}\0${subject.keys.run ?? ""}`;
+	const latest = new Map<string, number>();
+	for (const [position, subject] of subjects.entries()) latest.set(pinsKey(subject), position);
+	const keptPerCheck = new Map<string, number>();
+	const keep = new Set<number>();
+	for (let position = subjects.length - 1; position >= 0; position--) {
+		const subject = subjects[position];
+		if (subject === undefined) continue;
+		if (!index.edges.superseded.has(subject.id)) {
+			keep.add(position);
+			continue;
+		}
+		if (latest.get(pinsKey(subject)) !== position) continue;
+		const kept = keptPerCheck.get(checkKey(subject)) ?? 0;
+		if (kept >= INDEX_SUPERSEDED_PER_CHECK) continue;
+		keptPerCheck.set(checkKey(subject), kept + 1);
+		keep.add(position);
+	}
+	index.edges.subjects = subjects.filter((_subject, position) => keep.has(position));
+	const live = new Set(index.edges.subjects.map((subject) => subject.id));
+	index.edges.superseded = new Set([...index.edges.superseded].filter((id) => live.has(id)));
+	index.recent = index.recent.slice(-INDEX_RECENT_IDS);
+	index.edges.known = new Set([...live, ...index.recent]);
+	while (index.starts.size > INDEX_RECENT_STARTS) {
+		const [oldest] = index.starts.keys();
+		if (oldest === undefined) break;
+		index.starts.delete(oldest);
+	}
+}
+
+function loadIndex(project: string, fd: number, size: number): ClaimsIndex | null {
+	let file: ClaimsIndexFile;
+	try {
+		file = JSON.parse(readFileSync(claimsIndexPath(project), "utf8")) as ClaimsIndexFile;
+	} catch {
+		// Missing or damaged: rebuilt from a full read.
+		return null;
+	}
+	if (
+		!isObject(file) ||
+		file.v !== CLAIMS_INDEX_VERSION ||
+		file.project !== project ||
+		typeof file.logBytes !== "number" ||
+		file.logBytes > size ||
+		!Array.isArray(file.subjects) ||
+		!Array.isArray(file.superseded) ||
+		!Array.isArray(file.layouts) ||
+		!Array.isArray(file.recent) ||
+		!Array.isArray(file.pending) ||
+		!Array.isArray(file.hypotheses) ||
+		!Array.isArray(file.starts) ||
+		tailDigest(fd, file.logBytes) !== file.tail
+	)
+		return null;
+	const index: ClaimsIndex = {
+		edges: {
+			subjects: file.subjects,
+			superseded: new Set(file.superseded),
+			layouts: new Map(file.layouts),
+			known: new Set([...file.subjects.map((subject) => subject.id), ...file.recent]),
+		},
+		recent: file.recent,
+		pending: new Set(file.pending),
+		hypotheses: new Map(file.hypotheses.map(({ key, ...rest }) => [key, rest])),
+		starts: new Map(file.starts),
+	};
+	// Lines another writer appended after the index was written, an older build included.
+	if (size > file.logBytes) foldIndexText(index, project, readRange(fd, file.logBytes, size).toString("utf8"));
+	return index;
+}
+
+function writeIndex(project: string, index: ClaimsIndex, fd: number, size: number): void {
+	pruneIndex(index);
+	const file: ClaimsIndexFile = {
+		v: CLAIMS_INDEX_VERSION,
+		project,
+		logBytes: size,
+		tail: tailDigest(fd, size),
+		subjects: index.edges.subjects,
+		superseded: [...index.edges.superseded],
+		layouts: [...index.edges.layouts],
+		recent: index.recent,
+		pending: [...index.pending],
+		hypotheses: [...index.hypotheses].map(([key, value]) => ({ key, ...value })),
+		starts: [...index.starts],
+	};
+	try {
+		safeResourceWrite(claimsIndexPath(project), `${JSON.stringify(file)}\n`, { mode: 0o600 });
+	} catch {
+		// The index is a cache; the next append rebuilds it from the log.
+	}
+}
+
+interface AppendContext {
+	/** The index as of the log's current end, held under the lock. */
+	index: ClaimsIndex;
+	/** The whole log, parsed once on first use. Only writers that need history beyond the index call it. */
+	full: () => ClaimsLogRead;
+}
+
+/** Bytes appended through `appendLines` that read the whole log, counted for the index contract (#406). */
+let fullReadsForTest = 0;
+export function claimsFullReadCount(): number {
+	return fullReadsForTest;
+}
+
+/**
+ * Write lines to the end of a project's log under its lock. `lines` sees the index, and the whole log on request, as
+ * they stand once the lock is held. A line over the bound is dropped. Returns the index after the append.
+ */
+async function appendLines(project: string, lines: (context: AppendContext) => string[]): Promise<ClaimsIndex> {
+	const path = claimsLogPath(project);
 	const dir = dirname(path);
 	const created = !existsSync(dir);
 	mkdirSync(dir, { recursive: true });
+	let result: ClaimsIndex = emptyIndex();
 	await withStateFileLock(path, () => {
 		const fd = openSync(path, "a+", 0o600);
 		try {
-			const current = readFileSync(fd, "utf8");
-			const next = lines(current).filter(withinLineBound);
+			const size = fstatSync(fd).size;
+			let full: ClaimsLogRead | undefined;
+			const readFull = (): ClaimsLogRead => {
+				if (full === undefined) {
+					fullReadsForTest += 1;
+					full = parseClaimsLog(readRange(fd, 0, size).toString("utf8"), project);
+				}
+				return full;
+			};
+			const index = loadIndex(project, fd, size) ?? indexFromRead(readFull());
+			result = index;
+			const next = lines({ index, full: readFull }).filter(withinLineBound);
 			if (next.length === 0) return;
 			// A line torn by a crash is closed off, so the append starts a line of its own.
-			const prefix = current.length === 0 || current.endsWith("\n") ? "" : "\n";
-			writeSync(fd, `${prefix}${next.join("\n")}\n`);
+			const torn = size > 0 && readRange(fd, size - 1, size).toString("utf8") !== "\n";
+			writeSync(fd, `${torn ? "\n" : ""}${next.join("\n")}\n`);
 			fsyncSync(fd);
+			foldIndexText(index, project, next.join("\n"));
+			writeIndex(project, index, fd, fstatSync(fd).size);
 		} finally {
 			closeSync(fd);
 		}
 	});
 	if (created) fsyncDirectory(dir);
+	return result;
 }
 
 /**
  * Append claims to their project's log, each followed by the edges it adds against the log (#406). Records for several
- * projects are grouped per log. Returns the edges written.
+ * projects are grouped per log. Edges are derived from the log's index, so an append costs the claims of the check it
+ * touches, not the log. Returns the edges written and, per project, the contradictions still awaiting a regression.
  */
-export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<ClaimEdgeRecord[]> {
+async function appendClaimsIndexed(
+	records: ReadonlyArray<ClaimRecord>,
+): Promise<{ edges: ClaimEdgeRecord[]; pending: Map<string, string[]> }> {
 	const byProject = new Map<string, ClaimRecord[]>();
 	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
 	const written: ClaimEdgeRecord[] = [];
+	const pending = new Map<string, string[]>();
 	for (const [project, group] of byProject) {
-		await appendLines(claimsLogPath(project), (current) => {
-			const log = parseClaimsLog(current, project);
+		const index = await appendLines(project, ({ index }) => {
 			const lines: string[] = [];
-			const history = { claims: [...log.records], edges: [...log.edges] };
 			for (const claim of group) {
 				// Checked here, not only in appendLines, so an unwritten claim derives no edges.
 				if (!withinLineBound(JSON.stringify(claim))) continue;
-				const edges = deriveClaimEdges(history, [claim]);
+				const edges = deriveClaimEdgesFrom(index.edges, [claim]);
 				lines.push(JSON.stringify(claim), ...edges.map((edge) => JSON.stringify(edge)));
-				history.claims.push(claim);
-				history.edges.push(...edges);
 				written.push(...edges);
 			}
 			return lines;
 		});
+		pending.set(project, [...index.pending]);
 	}
-	return written;
+	return { edges: written, pending };
 }
+
+export async function appendClaims(records: ReadonlyArray<ClaimRecord>): Promise<ClaimEdgeRecord[]> {
+	return (await appendClaimsIndexed(records)).edges;
+}
+
+/** `appendClaims`, also returning the contradictions of each project that still await a regression line. */
+export { appendClaimsIndexed };
 
 /** Append regression records, which name what a contradiction did to memory, to their project's log. */
 export async function appendClaimRegressions(records: ReadonlyArray<ClaimRegressionRecord>): Promise<void> {
 	const byProject = new Map<string, ClaimRegressionRecord[]>();
 	for (const record of records) byProject.set(record.project, [...(byProject.get(record.project) ?? []), record]);
 	for (const [project, group] of byProject)
-		await appendLines(claimsLogPath(project), () => group.map((record) => JSON.stringify(record)));
+		await appendLines(project, () => group.map((record) => JSON.stringify(record)));
 }
 
 /**
@@ -145,12 +497,12 @@ export async function appendHypotheses(
 	const written: HypothesisRecord[] = [];
 	if (drafts.length === 0) return written;
 	let refused = false;
-	await appendLines(claimsLogPath(project), (current) => {
+	await appendLines(project, ({ full }) => {
 		if (stillCurrent !== undefined && !stillCurrent()) {
 			refused = true;
 			return [];
 		}
-		const added = deriveHypothesisRecords(parseClaimsLog(current, project).hypotheses, drafts);
+		const added = deriveHypothesisRecords(full().hypotheses, drafts);
 		written.push(...added);
 		return added.map((record) => JSON.stringify(record));
 	});
@@ -174,17 +526,16 @@ export async function appendCheckStarts(
 	const bindings = new Map<string, string[]>();
 	const wanted = new Set(checks);
 	if (wanted.size === 0) return bindings;
-	await appendLines(claimsLogPath(project), (current) => {
-		const log = parseClaimsLog(current, project);
-		const started = new Map(log.checkStarts.map((record) => [runKey(record.run, record.check), record]));
+	await appendLines(project, ({ index }) => {
 		const lines: string[] = [];
 		for (const check of wanted) {
-			const earlier = started.get(runKey(run, check));
+			const earlier = index.starts.get(runKey(run, check));
 			if (earlier !== undefined) {
-				bindings.set(check, [...earlier.hypotheses]);
+				bindings.set(check, [...earlier]);
 				continue;
 			}
-			const hypotheses = hypothesesNaming(log.hypotheses, check);
+			// The current revision of each slate entry whose criterion names the check, from the index.
+			const hypotheses = [...index.hypotheses.values()].filter((current) => current.check === check).map(({ id }) => id);
 			const body: Omit<CheckStartRecord, "id"> = {
 				v: CLAIM_RECORD_VERSION,
 				type: "check-start",
@@ -209,8 +560,8 @@ export async function appendHypothesisTests(
 ): Promise<HypothesisTestRecord[]> {
 	const written: HypothesisTestRecord[] = [];
 	if (!runs.some((run) => run.hypotheses.length > 0)) return written;
-	await appendLines(claimsLogPath(project), (current) => {
-		const added = deriveHypothesisTests(parseClaimsLog(current, project).hypotheses, runs);
+	await appendLines(project, ({ full }) => {
+		const added = deriveHypothesisTests(full().hypotheses, runs);
 		written.push(...added);
 		return added.map((record) => JSON.stringify(record));
 	});
@@ -226,6 +577,12 @@ export interface ClaimsLogRead {
 	hypotheses: HypothesisRecord[];
 	checkStarts: CheckStartRecord[];
 	hypothesisTests: HypothesisTestRecord[];
+	/** Worker disagreements from agent ledgers, kept past their dispatch; inferred. */
+	disputes: ClaimDisputeRecord[];
+	/** Claims imported from another project; inferred, never edge-forming. */
+	imports: ClaimImportRecord[];
+	/** Logs of linked worktrees written before worktrees folded into the main checkout, read through, never rewritten. */
+	legacy: string[];
 	/** Lines that are not a JSON object, such as a line torn by a crash. */
 	unreadable: number;
 	/**
@@ -247,6 +604,47 @@ export interface ClaimsLogRead {
 	 * did land. Ids hash the record's content, so the repeat is the same record; the first is kept where it was appended.
 	 */
 	duplicates: number;
+}
+
+function isDisputePost(value: unknown): boolean {
+	return (
+		isObject(value) &&
+		typeof value.entry === "string" &&
+		typeof value.runId === "string" &&
+		typeof value.agentId === "string" &&
+		typeof value.kind === "string" &&
+		typeof value.text === "string" &&
+		(value.path === undefined || typeof value.path === "string") &&
+		(value.line === undefined || typeof value.line === "number")
+	);
+}
+
+function isDisputeRecord(value: Record<string, unknown>): boolean {
+	return (
+		value.type === "dispute" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		typeof value.ledger === "string" &&
+		value.evidence === "inferred" &&
+		isDisputePost(value.target) &&
+		isDisputePost(value.review)
+	);
+}
+
+function isImportRecord(value: Record<string, unknown>): boolean {
+	const origin = value.origin;
+	return (
+		value.type === "import" &&
+		typeof value.id === "string" &&
+		typeof value.at === "string" &&
+		value.evidence === "inferred" &&
+		isObject(origin) &&
+		typeof origin.projectDigest === "string" &&
+		isNullableString(origin.rootCommit) &&
+		(origin.remote === undefined || typeof origin.remote === "string") &&
+		isObject(value.claim) &&
+		isClaimRecord(value.claim)
+	);
 }
 
 function isClaimRecord(value: Record<string, unknown>): boolean {
@@ -496,6 +894,9 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 		hypotheses: [],
 		checkStarts: [],
 		hypothesisTests: [],
+		disputes: [],
+		imports: [],
+		legacy: [],
 		unreadable: 0,
 		mismatched: 0,
 		unknownVersion: 0,
@@ -563,6 +964,17 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 			}
 			continue;
 		}
+		if (isDisputeRecord(record) || isImportRecord(record)) {
+			const id = record.id as string;
+			if (record.project !== projectRoot || claimLogRecordId(record) !== id) read.mismatched += 1;
+			else if (seen.has(id)) read.duplicates += 1;
+			else {
+				seen.add(id);
+				if (record.type === "dispute") read.disputes.push(record as unknown as ClaimDisputeRecord);
+				else read.imports.push(record as unknown as ClaimImportRecord);
+			}
+			continue;
+		}
 		if (isHypothesisRecord(record) || isCheckStartRecord(record) || isHypothesisTestRecord(record)) {
 			if (record.project !== projectRoot || claimLogRecordId(record) !== record.id) read.mismatched += 1;
 			else if (record.type === "hypothesis") {
@@ -585,8 +997,7 @@ function parseClaimsLog(text: string, projectRoot: string): ClaimsLogRead {
 	return read;
 }
 
-/** Every claim, edge and regression in a project's log, oldest first. A missing log reads as empty. */
-export function readClaims(projectRoot: string): ClaimsLogRead {
+function readLog(projectRoot: string): ClaimsLogRead {
 	let text: string;
 	try {
 		text = readFileSync(claimsLogPath(projectRoot), "utf8");
@@ -595,4 +1006,239 @@ export function readClaims(projectRoot: string): ClaimsLogRead {
 		throw error;
 	}
 	return parseClaimsLog(text, projectRoot);
+}
+
+/**
+ * Every record in a project's log, oldest first. A missing log reads as empty.
+ *
+ * Before linked worktrees folded into their main checkout (#406), each worktree kept a log under its own root. Those
+ * logs are read through after the project's own records, so a lane's earlier claims stay visible from the checkout it
+ * merges into; they are never rewritten, and appends never derive edges against them.
+ */
+export function readClaims(projectRoot: string): ClaimsLogRead {
+	const read = readLog(projectRoot);
+	for (const worktree of linkedWorktreeRoots(projectRoot)) {
+		if (!existsSync(claimsLogPath(worktree))) continue;
+		let legacy: ClaimsLogRead;
+		try {
+			legacy = readLog(worktree);
+		} catch {
+			// An unreadable legacy log hides only its own history.
+			continue;
+		}
+		read.legacy.push(legacy.path);
+		const known = new Set(read.records.map((claim) => claim.id));
+		read.records.push(...legacy.records.filter((claim) => !known.has(claim.id)));
+		read.edges.push(...legacy.edges);
+		read.regressions.push(...legacy.regressions);
+		read.hypotheses.push(...legacy.hypotheses);
+		read.checkStarts.push(...legacy.checkStarts);
+		read.hypothesisTests.push(...legacy.hypothesisTests);
+		read.disputes.push(...legacy.disputes);
+		read.imports.push(...legacy.imports);
+		read.unreadable += legacy.unreadable;
+		read.mismatched += legacy.mismatched;
+		read.unknownVersion += legacy.unknownVersion;
+		read.unlinked += legacy.unlinked;
+		read.duplicates += legacy.duplicates;
+	}
+	return read;
+}
+
+/** What makes two inferred records one: a dispute's id, an import's origin and original claim (not its import time). */
+function inferredKey(record: ClaimDisputeRecord | ClaimImportRecord): string {
+	return record.type === "import" ? `import\0${record.origin.projectDigest}\0${record.claim.id}` : record.id;
+}
+
+/** Append inferred records (disputes, imports) to a project's log; a record already there is skipped. */
+async function appendInferred(
+	project: string,
+	records: ReadonlyArray<ClaimDisputeRecord | ClaimImportRecord>,
+): Promise<number> {
+	let written = 0;
+	if (records.length === 0) return written;
+	await appendLines(project, ({ full }) => {
+		const log = full();
+		const known = new Set([...log.disputes, ...log.imports].map(inferredKey));
+		const lines: string[] = [];
+		for (const record of records) {
+			if (known.has(inferredKey(record))) continue;
+			known.add(inferredKey(record));
+			lines.push(JSON.stringify(record));
+		}
+		written = lines.length;
+		return lines;
+	});
+	return written;
+}
+
+export async function appendDisputes(project: string, records: ReadonlyArray<ClaimDisputeRecord>): Promise<number> {
+	return appendInferred(project, records);
+}
+
+export async function appendImports(project: string, records: ReadonlyArray<ClaimImportRecord>): Promise<number> {
+	return appendInferred(project, records);
+}
+
+/** What a compaction kept, dropped and pruned. */
+export interface ClaimsCompaction {
+	path: string;
+	bytesBefore: number;
+	bytesAfter: number;
+	linesBefore: number;
+	linesAfter: number;
+	/** Check-start lines that bound no hypothesis: they decide nothing a later read admits. */
+	droppedStarts: number;
+	duplicates: number;
+	/** Torn, unparseable or tampered lines, moved to `<digest>.quarantine.jsonl`. */
+	quarantined: number;
+	/** Superseded claims older than the prune date that nothing cites, and the edges that named them. */
+	prunedClaims: number;
+	prunedEdges: number;
+	dryRun: boolean;
+}
+
+/**
+ * Rewrite a project's log without what no reader needs (#406), under the log's lock: check-starts that bound no
+ * hypothesis, repeated lines, and lines that are not a valid record of this project (moved to a quarantine file, not
+ * deleted). With `pruneSupersededBefore`, superseded claims captured before that time are pruned too, unless a
+ * regression, a hypothesis test or a memory record (`cited`) still names them; edges naming a pruned claim go with
+ * it. Lines of a version or type this build does not know are kept as they are, so an older build never drops a newer
+ * build's records. The new generation is written beside the log and renamed over it, so a reader without the lock sees
+ * one generation or the other; the previous generation stays as `<digest>.prev.jsonl` until the next compaction.
+ */
+export async function compactClaimsLog(
+	project: string,
+	options: { pruneSupersededBefore?: Date; cited?: ReadonlySet<string>; dryRun?: boolean } = {},
+): Promise<ClaimsCompaction> {
+	const path = claimsLogPath(project);
+	const result: ClaimsCompaction = {
+		path,
+		bytesBefore: 0,
+		bytesAfter: 0,
+		linesBefore: 0,
+		linesAfter: 0,
+		droppedStarts: 0,
+		duplicates: 0,
+		quarantined: 0,
+		prunedClaims: 0,
+		prunedEdges: 0,
+		dryRun: options.dryRun === true,
+	};
+	if (!existsSync(path)) return result;
+	await withStateFileLock(path, () => {
+		const text = readFileSync(path, "utf8");
+		result.bytesBefore = Buffer.byteLength(text, "utf8");
+		const read = parseClaimsLog(text, project);
+		const admitted = new Set<string>([
+			...read.records.map(({ id }) => id),
+			...read.edges.map(({ id }) => id),
+			...read.regressions.map(({ id }) => id),
+			...read.hypotheses.map(({ id }) => id),
+			...read.checkStarts.filter((start) => start.hypotheses.length > 0).map(({ id }) => id),
+			...read.hypothesisTests.map(({ id }) => id),
+			...read.disputes.map(({ id }) => id),
+			...read.imports.map(({ id }) => id),
+		]);
+		const emptyStarts = new Set(read.checkStarts.filter((start) => start.hypotheses.length === 0).map(({ id }) => id));
+		const pruned = new Set<string>();
+		if (options.pruneSupersededBefore !== undefined) {
+			const before = options.pruneSupersededBefore.getTime();
+			const superseded = new Set(read.edges.filter((edge) => edge.kind === "supersedes").map((edge) => edge.to));
+			const kept = new Set<string>([
+				...read.regressions.flatMap((regression) => [regression.from, ...regression.backing]),
+				...read.hypothesisTests.flatMap((test) => (test.claim === undefined ? [] : [test.claim])),
+				...read.edges.filter((edge) => edge.kind === "contradicts").flatMap((edge) => [edge.from, edge.to]),
+				...(options.cited ?? []),
+			]);
+			for (const claim of read.records)
+				if (superseded.has(claim.id) && !kept.has(claim.id) && Date.parse(claim.at) < before) pruned.add(claim.id);
+		}
+		const keptLines: string[] = [];
+		const quarantine: string[] = [];
+		const written = new Set<string>();
+		for (const line of text.split("\n")) {
+			if (line.trim().length === 0) continue;
+			result.linesBefore += 1;
+			let value: unknown;
+			try {
+				value = withinLineBound(line) ? JSON.parse(line) : undefined;
+			} catch {
+				value = undefined;
+			}
+			if (!isObject(value)) {
+				quarantine.push(line);
+				continue;
+			}
+			const id = typeof value.id === "string" ? value.id : undefined;
+			const known =
+				value.v === CLAIM_RECORD_VERSION &&
+				["claim", "edge", "regression", "hypothesis", "check-start", "hypothesis-test", "dispute", "import"].includes(
+					String(value.type),
+				);
+			// Another version or type: a newer build's record, kept verbatim.
+			if (!known || id === undefined) {
+				keptLines.push(line);
+				continue;
+			}
+			if (emptyStarts.has(id)) {
+				result.droppedStarts += 1;
+				continue;
+			}
+			if (pruned.has(id)) {
+				result.prunedClaims += 1;
+				continue;
+			}
+			if (value.type === "edge" && (pruned.has(String(value.from)) || pruned.has(String(value.to)))) {
+				result.prunedEdges += 1;
+				continue;
+			}
+			if (written.has(id)) {
+				result.duplicates += 1;
+				continue;
+			}
+			if (!admitted.has(id)) {
+				quarantine.push(line);
+				continue;
+			}
+			written.add(id);
+			keptLines.push(line);
+		}
+		result.quarantined = quarantine.length;
+		result.linesAfter = keptLines.length;
+		const next = keptLines.length === 0 ? "" : `${keptLines.join("\n")}\n`;
+		result.bytesAfter = Buffer.byteLength(next, "utf8");
+		if (options.dryRun === true) return;
+		if (quarantine.length > 0) writeFileLines(siblingPath(path, "quarantine.jsonl"), quarantine);
+		copyFileSync(path, siblingPath(path, "prev.jsonl"));
+		const temporary = siblingPath(path, `compact-${process.pid}.tmp`);
+		const fd = openSync(temporary, "w", 0o600);
+		try {
+			writeSync(fd, next);
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		renameSync(temporary, path);
+		fsyncDirectory(dirname(path));
+		// The index described the old generation; the next append rebuilds it from this one.
+		rmSync(claimsIndexPath(project), { force: true });
+	});
+	return result;
+}
+
+/** Append lines to an audit file beside the log, created 0600. */
+function writeFileLines(path: string, lines: ReadonlyArray<string>): void {
+	const fd = openSync(path, "a", 0o600);
+	try {
+		writeSync(fd, `${lines.join("\n")}\n`);
+		fsyncSync(fd);
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/** Screen inferred text at capture, as claim text is: flagged text is stored for audit and withheld from prompts. */
+export function inferredFlag(...texts: ReadonlyArray<string>): { flagged?: "instruction-markers" } {
+	return texts.some((text) => containsInstructionMarkers(text)) ? { flagged: "instruction-markers" } : {};
 }

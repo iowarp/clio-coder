@@ -6,18 +6,27 @@ import { clioDataDir } from "../../core/xdg.js";
 import { recordClaimRegressions } from "../memory/index.js";
 import type { MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimFromVerifyResult, claimsFromHostVerification, type SealedHostCheck } from "./capture.js";
-import { claimBackingRefs, claimRegressionNote, overturnedAgreements, regressionRecord } from "./edges.js";
+import {
+	claimBackingRefs,
+	claimLogRecordId,
+	claimRegressionNote,
+	overturnedAgreements,
+	regressionRecord,
+} from "./edges.js";
 import { type CheckRun, hypothesesFromSlate, isHypothesisSlate, type SlateOrigin } from "./hypotheses.js";
 import {
 	appendCheckStarts,
 	appendClaimRegressions,
-	appendClaims,
+	appendClaimsIndexed,
+	appendDisputes,
 	appendHypotheses,
 	appendHypothesisTests,
-	claimsProjectRoot,
+	captureWorktree,
+	claimsCaptureCheckout,
+	inferredFlag,
 	readClaims,
 } from "./store.js";
-import type { ClaimRecord } from "./types.js";
+import { CLAIM_RECORD_VERSION, type ClaimDisputePost, type ClaimDisputeRecord, type ClaimRecord } from "./types.js";
 
 export const CLAIM_CAPTURE_REGISTRATION_ID = "observer.claims-capture";
 const HYPOTHESIS_CAPTURE_REGISTRATION_ID = "observer.hypothesis-capture";
@@ -86,8 +95,11 @@ export function createClaimCaptureRegistration(options: {
 				const check = input.toolArgs?.check;
 				if (callId === undefined || typeof check !== "string") return [];
 				open.delete(callId);
+				// A forged worktree pointer records nothing, not even a start (#406).
+				const checkout = claimsCaptureCheckout(options.cwd());
+				if (checkout === null) return [];
 				const run = { channel: "verify" as const, sessionId: input.sessionId ?? null, toolCallId: callId };
-				const started = await appendCheckStarts(claimsProjectRoot(options.cwd()), run, [check], now().toISOString());
+				const started = await appendCheckStarts(checkout.project, run, [check], now().toISOString());
 				open.set(callId, { check, hypotheses: started.get(check) ?? [] });
 				for (const stale of open.keys()) {
 					if (open.size <= OPEN_VERIFY_BINDINGS_MAX) break;
@@ -97,7 +109,10 @@ export function createClaimCaptureRegistration(options: {
 			}
 			const bound = callId === undefined ? undefined : open.get(callId);
 			if (callId !== undefined) open.delete(callId);
-			const project = claimsProjectRoot(options.cwd());
+			const checkout = claimsCaptureCheckout(options.cwd());
+			if (checkout === null) return [];
+			const project = checkout.project;
+			const worktree = captureWorktree(checkout);
 			const at = now().toISOString();
 			const source = {
 				channel: "verify" as const,
@@ -105,7 +120,13 @@ export function createClaimCaptureRegistration(options: {
 				toolCallId: input.toolCallId ?? null,
 				requestedBy: input.metadata?.origin === "harness" ? ("harness" as const) : ("model" as const),
 			};
-			const claim = claimFromVerifyResult({ details: input.toolResultDetails, project, at, source });
+			const claim = claimFromVerifyResult({
+				details: input.toolResultDetails,
+				project,
+				...(worktree !== undefined ? { checkout: worktree } : {}),
+				at,
+				source,
+			});
 			if (claim !== null) await recordClaims([claim], now());
 			// After the claim is on disk, so a test record never names a claim the log does not hold yet.
 			const run = verifyRun(input.toolResultDetails, bound, claim, source, at);
@@ -138,13 +159,15 @@ export function createHypothesisCaptureRegistration(options: {
 			const path = input.toolArgs?.path;
 			if (typeof path !== "string") return [];
 			const cwd = options.cwd();
+			const checkout = claimsCaptureCheckout(cwd);
+			if (checkout === null) return [];
 			const snapshot = snapshotSlate(resolve(cwd, path));
 			if (snapshot === null) return [];
 			// A capture that finds the file rewritten by the time it holds the log's lock records nothing: the
 			// newer write's own capture records the bytes the file holds.
 			await recordSlate({
 				snapshot,
-				project: claimsProjectRoot(cwd),
+				project: checkout.project,
 				at: now().toISOString(),
 				source: { channel: "slate", sessionId: input.sessionId ?? null, toolCallId: input.toolCallId ?? null },
 			});
@@ -225,12 +248,9 @@ export async function bindHostVerificationHypotheses(
 	checks: ReadonlyArray<string>,
 	now: Date = new Date(),
 ): Promise<ReadonlyMap<string, ReadonlyArray<string>>> {
-	return appendCheckStarts(
-		claimsProjectRoot(projectCwd),
-		{ channel: "host-verification", runId },
-		checks,
-		now.toISOString(),
-	);
+	const checkout = claimsCaptureCheckout(projectCwd);
+	if (checkout === null) return new Map();
+	return appendCheckStarts(checkout.project, { channel: "host-verification", runId }, checks, now.toISOString());
 }
 
 /**
@@ -244,7 +264,10 @@ export function snapshotAcceptedWorkerSlates(input: {
 	projectCwd: string;
 	paths: ReadonlyArray<string>;
 }): AcceptedWorkerSlates {
-	const project = claimsProjectRoot(input.projectCwd);
+	const checkout = claimsCaptureCheckout(input.projectCwd);
+	if (checkout === null) return [];
+	// Slate paths are files of the checkout the run landed in.
+	const project = checkout.checkout;
 	const physical = (path: string): string => {
 		try {
 			return realpathSync(path);
@@ -280,7 +303,9 @@ export async function recordAcceptedWorkerSlates(input: {
 	slates: AcceptedWorkerSlates;
 	now?: Date;
 }): Promise<{ recorded: number; drifted: string[] }> {
-	const project = claimsProjectRoot(input.projectCwd);
+	const checkout = claimsCaptureCheckout(input.projectCwd);
+	if (checkout === null) return { recorded: 0, drifted: [] };
+	const project = checkout.project;
 	const at = (input.now ?? new Date()).toISOString();
 	const source: SlateOrigin = { channel: "worker-slate", runId: input.runId, receiptDigest: input.receiptDigest };
 	let recorded = 0;
@@ -306,13 +331,17 @@ export async function recordHostVerificationClaims(input: {
 	hypotheses?: ReadonlyMap<string, ReadonlyArray<string>>;
 	now?: Date;
 }): Promise<number> {
-	const project = claimsProjectRoot(input.projectCwd);
+	const checkout = claimsCaptureCheckout(input.projectCwd);
+	if (checkout === null) return 0;
+	const project = checkout.project;
+	const worktree = captureWorktree(checkout);
 	const at = (input.now ?? new Date()).toISOString();
 	const claims = claimsFromHostVerification({
 		runId: input.runId,
 		receiptDigest: input.receiptDigest,
 		checks: input.checks,
 		project,
+		...(worktree !== undefined ? { checkout: worktree } : {}),
 		at,
 	});
 	if (claims.length > 0) await recordClaims(claims, input.now ?? new Date());
@@ -342,44 +371,133 @@ export async function recordHostVerificationClaims(input: {
  * locked mutation, and a `regression` line in the claims log names the records it reached, none included. Every
  * producer of claims (main-thread verify, host verification, research iterations) appends through here, so a
  * contradiction reaches memory when it is recorded rather than on some later append.
+ *
+ * The log's index says which contradictions still await their regression line, so the whole log is read only when
+ * one does. Each is closed by a regression line once evaluated, an empty one when it overturned nothing a memory could
+ * cite (a flip back to agreement, or a pass already superseded), so it is never evaluated again.
  */
 export async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Promise<void> {
-	const edges = await appendClaims(claims);
-	// Every project this append touched, so a contradiction whose regression did not land earlier is retried here.
-	const projects = new Set([...claims.map((claim) => claim.project), ...edges.map((edge) => edge.project)]);
-	for (const project of projects) {
+	const { pending } = await appendClaimsIndexed(claims);
+	for (const [project, edgeIds] of pending) {
+		if (edgeIds.length === 0) continue;
+		const waiting = new Set(edgeIds);
 		const log = readClaims(project);
 		const regressed = new Set(log.regressions.map((regression) => regression.edge));
 		const claimsById = new Map(log.records.map((claim) => [claim.id, claim]));
-		// Only a disagreement can overturn an agreement. A flip back to agreement never gets a regression line, so
-		// without this filter every such edge would be evaluated again, against the whole log, on every append.
 		const group = log.edges.filter(
-			(edge) =>
-				edge.kind === "contradicts" && !regressed.has(edge.id) && claimsById.get(edge.from)?.verdict === "disagrees",
+			(edge) => waiting.has(edge.id) && edge.kind === "contradicts" && !regressed.has(edge.id) && edge.project === project,
 		);
 		if (group.length === 0) continue;
-		const overturned = group.flatMap((edge) => {
+		const evaluated = group.map((edge) => {
 			const later = claimsById.get(edge.from);
-			const backing = overturnedAgreements(edge, log.records, log.edges);
-			return later === undefined || backing.length === 0 ? [] : [{ edge, later, backing }];
+			const backing = later?.verdict === "disagrees" ? overturnedAgreements(edge, log.records, log.edges) : [];
+			return { edge, later, backing };
 		});
-		if (overturned.length === 0) continue;
-		const inputs = overturned.flatMap(({ later, backing }) =>
-			backing.map((claim) => ({ refs: claimBackingRefs(claim), note: claimRegressionNote(later, claim) })),
+		const inputs = evaluated.flatMap(({ later, backing }) =>
+			later === undefined
+				? []
+				: backing.map((claim) => ({ refs: claimBackingRefs(claim), note: claimRegressionNote(later, claim) })),
 		);
-		let reached: Awaited<ReturnType<typeof recordClaimRegressions>>;
-		try {
-			reached = await recordClaimRegressions(clioDataDir(), inputs);
-		} catch {
-			// No regression line is written, so the contradiction stays pending and the next append retries it.
-			continue;
+		let reached: Awaited<ReturnType<typeof recordClaimRegressions>> = [];
+		if (inputs.length > 0) {
+			try {
+				reached = await recordClaimRegressions(clioDataDir(), inputs);
+			} catch {
+				// No regression line is written, so the contradictions stay pending and the next append retries them.
+				continue;
+			}
 		}
 		let index = 0;
-		const records = overturned.map(({ edge, backing }) => {
+		const records = evaluated.map(({ edge, later, backing }) => {
 			const memory = new Set<string>();
-			for (const _claim of backing) for (const id of reached[index++] ?? []) memory.add(id);
+			if (later !== undefined) for (const _claim of backing) for (const id of reached[index++] ?? []) memory.add(id);
 			return regressionRecord({ edge, backing, memory: [...memory], at: now.toISOString() });
 		});
 		await appendClaimRegressions(records);
 	}
+}
+
+/** Model-authored post text is clipped to this many characters in a dispute line. */
+const DISPUTE_TEXT_MAX_CHARS = 280;
+
+/** One agent-ledger post as `recordAgentLedgerDispute` reads it; the dispatch ledger's entry shape, structurally. */
+export interface AgentLedgerPostView {
+	id: string;
+	runId: string;
+	agentId: string;
+	body:
+		| { kind: "claim"; scope: ReadonlyArray<string>; intent: string }
+		| { kind: "finding"; claim: string; path?: string; line?: number }
+		| { kind: "review"; target: string; passed: boolean; evidence: string }
+		| { kind: "message"; to: string; text: string; replyTo?: string };
+	flowRestrictions?: unknown;
+}
+
+function disputePost(entry: AgentLedgerPostView, withhold: boolean): ClaimDisputePost {
+	const body = entry.body;
+	const raw =
+		body.kind === "finding"
+			? body.claim
+			: body.kind === "claim"
+				? `${body.intent} (scope ${body.scope.join(" ")})`
+				: body.kind === "review"
+					? body.evidence
+					: body.text;
+	const oneLine = raw.replace(/\s+/gu, " ").trim();
+	const text = withhold
+		? "[text withheld: flow-restricted]"
+		: oneLine.length <= DISPUTE_TEXT_MAX_CHARS
+			? oneLine
+			: `${oneLine.slice(0, DISPUTE_TEXT_MAX_CHARS - 3)}...`;
+	const path = body.kind === "finding" ? body.path : body.kind === "claim" ? body.scope[0] : undefined;
+	return {
+		entry: entry.id,
+		runId: entry.runId,
+		agentId: entry.agentId,
+		kind: body.kind,
+		text,
+		...(path !== undefined && !withhold ? { path } : {}),
+		...(body.kind === "finding" && body.line !== undefined ? { line: body.line } : {}),
+	};
+}
+
+/**
+ * Keep a worker disagreement past its dispatch (#406): when an agent-ledger `review` that did not pass lands, the
+ * review and the entry it targets are written to the project's claims log as one `dispute`. The agent ledger itself
+ * is a machine-wide ring of recent dispatches; this line is what a later session reads. Both posts are model-authored,
+ * so the record is inferred: no verdict is merged, no edge or memory backing ever comes from it. A post the
+ * information-flow policy restricted keeps its ids and agents but not its text or path. Returns the dispute written,
+ * or null when the review passed, its target is not on the ledger, or the checkout is not one claims record in.
+ */
+export async function recordAgentLedgerDispute(input: {
+	ledgerId: string;
+	review: AgentLedgerPostView;
+	entries: ReadonlyArray<AgentLedgerPostView>;
+	projectCwd: string;
+	now?: Date;
+}): Promise<ClaimDisputeRecord | null> {
+	const body = input.review.body;
+	if (body.kind !== "review" || body.passed) return null;
+	const target = input.entries.find((entry) => entry.id === body.target);
+	if (target === undefined || target.id === input.review.id) return null;
+	const checkout = claimsCaptureCheckout(input.projectCwd);
+	if (checkout === null) return null;
+	const withhold = target.flowRestrictions !== undefined || input.review.flowRestrictions !== undefined;
+	const targetPost = disputePost(target, withhold);
+	const reviewPost = disputePost(input.review, withhold);
+	const record: Omit<ClaimDisputeRecord, "id"> = {
+		v: CLAIM_RECORD_VERSION,
+		type: "dispute",
+		at: (input.now ?? new Date()).toISOString(),
+		project: checkout.project,
+		ledger: input.ledgerId,
+		target: targetPost,
+		review: reviewPost,
+		evidence: "inferred",
+		...inferredFlag(targetPost.text, reviewPost.text, targetPost.path ?? "", reviewPost.path ?? ""),
+		...(withhold ? { withheld: "flow-restricted" as const } : {}),
+	};
+	const dispute = { ...record, id: claimLogRecordId(record) } as ClaimDisputeRecord;
+	await appendDisputes(checkout.project, [dispute]);
+	return dispute;
 }

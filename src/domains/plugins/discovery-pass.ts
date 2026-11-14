@@ -18,13 +18,14 @@ import type { PluginCandidate, PluginSnapshot } from "./types.js";
 interface DiscoveryPass {
 	readonly candidates: Map<string, PluginCandidate>;
 	readonly snapshots: Map<string, PluginSnapshot>;
+	readonly derived: Map<string, unknown>;
 }
 
 let active: DiscoveryPass | null = null;
 
 export function withPluginDiscoveryPass<T>(body: () => T): T {
 	if (active) return body();
-	active = { candidates: new Map(), snapshots: new Map() };
+	active = { candidates: new Map(), snapshots: new Map(), derived: new Map() };
 	try {
 		return body();
 	} finally {
@@ -62,4 +63,15 @@ export function passPluginSnapshot(key: string, build: () => PluginSnapshot): Pl
 		active.snapshots.set(key, snapshot);
 	}
 	return snapshot;
+}
+
+/**
+ * A value that depends only on what the pass already holds fixed: the install state and the verified trees. One
+ * agent discovery asked for the installed skill names once per plugin that binds skills, 33 ms each time for the
+ * same answer. `key` names the question and its arguments.
+ */
+export function passDerived<T>(key: string, derive: () => T): T {
+	if (!active) return derive();
+	if (!active.derived.has(key)) active.derived.set(key, derive());
+	return active.derived.get(key) as T;
 }

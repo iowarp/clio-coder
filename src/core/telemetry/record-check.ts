@@ -6,7 +6,7 @@ import { Value } from "typebox/value";
  * Compiling a schema costs about as much as this many interpreted checks of a journal record, so a writer that
  * checks a handful of records never pays for a compile it would not earn back.
  */
-const COMPILE_AFTER = 32;
+const COMPILE_AFTER = 80;
 
 interface CheckState {
 	seen: number;

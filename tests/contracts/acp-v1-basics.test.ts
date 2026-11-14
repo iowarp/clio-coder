@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { readDispatchScopeNotice } from "../../src/core/dispatch-scope-notice.js";
 import type { StartupHint } from "../../src/domains/context/contract.js";
-import type { AcpRequestError } from "../../src/engine/acp/errors.js";
+import { type AcpRequestError, AcpTimeoutError } from "../../src/engine/acp/errors.js";
 import { createAcpInterviewChannel } from "../../src/engine/acp/host-members.js";
 import { createAcpHandshake, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import { type AcpJsonRpcPeerTransport, createStdioServerTransport } from "../../src/engine/acp/transport.js";
@@ -371,6 +371,39 @@ test("ACP interview timeout and detach cancel rounds without a caller abort sign
 	detach();
 	deepStrictEqual(await detached, { answers: [], cancelled: true });
 	deepStrictEqual(notifications, Array(3).fill("_clio-coder/interview/cancel"));
+});
+
+// A GUI or ACP operator who steps away gets the terminal's outcome: the round lapses and ask_user takes the recommendation.
+test("ACP interview of an ask_user round waits the shorter window and lapses to timedOut, not a cancel", async () => {
+	let unattendedMs = 30_000;
+	const channel = createAcpInterviewChannel({ unattendedWindowMs: () => unattendedMs });
+	const timeouts: Array<number | undefined> = [];
+	channel.attach({
+		transport: {
+			request: async <T>(_method: string, _params?: unknown, timeoutMs?: number): Promise<T> => {
+				timeouts.push(timeoutMs);
+				throw new AcpTimeoutError("Interview request timed out");
+			},
+			notify: () => {},
+		},
+		sessionId: () => "session-1",
+		enabled: () => true,
+		timeoutMs: 605_000,
+	});
+	const round = [{ question: "Which scope?", options: [{ label: "Phase 1" }, { label: "All" }] }];
+	deepStrictEqual(await channel.ask(round, { unattendedFallback: true }), {
+		answers: [],
+		timedOut: { afterSeconds: 30 },
+	});
+	unattendedMs = 0;
+	deepStrictEqual(await channel.ask(round, { unattendedFallback: true }), {
+		answers: [],
+		timedOut: { afterSeconds: 605 },
+	});
+	// A round nobody's ask_user tool asked (a harness confirmation) keeps the cancel and the client's own timeout.
+	unattendedMs = 30_000;
+	deepStrictEqual(await channel.ask(round), { answers: [], cancelled: true });
+	deepStrictEqual(timeouts, [30_000, 605_000, 605_000]);
 });
 
 test("ACP sends startup notices once as session metadata, never as reply text", async () => {
