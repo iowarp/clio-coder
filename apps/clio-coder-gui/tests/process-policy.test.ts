@@ -58,12 +58,16 @@ for (const signal of ["SIGTERM", "SIGHUP"] as const)
 	test(`checkout launcher binds loopback, serves authenticated meta, and exits cleanly on ${signal}`, {
 		timeout: 15000,
 	}, async (t) => {
-		// Building the client is a separate acceptance step; this test supplies a tiny
-		// app-local static fixture only when the checkout has no build yet.
+		// Building the client is a separate acceptance step; this test supplies a tiny app-local static
+		// fixture only when neither the app's build nor the package's dist/gui/client exists yet.
 		const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
 		let temporary = false;
 		try {
-			await readFile(join(clientDir, "index.html"));
+			await Promise.any(
+				[clientDir, fileURLToPath(new URL("../../../dist/gui/client/", import.meta.url))].map((dir) =>
+					readFile(join(dir, "index.html")),
+				),
+			);
 		} catch {
 			temporary = true;
 			await mkdir(clientDir, { recursive: true });
