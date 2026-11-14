@@ -2733,8 +2733,25 @@ try {
 				await page.route(paletteChunk, hold("palette"));
 				await page.route(helpChunk, hold("help"));
 				try {
+					// "polish geometry" reopened this window from a launch link, so it is a new client, and the one it
+					// replaced still holds the task and counts as present for a while. Wait for the control read and take
+					// control when it says this window only views the task; the fill below needs an enabled message box.
+					const controlRead = page.waitForResponse(
+						(response) =>
+							response.request().method() === "GET" &&
+							/^\/api\/sessions\/[^/]+\/control$/u.test(new URL(response.url()).pathname),
+					);
 					await page.goto(noticeSessionUrl);
 					await composerField.waitFor();
+					const control = (await (await controlRead).json()) as {
+						controller: { clientId: string } | null;
+						you: { clientId: string };
+					};
+					if (control.controller && control.controller.clientId !== control.you.clientId) {
+						const note = page.locator(".composer__delivery-note");
+						await note.getByRole("button", { name: "Take control", exact: true }).click();
+						await note.locator("strong", { hasText: /^Viewing$/u }).waitFor({ state: "detached" });
+					}
 					await composerField.fill("");
 					await composerField.focus();
 					for (const [chord, name, chunk, combobox] of [
