@@ -40,19 +40,28 @@ export function terminalBackgroundColor(env: NodeJS.ProcessEnv = process.env): R
  */
 export const TERMINAL_HANDOVER_VARS = ["CLIO_CODER_TERMINAL_BACKGROUND", "CLIO_CODER_TERMINAL_SIZE"] as const;
 
+/** What the launcher hands over for a terminal that answered its probe with no background color. */
+const NO_REPORTED_BACKGROUND = "none";
+
 /** The reported color and the terminal's size, as the variables for the session a launcher starts in a pane. */
 export function terminalHandover(
 	stdout: Pick<NodeJS.WriteStream, "columns" | "rows"> = process.stdout,
 	env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
-	const handed: Record<string, string> = {};
 	const color = terminalBackgroundColor(env);
-	if (color !== null) {
-		handed.CLIO_CODER_TERMINAL_BACKGROUND = color.map((channel) => channel.toString(16).padStart(2, "0")).join("");
-	}
+	// A terminal that reported no color is handed over as such. Left unset, the session asked again from inside
+	// the pane, where nothing answers before the host's client attaches, and waited out the probe's timeout
+	// whenever it got there first.
+	const handed: Record<string, string> = {
+		CLIO_CODER_TERMINAL_BACKGROUND:
+			color === null ? NO_REPORTED_BACKGROUND : color.map((channel) => channel.toString(16).padStart(2, "0")).join(""),
+	};
 	if (stdout.columns > 0 && stdout.rows > 0) handed.CLIO_CODER_TERMINAL_SIZE = `${stdout.columns}x${stdout.rows}`;
 	return handed;
 }
+
+/** How often a session waiting for its pane's size writes to the pane, which is what makes the host apply it. */
+const HOST_NUDGE_MS = 4;
 
 /** How much of the terminal a pane host's own chrome may take from its one pane. */
 const HOST_CHROME = { columns: 12, rows: 6 } as const;
@@ -83,6 +92,7 @@ export async function awaitHandedTerminalSize(
 	await new Promise<void>((resolve) => {
 		const finish = (): void => {
 			clearTimeout(timer);
+			clearInterval(nudge);
 			stdout.off("resize", onResize);
 			resolve();
 		};
@@ -90,7 +100,14 @@ export async function awaitHandedTerminalSize(
 			if (attached()) finish();
 		};
 		const timer = setTimeout(finish, options.timeoutMs ?? 1_000);
+		// The host resizes the pane when its client attaches but applies that on the pane's next write, or failing
+		// that on its own tick about 250 ms later. A session that waits in silence waits for the tick (238 ms of
+		// idle before the first frame on 4 of 5 launches), so it keeps writing a sequence that changes nothing on
+		// screen: the resize then follows within 2 ms of the first write after the attach.
+		const write = (): boolean => stdout.write("\u001b[m");
+		const nudge = setInterval(write, HOST_NUDGE_MS);
 		stdout.on("resize", onResize);
+		write();
 	});
 }
 
@@ -173,14 +190,16 @@ export async function probeTerminalBackground(
 	const env = options.env ?? process.env;
 	// A pane host has no background to report until a client attaches, and a session its launcher starts is up
 	// before that. The launcher asked the real terminal and handed the answer over.
-	const handed = /^[0-9a-f]{6}$/iu.exec(env.CLIO_CODER_TERMINAL_BACKGROUND ?? "")?.[0];
+	const handed = /^(?:[0-9a-f]{6}|none)$/iu.exec(env.CLIO_CODER_TERMINAL_BACKGROUND ?? "")?.[0];
 	// Read once: a restarted session and every child asks the terminal for itself.
 	Reflect.deleteProperty(env, "CLIO_CODER_TERMINAL_BACKGROUND");
 	if (terminalThemeForced(env)) return terminalBackground(env);
 	if (colorDisabled(env) || !stdin.isTTY || !stdout.isTTY) return null;
 	if (handed !== undefined) {
-		const channel = (at: number): number => Number.parseInt(handed.slice(at, at + 2), 16);
-		reportTerminalColors({ background: [channel(0), channel(2), channel(4)] });
+		if (handed !== NO_REPORTED_BACKGROUND) {
+			const channel = (at: number): number => Number.parseInt(handed.slice(at, at + 2), 16);
+			reportTerminalColors({ background: [channel(0), channel(2), channel(4)] });
+		}
 		return terminalBackground(env);
 	}
 	const wasRaw = stdin.isRaw;
