@@ -359,6 +359,8 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 					hasNotices: notices.length > 0,
 					tasks: paletteTasks,
 					catalog: snapshot?.state === "open" ? taskCatalog.data : undefined,
+					capabilities:
+						sessionId === null ? undefined : queries.getQueryData<AgentCapabilities>(["session-capabilities", sessionId]),
 				},
 				{
 					navigate: (path) => void navigate(path),
@@ -388,6 +390,13 @@ function Workbench({ client, local }: { client: Client; local: Client }) {
 						// The palette hands focus back a frame after it closes; the composer takes it after that.
 						void import("./chat/Composer.js").then((module) =>
 							requestAnimationFrame(() => requestAnimationFrame(() => module.fillComposer(sessionId, `/${name} `))),
+						);
+					},
+					openSessionAction: (action) => {
+						if (sessionId === null) return;
+						// The palette hands focus back a frame after it closes; the dialog takes it after that.
+						void import("./chat/Composer.js").then((module) =>
+							requestAnimationFrame(() => requestAnimationFrame(() => module.openComposerAction(sessionId, action))),
 						);
 					},
 					closeSession: () => {
