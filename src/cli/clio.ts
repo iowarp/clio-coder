@@ -106,6 +106,22 @@ export async function runClioCommand(
 		process.stderr.write('clio-coder: a task on stdin needs a subcommand; use: clio-coder run "<task>"\n');
 		return 2;
 	}
+	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
+		// Every completed hosted process releases its workspace, including a
+		// crash or signal exit, so its utility processes and sockets cannot linger. Interactive
+		// shutdown ends the process itself, so the exit event is the one place
+		// every clean path passes through. Registered before the first early return (a refused
+		// home, a declined folder, an unusable route), or the launcher stays attached to the pane's shell.
+		const { clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
+			"../domains/mux/workspace/exit-marker.js"
+		);
+		if (hostedInWorkspace()) {
+			clearWorkspaceExit();
+			process.once("exit", (code) => {
+				if (!isRestartHandoff()) markWorkspaceExit(process.env, code);
+			});
+		}
+	}
 	// ACP (and the GUI's sessions over it) and the interactive TUI have an operator to answer a keychain
 	// prompt; headless runs and the non-interactive boot keep the Copilot runtime's keychain closed.
 	if (options.acp || terminalLeaseEligible(options)) allowCopilotKeychain();
@@ -233,21 +249,6 @@ export async function runClioCommand(
 		// The per-file notices are held after the card: a skipped card is answered by the header's `/trust`
 		// reminder, and a trusted project names what its connections still need, also after `/trust`'s restart.
 		trustCardNotices = launchTrustNotices(outcome, process.cwd(), startupSettings);
-	}
-	if (terminalLeaseEligible(options) && process.env.HERDR_ENV === "1") {
-		// Every completed hosted process releases its workspace, including a
-		// crash or signal exit, so its utility processes and sockets cannot linger. Interactive
-		// shutdown ends the process itself, so the exit event is the one place
-		// every clean path passes through.
-		const { clearWorkspaceExit, hostedInWorkspace, markWorkspaceExit } = await import(
-			"../domains/mux/workspace/exit-marker.js"
-		);
-		if (hostedInWorkspace()) {
-			clearWorkspaceExit();
-			process.once("exit", (code) => {
-				if (!isRestartHandoff()) markWorkspaceExit(process.env, code);
-			});
-		}
 	}
 	let terminalLease: import("../interactive/terminal-lease.js").TerminalLease | undefined;
 	try {

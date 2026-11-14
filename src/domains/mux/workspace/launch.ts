@@ -372,10 +372,30 @@ function runHerdr(host: Host, args: ReadonlyArray<string>): boolean {
 	return result.status === 0;
 }
 
-/** Stop the session's server when it holds nothing. Call under the session lock. True when no server is left. */
-async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean> {
+/**
+ * Whether any workspace still holds a Clio some launcher opened: a pane carrying a launcher's nonce or reporting
+ * Clio. herdr replaces the last workspace the moment it closes under an attached client, so the operator ending the
+ * Clio pane's shell leaves a fresh shell workspace that carries neither. The managed config unbinds herdr's own
+ * workspace keys and launchers tag their workspace under the session lock, so nothing else makes one.
+ */
+async function holdsClaimedWorkspace(client: MuxClient): Promise<boolean> {
+	for (const workspace of await client.workspaceList()) {
+		const panes = await client.paneList(workspace.workspaceId);
+		if (panes.some((pane) => pane.agent === CLIO_AGENT || WORKSPACE_NONCE.test(pane.tokens[WORKSPACE_TOKEN] ?? ""))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Stop the session's server when it holds nothing. Call under the session lock. True when no server is left.
+ * `replaced` is for a launcher whose own workspace closed under it: herdr's replacement then holds the host, and a
+ * host holding nothing but untagged workspaces is unreachable, since no launch ever attaches to one.
+ */
+async function stopServerIfEmpty(host: Host, client: MuxClient, replaced = false): Promise<boolean> {
 	try {
-		if ((await client.workspaceList()).length > 0) return false;
+		if (replaced ? await holdsClaimedWorkspace(client) : (await client.workspaceList()).length > 0) return false;
 	} catch {
 		return (await pingOnce(host)) === null;
 	}
@@ -725,7 +745,9 @@ async function attachWorkspace(
 	try {
 		workspaceLeftRunning = await withStateFileLock(lockTarget, async () => {
 			// A co-attached launcher may already have removed our workspace and a new server may reuse its ids.
-			if (!(await stillOwnsWorkspace(client, opened))) return false;
+			// Gone because the operator ended the Clio pane's shell, it left herdr's replacement behind, which would
+			// keep the server and a shell running for nobody.
+			if (!(await stillOwnsWorkspace(client, opened))) return !(await stopServerIfEmpty(host, client, true));
 			if (clioQuit) {
 				// Closing the last workspace under any attached client creates a
 				// replacement. Stop the host instead: delayed co-attached clients
