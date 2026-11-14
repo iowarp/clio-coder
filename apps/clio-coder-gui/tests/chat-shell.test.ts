@@ -25,7 +25,9 @@ import {
 } from "../client/chat/chat-turn.js";
 import type { HealthRow } from "../client/chat/health.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../client/chat/turns.js";
-import { appCommands, DESTINATIONS, NO_SITUATION } from "../client/interaction/commands.js";
+import { appCommands, DESTINATIONS, liveStopTarget, NO_SITUATION } from "../client/interaction/commands.js";
+import { stopRefusal } from "../client/pages/session-control-model.js";
+import type { Problem } from "../contracts/common.js";
 import type { TimelineItem, Turn } from "../contracts/sessions.js";
 
 const item = (over: Partial<TimelineItem> & Pick<TimelineItem, "id" | "kind">): TimelineItem => ({
@@ -337,13 +339,78 @@ test("every navigation entry is reachable from the palette", () => {
 	assert.deepEqual(calls, ["help"], "Help opens its reference action instead of navigating to a reader");
 });
 
-test("the palette never sources a row from the session command catalog", () => {
-	// GET /api/sessions/:id/commands wires 9 of about 21 optional members, so a row built from it
-	// would refuse with "not wired". Nothing here may look like one.
+test("the palette builds no request of its own and no row that looks like a typed command", () => {
+	// The open task's catalog arrives as data and its rows run through the composer, so this module
+	// never calls the command routes itself. Nothing here may look like a slash line.
 	const source = readFileSync(fileURLToPath(new URL("../client/interaction/commands.ts", import.meta.url)), "utf8");
 	assert.equal(source.includes("sessionCommands"), false);
 	assert.equal(source.includes("invokeSessionCommand"), false);
 	const { handlers: on } = handlers();
 	for (const command of appCommands({ sessionId: "s1", runningTurnId: null, sessionOpen: true, hasNotices: true }, on))
 		assert.equal(command.title.startsWith("/"), false, `${command.id} looks like a slash command`);
+});
+
+test("the open task's commands are a This task group: one runs, one that needs arguments asks for them", () => {
+	const { calls, handlers: on } = handlers();
+	const command = (name: string, args: Record<string, unknown>) =>
+		({ name, summary: `Run ${name}`, usage: `/${name}`, group: "Work", args }) as never;
+	const catalog = {
+		version: 1 as const,
+		commands: [command("doctor", {}), command("share", { positionals: [{ name: "target", required: true }] })],
+	};
+	const run = {
+		...on,
+		runTaskCommand: (name: string) => calls.push(`run ${name}`),
+		fillTaskCommand: (name: string) => calls.push(`fill ${name}`),
+	};
+	const open = { sessionId: "s1", runningTurnId: null, sessionOpen: true, hasNotices: false, catalog };
+	const rows = appCommands(open, run).filter((row) => row.group === "This task");
+	assert.deepEqual(
+		rows.map((row) => row.title),
+		["Run doctor", "Run share…"],
+	);
+	for (const row of rows) row.run();
+	assert.deepEqual(calls, ["run doctor", "fill share"]);
+	assert.equal(appCommands({ ...open, sessionOpen: false }, run).filter((row) => row.group === "This task").length, 0);
+	assert.equal(appCommands(open, on).filter((row) => row.group === "This task").length, 0);
+});
+
+test("a stop names the turn running when it is pressed, and nothing once that turn settled", () => {
+	const turn = (id: string, status: string) => ({ id, status, prompt: "Seed turn." });
+	const snapshot = (turns: unknown[], state = "open") =>
+		({ workspaceId: "w1", state, label: null, turns, timeline: [] }) as never;
+	assert.deepEqual(liveStopTarget("s1", snapshot([turn("t1", "succeeded"), turn("t2", "running")])), {
+		id: "s1",
+		workspaceId: "w1",
+		title: "Seed turn.",
+		currentTurnId: "t2",
+	});
+	assert.equal(liveStopTarget("s1", snapshot([turn("t1", "running"), turn("t2", "succeeded")])), null);
+	assert.equal(liveStopTarget("s1", snapshot([turn("t2", "running")], "closed")), null);
+	assert.equal(liveStopTarget("s1", undefined), null);
+});
+
+test("a refused stop reads as nothing stopped, never as accepted", () => {
+	const problem = (code: Problem["code"], extra: Partial<Problem> = {}): Problem => ({
+		type: `urn:clio-coder:problem:${code}`,
+		title: "Refused",
+		status: 409,
+		detail: "That turn already ended, so CLIO Coder stopped nothing.",
+		code,
+		instance: "/api/sessions/s1/turns/t1/cancel",
+		...extra,
+	});
+	assert.equal(stopRefusal(problem("conflict")), "That turn already ended, so CLIO Coder stopped nothing.");
+	// Another window's control and transport failures stay for review: retrying can still stop the turn.
+	assert.equal(
+		stopRefusal(problem("conflict", { control: { sessionId: "s1", controller: { clientId: "c", label: "Window A" } } })),
+		null,
+	);
+	assert.equal(stopRefusal(problem("upstream_acp")), null);
+	assert.equal(stopRefusal(undefined), null);
+	const actions = readFileSync(
+		fileURLToPath(new URL("../client/pages/session-control-actions.ts", import.meta.url)),
+		"utf8",
+	);
+	assert.match(actions, /stopRefusal\(error\.problem\)/);
 });

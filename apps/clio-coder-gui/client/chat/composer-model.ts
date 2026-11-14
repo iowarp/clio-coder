@@ -24,6 +24,7 @@ import type {
 } from "../../contracts/steering.js";
 import { compactDuration } from "./overview-model.js";
 import { quantityValue } from "./session-usage-model.js";
+import { isSlashAlias } from "./slash-model.js";
 import type { TurnEnding } from "./turns.js";
 import { endingSentence, isStoppedEarly, turnEnding } from "./turns.js";
 
@@ -358,6 +359,11 @@ export interface ComposerSituation {
 	readonly shell?: boolean;
 	/** The label of the other window that controls this task; this one only views it until it takes control. */
 	readonly viewing?: string;
+	/**
+	 * `slashNotice`'s warning for a `/name` the session does not serve. The child refuses that line,
+	 * so the composer holds it rather than warning and sending it anyway.
+	 */
+	readonly unknownSlash?: string;
 }
 
 /** Why a viewing window's composer takes nothing: the server refuses every message from a window without control. */
@@ -426,6 +432,7 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 		return blocked(CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.");
 	const text = draft.text.trim();
 	if (text === "") return blocked("Write a message first.");
+	if (situation.unknownSlash !== undefined) return blocked(situation.unknownSlash);
 	const line = situation.shell ? shellLine(text) : null;
 	if (line !== null) {
 		if (line.command === "") return blocked("Write a command after the !.");
@@ -470,29 +477,22 @@ export function submitLabel(intent: SubmitIntent, situation: ComposerSituation, 
 const SLASH_TOKEN = /^\/([A-Za-z][A-Za-z0-9:-]*)(?:\s|$)/u;
 
 /**
- * Says before sending what the agent will say after: a `/name` that no command
- * and no loaded prompt template owns is refused and never reaches the model.
- * It warns and does not block, because the agent screens the line itself and
- * a template loaded since the catalog was read is still honored there. A
- * catalog without its template list cannot tell a template from a typo, so it
- * says nothing rather than guess.
+ * Says before sending what the agent will say after: a `/name` that no command,
+ * no loaded prompt template and no terminal name the app answers owns is
+ * refused and never reaches the model. A catalog command never gets here: the
+ * composer parses it as a command line first. It warns and does not block,
+ * because the agent screens the line itself and a template loaded since the
+ * catalog was read is still honored there. A catalog without its template list
+ * cannot tell a template from a typo, so it says nothing rather than guess.
  */
 export function slashNotice(text: string, catalog: CommandCatalog | undefined): ComposerNotice | null {
 	const token = SLASH_TOKEN.exec(text.trim())?.[1];
 	if (token === undefined || catalog?.prompts === undefined) return null;
-	const command = catalog.commands.find((entry) => entry.name === token);
-	if (command) {
-		// The agent invokes a command typed in a prompt only when its result belongs to that prompt.
-		if (command.streams === undefined || command.injectsUserTurn || command.promptTurn) return null;
-		return {
-			tone: "warn",
-			message: `/${token} runs from the command list, not from a message. Sending it will be refused.`,
-		};
-	}
-	if (catalog.prompts.includes(token)) return null;
+	if (catalog.commands.some((entry) => entry.name === token) || catalog.prompts.includes(token) || isSlashAlias(token))
+		return null;
 	return {
 		tone: "warn",
-		message: `/${token} is not a command or prompt template in this task, so sending it will be refused. Start the line with \\/ to send it as text.`,
+		message: `/${token} is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.`,
 	};
 }
 

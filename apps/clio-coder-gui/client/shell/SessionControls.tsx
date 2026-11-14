@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import type { Client } from "../api/client.js";
 import { Icon } from "../design/icons.js";
 import { StatusMark } from "../design/status.js";
@@ -72,6 +72,7 @@ export function SessionControlsProvider({ client, children }: { client: Client; 
 export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const { controls } = useSessionCommands();
 	const [reviewing, setReviewing] = useState(false);
+	const { pathname } = useLocation();
 	const reviewButton = useRef<HTMLButtonElement>(null);
 	const results = useRef<HTMLDivElement>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -96,13 +97,14 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 	if (!latest && !controls.notice) return null;
 	const needsReview = unresolved.length > 0 || controls.notice !== null;
 	const label = needsReview ? "Check session" : pending.length ? "Request in progress" : "Request checked";
+	const idle = !needsReview && !pending.length && latest?.nothingStopped === true;
 	const summary = needsReview
 		? `${unresolved.length || 1} session ${unresolved.length > 1 ? "requests need" : "request needs"} your review.`
 		: pending.length > 1
 			? `${pending.length} session requests in progress…`
 			: latest?.action === "close"
 				? `${pending.length ? "Close request" : "Closed"} · ${latest.title}`
-				: `Stop request · ${latest?.title ?? "Session"}`;
+				: `${pending.length ? "Stop request" : idle ? "Nothing stopped" : "Stop confirmed"} · ${latest?.title ?? "Session"}`;
 	const dismissCompleted = () => {
 		for (const row of controls.records) if (row.stage === "complete") controls.dismiss(row.key);
 		controls.clearNotice();
@@ -117,7 +119,10 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 				aria-label="Session control status"
 			>
 				<div className="session-control-notice__message" role="status">
-					<StatusMark tone={needsReview ? "warn" : pending.length ? "running" : "success"} label={label} />
+					<StatusMark
+						tone={needsReview ? "warn" : pending.length ? "running" : idle ? "neutral" : "success"}
+						label={label}
+					/>
 					<span>{summary}</span>
 				</div>
 				<div className="session-control-notice__actions">
@@ -154,17 +159,27 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 							>
 								<header>
 									<StatusMark
-										tone={record.stage === "unresolved" ? "warn" : record.stage === "sending" ? "running" : "success"}
+										tone={
+											record.stage === "unresolved"
+												? "warn"
+												: record.stage === "sending"
+													? "running"
+													: record.nothingStopped
+														? "neutral"
+														: "success"
+										}
 										label={record.action === "stop" ? "Stop turn" : "Close session"}
 									/>
 									<h3>{record.title}</h3>
 								</header>
 								<p role={record.stage === "unresolved" ? "alert" : "status"}>{record.message}</p>
 								<div className="session-control-result__actions">
-									<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
-										Open session
-										<Icon name="external" />
-									</Link>
+									{pathname === `/sessions/${record.sessionId}` ? null : (
+										<Link to={`/sessions/${record.sessionId}`} onClick={() => setReviewing(false)}>
+											Open session
+											<Icon name="external" />
+										</Link>
+									)}
 									<button
 										type="button"
 										data-control-wait={record.key}

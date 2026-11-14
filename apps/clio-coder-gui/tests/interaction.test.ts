@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-import { HELP_SECTIONS, searchHelp, VIEW_GUIDE } from "../client/interaction/help-reference.js";
+import { fileURLToPath } from "node:url";
+import { COMPOSER_NOTES, HELP_SECTIONS, searchHelp, VIEW_GUIDE } from "../client/interaction/help-reference.js";
 import {
 	formatKeybinding,
 	KEYBINDING_ORDER,
@@ -44,7 +46,7 @@ test("the sidebar chord is Ctrl or Cmd plus backslash and reaches no dialog or i
 		!matchesKeybinding(KEYBINDINGS.sidebar, press("\\", { ctrlKey: true, altKey: true })),
 		"AltGr layouts type it",
 	);
-	assert.equal(formatKeybinding(KEYBINDINGS.sidebar), "Ctrl or Cmd + \\");
+	assert.equal(formatKeybinding(KEYBINDINGS.sidebar), "Ctrl/Cmd + \\");
 	assert.equal(KEYBINDINGS.sidebar.scope, "global");
 });
 
@@ -81,11 +83,13 @@ test("the matcher is exact: every listed modifier held and no unlisted one", () 
 });
 
 test("chords print the way the reference reads them", () => {
-	assert.equal(formatKeybinding(KEYBINDINGS.send), "Ctrl or Cmd + Enter");
+	// Plain Enter sends by default; the row says so and names the other two Enter chords.
+	assert.equal(formatKeybinding(KEYBINDINGS.send), "Enter");
+	assert.match(KEYBINDINGS.send.where, /Shift\+Enter adds a line/);
 	assert.equal(formatKeybinding(KEYBINDINGS.allowOnce), "Alt + A");
 	assert.equal(formatKeybinding(KEYBINDINGS.escape), "Esc");
 	assert.equal(formatKeybinding(KEYBINDINGS.tabNext), "Right arrow");
-	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl or Cmd + K");
+	assert.equal(formatKeybinding(KEYBINDINGS.palette), "Ctrl/Cmd + K");
 });
 
 test("the launcher score ranks a whole-value prefix over a word prefix over a substring", () => {
@@ -104,7 +108,7 @@ test("the reference covers every route and prints the keyboard table verbatim", 
 	assert.ok(keyboard);
 	assert.deepEqual(
 		keyboard.entries.map((entry) => entry.term),
-		KEYBINDING_ORDER.map(formatKeybinding),
+		[...KEYBINDING_ORDER.map(formatKeybinding), ...COMPOSER_NOTES.map((note) => note.term)],
 	);
 	for (const section of HELP_SECTIONS)
 		if (section.reserved !== undefined) {
@@ -140,4 +144,64 @@ test("help search matches every word across any field and reports nothing as not
 	// AND across words, OR across fields.
 	assert.equal(searchHelp("pending approval").length > 0, true);
 	assert.deepEqual(searchHelp("approval zzzz"), []);
+});
+
+test("an Alt chord matches its physical key where Option types a character", () => {
+	// macOS Option+M types µ; the key's code still names it.
+	assert.ok(matchesKeybinding(KEYBINDINGS.modelPicker, press("µ", { altKey: true, code: "KeyM" })));
+	assert.ok(matchesKeybinding(KEYBINDINGS.allowOnce, press("å", { altKey: true, code: "KeyA" })));
+	assert.ok(matchesKeybinding(KEYBINDINGS.modelPicker, press("m", { altKey: true, code: "KeyM" })));
+	assert.ok(!matchesKeybinding(KEYBINDINGS.modelPicker, press("µ", { altKey: true, code: "KeyN" })));
+	assert.ok(!matchesKeybinding(KEYBINDINGS.modelPicker, press("µ", { code: "KeyM" })));
+	// A layout whose M key types another letter follows the letter, not the position.
+	assert.ok(!matchesKeybinding(KEYBINDINGS.modelPicker, press("n", { altKey: true, code: "KeyM" })));
+});
+
+test("every declared chord has a handler, and Ctrl+. has exactly one", () => {
+	for (const id of ["modelPicker", "outputDetail", "autonomyMenu", "sendNow", "rejectAndStop"])
+		assert.ok(Object.hasOwn(KEYBINDINGS, id), `${id} is not declared`);
+	const root = fileURLToPath(new URL("../client/", import.meta.url));
+	const source = readdirSync(root, { recursive: true, encoding: "utf8" })
+		.filter((path) => /\.tsx?$/u.test(path) && !path.endsWith("keybindings.ts"))
+		.map((path) => readFileSync(`${root}${path}`, "utf8"))
+		.join("\n");
+	// The tab and list rows document what native controls and the roving lists already do.
+	const documentation = new Set(["tabPrevious", "tabNext", "tabFirst", "tabLast", "listPrevious", "listNext"]);
+	for (const binding of KEYBINDING_ORDER) {
+		if (documentation.has(binding.id)) continue;
+		const consumed =
+			source.includes(`useShortcut("${binding.id}"`) ||
+			source.includes(`useMenuShortcut("${binding.id}"`) ||
+			new RegExp(`KEYBINDINGS\\.${binding.id}\\b`, "u").test(source);
+		assert.ok(consumed, `${binding.id} is declared but nothing handles it`);
+	}
+	assert.equal(source.split('useShortcut("cancelTurn"').length - 1, 1);
+});
+
+test("the reference lists the conversation chords and the message-box keys", () => {
+	const keyboard = HELP_SECTIONS.find((section) => section.id === "keyboard");
+	assert.ok(keyboard);
+	const terms = keyboard.entries.map((entry) => entry.term);
+	for (const chord of [
+		"Ctrl/Cmd + .",
+		"F2",
+		"Alt + M",
+		"Alt + O",
+		"Alt + Y",
+		"Alt + S",
+		"Alt + X",
+		"Esc, Esc",
+		"Up / Down",
+	])
+		assert.ok(terms.includes(chord), `${chord} is missing from the reference`);
+	assert.ok(keyboard.entries.some((entry) => entry.meaning.includes("Shift+Enter")));
+	const commands = HELP_SECTIONS.find((section) => section.id === "commands");
+	assert.ok(commands);
+	assert.match(commands.lede, /^Type \/ in the message box to see this task's commands\./u);
+	assert.ok(commands.entries.some((entry) => entry.term === "/compact [instructions]"));
+	assert.ok(commands.entries.some((entry) => entry.term.includes("/extensions dev")));
+	// One name for stopping, so searching the reference for it finds the chord and Esc, Esc.
+	const stop = searchHelp("stop").find((match) => match.section.id === "keyboard");
+	assert.ok(stop?.entries.some((entry) => entry.term === "Ctrl/Cmd + ."));
+	assert.ok(stop?.entries.some((entry) => entry.term === "Esc, Esc"));
 });

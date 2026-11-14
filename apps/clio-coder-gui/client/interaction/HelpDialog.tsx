@@ -5,18 +5,25 @@ import { Dialog } from "./Dialog.js";
 import type { HelpView } from "./help-model.js";
 import { HELP_VIEWS, helpContent } from "./help-model.js";
 import type { HelpMatch } from "./help-reference.js";
-import type { Keybinding } from "./keybindings.js";
-import { formatKeybinding } from "./keybindings.js";
 import { PUBLIC_HELP } from "./public-help.js";
 import "./help.css";
 
-function ShortcutKeys({ binding }: { binding: Keybinding }) {
-	const chord = formatKeybinding(binding);
+function ShortcutKeys({ chord }: { chord: string }) {
+	// A chord's keys sit together; a sequence (`Esc, Esc`) or a choice (`Up / Down`) keeps its separator.
+	const parts = chord.split(/( \+ |, | \/ )/u);
 	return (
 		<span className="help-keys" role="img" aria-label={chord}>
-			{chord.split(" + ").map((key) => (
-				<kbd key={key}>{key.replace("Ctrl or Cmd", "Ctrl/Cmd")}</kbd>
-			))}
+			{parts.map((part, index) =>
+				index % 2 === 1 ? (
+					part === " + " ? null : (
+						// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed chord never reorder.
+						<span key={index}>{part.trim()}</span>
+					)
+				) : (
+					// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed chord never reorder.
+					<kbd key={index}>{part}</kbd>
+				),
+			)}
 		</span>
 	);
 }
@@ -144,7 +151,7 @@ export function HelpReferenceBody({
 												<span>{binding.where}</span>
 											</dt>
 											<dd>
-												<ShortcutKeys binding={binding} />
+												<ShortcutKeys chord={binding.keys} />
 											</dd>
 										</div>
 									))}

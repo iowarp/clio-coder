@@ -253,24 +253,28 @@ function ApprovalButtons({
 	const answerSent = useAnswerSent(sessionId, permission.id);
 	return (
 		<>
-			{approvalActions(permission).map((action) => (
-				<button
-					key={action.decision}
-					type="button"
-					className={action.variant === "primary" ? "primary" : ""}
-					title={action.description}
-					disabled={answering || answerSent}
-					onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
-				>
-					{action.label}
-					{action.keybinding === null ? null : (
-						<span className="approval-card__chord" aria-hidden="true">
-							{KEYBINDINGS[action.keybinding].modifiers.includes("alt") ? "Alt+" : ""}
-							{KEYBINDINGS[action.keybinding].key.toUpperCase()}
-						</span>
-					)}
-				</button>
-			))}
+			{approvalActions(permission).map((action) => {
+				// The turn-ending refusal's chord is declared here; the model keeps its two wire-era answers' ids.
+				const chord = action.keybinding ?? (action.decision === "reject-and-stop" ? "rejectAndStop" : null);
+				return (
+					<button
+						key={action.decision}
+						type="button"
+						className={action.variant === "primary" ? "primary" : ""}
+						title={action.description}
+						disabled={answering || answerSent}
+						onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
+					>
+						{action.label}
+						{chord === null ? null : (
+							<span className="approval-card__chord" aria-hidden="true">
+								{KEYBINDINGS[chord].modifiers.includes("alt") ? "Alt+" : ""}
+								{KEYBINDINGS[chord].key.toUpperCase()}
+							</span>
+						)}
+					</button>
+				);
+			})}
 			{answering || answerSent ? (
 				<span className="approval-decision-progress" role="status">
 					{answerSent ? "Decision recorded; updating this task…" : "Sending your decision…"}
@@ -398,6 +402,9 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 		enabled,
 	});
 	useShortcut("reject", () => permission && answer.mutate({ id: permission.id, decision: "reject" }), { enabled });
+	const stoppable = enabled && permission?.canStopTurn === true;
+	const rejectAndStop = () => permission && answer.mutate({ id: permission.id, decision: "reject-and-stop" });
+	useShortcut("rejectAndStop", rejectAndStop, { enabled: stoppable });
 
 	const anchored = useAnchored(id);
 	if (!permission) return null;
@@ -451,7 +458,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 				call={call}
 				answer={answer}
 				eyebrow={`${bannerEyebrow(escalated)} · ${queue.position}`}
-				hint={KEYBOARD_HINT}
+				hint={permission.canStopTurn ? `${KEYBOARD_HINT} · Alt+X rejects and stops the turn` : KEYBOARD_HINT}
 				variant="banner"
 			/>
 		</section>

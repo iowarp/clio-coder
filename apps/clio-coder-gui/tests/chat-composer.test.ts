@@ -206,6 +206,17 @@ test("a send already on the wire blocks the next one", () => {
 	assert.deepEqual(intent, { kind: "blocked", reason: "The previous send is still on the wire." });
 });
 
+test("a /name the session does not serve is held with its warning, not warned about and sent", () => {
+	const warning =
+		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.";
+	for (const turnRunning of [false, true]) {
+		assert.deepEqual(submitIntent(draft({ text: "/tpyo fix it" }), situation({ turnRunning, unknownSlash: warning })), {
+			kind: "blocked",
+			reason: warning,
+		});
+	}
+});
+
 test("a window that only views the task offers no send, steer or shell line, and says who controls it", () => {
 	const viewing = situation({ viewing: "Firefox on laptop" });
 	for (const text of ["fix the build", "!ls"]) {
@@ -608,9 +619,15 @@ test("a /name the session cannot run is flagged before it is sent, and nothing e
 	assert.equal(slashNotice("\\/tmp is full", catalog), null);
 	assert.equal(slashNotice("/home/me/notes.md says why", catalog), null);
 	assert.equal(slashNotice("plain text /tpyo", catalog), null);
-	assert.match(slashNotice("/tpyo fix it", catalog)?.message ?? "", /\/tpyo is not a command or prompt template/);
-	assert.match(slashNotice("/model gpt", catalog)?.message ?? "", /Start the line with \\\//);
-	assert.match(slashNotice("/run verifier", catalog)?.message ?? "", /runs from the command list/);
+	assert.equal(
+		slashNotice("/tpyo fix it", catalog)?.message,
+		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.",
+	);
+	// A terminal name the app answers itself runs here, so it is not warned about.
+	assert.equal(slashNotice("/model", catalog), null);
+	assert.equal(slashNotice("/model gpt", catalog), null);
+	assert.equal(slashNotice("/extensions dev", catalog), null);
+	assert.equal(slashNotice("/run verifier", catalog), null);
 	// Without the template list the composer cannot tell a template from a typo, so it says nothing.
 	assert.equal(slashNotice("/tpyo", { version: 1, commands: catalog.commands }), null);
 	assert.equal(slashNotice("/tpyo", undefined), null);

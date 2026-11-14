@@ -1,6 +1,6 @@
-import { searchHelp } from "./help-reference.js";
+import { COMPOSER_NOTES, searchHelp } from "./help-reference.js";
 import type { KeybindingId } from "./keybindings.js";
-import { KEYBINDINGS } from "./keybindings.js";
+import { formatKeybinding, KEYBINDINGS } from "./keybindings.js";
 
 export const HELP_VIEWS = [
 	{ id: "guide", title: "Using CLIO Coder" },
@@ -25,12 +25,17 @@ const GROUP_BY_BINDING = {
 	newWindow: "workspace",
 	focusComposer: "conversation",
 	send: "conversation",
+	sendNow: "conversation",
 	historySearch: "conversation",
 	cancelTurn: "conversation",
+	modelPicker: "conversation",
+	outputDetail: "conversation",
+	autonomyMenu: "conversation",
 	sessionPanel: "conversation",
 	agents: "conversation",
 	allowOnce: "decisions",
 	reject: "decisions",
+	rejectAndStop: "decisions",
 	interviewSubmit: "decisions",
 	sidebar: "navigation",
 	escape: "navigation",
@@ -42,15 +47,33 @@ const GROUP_BY_BINDING = {
 	listNext: "navigation",
 } as const satisfies Record<KeybindingId, keyof typeof GROUP_TITLES>;
 
+/** One printed shortcut: a bound chord, or a message-box note the binding table cannot express. */
+export interface ShortcutRow {
+	readonly id: string;
+	readonly action: string;
+	readonly where: string;
+	readonly keys: string;
+}
+
 export function helpContent(query: string, view: HelpView) {
 	const searching = query.trim().length > 0;
 	const matches = searchHelp(query);
 	const keyboard = matches.find(({ section }) => section.id === "keyboard");
 	const shortcuts = Object.entries(GROUP_TITLES).flatMap(([id, title]) => {
-		const bindings = (Object.keys(GROUP_BY_BINDING) as KeybindingId[])
+		const bindings: ShortcutRow[] = (Object.keys(GROUP_BY_BINDING) as KeybindingId[])
 			.filter((bindingId) => GROUP_BY_BINDING[bindingId] === id)
 			.map((bindingId) => KEYBINDINGS[bindingId])
-			.filter((binding) => keyboard?.entries.some((entry) => entry.bindingId === binding.id));
+			.filter((binding) => keyboard?.entries.some((entry) => entry.bindingId === binding.id))
+			.map((binding) => ({
+				id: binding.id,
+				action: binding.action,
+				where: binding.where,
+				keys: formatKeybinding(binding),
+			}));
+		if (id === "conversation")
+			for (const note of COMPOSER_NOTES)
+				if (keyboard?.entries.some((entry) => entry.bindingId === undefined && entry.term === note.term))
+					bindings.push({ id: `note:${note.term}`, action: note.action, where: note.where, keys: note.term });
 		return bindings.length > 0 && (searching || view === "shortcuts") ? [{ id, title, bindings }] : [];
 	});
 	const sections = matches.filter(

@@ -18,6 +18,8 @@ export interface Keybinding {
 	readonly scope: ShortcutScope;
 	readonly action: string;
 	readonly where: string;
+	/** What the reference prints instead of the chord, when the row documents a key policy rather than one chord. */
+	readonly label?: string;
 }
 
 export const KEYBINDINGS = {
@@ -35,7 +37,16 @@ export const KEYBINDINGS = {
 		modifiers: ["primary"],
 		scope: "composer",
 		action: "Send message",
-		where: "Composer focused",
+		where: "Shift+Enter adds a line. Ctrl+Enter always sends",
+		label: "Enter",
+	},
+	sendNow: {
+		id: "sendNow",
+		key: "s",
+		modifiers: ["alt"],
+		scope: "composer",
+		action: "Send now, during a running turn",
+		where: "Composer focused · a turn is running",
 	},
 	historySearch: {
 		id: "historySearch",
@@ -60,6 +71,38 @@ export const KEYBINDINGS = {
 		scope: "global",
 		action: "Reject pending approval",
 		where: "Approval waiting · no dialog open",
+	},
+	rejectAndStop: {
+		id: "rejectAndStop",
+		key: "x",
+		modifiers: ["alt"],
+		scope: "global",
+		action: "Reject pending approval and stop the turn",
+		where: "Approval waiting · when the agent offers it",
+	},
+	modelPicker: {
+		id: "modelPicker",
+		key: "m",
+		modifiers: ["alt"],
+		scope: "global",
+		action: "Choose the model",
+		where: "Conversation · no dialog open",
+	},
+	outputDetail: {
+		id: "outputDetail",
+		key: "o",
+		modifiers: ["alt"],
+		scope: "global",
+		action: "Choose transcript detail",
+		where: "Conversation · no dialog open",
+	},
+	autonomyMenu: {
+		id: "autonomyMenu",
+		key: "y",
+		modifiers: ["alt"],
+		scope: "global",
+		action: "Choose the autonomy level",
+		where: "Conversation · no dialog open",
 	},
 	escape: {
 		id: "escape",
@@ -194,7 +237,7 @@ export const KEYBINDINGS = {
 		key: ".",
 		modifiers: ["primary"],
 		scope: "global",
-		action: "Cancel running turn",
+		action: "Stop the running turn",
 		where: "While a turn is running",
 	},
 } as const satisfies Readonly<Record<string, Keybinding>>;
@@ -212,11 +255,22 @@ export interface KeyEventLike {
 	readonly ctrlKey: boolean;
 	readonly metaKey: boolean;
 	readonly shiftKey: boolean;
+	/** The physical key. Read only for Alt+letter chords, where macOS Option turns the letter into a symbol. */
+	readonly code?: string;
 }
 
-function sameKey(binding: Keybinding, key: string): boolean {
-	if (binding.key.length === 1 && key.length === 1) return binding.key.toLowerCase() === key.toLowerCase();
-	return binding.key === key;
+const ASCII_LETTER = /^[a-z]$/i;
+
+function sameKey(binding: Keybinding, event: KeyEventLike): boolean {
+	const { key } = event;
+	if (binding.key.length === 1 && key.length === 1 && binding.key.toLowerCase() === key.toLowerCase()) return true;
+	if (binding.key === key) return true;
+	return (
+		binding.modifiers.includes("alt") &&
+		ASCII_LETTER.test(binding.key) &&
+		!ASCII_LETTER.test(key) &&
+		event.code === `Key${binding.key.toUpperCase()}`
+	);
 }
 
 /**
@@ -224,7 +278,7 @@ function sameKey(binding: Keybinding, key: string): boolean {
  * modifier held. Exactness rather than "at least these" is what stops Alt+A firing during Ctrl+Alt+A.
  */
 export function matchesKeybinding(binding: Keybinding, event: KeyEventLike): boolean {
-	if (!sameKey(binding, event.key)) return false;
+	if (!sameKey(binding, event)) return false;
 	const wantsPrimary = binding.modifiers.includes("primary");
 	const wantsAlt = binding.modifiers.includes("alt");
 	const wantsShift = binding.modifiers.includes("shift");
@@ -236,7 +290,7 @@ export function matchesKeybinding(binding: Keybinding, event: KeyEventLike): boo
 }
 
 const MODIFIER_LABELS: Readonly<Record<KeyModifier, string>> = {
-	primary: "Ctrl or Cmd",
+	primary: "Ctrl/Cmd",
 	alt: "Alt",
 	shift: "Shift",
 };
@@ -253,8 +307,9 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
 	End: "End",
 };
 
-/** The chord as the reference prints it, for example "Ctrl or Cmd + Enter". */
+/** The chord as every list prints it (help, palette, settings), for example "Ctrl/Cmd + K", or the row's own label. */
 export function formatKeybinding(binding: Keybinding): string {
+	if (binding.label !== undefined) return binding.label;
 	const parts = binding.modifiers.map((modifier) => MODIFIER_LABELS[modifier]);
 	parts.push(KEY_LABELS[binding.key] ?? binding.key.toUpperCase());
 	return parts.join(" + ");
