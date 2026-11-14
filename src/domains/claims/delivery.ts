@@ -1,12 +1,14 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { canonicalCheckout, checkoutHead } from "../../core/project-root.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../../core/untrusted-content.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
 import { hypothesisStatuses, latestHypotheses } from "./hypotheses.js";
-import { type ClaimsLogRead, claimsLogPath, claimsProjectRoot, readClaims } from "./store.js";
-import type { ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
+import { type ClaimsLogRead, claimsLogPath, readClaims } from "./store.js";
+import type { ClaimDisputeRecord, ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
 
 /**
  * Delivery of contested and superseded claims to the main agent when the task touches their check (#406).
@@ -39,11 +41,22 @@ function short(id: string): string {
 	return id.slice(0, 12);
 }
 
-function claimLine(claim: ClaimRecord): string {
+/**
+ * Why a delivered claim no longer describes the checkout the session is in (#406): it was recorded at a commit HEAD
+ * has moved past. Null when it was recorded at HEAD, or when either commit is unknown.
+ */
+function staleNote(claim: ClaimRecord, head: string | null): string | null {
+	const commit = claim.conditions.commit;
+	if (commit === null || head === null || commit === head) return null;
+	return `[stale: recorded at commit ${short(commit)}; HEAD is now ${short(head)}]`;
+}
+
+function claimLine(claim: ClaimRecord, head: string | null = null): string {
 	// The text is built from typed fields, but check ids and paths come from the project's catalog.
 	const text =
 		claim.flagged !== undefined ? "[text withheld: instruction-shaped]" : clip(claim.text, CLAIM_TEXT_MAX_CHARS);
-	return `claim ${short(claim.id)} ${claim.verdict}: ${text}`;
+	const stale = staleNote(claim, head);
+	return `claim ${short(claim.id)} ${claim.verdict}${stale !== null ? ` ${stale}` : ""}: ${text}`;
 }
 
 /** The latest open contradiction and the latest supersede of one check: what its delivery is about. */
@@ -54,9 +67,15 @@ function checkEdgeState(
 ): { openContradiction: ClaimEdgeRecord | undefined; lastSupersede: ClaimEdgeRecord | undefined } {
 	const ofCheck = read.edges.filter((edge) => edge.check === check);
 	return {
+		// Open while the later side is contested; the earlier side is contested too, or retired when the later one was a
+		// failure that overturned a pass.
 		openContradiction: ofCheck
 			.filter((edge) => edge.kind === "contradicts")
-			.filter((edge) => statuses.get(edge.from) === "contested" && statuses.get(edge.to) === "contested")
+			.filter(
+				(edge) =>
+					statuses.get(edge.from) === "contested" &&
+					(statuses.get(edge.to) === "contested" || statuses.get(edge.to) === "retired"),
+			)
 			.at(-1),
 		lastSupersede: ofCheck.filter((edge) => edge.kind === "supersedes").at(-1),
 	};
@@ -68,11 +87,15 @@ function checkEdgeState(
  */
 function claimsDeliveryState(
 	check: string,
-	read: Pick<ClaimsLogRead, "edges">,
+	read: Pick<ClaimsLogRead, "records" | "edges">,
 	statuses: ReadonlyMap<string, ClaimStatus>,
+	head: string | null = null,
 ): string {
 	const { openContradiction, lastSupersede } = checkEdgeState(check, read, statuses);
-	return `${check}\0${openContradiction?.id ?? ""}\0${lastSupersede?.id ?? ""}`;
+	// Offered again once when the check's latest claim turns stale, so a session whose HEAD moved learns it.
+	const latest = read.records.filter((claim) => claim.keys.check === check).at(-1);
+	const stale = latest !== undefined && staleNote(latest, head) !== null ? `stale:${head}` : "";
+	return `${check}\0${openContradiction?.id ?? ""}\0${lastSupersede?.id ?? ""}\0${stale}`;
 }
 
 /**
@@ -83,6 +106,7 @@ export function claimsDeliveryMessage(
 	check: string,
 	read: Pick<ClaimsLogRead, "records" | "edges">,
 	statuses: ReadonlyMap<string, ClaimStatus> = claimStatuses(read.records, read.edges),
+	head: string | null = null,
 ): string | null {
 	const claims = read.records.filter((claim) => claim.keys.check === check);
 	const latest = claims.at(-1);
@@ -97,11 +121,12 @@ export function claimsDeliveryMessage(
 	const later = openContradiction === undefined ? undefined : byId.get(openContradiction.from);
 	const earlier = openContradiction === undefined ? undefined : byId.get(openContradiction.to);
 	if (later !== undefined && earlier !== undefined) {
+		const retired = statuses.get(earlier.id) === "retired" ? " (retired: this failure overturned it)" : "";
 		parts.push(
-			`Contested: ${claimLine(later)} It contradicts ${claimLine(earlier)} Opposite verdicts ${contradictionConditions(later, earlier)}.`,
+			`Contested: ${claimLine(later, head)} It contradicts ${claimLine(earlier, head)}${retired} Opposite verdicts ${contradictionConditions(later, earlier)}.`,
 		);
 	} else {
-		parts.push(`Latest: ${claimLine(latest)}`);
+		parts.push(`Latest: ${claimLine(latest, head)}`);
 	}
 	const replacing = lastSupersede === undefined ? undefined : byId.get(lastSupersede.from);
 	const replaced = lastSupersede === undefined ? undefined : byId.get(lastSupersede.to);
@@ -113,6 +138,54 @@ export function claimsDeliveryMessage(
 		"A claim states agreement within the check's declared tolerance under its recorded conditions, not truth; rerun the check to judge the current tree.",
 	);
 	return clip(parts.join(" "), CLAIMS_DELIVERY_MAX_CHARS);
+}
+
+/** Disputes one hook point offers at most, beside the checks. */
+const DISPUTE_DELIVERY_MAX = 2;
+
+function disputeSide(post: ClaimDisputeRecord["target"], flagged: boolean): string {
+	const where = post.path === undefined ? "" : ` ${post.path}${post.line === undefined ? "" : `:${post.line}`}`;
+	const text = flagged ? "[text withheld: instruction-shaped]" : post.text;
+	return `${post.kind} ${post.entry} by ${post.agentId} (run ${post.runId})${where}: ${text}`;
+}
+
+/**
+ * A worker disagreement kept past its dispatch (#406): both posts as their authors wrote them, no merged verdict, and
+ * the reminder that neither is evidence.
+ */
+function disputeDeliveryMessage(dispute: ClaimDisputeRecord): string {
+	const flagged = dispute.flagged !== undefined;
+	return clip(
+		[
+			`[Claims] Workers disagreed on a ledger entry this task touches (dispatch ledger ${dispute.ledger}, ${dispute.at}).`,
+			UNTRUSTED_CONTENT_BANNER,
+			`Disputed ${disputeSide(dispute.target, flagged)}`,
+			`Failing review ${disputeSide(dispute.review, flagged)}`,
+			"Both sides are model-authored and inferred, not verified; no verdict was merged. Check the cited code before relying on either.",
+		].join(" "),
+		CLAIMS_DELIVERY_MAX_CHARS,
+	);
+}
+
+function disputePaths(dispute: ClaimDisputeRecord): string[] {
+	return [dispute.target.path, dispute.review.path].filter((path): path is string => path !== undefined);
+}
+
+/** Disputes whose posts cite a path the text names as a whole token. */
+function disputesNamedByText(text: string, disputes: ReadonlyArray<ClaimDisputeRecord>): ClaimDisputeRecord[] {
+	return disputes.filter((dispute) => disputePaths(dispute).some((path) => namesToken(text, path)));
+}
+
+function disputesTouchingPath(
+	path: string,
+	checkout: string,
+	cwd: string,
+	disputes: ReadonlyArray<ClaimDisputeRecord>,
+): ClaimDisputeRecord[] {
+	const absolute = isAbsolute(path) ? path : resolve(cwd, path);
+	return disputes.filter((dispute) =>
+		disputePaths(dispute).some((entry) => resolve(checkout, entry) === absolute || entry === path),
+	);
 }
 
 /** Path-like argv entries: the analysis script a check runs counts as part of what the check judges. */
@@ -211,6 +284,45 @@ function offersPath(project: string): string {
 	return claimsLogPath(project).replace(/\.jsonl$/u, ".offers.jsonl");
 }
 
+/** Offers files past this size are trimmed when a session first loads them. */
+export const CLAIMS_OFFERS_MAX_BYTES = 256 * 1024;
+/** Offers older than this are dropped by the trim: a session idle this long is offered again, once. */
+export const CLAIMS_OFFERS_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Keep the offers file bounded (#406): past `CLAIMS_OFFERS_MAX_BYTES`, rewrite it with only the offers made within
+ * the retention window. Offers only deduplicate within a session, so dropping an old one costs at most one repeat
+ * offer to a session resumed after the window. The rewrite is atomic; an offer appended by another process while it
+ * runs can be lost, with the same cost. Returns whether the file was rewritten.
+ */
+export function trimClaimsOffers(project: string, now: Date = new Date()): boolean {
+	const path = offersPath(project);
+	let text: string;
+	try {
+		if (statSync(path).size <= CLAIMS_OFFERS_MAX_BYTES) return false;
+		text = readFileSync(path, "utf8");
+	} catch {
+		// No offers file: nothing to trim.
+		return false;
+	}
+	const cutoff = now.getTime() - CLAIMS_OFFERS_RETENTION_MS;
+	const kept = text.split("\n").filter((line) => {
+		try {
+			const value = JSON.parse(line) as { at?: unknown };
+			return typeof value.at === "string" && Date.parse(value.at) >= cutoff;
+		} catch {
+			return false;
+		}
+	});
+	try {
+		safeResourceWrite(path, kept.length === 0 ? "" : `${kept.join("\n")}\n`, { mode: 0o600 });
+		return true;
+	} catch {
+		// An unwritable state dir leaves the file as it was; it only costs read time.
+		return false;
+	}
+}
+
 function readOffers(path: string, session: string): Set<string> {
 	const states = new Set<string>();
 	let text: string;
@@ -271,8 +383,13 @@ export function createClaimsDeliveryRegistrations(options: {
 		}
 	};
 
-	const deliver = (input: MiddlewareHookInput, pick: (read: ClaimsLogRead) => string[]): string[] => {
-		const project = claimsProjectRoot(options.cwd());
+	const deliver = (
+		input: MiddlewareHookInput,
+		pick: (read: ClaimsLogRead) => string[],
+		pickDisputes: (read: ClaimsLogRead) => ClaimDisputeRecord[] = () => [],
+	): string[] => {
+		const checkout = canonicalCheckout(options.cwd());
+		const project = checkout.project;
 		// A new, resumed or forked session reads what was offered under its own id. The first turn of a fresh session
 		// carries no id yet; the id it gains on the next hook is the same session, so only a change between ids resets.
 		if (input.sessionId !== undefined && sessionKey !== undefined && input.sessionId !== sessionKey) {
@@ -282,23 +399,35 @@ export function createClaimsDeliveryRegistrations(options: {
 		if (input.sessionId !== undefined) sessionKey = input.sessionId;
 		if (sessionKey !== undefined && loadedFor !== sessionKey) {
 			loadedFor = sessionKey;
+			trimClaimsOffers(project, now());
 			for (const state of readOffers(offersPath(project), sessionKey)) offered.add(state);
 			record(project, unrecorded);
 			unrecorded = [];
 		}
 		const read = load(project);
-		if (read === null || read.records.length === 0) return [];
+		if (read === null || (read.records.length === 0 && read.disputes.length === 0)) return [];
 		const statuses = claimStatuses(read.records, read.edges);
+		const head = read.records.length === 0 ? null : checkoutHead(checkout.checkout);
 		const messages: string[] = [];
 		const states: string[] = [];
 		for (const check of pick(read)) {
 			if (messages.length >= CLAIMS_DELIVERY_MAX_CHECKS) break;
-			const message = claimsDeliveryMessage(check, read, statuses);
-			const state = claimsDeliveryState(check, read, statuses);
+			const message = claimsDeliveryMessage(check, read, statuses, head);
+			const state = claimsDeliveryState(check, read, statuses, head);
 			if (message === null || offered.has(state)) continue;
 			offered.add(state);
 			states.push(state);
 			messages.push(message);
+		}
+		let disputes = 0;
+		for (const dispute of read.disputes.length === 0 ? [] : pickDisputes(read)) {
+			if (disputes >= DISPUTE_DELIVERY_MAX) break;
+			const state = `dispute\0${dispute.id}`;
+			if (offered.has(state)) continue;
+			offered.add(state);
+			states.push(state);
+			messages.push(disputeDeliveryMessage(dispute));
+			disputes += 1;
 		}
 		if (sessionKey === undefined) unrecorded.push(...states);
 		else record(project, states);
@@ -307,7 +436,7 @@ export function createClaimsDeliveryRegistrations(options: {
 
 	// Runs after `deliver`, which has already settled the session key and loaded this session's earlier offers.
 	const deliverHypotheses = (check: string): string[] => {
-		const project = claimsProjectRoot(options.cwd());
+		const project = canonicalCheckout(options.cwd()).project;
 		const read = load(project);
 		if (read === null || read.hypotheses.length === 0) return [];
 		const fresh = hypothesisNotes(check, read).filter((note) => !offered.has(note.state));
@@ -336,7 +465,11 @@ export function createClaimsDeliveryRegistrations(options: {
 				if (input.hook === "turn_start") {
 					const text = input.text ?? "";
 					if (text.trim().length === 0) return [];
-					return deliver(input, (read) => checksNamedByText(text, read.records)).map((message) => ({
+					return deliver(
+						input,
+						(read) => checksNamedByText(text, read.records),
+						(read) => disputesNamedByText(text, read.disputes),
+					).map((message) => ({
 						kind: "inject_reminder",
 						severity: "info",
 						audience: "model",
@@ -347,7 +480,15 @@ export function createClaimsDeliveryRegistrations(options: {
 				const path = stringArg(input, "path");
 				if (path === null) return [];
 				const cwd = options.cwd();
-				return asNotes(deliver(input, (read) => checksTouchingPath(path, claimsProjectRoot(cwd), cwd, read.records)));
+				// Claim paths are relative to the checkout the check ran in, which is this one for a session in it.
+				const checkout = canonicalCheckout(cwd).checkout;
+				return asNotes(
+					deliver(
+						input,
+						(read) => checksTouchingPath(path, checkout, cwd, read.records),
+						(read) => disputesTouchingPath(path, checkout, cwd, read.disputes),
+					),
+				);
 			},
 		},
 		{

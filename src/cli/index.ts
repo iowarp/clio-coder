@@ -100,7 +100,7 @@ Usage:
   clio-coder fleet nodes|run|status|view|events|code-steps|decisions|verify|land|cancel|drain|resume  run playbooks on the fleet; inspect, verify, land, or cancel runs; admission control
   clio-coder evidence list|inspect <runId>  list runs or inspect one run's sealed evidence
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
-  clio-coder claims [show <id>]   list the project's recorded reproduce and numeric-compare claims
+  clio-coder claims [show <id>|export|import <file>|compact]  list, share or compact the project's recorded claims and worker disputes
   clio-coder arena run|show|vote|list|standings  run one prompt on 2 to 4 contenders, vote blind, read standings
   clio-coder research start|resume|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)

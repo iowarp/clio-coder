@@ -169,7 +169,9 @@ describe("claims ledger (#406)", () => {
 			overturnedAgreements(contradiction, [agreed, disagreed], first).map((item) => item.id),
 			[agreed.id],
 		);
-		assert.deepEqual(claimStatuses([agreed, disagreed], first).get(agreed.id), "contested");
+		// The pass the failure overturned is retired; the failure stays contested (#406).
+		assert.deepEqual(claimStatuses([agreed, disagreed], first).get(agreed.id), "retired");
+		assert.deepEqual(claimStatuses([agreed, disagreed], first).get(disagreed.id), "contested");
 		const second = deriveClaimEdges({ claims: [agreed, disagreed], edges: first }, [afterCommit]);
 		assert.deepEqual(
 			second.map((edge) => [edge.kind, edge.to]),
@@ -264,7 +266,7 @@ describe("claims ledger (#406)", () => {
 		const statuses = claimStatuses(all, edges);
 		assert.deepEqual(
 			all.map((claim) => statuses.get(claim.id)),
-			["contested", "standing", "contested"],
+			["retired", "standing", "contested"],
 		);
 		const ambiguous = sweepClaim(argv("0", "1"), undefined, true, "2026-11-06T00:00:00.000Z");
 		assert.deepEqual(
@@ -377,7 +379,7 @@ describe("claims ledger (#406)", () => {
 			assert.equal(read.regressions.length, 1);
 			assert.equal(read.duplicates, 4);
 			assert.equal(read.mismatched, 0);
-			assert.equal(claimStatuses(read.records, read.edges).get(agreed.id), "contested");
+			assert.equal(claimStatuses(read.records, read.edges).get(agreed.id), "retired");
 		} finally {
 			env.restore();
 		}
@@ -1203,7 +1205,7 @@ describe("claims ledger (#406)", () => {
 			process.chdir(repo);
 			const printed: string[] = [];
 			console.log = (text: string) => printed.push(text);
-			assert.equal(runClaimsCommand(["--json"]), 0);
+			assert.equal(await runClaimsCommand(["--json"]), 0);
 			const listed = (JSON.parse(printed.join("\n")) as { claims: Array<{ id: string; stale: boolean }> }).claims;
 			assert.deepEqual(
 				listed.map((item) => [item.id, item.stale]),
@@ -1213,7 +1215,7 @@ describe("claims ledger (#406)", () => {
 				],
 			);
 			printed.length = 0;
-			assert.equal(runClaimsCommand([]), 0);
+			assert.equal(await runClaimsCommand([]), 0);
 			match(printed.join("\n"), new RegExp(`stale: recorded at commit ${first.slice(0, 12)}; HEAD is now`, "u"));
 		} finally {
 			console.log = log;
