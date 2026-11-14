@@ -12,7 +12,7 @@ import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/s
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { BudgetBanner } from "../chat/BudgetBanner.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
-import { Composer, fillComposer, focusComposer, openComposerAction } from "../chat/Composer.js";
+import { Composer, fillComposer, focusComposer, openComposerAction, openComposerForm } from "../chat/Composer.js";
 import { ContextWorkCard } from "../chat/ContextWorkCard.js";
 import { ControlBanner } from "../chat/ControlBanner.js";
 import { ConversationOutline } from "../chat/ConversationOutline.js";
@@ -33,7 +33,7 @@ import { ReadoutStrip } from "../chat/ReadoutStrip.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
-import { menuActions, type SlashAction } from "../chat/slash-actions.js";
+import { MENU_FORMS, menuActions, type SlashAction } from "../chat/slash-actions.js";
 import { TelemetryChips } from "../chat/TelemetryChips.js";
 import { memoryGuardianMark } from "../chat/telemetry-model.js";
 import { TRANSCRIPT_PAGE_SIZE } from "../chat/transcript-view-model.js";
@@ -516,6 +516,18 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 												onClick={() => openComposerAction(snapshot.id, spec.action)}
 											>
 												{spec.title}…
+											</MenuItem>
+										))
+									: null}
+								{snapshot.state === "open" && capabilities.data?.commands
+									? MENU_FORMS.map((form) => (
+											<MenuItem
+												key={form.name}
+												icon="bolt"
+												disabled={!!controlling}
+												onClick={() => openComposerForm(snapshot.id, form.name)}
+											>
+												{form.title}…
 											</MenuItem>
 										))
 									: null}
