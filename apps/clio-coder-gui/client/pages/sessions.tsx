@@ -51,7 +51,7 @@ import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { Menu, MenuItem } from "../shell/Menu.js";
 import { useSessionCommands } from "../shell/SessionControls.js";
-import { taskTitle } from "../shell/shell-model.js";
+import { answeredTurns, renameBlocker, taskTitle } from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/tasks.js";
 import { openAppWindow } from "../shell/windows.js";
@@ -428,6 +428,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								: turn?.status === "failed"
 									? { tone: "failed", label: "Last turn failed" }
 									: null;
+	// Only a saved task takes a name, and the engine saves it once CLIO Coder has answered in it.
+	const renameBlocked = renameBlocker({ saved: snapshot.label !== null, answered: answeredTurns(snapshot.turns) });
 	const memoryMark = memoryGuardianMark(
 		snapshot.telemetry?.memory,
 		snapshot.state !== "parked" &&
@@ -443,15 +445,19 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<TopBar
 							title={title}
 							titleLabel={title}
-							rename={{
-								active: renaming,
-								onStart: () => setRenaming(true),
-								onCancel: () => setRenaming(false),
-								onSave: (label) => {
-									setRenaming(false);
-									renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
-								},
-							}}
+							{...(renameBlocked
+								? {}
+								: {
+										rename: {
+											active: renaming,
+											onStart: () => setRenaming(true),
+											onCancel: () => setRenaming(false),
+											onSave: (label: string) => {
+												setRenaming(false);
+												renameTask.mutate({ sessionId: snapshot.id, workspaceId: snapshot.workspaceId, label });
+											},
+										},
+									})}
 						>
 							{snapshot.telemetry?.eggs?.includes("duck") ? (
 								<span
@@ -471,8 +477,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								<MenuItem icon="search" onClick={() => setOutline(true)}>
 									Find in conversation
 								</MenuItem>
-								<MenuItem icon="pencil" onClick={() => setRenaming(true)}>
-									Rename task
+								<MenuItem icon="pencil" disabled={renameBlocked !== null} onClick={() => setRenaming(true)}>
+									{renameBlocked ? "Rename task · after the first answer" : "Rename task"}
 								</MenuItem>
 								<MenuItem icon="external" onClick={() => openAppWindow(`/sessions/${snapshot.id}`)}>
 									Open in new window

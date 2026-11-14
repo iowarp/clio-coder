@@ -1,4 +1,4 @@
-import { SettingsValidationError } from "../../../../../src/core/config.js";
+import { SettingsValidationError, validateSettings } from "../../../../../src/core/config.js";
 import {
 	applyControlValue,
 	orderedSectionControls,
@@ -129,6 +129,59 @@ function runtimes() {
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 }
 
+type Bounds = Pick<SettingControl, "minimum" | "exclusiveMinimum" | "maximum" | "exclusiveMaximum" | "integer">;
+const BOUNDS = new Map<string, Bounds>();
+const FIGURE = String.raw`(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)`;
+const LOWER = new RegExp(`expected an? (?:integer|number) (>=|>) ${FIGURE}`);
+const UPPER = new RegExp(`(?:expected an? (?:integer|number) |and )(<=|<) ${FIGURE}`);
+
+/** What the engine's validation says about one value at `path`, or undefined when it accepts it. */
+function verdict(path: string, value: number): string | undefined {
+	const raw: Record<string, unknown> = { version: 2 };
+	const parts = path.split(".");
+	let cursor = raw;
+	for (const part of parts.slice(0, -1)) {
+		const next: Record<string, unknown> = {};
+		cursor[part] = next;
+		cursor = next;
+	}
+	cursor[parts.at(-1) ?? path] = value;
+	return validateSettings(raw).issues.find((issue) => issue.path === path)?.message;
+}
+
+/**
+ * A number control's bounds, learned once by asking the engine's validation about values far outside any range.
+ * The page then checks a draft against the very bounds the save enforces, and states them in its own words.
+ */
+function boundsOf(path: string): Bounds {
+	const known = BOUNDS.get(path);
+	if (known) return known;
+	const low = LOWER.exec(verdict(path, -1e15) ?? "");
+	const high = UPPER.exec(verdict(path, 1e15) ?? "");
+	const bounds: Bounds = {
+		...(low?.[2] ? { [low[1] === ">" ? "exclusiveMinimum" : "minimum"]: Number(low[2]) } : {}),
+		...(high?.[2] ? { [high[1] === "<" ? "exclusiveMaximum" : "maximum"]: Number(high[2]) } : {}),
+		...(/^expected an integer/.test(verdict(path, 0.5) ?? "") ? { integer: true } : {}),
+	};
+	BOUNDS.set(path, bounds);
+	return bounds;
+}
+
+const KIND_WORDS: Record<string, string> = { integer: "a whole number", number: "a number" };
+
+/** One engine issue in the page's words: the control's label, what it accepts and what was entered. */
+function plainIssue(label: string, message: string): string {
+	const shape = /^expected (an? (integer|number)|.+?)(?: ((?:>=|>|<=|<) .+?))?, got (.+)$/.exec(message);
+	if (!shape) return `${label} was not saved: ${message}.`;
+	const what = shape[2] ? KIND_WORDS[shape[2]] : shape[1];
+	const range = (shape[3] ?? "")
+		.replace(/>= /g, "at least ")
+		.replace(/<= /g, "at most ")
+		.replace(/> /g, "above ")
+		.replace(/< /g, "below ");
+	return `${label} must be ${what}${range ? `${range.startsWith("at ") ? " of" : ""} ${range}` : ""}; ${shape[4]} was entered.`;
+}
+
 export function readSettingsControls(cwd: string): SettingsControls {
 	const layered = readLayeredSettings(cwd);
 	const targets = layered.settings.targets.map((target) => target.id);
@@ -178,6 +231,7 @@ export function readSettingsControls(cwd: string): SettingsControls {
 				...(control.path.startsWith("safety.review.") ? { timingNote: TERMINAL_ONLY_TIMING } : {}),
 				...(CONFIRM[control.path] && !reason ? { confirm: CONFIRM[control.path] } : {}),
 				...(valueConfirm && !reason ? { confirm: valueConfirm.text, confirmValue: valueConfirm.value } : {}),
+				...(control.kind === "number" ? boundsOf(control.path) : {}),
 			};
 		});
 	return {
@@ -213,7 +267,12 @@ export function writeSettingControl(cwd: string, write: SettingWrite): SettingWr
 				"validation",
 				error.issues
 					.slice(0, 4)
-					.map((issue) => `${issue.path}: ${issue.message}`)
+					.map((issue) =>
+						plainIssue(
+							before.controls.find((candidate) => candidate.path === issue.path)?.label ?? control.label,
+							issue.message,
+						),
+					)
 					.join(" "),
 			);
 		const detail = error instanceof Error ? error.message : String(error);
