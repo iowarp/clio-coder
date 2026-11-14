@@ -50,6 +50,12 @@
 	padding: 18px 20px 14px;
 	border-bottom: 1px solid var(--line);
 }
+.dialog__actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+}
 .dialog__header h2 {
 	font-family: var(--font-ui);
 	font-size: 17px;
@@ -140,7 +146,8 @@
 	padding: 0 6px;
 	color: var(--muted);
 }
-.palette {
+.palette,
+.dialog-loading {
 	display: grid;
 	gap: 10px;
 }
@@ -185,10 +192,29 @@
 	background: var(--accent-soft);
 	box-shadow: inset 2px 0 0 var(--accent);
 }
-.palette__option kbd {
-	color: var(--muted);
-	font-family: var(--font-mono);
-	font-size: 11px;
+/* Keycaps: the one shortcut notation (palette, Help, Settings). */
+.keycaps {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--ink-muted);
+	font-size: var(--text-instrument);
+}
+.keycaps kbd {
+	padding: 2px 5px;
+	min-width: 25px;
+	border: 1px solid var(--line-strong);
+	border-bottom-width: 2px;
+	border-radius: var(--radius-sm);
+	background: var(--well);
+	color: var(--ink);
+	font: 400 var(--text-instrument) / 1.4 var(--font-mono);
+	text-align: center;
+	white-space: nowrap;
+}
+.palette__option .keycaps {
+	flex: none;
 }
 .palette__empty {
 	color: var(--muted);

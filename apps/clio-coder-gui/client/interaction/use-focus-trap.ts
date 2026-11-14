@@ -2,7 +2,7 @@
 // native `<dialog>`. The containment branch handles the case hand-rolled traps get wrong: focus that
 // has escaped the container entirely is pulled back to the end Tab was heading toward.
 
-import { type RefObject, useEffect } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 
 export const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -42,19 +42,26 @@ export function containTabKey(event: KeyboardEvent, container: HTMLElement): voi
  * Move focus into `container` on open, contain Tab while open, and return focus to whatever held it
  * when the trap closes. The restore is guarded on `isConnected` because the element that opened the
  * layer is often unmounted by the action that closed it. Pass `initial` to land somewhere other than
- * the first focusable control, which a destructive dialog should do.
+ * the first focusable control, which a destructive dialog should do. `returnTo` names the opener
+ * when the caller knows it (a click that did not focus its button, a child that took focus on
+ * mount). `owns` reports whether this trap is the innermost layer; a covered trap leaves Tab alone.
  */
 export function useFocusTrap(
 	container: RefObject<HTMLElement | null>,
 	active: boolean,
 	initial?: RefObject<HTMLElement | null>,
+	options: { readonly returnTo?: HTMLElement | null | undefined; readonly owns?: () => boolean } = {},
 ): void {
+	const latest = useRef(options);
+	latest.current = options;
 	useEffect(() => {
 		if (!active) return;
-		const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const opener = latest.current.returnTo ?? document.activeElement;
+		const previouslyFocused = opener instanceof HTMLElement ? opener : null;
 		const landing = initial?.current ?? container.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ?? null;
 		(landing ?? container.current)?.focus();
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (latest.current.owns && !latest.current.owns()) return;
 			if (container.current) containTabKey(event, container.current);
 		};
 		document.addEventListener("keydown", onKeyDown);
@@ -77,7 +84,7 @@ export function useFocusTrap(
 					target?.focus();
 					if (tries > 0 && document.activeElement !== target) restore(tries - 1);
 				});
-			restore(1);
+			restore(3);
 		};
 	}, [container, active, initial]);
 }
