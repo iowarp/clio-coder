@@ -177,7 +177,7 @@ export const ActivityGroup = memo(function ActivityGroup({
 							client={client}
 							session={session}
 							workspaceRoot={workspaceRoot}
-							nowMs={nowMs}
+							nowMs={item.status === "in_progress" ? nowMs : 0}
 						/>
 					))}
 				</ul>

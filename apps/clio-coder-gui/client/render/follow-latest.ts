@@ -16,6 +16,40 @@ export interface FollowLatest {
 }
 
 const BOTTOM_TOLERANCE_PX = 32;
+/** How long after a wheel, touch, pointer or navigation key an upward scroll still counts as the reader's. */
+const INTENT_MS = 1_000;
+const NAV_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+
+/** The parts of a timeline item that say who wrote it; `snapshot.timeline` satisfies this. */
+export interface ActivityItem {
+	readonly id: string;
+	readonly kind: string;
+	readonly origin?: string;
+}
+
+/**
+ * True when `next` is `previous` grown by a prompt the operator just sent: a live user item after
+ * the last item `previous` ended on. Opening another task, or replaying history, is not a send.
+ */
+export function sentPrompt(previous: readonly ActivityItem[], next: readonly ActivityItem[]): boolean {
+	const last = previous.at(-1);
+	if (last === undefined || next === previous) return false;
+	let sent = false;
+	// A send lands at the end, so only the tail since the previous end is read.
+	for (let index = next.length - 1; index >= Math.max(0, next.length - 64); index--) {
+		const item = next[index];
+		if (item === undefined) break;
+		if (item.id === last.id) return sent;
+		if (item.kind === "user" && item.origin !== "replay") sent = true;
+	}
+	return false;
+}
+
+function editable(target: EventTarget | null): boolean {
+	return (
+		target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/u.test(target.tagName))
+	);
+}
 
 /**
  * Keeps a scroll region pinned to its end while the operator is reading the
@@ -28,11 +62,16 @@ const BOTTOM_TOLERANCE_PX = 32;
  * suspended while pinned, so a shrinking live header cannot move the viewport
  * above our last write and masquerade as the operator scrolling up. It resumes
  * when reading older content, where height changes must retain the reading edge.
+ *
+ * While a turn runs, a short upward move with no reader input behind it is the browser clamping
+ * scrollTop to content that shrank for a moment (a tool group folding as the next paragraph
+ * arrives), not the reader leaving; it is pinned back instead of ending follow. Sending a prompt
+ * from anywhere in the transcript returns to the live edge, where its answer will appear.
  */
 export function useFollowLatest(
 	scrollRef: RefObject<HTMLElement | null>,
 	enabled: boolean,
-	activityKey: unknown,
+	activityKey: readonly ActivityItem[] | undefined,
 	running = false,
 ): FollowLatest {
 	const [following, setFollowing] = useState(true);
@@ -43,6 +82,8 @@ export function useFollowLatest(
 	const wasRunning = useRef(running);
 	const settling = useRef(false);
 	const previousActivity = useRef(activityKey);
+	const runningRef = useRef(running);
+	runningRef.current = running;
 
 	const setFollow = useCallback(
 		(next: boolean) => {
@@ -52,6 +93,8 @@ export function useFollowLatest(
 				originalAnchor.current ??= element.style.overflowAnchor;
 				const anchor = originalAnchor.current;
 				element.style.overflowAnchor = next ? "none" : anchor;
+				// Read by follow-latest.css: a region the reader has left makes room for the jump control.
+				element.dataset.followLatest = next ? "on" : "away";
 			}
 			setFollowing((current) => (current === next ? current : next));
 			if (next) setUnseen(false);
@@ -60,19 +103,16 @@ export function useFollowLatest(
 	);
 
 	useEffect(() => {
-		const previous = previousActivity.current;
-		previousActivity.current = activityKey;
-		// Restoring an existing transcript is not new activity below the reader.
-		if (previous !== undefined && previous !== activityKey && !followingRef.current) setUnseen(true);
-	}, [activityKey]);
-
-	useEffect(() => {
 		const element = scrollRef.current;
 		if (element === null || !enabled) return;
 		originalAnchor.current ??= element.style.overflowAnchor;
 		const anchor = originalAnchor.current;
 		element.style.overflowAnchor = followingRef.current ? "none" : anchor;
+		element.dataset.followLatest = followingRef.current ? "on" : "away";
 		let viewportHeight = element.clientHeight;
+		let intentAt = Number.NEGATIVE_INFINITY;
+		let pressed = false;
+		const intended = () => pressed || performance.now() - intentAt < INTENT_MS;
 		const atBottom = () => element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_TOLERANCE_PX;
 		const pin = () => {
 			element.scrollTop = element.scrollHeight;
@@ -100,18 +140,38 @@ export function useFollowLatest(
 				return;
 			}
 			if (followingRef.current && settling.current) return;
+			if (
+				followingRef.current &&
+				runningRef.current &&
+				!intended() &&
+				top < programmaticTop.current - 1 &&
+				programmaticTop.current - top <= height
+			) {
+				pin();
+				return;
+			}
 			if (top < programmaticTop.current - 1 || !followingRef.current) setFollow(false);
 		};
 		const readIntent = (event: Event) => {
-			if (
-				event instanceof KeyboardEvent &&
-				!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)
-			)
-				return;
-			if (event.target instanceof Node && element.contains(event.target)) settling.current = false;
+			if (event instanceof KeyboardEvent && !NAV_KEYS.has(event.key)) return;
+			if (event.target instanceof Node && element.contains(event.target)) {
+				settling.current = false;
+				intentAt = performance.now();
+				if (event.type === "pointerdown") pressed = true;
+			}
 		};
-		const intentEvents = ["wheel", "touchmove", "pointerdown", "keydown"] as const;
+		// Keys scroll the region last pointed at even while focus sits outside it, but not from a field.
+		const readKey = (event: KeyboardEvent) => {
+			if (NAV_KEYS.has(event.key) && !editable(event.target)) intentAt = performance.now();
+		};
+		const release = () => {
+			pressed = false;
+		};
+		const intentEvents = ["wheel", "touchmove", "pointerdown", "keydown", "focusin"] as const;
 		for (const type of intentEvents) element.addEventListener(type, readIntent, { passive: true, capture: true });
+		window.addEventListener("keydown", readKey, { passive: true, capture: true });
+		window.addEventListener("pointerup", release, { passive: true, capture: true });
+		window.addEventListener("pointercancel", release, { passive: true, capture: true });
 		element.addEventListener("scroll", onScroll, { passive: true });
 		const observer =
 			typeof ResizeObserver === "undefined"
@@ -138,8 +198,12 @@ export function useFollowLatest(
 		children?.observe(element, { childList: true });
 		return () => {
 			element.style.overflowAnchor = anchor;
+			delete element.dataset.followLatest;
 			originalAnchor.current = null;
 			for (const type of intentEvents) element.removeEventListener(type, readIntent, true);
+			window.removeEventListener("keydown", readKey, true);
+			window.removeEventListener("pointerup", release, true);
+			window.removeEventListener("pointercancel", release, true);
 			element.removeEventListener("scroll", onScroll);
 			observer?.disconnect();
 			if (observer === null) window.removeEventListener("resize", pin);
@@ -206,6 +270,15 @@ export function useFollowLatest(
 		element.scrollTo({ top: element.scrollHeight, behavior: "instant" });
 		programmaticTop.current = element.scrollTop;
 	}, [scrollRef, setFollow]);
+
+	useLayoutEffect(() => {
+		const previous = previousActivity.current;
+		previousActivity.current = activityKey;
+		// Restoring an existing transcript is not new activity below the reader.
+		if (previous === undefined || activityKey === undefined || previous === activityKey || followingRef.current) return;
+		if (enabled && sentPrompt(previous, activityKey)) jumpToLatest();
+		else setUnseen(true);
+	}, [activityKey, enabled, jumpToLatest]);
 
 	return { following, unseen, jumpToLatest, snapshot, restore };
 }

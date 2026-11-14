@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
+import { sentPrompt } from "../client/render/follow-latest.js";
 import { routes } from "../contracts/routes.js";
 import { applySessionDelta, emptySession, encodeMeter, SessionBuffer } from "../contracts/session-projection.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot, type TimelineItem } from "../contracts/sessions.js";
@@ -517,4 +518,21 @@ test("a session cost ceiling stop stands until model output or a tool call follo
 		undefined,
 		"a branch switch drops it; the replay brings it back if it stands",
 	);
+});
+
+test("a prompt sent into the same timeline returns the reader to the live edge; a replay or another task does not", () => {
+	const item = (id: string, kind: TimelineItem["kind"], origin: TimelineItem["origin"] = "live") => ({
+		id,
+		kind,
+		origin,
+	});
+	const before = [item("a:user", "user"), item("a:text", "text")];
+	const answered = [...before, item("a:tool", "tool")];
+	const sent = [...answered, item("b:user", "user")];
+	assert.equal(sentPrompt(before, answered), false, "output is not a send");
+	assert.equal(sentPrompt(answered, sent), true);
+	assert.equal(sentPrompt(answered, [...sent, item("b:text", "text")]), true, "a batch that also starts the answer");
+	assert.equal(sentPrompt(answered, [...answered, item("r:user", "user", "replay")]), false, "history replays");
+	assert.equal(sentPrompt(answered, [item("x:user", "user"), item("y:user", "user")]), false, "another task");
+	assert.equal(sentPrompt([], sent), false, "nothing to compare with");
 });

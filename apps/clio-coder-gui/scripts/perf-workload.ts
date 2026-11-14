@@ -26,6 +26,8 @@ const { values } = parseArgs({
 		history: { type: "string", default: "0" },
 		// With --history, then press "Show N earlier turns" until the whole conversation is open.
 		"page-back": { type: "boolean", default: false },
+		// Record a Chrome performance trace per streamed turn (and of the resume), for DevTools or Perfetto.
+		trace: { type: "boolean", default: false },
 	},
 });
 if (!values.client) throw new Error("--client <private build> is required.");
@@ -37,6 +39,8 @@ const TYPED = "Typing a follow-up question while Clio Coder is still streaming."
 
 /** Installed before any app script so the record clock and the render counters exist from the start. */
 const INSTRUMENTATION = `(() => {
+	// tsx keeps function names through a __name helper the page lacks, and evaluated callbacks call it.
+	globalThis.__name ??= (target) => target;
 	const WINDOW_FROM = 100;
 	globalThis.__clioRenderCounts = {};
 	const perf = {
@@ -153,6 +157,16 @@ class Done extends Error {}
  * Resume a saved conversation the fixture replays as HISTORY rich turns, then report how long the
  * page took to show its last turn, and what the open transcript costs at rest.
  */
+/** With --trace, a Chrome performance trace of `run`, saved beside the report as `<label>-<name>.trace.json`. */
+async function traced<T>(page: Page, name: string, run: () => Promise<T>): Promise<T> {
+	if (!values.trace) return run();
+	await browser.startTracing(page, { path: join(values.out, `${values.label}-${name}.trace.json`), screenshots: false });
+	try {
+		return await run();
+	} finally {
+		await browser.stopTracing();
+	}
+}
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
 function launch() {
 	return fixtureLaunch(origin);
@@ -162,26 +176,30 @@ async function resumeHistory(page: Page, id: string) {
 	await page.getByPlaceholder("Describe a task or ask a question").waitFor();
 	await setRunning(page, true);
 	const started = await page.evaluate(() => performance.now());
-	await page.evaluate((path) => {
-		history.pushState(null, "", path);
-		dispatchEvent(new PopStateEvent("popstate"));
-	}, `/sessions/${id}`);
-	await page.getByText(`Earlier prompt ${HISTORY}:`, { exact: false }).waitFor({ timeout: 60_000 });
-	const shownMs = (await page.evaluate(() => performance.now())) - started;
-	await page.waitForTimeout(1_500);
+	const shownMs = await traced(page, "history", async () => {
+		await page.evaluate((path) => {
+			history.pushState(null, "", path);
+			dispatchEvent(new PopStateEvent("popstate"));
+		}, `/sessions/${id}`);
+		await page.getByText(`Earlier prompt ${HISTORY}:`, { exact: false }).waitFor({ timeout: 60_000 });
+		const shown = (await page.evaluate(() => performance.now())) - started;
+		await page.waitForTimeout(1_500);
+		return shown;
+	});
 	const settled = await sample(page);
 	const transcript = page.locator(".chat-transcript");
 	// Scroll back through the transcript a screen at a time, as a reader does.
 	await setRunning(page, true);
 	for (let step = 0; step < 30; step++) {
 		await transcript.evaluate((element) => {
+			element.dispatchEvent(new WheelEvent("wheel", { deltaY: -element.clientHeight, bubbles: true }));
 			element.scrollTop = Math.max(0, element.scrollTop - element.clientHeight);
 		});
 		await page.waitForTimeout(80);
 	}
 	const scrolled = await sample(page);
 	await setRunning(page, false);
-	const paged = values["page-back"] ? await pageBack(page) : null;
+	const paged = values["page-back"] ? await traced(page, "page-back", () => pageBack(page)) : null;
 	return {
 		turns: HISTORY,
 		lastTurnShownMs: Math.round(shownMs),
@@ -199,23 +217,35 @@ async function resumeHistory(page: Page, id: string) {
 		...(paged ? { pageBack: paged } : {}),
 	};
 }
-/** Open the rest of a resumed conversation a page at a time, timing each press to the frame that shows it. */
+/**
+ * Open the rest of a resumed conversation a page at a time. Each press is timed to the frame that
+ * first shows earlier turns (`durationMs`) and to the frame that shows the whole page (`pageMs`).
+ */
 async function pageBack(page: Page) {
 	const more = page.getByRole("button", { name: /Show \d+ earlier turns/u });
-	const presses: Array<{ renderedTurns: number; durationMs: number; longTasksOver50: number; longestTaskMs: number }> =
-		[];
+	const presses: Array<{
+		renderedTurns: number;
+		durationMs: number;
+		pageMs: number;
+		longTasksOver50: number;
+		longestTaskMs: number;
+	}> = [];
 	for (let press = 0; press < 100 && (await more.count()) > 0; press++) {
 		await setRunning(page, true);
-		const durationMs = await more.evaluate(
+		const timing = await more.evaluate(
 			(button) =>
-				new Promise<number>((resolve) => {
+				new Promise<{ first: number; page: number }>((resolve) => {
 					const count = () => document.querySelectorAll(".chat-turn").length;
 					const from = count();
+					const wanted = from + Number(/\d+/u.exec(button.textContent ?? "")?.[0] ?? 1);
 					const started = performance.now();
+					let first = -1;
 					(button as HTMLElement).click();
 					const check = () => {
-						if (count() > from) requestAnimationFrame(() => resolve(performance.now() - started));
-						else if (performance.now() - started > 10_000) resolve(-1);
+						const now = performance.now();
+						if (first < 0 && count() > from) first = now - started;
+						if (count() >= wanted) requestAnimationFrame(() => resolve({ first, page: performance.now() - started }));
+						else if (now - started > 10_000) resolve({ first, page: -1 });
 						else requestAnimationFrame(check);
 					};
 					requestAnimationFrame(check);
@@ -226,7 +256,8 @@ async function pageBack(page: Page) {
 		await setRunning(page, false);
 		presses.push({
 			renderedTurns: await page.locator(".chat-turn").count(),
-			durationMs: round(durationMs),
+			durationMs: round(timing.first),
+			pageMs: round(timing.page),
 			longTasksOver50: pressed.longTasks.filter((task) => task.duration > 50).length,
 			longestTaskMs: round(Math.max(0, ...pressed.longTasks.map((task) => task.duration))),
 		});
@@ -335,29 +366,33 @@ try {
 		const before = await sample(page);
 		await setRunning(page, true);
 		const started = performance.now();
-		await composer.fill(`${WORKLOAD} Audit the convergence notes, turn ${turn}.`);
-		await page.locator(".composer__submit").click();
-		await working.waitFor();
 		let scroll: Record<string, unknown> | null = null;
-		if (!quiet) {
-			await page.waitForTimeout(700);
-			await composer.click();
-			await page.keyboard.type(TYPED, { delay: 35 });
-			const transcript = page.locator(".chat-transcript");
-			const held = await transcript.evaluate((element) => {
-				element.scrollTop = Math.max(0, element.scrollHeight / 2 - 300);
-				return element.scrollTop;
-			});
-			await page.waitForTimeout(1_200);
-			const after = await transcript.evaluate((element) => element.scrollTop);
-			scroll = {
-				held,
-				after,
-				stayedPut: Math.abs(after - held) < 2,
-				jumpPill: (await page.locator(".jump-to-latest").count()) > 0,
-			};
-		}
-		await stop.waitFor({ state: "detached", timeout: 120_000 });
+		await traced(page, `turn${turn}`, async () => {
+			await composer.fill(`${WORKLOAD} Audit the convergence notes, turn ${turn}.`);
+			await page.locator(".composer__submit").click();
+			await working.waitFor();
+			if (!quiet) {
+				await page.waitForTimeout(700);
+				await composer.click();
+				await page.keyboard.type(TYPED, { delay: 35 });
+				const transcript = page.locator(".chat-transcript");
+				const held = await transcript.evaluate((element) => {
+					// The reader's wheel, so follow-latest reads the move as leaving rather than as a layout clamp.
+					element.dispatchEvent(new WheelEvent("wheel", { deltaY: -element.clientHeight, bubbles: true }));
+					element.scrollTop = Math.max(0, element.scrollHeight / 2 - 300);
+					return element.scrollTop;
+				});
+				await page.waitForTimeout(1_200);
+				const after = await transcript.evaluate((element) => element.scrollTop);
+				scroll = {
+					held,
+					after,
+					stayedPut: Math.abs(after - held) < 2,
+					jumpPill: (await page.locator(".jump-to-latest").count()) > 0,
+				};
+			}
+			await stop.waitFor({ state: "detached", timeout: 120_000 });
+		});
 		const durationMs = performance.now() - started;
 		// Diagrams render once the turn settles and only near the viewport (600px). A turn that held the view
 		// elsewhere leaves its diagram pending by design, so it is brought into view and timed from there.
