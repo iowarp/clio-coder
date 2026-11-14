@@ -1192,13 +1192,18 @@ try {
 				group
 					.locator("dd")
 					.evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
-			assert.deepEqual(await figures(tokenGroup), ["11", "12", "15", "38"]);
+			// The fixture reports usage that scales with each turn, so the figures are read back, not pinned.
+			const counts = async (group: Locator) =>
+				(await figures(group)).map((figure) => Number((figure ?? "").replaceAll(",", "")));
+			const [input = 0, output = 0, reasoning = 0, prompt = 0] = await counts(tokenGroup);
+			assert.ok([input, output, reasoning, prompt].every((value) => Number.isInteger(value) && value >= 0));
 			const cacheGroup = usage.locator(".turn-details__group", {
 				has: page.getByRole("heading", { name: "Cache", exact: true }),
 			});
 			// Cache reads and writes are the provider's fields; no hit share is derived from them.
 			assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Written"]);
-			assert.deepEqual(await figures(cacheGroup), ["13", "14"]);
+			const [cacheRead = 0, cacheWrite = 0] = await counts(cacheGroup);
+			assert.equal(prompt, input + cacheRead + cacheWrite, "Prompt is not input plus cache read and write");
 			await check("conversation-usage");
 			await page.keyboard.press("Enter");
 			assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
@@ -1920,11 +1925,14 @@ try {
 			await chipOrSlash(/Open the context window\.$/, "context");
 			const contextPanel = pane.locator(".context-panel");
 			// The lead reads used, then window and share, each an explainable figure (#434).
-			await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
-			assert.equal(
-				(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
-				"20,480 of 131,072 tokens · 15.6%",
-			);
+			// The fixture's ledger grows with each answered turn from its opening 20,480 tokens.
+			await contextPanel.locator(".context-panel__figure strong").waitFor();
+			const leadFigure = (await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim();
+			const lead = /^([\d,]+) of 131,072 tokens · ([\d.]+)%$/.exec(leadFigure);
+			assert.ok(lead, `context lead reads ${leadFigure}`);
+			const leadUsed = Number(lead[1]?.replaceAll(",", ""));
+			assert.ok(leadUsed > 20_480, `the context window did not grow with the answered turns: ${leadFigure}`);
+			assert.equal(lead[2], ((leadUsed / 131_072) * 100).toFixed(1));
 			await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 			await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
 			await check("context-window");
