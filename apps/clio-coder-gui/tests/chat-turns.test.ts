@@ -14,7 +14,12 @@ import {
 import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
 import { routeFacts } from "../client/chat/route.js";
-import { conversationChanges, routeDraft, savedRoutePatch } from "../client/chat/route-picker-model.js";
+import {
+	catalogFallbackNote,
+	conversationChanges,
+	routeDraft,
+	savedRoutePatch,
+} from "../client/chat/route-picker-model.js";
 import { settledKey, settledTurns } from "../client/chat/session-telemetry.js";
 import { presentTool } from "../client/chat/tool-presentation.js";
 import {
@@ -1080,4 +1085,12 @@ test("a call the safety judge is holding says so in the engine's words, and a he
 		label: "Running",
 		detail: "Write notes.md",
 	});
+});
+
+test("a connection that cannot list its models is not said to have failed to answer", () => {
+	// Live: openai-codex answered every chat turn while the picker said it "did not answer (unsupported)".
+	const note = catalogFallbackNote("openai-codex", "unsupported");
+	assert.doesNotMatch(note, /did not answer/);
+	assert.match(note, /cannot list its models/);
+	assert.match(catalogFallbackNote("local", "timeout"), /^local did not answer \(timeout\)/);
 });
