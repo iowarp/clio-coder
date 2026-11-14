@@ -232,6 +232,27 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 			available: sessionOpen && runningTurnId === null,
 			run: handlers.closeSession,
 		});
+		// The task page reads these from the URL: the dialog says when the engine offers no snapshots.
+		commands.push({
+			id: "session.rewind",
+			title: "Restore files from a snapshot",
+			group: "Session",
+			keywords: ["rewind", "undo", "snapshot", "revert"],
+			available: sessionOpen,
+			run: () => handlers.navigate(`/sessions/${sessionId}?rewind=1`),
+		});
+		for (const [format, name] of [
+			["html", "HTML"],
+			["markdown", "Markdown"],
+		] as const)
+			commands.push({
+				id: `session.download.${format}`,
+				title: `Download transcript as ${name}`,
+				group: "Session",
+				keywords: ["export", "save", "transcript", format],
+				available: sessionOpen,
+				run: () => handlers.navigate(`/sessions/${sessionId}?download=${format}`),
+			});
 	}
 	const { runTaskCommand, fillTaskCommand } = handlers;
 	if (sessionId !== null && sessionOpen && situation.catalog && runTaskCommand && fillTaskCommand)

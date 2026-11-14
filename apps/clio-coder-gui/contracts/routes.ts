@@ -86,6 +86,14 @@ import {
 	ResearchReport,
 	ResearchStartRequest,
 } from "./research.js";
+import {
+	SnapshotList,
+	SnapshotNumber,
+	SnapshotOutcome,
+	SnapshotPlan,
+	TranscriptDownload,
+	TranscriptFormat,
+} from "./rewind.js";
 import { routes as runtimeRoutes } from "./runtime-routes.js";
 import { SessionConfig, SetConfigOption } from "./session-config.js";
 import { SessionOverview } from "./session-overview.js";
@@ -177,6 +185,7 @@ export type Input<R extends Route> = {
 export type Output<R extends Route> = Static<R["response"]>;
 const toolParams = Type.Object({ toolId: Id }, { additionalProperties: false });
 const operationParams = Type.Object({ id: Id }, { additionalProperties: false });
+const snapshotParams = Type.Object({ id: Id, n: SnapshotNumber }, { additionalProperties: false });
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
@@ -1357,5 +1366,36 @@ export const routes = {
 		response: Operation,
 		summary: "Cancel a cancellable operation",
 		...runtimeRoutes.cancel,
+	}),
+	// x090 spec 14
+	sessionSnapshots: defineRoute({
+		...get,
+		params: operationParams,
+		response: SnapshotList,
+		summary: "The workspace snapshots this task holds, newest first, as the terminal's /rewind lists them",
+		...runtimeRoutes.sessionSnapshots,
+	}),
+	sessionSnapshotPreview: defineRoute({
+		...get,
+		params: snapshotParams,
+		response: SnapshotPlan,
+		summary: "What restoring a workspace snapshot would write, remove and keep",
+		...runtimeRoutes.sessionSnapshotPreview,
+	}),
+	sessionSnapshotRestore: defineRoute({
+		...post,
+		status: 200,
+		params: snapshotParams,
+		response: SnapshotOutcome,
+		summary: "Restore the workspace files from a snapshot, taking an undo snapshot first",
+		...runtimeRoutes.sessionSnapshotRestore,
+	}),
+	sessionTranscript: defineRoute({
+		...get,
+		params: operationParams,
+		query: Type.Object({ format: TranscriptFormat }, { additionalProperties: false }),
+		response: TranscriptDownload,
+		summary: "The task's transcript as the terminal's /export writes it, for the browser to save",
+		...runtimeRoutes.sessionTranscript,
 	}),
 };

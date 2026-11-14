@@ -218,6 +218,8 @@ export const guiTests = [
 	"client-auth",
 	"session-control",
 	"session-overview",
+	"rewind-http",
+	"rewind-model",
 	"openapi",
 	"boundaries",
 ]

@@ -36,6 +36,7 @@ import {
 	type InterviewSubmission,
 } from "../../contracts/interviews.js";
 import { PERMISSION_WITHDRAW_METHOD, type PermissionDecision } from "../../contracts/permissions.js";
+import { SnapshotList, SnapshotOutcome, SnapshotPlan } from "../../contracts/rewind.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
 import { BudgetBlock } from "../../contracts/session-telemetry.js";
@@ -2159,5 +2160,30 @@ export class Supervisor {
 		await Promise.allSettled(this.controls);
 		await Promise.allSettled([...this.entries.values()].map((entry) => this.retire(entry)));
 		await Promise.all(this.reapers);
+	}
+	/** The workspace snapshots the engine took for this task, newest first: the terminal's /rewind list. */
+	snapshotList(id: string) {
+		const { methods } = this.snapshotting(id);
+		return this.projected(id, methods.list, { sessionId: id }, SnapshotList);
+	}
+	snapshotPreview(id: string, n: number) {
+		const { methods } = this.snapshotting(id);
+		return this.projected(id, methods.preview, { sessionId: id, n }, SnapshotPlan);
+	}
+	/** Restoring changes files a running turn may be reading, so it waits for the turn as the engine does. */
+	snapshotRestore(id: string, n: number) {
+		const { entry, methods } = this.snapshotting(id);
+		if (entry.turnId || entry.rebase || entry.contextCommand || this.configuring.has(id))
+			throw new AppProblem(
+				"conflict",
+				"CLIO Coder is working, so nothing restores now. Wait for the turn to finish, or stop it.",
+			);
+		return this.projected(id, methods.restore, { sessionId: id, n }, SnapshotOutcome, BRANCH_TIMEOUT_MS);
+	}
+	private snapshotting(id: string) {
+		const entry = this.active(id);
+		const methods = entry.client.capabilities.snapshots;
+		if (!methods) throw new AppProblem("conflict", "File snapshots are not available for this task.");
+		return { entry, methods };
 	}
 }

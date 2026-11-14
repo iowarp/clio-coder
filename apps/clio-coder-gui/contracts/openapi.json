@@ -12342,6 +12342,29 @@
 											},
 											"additionalProperties": false
 										},
+										"snapshots": {
+											"type": "object",
+											"required": ["version", "list", "preview", "restore"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"list": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"preview": {
+													"type": "string",
+													"maxLength": 128
+												},
+												"restore": {
+													"type": "string",
+													"maxLength": 128
+												}
+											},
+											"additionalProperties": false
+										},
 										"handoff": {
 											"type": "object",
 											"required": ["version", "prepare", "commit", "cancel"],
@@ -23148,6 +23171,619 @@
 					}
 				}
 			}
+		},
+		"/api/sessions/{id}/snapshots": {
+			"get": {
+				"operationId": "sessionSnapshots",
+				"summary": "The workspace snapshots this task holds, newest first, as the terminal's /rewind lists them",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["snapshots", "truncated"],
+									"properties": {
+										"snapshots": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["n", "at", "reason", "differs", "skipped"],
+												"properties": {
+													"n": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"at": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"reason": {
+														"type": "string",
+														"maxLength": 512
+													},
+													"tool": {
+														"type": "string",
+														"maxLength": 128
+													},
+													"turnId": {
+														"type": "string",
+														"minLength": 1,
+														"maxLength": 128
+													},
+													"differs": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"skipped": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 100
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/snapshots/{n}": {
+			"get": {
+				"operationId": "sessionSnapshotPreview",
+				"summary": "What restoring a workspace snapshot would write, remove and keep",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "n",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9][0-9]{0,8}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["kind", "n", "restore", "remove", "kept", "refs", "truncated"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "plan"
+												},
+												"n": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"restore": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"remove": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"kept": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"refs": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["kind", "label", "state", "recover"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "head"
+																	},
+																	{
+																		"type": "string",
+																		"const": "stash"
+																	},
+																	{
+																		"type": "string",
+																		"const": "branch"
+																	}
+																]
+															},
+															"label": {
+																"type": "string",
+																"maxLength": 512
+															},
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "in-place"
+																	},
+																	{
+																		"type": "string",
+																		"const": "moved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gone"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															"recover": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 1024
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "unavailable"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/snapshots/{n}/restore": {
+			"post": {
+				"operationId": "sessionSnapshotRestore",
+				"summary": "Restore the workspace files from a snapshot, taking an undo snapshot first",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "n",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[1-9][0-9]{0,8}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["kind", "n", "undo", "restored", "removed", "kept", "failed", "refs", "truncated"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "restored"
+												},
+												"n": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"undo": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"restored": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"removed": {
+													"$ref": "#/components/schemas/Array_dccae6b5"
+												},
+												"kept": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"failed": {
+													"$ref": "#/components/schemas/Array_d390febe"
+												},
+												"refs": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["kind", "label", "state", "recover"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "head"
+																	},
+																	{
+																		"type": "string",
+																		"const": "stash"
+																	},
+																	{
+																		"type": "string",
+																		"const": "branch"
+																	}
+																]
+															},
+															"label": {
+																"type": "string",
+																"maxLength": 512
+															},
+															"state": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "in-place"
+																	},
+																	{
+																		"type": "string",
+																		"const": "moved"
+																	},
+																	{
+																		"type": "string",
+																		"const": "gone"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															"recover": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"maxLength": 1024
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 64
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "unavailable"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["kind", "reason", "undo"],
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "failed"
+												},
+												"reason": {
+													"type": "string",
+													"maxLength": 512
+												},
+												"undo": {
+													"type": "integer",
+													"minimum": 1
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/transcript": {
+			"get": {
+				"operationId": "sessionTranscript",
+				"summary": "The task's transcript as the terminal's /export writes it, for the browser to save",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "format",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string",
+									"const": "html"
+								},
+								{
+									"type": "string",
+									"const": "markdown"
+								}
+							]
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["filename", "mediaType", "text"],
+									"properties": {
+										"filename": {
+											"type": "string",
+											"minLength": 1,
+											"maxLength": 160
+										},
+										"mediaType": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "text/html"
+												},
+												{
+													"type": "string",
+													"const": "text/markdown"
+												}
+											]
+										},
+										"text": {
+											"type": "string",
+											"maxLength": 16777216
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
@@ -23527,6 +24163,13 @@
 				},
 				"maxItems": 64
 			},
+			"Array_d390febe": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_path_why_89715cdc"
+				},
+				"maxItems": 500
+			},
 			"Array_d68bdb0a": {
 				"type": "array",
 				"items": {
@@ -23548,6 +24191,14 @@
 				"items": {
 					"$ref": "#/components/schemas/Object_kind_message_origin_eda6e2b3"
 				}
+			},
+			"Array_dccae6b5": {
+				"type": "array",
+				"items": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"maxItems": 500
 			},
 			"Array_de2d36b0": {
 				"type": "array",
@@ -30231,6 +30882,21 @@
 					},
 					"passed": {
 						"type": "boolean"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Object_path_why_89715cdc": {
+				"type": "object",
+				"required": ["path", "why"],
+				"properties": {
+					"path": {
+						"type": "string",
+						"maxLength": 4096
+					},
+					"why": {
+						"type": "string",
+						"maxLength": 512
 					}
 				},
 				"additionalProperties": false

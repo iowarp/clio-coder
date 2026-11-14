@@ -30,6 +30,7 @@ import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
+import { RewindHost } from "../chat/RewindDialog.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
@@ -477,6 +478,19 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								<MenuItem icon="folder" onClick={() => void navigate(`/workspaces/${snapshot.workspaceId}/sessions`)}>
 									All tasks in {workspaceName}
 								</MenuItem>
+								<MenuItem icon="clock" disabled={snapshot.state !== "open"} onClick={() => void navigate("?rewind=1")}>
+									Restore files…
+								</MenuItem>
+								<MenuItem icon="arrowDown" disabled={snapshot.state !== "open"} onClick={() => void navigate("?download=html")}>
+									Download transcript as HTML
+								</MenuItem>
+								<MenuItem
+									icon="arrowDown"
+									disabled={snapshot.state !== "open"}
+									onClick={() => void navigate("?download=markdown")}
+								>
+									Download transcript as Markdown
+								</MenuItem>
 								<MenuItem
 									icon="close"
 									tone="danger"
@@ -486,6 +500,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									Close task
 								</MenuItem>
 							</Menu>
+							<RewindHost client={client} snapshot={snapshot} onTurn={transcript.revealTurn} />
 							<Link
 								className="wb-chip wb-chip--place"
 								to={`/workspaces/${snapshot.workspaceId}/sessions`}

@@ -184,6 +184,15 @@ export const routes = {
 	remove: { name: "remove", method: "POST", path: "/api/toolchain/tools/:toolId/remove" },
 	operation: { name: "operation", method: "GET", path: "/api/operations/:id" },
 	cancel: { name: "cancel", method: "POST", path: "/api/operations/:id/cancel" },
+	// x090 spec 14
+	sessionSnapshots: { name: "sessionSnapshots", method: "GET", path: "/api/sessions/:id/snapshots" },
+	sessionSnapshotPreview: { name: "sessionSnapshotPreview", method: "GET", path: "/api/sessions/:id/snapshots/:n" },
+	sessionSnapshotRestore: {
+		name: "sessionSnapshotRestore",
+		method: "POST",
+		path: "/api/sessions/:id/snapshots/:n/restore",
+	},
+	sessionTranscript: { name: "sessionTranscript", method: "GET", path: "/api/sessions/:id/transcript" },
 } as const;
 
 export type RuntimeRoute = (typeof routes)[keyof typeof routes];

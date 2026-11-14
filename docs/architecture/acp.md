@@ -79,6 +79,7 @@ Every CLIO Coder extension is namespaced under `agentCapabilities._meta`, so a s
 | `clio-coder/tools` | `"mediated"` | a tool registry is wired |
 | `clio-coder/events` | `{version: 1, notification: "_clio-coder/event", kinds, workspaceInstanceId}` | an event bus is wired |
 | `clio-coder/board` | `{version: 1, method, supersede?, proposeMemory?}` | the task board is wired; the two action methods need board actions |
+| `clio-coder/snapshots` | `{version: 1, list, preview, restore}` | a session host is wired; `list` is empty when snapshots are off or the task is not in a Git work tree |
 | `clio-coder/branches` | `{version: 1, tree, switchTurn, fork}` | session branching is wired |
 | `clio-coder/handoff` | `{version: 1, prepare, commit, cancel}` | the handoff service is wired |
 | `clio-coder/context` | `{version: 1, ledger, status, activity?, invoke?}` | the context ledger is wired; `activity: "context.activity_changed"` when an event bus is wired, `invoke` when a command host is |
@@ -157,6 +158,9 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `_clio-coder/session/board` | client to server | Reads tasks, plan, decisions, and task-memory status. |
 | `_clio-coder/decisions/supersede` | client to server | Marks a recorded decision superseded while idle. |
 | `_clio-coder/memory/propose` | client to server | Proposes a memory candidate for review. |
+| `_clio-coder/session/snapshots` | client to server | Lists the session's workspace snapshots as `/rewind` shows them. |
+| `_clio-coder/session/snapshot_preview` | client to server | Reads what restoring one snapshot would change. |
+| `_clio-coder/session/snapshot_restore` | client to server | Restores one snapshot's files, taking an undo snapshot first. |
 | `_clio-coder/session/tree` | client to server | Reads the session tree as the `/tree` navigator shows it. |
 | `_clio-coder/session/switch_turn` | client to server | Moves the append point to a turn and replays the branch. |
 | `_clio-coder/session/fork` | client to server | Starts a new session from a turn and replays it. |
@@ -377,6 +381,9 @@ The remaining `_clio-coder/*` methods project terminal views as bounded read mod
 | `_clio-coder/session/board` | `{sessionId}` | `{version: 1, operatorTasks, plan, decisions, memory, truncated}`. Lists hold at most 100 items and text at most 1 KiB. It reads only; operator tasks change through the `tasks` command. |
 | `_clio-coder/decisions/supersede` | `{sessionId, interviewId, key, correction?}` | `{status, correctionTurn?}` or `{status: "refused", reason}`. Idle only. `correction` is at most 2048 bytes and non-blank. The correction turn is returned for the client to send as a prompt. |
 | `_clio-coder/memory/propose` | `{sessionId, entryId, scope: "repo" or "global", acknowledgeGlobal?}` | `{status: "proposed" or "existing", recordId}`. Global scope without `acknowledgeGlobal: true` returns `{status: "needs_acknowledgement"}`. A proposal the memory domain rejects returns `{status: "refused", reason}`. A proposal is a candidate for review, never an approval. |
+| `_clio-coder/session/snapshots` | `{sessionId}` | `{snapshots, truncated}`, newest first, at most 100. A row is `{n, at, reason, tool?, turnId?, differs, skipped}`; `differs` counts files that differ from the workspace now, or is null when that could not be read. |
+| `_clio-coder/session/snapshot_preview` | `{sessionId, n}` | `{kind: "plan", n, restore, remove, kept, refs, truncated}` or `{kind: "unavailable", reason}`. Each path list holds at most 500 entries; `kept` rows are `{path, why}`, `refs` rows `{kind, label, state, recover}`. |
+| `_clio-coder/session/snapshot_restore` | `{sessionId, n}` | `{kind: "restored", n, undo, restored, removed, kept, failed, refs, truncated}`, `{kind: "unavailable", reason}` or `{kind: "failed", reason, undo}`; `undo` is the snapshot taken first. Idle only (`prompt_active`). |
 | `_clio-coder/session/tree` | `{sessionId}` | `{version: 1, sessionId, leafId, parentSessionId, parentTurnId, nodes, truncated}`. At most 400 nodes, active path kept whole. A node is `{id, parentId, kind, at, label, preview, active, selectable}` with previews at most 240 bytes. |
 | `_clio-coder/session/switch_turn` | `{sessionId, turnId}` | `{sessionId, leafId, _meta}` after replaying the branch. Idle only. `turnId` must be selectable (not a compaction or branch row). |
 | `_clio-coder/session/fork` | `{sessionId, turnId}` | `{sessionId, parentSessionId, parentTurnId, modes, configOptions, _meta}` for the new session, which replaces the hosted one. Idle only. |
