@@ -218,6 +218,7 @@ export const guiTests = [
 	"client-auth",
 	"session-control",
 	"session-overview",
+	"notification-model",
 	"openapi",
 	"boundaries",
 ]

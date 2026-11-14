@@ -688,7 +688,7 @@ try {
 				.click();
 			await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
 			await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-			const problemNotice = page.locator(".notice", { hasText: "validation" }).last();
+			const problemNotice = page.locator(".notice", { hasText: "Check the input" }).last();
 			await problemNotice.waitFor();
 			await page.keyboard.press("Escape");
 			await openDialog.waitFor({ state: "detached" });
@@ -2043,9 +2043,9 @@ try {
 				.click();
 			await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
 			await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-			const toast = page.locator(".notice-region .notice", { hasText: "validation" });
+			const toast = page.locator(".notice-region .notice", { hasText: "Check the input" });
 			await toast.waitFor();
-			assert.match(await toast.innerText(), /validation/);
+			assert.match(await toast.innerText(), /Check the input/);
 			await check("problem-toast");
 			await page.keyboard.press("Escape");
 			await openDialog.waitFor({ state: "detached" });

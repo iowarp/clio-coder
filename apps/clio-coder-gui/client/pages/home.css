@@ -102,6 +102,22 @@
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
+/* While the model check runs, a placeholder holds the row at its resolved height, so the label
+   arrives without moving the row; only opacity breathes, which the compositor runs alone. */
+.newtask__skeleton {
+	display: inline-block;
+	width: min(22ch, 100%);
+	height: 0.9em;
+	vertical-align: middle;
+	border-radius: var(--radius-sm);
+	background: var(--line);
+	animation: newtask-breathe var(--motion-feedback) var(--ease-standard) infinite alternate;
+}
+@keyframes newtask-breathe {
+	to {
+		opacity: 0.45;
+	}
+}
 .newtask__context-label {
 	display: inline-flex;
 	align-items: center;

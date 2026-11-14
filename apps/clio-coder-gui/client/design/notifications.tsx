@@ -6,8 +6,8 @@ import type { MouseEvent } from "react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiProblem } from "../api/client.js";
 import { useLiveState } from "../interaction/announcer.js";
-import type { Notice, NoticeTone } from "./notification-model.js";
-import { DEFAULT_TTL, matchingProblem, noticeAfterDismissal, problemTone } from "./notification-model.js";
+import type { Notice, NoticeInput, NoticeTone } from "./notification-model.js";
+import { DEFAULT_TTL, noticeAfterDismissal, problemNotice, withNotice } from "./notification-model.js";
 import "../interaction/interaction.css";
 
 export type { Notice, NoticeTone } from "./notification-model.js";
@@ -31,12 +31,11 @@ function arm(notice: Notice): void {
 	);
 }
 
-export function notify(input: Omit<Notice, "id" | "at" | "ttl"> & { id?: string; ttl?: number | null }): string {
+export function notify(input: NoticeInput): string {
 	const id = input.id ?? crypto.randomUUID();
 	const ttl = input.ttl === undefined ? DEFAULT_TTL[input.tone] : input.ttl;
 	const notice: Notice = { ...input, id, ttl, at: Date.now() };
-	// The same id replaces in place, which is how a retried request does not stack.
-	notices = [...notices.filter((existing) => existing.id !== id), notice].slice(-5);
+	notices = withNotice(notices, notice);
 	const existing = timers.get(id);
 	if (existing) clearTimeout(existing);
 	timers.delete(id);
@@ -93,17 +92,7 @@ export function reportProblem(error: unknown, scope?: string): void {
 	// reconnect panel, so a toast per query would only bury it.
 	if (error instanceof ApiProblem && error.problem.status === 401) return;
 	if (error instanceof ApiProblem) {
-		const previous = matchingProblem(notices, scope, error.problem);
-		notify({
-			// Client-side failures all use "browser" as their reference, not as a notification identity.
-			id: previous?.id ?? (scope || error.problem.instance === "browser" ? crypto.randomUUID() : error.problem.instance),
-			tone: problemTone(error.problem.code),
-			title: error.problem.title,
-			detail: error.problem.detail,
-			code: error.problem.code,
-			reference: error.problem.instance,
-			...(scope ? { problemScope: scope, occurrences: (previous?.occurrences ?? 0) + 1 } : {}),
-		});
+		notify(problemNotice(notices, error.problem, scope, crypto.randomUUID()));
 		return;
 	}
 	notify({
@@ -124,8 +113,26 @@ const TONE_WORDS: Readonly<Record<NoticeTone, string>> = {
 /** A pointer press on a dismiss control must not pull focus out of whatever the operator was typing in. */
 const keepFocus = (event: MouseEvent<HTMLButtonElement>) => event.preventDefault();
 
+/** A phone-width window keeps two notices in view, a wider one three; the rest are counted. */
+const NARROW_QUERY = "(max-width: 599.98px)";
+function useVisibleCap(): number {
+	const [narrow, setNarrow] = useState(() => typeof matchMedia === "function" && matchMedia(NARROW_QUERY).matches);
+	useEffect(() => {
+		if (typeof matchMedia !== "function") return;
+		const query = matchMedia(NARROW_QUERY);
+		const change = () => setNarrow(query.matches);
+		query.addEventListener("change", change);
+		change();
+		return () => query.removeEventListener("change", change);
+	}, []);
+	return narrow ? 2 : 3;
+}
+
 export function NoticeToasts() {
 	const values = useNotices();
+	const cap = useVisibleCap();
+	const shown = values.slice(-cap);
+	const hidden = values.length - shown.length;
 	const region = useRef<HTMLElement>(null);
 	const [hovered, setHovered] = useState(false);
 	const [focused, setFocused] = useState(false);
@@ -203,7 +210,10 @@ export function NoticeToasts() {
 			>
 				{values.length > 1 && (
 					<div className="notice-region__controls">
-						<span>{values.length} notifications</span>
+						<span>
+							{values.length} notifications
+							{hidden > 0 ? <span className="notice-region__more"> · +{hidden} more</span> : null}
+						</span>
 						<button
 							type="button"
 							onMouseDown={keepFocus}
@@ -221,7 +231,7 @@ export function NoticeToasts() {
 				)}
 				{values.length > 0 && (
 					<div className="notice-region__list">
-						{values.map((notice) => (
+						{shown.map((notice) => (
 							<article className={`notice notice--${notice.tone}`} data-notice-id={notice.id} key={notice.id}>
 								<div className="notice__heading">
 									<span className="notice__glyph" aria-hidden="true">
@@ -238,7 +248,7 @@ export function NoticeToasts() {
 										onClick={(event) => {
 											if (event.currentTarget.contains(document.activeElement)) {
 												refocus.current = noticeAfterDismissal(
-													values.map((item) => item.id),
+													shown.map((item) => item.id),
 													notice.id,
 												);
 												refocusPending.current = true;

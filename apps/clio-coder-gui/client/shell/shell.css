@@ -1143,6 +1143,47 @@ button.wb-chip:hover:not(:disabled) {
 		display: none;
 	}
 }
+/* At phone width the status may give way before the end controls leave the bar, and a waiting
+   approval says it in two words beside the strip's mark. The full label stays in the chip's text, so
+   its accessible name is unchanged; the short words are generated and carry no name of their own. */
+@media (max-width: 390px) {
+	.wb-bar .wb-chip--status {
+		flex: 0 1 auto;
+		min-width: 0;
+	}
+	.wb-bar .wb-chip--status[data-tone="approval"] {
+		position: relative;
+		gap: var(--space-1);
+		padding-inline: var(--space-2);
+	}
+	.wb-bar .wb-chip--status[data-tone="approval"] > span {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+	.wb-bar .wb-chip--status[data-tone="approval"]::before {
+		content: "!" / "";
+		font-family: var(--font-mono);
+		font-weight: 700;
+	}
+	.wb-bar .wb-chip--status[data-tone="approval"]::after {
+		content: "Approval needed" / "";
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}
+/* A phone-width disclosure is at least a 24px target. Zero specificity: a summary sized on purpose,
+   and the 44px row a touch pointer gets, both keep their own rule. Padding grows it, never the type. */
+@media (max-width: 390px) {
+	:where(summary) {
+		min-block-size: 24px;
+		padding-block: 3px;
+	}
+}
 
 .wb-icon.wb-icon--text {
 	display: inline-flex;

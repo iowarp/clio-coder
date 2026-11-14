@@ -390,11 +390,16 @@ export function Home({ client }: { client: Client }) {
 						<summary>
 							<Icon name="models" />
 							<span>
-								{ready
-									? (setup.data?.model ?? setup.data?.targetId ?? "Connected model")
-									: setup.isPending
-										? "Checking model connection…"
-										: "Model connection needs attention"}
+								{ready ? (
+									(setup.data?.model ?? setup.data?.targetId ?? "Connected model")
+								) : setup.isPending ? (
+									<>
+										<span className="newtask__skeleton" aria-hidden="true" />
+										<span className="sr-only">Checking model connection…</span>
+									</>
+								) : (
+									"Model connection needs attention"
+								)}
 							</span>
 							<span className="newtask__context-label">
 								Task settings <Icon name="chevronDown" />

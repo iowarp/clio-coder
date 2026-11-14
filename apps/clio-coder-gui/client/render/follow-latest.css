@@ -17,10 +17,12 @@
 	overflow: visible;
 }
 
+/* The pill rests on the transcript's bottom edge at the column's right gutter, clear of the reading
+   measure, rather than over the text in the middle of the column. */
 .jump-to-latest {
 	position: absolute;
-	bottom: 12px;
-	left: 50%;
+	bottom: var(--space-2);
+	right: var(--chat-gutter, var(--space-4));
 	display: inline-flex;
 	align-items: center;
 	gap: 7px;
@@ -34,7 +36,6 @@
 	font-size: 0.7rem;
 	font-weight: 650;
 	letter-spacing: 0.06em;
-	transform: translateX(-50%);
 	cursor: pointer;
 }
 

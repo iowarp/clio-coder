@@ -289,12 +289,16 @@
 	text-underline-offset: 3px;
 }
 
-/* The stack takes the app layout's own bottom row, so it can never cover a control such as Send or
-   Save; it keeps its width and its place at the right. */
+/* The stack floats over the work instead of taking a row of the app layout: a row cost the workbench
+   its height, and with a few notices the composer fell out of the window. It sits above the
+   workbench's own menus (20) and below dialogs and the phone drawer (30). On a task page it rises
+   above the composer dock where the browser can anchor it, so a notice never covers Send or Stop. */
 .notice-region {
-	justify-self: end;
+	position: fixed;
+	right: var(--space-4);
+	bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+	z-index: 25;
 	width: min(480px, calc(100vw - 2 * var(--space-4)));
-	margin: 0 var(--space-4) var(--space-4);
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
@@ -306,6 +310,22 @@
 }
 .notice-region > * {
 	pointer-events: auto;
+}
+@supports (anchor-name: --notice-dock) {
+	.conversation__dock {
+		anchor-name: --notice-dock;
+	}
+	.notice-region {
+		bottom: calc(var(--space-2) + anchor(--notice-dock top, calc(var(--space-2) + env(safe-area-inset-bottom, 0px))));
+	}
+}
+/* A phone-width window spans the stack across the page gutter. */
+@media (max-width: 599.98px) {
+	.notice-region {
+		left: var(--space-3);
+		right: var(--space-3);
+		width: auto;
+	}
 }
 .notice-region__controls {
 	flex: none;

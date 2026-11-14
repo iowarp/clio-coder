@@ -54,6 +54,23 @@
 	background: var(--on-primary);
 	transform: translateX(14px);
 }
+/* At phone width the box grows to a 24px target through transparent borders; the track is painted
+   inside them, so it still reads as 32x18 and the thumb keeps its place. */
+@media (max-width: 390px) {
+	.switch {
+		height: 24px;
+		border-block: 3px solid transparent;
+	}
+	/* Each state's `background` shorthand resets the clip, so every one of them restates it. */
+	.switch,
+	.switch[aria-checked="true"],
+	.switch:hover:not(:disabled),
+	.switch:active:not(:disabled),
+	.switch[aria-checked="true"]:hover:not(:disabled),
+	.switch[aria-checked="true"]:active:not(:disabled) {
+		background-clip: padding-box;
+	}
+}
 .switch__state {
 	min-width: 3ch;
 	font-size: var(--text-exact);

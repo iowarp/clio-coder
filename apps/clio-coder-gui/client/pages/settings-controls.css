@@ -324,3 +324,12 @@
 	background: var(--well);
 	border-left: 2px solid var(--accent);
 }
+
+/* A link laid out as a block (a flex row's item, a list of pages) is a 24px target at phone width;
+   a link inside a sentence stays inline and keeps the line's height. */
+@media (max-width: 390px) {
+	:where(.wb-main[data-mode="settings"]) a:not(.wb-chip, .wb-icon, .primary) {
+		min-block-size: 24px;
+		padding-block: 2px;
+	}
+}

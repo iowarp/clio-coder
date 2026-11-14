@@ -707,3 +707,12 @@
 .chat-transcript[data-detail="detailed"] .tool-card__took {
 	display: inline;
 }
+
+/* ---- phone-width hit areas (x090 layout) ----------------------------------------------------- */
+/* The outcome line is a one-line disclosure; at phone width padding makes it a 24px target. */
+@media (max-width: 390px) {
+	summary.turn-outcome__line {
+		min-block-size: 24px;
+		padding-block: 3px;
+	}
+}

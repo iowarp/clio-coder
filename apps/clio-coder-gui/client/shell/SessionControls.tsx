@@ -8,6 +8,9 @@ import { type SessionControls, useSessionControls } from "../pages/session-contr
 import type { SessionControlTarget } from "../pages/session-control-model.js";
 import "./session-controls.css";
 
+/** How long a settled stop or close request stays in the task bar before it clears itself. */
+const COMPLETED_NOTICE_MS = 4_000;
+
 interface SessionCommands {
 	readonly controls: SessionControls;
 	requestClose(target: SessionControlTarget): void;
@@ -89,12 +92,38 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 	const unresolved = controls.records.filter((row) => row.stage === "unresolved");
 	const pending = controls.records.filter((row) => row.stage === "sending");
 	const latest = pending.at(-1) ?? controls.records.at(-1);
+	// A pointer over the banner or focus inside it holds a settled request on screen; leaving restarts the wait.
+	const [held, setHeld] = useState({ hover: false, focus: false });
+	const settled =
+		latest?.stage === "complete" && unresolved.length === 0 && pending.length === 0 && controls.notice === null;
+	const expiring =
+		settled && !held.hover && !held.focus && !reviewing
+			? controls.records
+					.filter((row) => row.stage === "complete")
+					.map((row) => row.key)
+					.join(" ")
+			: "";
+	const shown = latest !== undefined || controls.notice !== null;
+	// The section unmounts under the pointer when dismissed, so no leave event ever arrives.
+	useEffect(() => {
+		if (!shown) setHeld({ hover: false, focus: false });
+	}, [shown]);
+	const latestControls = useRef(controls);
+	latestControls.current = controls;
+	useEffect(() => {
+		if (!expiring) return;
+		const timer = setTimeout(() => {
+			const current = latestControls.current;
+			for (const row of current.records) if (row.stage === "complete") current.dismiss(row.key);
+		}, COMPLETED_NOTICE_MS);
+		return () => clearTimeout(timer);
+	}, [expiring]);
 	const returnToWork = () =>
 		requestAnimationFrame(() => {
 			const field = document.querySelector<HTMLTextAreaElement>(".composer__field:not(:disabled)");
 			(field ?? document.getElementById("main"))?.focus();
 		});
-	if (!latest && !controls.notice) return null;
+	if (!shown) return null;
 	const needsReview = unresolved.length > 0 || controls.notice !== null;
 	const label = needsReview ? "Check session" : pending.length ? "Request in progress" : "Request checked";
 	const idle = !needsReview && !pending.length && latest?.nothingStopped === true;
@@ -117,6 +146,12 @@ export function SessionControlNotice({ connected }: { connected: boolean }) {
 				className="session-control-notice"
 				data-state={needsReview ? "unresolved" : pending.length ? "sending" : "complete"}
 				aria-label="Session control status"
+				onMouseEnter={() => setHeld((state) => ({ ...state, hover: true }))}
+				onMouseLeave={() => setHeld((state) => ({ ...state, hover: false }))}
+				onFocus={() => setHeld((state) => ({ ...state, focus: true }))}
+				onBlur={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget)) setHeld((state) => ({ ...state, focus: false }));
+				}}
 			>
 				<div className="session-control-notice__message" role="status">
 					<StatusMark
