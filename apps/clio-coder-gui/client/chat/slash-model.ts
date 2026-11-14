@@ -414,7 +414,13 @@ export const SLASH_ALIASES: readonly SlashAliasSpec[] = [
 		// The task page opens its restore dialog from the URL; the dialog says so when the engine keeps no snapshots.
 		target: { kind: "navigate", path: "?rewind=1" },
 	},
-	...["restart", "upgrade", "panes", "music", "files", "extensions dev", "trust"].map(terminalOnly),
+	...["restart", "upgrade", "panes", "music", "files", "extensions dev"].map(terminalOnly),
+	// x090 spec 12
+	{
+		names: ["trust"],
+		summary: "Review the project files this task ignored",
+		target: { kind: "notice", message: "Open Project trust in the task pane to review the files this task ignored." },
+	},
 ];
 
 const ALIAS_BY_NAME = new Map<string, SlashAliasSpec>(

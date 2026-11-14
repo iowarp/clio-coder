@@ -52,8 +52,19 @@ test("CLI runner: closed command table, exact argv, canonical cwd and prose outc
 		{ kind: "targets.list", extra: "--probe" },
 		{ kind: "targets.use", id: "--help" },
 		{ kind: "targets.remove", id: "a;echo bad" },
+		{ kind: "trust.approve", surface: "settings", hash: "a".repeat(63) },
+		{ kind: "trust.preview", surface: "../x" },
+		{ kind: "memory.decide", id: "--help", decision: "approve" },
 	])
 		assert.throws(() => commandPlan(input), AppProblem);
+	assert.deepEqual(commandPlan({ kind: "trust.preview", surface: "settings" }), {
+		argv: ["config", "trust", "settings", "--json"],
+		output: "json",
+	});
+	assert.deepEqual(commandPlan({ kind: "trust.approve", surface: "settings", hash: "a".repeat(64) }), {
+		argv: ["config", "trust", "settings", "--hash", "a".repeat(64)],
+		output: "exit",
+	});
 	const h = await scratchHome(),
 		log = join(h.path, "commands.jsonl");
 	const runner = new CliRunner({ ...h.env, CLIO_CODER_WEB_CLI: fixture, CLIO_CODER_WEB_COMMAND_LOG: log });
@@ -66,6 +77,11 @@ test("CLI runner: closed command table, exact argv, canonical cwd and prose outc
 			{ command: { kind: "routing.models" }, argv: ["models", "--json", "--offline"] },
 			{ command: { kind: "routing.profiles" }, argv: ["targets", "profile", "list", "--json"] },
 			{ command: { kind: "routing.bindings" }, argv: ["targets", "profile", "bindings", "--json"] },
+			{ command: { kind: "memory.list" }, argv: ["memory", "list", "--json"] },
+			{
+				command: { kind: "memory.decide", id: "mem-0123456789abcdef", decision: "reject" },
+				argv: ["memory", "reject", "mem-0123456789abcdef"],
+			},
 		];
 		for (const { command, argv } of commands) {
 			const value = await runner.run(command, h.path);

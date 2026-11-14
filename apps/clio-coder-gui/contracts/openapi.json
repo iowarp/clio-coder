@@ -10691,7 +10691,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
+									"$ref": "#/components/schemas/Object_issues_layers_rows_4a05be25"
 								}
 							}
 						},
@@ -23045,7 +23045,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_82be1402"
+									"$ref": "#/components/schemas/Union_c42a87cf"
 								}
 							}
 						},
@@ -23140,7 +23140,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Union_82be1402"
+									"$ref": "#/components/schemas/Union_c42a87cf"
 								}
 							}
 						},
@@ -23784,6 +23784,593 @@
 					}
 				}
 			}
+		},
+		"/api/workspaces/{id}/trust/{surface}": {
+			"get": {
+				"operationId": "trustPreview",
+				"summary": "Every file, script and package a project trust surface holds, with the digest an approval names",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "surface",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"$ref": "#/components/schemas/Union_2b85be37"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["workspaceRoot", "surface", "files", "contentHash", "verdict"],
+									"properties": {
+										"workspaceRoot": {
+											"type": "string",
+											"maxLength": 4096
+										},
+										"surface": {
+											"$ref": "#/components/schemas/Union_2b85be37"
+										},
+										"files": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["path", "text", "hash"],
+												"properties": {
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"text": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 262144
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hash": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 128
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"error": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"truncatedFrom": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										},
+										"contentHash": {
+											"anyOf": [
+												{
+													"type": "string",
+													"pattern": "^[0-9a-f]{64}$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"verdict": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "trusted"
+												},
+												{
+													"type": "string",
+													"const": "untrusted"
+												},
+												{
+													"type": "string",
+													"const": "changed"
+												}
+											]
+										},
+										"scripts": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["path", "text", "hash"],
+												"properties": {
+													"path": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"text": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 262144
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"hash": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 128
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"error": {
+														"type": "string",
+														"maxLength": 4096
+													},
+													"truncatedFrom": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 64
+										},
+										"packages": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "source", "kind", "enabled"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"maxLength": 1024
+													},
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 4096
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"enabled": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 1024
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "trustApprove",
+				"summary": "Trust a project surface at the digest of the preview the operator reviewed",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "surface",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"$ref": "#/components/schemas/Union_2b85be37"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["hash"],
+								"properties": {
+									"hash": {
+										"type": "string",
+										"pattern": "^[0-9a-f]{64}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/memory/pending": {
+			"get": {
+				"operationId": "memoryPending",
+				"summary": "Memory lessons waiting for review, newest first",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["records"],
+									"properties": {
+										"records": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"scope",
+													"key",
+													"lesson",
+													"appliesWhen",
+													"avoidWhen",
+													"confidence",
+													"evidenceRefs",
+													"createdAt",
+													"approved"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^mem-[a-f0-9]{16}$"
+													},
+													"scope": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"key": {
+														"type": "string",
+														"maxLength": 1024
+													},
+													"lesson": {
+														"type": "string",
+														"maxLength": 16384
+													},
+													"appliesWhen": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"avoidWhen": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"confidence": {
+														"type": "number",
+														"minimum": 0,
+														"maximum": 1
+													},
+													"evidenceRefs": {
+														"$ref": "#/components/schemas/Array_d853a408"
+													},
+													"createdAt": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"approved": {
+														"type": "boolean"
+													},
+													"rejectedAt": {
+														"type": "string",
+														"maxLength": 64
+													},
+													"repository": {
+														"type": "object",
+														"required": ["key"],
+														"properties": {
+															"key": {
+																"type": "string",
+																"maxLength": 4096
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 200
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/memory/{memoryId}": {
+			"post": {
+				"operationId": "memoryDecide",
+				"summary": "Approve or reject one memory lesson waiting for review",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "memoryId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^mem-[a-f0-9]{16}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					},
+					{
+						"name": "X-Clio-Epoch",
+						"in": "header",
+						"required": false,
+						"schema": {
+							"type": "string"
+						},
+						"description": "Expected server epoch. A mismatch refuses the command before admission; refresh server state before retrying."
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["decision"],
+								"properties": {
+									"decision": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "approve"
+											},
+											{
+												"type": "string",
+												"const": "reject"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"$ref": "#/components/schemas/Problem"
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
@@ -23941,6 +24528,12 @@
 					"$ref": "#/components/schemas/Object_share_tokens_75147379"
 				},
 				"maxItems": 32
+			},
+			"Array_541b9459": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_kind_message_origin_b279b57c"
+				}
 			},
 			"Array_5476b752": {
 				"type": "array",
@@ -24185,12 +24778,6 @@
 					"maxLength": 4096
 				},
 				"maxItems": 64
-			},
-			"Array_da4a6dba": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_kind_message_origin_eda6e2b3"
-				}
 			},
 			"Array_dccae6b5": {
 				"type": "array",
@@ -26303,7 +26890,7 @@
 										"type": "string"
 									},
 									"operation": {
-										"$ref": "#/components/schemas/Union_82be1402"
+										"$ref": "#/components/schemas/Union_c42a87cf"
 									}
 								}
 							}
@@ -28591,11 +29178,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_cancellable_finishedAt_id_d92c15c4": {
+			"Object_cancellable_finishedAt_id_bc1589d9": {
 				"type": "object",
 				"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt", "result"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_73a6759b"
+					"$ref": "#/components/schemas/Shape_f7ed5f9c"
 				},
 				"additionalProperties": false
 			},
@@ -29920,11 +30507,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_exitCode_id_kind_847e19f3": {
+			"Object_exitCode_id_kind_5ab81846": {
 				"type": "object",
 				"required": ["kind", "id", "message", "exitCode", "targets"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_52231196"
+					"$ref": "#/components/schemas/Shape_4e5db761"
 				},
 				"additionalProperties": false
 			},
@@ -30288,11 +30875,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_issues_layers_rows_bb43261c": {
+			"Object_issues_layers_rows_4a05be25": {
 				"type": "object",
 				"required": ["rows", "layers", "issues"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_e120b9e1"
+					"$ref": "#/components/schemas/Shape_e908a932"
 				},
 				"additionalProperties": false
 			},
@@ -30370,7 +30957,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_kind_message_origin_eda6e2b3": {
+			"Object_kind_message_origin_b279b57c": {
 				"type": "object",
 				"required": ["origin", "path", "kind", "message"],
 				"properties": {
@@ -30385,6 +30972,9 @@
 					},
 					"message": {
 						"type": "string"
+					},
+					"surface": {
+						"$ref": "#/components/schemas/Union_2b85be37"
 					}
 				},
 				"additionalProperties": false
@@ -33074,6 +33664,29 @@
 					]
 				}
 			},
+			"Shape_4e5db761": {
+				"kind": {
+					"type": "string",
+					"const": "targets"
+				},
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"message": {
+					"type": "string"
+				},
+				"exitCode": {
+					"type": "number",
+					"const": 0
+				},
+				"targets": {
+					"$ref": "#/components/schemas/Object_targets_truncated_f813c111"
+				},
+				"settings": {
+					"$ref": "#/components/schemas/Object_issues_layers_rows_4a05be25"
+				}
+			},
 			"Shape_4fbca3d1": {
 				"type": {
 					"type": "string",
@@ -33104,29 +33717,6 @@
 				},
 				"total": {
 					"$ref": "#/components/schemas/Union_c9b7ca4a"
-				}
-			},
-			"Shape_52231196": {
-				"kind": {
-					"type": "string",
-					"const": "targets"
-				},
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"message": {
-					"type": "string"
-				},
-				"exitCode": {
-					"type": "number",
-					"const": 0
-				},
-				"targets": {
-					"$ref": "#/components/schemas/Object_targets_truncated_f813c111"
-				},
-				"settings": {
-					"$ref": "#/components/schemas/Object_issues_layers_rows_bb43261c"
 				}
 			},
 			"Shape_52915b31": {
@@ -33916,38 +34506,6 @@
 				},
 				"truncated": {
 					"type": "boolean"
-				}
-			},
-			"Shape_73a6759b": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 1
-				},
-				"cancellable": {
-					"type": "boolean"
-				},
-				"startedAt": {
-					"type": "string"
-				},
-				"progress": {
-					"$ref": "#/components/schemas/Array_62d9e6ab"
-				},
-				"status": {
-					"type": "string",
-					"const": "succeeded"
-				},
-				"finishedAt": {
-					"type": "string"
-				},
-				"result": {
-					"$ref": "#/components/schemas/Union_5f05c598"
 				}
 			},
 			"Shape_74fd8979": {
@@ -35295,17 +35853,6 @@
 					"$ref": "#/components/schemas/Union_46b9d05f"
 				}
 			},
-			"Shape_e120b9e1": {
-				"rows": {
-					"$ref": "#/components/schemas/Array_296ec6ce"
-				},
-				"layers": {
-					"$ref": "#/components/schemas/Array_ea04312e"
-				},
-				"issues": {
-					"$ref": "#/components/schemas/Array_da4a6dba"
-				}
-			},
 			"Shape_e2cced2d": {
 				"id": {
 					"type": "integer",
@@ -35352,6 +35899,17 @@
 				},
 				"closed": {
 					"$ref": "#/components/schemas/Union_76a27b10"
+				}
+			},
+			"Shape_e908a932": {
+				"rows": {
+					"$ref": "#/components/schemas/Array_296ec6ce"
+				},
+				"layers": {
+					"$ref": "#/components/schemas/Array_ea04312e"
+				},
+				"issues": {
+					"$ref": "#/components/schemas/Array_541b9459"
 				}
 			},
 			"Shape_ed19653f": {
@@ -35562,6 +36120,38 @@
 				},
 				"changedAfterCommit": {
 					"$ref": "#/components/schemas/Object_count_paths_d0e3bddd"
+				}
+			},
+			"Shape_f7ed5f9c": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"cancellable": {
+					"type": "boolean"
+				},
+				"startedAt": {
+					"type": "string"
+				},
+				"progress": {
+					"$ref": "#/components/schemas/Array_62d9e6ab"
+				},
+				"status": {
+					"type": "string",
+					"const": "succeeded"
+				},
+				"finishedAt": {
+					"type": "string"
+				},
+				"result": {
+					"$ref": "#/components/schemas/Union_e8a6bdcb"
 				}
 			},
 			"Shape_fa4ddc88": {
@@ -37161,6 +37751,34 @@
 					}
 				]
 			},
+			"Union_2b85be37": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "safety"
+					},
+					{
+						"type": "string",
+						"const": "hooks"
+					},
+					{
+						"type": "string",
+						"const": "settings"
+					},
+					{
+						"type": "string",
+						"const": "extensions"
+					},
+					{
+						"type": "string",
+						"const": "plugins"
+					},
+					{
+						"type": "string",
+						"const": "handbook"
+					}
+				]
+			},
 			"Union_2c0a1e0b": {
 				"anyOf": [
 					{
@@ -37599,19 +38217,6 @@
 					}
 				]
 			},
-			"Union_5f05c598": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_id_message_304430bd"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_847e19f3"
-					},
-					{
-						"$ref": "#/components/schemas/Object_exitCode_id_kind_9f278733"
-					}
-				]
-			},
 			"Union_5f470bd4": {
 				"anyOf": [
 					{
@@ -37971,22 +38576,6 @@
 					},
 					{
 						"type": "null"
-					}
-				]
-			},
-			"Union_82be1402": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_d92c15c4"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_196f4e51"
-					},
-					{
-						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
 					}
 				]
 			},
@@ -38686,6 +39275,22 @@
 					}
 				]
 			},
+			"Union_c42a87cf": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_cancellable_id_kind_c46729e0"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_bc1589d9"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_196f4e51"
+					},
+					{
+						"$ref": "#/components/schemas/Object_cancellable_finishedAt_id_7631365d"
+					}
+				]
+			},
 			"Union_c6270044": {
 				"anyOf": [
 					{
@@ -39019,6 +39624,19 @@
 					},
 					{
 						"type": "null"
+					}
+				]
+			},
+			"Union_e8a6bdcb": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_id_message_304430bd"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_5ab81846"
+					},
+					{
+						"$ref": "#/components/schemas/Object_exitCode_id_kind_9f278733"
 					}
 				]
 			},

@@ -193,6 +193,11 @@ export const routes = {
 		path: "/api/sessions/:id/snapshots/:n/restore",
 	},
 	sessionTranscript: { name: "sessionTranscript", method: "GET", path: "/api/sessions/:id/transcript" },
+	// x090 spec 12
+	trustPreview: { name: "trustPreview", method: "GET", path: "/api/workspaces/:id/trust/:surface" },
+	trustApprove: { name: "trustApprove", method: "POST", path: "/api/workspaces/:id/trust/:surface" },
+	memoryPending: { name: "memoryPending", method: "GET", path: "/api/workspaces/:id/memory/pending" },
+	memoryDecide: { name: "memoryDecide", method: "POST", path: "/api/workspaces/:id/memory/:memoryId" },
 } as const;
 
 export type RuntimeRoute = (typeof routes)[keyof typeof routes];

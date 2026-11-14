@@ -604,3 +604,22 @@
 	grid-column: 1;
 	margin-top: 2px;
 }
+
+/* x090 spec 12 */
+.memory-review {
+	margin-top: var(--space-3);
+}
+.memory-review h4 {
+	margin: 0 0 var(--space-2);
+	font-size: 13px;
+	font-weight: 500;
+}
+.memory-review__row .drill__main {
+	display: grid;
+	gap: 2px;
+	overflow-wrap: anywhere;
+}
+.memory-review__error {
+	grid-column: 1 / -1;
+	margin: 0;
+}

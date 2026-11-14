@@ -4,6 +4,7 @@ import { ArenaChoice, ArenaMatchId, ArenaNote, ArenaStartRequest } from "../cont
 import { Id } from "../contracts/common.js";
 import { MachineAdd, MachineId } from "../contracts/machines.js";
 import { ResearchCampaignId, ResearchStartRequest } from "../contracts/research.js";
+import { MemoryDecision, MemoryId, Sha256, TrustSurface } from "../contracts/review.js";
 import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
@@ -42,6 +43,10 @@ export const CliCommand = Type.Union([
 	Type.Object({ kind: Type.Literal("research.status"), id: ResearchCampaignId }, closed),
 	Type.Object({ kind: Type.Literal("research.report"), id: ResearchCampaignId }, closed),
 	Type.Object({ kind: Type.Literal("research.start"), request: ResearchStartRequest }, closed),
+	Type.Object({ kind: Type.Literal("trust.preview"), surface: TrustSurface }, closed),
+	Type.Object({ kind: Type.Literal("trust.approve"), surface: TrustSurface, hash: Sha256 }, closed),
+	Type.Object({ kind: Type.Literal("memory.list") }, closed),
+	Type.Object({ kind: Type.Literal("memory.decide"), id: MemoryId, decision: MemoryDecision }, closed),
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
@@ -173,5 +178,14 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 				output: "json",
 			};
 		}
+		case "trust.preview":
+			return { argv: ["config", "trust", input.surface, "--json"], output: "json" };
+		// Approval names the digest of the preview the operator saw; the CLI refuses it if the bytes moved since.
+		case "trust.approve":
+			return { argv: ["config", "trust", input.surface, "--hash", input.hash], output: "exit" };
+		case "memory.list":
+			return { argv: ["memory", "list", "--json"], output: "json" };
+		case "memory.decide":
+			return { argv: ["memory", input.decision, input.id], output: "exit" };
 	}
 }
