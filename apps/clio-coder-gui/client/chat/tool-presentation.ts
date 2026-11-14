@@ -393,6 +393,15 @@ export function isSettledStatus(status: string): boolean {
 	return status === "completed" || status === "failed" || status === "cancelled" || status === "unknown";
 }
 
+const awaitingPane: OutputPane = {
+	source: "none",
+	text: "",
+	styled: null,
+	running: false,
+	truncated: false,
+	placeholder: "Nothing has run yet. It waits for your answer.",
+};
+
 /**
  * The output pane for one item. The presence of `partialOutput` says the call is
  * RUNNING, never that it finished; `running` is derived from `status` alone.
@@ -925,10 +934,13 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		options.nowMs !== undefined && options.startedAtMs !== undefined
 			? Math.max(0, Math.floor((options.nowMs - options.startedAtMs) / 1000))
 			: null;
-	if (!settled && elapsedSeconds !== null && elapsedSeconds >= LONG_RUNNING_TOOL_SECONDS)
+	// The engine opens a call as in progress before its approval gate, so a call held for the operator's answer
+	// has not started: it neither runs long nor waits for output.
+	const awaiting = !settled && (options.decision === "pending" || options.decision === "escalated");
+	if (!settled && !awaiting && elapsedSeconds !== null && elapsedSeconds >= LONG_RUNNING_TOOL_SECONDS)
 		facts.push({ label: "still running", value: formatDuration(elapsedSeconds), tone: "warn" });
 
-	const output = outputPane(item, wire);
+	const output = awaiting ? awaitingPane : outputPane(item, wire);
 	// A call that never got its approval did not break, so its row says that instead of echoing the
 	// last line of the refusal, which is an instruction to the model ("Do not retry the same call.").
 	const refused = notApproved(item, wire);
@@ -953,7 +965,7 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		steps,
 		headline,
 		body: kind.body,
-		tone: refused || stopped ? "neutral" : toneFor(item.status, wire.isError),
+		tone: refused || stopped ? "neutral" : awaiting ? "warn" : toneFor(item.status, wire.isError),
 		// A result that reports an error is a failure even when its frame said completed.
 		statusLabel: refused
 			? declinedLabel(options.decision)
@@ -961,8 +973,8 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				? "Stopped"
 				: wire.isError && item.status === "completed"
 					? "Failed"
-					: // A call held for the operator's answer is not queued behind anything: it waits on them.
-						item.status === "pending" && (options.decision === "pending" || options.decision === "escalated")
+					: // A call held for the operator's answer is not queued or running: it waits on them.
+						awaiting
 						? "Waiting for approval"
 						: (STATUS_LABEL[item.status] ?? item.status),
 		settled,
