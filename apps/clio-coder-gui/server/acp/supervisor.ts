@@ -39,7 +39,7 @@ import { PERMISSION_WITHDRAW_METHOD, type PermissionDecision } from "../../contr
 import { SnapshotList, SnapshotOutcome, SnapshotPlan } from "../../contracts/rewind.js";
 import type { SetConfigOption } from "../../contracts/session-config.js";
 import { applySessionDelta, boundedText, emptySession } from "../../contracts/session-projection.js";
-import { BudgetBlock } from "../../contracts/session-telemetry.js";
+import { BudgetBlock, MemoryCapture } from "../../contracts/session-telemetry.js";
 import {
 	Provenance,
 	type SessionDelta,
@@ -95,6 +95,7 @@ import {
 	ACP_JOBS_LIST_METHOD,
 	ACP_LIBRARY_RELOAD_METHOD,
 	ACP_MAX_JOBS,
+	ACP_MEMORY_CAPTURE_META_KEY,
 	ACP_MEMORY_PROPOSE_METHOD,
 	ACP_NOTICE_META_KEY,
 	ACP_QUEUE_CHANGED_NOTIFICATION,
@@ -1165,6 +1166,14 @@ export class Supervisor {
 					this.publish({
 						type: "session.telemetry",
 						payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { budget } },
+					});
+				}
+				// An operator memory capture stands as the session's latest chip until the next one (or its own action).
+				if (meta[ACP_MEMORY_CAPTURE_META_KEY] !== undefined) {
+					const memoryCapture = projectTelemetryValue(MemoryCapture, record(meta[ACP_MEMORY_CAPTURE_META_KEY]));
+					this.publish({
+						type: "session.telemetry",
+						payload: { resource: entry.id, revision: this.revision(entry.id), telemetry: { memoryCapture } },
 					});
 				}
 				return;

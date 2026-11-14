@@ -18395,7 +18395,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_bf2639be"
 								}
 							}
 						},
@@ -19432,7 +19432,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_bf2639be"
 								}
 							}
 						},
@@ -19527,7 +19527,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_bf2639be"
 								}
 							}
 						},
@@ -19577,7 +19577,7 @@
 								"schema": {
 									"type": "array",
 									"items": {
-										"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
+										"$ref": "#/components/schemas/Object_config_contextWork_fleet_bf2639be"
 									}
 								}
 							}
@@ -20118,7 +20118,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Object_config_contextWork_fleet_03daef86"
+									"$ref": "#/components/schemas/Object_config_contextWork_fleet_bf2639be"
 								}
 							}
 						},
@@ -25596,7 +25596,7 @@
 										"minimum": 1
 									},
 									"telemetry": {
-										"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_838c32d0"
+										"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_4ac2cf08"
 									}
 								},
 								"additionalProperties": false
@@ -27228,6 +27228,34 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_action_captureId_kind_096abb54": {
+				"type": "object",
+				"required": ["version", "captureId", "action", "text"],
+				"properties": {
+					"version": {
+						"type": "number",
+						"const": 1
+					},
+					"captureId": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"action": {
+						"$ref": "#/components/schemas/Union_98be399e"
+					},
+					"scope": {
+						"$ref": "#/components/schemas/Union_f9a2673e"
+					},
+					"kind": {
+						"$ref": "#/components/schemas/Union_ca528218"
+					},
+					"text": {
+						"type": "string",
+						"maxLength": 1024
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_action_outcome_f4b8ccad": {
 				"type": "object",
 				"required": ["action", "outcome"],
@@ -28392,10 +28420,10 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_autonomy_budget_commandsRevision_838c32d0": {
+			"Object_autonomy_budget_commandsRevision_4ac2cf08": {
 				"type": "object",
 				"properties": {
-					"$ref": "#/components/schemas/Shape_178e5e21"
+					"$ref": "#/components/schemas/Shape_d129f32f"
 				},
 				"additionalProperties": false
 			},
@@ -29609,7 +29637,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_config_contextWork_fleet_03daef86": {
+			"Object_config_contextWork_fleet_bf2639be": {
 				"type": "object",
 				"required": [
 					"id",
@@ -29626,7 +29654,7 @@
 					"health"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_b023189c"
+					"$ref": "#/components/schemas/Shape_bf52458e"
 				},
 				"additionalProperties": false
 			},
@@ -33077,42 +33105,6 @@
 					"$ref": "#/components/schemas/Object_canStopTurn_decision_escalateAt_da5b47bd"
 				}
 			},
-			"Shape_178e5e21": {
-				"autonomy": {
-					"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
-				},
-				"eggs": {
-					"$ref": "#/components/schemas/Array_9e16c3c4"
-				},
-				"memory": {
-					"$ref": "#/components/schemas/Object_state_e373222f"
-				},
-				"usage": {
-					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
-				},
-				"plan": {
-					"$ref": "#/components/schemas/Object_cancelled_entries_title_39c51394"
-				},
-				"workspace": {
-					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
-				},
-				"trust": {
-					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
-				},
-				"budget": {
-					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
-				},
-				"notices": {
-					"$ref": "#/components/schemas/Array_7aa99c38"
-				},
-				"commandsRevision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"readouts": {
-					"$ref": "#/components/schemas/Object_autonomy_retry_skills_c940d2cd"
-				}
-			},
 			"Shape_189a8354": {
 				"type": {
 					"type": "string",
@@ -34976,66 +34968,6 @@
 					"$ref": "#/components/schemas/Object_agentId_attempt_node_66c67273"
 				}
 			},
-			"Shape_b023189c": {
-				"id": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"workspaceId": {
-					"type": "string",
-					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
-				},
-				"state": {
-					"$ref": "#/components/schemas/Union_5f624b4c"
-				},
-				"revision": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"timeline": {
-					"$ref": "#/components/schemas/Array_029d694f"
-				},
-				"timelineTruncated": {
-					"type": "boolean"
-				},
-				"turns": {
-					"$ref": "#/components/schemas/Array_fb7031ee"
-				},
-				"recoveredOrphan": {
-					"type": "boolean"
-				},
-				"label": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"config": {
-					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
-				},
-				"telemetry": {
-					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_838c32d0"
-				},
-				"contextWork": {
-					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
-				},
-				"permissions": {
-					"$ref": "#/components/schemas/Array_c9ef4f17"
-				},
-				"fleet": {
-					"$ref": "#/components/schemas/Array_fdb8a333"
-				},
-				"health": {
-					"$ref": "#/components/schemas/Array_9ea511b0"
-				},
-				"jobs": {
-					"$ref": "#/components/schemas/Array_3610e4f1"
-				}
-			},
 			"Shape_b3be4c3e": {
 				"version": {
 					"type": "number",
@@ -35428,6 +35360,66 @@
 					"$ref": "#/components/schemas/Array_f07c1c28"
 				}
 			},
+			"Shape_bf52458e": {
+				"id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"workspaceId": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+				},
+				"state": {
+					"$ref": "#/components/schemas/Union_5f624b4c"
+				},
+				"revision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"timeline": {
+					"$ref": "#/components/schemas/Array_029d694f"
+				},
+				"timelineTruncated": {
+					"type": "boolean"
+				},
+				"turns": {
+					"$ref": "#/components/schemas/Array_fb7031ee"
+				},
+				"recoveredOrphan": {
+					"type": "boolean"
+				},
+				"label": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"config": {
+					"$ref": "#/components/schemas/Object_options_target_72bcec3a"
+				},
+				"telemetry": {
+					"$ref": "#/components/schemas/Object_autonomy_budget_commandsRevision_4ac2cf08"
+				},
+				"contextWork": {
+					"$ref": "#/components/schemas/Object_active_latest_version_1e8e184d"
+				},
+				"permissions": {
+					"$ref": "#/components/schemas/Array_c9ef4f17"
+				},
+				"fleet": {
+					"$ref": "#/components/schemas/Array_fdb8a333"
+				},
+				"health": {
+					"$ref": "#/components/schemas/Array_9ea511b0"
+				},
+				"jobs": {
+					"$ref": "#/components/schemas/Array_3610e4f1"
+				}
+			},
 			"Shape_c201611e": {
 				"role": {
 					"$ref": "#/components/schemas/Enum_3bf738aa"
@@ -35738,6 +35730,45 @@
 				},
 				"retry": {
 					"$ref": "#/components/schemas/Union_4bf0a9b3"
+				}
+			},
+			"Shape_d129f32f": {
+				"autonomy": {
+					"$ref": "#/components/schemas/Object_level_modes_source_c5f9dc23"
+				},
+				"eggs": {
+					"$ref": "#/components/schemas/Array_9e16c3c4"
+				},
+				"memory": {
+					"$ref": "#/components/schemas/Object_state_e373222f"
+				},
+				"usage": {
+					"$ref": "#/components/schemas/Object_context_session_turn_795346ed"
+				},
+				"plan": {
+					"$ref": "#/components/schemas/Object_cancelled_entries_title_39c51394"
+				},
+				"workspace": {
+					"$ref": "#/components/schemas/Object_ahead_behind_branch_2d2287ca"
+				},
+				"trust": {
+					"$ref": "#/components/schemas/Object_ignored_b2c77e98"
+				},
+				"budget": {
+					"$ref": "#/components/schemas/Object_ceilingDisplay_ceilingUsd_contextTokens_ca3e1846"
+				},
+				"memoryCapture": {
+					"$ref": "#/components/schemas/Object_action_captureId_kind_096abb54"
+				},
+				"notices": {
+					"$ref": "#/components/schemas/Array_7aa99c38"
+				},
+				"commandsRevision": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"readouts": {
+					"$ref": "#/components/schemas/Object_autonomy_retry_skills_c940d2cd"
 				}
 			},
 			"Shape_d2ae50e5": {
@@ -38822,6 +38853,26 @@
 					}
 				]
 			},
+			"Union_98be399e": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "remembered"
+					},
+					{
+						"type": "string",
+						"const": "forgot"
+					},
+					{
+						"type": "string",
+						"const": "undone"
+					},
+					{
+						"type": "string",
+						"const": "refused"
+					}
+				]
+			},
 			"Union_9962ea3d": {
 				"anyOf": [
 					{
@@ -39357,6 +39408,26 @@
 					}
 				]
 			},
+			"Union_ca528218": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "fact"
+					},
+					{
+						"type": "string",
+						"const": "preference"
+					},
+					{
+						"type": "string",
+						"const": "rule"
+					},
+					{
+						"type": "string",
+						"const": "command"
+					}
+				]
+			},
 			"Union_cae92167": {
 				"anyOf": [
 					{
@@ -39818,6 +39889,22 @@
 					{
 						"type": "string",
 						"const": "reviewed"
+					}
+				]
+			},
+			"Union_f9a2673e": {
+				"anyOf": [
+					{
+						"type": "string",
+						"const": "session"
+					},
+					{
+						"type": "string",
+						"const": "project"
+					},
+					{
+						"type": "string",
+						"const": "global"
 					}
 				]
 			},

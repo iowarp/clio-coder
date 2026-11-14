@@ -36,8 +36,15 @@ export interface MemoryPromotionRedaction {
 	sourceFields: string[];
 }
 
+/** What an operator-stated memory says it is; the operator's words or the background classifier chose it. */
+export const OPERATOR_STATED_KINDS = ["fact", "preference", "rule", "command"] as const;
+export type OperatorStatedKind = (typeof OPERATOR_STATED_KINDS)[number];
+
 export interface MemoryRecordProvenance {
-	sourceKind: "evidence" | "task-bank-entry" | "handoff-snapshot";
+	/** `operator-stated`: the operator told Clio to remember it in a submitted prompt; their words are the approval. */
+	sourceKind: "evidence" | "task-bank-entry" | "handoff-snapshot" | "operator-stated";
+	/** Only on `operator-stated` records. */
+	statedKind?: OperatorStatedKind;
 	evidenceId?: string;
 	sourceSessionId?: string;
 	sourceEntryId?: string;

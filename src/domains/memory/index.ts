@@ -79,6 +79,29 @@ export {
 	rejectMemoryRecord,
 } from "./operations.js";
 export {
+	classifyOperatorStatement,
+	type DurableOperatorScope,
+	detectOperatorMemoryIntent,
+	explicitOperatorScope,
+	isOperatorStated,
+	normalizeOperatorStatement,
+	OPERATOR_MEMORY_SCOPES,
+	OPERATOR_SECRET_REFUSAL,
+	OPERATOR_STATEMENT_MAX_CHARS,
+	type OperatorMemoryIntent,
+	type OperatorMemoryScope,
+	type OperatorRetraction,
+	type OperatorStatementClassification,
+	type OperatorStatementWrite,
+	operatorStatedKind,
+	operatorStatementHoldsSecret,
+	operatorStatementMatch,
+	rememberOperatorStatement,
+	restoreOperatorStatement,
+	retractOperatorStatement,
+	slashRememberIntent,
+} from "./operator-statement.js";
+export {
 	applyScopeIdentity,
 	MEMORY_PROMOTION_SCOPES,
 	type MemoryPromotionScope,
@@ -103,8 +126,10 @@ export {
 	type MemoryPromptOptions,
 	type MemoryRecordStanding,
 	memoryRecordStanding,
+	type OperatorSessionNote,
 	renderMemoryPromptSection,
 	selectMemoryForPrompt,
+	withOperatorSessionNotes,
 } from "./prompt-section.js";
 export {
 	memoryIdFromEvidence,
@@ -227,6 +252,7 @@ export type {
 	MemoryStoreFile,
 	MemoryStoreValidationResult,
 	MemoryValidationIssue,
+	OperatorStatedKind,
 } from "./types.js";
-export { MEMORY_SCOPES, MEMORY_VERSION } from "./types.js";
+export { MEMORY_SCOPES, MEMORY_VERSION, OPERATOR_STATED_KINDS } from "./types.js";
 export { validateMemoryRecord, validateMemoryStore } from "./validate.js";

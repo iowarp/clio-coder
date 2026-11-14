@@ -90,6 +90,7 @@ export interface InteractiveSlashSubmitExpansion {
 
 type SlashChat = Pick<
 	ChatLoop,
+	| "operatorMemory"
 	| "discoverOperatorEgg"
 	| "eggsCommand"
 	| "clearSkillSurface"
@@ -999,6 +1000,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		// worker's output name a file the operator never mentioned.
 		submitOperatorNote: (text) =>
 			void submitExpanded({ text, images: [], workingContextPaths: [], pendingSkillRequests: [] }),
+		...(deps.chat.operatorMemory ? { operatorMemory: deps.chat.operatorMemory } : {}),
 		submitChat: (text) => {
 			const draft = activeDraft;
 			activeDraft = undefined;

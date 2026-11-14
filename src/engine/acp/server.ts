@@ -20,6 +20,7 @@ import {
 	ACP_MAX_MODEL_ID_BYTES,
 	ACP_MAX_TARGET_ID_BYTES,
 	ACP_MAX_TARGETS,
+	ACP_MEMORY_CAPTURE_META_KEY,
 	ACP_MEMORY_META_KEY,
 	ACP_NOTICE_META_KEY,
 	ACP_SAFE_SETTINGS_KEYS,
@@ -816,6 +817,22 @@ interface AcpAgentAttribution {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The capture chip's fields, closed sets only, so a client never renders an arbitrary engine object. */
+function memoryCaptureMeta(chip: Record<string, unknown>): Record<string, unknown> {
+	const pick = (value: unknown, allowed: readonly string[]): string | undefined =>
+		typeof value === "string" && allowed.includes(value) ? value : undefined;
+	const scope = pick(chip.scope, ["session", "project", "global"]);
+	const kind = pick(chip.kind, ["fact", "preference", "rule", "command"]);
+	return {
+		version: 1,
+		captureId: typeof chip.captureId === "string" ? chip.captureId.slice(0, 64) : "",
+		action: pick(chip.action, ["remembered", "forgot", "undone", "refused"]) ?? "remembered",
+		...(scope !== undefined ? { scope } : {}),
+		...(kind !== undefined ? { kind } : {}),
+		text: typeof chip.text === "string" ? safeStoredString(chip.text, 1024) : "",
+	};
 }
 
 function eventRecord(value: unknown): AcpEventRecord {
@@ -1917,7 +1934,11 @@ function handleChatEvent(
 					sessionUpdate: "agent_message_chunk",
 					content: textContent(`${safeStoredString(event.text, ACP_MAX_CHUNK_BYTES - 2)}\n`),
 				},
-				{ ...ORCHESTRATOR_UPDATE_META, [ACP_NOTICE_META_KEY]: { level: event.level } },
+				{
+					...ORCHESTRATOR_UPDATE_META,
+					[ACP_NOTICE_META_KEY]: { level: event.level },
+					...(isRecord(event.memory) ? { [ACP_MEMORY_CAPTURE_META_KEY]: memoryCaptureMeta(event.memory) } : {}),
+				},
 			);
 		}
 		return;
