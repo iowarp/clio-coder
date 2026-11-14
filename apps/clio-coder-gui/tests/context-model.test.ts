@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { contextView } from "../client/chat/context-model.js";
+import { contextWorkView } from "../client/chat/context-work-model.js";
 import type { WireContextLedger } from "../contracts/context-ledger.js";
+import type { ContextOperation } from "../contracts/context-work.js";
 import { withLedgerDisplay } from "../server/services/context-display.js";
 
 const WIRE: WireContextLedger = {
@@ -84,4 +86,45 @@ test("the window bar's parts come worded from the server, the smallest categorie
 	);
 	assert.equal(segments[3]?.fill, 0.7, "the folded part's width is the folded shares");
 	assert.deepEqual(withLedgerDisplay({ ...WIRE, contextWindow: 0, groups }).display.segments, []);
+});
+
+test("a folded part holding a category with no reported share reads not reported, not a smaller sum", () => {
+	const groups = [
+		{ category: "system", label: "System prompt", tokens: 4096, percent: 3.125 },
+		{ category: "messages", label: "Conversation", tokens: 16384, percent: 12.5 },
+		{ category: "tools", label: "Tools", tokens: 1310, percent: 1 },
+		{ category: "memory", label: "Memory", tokens: 655, percent: null },
+		{ category: "skills", label: "Skills", tokens: 262, percent: 0.2 },
+	];
+	const { segments } = withLedgerDisplay({ ...WIRE, groups }).display;
+	assert.deepEqual(
+		segments.map(({ label, share, fill }) => [label, share, fill]),
+		[
+			["Conversation", "12.5%", 12.5],
+			["System prompt", "3.1%", 3.125],
+			["Tools", "1.0%", 1],
+			["Other", "not reported", 0],
+		],
+	);
+});
+
+test("a compaction that summarized nothing says so, as the terminal does", () => {
+	const compaction = (facts: NonNullable<ContextOperation["facts"]>): ContextOperation => ({
+		version: 1,
+		id: "op-1",
+		kind: "compaction",
+		sessionId: null,
+		cwd: "/work",
+		origin: "automatic",
+		reason: "",
+		startedAt: "2026-11-14T08:00:00.000Z",
+		outcome: "completed",
+		facts,
+	});
+	const evicted = contextWorkView(compaction([{ kind: "removed", unit: "observations", count: 12 }]));
+	assert.equal(evicted.label, "Complete · no summary");
+	assert.match(evicted.message ?? "", /nothing was summarized/u);
+	assert.equal(contextWorkView(compaction([])).label, "Complete · no summary");
+	const summarized = contextWorkView(compaction([{ kind: "summarized", unit: "messages", count: 40 }]));
+	assert.deepEqual([summarized.label, summarized.message], ["Complete", null]);
 });

@@ -7,14 +7,38 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { sessionReadScope } from "../api/sessions.js";
 
-import { type Spend, tokensText } from "./session-usage-model.js";
+import { type Spend, tokensText, usageReadable } from "./session-usage-model.js";
 
 type Turns = SessionSnapshot["turns"];
 // A GET may supersede the push it began after, but cannot overwrite a newer push that raced it.
 const contextReadBasis = new WeakMap<ContextLedger, number>();
 
-/** Changes when a turn settles, which is when the ledger and the accounting can have moved. */
+/** How many of the retained turns have settled. The projection keeps only the newest turns, so this stops at its cap. */
 export const settledTurns = (turns: Turns): number => turns.filter((turn) => turn.status !== "running").length;
+
+/**
+ * Changes on every settle, which is when the ledger and the accounting can have moved, and has no ceiling: the id
+ * of the newest settled turn. A count of settled turns stops moving once the projection drops its oldest turns.
+ */
+export function settledKey(turns: Turns): string {
+	for (let index = turns.length - 1; index >= 0; index--) {
+		const turn = turns[index];
+		if (turn && turn.status !== "running") return turn.id;
+	}
+	return "none";
+}
+
+/** The settle key of the session snapshot every view of this task reads, so each read of a session keys alike. */
+function useSettledKey(client: Client, sessionId: string): string {
+	return (
+		useQuery({
+			queryKey: ["session", sessionId],
+			queryFn: () => client.call(routes.session, { params: { id: sessionId }, query: {}, body: {} }),
+			enabled: false,
+			select: (snapshot) => settledKey(snapshot.turns),
+		}).data ?? "none"
+	);
+}
 
 export function useSessionCapabilities(client: Client, sessionId: string, open: boolean) {
 	return useQuery({
@@ -45,8 +69,11 @@ export function useContextWork(client: Client, sessionId: string) {
 	}).data;
 }
 
-export function useContextLedger(client: Client, sessionId: string, settled: number, enabled: boolean) {
+// `_settled` is the callers' settled-turn count. The key reads the snapshot's settle key instead, because the count
+// stops changing in a long task.
+export function useContextLedger(client: Client, sessionId: string, _settled: number, enabled: boolean) {
 	const queries = useQueryClient();
+	const settled = useSettledKey(client, sessionId);
 	const live = useSessionTelemetry(client, sessionId)?.usage?.context;
 	const operation = useContextWork(client, sessionId)?.latest;
 	const pushedRevision =
@@ -73,6 +100,9 @@ export function useContextLedger(client: Client, sessionId: string, settled: num
 		structuralSharing: false,
 		enabled,
 		retry: false,
+		// A refused read stays refused until a turn settles or the session is reloaded; those paths change the key or
+		// invalidate it, so a remount alone does not ask again.
+		retryOnMount: false,
 		// The previous turn's figure stays on screen while the next one is read, so nothing blinks.
 		placeholderData: (previous, previousQuery) =>
 			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
@@ -82,14 +112,28 @@ export function useContextLedger(client: Client, sessionId: string, settled: num
 	return { ...query, data, isPending: !data && query.isPending };
 }
 
-export function useSessionUsage(client: Client, sessionId: string, settled: number, enabled: boolean) {
+/**
+ * The session's accounting and provider quota, read only from a build that reports all of it. Its failures are shown
+ * in the Usage view; the header chips and the Session column read it in the background and stay quiet.
+ */
+export function useSessionUsage(client: Client, sessionId: string, _settled: number, enabled: boolean) {
 	const scope = sessionReadScope(sessionId);
+	const settled = useSettledKey(client, sessionId);
+	const readable =
+		useQuery({
+			queryKey: ["session-capabilities", sessionId],
+			queryFn: () => client.call(routes.sessionCapabilities, { params: { id: sessionId }, query: {}, body: {} }),
+			enabled: false,
+			select: usageReadable,
+		}).data ?? false;
 	return useQuery({
+		meta: { errorSurface: "inline" },
 		queryKey: ["session-usage", sessionId, settled, scope],
 		queryFn: ({ signal }) =>
 			client.call(routes.sessionUsage, { params: { id: sessionId }, query: {}, body: {} }, undefined, signal),
-		enabled,
+		enabled: enabled && readable,
 		retry: false,
+		retryOnMount: false,
 		placeholderData: (previous, previousQuery) =>
 			previousQuery?.queryKey[1] === sessionId && previousQuery.queryKey.at(-1) === scope ? previous : undefined,
 	});

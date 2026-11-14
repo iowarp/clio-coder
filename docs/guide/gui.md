@@ -309,11 +309,14 @@ From left to right: the sidebar toggle and New task button (shown while the rail
 | --- | --- |
 | Project | The project name; links to its task list. |
 | Status | `Needs your approval`, `Waiting for a slot`, `Working` with elapsed time, `Waiting on N workers`, `Starting`, `Paused`, `Closed`, `Unavailable` or `Last turn failed`, plus `recovered after a server interruption` when the server re-bound the task. |
-| Context ring | Percent of the context window used. Opens the Context window view. |
+| Context ring | Percent of the context window used. Opens the Context window view. For a task that is not open the ring is grey and its title ends with `· last known`. |
+| Quota | `Quota <percent>`, shown only when a provider window of the task's plan reports 80% used or more, naming the fullest window and its reset time on hover. Warning colour from 80%, failure colour from 100%. Opens Usage and quota. |
 | Spend | Token count and cost, each only when some of it was measured or estimated. With neither, the chip is absent. Opens Usage and quota. |
 | Changes | Added and removed line counts of applied edits. Opens the Changes view. |
 
 The last button shows or hides the right sidebar (`Ctrl/Cmd+Shift+\`). The ring and spend update while a turn runs, from the telemetry described under [Live telemetry](#live-telemetry), and from CLIO Coder's settled accounting after it ends.
+
+A completed context compaction that summarized nothing (it only evicted or masked older tool output, which stays recallable) reads `Complete · no summary`, as in the terminal.
 
 ### Session column
 
