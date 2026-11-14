@@ -127,12 +127,18 @@ function linkTo(fromDir: string, target: string): string {
 }
 
 function escapeCell(value: string): string {
-	return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+	return value.replace(/[\\|]/g, "\\$&").replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 
 function codeList(values: ReadonlyArray<string>, limit: number): string {
 	if (values.length === 0) return "—";
-	const shown = values.slice(0, limit).map((value) => `\`${escapeCell(value)}\``);
+	const shown = values.slice(0, limit).map((value) => {
+		if (!/[\\`]/.test(value)) return `\`${escapeCell(value)}\``;
+		// A code span keeps a backslash literally, so `\\|` would show both backslashes. Raw <code> with every ASCII
+		// punctuation mark as a numeric reference shows the value exactly: no emphasis, link, escape or cell split.
+		const encoded = value.replace(/[!-/:-@[-`{-~]/g, (mark) => `&#${mark.charCodeAt(0)};`);
+		return `<code>${escapeCell(encoded)}</code>`;
+	});
 	return values.length > limit ? `${shown.join(", ")}, …` : shown.join(", ");
 }
 
