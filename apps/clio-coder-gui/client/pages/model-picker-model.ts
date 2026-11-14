@@ -1,6 +1,6 @@
-import { ACP_TARGET_MODEL_LIMIT } from "../../contracts/wire.js";
+import { ACP_TARGET_MODEL_LIMIT } from "../../contracts/runtime.js";
 
-export { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "../../contracts/wire.js";
+export { ACP_TARGET_MODEL_LIMIT, MODEL_TARGET_PATHS } from "../../contracts/runtime.js";
 // The model picker's decisions: which ids a target offers, how the saved value sits among them, and
 // which setting names the target a model field belongs to. Pure, so node:test covers it.
 
