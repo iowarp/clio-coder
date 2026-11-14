@@ -398,6 +398,48 @@ describe("private pane host layout (POSIX)", () => {
 		equal(run({}).stdout.trim(), "shell args=0 leaked=0");
 	});
 
+	it("the shim records the status of a Clio that ended without its exit marker, and keeps one Clio wrote", (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "clio-shim-marker-"));
+		t.after(() => rmSync(scratch, { recursive: true, force: true }));
+		const shim = join(scratch, "pane-shell");
+		const clio = join(scratch, "fake-clio");
+		const socket = join(scratch, `${SESSION}.sock`);
+		const marker = exitMarkerPath(socket, "w1:p1");
+		writeFileSync(shim, renderPosixShellShim("linux"), { mode: 0o755 });
+		writeFileSync(
+			clio,
+			'#!/bin/sh\n[ -z "$OWN" ] || printf "%s" "$OWN" >"$MARKER"\n[ "$1" = kill ] && kill -9 $$\nexit "$1"\n',
+			{
+				mode: 0o755,
+			},
+		);
+		const run = (status: string, own = "") => {
+			rmSync(marker, { force: true });
+			const launch = createPosixHostPlatform({ env: {} }).paneLaunch([clio, status]);
+			spawnSync("/bin/sh", [shim], {
+				env: {
+					PATH: "/usr/bin:/bin",
+					SHELL: "/bin/true",
+					HERDR_PANE_ID: "w1:p1",
+					HERDR_SOCKET_PATH: socket,
+					MARKER: marker,
+					OWN: own,
+					...launch.env,
+				},
+			});
+			return readWorkspaceExitResult(marker);
+		};
+		// A Clio that failed before it registered its marker, or was killed, must not leave the launcher at the shell.
+		deepStrictEqual(run("3"), { exitCode: 3, summary: null });
+		deepStrictEqual(run("kill"), { exitCode: 137, summary: null });
+		deepStrictEqual(run("0"), { exitCode: 0, summary: null });
+		deepStrictEqual(run("5", "summary\n"), { exitCode: 0, summary: "summary\n" });
+		deepStrictEqual(
+			readdirSync(scratch).filter((name) => name.endsWith(".tmp")),
+			[],
+		);
+	});
+
 	it("replaces a changed shell shim without truncating an existing reader's inode", (t) => {
 		const scratch = mkdtempSync(join(tmpdir(), "host-atomic-"));
 		t.after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -728,6 +770,128 @@ describe("private host attached-client shutdown", () => {
 			if (!reattached) await follower;
 		});
 	}
+});
+
+describe("private host after the Clio pane's shell exits", () => {
+	it("stops a host left holding only herdr's replacement workspace", {
+		skip: process.platform === "win32",
+	}, async (t) => {
+		const scratch = mkdtempSync(join(tmpdir(), "host-replaced-"));
+		const socketPath = join(tmpdir(), `${SESSION}.sock`);
+		const binary = join(scratch, "client");
+		const program = join(scratch, "client.mjs");
+		writeFileSync(
+			program,
+			[
+				'import { createConnection } from "node:net";',
+				"const socket = createConnection(process.env.HERDR_SOCKET_PATH);",
+				'socket.on("connect", () => socket.write(JSON.stringify({ method: "test.attach", params: { pid: process.pid } }) + "\\n"));',
+				'socket.on("end", () => process.exit(0));',
+				'socket.on("error", () => process.exit(1));',
+				'process.on("SIGHUP", () => { socket.end(); process.exit(0); });',
+			].join("\n"),
+		);
+		writeFileSync(
+			binary,
+			`#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${program.replaceAll("'", "'\\''")}' "$@"\n`,
+			{ mode: 0o755 },
+		);
+		const pids = new Set<number>();
+		const methods: string[] = [];
+		let nonce = "";
+		// The Clio pane, until the operator ends its shell and herdr puts an untagged shell workspace in its place.
+		let workspaces: Array<{ id: string; tokens: () => Record<string, string> }> = [];
+		let attached = false;
+		const server = createServer((socket) => {
+			let pending = "";
+			socket.on("data", (chunk) => {
+				pending += chunk.toString();
+				if (!pending.includes("\n")) return;
+				const request = JSON.parse(pending.trim());
+				if (request.method === "test.attach") {
+					pids.add(request.params.pid);
+					attached = true;
+					return;
+				}
+				methods.push(request.method);
+				const pane = (id: string, tokens: Record<string, string>) => ({
+					pane_id: `${id}:p1`,
+					tab_id: "t1",
+					workspace_id: id,
+					cwd: scratch,
+					tokens,
+				});
+				let result: unknown = {};
+				if (request.method === "ping") result = { version: "fixture", protocol: 21 };
+				if (request.method === "workspace.list") result = { workspaces: workspaces.map((w) => ({ workspace_id: w.id })) };
+				if (request.method === "pane.list") {
+					const found = workspaces.find((w) => w.id === request.params.workspace_id);
+					result = { panes: found ? [pane(found.id, found.tokens())] : [] };
+				}
+				if (request.method === "workspace.create") {
+					workspaces = [{ id: "w1", tokens: () => ({ clio_coder_workspace: nonce }) }];
+					result = { workspace: { workspace_id: "w1" }, root_pane: pane("w1", {}) };
+				}
+				if (request.method === "pane.report_metadata") nonce = request.params.tokens.clio_coder_workspace;
+				socket.end(`${JSON.stringify({ id: request.id, result })}\n`);
+				if (request.method === "server.stop") server.close();
+			});
+		});
+		const launches: Array<ReturnType<typeof launchWorkspace>> = [];
+		t.after(async () => {
+			for (const pid of pids) {
+				try {
+					process.kill(pid, "SIGKILL");
+				} catch {}
+			}
+			if (server.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+			await Promise.allSettled(launches);
+			rmSync(socketPath, { force: true });
+			rmSync(scratch, { recursive: true, force: true });
+		});
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(socketPath, resolve);
+		});
+		const launch = launchWorkspace({
+			herdrPath: binary,
+			herdrVersion: "fixture",
+			nested: false,
+			outputStyle: "standard",
+			cwd: scratch,
+			clioArgv: ["unused"],
+			platform: {
+				hostLayout: () => ({
+					socketPath,
+					herdrArgs: [],
+					hostEnv: { HERDR_SOCKET_PATH: socketPath },
+					configPath: join(scratch, "config.toml"),
+					shell: { defaultShell: null, shellMode: "non_login" },
+					sessionFile: join(scratch, "session.json"),
+					disposableDirs: [],
+					cleanupArgs: null,
+				}),
+				paneLaunch: () => ({ env: {}, line: null }),
+				detach: (child) => {
+					child.kill("SIGHUP");
+				},
+				afterClientExit: () => undefined,
+			},
+		});
+		launches.push(launch);
+		for (let attempt = 0; attempt < 400 && !attached; attempt++) await sleep(25);
+		ok(attached, "fixture client did not attach");
+		// Clio was killed without its marker and the operator typed `exit` at the pane's shell.
+		workspaces = [{ id: "w2", tokens: () => ({}) }];
+		const result = await launch;
+		equal(result.status, "closed");
+		if (result.status === "closed") {
+			equal(result.exitCode, 0);
+			equal(result.workspaceLeftRunning, false);
+		}
+		ok(methods.includes("server.stop"), "the replacement workspace must not keep the host running");
+		equal(methods.includes("workspace.close"), false);
+	});
 });
 
 describe("managed herdr config", () => {
