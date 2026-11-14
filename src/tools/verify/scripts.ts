@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { resolveSafeCwd, runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
-import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox/main-session.js";
+import {
+	type MainSandboxPolicy,
+	mainSandboxWriteHint,
+	readOnlyMainSandboxPolicy,
+} from "../../core/sandbox/main-session.js";
 import { declaredVerificationScripts, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { ToolResult } from "../registry.js";
 import { runVectorTool } from "../safe-exec.js";
@@ -35,6 +40,7 @@ import {
 	parsePerfBaseline,
 	renderPerfBaseline,
 } from "./perf.js";
+import { captureProofSnapshot } from "./proof.js";
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
 import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
@@ -206,6 +212,11 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 export interface VerifyRunOptions {
 	signal?: AbortSignal;
 	shellSandbox?: MainSandboxPolicy;
+	/**
+	 * The checkout a declared check's cwd, reference and baseline resolve against; the process working directory when
+	 * absent. A caller running a check in another checkout passes it here rather than changing the process directory.
+	 */
+	workspaceRoot?: string;
 }
 
 /** The main-session sandbox's write hint for a contained check's failed output, on its own line, or "". */
@@ -525,6 +536,7 @@ async function runJudgedCheck(
 	try {
 		result = await runCommandVector(file, vector, {
 			cwd,
+			...(options?.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
 			timeoutMs: check.timeoutMs,
 			maxOutputBytes: JUDGED_CHECK_MAX_OUTPUT_BYTES,
 			...(options?.signal !== undefined ? { signal: options.signal } : {}),
@@ -555,9 +567,9 @@ async function runJudgedCheck(
 	}
 	const report =
 		check.kind === "numeric-compare" && check.numeric !== undefined
-			? judgeNumericCompare(result.stdout, check.numeric, process.cwd())
+			? judgeNumericCompare(result.stdout, check.numeric, options?.workspaceRoot ?? process.cwd())
 			: check.kind === "perf-budget" && check.perf !== undefined
-				? judgePerfBudget(result.durationMs, check.perf, process.cwd())
+				? judgePerfBudget(result.durationMs, check.perf, options?.workspaceRoot ?? process.cwd())
 				: new Error(`declared check '${check.id}' has kind ${check.kind} without its parameters`);
 	if (report instanceof Error) return { kind: "error", message: `verify: ${report.message}`, details: facts };
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
@@ -622,7 +634,7 @@ async function runReproduceCheck(check: DeclaredCheck, options?: VerifyRunOption
 		cwd: check.cwd,
 		timeoutMs: check.timeoutMs,
 		spec: check.reproduce,
-		workspaceRoot: process.cwd(),
+		workspaceRoot: options?.workspaceRoot ?? process.cwd(),
 		...(options?.signal !== undefined ? { signal: options.signal } : {}),
 		...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
 	});
@@ -632,14 +644,70 @@ async function runReproduceCheck(check: DeclaredCheck, options?: VerifyRunOption
 export async function runProjectCheck(check: DeclaredCheck, options?: VerifyRunOptions): Promise<ToolResult> {
 	const [file, ...vector] = check.command;
 	if (file === undefined) return { kind: "error", message: `verify: declared check '${check.id}' has empty argv` };
-	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
+	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, options?.workspaceRoot ?? process.cwd());
 	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
 	if (check.kind === "reproduce") return withDeclaredEvidence(await runReproduceCheck(check, options), check);
 	if (check.kind !== "command") {
 		return withDeclaredEvidence(await runJudgedCheck(check, file, vector, cwd, options), check);
 	}
+	if (check.proof !== undefined)
+		return withDeclaredEvidence(await runProofCheck(check, file, vector, cwd, options), check);
 	const result = await runVectorTool("verify", file, vector, { cwd, timeout_ms: check.timeoutMs }, options);
 	return withDeclaredEvidence(result, check);
+}
+
+async function runProofCheck(
+	check: DeclaredCheck,
+	file: string,
+	vector: string[],
+	cwd: string,
+	options?: VerifyRunOptions,
+): Promise<ToolResult> {
+	const proof = check.proof;
+	if (proof === undefined || check.proofCatalogDigest === undefined)
+		return { kind: "error", message: "verify: proof declaration or catalog fingerprint is missing" };
+	let scratch: string | undefined;
+	try {
+		const snapshot = captureProofSnapshot(process.cwd(), proof.inputs, check.proofCatalogDigest);
+		scratch = mkdtempSync(path.join(tmpdir(), "clio-proof-"));
+		const sandbox = readOnlyMainSandboxPolicy({
+			workspace: process.cwd(),
+			scratchRoots: [],
+			scratchDir: scratch,
+		});
+		const result = await runVectorTool(
+			"verify",
+			file,
+			vector,
+			{ cwd, timeout_ms: check.timeoutMs },
+			{ ...options, shellSandbox: { ...sandbox, network: false } },
+		);
+		if (result.kind === "error") return result;
+		if (
+			result.details?.launched !== true ||
+			result.details.exitCode !== 0 ||
+			result.details.aborted === true ||
+			result.details.timedOut === true ||
+			result.details.outputCapped === true ||
+			captureProofSnapshot(process.cwd(), proof.inputs) !== snapshot
+		)
+			return {
+				kind: "error",
+				message: `verify: proof '${check.id}' has incomplete execution or changed inputs; no proof evidence recorded`,
+			};
+		return {
+			...result,
+			output: `${result.output}\nDeclared proof result: ${proof.status} (${proof.goals.map((goal) => goal.id).join(", ")})`,
+			details: { ...result.details, proof: { check: check.id, proof, snapshot } },
+		};
+	} catch (error) {
+		return {
+			kind: "error",
+			message: `verify: proof '${check.id}' unavailable: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	} finally {
+		if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
+	}
 }
 
 /**

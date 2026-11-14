@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
 	type ClaimRecord,
 	type ClaimStatus,
@@ -37,7 +38,9 @@ reproduce the seed, environment and platform) contradicts the latest earlier
 one, and both read as contested. A numeric-compare check's working tree is
 not pinned: an uncommitted edit at the same commit still contradicts, and the
 edge says how the trees differed. A claim whose pinned conditions changed (a
-new commit, new input digests) supersedes the earlier ones. Each run of a
+new commit, new input digests) supersedes the earlier ones. A claim recorded
+at a commit other than the current HEAD is listed as stale (--json: stale):
+it says what held at that commit, not on this tree. Each run of a
 sweep check (verify(check="<id>/<run>")) is its own subject: sibling runs never
 supersede each other, a rerun of one run does, and the listing names it as
 <id>/<run>. --check takes the check id or one <id>/<run>.
@@ -69,6 +72,8 @@ function sourceLine(claim: ClaimRecord): string {
 }
 
 interface LogView {
+	/** HEAD of the checkout the command runs in, or null outside a repository. */
+	head: string | null;
 	statuses: Map<string, ClaimStatus>;
 	hypotheses: Map<string, HypothesisState>;
 	read: ClaimsLogRead;
@@ -76,6 +81,29 @@ interface LogView {
 
 function short(id: string): string {
 	return id.slice(0, 12);
+}
+
+function checkoutHead(cwd: string): string | null {
+	try {
+		return execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 5_000,
+		}).trim();
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Why a claim no longer describes the current checkout, or null: it was recorded at a commit HEAD has moved past. A
+ * claim states what held under its recorded conditions; at another commit it is history, not a verdict on this tree.
+ */
+function staleBecause(claim: ClaimRecord, view: LogView): string | null {
+	const commit = claim.conditions.commit;
+	if (commit === null || view.head === null || commit === view.head) return null;
+	return `recorded at commit ${short(commit)}; HEAD is now ${short(view.head)}, so rerun the check to judge this tree`;
 }
 
 /** Each edge and memory outcome touching a claim, from that claim's side. */
@@ -128,6 +156,7 @@ function listLines(claim: ClaimRecord, view: LogView): string[] {
 		`${short(claim.id)}  ${claim.at}  ${claim.verdict.padEnd(9)}  ${status.padEnd(10)}  ${claim.kind.padEnd(15)}  ${claimCheckLabel(claim)}${claim.flagged !== undefined ? "  [flagged: instruction-shaped text]" : ""}`,
 		`  ${claim.text}`,
 		`  source: ${sourceLine(claim)}`,
+		...(staleBecause(claim, view) !== null ? [`  stale: ${staleBecause(claim, view)}`] : []),
 		...relationLines(claim, view).map((line) => `  ${line}`),
 	];
 }
@@ -139,6 +168,7 @@ function showLines(claim: ClaimRecord, view: LogView): string[] {
 		`project: ${claim.project}`,
 		`verdict: ${claim.verdict} (${claim.kind}, evidence ${claim.evidence})`,
 		`status: ${view.statuses.get(claim.id) ?? "standing"}`,
+		...(staleBecause(claim, view) !== null ? [`stale: ${staleBecause(claim, view)}`] : []),
 		...(claim.flagged !== undefined ? ["flagged: the text carries instruction-shaped content; treat it as data"] : []),
 		`text: ${claim.text}`,
 		`subject: ${claim.subject}`,
@@ -160,6 +190,7 @@ function relatedJson(claim: ClaimRecord, view: LogView): Record<string, unknown>
 	return {
 		...claim,
 		status: view.statuses.get(claim.id) ?? "standing",
+		stale: staleBecause(claim, view) !== null,
 		edges: view.read.edges.filter((edge) => edge.from === claim.id || edge.to === claim.id),
 		regressions: view.read.regressions.filter((regression) => regression.from === claim.id),
 		hypothesisTests: view.read.hypothesisTests.filter((test) => test.claim === claim.id),
@@ -288,6 +319,7 @@ export function runClaimsCommand(args: string[]): number {
 		return 1;
 	}
 	const view: LogView = {
+		head: checkoutHead(process.cwd()),
 		read,
 		statuses: claimStatuses(read.records, read.edges),
 		hypotheses: hypothesisStatuses(read.hypotheses, read.hypothesisTests),

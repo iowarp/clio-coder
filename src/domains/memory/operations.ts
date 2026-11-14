@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { clioProjectRoot } from "../../core/project-root.js";
 import {
 	type MemoryMutationOptions,
+	memoryRoot,
 	mutateMemoryRecords,
 	pruneStaleMemoryRecords,
 	sortMemoryRecords,
@@ -23,7 +24,70 @@ export async function approveMemoryRecord(
 	memoryId: string,
 	now: Date = new Date(),
 ): Promise<MemoryRecord> {
-	return updateMemoryRecord(dataDir, memoryId, (record) => approveRecord(record, now));
+	let cleared: string[] = [];
+	const approved = await updateMemoryRecord(dataDir, memoryId, (record) => {
+		cleared = [...(record.regressions ?? [])];
+		return approveRecord(record, now);
+	});
+	if (cleared.length > 0)
+		appendClearedRegressions(dataDir, { id: approved.id, at: now.toISOString(), regressions: cleared });
+	return approved;
+}
+
+/**
+ * The regressions an operator re-approval cleared from one record. Approval removes `regressions` from the record so
+ * it can stand in the prompt again; this line keeps what was overturned and when it was cleared, so a re-approved
+ * record still shows it was once contradicted. Kept beside the store, not in it, so the record schema is unchanged.
+ */
+export interface ClearedMemoryRegressions {
+	id: string;
+	at: string;
+	by: "operator";
+	regressions: string[];
+}
+
+export function memoryRegressionsClearedPath(dataDir: string): string {
+	return join(memoryRoot(dataDir), "regressions-cleared.jsonl");
+}
+
+function appendClearedRegressions(dataDir: string, entry: Omit<ClearedMemoryRegressions, "by">): void {
+	const path = memoryRegressionsClearedPath(dataDir);
+	mkdirSync(dirname(path), { recursive: true });
+	// One small line with O_APPEND, written after the approval landed, so it never names a clearing that did not happen.
+	appendFileSync(
+		path,
+		`${JSON.stringify({ id: entry.id, at: entry.at, by: "operator", regressions: entry.regressions })}\n`,
+		{
+			mode: 0o600,
+		},
+	);
+}
+
+/** Every recorded clearing, oldest first, optionally for one record. A torn or foreign line is skipped. */
+export function readClearedMemoryRegressions(dataDir: string, memoryId?: string): ClearedMemoryRegressions[] {
+	let text: string;
+	try {
+		text = readFileSync(memoryRegressionsClearedPath(dataDir), "utf8");
+	} catch {
+		return [];
+	}
+	const entries: ClearedMemoryRegressions[] = [];
+	for (const line of text.split("\n")) {
+		if (line.trim().length === 0) continue;
+		let value: unknown;
+		try {
+			value = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (typeof value !== "object" || value === null) continue;
+		const { id, at, regressions } = value as Record<string, unknown>;
+		if (typeof id !== "string" || typeof at !== "string" || !Array.isArray(regressions)) continue;
+		if (memoryId !== undefined && id !== memoryId) continue;
+		const notes = regressions.filter((item): item is string => typeof item === "string");
+		entries.push({ id, at, by: "operator", regressions: notes });
+	}
+	return entries;
 }
 
 export async function rejectMemoryRecord(

@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
+import { UNTRUSTED_CONTENT_BANNER } from "../../core/untrusted-content.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
 import { hypothesisStatuses, latestHypotheses } from "./hypotheses.js";
@@ -25,8 +26,8 @@ import type { ClaimEdgeRecord, ClaimRecord, ClaimStatus } from "./types.js";
 export const CLAIMS_DELIVERY_REGISTRATION_ID = "observer.claims-delivery";
 export const CLAIMS_DELIVERY_VERIFY_REGISTRATION_ID = "observer.claims-delivery-verify";
 
-/** Per check message cap and per hook check cap, so one hook point adds at most about 2.4 KB. */
-export const CLAIMS_DELIVERY_MAX_CHARS = 1200;
+/** Per check message cap (the untrusted banner included) and per hook check cap: at most about 2.6 KB per hook point. */
+export const CLAIMS_DELIVERY_MAX_CHARS = 1300;
 export const CLAIMS_DELIVERY_MAX_CHECKS = 2;
 const CLAIM_TEXT_MAX_CHARS = 280;
 
@@ -90,7 +91,9 @@ export function claimsDeliveryMessage(
 	const superseded = claims.filter((claim) => statuses.get(claim.id) === "superseded");
 	const { openContradiction, lastSupersede } = checkEdgeState(check, read, statuses);
 	if (openContradiction === undefined && superseded.length === 0) return null;
-	const parts: string[] = [`[Claims] Check '${check}' has recorded claims this task touches.`];
+	// Claim text is built from typed fields, but check ids and paths come from the project's catalog, which a cloned
+	// repository may ship; the banner marks what follows as data before any of it.
+	const parts: string[] = [`[Claims] Check '${check}' has recorded claims this task touches.`, UNTRUSTED_CONTENT_BANNER];
 	const later = openContradiction === undefined ? undefined : byId.get(openContradiction.from);
 	const earlier = openContradiction === undefined ? undefined : byId.get(openContradiction.to);
 	if (later !== undefined && earlier !== undefined) {
@@ -186,7 +189,8 @@ function hypothesisNotes(check: string, read: ClaimsLogRead): Array<{ state: str
 					: `claim ${short(test.claim)} disagrees: the result did not satisfy the declared comparison`;
 		notes.push({
 			state: `hypothesis\0${hypothesis.id}\0${test.id}`,
-			message: `Hypothesis ${hypothesis.hypothesis} of ${hypothesis.slate} (record ${short(hypothesis.id)}) is ${state.status} in the claims ledger: ${why}. The slate keeps status proposed; report this status from the ledger (clio-coder claims) and leave the slate as written.`,
+			// The hypothesis id and slate path are model-authored, so the note opens with the untrusted banner.
+			message: `${UNTRUSTED_CONTENT_BANNER} Hypothesis ${hypothesis.hypothesis} of ${hypothesis.slate} (record ${short(hypothesis.id)}) is ${state.status} in the claims ledger: ${why}. The slate keeps status proposed; report this status from the ledger (clio-coder claims) and leave the slate as written.`,
 		});
 		if (notes.length >= HYPOTHESIS_NOTE_MAX) break;
 	}

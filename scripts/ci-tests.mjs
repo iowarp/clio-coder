@@ -231,6 +231,8 @@ export const guiTests = [
 	// x090 round 2, truth
 	"task-rename",
 	"metrics-scope-model",
+	// x090 round 2, keys
+	"row-keys-model",
 ]
 	.map((name) => `tests/${name}.test.ts`)
 	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");

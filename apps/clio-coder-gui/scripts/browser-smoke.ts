@@ -627,7 +627,7 @@ try {
 			await page.getByRole("heading", { name: "Shortcuts & help", exact: true }).waitFor();
 			await page.getByRole("searchbox", { name: "Search shortcuts and help", exact: true }).waitFor();
 			assert.equal(await page.getByRole("link", { name: "Open public documentation ↗", exact: true }).count(), 0);
-			await page.getByRole("button", { name: "Documentation", exact: true }).click();
+			await page.getByRole("tab", { name: "Documentation", exact: true }).click();
 			const publicHelp = page.getByRole("link", { name: "Open public documentation ↗", exact: true });
 			assert.equal(await publicHelp.getAttribute("href"), "https://coder.iowarp.ai/docs.html");
 			assert.equal(await publicHelp.getAttribute("referrerpolicy"), "no-referrer");
@@ -2249,8 +2249,19 @@ try {
 				() => (document.querySelector(".report-dialog__preview")?.textContent ?? "").trim().length > 0,
 			);
 			assert.doesNotMatch(await preview.innerText(), /No preview yet/);
+			// Report opens over Help: Esc closes Report alone and returns to the button that opened it (R2-18).
+			const helpDialog = page.getByRole("dialog", { name: "Shortcuts & help", exact: true });
+			assert.equal(await helpDialog.count(), 1, "opening Report closed Help");
 			await page.keyboard.press("Escape");
 			await dialog.waitFor({ state: "detached" });
+			assert.equal(await helpDialog.count(), 1, "Esc on Report also closed Help");
+			await eventually(
+				() => page.evaluate(() => document.activeElement?.textContent?.trim() ?? ""),
+				"Report a problem",
+				"Esc on Report did not return focus to Help's Report button",
+			);
+			await page.keyboard.press("Escape");
+			await helpDialog.waitFor({ state: "detached" });
 			let planPosts = 0;
 			const planRoute = "**/api/workspaces/*/reports/plan";
 			await page.route(planRoute, async (route) => {
@@ -2283,6 +2294,8 @@ try {
 				assert.equal(planPosts, before + 1, "Try again did not re-POST the plan exactly once");
 				await page.keyboard.press("Escape");
 				await dialog.waitFor({ state: "detached" });
+				await page.keyboard.press("Escape");
+				await helpDialog.waitFor({ state: "detached" });
 			} finally {
 				// The stub marks its 500s, so the response listener never records them, however late they land.
 				await page.unroute(planRoute);
@@ -2654,7 +2667,7 @@ try {
 				// Help: the Documentation view names itself once, in its tab.
 				await page.keyboard.press("Control+/");
 				const help = page.getByRole("dialog", { name: "Shortcuts & help", exact: true });
-				await help.getByRole("button", { name: "Documentation", exact: true }).click();
+				await help.getByRole("tab", { name: "Documentation", exact: true }).click();
 				await help.getByRole("link", { name: "Open public documentation ↗", exact: true }).waitFor();
 				assert.equal(
 					await help.evaluate(
@@ -2701,6 +2714,129 @@ try {
 					{ border: "none", decoration: "none", cursor: "default" },
 				);
 				assert.match(blockedLook.text, /\(link blocked\)/u);
+				await page.setViewportSize({ width, height: 1050 });
+			});
+		// Round 2 keys (R2-1, R2-11, R2-18): keys land where the chord sent them and focus comes back to where it
+		// left. Once, at a fixed desktop size, so the rail is on screen.
+		if (runIndex === 0 && zoom === 1)
+			await step("keys land where the chord sent them", async () => {
+				await page.setViewportSize({ width: 1440, height: 900 });
+				const focused = () =>
+					page.evaluate(() => {
+						const active = document.activeElement;
+						return active ? `${active.tagName.toLowerCase()}.${active.className}|${active.textContent?.trim() ?? ""}` : "";
+					});
+				const composerFocused = () => composerField.evaluate((node) => node === document.activeElement);
+				// A slow first load: the palette and Help chunks are held until the step lets them through.
+				const holds = new Map<string, () => void>();
+				const hold = (name: string) => {
+					const gate = new Promise<void>((resolve) => holds.set(name, resolve));
+					return async (route: Route) => {
+						await gate;
+						await route.continue().catch(() => {});
+					};
+				};
+				const paletteChunk = /\/assets\/CommandPalette-[^/]*\.js$/u;
+				const helpChunk = /\/assets\/HelpDialog-[^/]*\.js$/u;
+				await page.route(paletteChunk, hold("palette"));
+				await page.route(helpChunk, hold("help"));
+				try {
+					await page.goto(noticeSessionUrl);
+					await composerField.waitFor();
+					await composerField.fill("");
+					await composerField.focus();
+					for (const [chord, name, chunk, combobox] of [
+						["Control+K", "Run a command", "palette", "combobox"],
+						["Control+/", "Search shortcuts and help", "help", "searchbox"],
+					] as const) {
+						await page.keyboard.press(chord);
+						await page.keyboard.type("zz");
+						await page.keyboard.press("Enter");
+						const dialog = page.getByRole("dialog");
+						assert.equal(
+							await dialog.getByLabel(name, { exact: true }).inputValue(),
+							"zz",
+							`${chord}: keys lost while loading`,
+						);
+						assert.equal(await composerField.inputValue(), "", `${chord}: the typed keys reached the message box`);
+						holds.get(chunk)?.();
+						// The body swaps in with the typed text and keeps focus in its field.
+						const field = dialog.getByRole(combobox, { name, exact: true });
+						await field.waitFor();
+						assert.equal(await field.inputValue(), "zz", `${chord}: the loaded body dropped the typed text`);
+						assert.equal(
+							await field.evaluate((node) => node === document.activeElement),
+							true,
+							`${chord}: focus left the field`,
+						);
+						await page.keyboard.press("Escape");
+						await dialog.waitFor({ state: "detached" });
+						await eventually(composerFocused, true, `${chord}: Esc did not return focus to the message box`);
+					}
+				} finally {
+					for (const release of holds.values()) release();
+					await page.unroute(paletteChunk);
+					await page.unroute(helpChunk);
+				}
+				// Help's topics are tabs: one tab stop, and the arrow keys move and select.
+				await page.keyboard.press("Control+/");
+				const help = page.getByRole("dialog", { name: "Shortcuts & help", exact: true });
+				const guide = help.getByRole("tab", { name: "Using CLIO Coder", exact: true });
+				await guide.focus();
+				await page.keyboard.press("ArrowRight");
+				const shortcuts = help.getByRole("tab", { name: "Shortcuts", exact: true });
+				assert.equal(await shortcuts.getAttribute("aria-selected"), "true", "ArrowRight did not select the next topic");
+				assert.equal(await shortcuts.evaluate((node) => node === document.activeElement), true);
+				await page.keyboard.press("End");
+				assert.equal(
+					await help.getByRole("tab", { name: "Documentation", exact: true }).getAttribute("aria-selected"),
+					"true",
+				);
+				await page.keyboard.press("Escape");
+				await help.waitFor({ state: "detached" });
+				// Esc from the palette opened by the rail's Search returns to Search.
+				const search = page.getByRole("button", { name: "Search", exact: true });
+				await search.click();
+				await page.getByRole("combobox", { name: "Run a command", exact: true }).waitFor();
+				await page.keyboard.press("Escape");
+				await eventually(focused, "button.wb-action|Search", "Esc from the palette did not return to Search");
+				// Up and Down, j and k move between the rail's task rows.
+				const rows = page
+					.locator("section.wb-side__tasks")
+					.locator("a.wb-task__main, button.wb-task__main:not([disabled])");
+				assert.ok((await rows.count()) >= 2, "the rail lists fewer than two tasks to move between");
+				await rows.nth(0).focus();
+				await page.keyboard.press("ArrowDown");
+				assert.equal(
+					await rows.nth(1).evaluate((node) => node === document.activeElement),
+					true,
+					"ArrowDown did not move rows",
+				);
+				await page.keyboard.press("k");
+				assert.equal(await rows.nth(0).evaluate((node) => node === document.activeElement), true, "k did not move rows");
+				await page.keyboard.press("j");
+				assert.equal(await rows.nth(1).evaluate((node) => node === document.activeElement), true, "j did not move rows");
+				// Enter in the header rename returns focus to the title button rather than the page.
+				await page.goto(noticeSessionUrl);
+				const rename = page.locator(".wb-bar__rename");
+				await rename.click();
+				await page.getByRole("textbox", { name: "Task name", exact: true }).waitFor();
+				await page.keyboard.press("Enter");
+				await eventually(
+					() => rename.evaluate((node) => node === document.activeElement).catch(() => false),
+					true,
+					"Enter in the header rename left focus on the page",
+				);
+				// New task, by chord and by the rail's button, lands in the Home message box.
+				await page.goto(`${origin}/sessions`);
+				await page.locator("main").getByRole("heading", { level: 1 }).first().waitFor();
+				await page.keyboard.press("Control+Shift+O");
+				await page.waitForURL(/\/(sessions\/[^/]+)?$/u);
+				await eventually(composerFocused, true, "Ctrl+Shift+O did not focus the message box");
+				await page.goto(`${origin}/sessions`);
+				await page.locator("main").getByRole("heading", { level: 1 }).first().waitFor();
+				await page.locator("nav.wb-side__actions").getByRole("button", { name: "New task", exact: true }).click();
+				await eventually(composerFocused, true, "the rail's New task did not focus the message box");
 				await page.setViewportSize({ width, height: 1050 });
 			});
 		await context.close();

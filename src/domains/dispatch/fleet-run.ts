@@ -1409,6 +1409,7 @@ async function runFleetHoldingWorkspace(
 						requestedAuthority: spec.capabilityClass,
 						approvedAuthority: spec.capabilityClass,
 						expectedResultContract: spec.resultContract.kind,
+						resultContract: spec.resultContract,
 						executionRole: requestExecutionRole({
 							agentId: task.agent,
 							resolveFacts: (id) => {

@@ -339,18 +339,25 @@ export async function recordHostVerificationClaims(input: {
 /**
  * Append claims, then carry each contradiction that overturned an agreement into memory (#406): every memory record
  * citing one of the overturned agreeing claims gets a regression naming both claims, written through memory's own
- * locked mutation, and a `regression` line in the claims log names the records it reached, none included.
+ * locked mutation, and a `regression` line in the claims log names the records it reached, none included. Every
+ * producer of claims (main-thread verify, host verification, research iterations) appends through here, so a
+ * contradiction reaches memory when it is recorded rather than on some later append.
  */
-async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Promise<void> {
+export async function recordClaims(claims: ReadonlyArray<ClaimRecord>, now: Date): Promise<void> {
 	const edges = await appendClaims(claims);
 	// Every project this append touched, so a contradiction whose regression did not land earlier is retried here.
 	const projects = new Set([...claims.map((claim) => claim.project), ...edges.map((edge) => edge.project)]);
 	for (const project of projects) {
 		const log = readClaims(project);
 		const regressed = new Set(log.regressions.map((regression) => regression.edge));
-		const group = log.edges.filter((edge) => edge.kind === "contradicts" && !regressed.has(edge.id));
-		if (group.length === 0) continue;
 		const claimsById = new Map(log.records.map((claim) => [claim.id, claim]));
+		// Only a disagreement can overturn an agreement. A flip back to agreement never gets a regression line, so
+		// without this filter every such edge would be evaluated again, against the whole log, on every append.
+		const group = log.edges.filter(
+			(edge) =>
+				edge.kind === "contradicts" && !regressed.has(edge.id) && claimsById.get(edge.from)?.verdict === "disagrees",
+		);
+		if (group.length === 0) continue;
 		const overturned = group.flatMap((edge) => {
 			const later = claimsById.get(edge.from);
 			const backing = overturnedAgreements(edge, log.records, log.edges);

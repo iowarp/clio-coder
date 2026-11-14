@@ -355,6 +355,7 @@ async function runFleet(
 				return {
 					requestedAuthority: spec.capabilityClass,
 					approvedAuthority: spec.capabilityClass,
+					resultContract: spec.resultContract,
 					expectedResultContract:
 						context.planRole === true
 							? "delegation-plan"

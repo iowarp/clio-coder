@@ -168,7 +168,9 @@ import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
 import {
 	INTERNAL_HELPER_RESULT_KINDS,
+	isHoareResultContract,
 	mutationReportFailures,
+	type ResultContract,
 	resultContractAuthorship,
 	validateRecipeResult,
 	validateStructuredHelperResult,
@@ -3112,7 +3114,10 @@ function resolveDispatchAdmissionStage(
 	let mcpNetworkWithheld: WorkerMcpNetworkWithheld[] = [];
 	if (mcp !== null) {
 		// The write roots the run's sandbox binds (workerSandboxFor), so the grant follows what the worker can write.
-		const readOnly = req.readOnly === true || normalizeAgentSpec(recipe).capabilityClass === "read-only";
+		const readOnly =
+			req.readOnly === true ||
+			normalizeAgentSpec(recipe).capabilityClass === "read-only" ||
+			isHoareResultContract(dispatchResultContract(req, recipe));
 		const treeRoot = req.taskWorktree?.path ?? req.cwd ?? process.cwd();
 		const writeRoots = readOnly ? [] : pathScope.writeBoundaries.length > 0 ? pathScope.writeBoundaries : [treeRoot];
 		const scoped = withholdWritableMcpNetwork(mcp, { writeRoots, launchRoot: treeRoot });
@@ -3172,6 +3177,7 @@ function withLedgerToolNarrowing(tools: ReadonlyArray<ToolName>, req: DispatchRe
  * line, the WorkerSpec and the receipt all derive from this one function.
  */
 function workerSandboxFor(input: {
+	resultContract?: ResultContract | null;
 	runtimeKind: RuntimeDescriptor["kind"];
 	req: DispatchRequest;
 	pathScope: DispatchPathScope;
@@ -3179,25 +3185,30 @@ function workerSandboxFor(input: {
 	allowedTools: ReadonlyArray<ToolName>;
 	settings: Readonly<ReturnType<ConfigContract["get"]>> | undefined;
 }): { applies: boolean; spec: WorkerSandboxSpec | undefined } {
+	const hoare = isHoareResultContract(input.resultContract);
+	if (hoare && input.runtimeKind !== "http")
+		throw new Error(
+			"dispatch: Hoare verification requires a native runtime with read-only, network-off command containment",
+		);
 	if (input.runtimeKind !== "http") return { applies: false, spec: undefined };
-	const mode = input.settings?.safety.sandbox ?? "auto";
+	const mode = hoare ? "required" : (input.settings?.safety.sandbox ?? "auto");
 	const dependencyRoots =
 		input.req.taskWorktree !== undefined && mode !== "off" && sandboxAvailability().available
 			? shareTaskWorktreeDependencies(input.req.taskWorktree)
 			: [];
 	const spec = resolveWorkerSandboxSpec({
 		mode,
-		readOnly: input.readOnly,
+		readOnly: hoare || input.readOnly,
 		cwd: input.req.cwd ?? process.cwd(),
 		writeBoundaries: input.pathScope.writeBoundaries,
 		...(input.req.taskWorktree !== undefined
 			? { taskWorktree: { path: input.req.taskWorktree.path, branch: input.req.taskWorktree.branch } }
 			: {}),
 		allowedTools: input.allowedTools,
-		networkSetting: input.settings?.safety.sandboxNetwork === true,
+		networkSetting: !hoare && input.settings?.safety.sandboxNetwork === true,
 		// Dispatch-granted read roots ride with the dependency roots: readable, never writable.
 		dependencyRoots: [...dependencyRoots, ...(input.req.extraReadRoots ?? [])],
-		...(input.settings !== undefined
+		...(input.settings !== undefined && !hoare
 			? { env: sandboxEnvPolicy(input.settings), unixSockets: input.settings.safety.sandboxUnixSockets }
 			: {}),
 		// The hooks of the worker's tree stay read-only, as in the main-session sandbox.
@@ -3210,7 +3221,14 @@ function workerSandboxFor(input: {
 	const local = (input.settings?.fleet.nodes?.length ?? 0) === 0;
 	return {
 		applies: true,
-		spec: spec !== undefined && local && sandboxAvailability().available ? { ...spec, backendExpected: true } : spec,
+		spec:
+			spec === undefined
+				? undefined
+				: {
+						...spec,
+						...(hoare ? { network: false } : {}),
+						...(local && sandboxAvailability().available ? { backendExpected: true } : {}),
+					},
 	};
 }
 
@@ -3502,6 +3520,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	}
 	assertWriteRootsEnforceable(input.target.runtime, spec.writeRoots);
 	const sandbox = workerSandboxFor({
+		resultContract: workerResultContract ?? null,
 		runtimeKind: input.target.runtime.kind,
 		req: input.req,
 		pathScope: input.pathScope,
@@ -5979,7 +5998,10 @@ export function createDispatchBundle(
 		}
 		enforceCapabilityGate(target.target.id, target.modelCapabilities, req.requiredCapabilities);
 		const cwd = req.cwd ?? process.cwd();
-		const readOnly = req.readOnly === true || spec.capabilityClass === "read-only";
+		const readOnly =
+			req.readOnly === true ||
+			spec.capabilityClass === "read-only" ||
+			isHoareResultContract(dispatchResultContract(req, recipe));
 		await assertStoreGrantAdmissible(req, readOnly);
 		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
 			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
@@ -6149,6 +6171,7 @@ export function createDispatchBundle(
 			projectContextTier: tier,
 			autonomy: "default",
 			...workerSandboxPromptLine({
+				resultContract: dispatchResultContract(req, recipe) ?? null,
 				runtimeKind: target.runtime.kind,
 				req,
 				pathScope,
@@ -10672,7 +10695,9 @@ export function createDispatchBundle(
 			recipe,
 			agentSpec,
 			effectiveTools,
-			req.readOnly === true || agentSpec.capabilityClass === "read-only",
+			req.readOnly === true ||
+				agentSpec.capabilityClass === "read-only" ||
+				isHoareResultContract(dispatchResultContract(req, recipe)),
 			pathScope,
 			withLiveAutonomy(settings),
 			target,
@@ -10696,7 +10721,10 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
-			readOnly: req.readOnly === true || agentSpec.capabilityClass === "read-only",
+			readOnly:
+				req.readOnly === true ||
+				agentSpec.capabilityClass === "read-only" ||
+				isHoareResultContract(dispatchResultContract(req, recipe)),
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
 		const resolution: DispatchPlanTaskResolution = {
