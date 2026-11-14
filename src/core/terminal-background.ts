@@ -60,6 +60,9 @@ export function terminalHandover(
 	return handed;
 }
 
+/** How often a session waiting for its pane's size writes to the pane, which is what makes the host apply it. */
+const HOST_NUDGE_MS = 4;
+
 /** How much of the terminal a pane host's own chrome may take from its one pane. */
 const HOST_CHROME = { columns: 12, rows: 6 } as const;
 
@@ -89,6 +92,7 @@ export async function awaitHandedTerminalSize(
 	await new Promise<void>((resolve) => {
 		const finish = (): void => {
 			clearTimeout(timer);
+			clearInterval(nudge);
 			stdout.off("resize", onResize);
 			resolve();
 		};
@@ -96,7 +100,14 @@ export async function awaitHandedTerminalSize(
 			if (attached()) finish();
 		};
 		const timer = setTimeout(finish, options.timeoutMs ?? 1_000);
+		// The host resizes the pane when its client attaches but applies that on the pane's next write, or failing
+		// that on its own tick about 250 ms later. A session that waits in silence waits for the tick (238 ms of
+		// idle before the first frame on 4 of 5 launches), so it keeps writing a sequence that changes nothing on
+		// screen: the resize then follows within 2 ms of the first write after the attach.
+		const write = (): boolean => stdout.write("\u001b[m");
+		const nudge = setInterval(write, HOST_NUDGE_MS);
 		stdout.on("resize", onResize);
+		write();
 	});
 }
 
