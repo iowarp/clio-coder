@@ -871,12 +871,18 @@ test("a call the engine opened as in progress but holds at its approval gate wai
 	assert.equal(held.tone, "warn");
 	assert.equal(held.output.running, false);
 	assert.doesNotMatch(held.output.placeholder ?? "", /Running/);
-	assert.equal(held.facts.some((fact) => fact.label === "still running"), false);
+	assert.equal(
+		held.facts.some((fact) => fact.label === "still running"),
+		false,
+	);
 	const summary = summarizeActivity([bash], new Map([["g", "pending"]]));
 	assert.deepEqual([summary.running, summary.waiting, summary.label], [0, 1, "Approval needed"]);
 	const allowed = presentTool(bash, { decision: "approved", nowMs: 120_000, startedAtMs: 0 });
 	assert.equal(allowed.statusLabel, "Running");
-	assert.equal(allowed.facts.some((fact) => fact.label === "still running"), true);
+	assert.equal(
+		allowed.facts.some((fact) => fact.label === "still running"),
+		true,
+	);
 	assert.equal(summarizeActivity([bash], new Map([["g", "approved"]])).running, 1);
 });
 
