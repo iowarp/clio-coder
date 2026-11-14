@@ -113,6 +113,8 @@ const failures: string[] = [],
 // is 800 CSS pixels inside a 1600px window; neither CSS zoom nor pinch scaling is applied.
 const runs = [...(values["zoom-only"] ? [] : widths.map((width) => ({ width, zoom: 1 }))), { width: 800, zoom: 2 }];
 const statuses: { method: string; path: string; status: number }[] = [];
+/** Set on responses a step fulfils itself; the error-response tally skips them. */
+const stubHeader = "x-clio-smoke-stub";
 const zoomMeasurements: { outerWidth: number; innerWidth: number; devicePixelRatio: number; visualScale: number }[] =
 	[];
 let zoomContext: BrowserContext | null = null;
@@ -139,6 +141,19 @@ async function flow(name: string, where: string, body: () => Promise<void>, reco
 		// Recovery is best effort: the next flow reports whatever state this one could not undo.
 		await recover?.().catch(() => {});
 	}
+}
+/**
+ * Read until the value matches or the time runs out, then assert on the last read. For state that a commit
+ * lands a render or a transition later than the event the step waited on (router, an adopted URL write).
+ */
+async function eventually<T>(read: () => Promise<T>, expected: T, message: string, timeout = 5_000) {
+	const deadline = Date.now() + timeout;
+	let actual = await read();
+	while (actual !== expected && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		actual = await read();
+	}
+	assert.equal(actual, expected, message);
 }
 try {
 	for (const [runIndex, { width, zoom }] of runs.entries()) {
@@ -210,7 +225,8 @@ try {
 			);
 		});
 		page.on("response", (response) => {
-			if (response.status() >= 400)
+			// A step's own stubbed failure is not a server answer the run must account for.
+			if (response.status() >= 400 && response.headers()[stubHeader] === undefined)
 				statuses.push({
 					method: response.request().method(),
 					path: new URL(response.url()).pathname,
@@ -2163,10 +2179,11 @@ try {
 				await page.locator("main").getByRole("button", { name: "Clear filters", exact: true }).click();
 				await settledQuery("");
 				assert.equal(new URL(page.url()).searchParams.get("q"), null);
-				assert.equal(await tasksBox.inputValue(), "", "Clear filters left text in the box");
+				// The box adopts an outside write a render after the URL commits; a throttled CPU widens that gap.
+				await eventually(() => tasksBox.inputValue(), "", "Clear filters left text in the box");
 				await page.goBack();
 				await settledQuery("abcde");
-				assert.equal(await tasksBox.inputValue(), "abcde", "Back did not restore the earlier search");
+				await eventually(() => tasksBox.inputValue(), "abcde", "Back did not restore the earlier search");
 				await page.goto(`${origin}/library?collection=skills`);
 				const libraryBox = page.getByRole("searchbox", { name: "Search skills", exact: true });
 				await libraryBox.waitFor();
@@ -2233,6 +2250,7 @@ try {
 				await route.fulfill({
 					status: 500,
 					contentType: "application/problem+json",
+					headers: { [stubHeader]: "1" },
 					body: JSON.stringify({
 						type: "urn:clio-coder:problem:internal",
 						title: "Internal error",
@@ -2258,11 +2276,8 @@ try {
 				await page.keyboard.press("Escape");
 				await dialog.waitFor({ state: "detached" });
 			} finally {
+				// The stub marks its 500s, so the response listener never records them, however late they land.
 				await page.unroute(planRoute);
-				// The 500s were this step's own stub, not a server answer the run must account for.
-				for (let index = statuses.length - 1; index >= 0; index--)
-					if (/\/reports\/plan$/.test(statuses[index]?.path ?? "") && statuses[index]?.status === 500)
-						statuses.splice(index, 1);
 			}
 		});
 		await step("start keeps the request on screen", async () => {
@@ -2522,13 +2537,19 @@ try {
 				const restingShadow = await sessionsLink.evaluate((node) => getComputedStyle(node).boxShadow);
 				await sessionsLink.click();
 				await page.waitForURL(`${origin}/sessions`);
-				assert.equal(await sessionsLink.getAttribute("aria-current"), "page");
+				// The URL commits before the router re-renders the rail and the route's own styles apply.
+				await eventually(
+					() => sessionsLink.getAttribute("aria-current"),
+					"page",
+					"the rail does not mark Sessions current on /sessions",
+				);
 				assert.notEqual(await sessionsLink.evaluate((node) => getComputedStyle(node).boxShadow), restingShadow);
 				const missionInner = page.locator("main .mission__inner");
 				await missionInner.waitFor();
-				assert.equal(
-					await page.locator("main .mission").evaluate((node) => getComputedStyle(node).scrollbarGutter),
+				await eventually(
+					() => page.locator("main .mission").evaluate((node) => getComputedStyle(node).scrollbarGutter),
 					"stable",
+					"the Sessions page does not keep a stable scrollbar gutter",
 				);
 				const metrics = page.locator("main .operator-records > summary");
 				if (await metrics.count()) {
