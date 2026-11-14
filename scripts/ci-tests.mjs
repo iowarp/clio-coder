@@ -228,6 +228,8 @@ export const guiTests = [
 	// x090 spec 12
 	"review-http",
 	"trust-model",
+	// x090 round 2, keys
+	"row-keys-model",
 	// x090 r2-layout
 	"idle-reads",
 ]

@@ -5,6 +5,8 @@ sources:
   - "src/tools/verify/index.ts"
   - "src/tools/verify/scripts.ts"
   - "src/tools/verify/catalog.ts"
+  - "src/tools/verify/proof.ts"
+  - "src/core/hoare.ts"
   - "src/tools/verify/frontend.ts"
   - "src/tools/verify/numeric.ts"
   - "src/tools/verify/test-files.ts"
@@ -26,6 +28,7 @@ symbols:
 tests:
   - "tests/contracts/verify-numeric.test.ts"
   - "tests/contracts/verify-toolchain-checks.test.ts"
+  - "tests/contracts/hoare-verification.test.ts"
   - "tests/contracts/quality-policy.test.ts"
 invariants:
   - "verify() with no check argument lists declared checks and does not run any command."
@@ -109,6 +112,45 @@ Every judged result carries a `judgement` object with three parts: the execution
 `SCIENTIFIC_VALIDITY_NOT_ESTABLISHED`. The third part records that a passing tolerance check
 does not, by itself, establish scientific validity. These types are defined in
 `src/tools/verify/scripts.ts`.
+
+### Hoare proof annotations (0.8.1)
+
+Version-2 `command` checks may add `proof: {status, inputs, goals}`. Status is
+`mechanized`, `modeled` or `refuted`, describing what exit zero attests. Every
+goal has `id`, `target` (`path:function`), `kind`, `pre`, `post`, `formula`, and
+optional `invariant`/`hazard`. Goal IDs are unique. The target source must be in
+the repository-relative input list, along with wrappers, contracts, translations
+and transitive includes. See the complete catalog and wrapper example in
+`library/plugins/hoare/skills/hoare-verification/references/provers.md`.
+
+The native runner fingerprints the catalog and inputs before and after execution.
+It records evidence only for a clean, launched, uncapped exit-zero command on
+unchanged inputs. A missing sandbox, tool, file, timeout or failed command is not
+a refutation. Refutation wrappers must exit zero only for an actual traced
+counterexample. These are declared-wrapper attestations, not proof certificates.
+Installed prover versions and undeclared transitive inputs are outside the seal.
+
+Proof commands enforce read-only workspace, network off, blocked Unix sockets
+and isolated temporary writes, including when called from the main session.
+No tool is installed automatically and containment never falls back to bare
+execution. Input reads reject symlink components and nonregular files and are
+bounded to 64 declared inputs, 1 MiB per file and 16 MiB overall.
+
+Hoare recipes bind `resultContract: {kind: verifier-report, assurance: argued}`
+(or `modeled`/`mechanized`). Every report check has a typed `obligation` with
+the goal fields, status and optional exact check ID. Core enforces the assurance
+mapping, nonempty unique goals, 128-obligation/32-KiB limits and verdict consistency.
+Machine claims require paired native start/finish events and authoritative
+successful outcomes from this run. A later failed/blocked attempt invalidates
+older proof evidence; report validation rechecks input fingerprints.
+Unobserved claims are rejected and terminal repair requests explicit unknown/fail.
+Ordinary verifier reports remain compatible.
+
+The existing receipt digest binds the accepted report to observed proof records.
+Sealing authenticates those records; it does not validate the mathematics of
+an argument or wrapper. Failed typed obligations and assurance survive the revise
+handoff. TUI rows show status; JSON, ACP and GUI keep the original structured
+report through their existing output and contract surfaces.
 
 ### Numeric comparison
 

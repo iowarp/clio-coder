@@ -52,6 +52,19 @@ function scratch() {
 
 const compose = (bodyFile: string) => ["bug", "--title", "fix: x fails on y", "--body-file", bodyFile];
 
+function assertSentIssue(output: string): void {
+	const line = output.split(/\r?\n/u).find((line) => line.startsWith("Sent: "));
+	ok(line, output);
+	const url = new URL(line.slice("Sent: ".length));
+	strictEqual(url.protocol, "https:");
+	strictEqual(url.host, "github.com");
+	strictEqual(url.pathname, "/iowarp/clio-coder/issues/452");
+	strictEqual(url.username, "");
+	strictEqual(url.password, "");
+	strictEqual(url.search, "");
+	strictEqual(url.hash, "");
+}
+
 test("a dry run prints the whole preview, exits 0 and asks gh nothing", async () => {
 	const { bodyFile, calls, deps, output } = scratch();
 	strictEqual(await runReport([...compose(bodyFile), "--dry-run"], deps), 0);
@@ -100,7 +113,7 @@ test("--yes with a signed-in gh files the issue once and status lists it", async
 	const { bodyFile, calls, deps, output } = scratch();
 	strictEqual(await runReport([...compose(bodyFile), "--yes"], deps), 0);
 	strictEqual(calls.filter((call) => call.args[0] === "issue" && call.args[1] === "create").length, 1);
-	ok(output().out.includes("https://github.com/iowarp/clio-coder/issues/452"));
+	assertSentIssue(output().out);
 	strictEqual(await runReport(["status"], deps), 0);
 	ok(
 		/rpt_[0-9A-Z]{26}\s+sent\s+bug\s+fix: x fails on y\s+https:\/\/github\.com\/iowarp\/clio-coder\/issues\/452/u.test(
@@ -176,7 +189,7 @@ test("a failed gist upload still posts the report, without a pointer, and says t
 	strictEqual(calls.filter((call) => call.args[0] === "issue" && call.args[1] === "create").length, 1);
 	ok(posted !== "" && !posted.includes("bundle: gist:"), posted);
 	const { out } = output();
-	ok(out.includes("https://github.com/iowarp/clio-coder/issues/452"), out);
+	assertSentIssue(out);
 	ok(out.includes("The bundle was not shared:") && out.includes("HTTP 403"), out);
 });
 

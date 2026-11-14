@@ -19,7 +19,6 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import type { ToolResult } from "../../tools/registry.js";
 import {
 	appendCheckStarts,
-	appendClaims,
 	appendHypotheses,
 	appendHypothesisTests,
 	type CheckRun,
@@ -30,6 +29,7 @@ import {
 	HYPOTHESIS_SLATE_SCHEMA,
 	hypothesesFromSlate,
 	readClaims,
+	recordClaims,
 } from "../claims/index.js";
 import { campaignDir, samplesName } from "./store.js";
 import type { ResearchCampaign, ResearchGrade, ResearchHypothesisVerdict } from "./types.js";
@@ -174,7 +174,8 @@ export async function finishIterationRecord(input: {
 		});
 		if (claim !== null) claims.set(outcome.check, claim);
 	}
-	if (claims.size > 0) await appendClaims([...claims.values()]);
+	// Through recordClaims, so a contradiction this iteration records regresses memory citing the overturned claim now.
+	if (claims.size > 0) await recordClaims([...claims.values()], new Date(input.at));
 	// The research improvement hypothesis is tested without the claim: reference agreement is not evidence the change
 	// improved the metric. Any other hypothesis bound to a check keeps the claim as its evidence, as `verify` would.
 	const research = researchHypothesisIds(input.campaign.project);

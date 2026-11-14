@@ -116,12 +116,6 @@
 	overflow: hidden;
 	min-height: 0;
 }
-/* "Report a problem" sits on the same inline edge as the search field and the topics below it. */
-.help-dialog .help-dialog__actions {
-	flex: none;
-	margin: 0;
-	padding: var(--space-4) var(--space-6) 0;
-}
 .help-reference {
 	height: 100%;
 	display: grid;
@@ -190,7 +184,7 @@
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
 }
-.help-nav button[aria-pressed="true"] {
+.help-nav button[aria-selected="true"] {
 	border-bottom-color: var(--accent);
 	color: var(--ink);
 }
@@ -246,21 +240,7 @@
 }
 .help-keys {
 	display: flex;
-	flex-wrap: wrap;
 	justify-content: flex-end;
-	gap: var(--space-1);
-}
-.help-keys kbd {
-	padding: 2px 5px;
-	min-width: 25px;
-	border: 1px solid var(--line-strong);
-	border-bottom-width: 2px;
-	border-radius: var(--radius-sm);
-	background: var(--well);
-	color: var(--ink);
-	font: 400 var(--text-instrument) / 1.4 var(--font-mono);
-	text-align: center;
-	white-space: nowrap;
 }
 .help-topics {
 	display: grid;
@@ -333,7 +313,6 @@
 		height: calc(100dvh - var(--window-titlebar-height, 0px) - 16px);
 	}
 	.help-dialog .dialog__header,
-	.help-dialog .help-dialog__actions,
 	.help-toolbar,
 	.help-content {
 		padding-inline: var(--space-4);

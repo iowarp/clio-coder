@@ -67,6 +67,21 @@ function fixture(t: { after(fn: () => void): void }) {
 	return { root, prefix, record, save, run };
 }
 
+test("macOS process parsing stays bounded for padded commands with Unicode line separators", () => {
+	const result = spawnSync(
+		process.execPath,
+		[
+			"-e",
+			'const { parseProcessList } = require(process.argv[1]); process.stdout.write(JSON.stringify(parseProcessList("darwin", "501 " + " ".repeat(100_000) + "node script\\u2028tail", 501)));',
+			helper,
+		],
+		{ encoding: "utf8", timeout: 5000 },
+	);
+	assert.equal(result.error, undefined);
+	assert.equal(result.status, 0, result.stderr);
+	assert.deepEqual(JSON.parse(result.stdout), ["node script\u2028tail"]);
+});
+
 test("truncated and malformed install records give actionable errors without partial launch state", (t) => {
 	const f = fixture(t);
 	for (const value of [
