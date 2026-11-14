@@ -67,8 +67,21 @@ export interface SegmentScan {
 	corruptOffset: number | null;
 }
 
-/** Pure scan: only the adjudicated writer may repair a tail; read-only queries never mutate (#434). */
-export function scanTelemetrySegment(bytes: Buffer): SegmentScan {
+const BACKSLASH = 0x5c;
+const SEGMENT_OPEN = "segment.open";
+
+/**
+ * Pure scan: only the adjudicated writer may repair a tail; read-only queries never mutate (#434).
+ *
+ * `wanted` is for a reader that consumes only records of those kinds. A checksummed line that holds no backslash, no
+ * wanted kind and no `segment.open` is left out of `rows` without being parsed: without a backslash JSON can spell no
+ * key or kind through an escape, so such a line's `k` can be none of them, and it would decode to another kind's
+ * record, a retired kind, or a skipped line with no `segment` flag, none of which yields a wanted record or moves the
+ * clock origin later records take. Headers and every line that might be one are still parsed. The checksum runs
+ * first, so `validBytes`, `tornTailBytes`, `corruptOffset` and every `damaged` row are as an unfiltered scan's;
+ * only `rows` loses those lines, so a fold over it counts fewer `skipped` and holds no record of an unwanted kind.
+ */
+export function scanTelemetrySegment(bytes: Buffer, wanted?: readonly string[]): SegmentScan {
 	const result: SegmentScan = { rows: [], validBytes: 0, tornTailBytes: 0, corruptOffset: null };
 	let offset = 0;
 	while (offset < bytes.length) {
@@ -88,6 +101,18 @@ export function scanTelemetrySegment(bytes: Buffer): SegmentScan {
 			// A damaged interior line is one unknown row; the scan resyncs at its newline and keeps later records.
 			result.corruptOffset ??= offset;
 			result.rows.push({ kind: "damaged" });
+			offset = newline + 1;
+			result.validBytes = offset;
+			continue;
+		}
+		// Byte search equals text search here: UTF-8 never encodes an ASCII character inside a multi-byte sequence. A
+		// wanted line's kind sits near its start, so testing the kinds first keeps the search short on lines parsed anyway.
+		if (
+			wanted !== undefined &&
+			!wanted.some((kind) => json.includes(kind)) &&
+			!json.includes(SEGMENT_OPEN) &&
+			!json.includes(BACKSLASH)
+		) {
 			offset = newline + 1;
 			result.validBytes = offset;
 			continue;
