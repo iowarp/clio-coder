@@ -8,9 +8,9 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium, type Page } from "playwright-core";
-import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
+import { fixtureLaunch } from "./fixture-launch.js";
 
 const { values } = parseArgs({
 	options: {
@@ -152,10 +152,8 @@ class Done extends Error {}
  * page took to show its last turn, and what the open transcript costs at rest.
  */
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
-async function launch() {
-	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
-	if (ticket === null) throw new Error("The perf server issued no launch ticket.");
-	return `ticket=${ticket}`;
+function launch() {
+	return fixtureLaunch(origin);
 }
 async function resumeHistory(page: Page, id: string) {
 	await page.goto(`${origin}/#${await launch()}`);
@@ -281,7 +279,7 @@ try {
 	await home.fill("Ready when you are.");
 	await home.press("Enter");
 	await page.waitForURL(/\/sessions\/[^/]+$/);
-	const composer = page.getByLabel("Message Clio Coder", { exact: true });
+	const composer = page.getByLabel("Message CLIO Coder", { exact: true });
 	await composer.waitFor();
 	const stop = page.getByRole("button", { name: "Stop turn", exact: true });
 	await stop.waitFor({ state: "detached" });
@@ -320,7 +318,6 @@ try {
 		// Diagrams render after the turn settles; a diagram the view followed past counts as near.
 		const turnElement = page.locator(".chat-turn").last();
 		await turnElement.locator(".diagram.is-rendered svg").waitFor();
-		await turnElement.locator(".diagram .diagram__status [role=alert]").waitFor();
 		const diagramsAt = performance.now();
 		await page.waitForTimeout(1_000);
 		await setRunning(page, false);

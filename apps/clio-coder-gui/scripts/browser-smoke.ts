@@ -8,7 +8,6 @@ import { serve } from "@hono/node-server";
 import { type BrowserContext, chromium, type Locator, type Route } from "playwright-core";
 import { SETTINGS_SECTIONS } from "../client/shell/shell-model.js";
 import type { SettingsControls } from "../contracts/settings-controls.js";
-import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -17,6 +16,7 @@ import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { seedGoldenSession, writeFixtureTelemetry } from "../tests/harness/telemetry-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
+import { fixtureLaunch } from "./fixture-launch.js";
 
 const { values } = parseArgs({
 	options: {
@@ -28,6 +28,8 @@ const { values } = parseArgs({
 		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
 		// Keep durable review captures separate from temporary browser profiles and fixture homes.
 		out: { type: "string" },
+		// Record a failing flow and run the next one, then list every failure and exit 1.
+		continue: { type: "boolean", default: false },
 	},
 });
 const widths = values.widths.split(",").map(Number);
@@ -71,11 +73,7 @@ const address = server.address();
 assert.ok(address && typeof address !== "string");
 origin = `http://127.0.0.1:${address.port}`;
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
-const launch = async () => {
-	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
-	if (ticket === null) throw new Error("The smoke server issued no launch ticket.");
-	return `ticket=${ticket}`;
-};
+const launch = () => fixtureLaunch(origin);
 const browser = await chromium
 	.launch({
 		executablePath: values.chrome,
@@ -108,6 +106,27 @@ let zoomContext: BrowserContext | null = null;
 let zoomProfile: string | null = null;
 let success = false;
 let failedPage: { screenshot(options: { path: string; fullPage: boolean }): Promise<unknown> } | null = null;
+/** With --continue, each failed flow: its name and width, then the first line of what went wrong. */
+const defects: { flow: string; message: string }[] = [];
+/**
+ * Run one named flow. Without --continue a failure throws as before. With it the failure is recorded with
+ * a capture, open popups are dismissed, and the caller runs the next flow, which may then fail on the
+ * state this one left behind; the first entry for a width is the one to read.
+ */
+async function flow(name: string, where: string, body: () => Promise<void>, recover?: () => Promise<void>) {
+	if (!values.continue) return body();
+	try {
+		await body();
+	} catch (error) {
+		const message = (error instanceof Error ? error.message : String(error)).split("\n")[0] ?? "";
+		defects.push({ flow: `${name} (${where})`, message });
+		const slug = `${where}-${name}`.replace(/[^\w-]+/g, "-");
+		// A capture is a diagnosis aid; a page that is already gone has nothing to show.
+		await failedPage?.screenshot({ path: join(output, `defect-${slug}.png`), fullPage: false }).catch(() => {});
+		// Recovery is best effort: the next flow reports whatever state this one could not undo.
+		await recover?.().catch(() => {});
+	}
+}
 try {
 	for (const [runIndex, { width, zoom }] of runs.entries()) {
 		let context: BrowserContext;
@@ -261,953 +280,21 @@ try {
 		async function dark(on: boolean) {
 			await page.emulateMedia({ colorScheme: on ? "dark" : "light" });
 		}
-		await page.goto(`${origin}/#${await launch()}`);
-		await page.getByRole("heading", { level: 1 }).waitFor();
-		if (zoom === 2) {
-			const measurement = await page.evaluate(() => ({
-				outerWidth,
-				innerWidth,
-				devicePixelRatio,
-				visualScale: visualViewport?.scale ?? 0,
-			}));
-			zoomMeasurements.push(measurement);
-			assert.deepEqual(measurement, { outerWidth: 1600, innerWidth: 800, devicePixelRatio: 2, visualScale: 1 });
-			assert.equal(await page.locator("body").evaluate((body) => getComputedStyle(body).zoom), "1");
-			await page.bringToFront();
-		}
-		// The new-task field takes focus on a fine pointer, so the skip link is the first stop on a page
-		// that opens without a focused field.
-		await page.goto(`${origin}/settings/general`);
-		await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
-		await page.keyboard.press("Tab");
-		assert.equal(await page.locator(".skip-link").evaluate((element) => document.activeElement === element), true);
-		await page.keyboard.press("Enter");
-		assert.equal(await page.locator("#main").evaluate((element) => document.activeElement === element), true);
-		await page.goto(`${origin}/`);
-		await page.getByRole("heading", { level: 1 }).waitFor();
-		assert.equal(await page.locator("footer").count(), 0);
-		const header = await page.locator(".wb-bar").boundingBox();
-		assert.ok(header && header.height <= 60);
-		// The brand is the drawn Clio mark, an inline SVG that animates while a task works.
-		const brand = await page.locator(".wb-brand svg").first().boundingBox();
-		assert.ok(brand !== null && brand.width > 0, "the brand mark is drawn");
-		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
-		await page.emulateMedia({ colorScheme: "dark" });
-		assert.equal(await page.locator("html").getAttribute("data-theme"), null);
-		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
-		await check("home-system-dark");
-		await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
-		await page.waitForFunction(() => {
-			const button = document.querySelector("button");
-			return (
-				button &&
-				getComputedStyle(button)
-					.transitionDuration.split(",")
-					.some((value) => parseFloat(value) > 0.001)
-			);
-		});
-		await page.emulateMedia({ reducedMotion: "reduce" });
-		await page.waitForFunction(() => {
-			const button = document.querySelector("button");
-			return (
-				button &&
-				getComputedStyle(button)
-					.transitionDuration.split(",")
-					.every((value) => parseFloat(value) <= 0.000001)
-			);
-		});
-		assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true);
-		await check("home-live-preferences");
-		await check("home");
-		if (width === 1600) await page.screenshot({ path: join(output, "home.png"), fullPage: true });
-		if (width === 320) await page.screenshot({ path: join(output, "320-home-light.png"), fullPage: true });
-		if (phone) {
-			const opener = page.locator(".wb-bar").getByRole("button", { name: "Show sidebar", exact: true });
-			await opener.click();
-			await page.locator('.wb[data-drawer="open"]').waitFor();
-			await check("navigation");
-			// Escape closes the drawer and hands focus back to the button that opened it.
-			await page.keyboard.press("Escape");
-			await page.locator('.wb[data-drawer="closed"]').waitFor({ state: "attached" });
-			assert.equal(await opener.evaluate((node) => document.activeElement === node), true);
-		}
-		// Install, the browser's connection and the theme moved from the masthead to General settings.
-		await navigate("General");
-		await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
-		await page.getByRole("button", { name: "Forget this browser" }).waitFor();
-		await check("app-preferences");
-		// An explicit choice wins over the device and is remembered; System stores nothing.
-		await page.getByRole("radio", { name: /^Dark/ }).check({ force: true });
-		await page.locator(':root[data-theme="dark"]').waitFor();
-		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), "dark");
-		await check("app-preferences-dark");
-		await leaveSettings();
-		await check("home-dark");
-		await page.screenshot({ path: join(output, `${width}-home-dark.png`), fullPage: true });
-		await navigate("General");
-		await page.getByRole("radio", { name: /^System/ }).check({ force: true });
-		await page.locator(":root:not([data-theme])").waitFor();
-		assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
-		await navigate("Toolchain");
-		await page.getByRole("article", { name: "herdr", exact: true }).waitFor();
-		await check("toolchain");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
-		// A window whose bundle was built for another version than the server's says so and offers a reload, which it
-		// never does on its own.
-		await page.route("**/api/meta", async (route) => {
-			const response = await route.fetch();
-			await route.fulfill({ response, json: { ...(await response.json()), clio: "0.0.0-stale" } });
-		});
-		await page.reload();
-		const staleNotice = page.locator(".app-update-notice", { hasText: "the server runs 0.0.0-stale." });
-		await staleNotice.getByRole("button", { name: "Reload this window", exact: true }).waitFor();
-		await check("stale-bundle");
-		await page.unroute("**/api/meta");
-		await page.reload();
-		await page.locator("main").getByRole("article", { name: "herdr", exact: true }).waitFor();
-		assert.equal(await staleNotice.count(), 0, "a matching server still shows the stale-bundle notice");
-		await navigate("Traces");
-		await page.locator('main a[href^="/traces/run-0000"]').waitFor();
-		await check("traces");
-		await page.locator('main a[href^="/traces/run-0000"]').click();
-		await page.locator("main").getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
-		// The replay steps through the run journal: the worker process, the run feed and the call (#434).
-		await page.getByText("Tool finished: read", { exact: true }).first().waitFor({ state: "attached" });
-		await page.getByText("worker call · settled", { exact: true }).first().waitFor({ state: "attached" });
-		await page.getByRole("tab", { name: /^Execution · 1 call$/ }).click();
-		await page.locator("main .trace-lane .trace-stage").first().waitFor({ state: "attached" });
-		// The run's spend by token kind, then by the model each call settled on, every figure explained (#434 §11.3).
-		const spend = page.locator("main section", {
-			has: page.getByRole("heading", { name: "Tokens and spend", exact: true }),
-		});
-		const modelCost = spend.locator(".trace-model-spend > li").first().locator("details.explain").last();
-		await modelCost.locator("summary").click();
-		await modelCost.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
-		await check("trace-run-spend");
-		await modelCost.locator("summary").click();
-		await page.getByRole("tab", { name: /^Replay/ }).click();
-		// The cost cell is the server's render; a legacy row may read partial or unmeasured, so only
-		// its presence is checked here.
-		const costCell = page
-			.locator("main .trace-totals li", { has: page.locator("span", { hasText: /^Cost$/ }) })
-			.locator("strong");
-		await costCell.waitFor();
-		assert.notEqual((await costCell.innerText()).trim(), "", "the run's cost cell is empty");
-		// A displayed quantity explains itself: its value, coverage and fold rule in the read model's words (#434 §11.4).
-		const tokensExplain = page
-			.locator("main .trace-totals li", { has: page.locator("span", { hasText: /^Tokens$/ }) })
-			.locator("details.explain");
-		await tokensExplain.locator("summary").click();
-		const explanation = tokensExplain.locator(".explain__panel");
-		await explanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
-		assert.notEqual(
-			(await explanation.locator(".explain__rule").innerText()).trim(),
-			"",
-			"the explanation names no rule",
-		);
-		await check("trace-run-explain");
-		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `trace-run-explain-${width}.png`) });
-		await page.keyboard.press("Escape");
-		assert.equal(await tokensExplain.evaluate((element) => (element as HTMLDetailsElement).open), false);
-		assert.ok(
-			await tokensExplain.locator("summary").evaluate((element) => element === document.activeElement),
-			"Escape hands focus back to the explained number",
-		);
-		// A run opens on its replay; the sealed record's checks have their own view.
-		await page.getByRole("tab", { name: /^Checks & record/ }).click();
-		// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
-		const checkRow = (label: string) =>
-			page.locator(".run-record-check", { has: page.getByText(label, { exact: true }) });
-		const mark = (label: string, word: string) =>
-			checkRow(label).locator(".run-record-check__state .status-mark", { hasText: word }).waitFor();
-		await mark("Result format", "Conforms");
-		await mark("Result quality", "Not measured");
-		await mark("Claimed checks", "1 of 2 claims grounded");
-		// The checks stand under the seal the read model verified; the saved document comes only on request (#434 §11.3).
-		await page.locator(".run-record-checks__integrity .status-mark", { hasText: "sealed" }).waitFor();
-		assert.equal(await page.getByRole("heading", { name: "The settled record", exact: true }).count(), 0);
-		await page.getByRole("button", { name: "Load full run record", exact: true }).click();
-		await page.getByRole("heading", { name: "The settled record", exact: true }).waitFor();
-		await check("trace-run");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
-		await navigate("Fleet");
-		await page.locator("main").getByRole("heading", { name: "Fleet executions", exact: true }).waitFor();
-		await page.getByText("not a live event stream", { exact: false }).waitFor();
-		await check("fleet");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `fleet-${width}.png`), fullPage: true });
-		await page.locator('main a[href^="/fleet/fleet-149"]').click();
-		await page.getByText("Inspect worker output", { exact: true }).click();
-		await page.getByText("Fixture step passed.", { exact: true }).waitFor();
-		await page
-			.locator("main")
-			.getByRole("heading", { name: "review · pass", exact: true })
-			.waitFor({ state: "attached" });
-		await check("fleet-run");
-		await dark(true);
-		await check("fleet-run-dark");
-		await page.goto(`${origin}/evidence`);
-		await page.locator('main a[href^="/evidence/evidence-039"]').waitFor();
-		await check("evidence");
-		await page.locator('main a[href^="/evidence/evidence-039"]').click();
-		await page.locator("main").getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
-		await check("evidence-detail-dark");
-		await dark(false);
-		await check("evidence-detail");
-		// The inspectors live inside closed disclosures, so they are opened before they are judged.
-		const openInspectors = async (name: string) => {
-			await page.locator("main details").evaluateAll((nodes) => {
-				for (const node of nodes) (node as HTMLDetailsElement).open = true;
+		const step = (name: string, body: () => Promise<void>) =>
+			flow(name, zoom === 2 ? "800px at 200% zoom" : `${width}px`, body, async () => {
+				for (const extra of context.pages()) if (extra !== page) await extra.close();
+				failedPage = page;
+				await page.keyboard.press("Escape");
+				await page.keyboard.press("Escape");
 			});
-			await page.locator("main .facts").first().waitFor();
-			const raw = await page
-				.locator("main pre")
-				.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? "").filter((text) => /^\s*[{[]/.test(text)));
-			assert.deepEqual(raw, [], `${name} still renders a raw JSON dump`);
-			await check(`${name}-inspectors`);
-			if (width === 1600 || width === 390)
-				await page.screenshot({ path: join(output, `${name}-inspectors-${width}.png`), fullPage: true });
-		};
-		await openInspectors("evidence-detail");
-		await page.keyboard.press("Control+/");
-		await page.getByRole("heading", { name: "Shortcuts & help", exact: true }).waitFor();
-		await page.getByRole("searchbox", { name: "Search shortcuts and help", exact: true }).waitFor();
-		assert.equal(await page.getByRole("link", { name: "Open public documentation ↗", exact: true }).count(), 0);
-		await page.getByRole("button", { name: "Documentation", exact: true }).click();
-		const publicHelp = page.getByRole("link", { name: "Open public documentation ↗", exact: true });
-		assert.equal(await publicHelp.getAttribute("href"), "https://coder.iowarp.ai/docs.html");
-		assert.equal(await publicHelp.getAttribute("referrerpolicy"), "no-referrer");
-		await check("help");
-		await page.keyboard.press("Escape");
-		assert.equal(await page.getByRole("link", { name: "Docs", exact: true }).count(), 0);
-		await page.goto(`${origin}/docs/architecture/trace-store.md`);
-		// A retired docs path lands on Help, whose documentation link leaves the app.
-		await page.locator("main").getByRole("heading", { name: "Make yourself at home.", exact: true }).waitFor();
-		assert.equal(await page.locator(".docs-page, iframe").count(), 0);
-		assert.equal(
-			await page.getByRole("link", { name: "Browse documentation", exact: true }).getAttribute("href"),
-			"https://coder.iowarp.ai/docs.html",
-		);
-		await check("legacy-help");
-		if (!phone) {
-			// The rail folds away entirely and one visible control brings it back.
-			await page.keyboard.press("Control+\\");
-			await page.locator('.wb[data-sidebar="collapsed"]').waitFor();
-			await page.locator(".wb-sidebar .wb-side").waitFor({ state: "hidden" });
-			await check("help-rail-collapsed");
-			if (width === 1600) await page.screenshot({ path: join(output, "navigation-collapsed-1600.png"), fullPage: true });
-			await page.getByRole("button", { name: "Show sidebar", exact: true }).filter({ visible: true }).first().click();
-			await page.locator('.wb[data-sidebar="expanded"]').waitFor();
-			await page.locator(".wb-sidebar").getByRole("button", { name: "Collapse sidebar", exact: true }).waitFor();
-			assert.equal(
-				await page.getByRole("navigation", { name: "Settings", exact: true }).getByRole("link").count(),
-				SETTINGS_SECTIONS.length,
-				"every settings place stays listed once the rail returns",
-			);
-		}
-		// A project opens from the rail's Open workspace dialog onto its own page, which lists its
-		// tasks and offers New task. New task returns to the home composer for that project, and the
-		// conversation begins with its first message.
-		await leaveSettings();
-		await revealSidebar();
-		await page
-			.locator(".wb-sidebar")
-			.getByRole("button", { name: /^Open workspace/ })
-			.click();
+		// Flows share these locators and helpers; a locator resolves only when it is used.
+		let noticeSessionUrl = "";
+		let workspaceUrl = "";
 		const openDialog = page.getByRole("dialog", { name: "Open workspace", exact: true });
-		await openDialog.getByLabel("Project folder", { exact: true }).fill(h.home.path);
-		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-		await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
-		await page.locator("main button.primary", { hasText: "New task" }).click();
-		await page.waitForURL(`${origin}/`);
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Summarize this project.");
-		await page.getByRole("button", { name: "Start task", exact: true }).click();
-		await page.waitForURL(/\/sessions\/[^/]+$/);
-		await page.getByLabel("Message Clio Coder", { exact: true }).waitFor();
-		const noticeSessionUrl = page.url();
-		// The bar also holds the transcript detail picker, so the task's menu is found by its name.
-		await page.locator('.conversation .wb-bar .wb-menu:has(> summary[aria-label="Task actions"]) summary').click();
-		await page.getByRole("menuitem", { name: /^All tasks in / }).click();
-		await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
-		await page.locator("main button.primary", { hasText: "New task" }).waitFor();
-		await page
-			.locator("main")
-			.getByRole("heading", { name: /^Your work in / })
-			.waitFor();
-		await check("sessions");
-		const workspaceUrl = page.url();
-		// Unavailable saved history is explained inline beside the tasks, not as a toast. A folder that
-		// does not exist raises the problem toast that stays up while the settings are written below.
-		await revealSidebar();
-		await page
-			.locator(".wb-sidebar")
-			.getByRole("button", { name: /^Open workspace/ })
-			.click();
-		await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
-		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-		const problemNotice = page.locator(".notice", { hasText: "validation" }).last();
-		await problemNotice.waitFor();
-		await page.keyboard.press("Escape");
-		await openDialog.waitFor({ state: "detached" });
-		await navigate("All settings");
-		// The write surface: a select saves through the engine, a project-set value refuses, a destructive
-		// change needs its named confirmation. All settings' search reaches every control by its path.
 		const setting = (path: string) =>
 			page.locator("main .setting-control", { has: page.locator("code", { hasText: path }) });
 		const findSetting = page.locator("main").getByLabel("Find a setting", { exact: true });
-		await findSetting.fill("chat.thinkingLevel");
-		const thinking = setting("chat.thinkingLevel");
-		const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
-		await thinking.getByRole("combobox").selectOption(level);
-		const saveThinking = thinking.getByRole("button", { name: "Save", exact: true });
-		await saveThinking.scrollIntoViewIfNeeded();
-		assert.equal(await problemNotice.isVisible(), true, "the notice is present while Save is used");
-		const noticeBounds = await page.locator(".notice-region").boundingBox();
-		const saveBounds = await saveThinking.boundingBox();
-		assert.ok(noticeBounds && saveBounds);
-		assert.ok(
-			saveBounds.y + saveBounds.height <= noticeBounds.y ||
-				noticeBounds.y + noticeBounds.height <= saveBounds.y ||
-				saveBounds.x + saveBounds.width <= noticeBounds.x ||
-				noticeBounds.x + noticeBounds.width <= saveBounds.x,
-			`notifications must not cover Save at ${width}px: save ${JSON.stringify(saveBounds)}, notices ${JSON.stringify(noticeBounds)}`,
-		);
-		assert.equal(
-			await saveThinking.evaluate((button) => {
-				const rect = button.getBoundingClientRect();
-				return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-			}),
-			true,
-			"Save receives pointer input while the notification is visible",
-		);
-		if (width === 390 || width === 400)
-			await page.screenshot({ path: join(output, `notice-save-${width}.png`), fullPage: true });
-		await saveThinking.click({ timeout: 1_000 });
-		assert.equal(await problemNotice.isVisible(), true, "Save does not wait for notification dismissal");
-		await thinking.getByRole("status").getByText("Used by the next relevant request").waitFor();
-		await problemNotice.locator(".notice__heading button").first().click();
-		await problemNotice.waitFor({ state: "detached" });
-		await check("settings-saved");
-		// A loaded approval can precede its tool-call history. Exercise the full banner beside a
-		// growing draft and a full notice row, including the short viewport where the task must scroll.
-		const noticeSessionId = new URL(noticeSessionUrl).pathname.split("/").at(-1);
-		assert.ok(noticeSessionId);
-		const noticePage = await context.newPage();
-		noticePage.on("pageerror", (error) => errors.push(error.message));
-		// The conversation defers its inspectors until their pane opens, so the stack is filled by the
-		// reads the shell still makes beside it: the rail's health and saved-history reads.
-		const refuse = (route: Route) =>
-			route.fulfill({
-				status: 503,
-				json: {
-					type: "urn:clio-coder:problem:unavailable",
-					title: "Notice layout check",
-					status: 503,
-					code: "unavailable",
-					detail: "The request could not complete. ".repeat(8),
-					instance: new URL(route.request().url()).pathname,
-				},
-			});
-		await noticePage.route("**/api/system", refuse);
-		await noticePage.route("**/api/workspaces/*/sessions", (route) =>
-			route.request().method() === "GET" ? refuse(route) : route.continue(),
-		);
-		await noticePage.route(`**/api/sessions/${noticeSessionId}{,/**}`, async (route) => {
-			const path = new URL(route.request().url()).pathname;
-			if (path === `/api/sessions/${noticeSessionId}`) {
-				await route.fulfill({
-					json: {
-						...h.supervisor.get(noticeSessionId),
-						permissions: [
-							{
-								id: "notice-approval",
-								turnId: "notice-turn",
-								toolCallId: "notice-call",
-								title: "Run a command",
-								kind: "execute",
-								requestedAt: new Date().toISOString(),
-								escalateAt: "2099-01-01T00:00:00Z",
-								expiresAt: "2099-01-02T00:00:00Z",
-								status: "pending",
-								canStopTurn: false,
-							},
-						],
-					},
-				});
-			} else await refuse(route);
-		});
-		try {
-			await noticePage.goto(`${noticeSessionUrl}#${await launch()}`);
-			const draft = noticePage.getByLabel("Message Clio Coder", { exact: true });
-			await draft.fill("A draft line\n".repeat(12));
-			await noticePage.locator(".approval-banner:not(.approval-banner--strip)").waitFor();
-			await noticePage.getByRole("button", { name: "Dismiss all", exact: true }).waitFor();
-			for (const height of zoom === 2 ? [await noticePage.evaluate(() => innerHeight)] : [900, 450]) {
-				if (zoom !== 2) await noticePage.setViewportSize({ width, height });
-				const receivesPointer = (control: Locator) =>
-					control.evaluate((element) => {
-						const rect = element.getBoundingClientRect();
-						return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-					});
-				for (const name of ["Reject", "Allow once"]) {
-					const answer = noticePage.locator(".conversation__approval").getByRole("button", { name, exact: true });
-					await answer.scrollIntoViewIfNeeded();
-					assert.equal(await receivesPointer(answer), true, `${name} stays reachable with notices at ${width}×${height}`);
-					await answer.click({ trial: true, timeout: 1_000 });
-				}
-				const transcript = noticePage.locator(".chat-transcript");
-				await transcript.scrollIntoViewIfNeeded();
-				const transcriptBounds = await transcript.boundingBox();
-				assert.ok(transcriptBounds && transcriptBounds.height >= 64, "the transcript keeps a readable scrolling viewport");
-				assert.equal(await receivesPointer(transcript), true, "the transcript stays reachable beside approval and draft");
-				const submit = noticePage.locator(".composer__submit");
-				await submit.scrollIntoViewIfNeeded();
-				assert.equal(await receivesPointer(submit), true, "the composer controls stay reachable with notices");
-				const noticeList = noticePage.locator(".notice-region__list");
-				assert.equal(await noticeList.evaluate((list) => list.scrollHeight > list.clientHeight), true);
-				await noticeList.evaluate((list) => {
-					list.scrollTop = 100;
-				});
-				const dismiss = noticePage.locator(".notice__heading button").first();
-				await dismiss.focus();
-				assert.equal(await dismiss.evaluate((button) => button === document.activeElement), true);
-				assert.equal(await receivesPointer(dismiss), true, "the focused individual Dismiss stays above the notice list");
-				await dismiss.click({ trial: true, timeout: 1_000 });
-				await check(`notice-approval-${height}`, noticePage);
-				await noticePage.screenshot({ path: join(output, `notice-approval-${width}-${height}.png`) });
-			}
-		} finally {
-			await noticePage.close();
-		}
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
-		await findSetting.fill("fleet.concurrency");
-		await setting("fleet.concurrency").getByText("Set by the project layer").waitFor();
-		if (await setting("fleet.concurrency").getByRole("combobox").count())
-			throw new Error("A project-set value still offers an editor.");
-		await findSetting.fill("fleet.history.maxRuns");
-		const history = setting("fleet.history.maxRuns");
-		await history.getByRole("spinbutton").fill(String(900 - runIndex * 100));
-		if (!(await history.getByRole("button", { name: "Save", exact: true }).isDisabled()))
-			throw new Error("A destructive setting saved without its confirmation.");
-		await history.getByRole("checkbox").check();
-		await check("settings-confirm");
-		if (width === 1600) await page.screenshot({ path: join(output, "settings-confirm.png"), fullPage: true });
-		await history.getByRole("button", { name: "Save", exact: true }).click();
-		await history.getByRole("status").waitFor();
-		await findSetting.fill("no-such-setting-anywhere");
-		await page.getByText("No settings match your search.", { exact: true }).waitFor();
-		await dark(true);
-		await findSetting.fill("retry");
-		await check("settings-controls-dark");
-		await dark(false);
-		await page
-			.locator("main")
-			.getByRole("link", { name: /^Effective values/ })
-			.click();
-		await page.getByLabel(/^Filter settings/).fill("chat.model");
-		await page.getByText("fixture-local-model", { exact: true }).waitFor();
-		await check("settings-inspection");
-		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `settings-${width}.png`) });
-		await dark(true);
-		await check("settings-inspection-dark");
-		await dark(false);
-		await page.getByRole("link", { name: "Sources & timing", exact: true }).click();
-		// Each source category is a disclosure; the hook is listed inside the closed Hooks one.
-		await page
-			.locator("main")
-			.getByRole("heading", { name: "fixture-hook", exact: true, includeHidden: true })
-			.waitFor({ state: "attached" });
-		await page.locator("main").getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
-		await check("config-graph");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `config-graph-${width}.png`), fullPage: true });
-		await dark(true);
-		await check("config-graph-dark");
-		await dark(false);
-		// Adding a connection is the guided setup's job; it opens from Models and closes back there.
-		await navigate("Models");
-		const controlsPath = "**/api/workspaces/*/settings/controls";
-		await page.route(controlsPath, async (route) => {
-			const response = await route.fetch();
-			const report = (await response.json()) as SettingsControls;
-			await route.fulfill({
-				json: {
-					...report,
-					controls: report.controls.map((control) =>
-						control.path === "chat.target"
-							? { ...control, value: "fixture" }
-							: control.path === "chat.model"
-								? { ...control, access: "writable" }
-								: control,
-					),
-				},
-			});
-		});
-		await page.reload();
-		const catalogSelect = page.locator(".model-select select").first();
-		await catalogSelect.waitFor();
-		const modelId = await catalogSelect.getAttribute("id");
-		const modelField = page.locator(".model-select").filter({ has: page.locator(`[id="${modelId}"]`) });
-		await modelField.locator("select").selectOption({ label: "Advanced: unverified model id…" });
-		await modelField.getByRole("button", { name: "Choose from the list", exact: true }).click();
-		assert.equal(await modelField.locator("select").evaluate((element) => element === document.activeElement), true);
-		await page.unroute(controlsPath);
-		await page.reload();
-		await page
-			.locator("main")
-			.getByRole("link", { name: /^Add a connection/ })
-			.click();
-		await page.getByRole("heading", { name: "Where does your model come from?", exact: true }).waitFor();
-		await check("targets-onboarding");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });
-		await page.getByRole("button", { name: "Close", exact: true }).click();
-		await page.waitForURL((url) => url.pathname === "/settings/models");
-		await page
-			.locator("main")
-			.getByRole("link", { name: /^Connections/ })
-			.click();
-		await page.getByRole("article", { name: "fixture", exact: true }).waitFor();
-		await check("targets");
-		await page
-			.getByRole("article", { name: "fixture", exact: true })
-			.getByRole("button", { name: "Use for chat & fleet", exact: true })
-			.click();
-		await page.locator("main").getByRole("heading", { name: "Connection use · succeeded", exact: true }).waitFor();
-		await dark(true);
-		await check("targets-dark");
-		await dark(false);
-		await page.getByRole("link", { name: "Fleet routes", exact: true }).click();
-		// The routing inventory shows one of profiles, agent bindings and cached models at a time.
-		await page
-			.getByRole("navigation", { name: "Routing inventory", exact: true })
-			.getByRole("button", { name: /^Agent bindings ·/ })
-			.click();
-		await page
-			.locator("main")
-			.getByRole("heading", { name: /^Agent bindings ·/ })
-			.waitFor();
-		await check("routing");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `routing-${width}.png`), fullPage: true });
-		await dark(true);
-		await check("routing-dark");
-		await page.goto(`${origin}/usage`);
-		await page.locator("main").getByRole("heading", { name: "Inside the token record", exact: true }).waitFor();
-		// The five bars compare fields with one another, which is the one thing a reader can get
-		// wrong by looking; the caveat is part of the panel, not a footnote that can drift away.
-		await page.getByText("they are not additive percentages", { exact: false }).waitFor();
-		await check("usage-dark");
-		await dark(false);
-		await check("usage");
-		// A repository figure explains to the window `usage report` folded, rebuilt ending now (#434 §11.4).
-		const windowTokens = page
-			.locator("main .usage-totals article", { hasText: "Recorded tokens" })
-			.locator("details.explain");
-		await windowTokens.locator("summary").click();
-		const windowExplanation = windowTokens.locator(".explain__panel");
-		await windowExplanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
-		assert.equal(
-			(await windowExplanation.locator("dd").first().innerText()).trim(),
-			(await windowTokens.locator("summary").innerText()).trim(),
-			"the window's explanation states the figure it explains",
-		);
-		await check("usage-explain");
-		await page.keyboard.press("Escape");
-		// Each recorded route has a dense row whose figures explain themselves; the grouping switches to targets.
-		const usageModelRow = page
-			.getByRole("region", { name: "Recorded usage by model", exact: true })
-			.locator("tbody tr", { has: page.locator("th", { hasText: /fixture-model$/ }) });
-		const modelTokens = usageModelRow.locator("td").nth(5).locator("details.explain");
-		await modelTokens.locator("summary").click();
-		await modelTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
-		await check("usage-model-row");
-		await modelTokens.locator("summary").click();
-		await page.locator("main").getByRole("button", { name: "Per target", exact: true }).click();
-		await page
-			.getByRole("region", { name: "Recorded usage by target", exact: true })
-			.locator("tbody tr", { has: page.locator("th", { hasText: /fixture/ }) })
-			.first()
-			.waitFor();
-		await check("usage-target-rows");
-		await page.locator("main").getByRole("button", { name: "Per model", exact: true }).click();
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
-		await navigate("Library");
-		// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
-		const offer = page.locator("main").getByRole("listitem", { name: "skill:map-codebase", exact: true });
-		await offer.waitFor();
-		await check("library-catalog");
-		await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).click();
-		const review = page.getByRole("dialog", { name: "Install skill:map-codebase", exact: true });
-		await review.getByText("This is exactly what will be applied. Nothing has been written yet.").waitFor();
-		await review.getByText("Staged and verified").waitFor();
-		await check("library-plan");
-		await review.getByRole("button", { name: "Apply this change", exact: true }).click();
-		await review.getByText("The files are on disk and the install record matches.").waitFor();
-		// The change reaches open conversations by reload; with none open the note says so.
-		const refreshNote = review.locator(".library-session-note");
-		await refreshNote.waitFor();
-		assert.doesNotMatch(await refreshNote.innerText(), /did not reload/);
-		await check("library-applied");
-		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `library-applied-${width}.png`) });
-		await review.getByRole("button", { name: "Done", exact: true }).click();
-		await offer.locator(".status-mark", { hasText: "Ready" }).waitFor();
-		// A second user install is no longer offered; the project scope still is.
-		if (await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).count())
-			throw new Error("An installed user copy still offers a user install.");
-		await offer.getByRole("button", { name: "Install skill:map-codebase in this project", exact: true }).waitFor();
-		await page
-			.locator("main")
-			.getByRole("button", { name: /^Installed only · [1-9]/ })
-			.click();
-		await check("library-installed");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `library-installed-${width}.png`), fullPage: true });
-		await dark(true);
-		await check("library-installed-dark");
-		if (width === 1600) await page.screenshot({ path: join(output, "library-installed-dark.png"), fullPage: true });
-		await dark(false);
-		await offer.getByRole("button", { name: "Remove the user copy of skill:map-codebase", exact: true }).click();
-		const removal = page.getByRole("dialog", { name: "Remove skill:map-codebase", exact: true });
-		await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
-		await removal.getByText("The files and the install record are gone.").waitFor();
-		await removal.getByRole("button", { name: "Done", exact: true }).click();
-		await offer.waitFor({ state: "detached" });
-		await page.locator("main").getByRole("listitem", { name: "extension:fixture-extension", exact: true }).waitFor();
-		assert.equal(await page.locator("main .library-packages > li").count(), 1);
-		await page
-			.locator("main")
-			.getByRole("tablist", { name: "Library collections" })
-			.getByRole("tab", { name: /^Skills · [1-9]/ })
-			.click();
-		await page.locator("main").getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
-		await check("library-skills");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `library-skills-${width}.png`), fullPage: true });
-		// The collections are one tab stop: an arrow key moves the selection and the focus together.
-		await page
-			.locator("main")
-			.getByRole("tab", { name: /^Skills · / })
-			.press("ArrowLeft");
-		const agentsTab = page.locator("main").getByRole("tab", { name: /^Agents · / });
-		await agentsTab.and(page.locator('[aria-selected="true"]')).waitFor();
-		if ((await agentsTab.getAttribute("aria-selected")) !== "true")
-			throw new Error("ArrowLeft from Skills did not select the Agents tab.");
-		if (!(await agentsTab.evaluate((node) => node === document.activeElement)))
-			throw new Error("ArrowLeft moved the selection without moving focus.");
-		const agentDetails = page.locator("main .library-resource__details").first();
-		await agentDetails.locator(":scope > summary").click();
-		await agentDetails.getByText("Tool-call budget", { exact: true }).waitFor();
-		await check("library-agent-details");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
-		for (const collection of ["Agents", "Prompts", "Playbooks", "Extensions", "Verifiers"]) {
-			await page
-				.locator("main")
-				.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) })
-				.click();
-			const resource = page.locator("main .library-resource").first();
-			await resource.waitFor();
-			const details = resource.locator(".library-resource__details");
-			if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open)))
-				await details.locator(":scope > summary").click();
-			await check(`library-${collection.toLowerCase()}`);
-		}
-		await dark(true);
-		await check("library-dark");
-		await navigate("System");
-		await page.locator("main summary", { hasText: "Clio folders" }).waitFor();
-		await check("system-dark");
-		await page.locator("main").getByRole("link", { name: "Other coding agents", exact: true }).click();
-		await page.locator("main").getByRole("heading", { name: "Codex", exact: true }).waitFor();
-		await check("interop-dark");
-		await dark(false);
-		await page.getByText("Would be offered", { exact: true }).waitFor();
-		// Opening the page ran nothing. The probe is an explicit act, and the page survives it.
-		await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).click();
-		await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).waitFor();
-		await check("interop");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `interop-${width}.png`), fullPage: true });
-		// The project page's New task returns to the home composer for that project; the first message
-		// starts the task and opens its conversation.
-		await page.goto(workspaceUrl);
-		await page.locator("main button.primary", { hasText: "New task" }).click();
-		await page.waitForURL(`${origin}/`);
-		await page
-			.getByLabel("Message Clio Coder", { exact: true })
-			.fill("Show the fixture findings with code and a diagram.");
-		await page.getByRole("button", { name: "Start task", exact: true }).click();
-		await page.waitForURL(/\/sessions\/[^/]+$/);
-		// The fixture first streams and then settles. Inspect its final Markdown subtree,
-		// which replaces the streaming subtree before deferred diagrams are rendered.
-		await page.locator(".chat-turn.is-settled .diagram").waitFor();
-		// Diagrams, like highlighted code, render when they approach the transcript viewport.
-		await page.locator(".chat-turn.is-settled .diagram").scrollIntoViewIfNeeded();
-		await page.locator(".diagram.is-rendered svg").waitFor();
-		// Highlighting waits until code nears the visible transcript; the composer is no longer
-		// displaced by page scrolling, so bring that block into the one reading viewport.
-		await page.locator(".code-block pre").first().scrollIntoViewIfNeeded();
-		await page.locator(".token.keyword").first().waitFor();
-		const diagram = await page.locator(".diagram svg").evaluate((node) => {
-			const svg = node as SVGSVGElement;
-			return {
-				width: svg.getBoundingClientRect().width,
-				height: svg.getBoundingClientRect().height,
-				viewBox: svg.getAttribute("viewBox"),
-				markup: svg.outerHTML,
-			};
-		});
-		await writeFile(join(output, `diagram-${width}.json`), JSON.stringify(diagram, null, 2));
-		assert.equal(
-			await page.locator(".diagram svg script, .diagram svg foreignObject, .diagram svg a, .diagram svg image").count(),
-			0,
-		);
-		assert.equal(
-			await page.locator(".diagram svg").evaluate((svg) => {
-				const bounds = svg.getBoundingClientRect();
-				return [...svg.querySelectorAll(".node")].every((node) => {
-					const rectangle = node.getBoundingClientRect();
-					return (
-						rectangle.left >= bounds.left - 1 &&
-						rectangle.right <= bounds.right + 1 &&
-						rectangle.top >= bounds.top - 1 &&
-						rectangle.bottom <= bounds.bottom + 1
-					);
-				});
-			}),
-			true,
-			"Every diagram node is inside the rendered viewport.",
-		);
-		if (width === 390) {
-			const code = page.locator(".code-block pre").first();
-			await code.focus();
-			await page.keyboard.press("ArrowRight");
-			await page.waitForFunction(() => (document.querySelector(".code-block pre")?.scrollLeft ?? 0) > 0);
-			await code.evaluate((node) => {
-				node.scrollLeft = 0;
-				node.blur();
-			});
-		}
-		assert.equal(await page.locator(".chat-transcript script").count(), 0);
-		assert.equal(await page.locator('.chat-transcript a[href^="javascript:"]').count(), 0);
-		assert.equal(await page.evaluate(() => Object.hasOwn(window, "modelMarkupExecuted")), false);
-		assert.ok((await page.locator(".chat-transcript").innerText()).includes("<script>window.modelMarkupExecuted"));
-		await page.locator(".chat-transcript").evaluate((element) => {
-			element.scrollTop = element.scrollHeight;
-		});
-		await page.locator(".jump-to-latest").waitFor({ state: "detached" });
-
-		// Complete accounting lives with the turn outcome, not as a repeated line above the
-		// composer. Its native disclosure must work from the keyboard and remain accessible open.
-		assert.equal(await page.locator(".conversation__dock > .chat-usage").count(), 0);
-		// The outcome line is the summary of the turn's own disclosure; each explained figure inside it is
-		// a nested disclosure of its own.
-		const usage = page.locator(".turn-outcome").last().locator(":scope > details");
-		const usageSummary = usage.locator(":scope > summary");
-		await usageSummary.focus();
-		await page.keyboard.press("Enter");
-		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), true);
-		const tokenGroup = usage.locator(".turn-details__group", {
-			has: page.getByRole("heading", { name: "Usage", exact: true }),
-		});
-		// Prompt is the whole prompt the provider read: input plus cache read and write.
-		assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning", "Prompt"]);
-		// An explained figure carries its explanation beside it; the figure is that disclosure's summary.
-		const figures = (group: Locator) =>
-			group.locator("dd").evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
-		assert.deepEqual(await figures(tokenGroup), ["11", "12", "15", "38"]);
-		const cacheGroup = usage.locator(".turn-details__group", {
-			has: page.getByRole("heading", { name: "Cache", exact: true }),
-		});
-		// Cache reads and writes are the provider's fields; the hit share is the read part of the whole prompt.
-		assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Hit share", "Written"]);
-		assert.deepEqual(await figures(cacheGroup), ["13", "34%", "14"]);
-		await check("conversation-usage");
-		await page.keyboard.press("Enter");
-		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
-		// Opening a detail freezes the live edge on purpose; Jump to latest returns to it before the draft grows.
-		await page.locator(".jump-to-latest").click();
-		await page.locator(".jump-to-latest").waitFor({ state: "detached" });
-
-		// The resting tray is compact, grows with a multiline draft, and keeps a followed
-		// transcript at its live edge while that grid row changes height.
-		const composerField = page.getByLabel("Message Clio Coder", { exact: true });
-		const restingComposer = await page.locator(".composer").evaluate((element) => element.getBoundingClientRect().height);
-		// Name each action's box in the failure, so a wrap on a narrow screen says which control caused it.
-		const actionBoxes = await page.locator(".composer__actions > *").evaluateAll((elements) =>
-			elements.map((element) => {
-				const box = element.getBoundingClientRect();
-				return `${element.className || element.tagName}:${Math.round(box.width)}@${Math.round(box.top)}`;
-			}),
-		);
-		// The tray carries its heading and hint lines around a one-line field and one row of actions.
-		// At 800px those lines wrap and the route actions take a row of their own; a wrapped action
-		// row at any wider size would still add 44px and fail here.
-		assert.ok(
-			restingComposer <= (width <= 800 ? 280 : 230),
-			`resting composer is ${restingComposer}px tall at ${width}px; actions ${actionBoxes.join(", ")}`,
-		);
-		const restingField = await composerField.evaluate((element) => element.getBoundingClientRect().height);
-		await composerField.fill("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
-		await page.waitForFunction(
-			(before) => (document.querySelector(".composer__field")?.getBoundingClientRect().height ?? 0) > before + 20,
-			restingField,
-		);
-		await page.waitForFunction(() => {
-			const transcript = document.querySelector(".chat-transcript");
-			return !!transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 32;
-		});
-		const grownComposer = await page.evaluate(() => {
-			const composer = document.querySelector(".composer")?.getBoundingClientRect();
-			const transcript = document.querySelector(".chat-transcript");
-			return {
-				composerBottom: composer?.bottom ?? Number.POSITIVE_INFINITY,
-				bottomGap: transcript
-					? transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
-					: Number.POSITIVE_INFINITY,
-			};
-		});
-		assert.ok(grownComposer.composerBottom <= 1050, "a growing draft pushed the composer below the viewport");
-		assert.ok(grownComposer.bottomGap <= 32, "a growing draft moved a followed transcript away from its live edge");
-		// A `/name` nothing owns is flagged before it is sent; a loaded template is not.
-		await composerField.fill("/tpyo fix the build");
-		await page.getByText("/tpyo is not a command or prompt template in this task").waitFor();
-		await check("composer-unknown-command");
-		await composerField.fill("/review-pr 42");
-		await page.getByText("is not a command or prompt template").waitFor({ state: "detached" });
-		await composerField.fill("");
-		await page.waitForFunction(
-			(before) =>
-				(document.querySelector(".composer__field")?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY) <=
-				before + 1,
-			restingField,
-		);
-		await composerField.evaluate((element) => (element as HTMLTextAreaElement).blur());
-
-		await check("conversation");
-		const conversationLayout = await page.evaluate(() => {
-			const transcript = document.querySelector(".chat-transcript");
-			const composer = document.querySelector(".composer");
-			const header = document.querySelector(".conversation .wb-bar");
-			const main = document.querySelector("main");
-			return {
-				pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight + 2,
-				mainScrolls: !!main && (main.scrollTop !== 0 || main.scrollLeft !== 0),
-				// The transcript owns scrolling whether or not this fixture's content happens to overflow it.
-				transcriptScrolls: !!transcript && ["auto", "scroll"].includes(getComputedStyle(transcript).overflowY),
-				headerVisible: !!header && header.getBoundingClientRect().top >= 0 && header.getBoundingClientRect().height > 0,
-				composerVisible: !!composer && composer.getBoundingClientRect().bottom <= innerHeight,
-			};
-		});
-		assert.deepEqual(conversationLayout, {
-			pageScrolls: false,
-			mainScrolls: false,
-			transcriptScrolls: true,
-			headerVisible: true,
-			composerVisible: true,
-		});
-		await page.screenshot({ path: join(output, `conversation-${width}.png`), fullPage: true });
-		// At 1400px a partial token sum with its gap clause, beside a status, pushed Review and Details out of the
-		// bar. A throwaway page sets that case up, so the text it writes never reaches the page that goes on.
-		if (width === 1600) {
-			const probe = await context.newPage();
-			try {
-				await probe.setViewportSize({ width: 1400, height: 900 });
-				await probe.goto(`${page.url()}#${await launch()}`);
-				const bar = probe.locator(".conversation .wb-bar");
-				const tokens = bar.locator(".wb-chip--figure summary").first();
-				await tokens.waitFor();
-				// A reading shows whole or wraps out of the bar whole; it is never cut.
-				const measure = (status: boolean) =>
-					bar.evaluate((element, withStatus) => {
-						const summary = element.querySelector(".wb-chip--figure summary");
-						if (summary) summary.textContent = "Tokens: ≥415,998 (1 call unknown)";
-						if (withStatus) {
-							const chip = document.createElement("span");
-							chip.className = "wb-chip wb-chip--status";
-							chip.innerHTML = "<span>Memory reviewing</span>";
-							element.querySelector(".wb-bar__readings")?.before(chip);
-						}
-						const edge = element.getBoundingClientRect();
-						const [review, details] = ['[title="Review changes"]', '[title^="Task details"]'].map((selector) => {
-							const box = element.querySelector(selector)?.getBoundingClientRect();
-							return !!box && box.left >= edge.left && box.right <= edge.right + 0.5;
-						});
-						const chip = element.querySelector(".wb-chip--figure") as HTMLElement;
-						const figure = chip.getBoundingClientRect();
-						const region = element.querySelector(".wb-bar__readings")?.getBoundingClientRect() ?? edge;
-						const shown = figure.top < region.bottom && figure.bottom > region.top;
-						const whole =
-							figure.left >= region.left - 0.5 &&
-							figure.right <= region.right + 0.5 &&
-							figure.bottom <= region.bottom + 0.5 &&
-							chip.scrollWidth <= chip.clientWidth + 1;
-						return {
-							barOverflows: element.scrollWidth > element.clientWidth + 1,
-							reviewInside: review,
-							detailsInside: details,
-							figure: shown ? (whole ? "whole" : "cut") : "wrapped out",
-						};
-					}, status);
-				const roomy = await measure(false);
-				await probe.screenshot({ path: join(output, "conversation-header-1400.png") });
-				assert.deepEqual(
-					roomy,
-					{ barOverflows: false, reviewInside: true, detailsInside: true, figure: "whole" },
-					"At 1400px the header must show the whole token figure beside Review and Details",
-				);
-				await tokens.click();
-				const panel = probe.locator(".wb-chip--figure .explain__panel").first();
-				await panel.waitFor();
-				const panelShown = await panel.evaluate((node) => {
-					const box = node.getBoundingClientRect();
-					const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-					return box.height > 0 && !!hit && node.contains(hit);
-				});
-				assert.ok(panelShown, "The token figure's explanation opened clipped by the bar");
-				await probe.keyboard.press("Escape");
-				const tight = await measure(true);
-				await probe.screenshot({ path: join(output, "conversation-header-1400-status.png") });
-				assert.ok(
-					!tight.barOverflows && tight.reviewInside && tight.detailsInside && tight.figure !== "cut",
-					`At 1400px with a status the header cut a reading or lost Review or Details: ${JSON.stringify(tight)}`,
-				);
-			} finally {
-				await probe.close();
-			}
-		}
-		await dark(true);
-		await check("conversation-dark");
-		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
-		if (width === 320) await page.screenshot({ path: join(output, "conversation-320-dark.png"), fullPage: true });
-		await dark(false);
-		// The task pane beside a conversation is read-only inspection. Opening it and each drill-in must
-		// preserve the route, unsent text and actual textarea node: a remount can silently lose selection,
-		// attachments or editor state.
-		const writesBeforeInspection = apiWrites.length;
-		const readsBeforeInspection = evidenceReads;
-		const contextPath = new URL(page.url()).pathname;
-		const contextSessionId = contextPath.split("/").at(-1);
-		assert.ok(contextSessionId);
-		const draft = "Keep this unsent draft while inspecting the workspace.";
-		await composerField.fill(draft);
-		const originalField = await composerField.elementHandle();
-		assert.ok(originalField);
-		async function assertConversationPreserved() {
-			assert.equal(new URL(page.url()).pathname, contextPath);
-			assert.equal(new URL(page.url()).pathname.split("/").at(-1), contextSessionId);
-			assert.equal(await composerField.inputValue(), draft);
-			assert.equal(
-				await originalField.evaluate((node) => node === document.querySelector(".composer__field")),
-				true,
-				"Pane inspection remounted the conversation composer",
-			);
-		}
+		const composerField = page.getByLabel("Message CLIO Coder", { exact: true });
 		const pane = page.locator(".pane:not([hidden])");
 		// The pane docks open from 1440px; narrower it is a modal slide-over behind the top bar's toggle.
 		async function openPane() {
@@ -1239,163 +326,8 @@ try {
 			await pane.getByRole("button", { name: "Close task details", exact: true }).click();
 			await pane.waitFor({ state: "detached" });
 		}
-		await openPane();
-		await assertConversationPreserved();
-		await pane.locator(".pane-steps li").first().waitFor();
-		const planTree = await pane.locator(".pane-steps").ariaSnapshot();
-		assert.match(planTree, /Completed:.*Read the fixture workspace/);
-		assert.match(planTree, /In progress:.*Summarize the findings/);
-		await check("pane-session");
-		// The column lists evidence from this session's own fleet records only, never the installation's inventory.
-		assert.equal(
-			await pane.locator(".pane-evidence a").count(),
-			0,
-			"Unrelated installation bundles were presented as this task's evidence",
-		);
-		for (const name of ["Context", "Usage", "Tasks and decisions"]) {
-			await openDrill(name);
-			await pane.locator(".pane__title", { hasText: name }).waitFor();
-			await assertConversationPreserved();
-			await check(`pane-${name.toLowerCase()}`);
-			if (width === 1600 || width === 390)
-				await page.screenshot({ path: join(output, `pane-${name.toLowerCase()}-${width}.png`), fullPage: true });
-			// The drill moves focus to its title. Docked, Escape steps back to the task details without
-			// closing the pane. The slide-over below 1440px closes on Escape from any view, so there the
-			// header's Back is the way back.
-			assert.equal(
-				await pane.locator(".pane__title").evaluate((node) => node === document.activeElement),
-				true,
-				"a drill-in did not move focus to its title",
-			);
-			if ((zoom === 2 ? 800 : width) >= 1440) {
-				await page.keyboard.press("Escape");
-				await pane.locator(".pane__title", { hasText: "Task details" }).waitFor();
-				assert.equal(await pane.count(), 1, "Escape in a drill-in closed the pane");
-			} else {
-				await pane.getByRole("button", { name: "Back to task details", exact: true }).click();
-				await pane.locator(".pane__title", { hasText: "Task details" }).waitFor();
-			}
-		}
-		// Changes has no drill-in before a file changes; the top bar's Review control opens the view itself.
-		await closePane();
-		const changesToggle = page.locator(".conversation .wb-bar").getByRole("button", { name: /^Review changes/ });
-		await changesToggle.click();
-		await pane.locator(".pane-blank").getByText("No files changed yet.", { exact: true }).waitFor();
-		await assertConversationPreserved();
-		await check("pane-changes");
-		assert.equal(evidenceReads, readsBeforeInspection, "The task pane triggered an evidence inventory read");
-		await closePane();
-		assert.equal(
-			await changesToggle.evaluate((node) => document.activeElement === node),
-			true,
-			"Closing the pane did not return focus to the control that opened it",
-		);
-		await assertConversationPreserved();
-		assert.deepEqual(apiWrites.slice(writesBeforeInspection), [], "Read-only pane inspection performed a write");
-		await composerField.fill("");
-		await originalField.dispose();
-		// Conversation controls use ACP config options, and saved scope alone can switch targets.
-		const route = page.locator(".route-picker");
-		await route.locator("summary").click();
-		await route.getByText("This conversation.", { exact: true }).waitFor();
-		assert.equal(await route.getByLabel("Connection", { exact: true }).isDisabled(), true);
-		await route.getByLabel("Model", { exact: true }).selectOption("fixture-small");
-		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
-		await check("route-picker-conversation");
-		await route.getByRole("button", { name: "Apply to this conversation", exact: true }).click();
-		await route.locator("summary .route-chip__text").getByText("fixture-small", { exact: true }).waitFor();
-		assert.match(
-			(await route.locator("summary").getAttribute("title")) ?? "",
-			/Target: fixture\. Model: fixture-small\./,
-		);
-		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
-		assert.match((await route.locator("summary").getAttribute("title")) ?? "", /Thinking: high/);
-		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
-		await route.locator("summary").click();
-		await route.getByText("This conversation.", { exact: true }).waitFor();
-		assert.equal(await route.getByLabel("Apply to", { exact: true }).count(), 0);
-		await check("route-picker");
-		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
-		await page.keyboard.press("Escape");
-		await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
-		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
-		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
-		// Escape closes it without saving and hands focus back to the chip.
-		await route.locator("summary").click();
-		await route.getByLabel("Thinking", { exact: true }).selectOption("low");
-		await page.keyboard.press("Escape");
-		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
-		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
-		// The task's own actions sit in one Task actions menu in the top bar; working freedom is the
-		// composer's pill. The menu closes on Escape and hands focus back to its button.
 		const taskMenu = page.locator('.conversation .wb-bar .wb-menu:has(> summary[aria-label="Task actions"])');
-		await taskMenu.locator("summary").click();
-		await taskMenu.getByRole("menuitem", { name: "Rename task", exact: true }).waitFor();
-		await taskMenu.getByRole("menuitem", { name: "Close task", exact: true }).waitFor();
-		await page
-			.locator(".composer")
-			.getByText("Working freedom for this task", { exact: true })
-			.waitFor({ state: "attached" });
-		await check("session-controls");
-		const menuBounds = await taskMenu.locator(".wb-menu__panel").boundingBox();
-		assert.ok(
-			menuBounds && menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= (zoom === 2 ? 800 : width),
-			`Task actions are outside the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
-		);
-		await page.keyboard.press("Escape");
-		assert.equal(await taskMenu.evaluate((element) => (element as HTMLDetailsElement).open), false);
-		assert.equal(await taskMenu.locator("summary").evaluate((element) => document.activeElement === element), true);
-		// Session commands run from the composer's slash palette. `/` lists what this session serves.
-		await composerField.fill("/");
 		const slashList = page.getByRole("listbox", { name: "Slash commands", exact: true });
-		await slashList
-			.getByRole("option", { name: /^\/doctor/ })
-			.first()
-			.waitFor();
-		await slashList.getByRole("option", { name: /^\/tree/ }).waitFor();
-		await slashList
-			.getByRole("option", { name: /^\/context/ })
-			.first()
-			.waitFor();
-		const firstSuggestion = await composerField.getAttribute("aria-activedescendant");
-		assert.ok(firstSuggestion);
-		await composerField.press("ArrowDown");
-		const nextSuggestion = await composerField.getAttribute("aria-activedescendant");
-		assert.ok(nextSuggestion);
-		assert.notEqual(nextSuggestion, firstSuggestion, "plain arrows did not move the active suggestion");
-		assert.equal(await composerField.evaluate((element) => document.activeElement === element), true);
-		await check("slash-palette");
-		await composerField.press("Shift+ArrowUp");
-		assert.deepEqual(
-			await composerField.evaluate((element) => {
-				const field = element as HTMLTextAreaElement;
-				return [field.selectionStart, field.selectionEnd];
-			}),
-			[0, 1],
-			"Shift+ArrowUp did not select text while the slash palette was open",
-		);
-		await page.keyboard.press("Escape");
-		await slashList.waitFor({ state: "detached" });
-		// A typed command line is parsed against the catalog and previewed; nothing runs until Enter.
-		await composerField.fill("/doctor deep");
-		await page.locator(".slash-palette--line code", { hasText: "/doctor deep" }).first().waitFor();
-		assert.equal(await page.locator(".slash-result").count(), 0, "a previewed command ran before Enter");
-		await composerField.press("Enter");
-		const slashResult = page.locator(".slash-result");
-		await slashResult.locator("pre", { hasText: "Deep checks completed." }).waitFor();
-		assert.equal(await composerField.inputValue(), "", "a command line that ran stayed in the composer");
-		await composerField.fill("/context compact Summarize the project");
-		await page
-			.locator(".slash-palette--line code", { hasText: "/context compact Summarize the project" })
-			.first()
-			.waitFor();
-		await composerField.press("Enter");
-		await slashResult.locator("pre", { hasText: "Context action: compact Summarize the project" }).waitFor();
-		await check("session-commands");
-		if (width === 1600) await page.screenshot({ path: join(output, "session-commands.png"), fullPage: true });
-		await slashResult.getByRole("button", { name: "Dismiss", exact: true }).click();
-		// The session board: the operator's tasks change through the tasks command, the plan and decisions only read.
-		// `/tasks` opens it beside the conversation.
 		async function slashPane(name: string) {
 			await composerField.fill(`/${name}`);
 			// With the palette dismissed, Enter on a line that names a pane view opens it rather than sending.
@@ -1412,247 +344,11 @@ try {
 				await pane.getByRole("button", { name: "Back to task details", exact: true }).waitFor();
 			} else await slashPane(view);
 		}
-		await slashPane("tasks");
-		const board = page.locator(".pane:not([hidden]) .board-panel");
-		await board.getByText("Read the fixture workspace", { exact: true }).waitFor();
-		assert.equal(await composerField.inputValue(), "", "a pane jump stayed in the composer");
-		await board.getByText("Markdown with one table", { exact: false }).waitFor();
-		await board.getByText("You have not added a task.", { exact: true }).waitFor();
-		await board.getByLabel("Add a task", { exact: true }).fill("Draft the summary");
-		await board.getByRole("button", { name: "Add", exact: true }).click();
-		await board.getByRole("button", { name: "Mark done: Draft the summary", exact: true }).click();
-		await board.locator(".status-mark", { hasText: "Done" }).waitFor();
-		await board.getByLabel("Add a task", { exact: true }).fill("Survey the project");
-		await board.getByRole("button", { name: "Add", exact: true }).click();
-		await board.getByRole("button", { name: "Hand to Clio Coder: Survey the project", exact: true }).click();
-		await board.locator(".status-mark", { hasText: "Handed to Clio Coder" }).waitFor();
-		await page.locator(".chat-request", { hasText: "/tasks hand u2" }).waitFor();
-		await page.getByText("Working on the handed task", { exact: true }).waitFor();
-		await page.waitForFunction(
-			() => document.activeElement?.getAttribute("aria-label") === "Mark done: Survey the project",
-		);
-		await page.getByRole("button", { name: "Send", exact: true }).waitFor({ state: "attached" });
-		// A decision is corrected in place: it is superseded and the new direction is sent as a request.
-		await board.getByRole("button", { name: "Correct: Report format", exact: true }).click();
-		await board.getByLabel("New direction", { exact: true }).fill("HTML with one table");
-		await board.getByRole("button", { name: "Supersede and tell Clio Coder", exact: true }).click();
-		await board
-			.getByText("Superseded. The new direction was sent to Clio Coder as a request.", { exact: true })
-			.waitFor();
-		await page.locator(".chat-request", { hasText: "is superseded by the operator" }).waitFor();
-		await board
-			.getByRole("button", { name: "Propose for every project: Sample B reads 4.2 on the field instrument.", exact: true })
-			.click();
-		await board
-			.getByText("Every project broadens where this lesson applies. Press again to propose it everywhere.", {
-				exact: true,
-			})
-			.waitFor();
-		await board
-			.getByRole("button", { name: "Propose for every project: Sample B reads 4.2 on the field instrument.", exact: true })
-			.click();
-		await board.getByText(/^Proposed memory-k1-global\. Review it/).waitFor();
-		await check("session-board-writes");
-		if (width === 1600 || width === 390) {
-			await board.locator("h3", { hasText: "What Clio Coder learned this session" }).scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `session-board-writes-${width}.png`) });
-		}
-		await check("session-board-hand");
-		await check("session-board");
-		if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
-		await closePane();
-		// An image and a text file ride a request when the agent announces image prompts and embedded
-		// context: attach both, see them listed, send, see each counted. A binary is refused by name.
-		// The composer's Attach control names what this session accepts in its title.
-		const attachButton = page.locator(".composer").getByRole("button", { name: "Attach", exact: true });
-		await attachButton.waitFor();
-		assert.equal(await attachButton.getAttribute("title"), "Attach files");
-		const picker = page.locator('.composer input[type="file"]');
-		await picker.setInputFiles({
-			name: "fixture.png",
-			mimeType: "image/png",
-			buffer: Buffer.from(
-				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
-				"base64",
-			),
-		});
-		await picker.setInputFiles({
-			name: "field-notes.md",
-			mimeType: "text/markdown",
-			buffer: Buffer.from("sample A: 4.2\n"),
-		});
-		const attachments = page.getByRole("list", { name: "Attachments to send with this request" });
-		await attachments.locator(".composer__attachment-name", { hasText: "fixture.png" }).waitFor();
-		await attachments.locator(".composer__attachment-name", { hasText: "field-notes.md" }).waitFor();
-		await picker.setInputFiles({
-			name: "archive.zip",
-			mimeType: "application/zip",
-			buffer: Buffer.from([0x50, 0x4b, 0x00, 0x03]),
-		});
-		await page.locator(".composer__notice", { hasText: "archive.zip is not a text file." }).waitFor();
-		await check("composer-attachment");
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Describe the attached image and notes.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.getByText("Received 1 image with the request.", { exact: true }).waitFor();
-		await page.getByText("Received 1 file with the request.", { exact: true }).waitFor();
-		await page.locator(".chat-request__images", { hasText: "1 image attached" }).waitFor();
-		await page.locator(".chat-request__images", { hasText: "1 file attached" }).waitFor();
-		assert.equal(await attachments.count(), 0);
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
-		await check("permission");
-		await dark(true);
-		await check("permission-dark");
-		await dark(false);
-		await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
-		await page.getByText("Tool executed.", { exact: true }).waitFor();
-		// A settled group collapses, so open it the way an operator would before reading the card.
-		await page.locator(".activity__summary").last().click();
-		const applied = page.locator(".diff.is-applied").last();
-		await applied.waitFor();
-		assert.match(await applied.innerText(), /applied/i);
-		assert.match(await applied.innerText(), /approved/);
-		// A refusal settles as a FAILED call. The card must keep the refused change on screen and
-		// say who turned it down, which a bare status cannot.
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write it again.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.getByRole("button", { name: "Reject", exact: true }).first().click();
-		await page.getByText("Permission rejected.", { exact: true }).waitFor();
-		const refused = page.locator(".diff.is-rejected").last();
-		await refused.waitFor();
-		assert.match(await refused.innerText(), /not applied · not approved/i);
-		assert.match(await refused.innerText(), /Nothing was written/);
-		assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
-		await check("permission-rejected");
-		if (width === 1600) await page.screenshot({ path: join(output, "permission-rejected.png"), fullPage: true });
-		// Changes lists what the task's recorded edit calls changed. The approved write is counted with its
-		// diff; the refused one changed nothing the transcript can vouch for, so it is not listed.
-		await openDrill("Changes");
-		const recordedFile = pane.locator(".change-file", { has: page.locator("strong", { hasText: "fixture.txt" }) });
-		await recordedFile.getByRole("button", { expanded: false }).click();
-		const recordedDiffs = recordedFile.locator(".change-file__diffs");
-		await recordedDiffs.locator(".diff.is-applied").waitFor();
-		assert.match(await recordedDiffs.locator(".diff.is-applied").innerText(), /applied/i);
-		assert.equal(await recordedDiffs.locator(".diff").count(), 1, "a refused write was listed as a change");
-		assert.equal(await pane.locator(".diff.is-rejected").count(), 0, "a refused write was listed as a change");
-		await check("artifacts-recorded-file");
-		if (width === 320 || width === 1600)
-			await page.screenshot({ path: join(output, `artifacts-recorded-file-${width}.png`), fullPage: true });
-		await closePane();
-		// A plan-scale dispatch: the card names every run and the hash the runs will seal.
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[plan] Survey the samples and draft a report.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		const planCard = page.locator(".approval-card", { hasText: "Dispatch plan · 2 runs · in parallel" }).first();
-		await planCard.waitFor();
-		assert.match(await planCard.innerText(), /Draft the comparison report/);
-		assert.match(await planCard.innerText(), /kept for review/);
-		assert.match(await planCard.innerText(), /3f2a9c1e04b7/);
-		await check("permission-plan");
-		if (width === 1600 || width === 390) {
-			await planCard.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `permission-plan-${width}.png`) });
-		}
-		await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
-		await page.getByText("The plan is running.", { exact: true }).waitFor();
-		// Dispatch steering. The fixture holds one live worker until it is stopped, so both write
-		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		// A running worker is steered from the strip at the transcript's live edge, not from a menu.
-		const workers = page.getByRole("region", { name: "1 worker running", exact: true });
-		await workers.getByRole("button", { name: "Guide scout", exact: true }).click();
-		await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
-		await page.getByRole("button", { name: "Send guidance", exact: true }).click();
-		await page.getByText("Guidance queued. The worker reads it at its next step.", { exact: true }).waitFor();
-		assert.equal(
-			await workers
-				.getByRole("button", { name: "Guide scout", exact: true })
-				.evaluate((node) => node === document.activeElement),
-			true,
-			"sending guidance returns focus to Guide",
-		);
-		// The runtime keeps the delegation open for the worker's life, so its group stays open too. The
-		// row names the agent once and keeps its state word whole, which clipped at 390px while the agent
-		// was repeated beside it.
-		const delegation = page.locator(".tool-card.is-dispatch").last();
-		await delegation.getByText("Running", { exact: true }).waitFor();
-		assert.equal(
-			await delegation.locator(".tool-card__head").evaluate((head) => {
-				const state = head.querySelector(".tool-card__state");
-				const bounds = head.getBoundingClientRect();
-				const box = state?.getBoundingClientRect();
-				return !!state && !!box && box.right <= bounds.right + 1 && state.scrollWidth <= state.clientWidth + 1;
-			}),
-			true,
-			`the delegation's state word is clipped at ${width}px`,
-		);
-		await check("fleet-steer");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `fleet-steer-${width}.png`), fullPage: true });
-		// The pane's Agents drill keeps the whole fleet history, the running row included.
-		await openDrill("Agents");
-		await pane.locator(".worker-graph").getByText("Survey the fixture", { exact: true }).first().waitFor();
-		await closePane();
-		// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
-		// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Then summarise it.");
-		// The delivery switch sits beside Send once there is a message to deliver.
-		await page.locator(".composer__delivery").getByRole("button", { name: "After this turn", exact: true }).click();
-		await page.locator(".composer__submit").click();
-		await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
-		await check("composer-queue");
-		if (width === 1600) await page.screenshot({ path: join(output, "composer-queue.png"), fullPage: true });
-		// From rest, as a pointer user arrives: the press itself focuses the composer, and the control must not move under it.
-		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-		await page.getByRole("button", { name: "Take them back", exact: true }).click();
-		await page.waitForFunction(
-			() => (document.querySelector(".composer__field") as HTMLTextAreaElement | null)?.value === "Then summarise it.",
-		);
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
-		await page.locator(".composer__options > summary").click();
-		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
-		await page.keyboard.press("Escape");
-		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
-		// Stop takes two presses, and the question puts focus on the answer that keeps the work.
-		await workers.getByRole("button", { name: "Stop scout", exact: true }).click();
-		assert.equal(
-			await page
-				.getByRole("button", { name: "Keep running", exact: true })
-				.evaluate((node) => node === document.activeElement),
-			true,
-		);
-		await check("fleet-stop");
-		await page.getByRole("button", { name: "Stop run", exact: true }).click();
-		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
-		assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
-		assert.equal(await page.locator(".live-workers").count(), 0, "a settled run leaves the live strip");
-		// Streamed deltas never render the composer: its props are scalars and a route memoized on
-		// settings and health. Count across the middle of the workload stream, well after the send's own
-		// renders, through Markdown, code, tool bursts and a failed call.
-		const composerRenders = () =>
-			page.evaluate(
-				() => (globalThis as unknown as { __clioRenderCounts: Record<string, number> }).__clioRenderCounts.composer ?? 0,
-			);
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[workload] Audit the convergence notes.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		const workload = page.locator(".chat-turn").last();
-		await workload.getByRole("heading", { name: "Results", exact: true }).waitFor();
-		const rendersBefore = await composerRenders();
-		await workload.getByRole("heading", { name: "How the levels relate", exact: true }).waitFor();
-		assert.equal(await composerRenders(), rendersBefore, "a streamed delta rendered the composer");
 		// A settled turn leaves no working chip in the top bar and no Stop in the composer.
 		const settled = async () => {
 			await page.locator('.wb-chip--status[data-tone="working"]').waitFor({ state: "detached" });
 			await page.getByRole("button", { name: "Stop turn", exact: true }).waitFor({ state: "detached" });
 		};
-		await settled();
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
-		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.locator('.wb-chip--status[data-tone="working"]').waitFor();
-		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
-		await settled();
-		await check("cancelled");
 		// Session actions open from the slash palette as a dialog over the conversation. The option carries
 		// the engine's title; the dialog opens under the app's own heading.
 		async function slashAction(name: string, title: string, heading: string) {
@@ -1675,346 +371,1772 @@ try {
 				"closing a slash dialog did not return focus to the composer",
 			);
 		}
-		// A playbook: preview compiles and starts nothing; the run starts the plan shown.
-		const fleetDialog = await slashAction("fleet run", "Run a playbook", "Run a workflow");
-		const fleetPanel = fleetDialog;
-		await fleetPanel.getByLabel("Playbook name", { exact: true }).fill("survey");
-		await fleetPanel.getByLabel("Variables, one name=value per line", { exact: true }).fill("site=plot-7");
-		await fleetPanel.getByRole("button", { name: "Preview the plan", exact: true }).click();
-		await fleetPanel.getByRole("heading", { name: "Fleet survey: 2 steps in 2 waves", exact: true }).waitFor();
-		assert.match(await fleetPanel.innerText(), /Writes reports\//);
-		await check("fleet-run-preview");
-		if (width === 1600 || width === 390) {
-			await fleetPanel.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `fleet-run-preview-${width}.png`) });
-		}
-		await fleetPanel.getByRole("button", { name: "Run this plan", exact: true }).click();
-		await page.locator(".notice-region .notice", { hasText: "Fleet survey started" }).waitFor();
-		if (await fleetDialog.count()) await closeDialog(fleetDialog);
-		await page.getByRole("button", { name: "Dismiss Fleet survey started", exact: true }).click();
-		// Extensions: what this conversation loaded, and a reload that says which generation is live.
-		const extensionsDialog = await slashAction("extensions", "Extensions", "Tools and add-ons");
-		const extensionsPanel = extensionsDialog.locator(".extensions-panel");
-		await extensionsPanel.getByText("survey-tools 1.2.0 · project scope", { exact: true }).waitFor();
-		// Reload sits under the panel's Apply installed changes disclosure.
-		await extensionsPanel.locator("summary", { hasText: "Apply installed changes" }).click();
-		await extensionsPanel.getByRole("button", { name: "Reload extensions", exact: true }).click();
-		await extensionsPanel.getByText(/^Generation \d+ is live \(no changes\); 2 hooks registered\.$/).waitFor();
-		await check("extensions");
-		await closeDialog(extensionsDialog);
-		// Usage: the conversation's spend in the agent's own words, and each provider's windows. The top
-		// bar's spend chip opens it.
-		await chipOrSlash(/^[\d,]+ tokens.*\. Open usage\.$/, "usage");
-		const usagePanel = pane.locator(".usage-panel");
-		// Rows are the read model's cost groups by target/model (#434), displays carried through unreworded: the
-		// estimated, partly unpriced cost keeps its "~" and "+?" provenance marks.
-		const modelRow = usagePanel.locator(".usage-panel__models > li", {
-			has: page.locator(".usage-panel__route", { hasText: /^fixture\/fixture-model$/ }),
+		await step("launch", async () => {
+			await page.goto(`${origin}/#${await launch()}`);
+			await page.getByRole("heading", { level: 1 }).waitFor();
+			if (zoom === 2) {
+				const measurement = await page.evaluate(() => ({
+					outerWidth,
+					innerWidth,
+					devicePixelRatio,
+					visualScale: visualViewport?.scale ?? 0,
+				}));
+				zoomMeasurements.push(measurement);
+				assert.deepEqual(measurement, { outerWidth: 1600, innerWidth: 800, devicePixelRatio: 2, visualScale: 1 });
+				assert.equal(await page.locator("body").evaluate((body) => getComputedStyle(body).zoom), "1");
+				await page.bringToFront();
+			}
 		});
-		await modelRow.locator(".usage-panel__cost", { hasText: "~$0.25 +?" }).waitFor();
-		// The provider windows sit under the panel's Provider quota disclosure.
-		await usagePanel.locator("summary", { hasText: /^Provider quota · 1 plan$/ }).click();
-		const fiveHour = usagePanel.getByRole("meter", { name: "5h used", exact: true });
-		await fiveHour.waitFor();
-		assert.equal(await fiveHour.getAttribute("aria-valuetext"), "71.4% used");
-		await check("usage");
-		if (width === 1600 || width === 390) {
-			await usagePanel.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `usage-${width}.png`) });
-		}
-		await closePane();
-		// Beside the conversation: a side question and drafts answer in place and add no turn.
-		const turnsBefore = await page.locator(".chat-request").count();
-		const questionDialog = await slashAction("btw", "Side question", "Side question");
-		const aside = questionDialog.locator(".aside-panel");
-		await aside.getByLabel("Side question", { exact: true }).fill("Which file holds the readings?");
-		await aside.getByRole("button", { name: "Ask", exact: true }).click();
-		await aside.getByText("The readings are in README.md.", { exact: true }).waitFor();
-		await check("aside-question");
-		await closeDialog(questionDialog);
-		const draftsDialog = await slashAction("draft", "Drafts", "Compare approaches");
-		const drafts = draftsDialog.locator(".aside-panel");
-		await drafts.getByLabel("Request to draft", { exact: true }).fill("How should the report show readings?");
-		await drafts.getByLabel("Drafts", { exact: true }).selectOption("2");
-		await drafts.getByRole("button", { name: "Draft", exact: true }).click();
-		await drafts.getByText("fixture/judge picked A in 12 ms.", { exact: true }).waitFor();
-		await check("aside");
-		if (width === 1600 || width === 390) {
-			await drafts.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `aside-${width}.png`) });
-		}
-		assert.equal(await page.locator(".chat-request").count(), turnsBefore, "an aside added a turn");
-		await drafts.getByRole("button", { name: "Put in composer", exact: true }).first().click();
-		assert.equal(
-			await page.getByLabel("Message Clio Coder", { exact: true }).inputValue(),
-			"Show the readings in one table with a unit column.",
-		);
-		await closeDialog(draftsDialog);
-		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
-		// The context window: Clio Coder's own accounting, worded and never recomputed. The top bar's
-		// context ring opens it. Its figures are the read model's, folded from the session's journal (#434), and the
-		// fixture agent journals nothing: the golden journal is seeded under this session's id, closed by the context
-		// snapshot a real turn journals for the ledger the fixture reports. The timeline below reads the same journal.
-		seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "", {
-			context: { window: 131_072, used: 20_480, reserve: 16_384, free: 94_208, system: 4096, messages: 16_384 },
+		await step("home and preferences", async () => {
+			// The new-task field takes focus on a fine pointer, so the skip link is the first stop on a page
+			// that opens without a focused field.
+			await page.goto(`${origin}/settings/general`);
+			await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
+			await page.keyboard.press("Tab");
+			assert.equal(await page.locator(".skip-link").evaluate((element) => document.activeElement === element), true);
+			await page.keyboard.press("Enter");
+			assert.equal(await page.locator("#main").evaluate((element) => document.activeElement === element), true);
+			await page.goto(`${origin}/`);
+			await page.getByRole("heading", { level: 1 }).waitFor();
+			assert.equal(await page.locator("footer").count(), 0);
+			const header = await page.locator(".wb-bar").boundingBox();
+			assert.ok(header && header.height <= 60);
+			// The brand is the drawn Clio mark, an inline SVG that animates while a task works.
+			const brand = await page.locator(".wb-brand svg").first().boundingBox();
+			assert.ok(brand !== null && brand.width > 0, "the brand mark is drawn");
+			assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
+			await page.emulateMedia({ colorScheme: "dark" });
+			assert.equal(await page.locator("html").getAttribute("data-theme"), null);
+			assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
+			await check("home-system-dark");
+			await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
+			await page.waitForFunction(() => {
+				const button = document.querySelector("button");
+				return (
+					button &&
+					getComputedStyle(button)
+						.transitionDuration.split(",")
+						.some((value) => parseFloat(value) > 0.001)
+				);
+			});
+			await page.emulateMedia({ reducedMotion: "reduce" });
+			await page.waitForFunction(() => {
+				const button = document.querySelector("button");
+				return (
+					button &&
+					getComputedStyle(button)
+						.transitionDuration.split(",")
+						.every((value) => parseFloat(value) <= 0.000001)
+				);
+			});
+			assert.equal(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches), true);
+			await check("home-live-preferences");
+			await check("home");
+			if (width === 1600) await page.screenshot({ path: join(output, "home.png"), fullPage: true });
+			if (width === 320) await page.screenshot({ path: join(output, "320-home-light.png"), fullPage: true });
+			if (phone) {
+				const opener = page.locator(".wb-bar").getByRole("button", { name: "Show sidebar", exact: true });
+				await opener.click();
+				await page.locator('.wb[data-drawer="open"]').waitFor();
+				await check("navigation");
+				// Escape closes the drawer and hands focus back to the button that opened it.
+				await page.keyboard.press("Escape");
+				await page.locator('.wb[data-drawer="closed"]').waitFor({ state: "attached" });
+				assert.equal(await opener.evaluate((node) => document.activeElement === node), true);
+			}
 		});
-		await chipOrSlash(/Open the context window\.$/, "context");
-		const contextPanel = pane.locator(".context-panel");
-		// The lead reads used, then window and share, each an explainable figure (#434).
-		await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
-		assert.equal(
-			(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
-			"20,480 of 131,072 tokens · 15.6%",
-		);
-		await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
-		await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
-		await check("context-window");
-		if (width === 1600 || width === 390) {
-			await contextPanel.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `context-window-${width}.png`) });
-		}
-		// The session timeline: the journal seeded above, newest first, every figure in the server's words (#434 §11.3).
-		await pane.getByLabel("Inspect task", { exact: true }).selectOption("timeline");
-		const timelinePanel = pane.locator(".timeline-panel");
-		const timelineCall = timelinePanel.locator(".timeline-panel__rows > li", { hasText: / call · / }).first();
-		await timelineCall.waitFor();
-		await timelinePanel.getByRole("combobox", { name: /^Entry kind/ }).selectOption("Model call");
-		assert.equal(
-			await timelinePanel.locator(".timeline-panel__rows > li", { hasNotText: / call · / }).count(),
-			0,
-			"the kind filter left another kind in the timeline",
-		);
-		const callTokens = timelineCall.locator("details.explain").first();
-		await callTokens.locator("summary").click();
-		await callTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
-		await check("session-timeline");
-		if (width === 1600 || width === 390) {
-			await timelinePanel.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `session-timeline-${width}.png`) });
-		}
-		await callTokens.locator("summary").click();
-		await closePane();
-		// Branches: continuing from an earlier reply replays only that branch; forking moves the
-		// conversation to a new session and says the project's files were left alone.
-		const branchesDialog = await slashAction("tree", "Branches", "Conversation history");
-		const branches = branchesDialog.locator(".branch-panel");
-		await branches.getByText("The next request continues here", { exact: false }).waitFor();
-		await check("branches");
-		if (width === 1600 || width === 390) {
-			await branches.locator("ol").scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `branches-${width}.png`) });
-		}
-		await branches
-			.getByRole("button", { name: "Continue from this reply: The second sample reads 4.2", exact: true })
-			.click();
-		await page.locator(".chat-request", { hasText: "Measure the second sample" }).waitFor();
-		assert.equal(
-			await page.locator(".chat-request", { hasText: "[stream] Show progress until cancelled." }).count(),
-			0,
-			"the branch left behind is not replayed",
-		);
-		// The pressed row becomes the disabled tip, so focus lands on the panel's heading, not the page.
-		await page.waitForFunction(
-			() => document.activeElement?.tagName === "H3" && !!document.activeElement.closest(".branch-panel"),
-			undefined,
-			{ timeout: 5000 },
-		);
-		const parentUrl = page.url();
-		await branches
-			.locator("li", { hasText: "The second sample reads 4.2" })
-			.getByText("The next request continues here", { exact: false })
-			.waitFor();
-		await branches
-			.getByRole("button", { name: "Fork a new conversation from this reply: Earlier reply", exact: true })
-			.click();
-		await page.waitForURL((url) => url.href !== parentUrl && url.pathname.startsWith("/sessions/"));
-		await page.locator(".notice-region .notice", { hasText: "Workspace files were not rewound" }).waitFor();
-		await page.locator(".chat-request", { hasText: "Earlier prompt" }).waitFor();
-		assert.equal(await page.locator(".chat-request", { hasText: "Measure the second sample" }).count(), 0);
-		if (await branchesDialog.count()) await closeDialog(branchesDialog);
-		await check("session-forked");
-		if (width === 1600 || width === 390)
-			await page.screenshot({ path: join(output, `session-forked-${width}.png`), fullPage: true });
-		for (const title of [/^Dismiss Continuing from/, /^Dismiss Conversation forked$/]) {
-			const dismiss = page.getByRole("button", { name: title });
-			if (await dismiss.count()) await dismiss.click();
-		}
-		// Handoff: a draft is reviewed and edited before anything is written; starting the new
-		// conversation moves there.
-		const handoffDialog = await slashAction("handoff", "Hand off to a new conversation", "Continue in a new task");
-		const handoff = handoffDialog.locator(".handoff-panel");
-		await handoff
-			.getByLabel("What should the next conversation accomplish?", { exact: true })
-			.fill("Finish the survey report");
-		await handoff.getByRole("button", { name: "Draw up the handoff", exact: true }).click();
-		const reviewField = handoff.getByLabel("Handoff document", { exact: true });
-		await reviewField.waitFor();
-		assert.match(await reviewField.inputValue(), /Goal: Finish the survey report/);
-		await reviewField.fill(`${await reviewField.inputValue()}\nReviewed in the smoke.\n`);
-		await check("handoff-review");
-		if (width === 1600 || width === 390) {
-			await handoff.scrollIntoViewIfNeeded();
-			await page.screenshot({ path: join(output, `handoff-review-${width}.png`) });
-		}
-		const forkedUrl = page.url();
-		await handoff.getByRole("button", { name: "Start the new conversation", exact: true }).click();
-		await page.waitForURL((url) => url.href !== forkedUrl && url.pathname.startsWith("/sessions/"));
-		await page.locator(".notice-region .notice", { hasText: "Handed off" }).waitFor();
-		await handoffDialog.waitFor({ state: "detached" });
-		await check("handed-off");
-		await page.getByRole("button", { name: "Dismiss Handed off", exact: true }).click();
-		// A second window on the same task only views it: its message box takes nothing the server would
-		// refuse, and says who drives the task until that window takes control.
-		await settled();
-		const viewer = await context.newPage();
-		failedPage = viewer;
-		viewer.on("pageerror", (error) => errors.push(error.message));
-		await viewer.goto(`${page.url()}#${await launch()}`);
-		const viewerNote = viewer.locator(".composer__delivery-note");
-		const viewing = (note: typeof viewerNote) => note.locator("strong", { hasText: /^Viewing$/ });
-		await viewing(viewerNote).waitFor();
-		assert.match(await viewerNote.innerText(), /^Viewing\s+Browser window( \d+)? controls this task\.\s+Take control$/);
-		const viewerField = viewer.getByLabel("Message Clio Coder", { exact: true });
-		assert.ok(await viewerField.isDisabled(), "a viewing window's message box takes input the server refuses");
-		assert.ok(await viewer.locator(".composer__submit").isDisabled(), "a viewing window offers Send");
-		assert.ok(await viewer.getByRole("button", { name: "Actions", exact: true }).isDisabled());
-		// One way to take control, in the message box; the banner above the transcript only explains.
-		assert.equal(await viewer.getByRole("button", { name: "Take control", exact: true }).count(), 1);
-		await check("viewer", viewer);
-		if (width === 1600) await viewer.screenshot({ path: join(output, `viewer-${width}.png`) });
-		await viewerNote.getByRole("button", { name: "Take control", exact: true }).click();
-		await viewing(viewerNote).waitFor({ state: "detached" });
-		assert.ok(await viewerField.isEnabled(), "taking control left the message box disabled");
-		// The first window is told, and its own message box now waits for it to take control back.
-		const pageNote = page.locator(".composer__delivery-note");
-		await page.locator(".notice-region .notice", { hasText: "took control of a task" }).waitFor();
-		await viewing(pageNote).waitFor();
-		assert.ok(await page.getByLabel("Message Clio Coder", { exact: true }).isDisabled());
-		await pageNote.getByRole("button", { name: "Take control", exact: true }).click();
-		await viewing(pageNote).waitFor({ state: "detached" });
-		await viewing(viewerNote).waitFor();
-		await page.getByRole("button", { name: /^Dismiss .+ took control of a task$/ }).click();
-		await viewer.close();
-		failedPage = page;
-		// Close lives in the top bar's Task actions menu, away from the composer's Stop.
-		await settled();
-		await taskMenu.locator("summary").click();
-		await taskMenu.getByRole("menuitem", { name: "Close task", exact: true }).click();
-		// Closing is a session control request; it is confirmed before it is sent.
-		await page
-			.getByRole("dialog", { name: "Close this session?", exact: true })
-			.getByRole("button", { name: "Close session", exact: true })
-			.click();
-		await page.locator('.wb-chip--status[data-tone="quiet"]', { hasText: "Closed" }).waitFor();
-		await page.getByText("This task is closed.", { exact: true }).waitFor();
-		await check("closed");
-		// A folder that does not exist is refused with the problem's reference.
-		await revealSidebar();
-		await page
-			.locator(".wb-sidebar")
-			.getByRole("button", { name: /^Open workspace/ })
-			.click();
-		await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
-		await openDialog.getByRole("button", { name: "Open", exact: true }).click();
-		const toast = page.locator(".notice-region .notice", { hasText: "validation" });
-		await toast.waitFor();
-		assert.match(await toast.innerText(), /validation/);
-		await check("problem-toast");
-		await page.keyboard.press("Escape");
-		await openDialog.waitFor({ state: "detached" });
-		// The code and reference sit under the toast's Technical details disclosure.
-		await toast.locator("summary", { hasText: "Technical details" }).click();
-		assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);
-		// A refused launch link must not brick the app: the shell says what happened, stops reconnecting, and a
-		// pasted launch link brings the same tab back.
-		await page.goto(`${origin}/#ticket=${"s".repeat(43)}`);
-		await page.reload();
-		await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
-		// The refused shell shows no task rail, so nothing behind the panel keeps reading.
-		assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a refused token still renders the task rail");
-		if ((await page.locator(".notice-region .notice").count()) > 0)
-			throw new Error("A refused token raised toasts on top of the reconnect panel.");
-		await page.getByLabel("Launch link", { exact: true }).fill("not a link");
-		await page.getByText("That text is not a launch link.", { exact: true }).waitFor();
-		await check("reconnect");
-		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `reconnect-${width}.png`) });
-		await page.getByLabel("Launch link", { exact: true }).fill(`[clio-coder:gui] ${origin}/#${await launch()}`);
-		await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
-		// The connected rail reports installation health once its diagnostics settle; it defers the doctor until System
-		// is opened, so "Not checked" is a settled connected state too.
-		await page
-			.locator(".wb-sidebar .wb-status__label")
-			.filter({ hasText: /^(Ready|Unverified|Not checked|\d+ issues?|\d+ warnings?)$/ })
-			.waitFor({ state: "attached" });
-		await page
-			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
-			.waitFor({ state: "detached" });
-		// Forgetting the browser signs this window out on the server before it drops the launch token, so
-		// the credential it held opens nothing afterwards.
-		await navigate("General");
-		await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
-		const [signedOut] = await Promise.all([
-			page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/revoke"),
-			page.getByRole("button", { name: "Forget this browser", exact: true }).click(),
-		]);
-		assert.equal(signedOut.status(), 200);
-		const forgotten = signedOut.request().headers().authorization ?? "";
-		assert.match(forgotten, /^Bearer [\w-]{43}$/);
-		await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
-		assert.equal(
-			(await fetch(`${origin}/api/meta`, { headers: { Authorization: forgotten } })).status,
-			401,
-			"a forgotten window's credential still opens the API",
-		);
-		// The dialog promises a new launch link: a reload of the forgotten tab inherits nothing that reconnects it.
-		await page.reload();
-		await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
-		assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a forgotten tab reconnected on reload");
+		await step("theme choice and toolchain", async () => {
+			// Install, the browser's connection and the theme moved from the masthead to General settings.
+			await navigate("General");
+			await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
+			await page.getByRole("button", { name: "Forget this browser" }).waitFor();
+			await check("app-preferences");
+			// An explicit choice wins over the device and is remembered; System stores nothing.
+			await page.getByRole("radio", { name: /^Dark/ }).check({ force: true });
+			await page.locator(':root[data-theme="dark"]').waitFor();
+			assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), "dark");
+			await check("app-preferences-dark");
+			await leaveSettings();
+			await check("home-dark");
+			await page.screenshot({ path: join(output, `${width}-home-dark.png`), fullPage: true });
+			await navigate("General");
+			await page.getByRole("radio", { name: /^System/ }).check({ force: true });
+			await page.locator(":root:not([data-theme])").waitFor();
+			assert.equal(await page.evaluate(() => localStorage.getItem("clio-coder-gui-theme")), null);
+			await navigate("Toolchain");
+			await page.getByRole("article", { name: "herdr", exact: true }).waitFor();
+			await check("toolchain");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
+		});
+		await step("stale bundle notice", async () => {
+			// A window whose bundle was built for another version than the server's says so and offers a reload, which it
+			// never does on its own.
+			await page.route("**/api/meta", async (route) => {
+				const response = await route.fetch();
+				await route.fulfill({ response, json: { ...(await response.json()), clio: "0.0.0-stale" } });
+			});
+			await page.reload();
+			const staleNotice = page.locator(".app-update-notice", { hasText: "the server runs 0.0.0-stale." });
+			await staleNotice.getByRole("button", { name: "Reload this window", exact: true }).waitFor();
+			await check("stale-bundle");
+			await page.unroute("**/api/meta");
+			await page.reload();
+			await page.locator("main").getByRole("article", { name: "herdr", exact: true }).waitFor();
+			assert.equal(await staleNotice.count(), 0, "a matching server still shows the stale-bundle notice");
+		});
+		await step("trace run", async () => {
+			await navigate("Traces");
+			await page.locator('main a[href^="/traces/run-0000"]').waitFor();
+			await check("traces");
+			await page.locator('main a[href^="/traces/run-0000"]').click();
+			await page.locator("main").getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
+			// The replay steps through the run journal: the worker process, the run feed and the call (#434).
+			await page.getByText("Tool finished: read", { exact: true }).first().waitFor({ state: "attached" });
+			await page.getByText("worker call · settled", { exact: true }).first().waitFor({ state: "attached" });
+			await page.getByRole("tab", { name: /^Execution · 1 call$/ }).click();
+			await page.locator("main .trace-lane .trace-stage").first().waitFor({ state: "attached" });
+			// The run's spend by token kind, then by the model each call settled on, every figure explained (#434 §11.3).
+			const spend = page.locator("main section", {
+				has: page.getByRole("heading", { name: "Tokens and spend", exact: true }),
+			});
+			const modelCost = spend.locator(".trace-model-spend > li").first().locator("details.explain").last();
+			await modelCost.locator("summary").click();
+			await modelCost.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+			await check("trace-run-spend");
+			await modelCost.locator("summary").click();
+			await page.getByRole("tab", { name: /^Replay/ }).click();
+			// The cost cell is the server's render; a legacy row may read partial or unmeasured, so only
+			// its presence is checked here.
+			const costCell = page
+				.locator("main .trace-totals li", { has: page.locator("span", { hasText: /^Cost$/ }) })
+				.locator("strong");
+			await costCell.waitFor();
+			assert.notEqual((await costCell.innerText()).trim(), "", "the run's cost cell is empty");
+			// A displayed quantity explains itself: its value, coverage and fold rule in the read model's words (#434 §11.4).
+			const tokensExplain = page
+				.locator("main .trace-totals li", { has: page.locator("span", { hasText: /^Tokens$/ }) })
+				.locator("details.explain");
+			await tokensExplain.locator("summary").click();
+			const explanation = tokensExplain.locator(".explain__panel");
+			await explanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
+			assert.notEqual(
+				(await explanation.locator(".explain__rule").innerText()).trim(),
+				"",
+				"the explanation names no rule",
+			);
+			await check("trace-run-explain");
+			if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `trace-run-explain-${width}.png`) });
+			await page.keyboard.press("Escape");
+			assert.equal(await tokensExplain.evaluate((element) => (element as HTMLDetailsElement).open), false);
+			assert.ok(
+				await tokensExplain.locator("summary").evaluate((element) => element === document.activeElement),
+				"Escape hands focus back to the explained number",
+			);
+			// A run opens on its replay; the sealed record's checks have their own view.
+			await page.getByRole("tab", { name: /^Checks & record/ }).click();
+			// Format conformance and contract quality are separate facts; an unmeasured quality never reads as a pass.
+			const checkRow = (label: string) =>
+				page.locator(".run-record-check", { has: page.getByText(label, { exact: true }) });
+			const mark = (label: string, word: string) =>
+				checkRow(label).locator(".run-record-check__state .status-mark", { hasText: word }).waitFor();
+			await mark("Result format", "Conforms");
+			await mark("Result quality", "Not measured");
+			await mark("Claimed checks", "1 of 2 claims grounded");
+			// The checks stand under the seal the read model verified; the saved document comes only on request (#434 §11.3).
+			await page.locator(".run-record-checks__integrity .status-mark", { hasText: "sealed" }).waitFor();
+			assert.equal(await page.getByRole("heading", { name: "The settled record", exact: true }).count(), 0);
+			await page.getByRole("button", { name: "Load full run record", exact: true }).click();
+			await page.getByRole("heading", { name: "The settled record", exact: true }).waitFor();
+			await check("trace-run");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
+		});
+		await step("fleet history", async () => {
+			await navigate("Fleet");
+			await page.locator("main").getByRole("heading", { name: "Fleet executions", exact: true }).waitFor();
+			await page.getByText("not a live event stream", { exact: false }).waitFor();
+			await check("fleet");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `fleet-${width}.png`), fullPage: true });
+			await page.locator('main a[href^="/fleet/fleet-149"]').click();
+			await page.getByText("Inspect worker output", { exact: true }).click();
+			await page.getByText("Fixture step passed.", { exact: true }).waitFor();
+			await page
+				.locator("main")
+				.getByRole("heading", { name: "review · pass", exact: true })
+				.waitFor({ state: "attached" });
+			await check("fleet-run");
+			await dark(true);
+			await check("fleet-run-dark");
+		});
+		await step("evidence and help", async () => {
+			await page.goto(`${origin}/evidence`);
+			await page.locator('main a[href^="/evidence/evidence-039"]').waitFor();
+			await check("evidence");
+			await page.locator('main a[href^="/evidence/evidence-039"]').click();
+			await page.locator("main").getByRole("heading", { name: "Trust by run", exact: true }).waitFor();
+			await check("evidence-detail-dark");
+			await dark(false);
+			await check("evidence-detail");
+			// The inspectors live inside closed disclosures, so they are opened before they are judged.
+			const openInspectors = async (name: string) => {
+				await page.locator("main details").evaluateAll((nodes) => {
+					for (const node of nodes) (node as HTMLDetailsElement).open = true;
+				});
+				await page.locator("main .facts").first().waitFor();
+				const raw = await page
+					.locator("main pre")
+					.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? "").filter((text) => /^\s*[{[]/.test(text)));
+				assert.deepEqual(raw, [], `${name} still renders a raw JSON dump`);
+				await check(`${name}-inspectors`);
+				if (width === 1600 || width === 390)
+					await page.screenshot({ path: join(output, `${name}-inspectors-${width}.png`), fullPage: true });
+			};
+			await openInspectors("evidence-detail");
+			await page.keyboard.press("Control+/");
+			await page.getByRole("heading", { name: "Shortcuts & help", exact: true }).waitFor();
+			await page.getByRole("searchbox", { name: "Search shortcuts and help", exact: true }).waitFor();
+			assert.equal(await page.getByRole("link", { name: "Open public documentation ↗", exact: true }).count(), 0);
+			await page.getByRole("button", { name: "Documentation", exact: true }).click();
+			const publicHelp = page.getByRole("link", { name: "Open public documentation ↗", exact: true });
+			assert.equal(await publicHelp.getAttribute("href"), "https://coder.iowarp.ai/docs.html");
+			assert.equal(await publicHelp.getAttribute("referrerpolicy"), "no-referrer");
+			await check("help");
+			await page.keyboard.press("Escape");
+			assert.equal(await page.getByRole("link", { name: "Docs", exact: true }).count(), 0);
+		});
+		await step("retired docs path and rail", async () => {
+			await page.goto(`${origin}/docs/architecture/trace-store.md`);
+			// A retired docs path lands on Help, whose documentation link leaves the app.
+			await page.locator("main").getByRole("heading", { name: "Make yourself at home.", exact: true }).waitFor();
+			assert.equal(await page.locator(".docs-page, iframe").count(), 0);
+			assert.equal(
+				await page.getByRole("link", { name: "Browse documentation", exact: true }).getAttribute("href"),
+				"https://coder.iowarp.ai/docs.html",
+			);
+			await check("legacy-help");
+			if (!phone) {
+				// The rail folds away entirely and one visible control brings it back.
+				await page.keyboard.press("Control+\\");
+				await page.locator('.wb[data-sidebar="collapsed"]').waitFor();
+				await page.locator(".wb-sidebar .wb-side").waitFor({ state: "hidden" });
+				await check("help-rail-collapsed");
+				if (width === 1600) await page.screenshot({ path: join(output, "navigation-collapsed-1600.png"), fullPage: true });
+				await page.getByRole("button", { name: "Show sidebar", exact: true }).filter({ visible: true }).first().click();
+				await page.locator('.wb[data-sidebar="expanded"]').waitFor();
+				await page.locator(".wb-sidebar").getByRole("button", { name: "Collapse sidebar", exact: true }).waitFor();
+				assert.equal(
+					await page.getByRole("navigation", { name: "Settings", exact: true }).getByRole("link").count(),
+					SETTINGS_SECTIONS.length,
+					"every settings place stays listed once the rail returns",
+				);
+			}
+		});
+		await step("open a workspace", async () => {
+			// A project opens from the rail's Open workspace dialog onto its own page, which lists its
+			// tasks and offers New task. New task returns to the home composer for that project, and the
+			// conversation begins with its first message.
+			await leaveSettings();
+			await revealSidebar();
+			await page
+				.locator(".wb-sidebar")
+				.getByRole("button", { name: /^Open workspace/ })
+				.click();
+			await openDialog.getByLabel("Project folder", { exact: true }).fill(h.home.path);
+			await openDialog.getByRole("button", { name: "Open", exact: true }).click();
+			await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
+			await page.locator("main button.primary", { hasText: "New task" }).click();
+			await page.waitForURL(`${origin}/`);
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("Summarize this project.");
+			await page.getByRole("button", { name: "Start task", exact: true }).click();
+			await page.waitForURL(/\/sessions\/[^/]+$/);
+			await page.getByLabel("Message CLIO Coder", { exact: true }).waitFor();
+			noticeSessionUrl = page.url();
+			// The bar also holds the transcript detail picker, so the task's menu is found by its name.
+			await page.locator('.conversation .wb-bar .wb-menu:has(> summary[aria-label="Task actions"]) summary').click();
+			await page.getByRole("menuitem", { name: /^All tasks in / }).click();
+			await page.waitForURL(/\/workspaces\/[^/]+\/sessions$/);
+			await page.locator("main button.primary", { hasText: "New task" }).waitFor();
+			await page
+				.locator("main")
+				.getByRole("heading", { name: /^Your work in / })
+				.waitFor();
+			await check("sessions");
+			workspaceUrl = page.url();
+		});
+		await step("settings save beside a notice", async () => {
+			// Unavailable saved history is explained inline beside the tasks, not as a toast. A folder that
+			// does not exist raises the problem toast that stays up while the settings are written below.
+			await revealSidebar();
+			await page
+				.locator(".wb-sidebar")
+				.getByRole("button", { name: /^Open workspace/ })
+				.click();
+			await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
+			await openDialog.getByRole("button", { name: "Open", exact: true }).click();
+			const problemNotice = page.locator(".notice", { hasText: "validation" }).last();
+			await problemNotice.waitFor();
+			await page.keyboard.press("Escape");
+			await openDialog.waitFor({ state: "detached" });
+			await navigate("All settings");
+			// The write surface: a select saves through the engine, a project-set value refuses, a destructive
+			// change needs its named confirmation. All settings' search reaches every control by its path.
+			await findSetting.fill("chat.thinkingLevel");
+			const thinking = setting("chat.thinkingLevel");
+			const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
+			await thinking.getByRole("combobox").selectOption(level);
+			const saveThinking = thinking.getByRole("button", { name: "Save", exact: true });
+			await saveThinking.scrollIntoViewIfNeeded();
+			assert.equal(await problemNotice.isVisible(), true, "the notice is present while Save is used");
+			const noticeBounds = await page.locator(".notice-region").boundingBox();
+			const saveBounds = await saveThinking.boundingBox();
+			assert.ok(noticeBounds && saveBounds);
+			assert.ok(
+				saveBounds.y + saveBounds.height <= noticeBounds.y ||
+					noticeBounds.y + noticeBounds.height <= saveBounds.y ||
+					saveBounds.x + saveBounds.width <= noticeBounds.x ||
+					noticeBounds.x + noticeBounds.width <= saveBounds.x,
+				`notifications must not cover Save at ${width}px: save ${JSON.stringify(saveBounds)}, notices ${JSON.stringify(noticeBounds)}`,
+			);
+			assert.equal(
+				await saveThinking.evaluate((button) => {
+					const rect = button.getBoundingClientRect();
+					return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+				}),
+				true,
+				"Save receives pointer input while the notification is visible",
+			);
+			if (width === 390 || width === 400)
+				await page.screenshot({ path: join(output, `notice-save-${width}.png`), fullPage: true });
+			await saveThinking.click({ timeout: 1_000 });
+			assert.equal(await problemNotice.isVisible(), true, "Save does not wait for notification dismissal");
+			await thinking.getByRole("status").getByText("Used by the next relevant request").waitFor();
+			await problemNotice.locator(".notice__heading button").first().click();
+			await problemNotice.waitFor({ state: "detached" });
+			await check("settings-saved");
+		});
+		await step("approval banner with notices", async () => {
+			// A loaded approval can precede its tool-call history. Exercise the full banner beside a
+			// growing draft and a full notice row, including the short viewport where the task must scroll.
+			const noticeSessionId = new URL(noticeSessionUrl).pathname.split("/").at(-1);
+			assert.ok(noticeSessionId);
+			const noticePage = await context.newPage();
+			noticePage.on("pageerror", (error) => errors.push(error.message));
+			// The conversation defers its inspectors until their pane opens, so the stack is filled by the
+			// reads the shell still makes beside it: the rail's health and saved-history reads.
+			const refuse = (route: Route) =>
+				route.fulfill({
+					status: 503,
+					json: {
+						type: "urn:clio-coder:problem:unavailable",
+						title: "Notice layout check",
+						status: 503,
+						code: "unavailable",
+						detail: "The request could not complete. ".repeat(8),
+						instance: new URL(route.request().url()).pathname,
+					},
+				});
+			await noticePage.route("**/api/system", refuse);
+			await noticePage.route("**/api/workspaces/*/sessions", (route) =>
+				route.request().method() === "GET" ? refuse(route) : route.continue(),
+			);
+			await noticePage.route(`**/api/sessions/${noticeSessionId}{,/**}`, async (route) => {
+				const path = new URL(route.request().url()).pathname;
+				if (path === `/api/sessions/${noticeSessionId}`) {
+					await route.fulfill({
+						json: {
+							...h.supervisor.get(noticeSessionId),
+							permissions: [
+								{
+									id: "notice-approval",
+									turnId: "notice-turn",
+									toolCallId: "notice-call",
+									title: "Run a command",
+									kind: "execute",
+									requestedAt: new Date().toISOString(),
+									escalateAt: "2099-01-01T00:00:00Z",
+									expiresAt: "2099-01-02T00:00:00Z",
+									status: "pending",
+									canStopTurn: false,
+								},
+							],
+						},
+					});
+				} else await refuse(route);
+			});
+			try {
+				await noticePage.goto(`${noticeSessionUrl}#${await launch()}`);
+				const draft = noticePage.getByLabel("Message CLIO Coder", { exact: true });
+				await draft.fill("A draft line\n".repeat(12));
+				await noticePage.locator(".approval-banner:not(.approval-banner--strip)").waitFor();
+				await noticePage.getByRole("button", { name: "Dismiss all", exact: true }).waitFor();
+				for (const height of zoom === 2 ? [await noticePage.evaluate(() => innerHeight)] : [900, 450]) {
+					if (zoom !== 2) await noticePage.setViewportSize({ width, height });
+					const receivesPointer = (control: Locator) =>
+						control.evaluate((element) => {
+							const rect = element.getBoundingClientRect();
+							return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+						});
+					for (const name of ["Reject", "Allow once"]) {
+						const answer = noticePage.locator(".conversation__approval").getByRole("button", { name, exact: true });
+						await answer.scrollIntoViewIfNeeded();
+						assert.equal(await receivesPointer(answer), true, `${name} stays reachable with notices at ${width}×${height}`);
+						await answer.click({ trial: true, timeout: 1_000 });
+					}
+					const transcript = noticePage.locator(".chat-transcript");
+					await transcript.scrollIntoViewIfNeeded();
+					const transcriptBounds = await transcript.boundingBox();
+					assert.ok(transcriptBounds && transcriptBounds.height >= 64, "the transcript keeps a readable scrolling viewport");
+					assert.equal(await receivesPointer(transcript), true, "the transcript stays reachable beside approval and draft");
+					const submit = noticePage.locator(".composer__submit");
+					await submit.scrollIntoViewIfNeeded();
+					assert.equal(await receivesPointer(submit), true, "the composer controls stay reachable with notices");
+					const noticeList = noticePage.locator(".notice-region__list");
+					assert.equal(await noticeList.evaluate((list) => list.scrollHeight > list.clientHeight), true);
+					await noticeList.evaluate((list) => {
+						list.scrollTop = 100;
+					});
+					const dismiss = noticePage.locator(".notice__heading button").first();
+					await dismiss.focus();
+					assert.equal(await dismiss.evaluate((button) => button === document.activeElement), true);
+					assert.equal(await receivesPointer(dismiss), true, "the focused individual Dismiss stays above the notice list");
+					await dismiss.click({ trial: true, timeout: 1_000 });
+					await check(`notice-approval-${height}`, noticePage);
+					await noticePage.screenshot({ path: join(output, `notice-approval-${width}-${height}.png`) });
+				}
+			} finally {
+				await noticePage.close();
+			}
+		});
+		await step("settings controls", async () => {
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
+			await findSetting.fill("fleet.concurrency");
+			await setting("fleet.concurrency").getByText("Set by the project layer").waitFor();
+			if (await setting("fleet.concurrency").getByRole("combobox").count())
+				throw new Error("A project-set value still offers an editor.");
+			await findSetting.fill("fleet.history.maxRuns");
+			const history = setting("fleet.history.maxRuns");
+			await history.getByRole("spinbutton").fill(String(900 - runIndex * 100));
+			if (!(await history.getByRole("button", { name: "Save", exact: true }).isDisabled()))
+				throw new Error("A destructive setting saved without its confirmation.");
+			await history.getByRole("checkbox").check();
+			await check("settings-confirm");
+			if (width === 1600) await page.screenshot({ path: join(output, "settings-confirm.png"), fullPage: true });
+			await history.getByRole("button", { name: "Save", exact: true }).click();
+			await history.getByRole("status").waitFor();
+			await findSetting.fill("no-such-setting-anywhere");
+			await page.getByText("No settings match your search.", { exact: true }).waitFor();
+			await dark(true);
+			await findSetting.fill("retry");
+			await check("settings-controls-dark");
+			await dark(false);
+			await page
+				.locator("main")
+				.getByRole("link", { name: /^Effective values/ })
+				.click();
+			await page.getByLabel(/^Filter settings/).fill("chat.model");
+			await page.getByText("fixture-local-model", { exact: true }).waitFor();
+			await check("settings-inspection");
+			if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `settings-${width}.png`) });
+			await dark(true);
+			await check("settings-inspection-dark");
+			await dark(false);
+			await page.getByRole("link", { name: "Sources & timing", exact: true }).click();
+			// Each source category is a disclosure; the hook is listed inside the closed Hooks one.
+			await page
+				.locator("main")
+				.getByRole("heading", { name: "fixture-hook", exact: true, includeHidden: true })
+				.waitFor({ state: "attached" });
+			await page.locator("main").getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
+			await check("config-graph");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `config-graph-${width}.png`), fullPage: true });
+			await dark(true);
+			await check("config-graph-dark");
+			await dark(false);
+		});
+		await step("models and connections", async () => {
+			// Adding a connection is the guided setup's job; it opens from Models and closes back there.
+			await navigate("Models");
+			const controlsPath = "**/api/workspaces/*/settings/controls";
+			await page.route(controlsPath, async (route) => {
+				const response = await route.fetch();
+				const report = (await response.json()) as SettingsControls;
+				await route.fulfill({
+					json: {
+						...report,
+						controls: report.controls.map((control) =>
+							control.path === "chat.target"
+								? { ...control, value: "fixture" }
+								: control.path === "chat.model"
+									? { ...control, access: "writable" }
+									: control,
+						),
+					},
+				});
+			});
+			await page.reload();
+			const catalogSelect = page.locator(".model-select select").first();
+			await catalogSelect.waitFor();
+			const modelId = await catalogSelect.getAttribute("id");
+			const modelField = page.locator(".model-select").filter({ has: page.locator(`[id="${modelId}"]`) });
+			await modelField.locator("select").selectOption({ label: "Advanced: unverified model id…" });
+			await modelField.getByRole("button", { name: "Choose from the list", exact: true }).click();
+			assert.equal(await modelField.locator("select").evaluate((element) => element === document.activeElement), true);
+			await page.unroute(controlsPath);
+			await page.reload();
+			await page
+				.locator("main")
+				.getByRole("link", { name: /^Add a connection/ })
+				.click();
+			await page.getByRole("heading", { name: "Where does your model come from?", exact: true }).waitFor();
+			await check("targets-onboarding");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });
+			await page.getByRole("button", { name: "Close", exact: true }).click();
+			await page.waitForURL((url) => url.pathname === "/settings/models");
+			await page
+				.locator("main")
+				.getByRole("link", { name: /^Connections/ })
+				.click();
+			await page.getByRole("article", { name: "fixture", exact: true }).waitFor();
+			await check("targets");
+			await page
+				.getByRole("article", { name: "fixture", exact: true })
+				.getByRole("button", { name: "Use for chat & fleet", exact: true })
+				.click();
+			await page.locator("main").getByRole("heading", { name: "Connection use · succeeded", exact: true }).waitFor();
+			await dark(true);
+			await check("targets-dark");
+			await dark(false);
+			await page.getByRole("link", { name: "Fleet routes", exact: true }).click();
+			// The routing inventory shows one of profiles, agent bindings and cached models at a time.
+			await page
+				.getByRole("navigation", { name: "Routing inventory", exact: true })
+				.getByRole("button", { name: /^Agent bindings ·/ })
+				.click();
+			await page
+				.locator("main")
+				.getByRole("heading", { name: /^Agent bindings ·/ })
+				.waitFor();
+			await check("routing");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `routing-${width}.png`), fullPage: true });
+			await dark(true);
+			await check("routing-dark");
+		});
+		await step("usage", async () => {
+			await page.goto(`${origin}/usage`);
+			await page.locator("main").getByRole("heading", { name: "Inside the token record", exact: true }).waitFor();
+			// The five bars compare fields with one another, which is the one thing a reader can get
+			// wrong by looking; the caveat is part of the panel, not a footnote that can drift away.
+			await page.getByText("they are not additive percentages", { exact: false }).waitFor();
+			await check("usage-dark");
+			await dark(false);
+			await check("usage");
+			// A repository figure explains to the window `usage report` folded, rebuilt ending now (#434 §11.4).
+			const windowTokens = page
+				.locator("main .usage-totals article", { hasText: "Recorded tokens" })
+				.locator("details.explain");
+			await windowTokens.locator("summary").click();
+			const windowExplanation = windowTokens.locator(".explain__panel");
+			await windowExplanation.locator("dt", { hasText: /^Coverage$/ }).waitFor();
+			assert.equal(
+				(await windowExplanation.locator("dd").first().innerText()).trim(),
+				(await windowTokens.locator("summary").innerText()).trim(),
+				"the window's explanation states the figure it explains",
+			);
+			await check("usage-explain");
+			await page.keyboard.press("Escape");
+			// Each recorded route has a dense row whose figures explain themselves; the grouping switches to targets.
+			const usageModelRow = page
+				.getByRole("region", { name: "Recorded usage by model", exact: true })
+				.locator("tbody tr", { has: page.locator("th", { hasText: /fixture-model$/ }) });
+			const modelTokens = usageModelRow.locator("td").nth(5).locator("details.explain");
+			await modelTokens.locator("summary").click();
+			await modelTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+			await check("usage-model-row");
+			await modelTokens.locator("summary").click();
+			await page.locator("main").getByRole("button", { name: "Per target", exact: true }).click();
+			await page
+				.getByRole("region", { name: "Recorded usage by target", exact: true })
+				.locator("tbody tr", { has: page.locator("th", { hasText: /fixture/ }) })
+				.first()
+				.waitFor();
+			await check("usage-target-rows");
+			await page.locator("main").getByRole("button", { name: "Per model", exact: true }).click();
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
+		});
+		await step("library", async () => {
+			await navigate("Library");
+			// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
+			const offer = page.locator("main").getByRole("listitem", { name: "skill:map-codebase", exact: true });
+			await offer.waitFor();
+			await check("library-catalog");
+			await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).click();
+			const review = page.getByRole("dialog", { name: "Install skill:map-codebase", exact: true });
+			await review.getByText("This is exactly what will be applied. Nothing has been written yet.").waitFor();
+			await review.getByText("Staged and verified").waitFor();
+			await check("library-plan");
+			await review.getByRole("button", { name: "Apply this change", exact: true }).click();
+			await review.getByText("The files are on disk and the install record matches.").waitFor();
+			// The change reaches open conversations by reload; with none open the note says so.
+			const refreshNote = review.locator(".library-session-note");
+			await refreshNote.waitFor();
+			assert.doesNotMatch(await refreshNote.innerText(), /did not reload/);
+			await check("library-applied");
+			if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `library-applied-${width}.png`) });
+			await review.getByRole("button", { name: "Done", exact: true }).click();
+			await offer.locator(".status-mark", { hasText: "Ready" }).waitFor();
+			// A second user install is no longer offered; the project scope still is.
+			if (await offer.getByRole("button", { name: "Install skill:map-codebase for me", exact: true }).count())
+				throw new Error("An installed user copy still offers a user install.");
+			await offer.getByRole("button", { name: "Install skill:map-codebase in this project", exact: true }).waitFor();
+			await page
+				.locator("main")
+				.getByRole("button", { name: /^Installed only · [1-9]/ })
+				.click();
+			await check("library-installed");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `library-installed-${width}.png`), fullPage: true });
+			await dark(true);
+			await check("library-installed-dark");
+			if (width === 1600) await page.screenshot({ path: join(output, "library-installed-dark.png"), fullPage: true });
+			await dark(false);
+			await offer.getByRole("button", { name: "Remove the user copy of skill:map-codebase", exact: true }).click();
+			const removal = page.getByRole("dialog", { name: "Remove skill:map-codebase", exact: true });
+			await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
+			await removal.getByText("The files and the install record are gone.").waitFor();
+			await removal.getByRole("button", { name: "Done", exact: true }).click();
+			await offer.waitFor({ state: "detached" });
+			await page.locator("main").getByRole("listitem", { name: "extension:fixture-extension", exact: true }).waitFor();
+			assert.equal(await page.locator("main .library-packages > li").count(), 1);
+			await page
+				.locator("main")
+				.getByRole("tablist", { name: "Library collections" })
+				.getByRole("tab", { name: /^Skills · [1-9]/ })
+				.click();
+			await page.locator("main").getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
+			await check("library-skills");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `library-skills-${width}.png`), fullPage: true });
+			// The collections are one tab stop: an arrow key moves the selection and the focus together.
+			await page
+				.locator("main")
+				.getByRole("tab", { name: /^Skills · / })
+				.press("ArrowLeft");
+			const agentsTab = page.locator("main").getByRole("tab", { name: /^Agents · / });
+			await agentsTab.and(page.locator('[aria-selected="true"]')).waitFor();
+			if ((await agentsTab.getAttribute("aria-selected")) !== "true")
+				throw new Error("ArrowLeft from Skills did not select the Agents tab.");
+			if (!(await agentsTab.evaluate((node) => node === document.activeElement)))
+				throw new Error("ArrowLeft moved the selection without moving focus.");
+			const agentDetails = page.locator("main .library-resource__details").first();
+			await agentDetails.locator(":scope > summary").click();
+			await agentDetails.getByText("Tool-call budget", { exact: true }).waitFor();
+			await check("library-agent-details");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
+			for (const collection of ["Agents", "Prompts", "Playbooks", "Extensions", "Verifiers"]) {
+				await page
+					.locator("main")
+					.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) })
+					.click();
+				const resource = page.locator("main .library-resource").first();
+				await resource.waitFor();
+				const details = resource.locator(".library-resource__details");
+				if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open)))
+					await details.locator(":scope > summary").click();
+				await check(`library-${collection.toLowerCase()}`);
+			}
+			await dark(true);
+			await check("library-dark");
+		});
+		await step("system and interop", async () => {
+			await navigate("System");
+			await page.locator("main summary", { hasText: "CLIO Coder folders" }).waitFor();
+			await check("system-dark");
+			await page.locator("main").getByRole("link", { name: "Other coding agents", exact: true }).click();
+			await page.locator("main").getByRole("heading", { name: "Codex", exact: true }).waitFor();
+			await check("interop-dark");
+			await dark(false);
+			await page.getByText("Would be offered", { exact: true }).waitFor();
+			// Opening the page ran nothing. The probe is an explicit act, and the page survives it.
+			await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).click();
+			await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).waitFor();
+			await check("interop");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `interop-${width}.png`), fullPage: true });
+		});
+		await step("conversation markdown and diagram", async () => {
+			// The project page's New task returns to the home composer for that project; the first message
+			// starts the task and opens its conversation.
+			await page.goto(workspaceUrl);
+			await page.locator("main button.primary", { hasText: "New task" }).click();
+			await page.waitForURL(`${origin}/`);
+			await page
+				.getByLabel("Message CLIO Coder", { exact: true })
+				.fill("Show the fixture findings with code and a diagram.");
+			await page.getByRole("button", { name: "Start task", exact: true }).click();
+			await page.waitForURL(/\/sessions\/[^/]+$/);
+			// The fixture first streams and then settles. Inspect its final Markdown subtree,
+			// which replaces the streaming subtree before deferred diagrams are rendered.
+			await page.locator(".chat-turn.is-settled .diagram").waitFor();
+			// Diagrams, like highlighted code, render when they approach the transcript viewport.
+			await page.locator(".chat-turn.is-settled .diagram").scrollIntoViewIfNeeded();
+			await page.locator(".diagram.is-rendered svg").waitFor();
+			// Highlighting waits until code nears the visible transcript; the composer is no longer
+			// displaced by page scrolling, so bring that block into the one reading viewport.
+			await page.locator(".code-block pre").first().scrollIntoViewIfNeeded();
+			await page.locator(".token.keyword").first().waitFor();
+			const diagram = await page.locator(".diagram svg").evaluate((node) => {
+				const svg = node as SVGSVGElement;
+				return {
+					width: svg.getBoundingClientRect().width,
+					height: svg.getBoundingClientRect().height,
+					viewBox: svg.getAttribute("viewBox"),
+					markup: svg.outerHTML,
+				};
+			});
+			await writeFile(join(output, `diagram-${width}.json`), JSON.stringify(diagram, null, 2));
+			assert.equal(
+				await page.locator(".diagram svg script, .diagram svg foreignObject, .diagram svg a, .diagram svg image").count(),
+				0,
+			);
+			assert.equal(
+				await page.locator(".diagram svg").evaluate((svg) => {
+					const bounds = svg.getBoundingClientRect();
+					return [...svg.querySelectorAll(".node")].every((node) => {
+						const rectangle = node.getBoundingClientRect();
+						return (
+							rectangle.left >= bounds.left - 1 &&
+							rectangle.right <= bounds.right + 1 &&
+							rectangle.top >= bounds.top - 1 &&
+							rectangle.bottom <= bounds.bottom + 1
+						);
+					});
+				}),
+				true,
+				"Every diagram node is inside the rendered viewport.",
+			);
+			if (width === 390) {
+				const code = page.locator(".code-block pre").first();
+				await code.focus();
+				await page.keyboard.press("ArrowRight");
+				await page.waitForFunction(() => (document.querySelector(".code-block pre")?.scrollLeft ?? 0) > 0);
+				await code.evaluate((node) => {
+					node.scrollLeft = 0;
+					node.blur();
+				});
+			}
+			assert.equal(await page.locator(".chat-transcript script").count(), 0);
+			assert.equal(await page.locator('.chat-transcript a[href^="javascript:"]').count(), 0);
+			assert.equal(await page.evaluate(() => Object.hasOwn(window, "modelMarkupExecuted")), false);
+			assert.ok((await page.locator(".chat-transcript").innerText()).includes("<script>window.modelMarkupExecuted"));
+			await page.locator(".chat-transcript").evaluate((element) => {
+				element.scrollTop = element.scrollHeight;
+			});
+			await page.locator(".jump-to-latest").waitFor({ state: "detached" });
+		});
+		await step("turn usage", async () => {
+			// Complete accounting lives with the turn outcome, not as a repeated line above the
+			// composer. Its native disclosure must work from the keyboard and remain accessible open.
+			assert.equal(await page.locator(".conversation__dock > .chat-usage").count(), 0);
+			// The outcome line is the summary of the turn's own disclosure; each explained figure inside it is
+			// a nested disclosure of its own.
+			const usage = page.locator(".turn-outcome").last().locator(":scope > details");
+			const usageSummary = usage.locator(":scope > summary");
+			await usageSummary.focus();
+			await page.keyboard.press("Enter");
+			assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), true);
+			const tokenGroup = usage.locator(".turn-details__group", {
+				has: page.getByRole("heading", { name: "Usage", exact: true }),
+			});
+			// Prompt is the whole prompt the provider read: input plus cache read and write.
+			assert.deepEqual(await tokenGroup.locator("dt").allTextContents(), ["Input", "Output", "Reasoning", "Prompt"]);
+			// An explained figure carries its explanation beside it; the figure is that disclosure's summary.
+			const figures = (group: Locator) =>
+				group
+					.locator("dd")
+					.evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
+			assert.deepEqual(await figures(tokenGroup), ["11", "12", "15", "38"]);
+			const cacheGroup = usage.locator(".turn-details__group", {
+				has: page.getByRole("heading", { name: "Cache", exact: true }),
+			});
+			// Cache reads and writes are the provider's fields; the hit share is the read part of the whole prompt.
+			assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Hit share", "Written"]);
+			assert.deepEqual(await figures(cacheGroup), ["13", "34%", "14"]);
+			await check("conversation-usage");
+			await page.keyboard.press("Enter");
+			assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
+			// Opening a detail freezes the live edge on purpose; Jump to latest returns to it before the draft grows.
+			await page.locator(".jump-to-latest").click();
+			await page.locator(".jump-to-latest").waitFor({ state: "detached" });
+		});
+		await step("composer tray and layout", async () => {
+			// The resting tray is compact, grows with a multiline draft, and keeps a followed
+			// transcript at its live edge while that grid row changes height.
+			const restingComposer = await page
+				.locator(".composer")
+				.evaluate((element) => element.getBoundingClientRect().height);
+			// Name each action's box in the failure, so a wrap on a narrow screen says which control caused it.
+			const actionBoxes = await page.locator(".composer__actions > *").evaluateAll((elements) =>
+				elements.map((element) => {
+					const box = element.getBoundingClientRect();
+					return `${element.className || element.tagName}:${Math.round(box.width)}@${Math.round(box.top)}`;
+				}),
+			);
+			// The tray carries its heading and hint lines around a one-line field and one row of actions.
+			// At 800px those lines wrap and the route actions take a row of their own; a wrapped action
+			// row at any wider size would still add 44px and fail here.
+			assert.ok(
+				restingComposer <= (width <= 800 ? 280 : 230),
+				`resting composer is ${restingComposer}px tall at ${width}px; actions ${actionBoxes.join(", ")}`,
+			);
+			const restingField = await composerField.evaluate((element) => element.getBoundingClientRect().height);
+			await composerField.fill("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
+			await page.waitForFunction(
+				(before) => (document.querySelector(".composer__field")?.getBoundingClientRect().height ?? 0) > before + 20,
+				restingField,
+			);
+			await page.waitForFunction(() => {
+				const transcript = document.querySelector(".chat-transcript");
+				return !!transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 32;
+			});
+			const grownComposer = await page.evaluate(() => {
+				const composer = document.querySelector(".composer")?.getBoundingClientRect();
+				const transcript = document.querySelector(".chat-transcript");
+				return {
+					composerBottom: composer?.bottom ?? Number.POSITIVE_INFINITY,
+					bottomGap: transcript
+						? transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
+						: Number.POSITIVE_INFINITY,
+				};
+			});
+			assert.ok(grownComposer.composerBottom <= 1050, "a growing draft pushed the composer below the viewport");
+			assert.ok(grownComposer.bottomGap <= 32, "a growing draft moved a followed transcript away from its live edge");
+			// A `/name` nothing owns is flagged before it is sent; a loaded template is not.
+			await composerField.fill("/tpyo fix the build");
+			await page.getByText("/tpyo is not a command or prompt template in this task").waitFor();
+			await check("composer-unknown-command");
+			await composerField.fill("/review-pr 42");
+			await page.getByText("is not a command or prompt template").waitFor({ state: "detached" });
+			await composerField.fill("");
+			await page.waitForFunction(
+				(before) =>
+					(document.querySelector(".composer__field")?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY) <=
+					before + 1,
+				restingField,
+			);
+			await composerField.evaluate((element) => (element as HTMLTextAreaElement).blur());
+
+			await check("conversation");
+			const conversationLayout = await page.evaluate(() => {
+				const transcript = document.querySelector(".chat-transcript");
+				const composer = document.querySelector(".composer");
+				const header = document.querySelector(".conversation .wb-bar");
+				const main = document.querySelector("main");
+				return {
+					pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight + 2,
+					mainScrolls: !!main && (main.scrollTop !== 0 || main.scrollLeft !== 0),
+					// The transcript owns scrolling whether or not this fixture's content happens to overflow it.
+					transcriptScrolls: !!transcript && ["auto", "scroll"].includes(getComputedStyle(transcript).overflowY),
+					headerVisible: !!header && header.getBoundingClientRect().top >= 0 && header.getBoundingClientRect().height > 0,
+					composerVisible: !!composer && composer.getBoundingClientRect().bottom <= innerHeight,
+				};
+			});
+			assert.deepEqual(conversationLayout, {
+				pageScrolls: false,
+				mainScrolls: false,
+				transcriptScrolls: true,
+				headerVisible: true,
+				composerVisible: true,
+			});
+			await page.screenshot({ path: join(output, `conversation-${width}.png`), fullPage: true });
+			// At 1400px a partial token sum with its gap clause, beside a status, pushed Review and Details out of the
+			// bar. A throwaway page sets that case up, so the text it writes never reaches the page that goes on.
+			if (width === 1600) {
+				const probe = await context.newPage();
+				try {
+					await probe.setViewportSize({ width: 1400, height: 900 });
+					await probe.goto(`${page.url()}#${await launch()}`);
+					const bar = probe.locator(".conversation .wb-bar");
+					const tokens = bar.locator(".wb-chip--figure summary").first();
+					await tokens.waitFor();
+					// A reading shows whole or wraps out of the bar whole; it is never cut.
+					const measure = (status: boolean) =>
+						bar.evaluate((element, withStatus) => {
+							const summary = element.querySelector(".wb-chip--figure summary");
+							if (summary) summary.textContent = "Tokens: ≥415,998 (1 call unknown)";
+							if (withStatus) {
+								const chip = document.createElement("span");
+								chip.className = "wb-chip wb-chip--status";
+								chip.innerHTML = "<span>Memory reviewing</span>";
+								element.querySelector(".wb-bar__readings")?.before(chip);
+							}
+							const edge = element.getBoundingClientRect();
+							const [review, details] = ['[title="Review changes"]', '[title^="Task details"]'].map((selector) => {
+								const box = element.querySelector(selector)?.getBoundingClientRect();
+								return !!box && box.left >= edge.left && box.right <= edge.right + 0.5;
+							});
+							const chip = element.querySelector(".wb-chip--figure") as HTMLElement;
+							const figure = chip.getBoundingClientRect();
+							const region = element.querySelector(".wb-bar__readings")?.getBoundingClientRect() ?? edge;
+							const shown = figure.top < region.bottom && figure.bottom > region.top;
+							const whole =
+								figure.left >= region.left - 0.5 &&
+								figure.right <= region.right + 0.5 &&
+								figure.bottom <= region.bottom + 0.5 &&
+								chip.scrollWidth <= chip.clientWidth + 1;
+							return {
+								barOverflows: element.scrollWidth > element.clientWidth + 1,
+								reviewInside: review,
+								detailsInside: details,
+								figure: shown ? (whole ? "whole" : "cut") : "wrapped out",
+							};
+						}, status);
+					const roomy = await measure(false);
+					await probe.screenshot({ path: join(output, "conversation-header-1400.png") });
+					assert.deepEqual(
+						roomy,
+						{ barOverflows: false, reviewInside: true, detailsInside: true, figure: "whole" },
+						"At 1400px the header must show the whole token figure beside Review and Details",
+					);
+					await tokens.click();
+					const panel = probe.locator(".wb-chip--figure .explain__panel").first();
+					await panel.waitFor();
+					const panelShown = await panel.evaluate((node) => {
+						const box = node.getBoundingClientRect();
+						const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+						return box.height > 0 && !!hit && node.contains(hit);
+					});
+					assert.ok(panelShown, "The token figure's explanation opened clipped by the bar");
+					await probe.keyboard.press("Escape");
+					const tight = await measure(true);
+					await probe.screenshot({ path: join(output, "conversation-header-1400-status.png") });
+					assert.ok(
+						!tight.barOverflows && tight.reviewInside && tight.detailsInside && tight.figure !== "cut",
+						`At 1400px with a status the header cut a reading or lost Review or Details: ${JSON.stringify(tight)}`,
+					);
+				} finally {
+					await probe.close();
+				}
+			}
+			await dark(true);
+			await check("conversation-dark");
+			if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
+			if (width === 320) await page.screenshot({ path: join(output, "conversation-320-dark.png"), fullPage: true });
+			await dark(false);
+		});
+		await step("task pane inspection", async () => {
+			// The task pane beside a conversation is read-only inspection. Opening it and each drill-in must
+			// preserve the route, unsent text and actual textarea node: a remount can silently lose selection,
+			// attachments or editor state.
+			const writesBeforeInspection = apiWrites.length;
+			const readsBeforeInspection = evidenceReads;
+			const contextPath = new URL(page.url()).pathname;
+			const contextSessionId = contextPath.split("/").at(-1);
+			assert.ok(contextSessionId);
+			const draft = "Keep this unsent draft while inspecting the workspace.";
+			await composerField.fill(draft);
+			const originalField = await composerField.elementHandle();
+			assert.ok(originalField);
+			async function assertConversationPreserved() {
+				assert.equal(new URL(page.url()).pathname, contextPath);
+				assert.equal(new URL(page.url()).pathname.split("/").at(-1), contextSessionId);
+				assert.equal(await composerField.inputValue(), draft);
+				assert.equal(
+					await originalField.evaluate((node) => node === document.querySelector(".composer__field")),
+					true,
+					"Pane inspection remounted the conversation composer",
+				);
+			}
+			await openPane();
+			await assertConversationPreserved();
+			await pane.locator(".pane-steps li").first().waitFor();
+			const planTree = await pane.locator(".pane-steps").ariaSnapshot();
+			assert.match(planTree, /Completed:.*Read the fixture workspace/);
+			assert.match(planTree, /In progress:.*Summarize the findings/);
+			await check("pane-session");
+			// The column lists evidence from this session's own fleet records only, never the installation's inventory.
+			assert.equal(
+				await pane.locator(".pane-evidence a").count(),
+				0,
+				"Unrelated installation bundles were presented as this task's evidence",
+			);
+			for (const name of ["Context", "Usage", "Tasks and decisions"]) {
+				await openDrill(name);
+				await pane.locator(".pane__title", { hasText: name }).waitFor();
+				await assertConversationPreserved();
+				await check(`pane-${name.toLowerCase()}`);
+				if (width === 1600 || width === 390)
+					await page.screenshot({ path: join(output, `pane-${name.toLowerCase()}-${width}.png`), fullPage: true });
+				// The drill moves focus to its title. Docked, Escape steps back to the task details without
+				// closing the pane. The slide-over below 1440px closes on Escape from any view, so there the
+				// header's Back is the way back.
+				assert.equal(
+					await pane.locator(".pane__title").evaluate((node) => node === document.activeElement),
+					true,
+					"a drill-in did not move focus to its title",
+				);
+				if ((zoom === 2 ? 800 : width) >= 1440) {
+					await page.keyboard.press("Escape");
+					await pane.locator(".pane__title", { hasText: "Task details" }).waitFor();
+					assert.equal(await pane.count(), 1, "Escape in a drill-in closed the pane");
+				} else {
+					await pane.getByRole("button", { name: "Back to task details", exact: true }).click();
+					await pane.locator(".pane__title", { hasText: "Task details" }).waitFor();
+				}
+			}
+			// Changes has no drill-in before a file changes; the top bar's Review control opens the view itself.
+			await closePane();
+			const changesToggle = page.locator(".conversation .wb-bar").getByRole("button", { name: /^Review changes/ });
+			await changesToggle.click();
+			await pane.locator(".pane-blank").getByText("No files changed yet.", { exact: true }).waitFor();
+			await assertConversationPreserved();
+			await check("pane-changes");
+			assert.equal(evidenceReads, readsBeforeInspection, "The task pane triggered an evidence inventory read");
+			await closePane();
+			assert.equal(
+				await changesToggle.evaluate((node) => document.activeElement === node),
+				true,
+				"Closing the pane did not return focus to the control that opened it",
+			);
+			await assertConversationPreserved();
+			assert.deepEqual(apiWrites.slice(writesBeforeInspection), [], "Read-only pane inspection performed a write");
+			await composerField.fill("");
+			await originalField.dispose();
+		});
+		await step("route picker", async () => {
+			// Conversation controls use ACP config options, and saved scope alone can switch targets.
+			const route = page.locator(".route-picker");
+			await route.locator("summary").click();
+			await route.getByText("This conversation.", { exact: true }).waitFor();
+			assert.equal(await route.getByLabel("Connection", { exact: true }).isDisabled(), true);
+			await route.getByLabel("Model", { exact: true }).selectOption("fixture-small");
+			await route.getByLabel("Thinking", { exact: true }).selectOption("high");
+			await check("route-picker-conversation");
+			await route.getByRole("button", { name: "Apply to this conversation", exact: true }).click();
+			await route.locator("summary .route-chip__text").getByText("fixture-small", { exact: true }).waitFor();
+			assert.match(
+				(await route.locator("summary").getAttribute("title")) ?? "",
+				/Target: fixture\. Model: fixture-small\./,
+			);
+			await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
+			assert.match((await route.locator("summary").getAttribute("title")) ?? "", /Thinking: high/);
+			assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+			await route.locator("summary").click();
+			await route.getByText("This conversation.", { exact: true }).waitFor();
+			assert.equal(await route.getByLabel("Apply to", { exact: true }).count(), 0);
+			await check("route-picker");
+			if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => !(document.querySelector(".route-picker") as HTMLDetailsElement).open);
+			assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
+			assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+			// Escape closes it without saving and hands focus back to the chip.
+			await route.locator("summary").click();
+			await route.getByLabel("Thinking", { exact: true }).selectOption("low");
+			await page.keyboard.press("Escape");
+			assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
+			assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+		});
+		await step("task actions menu", async () => {
+			// The task's own actions sit in one Task actions menu in the top bar; working freedom is the
+			// composer's pill. The menu closes on Escape and hands focus back to its button.
+			await taskMenu.locator("summary").click();
+			await taskMenu.getByRole("menuitem", { name: "Rename task", exact: true }).waitFor();
+			await taskMenu.getByRole("menuitem", { name: "Close task", exact: true }).waitFor();
+			await page
+				.locator(".composer")
+				.getByText("Working freedom for this task", { exact: true })
+				.waitFor({ state: "attached" });
+			await check("session-controls");
+			const menuBounds = await taskMenu.locator(".wb-menu__panel").boundingBox();
+			assert.ok(
+				menuBounds && menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= (zoom === 2 ? 800 : width),
+				`Task actions are outside the viewport at ${width}px: ${JSON.stringify(menuBounds)}`,
+			);
+			await page.keyboard.press("Escape");
+			assert.equal(await taskMenu.evaluate((element) => (element as HTMLDetailsElement).open), false);
+			assert.equal(await taskMenu.locator("summary").evaluate((element) => document.activeElement === element), true);
+		});
+		await step("slash commands", async () => {
+			// Session commands run from the composer's slash palette. `/` lists what this session serves.
+			await composerField.fill("/");
+			await slashList
+				.getByRole("option", { name: /^\/doctor/ })
+				.first()
+				.waitFor();
+			await slashList.getByRole("option", { name: /^\/tree/ }).waitFor();
+			await slashList
+				.getByRole("option", { name: /^\/context/ })
+				.first()
+				.waitFor();
+			const firstSuggestion = await composerField.getAttribute("aria-activedescendant");
+			assert.ok(firstSuggestion);
+			await composerField.press("ArrowDown");
+			const nextSuggestion = await composerField.getAttribute("aria-activedescendant");
+			assert.ok(nextSuggestion);
+			assert.notEqual(nextSuggestion, firstSuggestion, "plain arrows did not move the active suggestion");
+			assert.equal(await composerField.evaluate((element) => document.activeElement === element), true);
+			await check("slash-palette");
+			await composerField.press("Shift+ArrowUp");
+			assert.deepEqual(
+				await composerField.evaluate((element) => {
+					const field = element as HTMLTextAreaElement;
+					return [field.selectionStart, field.selectionEnd];
+				}),
+				[0, 1],
+				"Shift+ArrowUp did not select text while the slash palette was open",
+			);
+			await page.keyboard.press("Escape");
+			await slashList.waitFor({ state: "detached" });
+			// A typed command line is parsed against the catalog and previewed; nothing runs until Enter.
+			await composerField.fill("/doctor deep");
+			await page.locator(".slash-palette--line code", { hasText: "/doctor deep" }).first().waitFor();
+			assert.equal(await page.locator(".slash-result").count(), 0, "a previewed command ran before Enter");
+			await composerField.press("Enter");
+			const slashResult = page.locator(".slash-result");
+			await slashResult.locator("pre", { hasText: "Deep checks completed." }).waitFor();
+			assert.equal(await composerField.inputValue(), "", "a command line that ran stayed in the composer");
+			await composerField.fill("/context compact Summarize the project");
+			await page
+				.locator(".slash-palette--line code", { hasText: "/context compact Summarize the project" })
+				.first()
+				.waitFor();
+			await composerField.press("Enter");
+			await slashResult.locator("pre", { hasText: "Context action: compact Summarize the project" }).waitFor();
+			await check("session-commands");
+			if (width === 1600) await page.screenshot({ path: join(output, "session-commands.png"), fullPage: true });
+			await slashResult.getByRole("button", { name: "Dismiss", exact: true }).click();
+		});
+		await step("session board", async () => {
+			// The session board: the operator's tasks change through the tasks command, the plan and decisions only read.
+			// `/tasks` opens it beside the conversation.
+			await slashPane("tasks");
+			const board = page.locator(".pane:not([hidden]) .board-panel");
+			await board.getByText("Read the fixture workspace", { exact: true }).waitFor();
+			assert.equal(await composerField.inputValue(), "", "a pane jump stayed in the composer");
+			await board.getByText("Markdown with one table", { exact: false }).waitFor();
+			await board.getByText("You have not added a task.", { exact: true }).waitFor();
+			await board.getByLabel("Add a task", { exact: true }).fill("Draft the summary");
+			await board.getByRole("button", { name: "Add", exact: true }).click();
+			await board.getByRole("button", { name: "Mark done: Draft the summary", exact: true }).click();
+			await board.locator(".status-mark", { hasText: "Done" }).waitFor();
+			await board.getByLabel("Add a task", { exact: true }).fill("Survey the project");
+			await board.getByRole("button", { name: "Add", exact: true }).click();
+			await board.getByRole("button", { name: "Hand to CLIO Coder: Survey the project", exact: true }).click();
+			await board.locator(".status-mark", { hasText: "Handed to CLIO Coder" }).waitFor();
+			await page.locator(".chat-request", { hasText: "/tasks hand u2" }).waitFor();
+			await page.getByText("Working on the handed task", { exact: true }).waitFor();
+			await page.waitForFunction(
+				() => document.activeElement?.getAttribute("aria-label") === "Mark done: Survey the project",
+			);
+			await page.getByRole("button", { name: "Send", exact: true }).waitFor({ state: "attached" });
+			// A decision is corrected in place: it is superseded and the new direction is sent as a request.
+			await board.getByRole("button", { name: "Correct: Report format", exact: true }).click();
+			await board.getByLabel("New direction", { exact: true }).fill("HTML with one table");
+			await board.getByRole("button", { name: "Supersede and tell CLIO Coder", exact: true }).click();
+			await board
+				.getByText("Superseded. The new direction was sent to CLIO Coder as a request.", { exact: true })
+				.waitFor();
+			await page.locator(".chat-request", { hasText: "is superseded by the operator" }).waitFor();
+			await board
+				.getByRole("button", {
+					name: "Propose for every project: Sample B reads 4.2 on the field instrument.",
+					exact: true,
+				})
+				.click();
+			await board
+				.getByText("Every project broadens where this lesson applies. Press again to propose it everywhere.", {
+					exact: true,
+				})
+				.waitFor();
+			await board
+				.getByRole("button", {
+					name: "Propose for every project: Sample B reads 4.2 on the field instrument.",
+					exact: true,
+				})
+				.click();
+			await board.getByText(/^Proposed memory-k1-global\. Review it/).waitFor();
+			await check("session-board-writes");
+			if (width === 1600 || width === 390) {
+				await board.locator("h3", { hasText: "What CLIO Coder learned this session" }).scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `session-board-writes-${width}.png`) });
+			}
+			await check("session-board-hand");
+			await check("session-board");
+			if (width === 1600) await page.screenshot({ path: join(output, "session-board.png"), fullPage: true });
+			await closePane();
+		});
+		await step("attachments", async () => {
+			// An image and a text file ride a request when the agent announces image prompts and embedded
+			// context: attach both, see them listed, send, see each counted. A binary is refused by name.
+			// The composer's Attach control names what this session accepts in its title.
+			const attachButton = page.locator(".composer").getByRole("button", { name: "Attach", exact: true });
+			await attachButton.waitFor();
+			assert.equal(await attachButton.getAttribute("title"), "Attach files");
+			const picker = page.locator('.composer input[type="file"]');
+			await picker.setInputFiles({
+				name: "fixture.png",
+				mimeType: "image/png",
+				buffer: Buffer.from(
+					"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+					"base64",
+				),
+			});
+			await picker.setInputFiles({
+				name: "field-notes.md",
+				mimeType: "text/markdown",
+				buffer: Buffer.from("sample A: 4.2\n"),
+			});
+			const attachments = page.getByRole("list", { name: "Attachments to send with this request" });
+			await attachments.locator(".composer__attachment-name", { hasText: "fixture.png" }).waitFor();
+			await attachments.locator(".composer__attachment-name", { hasText: "field-notes.md" }).waitFor();
+			await picker.setInputFiles({
+				name: "archive.zip",
+				mimeType: "application/zip",
+				buffer: Buffer.from([0x50, 0x4b, 0x00, 0x03]),
+			});
+			await page.locator(".composer__notice", { hasText: "archive.zip is not a text file." }).waitFor();
+			await check("composer-attachment");
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("Describe the attached image and notes.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			await page.getByText("Received 1 image with the request.", { exact: true }).waitFor();
+			await page.getByText("Received 1 file with the request.", { exact: true }).waitFor();
+			await page.locator(".chat-request__images", { hasText: "1 image attached" }).waitFor();
+			await page.locator(".chat-request__images", { hasText: "1 file attached" }).waitFor();
+			assert.equal(await attachments.count(), 0);
+		});
+		await step("approvals", async () => {
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[approval] Write the fixture file.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
+			await check("permission");
+			await dark(true);
+			await check("permission-dark");
+			await dark(false);
+			await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
+			await page.getByText("Tool executed.", { exact: true }).waitFor();
+			// A settled group collapses, so open it the way an operator would before reading the card.
+			await page.locator(".activity__summary").last().click();
+			const applied = page.locator(".diff.is-applied").last();
+			await applied.waitFor();
+			assert.match(await applied.innerText(), /applied/i);
+			assert.match(await applied.innerText(), /approved/);
+			// A refusal settles as a FAILED call. The card must keep the refused change on screen and
+			// say who turned it down, which a bare status cannot.
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[approval] Write it again.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			await page.getByRole("button", { name: "Reject", exact: true }).first().click();
+			await page.getByText("Permission rejected.", { exact: true }).waitFor();
+			const refused = page.locator(".diff.is-rejected").last();
+			await refused.waitFor();
+			assert.match(await refused.innerText(), /not applied · not approved/i);
+			assert.match(await refused.innerText(), /Nothing was written/);
+			assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
+			await check("permission-rejected");
+			if (width === 1600) await page.screenshot({ path: join(output, "permission-rejected.png"), fullPage: true });
+			// Changes lists what the task's recorded edit calls changed. The approved write is counted with its
+			// diff; the refused one changed nothing the transcript can vouch for, so it is not listed.
+			await openDrill("Changes");
+			const recordedFile = pane.locator(".change-file", { has: page.locator("strong", { hasText: "fixture.txt" }) });
+			await recordedFile.getByRole("button", { expanded: false }).click();
+			const recordedDiffs = recordedFile.locator(".change-file__diffs");
+			await recordedDiffs.locator(".diff.is-applied").waitFor();
+			assert.match(await recordedDiffs.locator(".diff.is-applied").innerText(), /applied/i);
+			assert.equal(await recordedDiffs.locator(".diff").count(), 1, "a refused write was listed as a change");
+			assert.equal(await pane.locator(".diff.is-rejected").count(), 0, "a refused write was listed as a change");
+			await check("artifacts-recorded-file");
+			if (width === 320 || width === 1600)
+				await page.screenshot({ path: join(output, `artifacts-recorded-file-${width}.png`), fullPage: true });
+			await closePane();
+		});
+		await step("plan dispatch", async () => {
+			// A plan-scale dispatch: the card names every run and the hash the runs will seal.
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[plan] Survey the samples and draft a report.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			const planCard = page.locator(".approval-card", { hasText: "Dispatch plan · 2 runs · in parallel" }).first();
+			await planCard.waitFor();
+			assert.match(await planCard.innerText(), /Draft the comparison report/);
+			assert.match(await planCard.innerText(), /kept for review/);
+			assert.match(await planCard.innerText(), /3f2a9c1e04b7/);
+			await check("permission-plan");
+			if (width === 1600 || width === 390) {
+				await planCard.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `permission-plan-${width}.png`) });
+			}
+			await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
+			await page.getByText("The plan is running.", { exact: true }).waitFor();
+		});
+		await step("fleet steering", async () => {
+			// Dispatch steering. The fixture holds one live worker until it is stopped, so both write
+			// paths on a run are pressed for real: guidance is queued, then the run is stopped.
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[fleet] Survey the fixture.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			// A running worker is steered from the strip at the transcript's live edge, not from a menu.
+			const workers = page.getByRole("region", { name: "1 worker running", exact: true });
+			await workers.getByRole("button", { name: "Guide scout", exact: true }).click();
+			await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
+			await page.getByRole("button", { name: "Send guidance", exact: true }).click();
+			await page.getByText("Guidance queued. The worker reads it at its next step.", { exact: true }).waitFor();
+			assert.equal(
+				await workers
+					.getByRole("button", { name: "Guide scout", exact: true })
+					.evaluate((node) => node === document.activeElement),
+				true,
+				"sending guidance returns focus to Guide",
+			);
+			// The runtime keeps the delegation open for the worker's life, so its group stays open too. The
+			// row names the agent once and keeps its state word whole, which clipped at 390px while the agent
+			// was repeated beside it.
+			const delegation = page.locator(".tool-card.is-dispatch").last();
+			await delegation.getByText("Running", { exact: true }).waitFor();
+			assert.equal(
+				await delegation.locator(".tool-card__head").evaluate((head) => {
+					const state = head.querySelector(".tool-card__state");
+					const bounds = head.getBoundingClientRect();
+					const box = state?.getBoundingClientRect();
+					return !!state && !!box && box.right <= bounds.right + 1 && state.scrollWidth <= state.clientWidth + 1;
+				}),
+				true,
+				`the delegation's state word is clipped at ${width}px`,
+			);
+			await check("fleet-steer");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `fleet-steer-${width}.png`), fullPage: true });
+			// The pane's Agents drill keeps the whole fleet history, the running row included.
+			await openDrill("Agents");
+			await pane.locator(".worker-graph").getByText("Survey the fixture", { exact: true }).first().waitFor();
+			await closePane();
+			// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
+			// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("Then summarise it.");
+			// The delivery switch sits beside Send once there is a message to deliver.
+			await page.locator(".composer__delivery").getByRole("button", { name: "After this turn", exact: true }).click();
+			await page.locator(".composer__submit").click();
+			await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
+			await check("composer-queue");
+			if (width === 1600) await page.screenshot({ path: join(output, "composer-queue.png"), fullPage: true });
+			// From rest, as a pointer user arrives: the press itself focuses the composer, and the control must not move under it.
+			await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+			await page.getByRole("button", { name: "Take them back", exact: true }).click();
+			await page.waitForFunction(
+				() => (document.querySelector(".composer__field") as HTMLTextAreaElement | null)?.value === "Then summarise it.",
+			);
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("");
+			await page.locator(".composer__options > summary").click();
+			await page.getByRole("button", { name: "Interrupt", exact: true }).click();
+			await page.keyboard.press("Escape");
+			await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
+			// Stop takes two presses, and the question puts focus on the answer that keeps the work.
+			await workers.getByRole("button", { name: "Stop scout", exact: true }).click();
+			assert.equal(
+				await page
+					.getByRole("button", { name: "Keep running", exact: true })
+					.evaluate((node) => node === document.activeElement),
+				true,
+			);
+			await check("fleet-stop");
+			await page.getByRole("button", { name: "Stop run", exact: true }).click();
+			await page.getByText("The worker was stopped.", { exact: true }).waitFor();
+			assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
+			assert.equal(await page.locator(".live-workers").count(), 0, "a settled run leaves the live strip");
+		});
+		await step("streaming and cancel", async () => {
+			// Streamed deltas never render the composer: its props are scalars and a route memoized on
+			// settings and health. Count across the middle of the workload stream, well after the send's own
+			// renders, through Markdown, code, tool bursts and a failed call.
+			const composerRenders = () =>
+				page.evaluate(
+					() => (globalThis as unknown as { __clioRenderCounts: Record<string, number> }).__clioRenderCounts.composer ?? 0,
+				);
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[workload] Audit the convergence notes.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			const workload = page.locator(".chat-turn").last();
+			await workload.getByRole("heading", { name: "Results", exact: true }).waitFor();
+			const rendersBefore = await composerRenders();
+			await workload.getByRole("heading", { name: "How the levels relate", exact: true }).waitFor();
+			assert.equal(await composerRenders(), rendersBefore, "a streamed delta rendered the composer");
+			await settled();
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
+			await page.getByRole("button", { name: "Send", exact: true }).click();
+			await page.locator('.wb-chip--status[data-tone="working"]').waitFor();
+			await page.getByRole("button", { name: "Stop turn", exact: true }).click();
+			await settled();
+			await check("cancelled");
+		});
+		await step("playbook run", async () => {
+			// A playbook: preview compiles and starts nothing; the run starts the plan shown.
+			const fleetDialog = await slashAction("fleet run", "Run a playbook", "Run a workflow");
+			const fleetPanel = fleetDialog;
+			await fleetPanel.getByLabel("Playbook name", { exact: true }).fill("survey");
+			await fleetPanel.getByLabel("Variables, one name=value per line", { exact: true }).fill("site=plot-7");
+			await fleetPanel.getByRole("button", { name: "Preview the plan", exact: true }).click();
+			await fleetPanel.getByRole("heading", { name: "Fleet survey: 2 steps in 2 waves", exact: true }).waitFor();
+			assert.match(await fleetPanel.innerText(), /Writes reports\//);
+			await check("fleet-run-preview");
+			if (width === 1600 || width === 390) {
+				await fleetPanel.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `fleet-run-preview-${width}.png`) });
+			}
+			await fleetPanel.getByRole("button", { name: "Run this plan", exact: true }).click();
+			await page.locator(".notice-region .notice", { hasText: "Fleet survey started" }).waitFor();
+			if (await fleetDialog.count()) await closeDialog(fleetDialog);
+			await page.getByRole("button", { name: "Dismiss Fleet survey started", exact: true }).click();
+		});
+		await step("extensions", async () => {
+			// Extensions: what this conversation loaded, and a reload that says which generation is live.
+			const extensionsDialog = await slashAction("extensions", "Extensions", "Tools and add-ons");
+			const extensionsPanel = extensionsDialog.locator(".extensions-panel");
+			await extensionsPanel.getByText("survey-tools 1.2.0 · project scope", { exact: true }).waitFor();
+			// Reload sits under the panel's Apply installed changes disclosure.
+			await extensionsPanel.locator("summary", { hasText: "Apply installed changes" }).click();
+			await extensionsPanel.getByRole("button", { name: "Reload extensions", exact: true }).click();
+			await extensionsPanel.getByText(/^Generation \d+ is live \(no changes\); 2 hooks registered\.$/).waitFor();
+			await check("extensions");
+			await closeDialog(extensionsDialog);
+		});
+		await step("conversation usage", async () => {
+			// Usage: the conversation's spend in the agent's own words, and each provider's windows. The top
+			// bar's spend chip opens it.
+			await chipOrSlash(/^[\d,]+ tokens.*\. Open usage\.$/, "usage");
+			const usagePanel = pane.locator(".usage-panel");
+			// Rows are the read model's cost groups by target/model (#434), displays carried through unreworded: the
+			// estimated, partly unpriced cost keeps its "~" and "+?" provenance marks.
+			const modelRow = usagePanel.locator(".usage-panel__models > li", {
+				has: page.locator(".usage-panel__route", { hasText: /^fixture\/fixture-model$/ }),
+			});
+			await modelRow.locator(".usage-panel__cost", { hasText: "~$0.25 +?" }).waitFor();
+			// The provider windows sit under the panel's Provider quota disclosure.
+			await usagePanel.locator("summary", { hasText: /^Provider quota · 1 plan$/ }).click();
+			const fiveHour = usagePanel.getByRole("meter", { name: "5h used", exact: true });
+			await fiveHour.waitFor();
+			assert.equal(await fiveHour.getAttribute("aria-valuetext"), "71.4% used");
+			await check("usage");
+			if (width === 1600 || width === 390) {
+				await usagePanel.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `usage-${width}.png`) });
+			}
+			await closePane();
+		});
+		await step("side question and drafts", async () => {
+			// Beside the conversation: a side question and drafts answer in place and add no turn.
+			const turnsBefore = await page.locator(".chat-request").count();
+			const questionDialog = await slashAction("btw", "Side question", "Side question");
+			const aside = questionDialog.locator(".aside-panel");
+			await aside.getByLabel("Side question", { exact: true }).fill("Which file holds the readings?");
+			await aside.getByRole("button", { name: "Ask", exact: true }).click();
+			await aside.getByText("The readings are in README.md.", { exact: true }).waitFor();
+			await check("aside-question");
+			await closeDialog(questionDialog);
+			const draftsDialog = await slashAction("draft", "Drafts", "Compare approaches");
+			const drafts = draftsDialog.locator(".aside-panel");
+			await drafts.getByLabel("Request to draft", { exact: true }).fill("How should the report show readings?");
+			await drafts.getByLabel("Drafts", { exact: true }).selectOption("2");
+			await drafts.getByRole("button", { name: "Draft", exact: true }).click();
+			await drafts.getByText("fixture/judge picked A in 12 ms.", { exact: true }).waitFor();
+			await check("aside");
+			if (width === 1600 || width === 390) {
+				await drafts.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `aside-${width}.png`) });
+			}
+			assert.equal(await page.locator(".chat-request").count(), turnsBefore, "an aside added a turn");
+			await drafts.getByRole("button", { name: "Put in composer", exact: true }).first().click();
+			assert.equal(
+				await page.getByLabel("Message CLIO Coder", { exact: true }).inputValue(),
+				"Show the readings in one table with a unit column.",
+			);
+			await closeDialog(draftsDialog);
+			await page.getByLabel("Message CLIO Coder", { exact: true }).fill("");
+		});
+		await step("context window and timeline", async () => {
+			// The context window: Clio Coder's own accounting, worded and never recomputed. The top bar's
+			// context ring opens it. Its figures are the read model's, folded from the session's journal (#434), and the
+			// fixture agent journals nothing: the golden journal is seeded under this session's id, closed by the context
+			// snapshot a real turn journals for the ledger the fixture reports. The timeline below reads the same journal.
+			seedGoldenSession(join(h.home.path, "state"), new URL(page.url()).pathname.split("/").at(-1) ?? "", {
+				context: { window: 131_072, used: 20_480, reserve: 16_384, free: 94_208, system: 4096, messages: 16_384 },
+			});
+			await chipOrSlash(/Open the context window\.$/, "context");
+			const contextPanel = pane.locator(".context-panel");
+			// The lead reads used, then window and share, each an explainable figure (#434).
+			await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
+			assert.equal(
+				(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
+				"20,480 of 131,072 tokens · 15.6%",
+			);
+			await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
+			await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();
+			await check("context-window");
+			if (width === 1600 || width === 390) {
+				await contextPanel.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `context-window-${width}.png`) });
+			}
+			// The session timeline: the journal seeded above, newest first, every figure in the server's words (#434 §11.3).
+			await pane.getByLabel("Inspect task", { exact: true }).selectOption("timeline");
+			const timelinePanel = pane.locator(".timeline-panel");
+			const timelineCall = timelinePanel.locator(".timeline-panel__rows > li", { hasText: / call · / }).first();
+			await timelineCall.waitFor();
+			await timelinePanel.getByRole("combobox", { name: /^Entry kind/ }).selectOption("Model call");
+			assert.equal(
+				await timelinePanel.locator(".timeline-panel__rows > li", { hasNotText: / call · / }).count(),
+				0,
+				"the kind filter left another kind in the timeline",
+			);
+			const callTokens = timelineCall.locator("details.explain").first();
+			await callTokens.locator("summary").click();
+			await callTokens.locator(".explain__panel dt", { hasText: /^Coverage$/ }).waitFor();
+			await check("session-timeline");
+			if (width === 1600 || width === 390) {
+				await timelinePanel.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `session-timeline-${width}.png`) });
+			}
+			await callTokens.locator("summary").click();
+			await closePane();
+		});
+		await step("branches", async () => {
+			// Branches: continuing from an earlier reply replays only that branch; forking moves the
+			// conversation to a new session and says the project's files were left alone.
+			const branchesDialog = await slashAction("tree", "Branches", "Conversation history");
+			const branches = branchesDialog.locator(".branch-panel");
+			await branches.getByText("The next request continues here", { exact: false }).waitFor();
+			await check("branches");
+			if (width === 1600 || width === 390) {
+				await branches.locator("ol").scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `branches-${width}.png`) });
+			}
+			await branches
+				.getByRole("button", { name: "Continue from this reply: The second sample reads 4.2", exact: true })
+				.click();
+			await page.locator(".chat-request", { hasText: "Measure the second sample" }).waitFor();
+			assert.equal(
+				await page.locator(".chat-request", { hasText: "[stream] Show progress until cancelled." }).count(),
+				0,
+				"the branch left behind is not replayed",
+			);
+			// The pressed row becomes the disabled tip, so focus lands on the panel's heading, not the page.
+			await page.waitForFunction(
+				() => document.activeElement?.tagName === "H3" && !!document.activeElement.closest(".branch-panel"),
+				undefined,
+				{ timeout: 5000 },
+			);
+			const parentUrl = page.url();
+			await branches
+				.locator("li", { hasText: "The second sample reads 4.2" })
+				.getByText("The next request continues here", { exact: false })
+				.waitFor();
+			await branches
+				.getByRole("button", { name: "Fork a new conversation from this reply: Earlier reply", exact: true })
+				.click();
+			await page.waitForURL((url) => url.href !== parentUrl && url.pathname.startsWith("/sessions/"));
+			await page.locator(".notice-region .notice", { hasText: "Workspace files were not rewound" }).waitFor();
+			await page.locator(".chat-request", { hasText: "Earlier prompt" }).waitFor();
+			assert.equal(await page.locator(".chat-request", { hasText: "Measure the second sample" }).count(), 0);
+			if (await branchesDialog.count()) await closeDialog(branchesDialog);
+			await check("session-forked");
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `session-forked-${width}.png`), fullPage: true });
+			for (const title of [/^Dismiss Continuing from/, /^Dismiss Conversation forked$/]) {
+				const dismiss = page.getByRole("button", { name: title });
+				if (await dismiss.count()) await dismiss.click();
+			}
+		});
+		await step("handoff", async () => {
+			// Handoff: a draft is reviewed and edited before anything is written; starting the new
+			// conversation moves there.
+			const handoffDialog = await slashAction("handoff", "Hand off to a new conversation", "Continue in a new task");
+			const handoff = handoffDialog.locator(".handoff-panel");
+			await handoff
+				.getByLabel("What should the next conversation accomplish?", { exact: true })
+				.fill("Finish the survey report");
+			await handoff.getByRole("button", { name: "Draw up the handoff", exact: true }).click();
+			const reviewField = handoff.getByLabel("Handoff document", { exact: true });
+			await reviewField.waitFor();
+			assert.match(await reviewField.inputValue(), /Goal: Finish the survey report/);
+			await reviewField.fill(`${await reviewField.inputValue()}\nReviewed in the smoke.\n`);
+			await check("handoff-review");
+			if (width === 1600 || width === 390) {
+				await handoff.scrollIntoViewIfNeeded();
+				await page.screenshot({ path: join(output, `handoff-review-${width}.png`) });
+			}
+			const forkedUrl = page.url();
+			await handoff.getByRole("button", { name: "Start the new conversation", exact: true }).click();
+			await page.waitForURL((url) => url.href !== forkedUrl && url.pathname.startsWith("/sessions/"));
+			await page.locator(".notice-region .notice", { hasText: "Handed off" }).waitFor();
+			await handoffDialog.waitFor({ state: "detached" });
+			await check("handed-off");
+			await page.getByRole("button", { name: "Dismiss Handed off", exact: true }).click();
+		});
+		await step("viewer window", async () => {
+			// A second window on the same task only views it: its message box takes nothing the server would
+			// refuse, and says who drives the task until that window takes control.
+			await settled();
+			const viewer = await context.newPage();
+			failedPage = viewer;
+			viewer.on("pageerror", (error) => errors.push(error.message));
+			await viewer.goto(`${page.url()}#${await launch()}`);
+			const viewerNote = viewer.locator(".composer__delivery-note");
+			const viewing = (note: typeof viewerNote) => note.locator("strong", { hasText: /^Viewing$/ });
+			await viewing(viewerNote).waitFor();
+			assert.match(await viewerNote.innerText(), /^Viewing\s+Browser window( \d+)? controls this task\.\s+Take control$/);
+			const viewerField = viewer.getByLabel("Message CLIO Coder", { exact: true });
+			assert.ok(await viewerField.isDisabled(), "a viewing window's message box takes input the server refuses");
+			assert.ok(await viewer.locator(".composer__submit").isDisabled(), "a viewing window offers Send");
+			assert.ok(await viewer.getByRole("button", { name: "Actions", exact: true }).isDisabled());
+			// One way to take control, in the message box; the banner above the transcript only explains.
+			assert.equal(await viewer.getByRole("button", { name: "Take control", exact: true }).count(), 1);
+			await check("viewer", viewer);
+			if (width === 1600) await viewer.screenshot({ path: join(output, `viewer-${width}.png`) });
+			await viewerNote.getByRole("button", { name: "Take control", exact: true }).click();
+			await viewing(viewerNote).waitFor({ state: "detached" });
+			assert.ok(await viewerField.isEnabled(), "taking control left the message box disabled");
+			// The first window is told, and its own message box now waits for it to take control back.
+			const pageNote = page.locator(".composer__delivery-note");
+			await page.locator(".notice-region .notice", { hasText: "took control of a task" }).waitFor();
+			await viewing(pageNote).waitFor();
+			assert.ok(await page.getByLabel("Message CLIO Coder", { exact: true }).isDisabled());
+			await pageNote.getByRole("button", { name: "Take control", exact: true }).click();
+			await viewing(pageNote).waitFor({ state: "detached" });
+			await viewing(viewerNote).waitFor();
+			await page.getByRole("button", { name: /^Dismiss .+ took control of a task$/ }).click();
+			await viewer.close();
+			failedPage = page;
+		});
+		await step("close task", async () => {
+			// Close lives in the top bar's Task actions menu, away from the composer's Stop.
+			await settled();
+			await taskMenu.locator("summary").click();
+			await taskMenu.getByRole("menuitem", { name: "Close task", exact: true }).click();
+			// Closing is a session control request; it is confirmed before it is sent.
+			await page
+				.getByRole("dialog", { name: "Close this session?", exact: true })
+				.getByRole("button", { name: "Close session", exact: true })
+				.click();
+			await page.locator('.wb-chip--status[data-tone="quiet"]', { hasText: "Closed" }).waitFor();
+			await page.getByText("This task is closed.", { exact: true }).waitFor();
+			await check("closed");
+		});
+		await step("problem toast", async () => {
+			// A folder that does not exist is refused with the problem's reference.
+			await revealSidebar();
+			await page
+				.locator(".wb-sidebar")
+				.getByRole("button", { name: /^Open workspace/ })
+				.click();
+			await openDialog.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
+			await openDialog.getByRole("button", { name: "Open", exact: true }).click();
+			const toast = page.locator(".notice-region .notice", { hasText: "validation" });
+			await toast.waitFor();
+			assert.match(await toast.innerText(), /validation/);
+			await check("problem-toast");
+			await page.keyboard.press("Escape");
+			await openDialog.waitFor({ state: "detached" });
+			// The code and reference sit under the toast's Technical details disclosure.
+			await toast.locator("summary", { hasText: "Technical details" }).click();
+			assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);
+		});
+		await step("refused launch link", async () => {
+			// A refused launch link must not brick the app: the shell says what happened, stops reconnecting, and a
+			// pasted launch link brings the same tab back.
+			await page.goto(`${origin}/#ticket=${"s".repeat(43)}`);
+			await page.reload();
+			await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
+			// The refused shell shows no task rail, so nothing behind the panel keeps reading.
+			assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a refused token still renders the task rail");
+			if ((await page.locator(".notice-region .notice").count()) > 0)
+				throw new Error("A refused token raised toasts on top of the reconnect panel.");
+			await page.getByLabel("Launch link", { exact: true }).fill("not a link");
+			await page.getByText("That text is not a launch link.", { exact: true }).waitFor();
+			await check("reconnect");
+			if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `reconnect-${width}.png`) });
+			await page.getByLabel("Launch link", { exact: true }).fill(`[clio-coder:gui] ${origin}/#${await launch()}`);
+			await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
+			// The connected rail reports installation health once its diagnostics settle; it defers the doctor until System
+			// is opened, so "Not checked" is a settled connected state too.
+			await page
+				.locator(".wb-sidebar .wb-status__label")
+				.filter({ hasText: /^(Ready|Unverified|Not checked|\d+ issues?|\d+ warnings?)$/ })
+				.waitFor({ state: "attached" });
+			await page
+				.getByRole("heading", { name: "This browser is no longer connected", exact: true })
+				.waitFor({ state: "detached" });
+		});
+		await step("forget this browser", async () => {
+			// Forgetting the browser signs this window out on the server before it drops the launch token, so
+			// the credential it held opens nothing afterwards.
+			await navigate("General");
+			await page.locator("main").getByRole("heading", { name: "General", exact: true }).waitFor();
+			const [signedOut] = await Promise.all([
+				page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/revoke"),
+				page.getByRole("button", { name: "Forget this browser", exact: true }).click(),
+			]);
+			assert.equal(signedOut.status(), 200);
+			const forgotten = signedOut.request().headers().authorization ?? "";
+			assert.match(forgotten, /^Bearer [\w-]{43}$/);
+			await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
+			assert.equal(
+				(await fetch(`${origin}/api/meta`, { headers: { Authorization: forgotten } })).status,
+				401,
+				"a forgotten window's credential still opens the API",
+			);
+			// The dialog promises a new launch link: a reload of the forgotten tab inherits nothing that reconnects it.
+			await page.reload();
+			await page.getByRole("heading", { name: "Open your launch link", exact: true }).waitFor();
+			assert.equal(await page.locator(".wb-sidebar .wb-side").count(), 0, "a forgotten tab reconnected on reload");
+		});
 		await context.close();
 		if (zoom === 2) zoomContext = null;
 	}
-	assert.deepEqual(errors, []);
-	assert.deepEqual(failures, []);
-	// The stale-token step: the shell's first reads (meta, the rail's workspaces and session overview,
-	// setup status) start together and wait on one exchange of the launch token, which is refused once per
-	// width; the reads then fail in the browser without asking again. A refused stream must stop, not
-	// reconnect forever. Nothing is read again after the refusal.
-	const firstReads = [
-		"/api/auth/clients",
-		"/api/meta",
-		"/api/events",
-		"/api/events/ticket",
-		"/api/workspaces",
-		"/api/sessions/overview",
-		"/api/setup",
-	];
-	assert.ok(
-		statuses.some((item) => item.path === "/api/auth/clients" && item.status === 401),
-		"the stale launch token was never refused at the exchange",
-	);
-	for (const path of firstReads)
+	await flow("page errors", "all widths", async () => assert.deepEqual(errors, []));
+	await flow("request failures", "all widths", async () => assert.deepEqual(failures, []));
+	await flow("error responses", "all widths", async () => {
+		// The stale-token step: the shell's first reads (meta, the rail's workspaces and session overview,
+		// setup status) start together and wait on one exchange of the launch token, which is refused once per
+		// width; the reads then fail in the browser without asking again. A refused stream must stop, not
+		// reconnect forever. Nothing is read again after the refusal.
+		const firstReads = [
+			"/api/auth/clients",
+			"/api/meta",
+			"/api/events",
+			"/api/events/ticket",
+			"/api/workspaces",
+			"/api/sessions/overview",
+			"/api/setup",
+		];
 		assert.ok(
-			statuses.filter((item) => item.path === path && item.status === 401).length <= runs.length,
-			`${path} was refused more than once per width`,
+			statuses.some((item) => item.path === "/api/auth/clients" && item.status === 401),
+			"the stale launch token was never refused at the exchange",
 		);
-	assert.deepEqual(
-		statuses.filter(
-			(item) =>
-				!(item.path === "/api/workspaces" && item.status === 422) &&
-				// The harness Clio does not expose session history, so the read refuses. The same path also
-				// creates a session, and a refused create must still fail the run.
-				!(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
-				!(item.status === 401 && firstReads.includes(item.path)),
-		),
-		[],
-	);
+		for (const path of firstReads)
+			assert.ok(
+				statuses.filter((item) => item.path === path && item.status === 401).length <= runs.length,
+				`${path} was refused more than once per width`,
+			);
+		assert.deepEqual(
+			statuses.filter(
+				(item) =>
+					!(item.path === "/api/workspaces" && item.status === 422) &&
+					// The harness Clio does not expose session history, so the read refuses. The same path also
+					// creates a session, and a refused create must still fail the run.
+					!(item.method === "GET" && item.status === 409 && /^\/api\/workspaces\/[^/]+\/sessions$/.test(item.path)) &&
+					!(item.status === 401 && firstReads.includes(item.path)),
+			),
+			[],
+		);
+	});
 	success = true;
 } finally {
 	// The last thing on screen is usually the whole diagnosis of a timed-out locator.
 	if (!success) await failedPage?.screenshot({ path: join(output, "failure.png"), fullPage: false }).catch(() => {});
 	const report = {
 		output,
-		success,
+		success: success && defects.length === 0,
+		defects,
 		chrome: browser.version(),
 		zoomMeasurements,
 		checks,
@@ -2031,4 +2153,9 @@ try {
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 	await h.close();
 	await rm(telemetryScratch, { recursive: true, force: true });
+	if (defects.length > 0) {
+		console.log("KNOWN PRODUCT DEFECTS");
+		for (const defect of defects) console.log(`${defect.flow}: ${defect.message}`);
+		process.exitCode = 1;
+	}
 }

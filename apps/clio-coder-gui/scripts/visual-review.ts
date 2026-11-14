@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
 import { chromium } from "playwright-core";
-import { launchTicket } from "../server/local-server.js";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
@@ -22,14 +21,17 @@ import { seedHistory } from "../tests/harness/history-fixture.js";
 import { seedLibrary } from "../tests/harness/library-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
+import { fixtureLaunch } from "./fixture-launch.js";
 
 const SHOTS = [
 	"home",
+	"palette",
 	"history",
 	"delete",
 	"empty",
 	"picker",
 	"conv",
+	"slash",
 	"help",
 	"traces",
 	"trace-detail",
@@ -56,7 +58,7 @@ const { values } = parseArgs({
 			default: join(scratch, "visual"),
 		},
 		only: { type: "string", default: "" },
-		views: { type: "string", default: "2000x1040:dark,1440x900:light,1050x900:light" },
+		views: { type: "string", default: "2000x1040:dark,1440x900:light,1050x900:light,390x844:dark" },
 		state: { type: "string", default: "populated" },
 		route: { type: "boolean", default: false },
 		serve: { type: "boolean", default: false },
@@ -82,7 +84,11 @@ const h = await harness(
 		scenario: "markdown",
 		origin: () => origin,
 		...(values.client ? { clientDir: values.client } : {}),
-		...(values.route || values.serve ? { env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } } : {}),
+		// One replay turn makes the fixture advertise session/list, so the history page has a row to show.
+		env: {
+			CLIO_CODER_WEB_FIXTURE_REPLAY_TURNS: "1",
+			...(values.route || values.serve ? { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" } : {}),
+		},
 	},
 );
 if (values.state !== "empty") {
@@ -109,11 +115,7 @@ const stop = async () => {
 };
 
 /** What a launch link carries after `#`: a fresh single-use ticket, as clio-coder gui prints it. */
-const launch = async () => {
-	const ticket = await launchTicket(Number(new URL(origin).port), "test-token");
-	if (ticket === null) throw new Error("The fixture server issued no launch ticket.");
-	return `ticket=${ticket}`;
-};
+const launch = () => fixtureLaunch(origin);
 
 if (values.serve) {
 	// Vite's proxy presents the API origin, so the origin stays the served one. The ticket opens one window.
@@ -157,12 +159,20 @@ if (values.serve) {
 			await page.goto(`${origin}/#${await launch()}`);
 			await homeField.waitFor();
 			if (want("home") || want("empty")) await shot(want("home") ? "home" : "empty");
+			if (want("palette")) {
+				await page.keyboard.press("Control+K");
+				await page.getByRole("listbox", { name: "Commands", exact: true }).waitFor();
+				await shot("palette");
+				await page.keyboard.press("Escape");
+				await page.getByRole("listbox", { name: "Commands", exact: true }).waitFor({ state: "detached" });
+			}
 			if (want("history") || want("delete")) {
 				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
-				await page.locator("main").getByText("Survey the sensor calibration notes").waitFor();
+				// The fixture's session/list names its one saved session (tests/fixtures/acp-fixture-child.mjs).
+				await page.locator("main").getByText("A long saved conversation").waitFor();
 				if (want("history")) await shot("history", true);
 				if (want("delete")) {
-					await page.getByRole("button", { name: "Delete Survey the sensor calibration notes", exact: true }).click();
+					await page.getByRole("button", { name: "Delete A long saved conversation", exact: true }).click();
 					await page.getByRole("button", { name: "Keep", exact: true }).waitFor();
 					await shot("delete");
 					await page.getByRole("button", { name: "Keep", exact: true }).click();
@@ -207,19 +217,20 @@ if (values.serve) {
 					await page.waitForFunction(
 						() =>
 							!/(?:Reading|Loading|Checking|Resolving|Connecting)[^.!?]{0,90}…/.test(
-								document.querySelector("main")?.textContent ?? "",
+								// innerText skips hidden text, such as a closed explanation's "Reading where…" note.
+								(document.querySelector("main") as HTMLElement | null)?.innerText ?? "",
 							),
 					);
 					await shot(`${name}-${values.state}`, true);
 				}
 			if (values.state === "error") await page.unroute("**/api/**");
-			if (["picker", "conv", "approval", "fleet", "steer", "pane"].some(want)) {
+			if (["picker", "conv", "slash", "approval", "fleet", "steer", "pane"].some(want)) {
 				// A task starts from the home composer and lands on its conversation.
 				await page.goto(`${origin}/`);
 				await homeField.fill("Summarize the fixture workspace.");
 				await homeField.press("Enter");
 				await page.waitForURL(/\/sessions\/[^/]+$/);
-				const field = page.getByLabel("Message Clio Coder", { exact: true });
+				const field = page.getByLabel("Message CLIO Coder", { exact: true });
 				await field.waitFor();
 				// The route picker locks while a turn runs, so the opening turn settles first.
 				await page.getByRole("button", { name: "Stop turn", exact: true }).waitFor({ state: "detached" });
@@ -230,6 +241,14 @@ if (values.serve) {
 					await picker.getByText("This conversation.", { exact: true }).waitFor();
 					await shot("picker");
 					await page.keyboard.press("Escape");
+				}
+				if (want("slash")) {
+					const slashList = page.getByRole("listbox", { name: "Slash commands", exact: true });
+					await field.pressSequentially("/");
+					await slashList.waitFor();
+					await shot("slash");
+					await field.fill("");
+					await slashList.waitFor({ state: "detached" });
 				}
 				const send = async (text: string) => {
 					// A message sent while a turn runs is queued as direction, not started as a turn.
@@ -280,8 +299,9 @@ if (values.serve) {
 					if (want("fleet")) await shot("fleet-settled");
 				}
 				if (want("pane")) {
+					// The session header's Details control; its name gains a suffix when project files need review.
 					if ((await page.locator(".pane:not([hidden])").count()) === 0)
-						await page.getByRole("button", { name: "Show task sidebar", exact: true }).click();
+						await page.getByRole("button", { name: /^Show task details/ }).click();
 					await page.locator(".pane:not([hidden]) .pane__body").waitFor();
 					await shot("pane");
 				}
