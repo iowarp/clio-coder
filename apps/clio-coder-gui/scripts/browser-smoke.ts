@@ -1192,13 +1192,18 @@ try {
 				group
 					.locator("dd")
 					.evaluateAll((cells) => cells.map((cell) => (cell.querySelector("summary") ?? cell).textContent));
-			assert.deepEqual(await figures(tokenGroup), ["11", "12", "15", "38"]);
+			// The fixture reports usage that scales with each turn, so the figures are read back, not pinned.
+			const counts = async (group: Locator) =>
+				(await figures(group)).map((figure) => Number((figure ?? "").replaceAll(",", "")));
+			const [input = 0, output = 0, reasoning = 0, prompt = 0] = await counts(tokenGroup);
+			assert.ok([input, output, reasoning, prompt].every((value) => Number.isInteger(value) && value >= 0));
 			const cacheGroup = usage.locator(".turn-details__group", {
 				has: page.getByRole("heading", { name: "Cache", exact: true }),
 			});
 			// Cache reads and writes are the provider's fields; no hit share is derived from them.
 			assert.deepEqual(await cacheGroup.locator("dt").allTextContents(), ["Read", "Written"]);
-			assert.deepEqual(await figures(cacheGroup), ["13", "14"]);
+			const [cacheRead = 0, cacheWrite = 0] = await counts(cacheGroup);
+			assert.equal(prompt, input + cacheRead + cacheWrite, "Prompt is not input plus cache read and write");
 			await check("conversation-usage");
 			await page.keyboard.press("Enter");
 			assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
@@ -1920,10 +1925,18 @@ try {
 			await chipOrSlash(/Open the context window\.$/, "context");
 			const contextPanel = pane.locator(".context-panel");
 			// The lead reads used, then window and share, each an explainable figure (#434).
+			// The lead is the journal's figure, seeded above; the meter is the engine's live ledger, which the fixture
+			// grows with each answered turn from its opening 20,480 tokens (R2-4).
 			await contextPanel.locator(".context-panel__figure strong", { hasText: "20,480" }).waitFor();
 			assert.equal(
 				(await contextPanel.locator(".context-panel__figure").innerText()).replace(/\s+/g, " ").trim(),
 				"20,480 of 131,072 tokens · 15.6%",
+			);
+			await eventually(
+				async () =>
+					Number(await contextPanel.locator(".context-panel__meter [role=meter]").getAttribute("aria-valuenow")) > 15.625,
+				true,
+				"the context meter did not grow past the fixture's opening 15.6% with the answered turns",
 			);
 			await contextPanel.getByText("Total anchored to provider-reported usage.", { exact: true }).waitFor();
 			await contextPanel.getByRole("rowheader", { name: "Conversation", exact: true }).waitFor();

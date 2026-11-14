@@ -15,6 +15,40 @@ const settings = {
 	chat: { target: "fixture", model: "fixture-model", thinkingLevel: "off" },
 	safety: { autonomy: "default" },
 };
+// The engine starts each task on the chat route the layered settings name, the same layers Settings and Home
+// read: the user's file, then the project's shared and local files. The fixture applies them too (without the
+// trust check the seeded projects already pass), so the composer, Home and Settings agree.
+const readSettingsLayer = async (path) => {
+	let raw;
+	try {
+		raw = readFileSync(path, "utf8");
+	} catch {
+		return null; // A layer that does not exist adds nothing.
+	}
+	try {
+		return JSON.parse(raw);
+	} catch {
+		try {
+			const { parse } = await import("yaml");
+			return parse(raw);
+		} catch {
+			return null; // The engine refuses an unreadable layer; the fixture keeps its defaults instead.
+		}
+	}
+};
+const savedChat = { target: null, model: null };
+for (const path of [
+	...(process.env.CLIO_CODER_CONFIG_DIR ? [join(process.env.CLIO_CODER_CONFIG_DIR, "settings.yaml")] : []),
+	join(process.cwd(), ".clio-coder", "settings.yaml"),
+	join(process.cwd(), ".clio-coder", "settings.local.yaml"),
+]) {
+	const chat = (await readSettingsLayer(path))?.chat;
+	for (const key of ["target", "model", "thinkingLevel"])
+		if (typeof chat?.[key] === "string" && chat[key]) {
+			settings.chat[key] = chat[key];
+			if (key !== "thinkingLevel") savedChat[key] = chat[key];
+		}
+}
 // The engine's own mode descriptions (src/engine/acp/server.ts modeState), so the GUI shows real copy.
 const MODES = [
 	{
@@ -37,10 +71,14 @@ const configOptions = () => [
 	{
 		id: "model",
 		currentValue: settings.chat.model,
-		options: (settings.chat.target === "field-station"
-			? ["survey-large", "survey-small"]
-			: ["fixture-model", "fixture-small"]
-		).map((value) => ({ value, name: value, thinkingLevels })),
+		options: [
+			...new Set([
+				...(settings.chat.target === "field-station"
+					? ["survey-large", "survey-small"]
+					: ["fixture-model", "fixture-small"]),
+				...(savedChat.model && settings.chat.target === (savedChat.target ?? "fixture") ? [savedChat.model] : []),
+			]),
+		].map((value) => ({ value, name: value, thinkingLevels })),
 	},
 	{
 		id: "thinkingLevel",
@@ -61,7 +99,12 @@ const update = (
 	value,
 	meta = { "clio-coder/agent": [{ version: 1, role: "orchestrator", agentId: "orchestrator" }] },
 ) => send({ method: "session/update", params: { sessionId, update: value, ...(meta ? { _meta: meta } : {}) } });
-const text = (value) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
+// What the current turn has said, so its usage can scale with it.
+let answered = "";
+const text = (value) => {
+	answered += value;
+	update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
+};
 // The turn's usage as read-model quantities, each a fact beside its canonical display (#434).
 const quantity = (metric, value, display = String(value)) => ({
 	fact: { kind: "measured", value, source: "provider" },
@@ -85,6 +128,86 @@ const usage = {
 			ref: "session:fixture#firstToken",
 		},
 	},
+};
+// The markdown scenario stands in for a real task: each turn's usage scales with what was asked and answered,
+// the context grows turn over turn from the ledger's opening 20,480 tokens, and the engine's session ledger
+// records each exchange, which is what saves the task to the project's history.
+const REAL_TASK = scenario === "markdown";
+const CONTEXT_WINDOW = 131072,
+	CONTEXT_RESERVE = 16384,
+	SYSTEM_TOKENS = 4096;
+let cachedTokens = 20480,
+	unsentTokens = 0,
+	ledgerTurns = 0;
+const tokensOf = (chars) => Math.max(1, Math.ceil(chars / 4));
+const counted = (metric, value) => quantity(metric, value, value.toLocaleString("en-US"));
+const turnUsage = (prompt, answer) => {
+	const input = tokensOf(prompt.length),
+		output = tokensOf(answer.length),
+		cacheRead = cachedTokens,
+		cacheWrite = unsentTokens,
+		promptTokens = input + cacheRead + cacheWrite;
+	cachedTokens += unsentTokens;
+	unsentTokens = input + output;
+	return {
+		quantities: {
+			...usage.quantities,
+			input: counted("input", input),
+			output: counted("output", output),
+			cacheRead: counted("cacheRead", cacheRead),
+			cacheWrite: counted("cacheWrite", cacheWrite),
+			reasoning: counted("reasoning", Math.ceil(output / 4)),
+			prompt: counted("prompt", promptTokens),
+			total: counted("total", promptTokens + output),
+		},
+	};
+};
+const bucketOf = (cwd) => createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 16);
+const ledgerDirectory = (id) =>
+	process.env.CLIO_CODER_STATE_DIR ? join(process.env.CLIO_CODER_STATE_DIR, "sessions", bucketOf(taskCwd), id) : null;
+const recordExchange = (prompt, answer) => {
+	const directory = ledgerDirectory(sessionId);
+	if (!directory || !answer) return;
+	const at = new Date().toISOString();
+	const metaFile = join(directory, "meta.json");
+	const fresh = ledgerTurns === 0;
+	mkdirSync(directory, { recursive: true });
+	if (fresh)
+		writeFileSync(
+			metaFile,
+			JSON.stringify({
+				id: sessionId,
+				cwd: resolve(taskCwd),
+				cwdHash: bucketOf(taskCwd),
+				createdAt: at,
+				endedAt: null,
+				model: settings.chat.model,
+				target: settings.chat.target,
+				clioCoderVersion: "0",
+				piMonoVersion: "0",
+				platform: process.platform,
+				nodeVersion: process.versions.node,
+				sessionFormatVersion: 5,
+				firstMessagePreview: prompt.slice(0, 200),
+			}),
+		);
+	const user = `${sessionId}-u${ledgerTurns}`,
+		assistant = `${sessionId}-a${ledgerTurns}`,
+		parent = ledgerTurns === 0 ? null : `${sessionId}-a${ledgerTurns - 1}`;
+	const entries = [
+		...(fresh ? [{ type: "session", version: 6, id: sessionId, timestamp: at, cwd: resolve(taskCwd) }] : []),
+		{ kind: "message", turnId: user, parentTurnId: parent, timestamp: at, role: "user", payload: { text: prompt } },
+		{
+			kind: "message",
+			turnId: assistant,
+			parentTurnId: user,
+			timestamp: at,
+			role: "assistant",
+			payload: { text: answer },
+		},
+	];
+	appendFileSync(join(directory, "current.jsonl"), `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+	ledgerTurns++;
 };
 let writeCalls = 0;
 // Settled frames mirror src/engine/acp/server.ts: `content` carries the result
@@ -894,7 +1017,13 @@ async function handle(frame) {
 				};
 				if (ROUTE)
 					setTimeout(
-						() => event("provider.health_changed", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
+						() =>
+							event("provider.health_changed", {
+								targetId: settings.chat.target,
+								status: "healthy",
+								available: true,
+								latencyMs: 5,
+							}),
 						50,
 					);
 				// As the engine does, the open frame follows the session/new result rather than preceding it.
@@ -978,6 +1107,7 @@ async function handle(frame) {
 			case "session/prompt": {
 				promptRunning = true;
 				pendingHandoff = null;
+				answered = "";
 				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
 				if (STEERING && promptText.includes("[unreadable-queue]")) queueReadFails = true;
 				const turnScenario =
@@ -1538,10 +1668,10 @@ async function handle(frame) {
 					contextWindow: 131072,
 					contextWindowSource: "loaded",
 					contextWindowSlots: null,
-					usedTokens: 20480,
-					reserveTokens: 16384,
-					freeTokens: 94208,
-					percent: 15.625,
+					usedTokens: cachedTokens + unsentTokens,
+					reserveTokens: CONTEXT_RESERVE,
+					freeTokens: Math.max(0, CONTEXT_WINDOW - CONTEXT_RESERVE - cachedTokens - unsentTokens),
+					percent: ((cachedTokens + unsentTokens) / CONTEXT_WINDOW) * 100,
 					measured: true,
 					compactionThreshold: 0.8,
 					compactionAuto: true,
@@ -1549,8 +1679,18 @@ async function handle(frame) {
 					projectHandbookFiles: ["CLIO-CODER.md"],
 					toolCount: 14,
 					groups: [
-						{ category: "system", label: "System prompt", tokens: 4096, percent: 3.125 },
-						{ category: "messages", label: "Conversation", tokens: 16384, percent: 12.5 },
+						{
+							category: "system",
+							label: "System prompt",
+							tokens: SYSTEM_TOKENS,
+							percent: (SYSTEM_TOKENS / CONTEXT_WINDOW) * 100,
+						},
+						{
+							category: "messages",
+							label: "Conversation",
+							tokens: cachedTokens + unsentTokens - SYSTEM_TOKENS,
+							percent: ((cachedTokens + unsentTokens - SYSTEM_TOKENS) / CONTEXT_WINDOW) * 100,
+						},
 					],
 					lastCompaction: null,
 					promptCache: {
@@ -1735,10 +1875,25 @@ async function handle(frame) {
 						{
 							id: "fixture",
 							runtime: "openai-compatible",
-							models: ["fixture-model", "fixture-small"],
+							models: [
+								"fixture-model",
+								"fixture-small",
+								...((savedChat.target ?? "fixture") === "fixture" && savedChat.model ? [savedChat.model] : []),
+							],
 							isOrchestrator: true,
 							apiKey: "must-be-stripped",
 						},
+						// The connection the saved settings chose, as the engine lists every configured one.
+						...(savedChat.target && !["fixture", "field-station"].includes(savedChat.target)
+							? [
+									{
+										id: savedChat.target,
+										runtime: "openai-compatible",
+										models: [savedChat.model ?? "fixture-model"],
+										isOrchestrator: true,
+									},
+								]
+							: []),
 						// A second target with a catalog, so choosing one in the route picker changes the model list.
 						...(ROUTE
 							? [
@@ -1770,11 +1925,32 @@ async function handle(frame) {
 				update({ sessionUpdate: "current_mode_update", currentModeId: autonomy });
 				update({ sessionUpdate: "config_option_update", configOptions: ROUTE ? configOptions() : [] });
 				break;
-			case "_clio-coder/session/label":
+			case "_clio-coder/session/label": {
+				// The engine names the saved task in its ledger; the history reads the name back from there.
+				const directory = ledgerDirectory(frame.params.sessionId);
+				const metaFile = directory && join(directory, "meta.json");
+				let meta = null;
+				try {
+					meta = metaFile ? JSON.parse(readFileSync(metaFile, "utf8")) : null;
+				} catch {
+					meta = null; // Not a task this fixture saved; seeded and unsaved tasks keep the old no-op.
+				}
+				if (meta) {
+					if (frame.params.label) meta.name = frame.params.label;
+					else delete meta.name;
+					writeFileSync(metaFile, JSON.stringify(meta));
+				}
+				break;
+			}
 			case "session/delete":
 				break;
 			default:
 				throw Error("method_not_found");
+		}
+		if (REAL_TASK && frame.method === "session/prompt" && result?._meta?.["clio-coder/usage"] === usage) {
+			const prompt = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
+			result = { ...result, _meta: { ...result._meta, "clio-coder/usage": turnUsage(prompt, answered) } };
+			if (result.stopReason === "end_turn") recordExchange(prompt, answered);
 		}
 		if (frame.id !== undefined) send({ id: frame.id, result });
 	} catch (error) {

@@ -1,13 +1,19 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Link } from "react-router";
 import type { UsagePerformance } from "../../contracts/reports.js";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { CostReportV1, Quantity } from "../../contracts/wire.js";
 import type { Client } from "../api/client.js";
+import { emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
+import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
+import { taskRows } from "../shell/shell-model.js";
+import { useSessionOverview } from "../shell/tasks.js";
 import { Explained } from "../telemetry/Explained.js";
 import { explainable, quantityParts } from "../telemetry/quantity-model.js";
+import type { ScopeTask } from "./metrics-scope-model.js";
+import { metricsScopeNote, recordedSessionsLabel, sessionTitle } from "./metrics-scope-model.js";
 import { rankedMetricGroups, sparkline } from "./operator-metrics-model.js";
 import "./operator-metrics.css";
 
@@ -26,6 +32,44 @@ export function useOperatorMetrics(client: Client, workspace = "") {
 				signal,
 			),
 	});
+}
+
+/**
+ * The tasks in scope with the titles the task list shows: one project's, or every project's when the scope is all of
+ * them. Recorded metrics name sessions by these titles.
+ */
+export function useScopeTasks(client: Client, workspace: string) {
+	const workspaces = useQuery({
+		queryKey: ["workspaces"],
+		queryFn: ({ signal }) => client.call(routes.workspaces, emptyInput, undefined, signal),
+		enabled: !workspace,
+	});
+	const ids = workspace ? [workspace] : (workspaces.data ?? []).map((row) => row.id);
+	const queries = useQueryClient();
+	// One query over the scope's projects, each read through the shared per-project history cache. useQueries would
+	// pull its observer into the eager framework chunk for this lazy page.
+	const histories = useQuery({
+		queryKey: ["session-history", { scope: ids }],
+		queryFn: () =>
+			Promise.all(
+				ids.map((id) =>
+					queries
+						.fetchQuery({
+							queryKey: ["session-history", id],
+							queryFn: ({ signal }) =>
+								client.call(routes.sessionHistory, { params: { id }, query: {}, body: {} }, undefined, signal),
+							staleTime: SESSION_HISTORY_FRESHNESS.staleTime,
+						})
+						.catch(() => []),
+				),
+			),
+		enabled: ids.length > 0,
+		...SESSION_HISTORY_FRESHNESS,
+		meta: { errorSurface: "inline" },
+	});
+	const sessions = useSessionOverview(client).data?.sessions ?? [];
+	const tasks: ScopeTask[] = ids.flatMap((id, index) => taskRows(id, sessions, histories.data?.[index] ?? []));
+	return { tasks, titles: new Map(tasks.map((task) => [task.id, task.title])) };
 }
 
 function Measure({ client, value, label }: { client: Client; value: Metric | undefined; label: string }) {
@@ -195,16 +239,22 @@ export function SessionMetricFigures({ row }: { row: SessionMetric }) {
 	);
 }
 
-function SessionTrends({ client, performance }: { client: Client; performance: UsagePerformance }) {
+function SessionTrends({
+	client,
+	performance,
+	titles,
+}: {
+	client: Client;
+	performance: UsagePerformance;
+	titles: ReadonlyMap<string, string>;
+}) {
 	const id = useId();
 	const rows = performance.sessions;
 	return (
 		<section className="operator-section" aria-labelledby={`${id}-sessions`}>
 			<header className="operator-heading">
 				<h2 id={`${id}-sessions`}>Latency over sessions</h2>
-				<span>
-					{rows.length} / {performance.sessionCount} most recent sessions
-				</span>
+				<span>{recordedSessionsLabel(rows.length, performance.sessionCount)}</span>
 			</header>
 			<div className="operator-trends">
 				<div>
@@ -228,7 +278,7 @@ function SessionTrends({ client, performance }: { client: Client; performance: U
 					<table className="operator-table">
 						<thead>
 							<tr>
-								<th scope="col">Session · first record</th>
+								<th scope="col">Task · first record</th>
 								<th scope="col">Calls</th>
 								<th scope="col">Tokens</th>
 								<th scope="col">USD</th>
@@ -244,20 +294,20 @@ function SessionTrends({ client, performance }: { client: Client; performance: U
 							{[...rows].reverse().map((row) => (
 								<tr key={row.sessionId}>
 									<th scope="row">
-										<Link to={`/sessions/${row.sessionId}`}>{row.sessionId.slice(0, 12)}</Link>
+										<Link to={`/sessions/${row.sessionId}`}>{sessionTitle(row.sessionId, titles)}</Link>
 										<small>{row.startedAt ? formatTime(row.startedAt) : "No record time"}</small>
 										{!row.journal.present || row.journal.gapRecords || row.journal.skipped || row.journal.damaged ? (
 											<small>Incomplete journal</small>
 										) : null}
 									</th>
 									<td>
-										<Measure client={client} value={row.calls} label={`${row.sessionId} calls`} />
+										<Measure client={client} value={row.calls} label={`${sessionTitle(row.sessionId, titles)} calls`} />
 									</td>
 									<td>
-										<Measure client={client} value={row.tokens} label={`${row.sessionId} tokens`} />
+										<Measure client={client} value={row.tokens} label={`${sessionTitle(row.sessionId, titles)} tokens`} />
 									</td>
 									<td>
-										<Measure client={client} value={row.usd} label={`${row.sessionId} USD`} />
+										<Measure client={client} value={row.usd} label={`${sessionTitle(row.sessionId, titles)} USD`} />
 									</td>
 									<td>
 										<Share value={row.cacheShare} />
@@ -344,7 +394,13 @@ function ToolMetrics({ performance }: { performance: UsagePerformance }) {
 	);
 }
 
-function CompactionMetrics({ performance }: { performance: UsagePerformance }) {
+function CompactionMetrics({
+	performance,
+	titles,
+}: {
+	performance: UsagePerformance;
+	titles: ReadonlyMap<string, string>;
+}) {
 	const id = useId();
 	const outcomes = Object.entries(performance.compactionOutcomes);
 	const total = quantityParts(performance.totals.compactions).exact;
@@ -374,7 +430,7 @@ function CompactionMetrics({ performance }: { performance: UsagePerformance }) {
 								<time dateTime={row.at}>{formatTime(row.at)}</time>
 								<strong>{row.outcome}</strong>
 								{row.sessionId ? (
-									<Link to={`/sessions/${row.sessionId}`}>{row.sessionId.slice(0, 12)}</Link>
+									<Link to={`/sessions/${row.sessionId}`}>{sessionTitle(row.sessionId, titles)}</Link>
 								) : (
 									<span>No session owner</span>
 								)}
@@ -392,19 +448,29 @@ export function OperatorMetrics({
 	client,
 	performance,
 	cost,
+	workspace = "",
 	compact = false,
 }: {
 	client: Client;
 	performance: UsagePerformance;
 	cost: readonly CostReportV1[];
+	/** The project in scope; empty or absent for every project. */
+	workspace?: string;
 	compact?: boolean;
 }) {
+	const { tasks, titles } = useScopeTasks(client, workspace);
+	const scope = metricsScopeNote({
+		recorded: performance.sessions.map((row) => row.sessionId),
+		recordedCount: performance.sessionCount,
+		tasks,
+		project: !!workspace,
+	});
 	const sections = (
 		<>
 			<ModelMetrics client={client} cost={cost} />
-			<SessionTrends client={client} performance={performance} />
+			<SessionTrends client={client} performance={performance} titles={titles} />
 			<ToolMetrics performance={performance} />
-			<CompactionMetrics performance={performance} />
+			<CompactionMetrics performance={performance} titles={titles} />
 		</>
 	);
 	return (
@@ -424,10 +490,13 @@ export function OperatorMetrics({
 					</div>
 				))}
 			</dl>
+			{scope ? <p className="operator-note operator-scope">{scope}</p> : null}
 			{performance.coverage.unavailable || performance.coverage.gaps ? (
 				<p className="operator-coverage" role="status">
-					Incomplete coverage: {performance.coverage.unavailable} unreadable journals · {performance.coverage.gaps} skipped,
-					damaged or gap records. Counters describe observed settlements, not missing activity.
+					Incomplete coverage: {performance.coverage.unavailable} session{" "}
+					{performance.coverage.unavailable === 1 ? "record" : "records"} could not be read and {performance.coverage.gaps}{" "}
+					{performance.coverage.gaps === 1 ? "entry was" : "entries were"} skipped, damaged or missing. These counters cover
+					only what could be read.
 				</p>
 			) : null}
 			{compact ? (
