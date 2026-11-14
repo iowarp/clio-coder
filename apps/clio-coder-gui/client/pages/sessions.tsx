@@ -119,6 +119,13 @@ export async function locateTask(
  */
 function useSecond(active: boolean): number {
 	const [now, setNow] = useState(() => clock.now());
+	const [wasActive, setWasActive] = useState(active);
+	// The second held from the last live stretch is stale the moment a new one starts. Taking a fresh one during this
+	// render keeps a row that first appears now from recording that old second as its start.
+	if (active !== wasActive) {
+		setWasActive(active);
+		if (active) setNow(clock.now());
+	}
 	useEffect(() => {
 		if (!active) return;
 		setNow(clock.now());
@@ -388,7 +395,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					? { tone: "quiet", label: "Waiting for a slot" }
 					: {
 							tone: "working",
-							label: [liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : "Working", elapsed ?? null]
+							label: [
+								liveWorkers > 0 ? `Waiting on ${workerCount(liveWorkers)}` : turn?.startedAt ? "Working" : "Starting",
+								elapsed ?? null,
+							]
 								.filter(Boolean)
 								.join(" · "),
 						}

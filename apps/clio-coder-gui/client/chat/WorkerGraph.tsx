@@ -242,6 +242,12 @@ export const WorkerGraph = memo(function WorkerGraph({
 						<dt>failed</dt>
 						<dd>{graph.failed}</dd>
 					</div>
+					{graph.stopped > 0 ? (
+						<div>
+							<dt>stopped</dt>
+							<dd>{graph.stopped}</dd>
+						</div>
+					) : null}
 				</dl>
 				{graph.nodes.length > 0 ? (
 					<button type="button" className="agents-filter" aria-pressed={liveOnly} onClick={() => setLiveOnly(!liveOnly)}>

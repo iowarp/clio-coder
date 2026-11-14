@@ -122,8 +122,8 @@ export class SessionService {
 		return row;
 	}
 	async load(workspaceId: string, id: string) {
-		await this.find(workspaceId, id);
-		return this.supervisor.open(workspaceId, id);
+		const saved = await this.find(workspaceId, id);
+		return this.supervisor.open(workspaceId, id, saved.name);
 	}
 	async ledgerCommand(id: string, action: "label" | "delete", workspaceId?: string, label?: string) {
 		const workspace = workspaceId ?? this.supervisor.get(id).workspaceId;

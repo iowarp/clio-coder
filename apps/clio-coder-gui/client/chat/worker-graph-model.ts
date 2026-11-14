@@ -61,6 +61,7 @@ export function workerGraph(items: readonly FleetItem[], server?: readonly Sessi
 		active: runs.filter(isLiveRun).length,
 		completed: runs.filter((run) => run.state === "done").length,
 		failed: runs.filter((run) => run.state === "failed").length,
+		stopped: runs.filter((run) => run.state === "stopped").length,
 	};
 }
 

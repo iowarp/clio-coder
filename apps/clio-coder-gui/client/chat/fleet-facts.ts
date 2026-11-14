@@ -33,7 +33,7 @@ export type FleetItemLike = Omit<FleetItem, "fact"> & {
  * `ended` is never folded from the feed: it is a run the feed last saw live that the server no longer holds, so its
  * final event never reached this view. It says what the view knows, not how the run went.
  */
-export type FleetRunState = "queued" | "running" | "progress" | "done" | "failed" | "ended";
+export type FleetRunState = "queued" | "running" | "progress" | "done" | "failed" | "stopped" | "ended";
 
 export interface FleetRun {
 	readonly runId: string;
@@ -62,6 +62,7 @@ export const FLEET_GLYPHS: Readonly<Record<FleetRunState, string>> = {
 	progress: "◑",
 	done: "✓",
 	failed: "✕",
+	stopped: "■",
 	ended: "○",
 };
 
@@ -72,6 +73,7 @@ export const FLEET_STATE_LABELS: Readonly<Record<FleetRunState, string>> = {
 	progress: "Working",
 	done: "Done",
 	failed: "Failed",
+	stopped: "Stopped",
 	ended: "Ended (final event not received)",
 };
 
@@ -81,6 +83,7 @@ export const FLEET_STATE_TONES: Readonly<Record<FleetRunState, StatusTone>> = {
 	progress: "running",
 	done: "success",
 	failed: "fail",
+	stopped: "neutral",
 	ended: "neutral",
 };
 
@@ -136,7 +139,24 @@ function terminalOutcome(payload: Readonly<Record<string, unknown>>): string | n
 	return detail === null ? code : `${code === null ? "" : `${code}: `}${detail}`;
 }
 
-const TERMINAL_STATES: ReadonlySet<FleetRunState> = new Set<FleetRunState>(["done", "failed"]);
+const TERMINAL_STATES: ReadonlySet<FleetRunState> = new Set<FleetRunState>(["done", "failed", "stopped"]);
+
+/**
+ * The engine settles a stopped run through `run.failed` with the outcome `canceled` (`resolveRunOutcome`); a stop is
+ * not a failure, so it neither reads as one nor offers a report.
+ */
+function isStop(payload: Readonly<Record<string, unknown>>): boolean {
+	const outcome = text(payload.outcome);
+	return outcome === "canceled" || outcome === "cancelled";
+}
+
+/** A stop's reason and detail, without the cancel code that the state word already says. */
+function stopOutcome(payload: Readonly<Record<string, unknown>>): string | null {
+	const code = text(payload.outcomeCode);
+	const detail = text(payload.outcomeDetail);
+	if (code === null) return detail;
+	return detail === null ? code : `${code}: ${detail}`;
+}
 
 function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unknown>>, at: string): FleetRun {
 	// A late progress or start frame must not bring a settled run back to life.
@@ -174,8 +194,8 @@ function apply(run: FleetRun, type: string, payload: Readonly<Record<string, unk
 		case "fleet.failed":
 			return {
 				...base,
-				state: "failed",
-				outcome: terminalOutcome(payload) ?? base.outcome,
+				state: isStop(payload) ? "stopped" : "failed",
+				outcome: (isStop(payload) ? stopOutcome(payload) : terminalOutcome(payload)) ?? base.outcome,
 				durationMs: integer(payload.durationMs) ?? base.durationMs,
 				tokens: text(payload.tokenDisplay) ?? base.tokens,
 			};
@@ -326,12 +346,14 @@ export function presentFleetFact(fact: { readonly type: string; readonly payload
 			};
 		}
 		case "fleet.failed":
-			return {
-				label: "Run failed",
-				tone: "fail",
-				known: true,
-				summary: `${terminalOutcome(payload) ?? "CLIO Coder reported no reason"}.`,
-			};
+			return isStop(payload)
+				? { label: "Run stopped", tone: "neutral", known: true, summary: `${stopOutcome(payload) ?? "Stopped"}.` }
+				: {
+						label: "Run failed",
+						tone: "fail",
+						known: true,
+						summary: `${terminalOutcome(payload) ?? "CLIO Coder reported no reason"}.`,
+					};
 		case "fleet.loopBlocked": {
 			const disposition = text(payload.disposition);
 			return {

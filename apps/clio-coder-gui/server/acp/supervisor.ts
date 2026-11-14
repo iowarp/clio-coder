@@ -487,12 +487,13 @@ export class Supervisor {
 			// The workspace may have vanished or the ledger be unreadable; the record then keeps its terminal-resume path.
 		}
 	}
-	async open(workspaceId: string, existingId?: string) {
+	/** `label` is a saved session's ledger name; the replayed transcript cannot restore it, so the snapshot starts with it. */
+	async open(workspaceId: string, existingId?: string, label?: string) {
 		if (existingId && this.snapshots.get(existingId)?.state === "parked") {
 			await this.wake(existingId);
 			return this.get(existingId);
 		}
-		return this.track(this.openSession(workspaceId, existingId));
+		return this.track(this.openSession(workspaceId, existingId, false, label));
 	}
 	private async track(pending: Promise<SessionSnapshot>) {
 		this.opening.add(pending);
@@ -556,7 +557,7 @@ export class Supervisor {
 		if (this.snapshot(id).state === "parked") await this.wake(id);
 		return {};
 	}
-	private async openSession(workspaceId: string, existingId?: string, resume = false) {
+	private async openSession(workspaceId: string, existingId?: string, resume = false, label?: string) {
 		if (this.stopping) throw new AppProblem("unavailable", "The server is shutting down.");
 		if (existingId && (this.entries.has(existingId) || this.loading.has(existingId)))
 			throw new AppProblem("conflict", "Session is already open in this server.");
@@ -598,7 +599,9 @@ export class Supervisor {
 			if (!resume)
 				this.snapshots.set(
 					id,
-					existingId ? { ...emptySession(id, workspaceId), revision: this.floor + 1 } : emptySession(id, workspaceId),
+					existingId
+						? { ...emptySession(id, workspaceId), revision: this.floor + 1, label: label || null }
+						: emptySession(id, workspaceId),
 				);
 			this.entries.set(id, entry);
 			this.starting--;
@@ -730,7 +733,7 @@ export class Supervisor {
 				this.snapshots.delete(id);
 				entry.id = boundId;
 				this.entries.set(boundId, entry);
-				this.snapshots.set(boundId, emptySession(boundId, workspaceId));
+				this.snapshots.set(boundId, { ...emptySession(boundId, workspaceId), label: label || null });
 			}
 			await this.children.bind(row, boundId);
 			entry.bound = true;

@@ -412,6 +412,13 @@ test("the live status machine reaches all nine states from one realistic sequenc
 		record(liveStatus(chatTurn([user], "running"), turnRow({ id: "t", status: "running" }), null)),
 		"starting",
 	);
+	// Once the server admits the turn the agent holds it: the line says Working, as the header does (inspection F14).
+	const admitted = liveStatus(
+		chatTurn([user], "running"),
+		turnRow({ id: "t", status: "running", startedAt: "2026-09-20T00:00:00.000Z" }),
+		null,
+	);
+	assert.deepEqual([admitted.state, admitted.label], ["acting", "Working"]);
 	// A live worker outranks the orchestrator's silent timeline: "Starting" through a five-minute
 	// dispatch is a lie.
 	const waitingOnWorker = liveStatus(chatTurn([user], "running"), undefined, null, false, 2);

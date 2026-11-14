@@ -258,7 +258,10 @@ test("a saved task only the engine's session/list knows still loads", { timeout:
 	assert.deepEqual(history, []);
 	const loaded = await h.post("/api/sessions/perf-history/load", { workspaceId: workspace.id });
 	assert.equal(loaded.status, 200, await loaded.clone().text());
-	assert.equal((await json(loaded, routes.loadSession.response)).id, "perf-history");
+	const session = await json(loaded, routes.loadSession.response);
+	assert.equal(session.id, "perf-history");
+	// The saved name is the title, never the first replayed prompt (inspection F15).
+	assert.equal(session.label, "A long saved conversation");
 });
 
 test("permission rejection never executes and remote session admission codes remain upstream_acp problems", {

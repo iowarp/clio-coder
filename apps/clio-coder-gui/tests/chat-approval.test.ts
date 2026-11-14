@@ -412,6 +412,33 @@ test("progress is a working run, not a phase of its own, and a failure carries i
 	assert.equal(fleetSummaryLabel(runs), "Fleet · 2 running of 3");
 });
 
+test("a stopped worker reads as stopped, never as a failure (inspection F10)", () => {
+	const runs = foldFleetRuns([
+		fact("fleet.started", { runId: "r1", agentId: "builder" }),
+		fact("fleet.failed", {
+			runId: "r1",
+			agentId: "builder",
+			outcome: "canceled",
+			reason: "canceled",
+			outcomeDetail: "operator abort",
+			durationMs: 2500,
+		}),
+		fact("fleet.failed", { runId: "r2", agentId: "judge", outcome: "failed", reason: "failed", durationMs: 12 }),
+	]);
+	const [stopped, failed] = runs;
+	assert.ok(stopped && failed);
+	assert.equal(stopped.state, "stopped");
+	assert.ok(!isLiveRun(stopped));
+	assert.equal(fleetRunDetail(stopped), "Stopped · operator abort · 2.5s");
+	assert.equal(failed.state, "failed");
+	const presented = presentFleetFact({
+		type: "fleet.failed",
+		payload: { outcome: "cancelled", reason: "operator_cancel" },
+	});
+	assert.deepEqual([presented.label, presented.tone], ["Run stopped", "neutral"]);
+	assert.equal(presentFleetFact({ type: "fleet.failed", payload: { outcome: "failed" } }).label, "Run failed");
+});
+
 test("events arriving out of order are folded in reported sequence, not in array order", () => {
 	const started = fact("fleet.started", { runId: "r1", agentId: "a" });
 	const completed = fact("fleet.completed", {
