@@ -194,13 +194,6 @@ export interface CheckRun {
 	at: string;
 }
 
-/** The current revisions whose criterion names a check: what a run of it that starts now tests. */
-export function hypothesesNaming(records: ReadonlyArray<HypothesisRecordV1>, check: string): string[] {
-	return [...latestHypotheses(records).values()]
-		.filter((record) => record.criterion.check === check)
-		.map((record) => record.id);
-}
-
 /**
  * The test records check runs add: one per hypothesis bound to the run when it started, which still names the check.
  * The claim decides the outcome; a run without one only marks the hypothesis tested.

@@ -1,11 +1,17 @@
-import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { canonicalCheckout, checkoutHead } from "../core/project-root.js";
+import { clioDataDir } from "../core/xdg.js";
 import {
+	type ClaimDisputeRecord,
+	type ClaimImportRecord,
 	type ClaimRecord,
 	type ClaimStatus,
 	type ClaimsLogRead,
 	claimCheckLabel,
 	claimStatuses,
 	claimsProjectRoot,
+	compactClaimsLog,
 	contradictionConditions,
 	type HypothesisRecord,
 	type HypothesisState,
@@ -14,11 +20,15 @@ import {
 	readClaims,
 	supersedeConditions,
 } from "../domains/claims/index.js";
+import { exportClaims, importClaims, importOriginLabel } from "../domains/claims/transfer.js";
 import { printError } from "./argv.js";
 
 const HELP = `Usage:
   clio-coder claims [list] [--check <id>] [--json]
   clio-coder claims show <id-prefix> [--json]
+  clio-coder claims export [--check <id>] [--out <file>]
+  clio-coder claims import <file> [--json]
+  clio-coder claims compact [--prune-superseded-before <iso-date>] [--dry-run] [--json]
 
 Lists the claims recorded for the project at the current directory, oldest
 first. A claim is what one judged reproduce or numeric-compare check
@@ -29,13 +39,18 @@ platform). It does not establish that a result is scientifically right.
 Claims are captured from verify results on the main thread and from host
 verification of worker runs. The log is append-only and lives in Clio's state
 directory, keyed by the repository root, so every subdirectory of a repository
-reads the same claims.
+reads the same claims. A linked worktree folds into its main checkout: a lane
+and the checkout it merges into share one log, a lane's claims supersede only
+claims from the same worktree, and opposite verdicts at equal pinned conditions
+contradict wherever they ran. A checkout whose .git pointer claims a worktree
+the main repository does not record records nothing.
 
 Edges are derived when a claim is recorded, from the check id and recorded
 conditions only. A claim that reaches the opposite verdict with the same
 pinned conditions (commit, command, reference, inputs, tolerance, and for
 reproduce the seed, environment and platform) contradicts the latest earlier
-one, and both read as contested. A numeric-compare check's working tree is
+one. When a failure overturns a pass, the pass reads as retired and the failure
+as contested; any other contradiction leaves both contested. A numeric-compare check's working tree is
 not pinned: an uncommitted edit at the same commit still contradicts, and the
 edge says how the trees differed. A claim whose pinned conditions changed (a
 new commit, new input digests) supersedes the earlier ones. A claim recorded
@@ -47,6 +62,24 @@ supersede each other, a rerun of one run does, and the listing names it as
 When a disagreement overturns an agreement, every memory record citing the
 agreeing claim gets a regression and leaves the prompt until approved again;
 the claim lists which records changed, or that none did.
+
+A dispute is a worker disagreement kept past its dispatch: an agent-ledger
+review that did not pass, with the entry it targeted. Both sides are
+model-authored and inferred; no verdict is merged, and a dispute never backs
+memory.
+
+export writes this project's own grounded claims as JSON (stdout, or --out),
+with an origin naming the repository's root commit and origin remote, never a
+local path. import records another project's export here as inferred leads:
+each keeps its origin and is shown as not verified here, never forms an edge
+with this project's claims and never backs memory. Importing an export into
+the project it came from is refused.
+
+compact rewrites the log without check starts that bound no hypothesis,
+repeated lines and damaged lines (kept aside in <log>.quarantine.jsonl). With
+--prune-superseded-before it also drops superseded claims captured before that
+date that no regression, hypothesis test or memory record cites. The previous
+log stays as <log>.prev.jsonl until the next compaction.
 
 Hypotheses from a hypothesis-workflow slate (schema
 clio-coder.hypothesis-slate.v1) are recorded as proposed when the main session
@@ -81,19 +114,6 @@ interface LogView {
 
 function short(id: string): string {
 	return id.slice(0, 12);
-}
-
-function checkoutHead(cwd: string): string | null {
-	try {
-		return execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
-			cwd,
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "ignore"],
-			timeout: 5_000,
-		}).trim();
-	} catch {
-		return null;
-	}
 }
 
 /**
@@ -183,6 +203,28 @@ function showLines(claim: ClaimRecord, view: LogView): string[] {
 			.split("\n")
 			.map((line) => `  ${line}`),
 		SCOPE_NOTE,
+	];
+}
+
+function disputeSide(post: ClaimDisputeRecord["target"], flagged: boolean): string {
+	const where = post.path === undefined ? "" : ` ${post.path}${post.line === undefined ? "" : `:${post.line}`}`;
+	return `${post.kind} ${post.entry} by ${post.agentId} (run ${post.runId})${where}: ${flagged ? "[text withheld: instruction-shaped]" : post.text}`;
+}
+
+function disputeLines(dispute: ClaimDisputeRecord): string[] {
+	return [
+		`${short(dispute.id)}  ${dispute.at}  dispute    inferred    ledger ${dispute.ledger}${dispute.flagged !== undefined ? "  [flagged: instruction-shaped text]" : ""}${dispute.withheld !== undefined ? "  [text withheld: flow-restricted]" : ""}`,
+		`  disputed: ${disputeSide(dispute.target, dispute.flagged !== undefined)}`,
+		`  failing review: ${disputeSide(dispute.review, dispute.flagged !== undefined)}`,
+	];
+}
+
+function importLines(record: ClaimImportRecord): string[] {
+	const claim = record.claim;
+	return [
+		`${short(record.id)}  ${record.at}  ${claim.verdict.padEnd(9)}  imported    ${claim.kind.padEnd(15)}  ${claimCheckLabel(claim)}${record.flagged !== undefined ? "  [flagged: instruction-shaped text]" : ""}`,
+		`  ${record.flagged !== undefined ? "[text withheld: instruction-shaped]" : claim.text}`,
+		`  ${importOriginLabel(record)}; original claim ${short(claim.id)}`,
 	];
 }
 
@@ -293,6 +335,9 @@ function readJsonSummary(
 		path: read.path,
 		claims: claims.map((claim) => relatedJson(claim, view)),
 		hypotheses: hypotheses.map((hypothesis) => hypothesisJson(hypothesis, view)),
+		disputes: read.disputes.map((dispute) => ({ ...dispute, status: "contested" })),
+		imports: read.imports.map((record) => ({ ...record, status: "inferred", label: importOriginLabel(record) })),
+		...(read.legacy.length > 0 ? { legacy: read.legacy } : {}),
 		skipped: {
 			unreadable: read.unreadable,
 			mismatched: read.mismatched,
@@ -303,7 +348,99 @@ function readJsonSummary(
 	};
 }
 
-export function runClaimsCommand(args: string[]): number {
+/** `--name value` from operands, removing both; undefined when absent. Null when the flag has no value. */
+function takeOption(operands: string[], name: string): string | null | undefined {
+	const index = operands.indexOf(name);
+	if (index < 0) return undefined;
+	const value = operands[index + 1];
+	operands.splice(index, value === undefined ? 1 : 2);
+	return value ?? null;
+}
+
+async function runExport(operands: string[]): Promise<number> {
+	const check = takeOption(operands, "--check");
+	const out = takeOption(operands, "--out");
+	if (check === null || out === null || operands.length > 0) {
+		printError("claims export: usage: clio-coder claims export [--check <id>] [--out <file>]");
+		return 2;
+	}
+	const bundle = exportClaims(claimsProjectRoot(process.cwd()), check !== undefined ? { check } : {});
+	const text = `${JSON.stringify(bundle, null, 2)}\n`;
+	if (out === undefined) process.stdout.write(text);
+	else {
+		writeFileSync(resolve(out), text, { mode: 0o600 });
+		console.log(`exported ${bundle.claims.length} claim${bundle.claims.length === 1 ? "" : "s"} to ${resolve(out)}`);
+	}
+	return 0;
+}
+
+async function runImport(operands: string[], json: boolean): Promise<number> {
+	const [file] = operands;
+	if (file === undefined || operands.length > 1) {
+		printError("claims import: name one export file");
+		return 2;
+	}
+	const checkout = canonicalCheckout(process.cwd());
+	if (!checkout.trusted) {
+		printError(
+			"claims import: this checkout's .git pointer names a worktree its repository does not record; nothing was imported",
+		);
+		return 1;
+	}
+	let bundle: unknown;
+	try {
+		bundle = JSON.parse(readFileSync(resolve(file), "utf8"));
+	} catch (error) {
+		printError(`claims import: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+	try {
+		const result = await importClaims(checkout.project, bundle);
+		if (json) console.log(JSON.stringify(result, null, 2));
+		else
+			console.log(
+				`imported ${result.imported} claim${result.imported === 1 ? "" : "s"} as inferred (${result.repeated} already here, ${result.rejected} rejected as not intact, ${result.flagged} flagged); imported claims are leads from another project and ground nothing here`,
+			);
+		return 0;
+	} catch (error) {
+		printError(`claims import: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+}
+
+async function runCompact(operands: string[], json: boolean): Promise<number> {
+	const dryRun = operands.includes("--dry-run");
+	const rest = operands.filter((operand) => operand !== "--dry-run");
+	const before = takeOption(rest, "--prune-superseded-before");
+	if (before === null || rest.length > 0 || (before !== undefined && Number.isNaN(Date.parse(before)))) {
+		printError("claims compact: usage: clio-coder claims compact [--prune-superseded-before <iso-date>] [--dry-run]");
+		return 2;
+	}
+	let cited: Set<string> | undefined;
+	if (before !== undefined) {
+		// A claim a memory record cites stays, whatever its age: pruning it would orphan the record's evidence.
+		const { loadMemoryRecords } = await import("../domains/memory/index.js");
+		const records = await loadMemoryRecords(clioDataDir());
+		cited = new Set(
+			records.flatMap((record) =>
+				record.evidenceRefs.filter((ref) => ref.startsWith("claim:")).map((ref) => ref.slice("claim:".length)),
+			),
+		);
+	}
+	const result = await compactClaimsLog(claimsProjectRoot(process.cwd()), {
+		dryRun,
+		...(before !== undefined ? { pruneSupersededBefore: new Date(before) } : {}),
+		...(cited !== undefined ? { cited } : {}),
+	});
+	if (json) console.log(JSON.stringify(result, null, 2));
+	else
+		console.log(
+			`${dryRun ? "would compact" : "compacted"} ${result.path}: ${result.linesBefore} -> ${result.linesAfter} lines, ${result.bytesBefore} -> ${result.bytesAfter} bytes (${result.droppedStarts} unbound check starts, ${result.duplicates} repeats, ${result.quarantined} quarantined, ${result.prunedClaims} superseded claims and ${result.prunedEdges} edges pruned)`,
+		);
+	return 0;
+}
+
+export async function runClaimsCommand(args: string[]): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		console.log(HELP);
 		return 0;
@@ -311,6 +448,9 @@ export function runClaimsCommand(args: string[]): number {
 	const json = args.includes("--json");
 	const rest = args.filter((arg) => arg !== "--json");
 	const [action = "list", ...operands] = rest[0]?.startsWith("--") === true ? ["list", ...rest] : rest;
+	if (action === "export") return runExport(operands);
+	if (action === "import") return runImport(operands, json);
+	if (action === "compact") return runCompact(operands, json);
 	let read: ClaimsLogRead;
 	try {
 		read = readClaims(claimsProjectRoot(process.cwd()));
@@ -319,7 +459,7 @@ export function runClaimsCommand(args: string[]): number {
 		return 1;
 	}
 	const view: LogView = {
-		head: checkoutHead(process.cwd()),
+		head: checkoutHead(canonicalCheckout(process.cwd()).checkout),
 		read,
 		statuses: claimStatuses(read.records, read.edges),
 		hypotheses: hypothesisStatuses(read.hypotheses, read.hypothesisTests),
@@ -352,7 +492,7 @@ export function runClaimsCommand(args: string[]): number {
 			const count = (status: ClaimStatus): number =>
 				claims.filter((claim) => view.statuses.get(claim.id) === status).length;
 			lines.push(
-				`${claims.length} claim${claims.length === 1 ? "" : "s"} (${count("contested")} contested, ${count("superseded")} superseded); ${SCOPE_NOTE}`,
+				`${claims.length} claim${claims.length === 1 ? "" : "s"} (${count("contested")} contested, ${count("retired")} retired, ${count("superseded")} superseded); ${SCOPE_NOTE}`,
 				"",
 			);
 			for (const claim of claims) lines.push(...listLines(claim, view));
@@ -367,6 +507,31 @@ export function runClaimsCommand(args: string[]): number {
 			);
 			for (const hypothesis of hypotheses) lines.push(...hypothesisListLines(hypothesis, view));
 		}
+		const disputes =
+			check === undefined ? read.disputes : read.disputes.filter((dispute) => dispute.target.path === check);
+		if (disputes.length > 0) {
+			lines.push(
+				"",
+				`${disputes.length} dispute${disputes.length === 1 ? "" : "s"} (worker disagreements kept past their dispatch; inferred, no merged verdict)`,
+				"",
+			);
+			for (const dispute of disputes) lines.push(...disputeLines(dispute));
+		}
+		const imports =
+			check === undefined ? read.imports : read.imports.filter((record) => record.claim.keys.check === check);
+		if (imports.length > 0) {
+			lines.push(
+				"",
+				`${imports.length} imported claim${imports.length === 1 ? "" : "s"} (inferred leads from another project; they ground nothing here)`,
+				"",
+			);
+			for (const record of imports) lines.push(...importLines(record));
+		}
+		if (read.legacy.length > 0)
+			lines.push(
+				"",
+				`also read: ${read.legacy.join(", ")} (linked worktree logs from before worktrees folded into this project)`,
+			);
 		const skipped = skippedNote(read);
 		if (skipped !== null) lines.push(skipped);
 		console.log(lines.join("\n"));

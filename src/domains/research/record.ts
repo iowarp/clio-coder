@@ -26,6 +26,7 @@ import {
 	type ClaimRecord,
 	type ClaimSource,
 	claimFromVerifyResult,
+	claimsCaptureCheckout,
 	HYPOTHESIS_SLATE_SCHEMA,
 	hypothesesFromSlate,
 	readClaims,
@@ -175,7 +176,9 @@ export async function finishIterationRecord(input: {
 		if (claim !== null) claims.set(outcome.check, claim);
 	}
 	// Through recordClaims, so a contradiction this iteration records regresses memory citing the overturned claim now.
-	if (claims.size > 0) await recordClaims([...claims.values()], new Date(input.at));
+	// A campaign keyed on a forged worktree pointer records no claims, as main-thread capture does not (#406).
+	if (claims.size > 0 && claimsCaptureCheckout(input.campaign.project) !== null)
+		await recordClaims([...claims.values()], new Date(input.at));
 	// The research improvement hypothesis is tested without the claim: reference agreement is not evidence the change
 	// improved the metric. Any other hypothesis bound to a check keeps the claim as its evidence, as `verify` would.
 	const research = researchHypothesisIds(input.campaign.project);
