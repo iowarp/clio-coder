@@ -20,7 +20,7 @@
  * file degrades to the lower layers with an issue rather than throwing.
  */
 
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
@@ -44,6 +44,8 @@ import { DEFAULT_SETTINGS } from "./defaults.js";
 import { clioProjectRoot } from "./project-root.js";
 import { noteProjectTargets } from "./project-target-urls.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
+import type { SettingsDocumentRead } from "./settings-document.js";
+import { readSettingsDocument } from "./settings-document.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import {
 	captureProjectSurface,
@@ -174,30 +176,26 @@ function readRawLayer(
 	capturedText?: string,
 ): RawLayer {
 	if (capturedText === undefined && !existsSync(path)) return { origin, path, blob: undefined };
-	let text: string;
-	try {
-		text = capturedText ?? readFileSync(path, "utf8");
-	} catch (err) {
+	let read: SettingsDocumentRead;
+	if (capturedText === undefined) read = readSettingsDocument(path);
+	else {
+		try {
+			read = { kind: "parsed", document: parseYaml(capturedText, { maxAliasCount: 100 }) };
+		} catch (error) {
+			read = { kind: "invalid", error };
+		}
+	}
+	if (read.kind !== "parsed") {
+		const reason = read.error instanceof Error ? read.error.message : String(read.error);
 		issues.push({
 			origin,
 			path: "(root)",
-			message: `unreadable: ${err instanceof Error ? err.message : String(err)}`,
-			kind: "unreadable",
+			message: read.kind === "unreadable" ? `unreadable: ${reason}` : `${path}: invalid YAML: ${reason}`,
+			kind: read.kind === "unreadable" ? "unreadable" : "syntax",
 		});
 		return { origin, path, blob: undefined };
 	}
-	let parsed: unknown;
-	try {
-		parsed = parseYaml(text, { maxAliasCount: 100 });
-	} catch (err) {
-		issues.push({
-			origin,
-			path: "(root)",
-			message: `${path}: invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
-			kind: "syntax",
-		});
-		return { origin, path, blob: undefined };
-	}
+	const parsed = read.document;
 	if (parsed === null || parsed === undefined) return { origin, path, blob: {} };
 	if (!isRecord(parsed)) {
 		issues.push({ origin, path: "(root)", message: "settings file must be a mapping at the root" });

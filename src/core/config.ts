@@ -38,6 +38,7 @@ import {
 import { writeDiagnostic } from "./diagnostics.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
+import { readSettingsDocument } from "./settings-document.js";
 import type { SettingsFieldName } from "./settings-fields.js";
 import { withStateFileLockSync } from "./state-file-lock.js";
 import { MAX_TIMER_DELAY_MS } from "./timers.js";
@@ -2775,33 +2776,32 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 export function validateSettingsFile(): SettingsValidationResult {
 	const path = join(resolveClioDirs().config, "settings.yaml");
 	if (!existsSync(path)) return { settings: cloneValue(DEFAULT_SETTINGS), issues: [], coercions: [], retired: [] };
-	// The read and the parse are separate steps because they fail for separate
-	// reasons: folding them into one try reported `chmod 000` as invalid YAML,
-	// which is a false statement about the file and points at the wrong repair.
-	let text: string;
-	try {
-		text = readFileSync(path, "utf8");
-	} catch (err) {
+	// The read and the parse fail for separate reasons: reporting `chmod 000` as
+	// invalid YAML is a false statement about the file and points at the wrong repair.
+	const read = readSettingsDocument(path);
+	if (read.kind === "unreadable") {
 		return {
 			settings: cloneValue(DEFAULT_SETTINGS),
 			issues: [
-				{ path: "(root)", message: `unreadable: ${err instanceof Error ? err.message : String(err)}`, kind: "unreadable" },
+				{
+					path: "(root)",
+					message: `unreadable: ${read.error instanceof Error ? read.error.message : String(read.error)}`,
+					kind: "unreadable",
+				},
 			],
 			coercions: [],
 			retired: [],
 		};
 	}
-	let parsed: unknown;
-	try {
-		parsed = parseYaml(text);
-	} catch (err) {
+	if (read.kind === "invalid") {
 		return {
 			settings: cloneValue(DEFAULT_SETTINGS),
-			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(err)}`, kind: "syntax" }],
+			issues: [{ path: "(root)", message: `invalid YAML: ${yamlErrorSummary(read.error)}`, kind: "syntax" }],
 			coercions: [],
 			retired: [],
 		};
 	}
+	const parsed = read.document;
 	// An empty file parses as null; it holds no settings, so it reads as an empty map.
 	return validateSettings(parsed ?? {});
 }
