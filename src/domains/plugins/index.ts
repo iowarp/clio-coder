@@ -16,7 +16,7 @@ export {
 	pluginResourcePath,
 	readPluginManifest,
 } from "./discovery.js";
-export { withPluginDiscoveryPass } from "./discovery-pass.js";
+export { passDerived, withPluginDiscoveryPass } from "./discovery-pass.js";
 export { pluginContentDigest, pluginContentDigestWithCapture } from "./integrity.js";
 export { pluginPromptNames } from "./prompt-names.js";
 export {
