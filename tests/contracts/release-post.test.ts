@@ -8,6 +8,7 @@ interface PostModule {
 	postRelease(context: object, io: object): Promise<Record<string, { status: string; note: string; at: string }>>;
 	nextDevelopment(version: string): { version: string; branch: string } | null;
 	openUnreleased(text: string): string;
+	stripSvgComments(svg: string): string;
 }
 const load = async (): Promise<PostModule> => {
 	const module = "../../scripts/release/post.mjs";
@@ -48,6 +49,13 @@ function fakeIo(rules: Array<[RegExp, string | Error]>) {
 const absent = new Error("absent");
 const mainSha = "a".repeat(40);
 const branchSha = "b".repeat(40);
+
+test("SVG cleanup removes comments exposed by earlier removals without changing markup", async () => {
+	const { stripSvgComments } = await load();
+	const svg = '<svg><!<!-- hidden -->-- private metadata --><path d="M0 0"/>  </svg>  \n';
+	equal(stripSvgComments(svg), '<svg><path d="M0 0"/>  </svg>\n');
+	equal(stripSvgComments(stripSvgComments(svg)), stripSvgComments(svg));
+});
 
 test("post-release reruns only items that are not done or skipped", async () => {
 	const { ITEMS, postPending, postRelease } = await load();
