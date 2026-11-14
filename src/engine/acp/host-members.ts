@@ -286,8 +286,16 @@ function readResult(value: unknown, wire: WireQuestion[], original: AskUserQuest
 	return { answers };
 }
 
-export function createAcpInterviewChannel(): AcpInterviewChannel {
+/**
+ * `unattendedWindowMs` is the operator's `safety.unattendedAfterSeconds` in ms (0 for none). An ask_user round
+ * (`unattendedFallback`) waits the smaller of it and the client's request timeout, and a round nobody answered
+ * comes back `timedOut`, so the tool takes the recommended option as the terminal does, instead of ending the turn.
+ */
+export function createAcpInterviewChannel(
+	channelOptions: { unattendedWindowMs?: () => number } = {},
+): AcpInterviewChannel {
 	let binding: AcpInterviewBinding | null = null;
+	const unattendedWindow = (): number | undefined => channelOptions.unattendedWindowMs?.();
 	const pending = new Set<() => void>();
 	const cancel = (): void => {
 		for (const abort of pending) abort();
@@ -303,6 +311,10 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 		if (signal?.aborted === true) return cancelled();
 		const interviewId = `interview-${randomUUID()}`;
 		const operatorOnly = questions.some((question) => question.operator_only === true);
+		const fallback = options?.unattendedFallback === true;
+		const requestTimeoutMs = bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
+		const unattendedMs = fallback ? (unattendedWindow() ?? 0) : 0;
+		const timeoutMs = unattendedMs > 0 ? Math.min(unattendedMs, requestTimeoutMs) : requestTimeoutMs;
 		let onAbort: (() => void) | undefined;
 		let wasCancelled = false;
 		const aborted = new Promise<"aborted">((resolve) => {
@@ -324,7 +336,7 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 							questions: wire,
 							_meta: { [ACP_INTERVIEW_META_KEY]: { version: 1, operatorOnly } },
 						},
-						bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS,
+						timeoutMs,
 					),
 				)
 				.then(
@@ -340,12 +352,11 @@ export function createAcpInterviewChannel(): AcpInterviewChannel {
 			}
 			if (outcome.kind === "failed") {
 				bound.transport.notify(ACP_INTERVIEW_CANCEL_METHOD, { sessionId, interviewId });
-				// An operator's own choice nobody answered closes unanswered, the
-				// same outcome the TUI gives when its window passes; the ask_user
-				// tool picks nothing for it. Any other round keeps the cancel below.
-				if (outcome.err instanceof AcpTimeoutError && operatorOnly) {
-					const afterSeconds = Math.round((bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS) / 1000);
-					return { answers: [], timedOut: { afterSeconds } };
+				// A round nobody answered gets the TUI's outcome when its window
+				// passes: an operator's own choice closes unanswered, and an ask_user
+				// round takes its recommended options. Any other round keeps the cancel below.
+				if (outcome.err instanceof AcpTimeoutError && (operatorOnly || fallback)) {
+					return { answers: [], timedOut: { afterSeconds: Math.round(timeoutMs / 1000) } };
 				}
 				// A client that refuses the round (no active turn, malformed) has not
 				// answered it, so the caller sees the same cancel an Esc gives.

@@ -1,5 +1,5 @@
 import type { LibraryEntryKind } from "../domains/resources/index.js";
-import { unattendedWindowMs } from "../domains/safety/unattended.js";
+import { askUserWindowMs, unattendedWindowMs } from "../domains/safety/unattended.js";
 import { sessionApprovalTask } from "../session-control/approval-request-facts.js";
 import { dispatchSlashCommand } from "../session-control/slash-commands.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
@@ -87,6 +87,8 @@ export interface OverlayLifecycleRuntimeDeps {
 	onOverlayClosed?: () => void;
 	/** Monotonic milliseconds; stamps each permission card's open time. Defaults to `performance.now`. */
 	now?: () => number;
+	/** Wall-clock ms of the operator's last keystroke; a lapsed question window latches "away" until the next one. */
+	lastOperatorInputAt?: () => number;
 	app: OverlayLifecycleApplicationDeps;
 	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	/** Built-in commands this session leaves out of `/help`, as the palette does. */
@@ -429,6 +431,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getUnattendedWindowMs: () => unattendedWindowMs(deps.app.getSettings?.().safety.unattendedAfterSeconds),
 	});
 
+	// When a question window last lapsed with nobody at the keyboard; a keystroke after it ends the latch.
+	let awaySince: number | null = null;
 	overlayAskUser = createOverlayAskUserLifecycle({
 		tui,
 		getOverlayState: () => overlayTransitions.state,
@@ -450,8 +454,14 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
-		getUnattendedWindowMs: () => unattendedWindowMs(deps.app.getSettings?.().safety.unattendedAfterSeconds),
+		getUnattendedWindowMs: () => {
+			const safety = deps.app.getSettings?.().safety;
+			const lastInput = deps.lastOperatorInputAt?.();
+			const away = awaySince !== null && (lastInput === undefined || lastInput < awaySince);
+			return askUserWindowMs(safety?.unattendedAfterSeconds, { yolo: safety?.autonomy === "yolo", away });
+		},
 		onRoundTimedOut: (questions, result) => {
+			awaySince = Date.now();
 			const open = Math.max(0, questions.length - result.answers.length);
 			const seconds = result.timedOut?.afterSeconds ?? 0;
 			if (questions.some((question) => question.operator_only === true)) {

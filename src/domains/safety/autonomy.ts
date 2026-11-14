@@ -39,7 +39,9 @@ export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 /**
  * What yolo means for the operator's own session (ob-yolo D1). `contained`
  * keeps default's admission, sandbox, snapshots and safety judge, and refuses
- * back to the agent what default would park for a person, so nothing waits.
+ * back to the agent what default would park for a person, so no approval
+ * waits. Questions are a separate axis: ask_user reaches a person at every
+ * level, and the unattended window answers one nobody is there for.
  * `unconfined` is the skip-permissions yolo (#407): only the yolo floor and
  * operator-authored rules block. Read only from the operator's own settings.
  */
@@ -88,8 +90,8 @@ export function effectiveYoloConfinement(
 
 /**
  * The level admission, the safety judge and worker permits run at. Contained
- * yolo admits exactly as default does; the never-park rule that makes it
- * unattended lives where calls would park. Prompts, auto-continuation and the
+ * yolo admits exactly as default does; the never-park rule for approvals
+ * lives where calls would park. Prompts, auto-continuation and the
  * footer keep reading the operator's level.
  */
 export function admissionAutonomy(level: AutonomyLevel, confinement: YoloConfinement | undefined): AutonomyLevel {

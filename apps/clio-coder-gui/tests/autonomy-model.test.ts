@@ -5,7 +5,7 @@ import { autonomyMenu, currentAutonomy } from "../client/chat/autonomy-model.js"
 const DEFAULT =
 	"Workspace edits run; shell commands run in the OS sandbox; calls that need approval go to the safety judge, then to you.";
 const YOLO =
-	"Runs without stopping for you: the same sandbox and safety judge, and a call that would need you is refused instead of asked (unless the operator's settings chose unconfined yolo).";
+	"Runs without approval stops: the same sandbox and safety judge, and a call that would need your approval is refused instead of asked (unless the operator's settings chose unconfined yolo). Questions still reach you.";
 const modes = [
 	{ id: "default", name: "default", description: DEFAULT },
 	{ id: "yolo", name: "yolo", description: YOLO },
@@ -21,7 +21,7 @@ test("the autonomy menu repeats the engine's mode descriptions verbatim", () => 
 		],
 	);
 	assert.ok(menu.confirmation.includes(YOLO));
-	assert.ok(menu.confirmation.startsWith("Switch this task to Run without asking? "));
+	assert.ok(menu.confirmation.startsWith("Switch this task to Run without approvals? "));
 	assert.ok(menu.confirmation.endsWith(" It lasts until the task closes."));
 	assert.equal(menu.unrecognized, undefined);
 });
