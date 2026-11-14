@@ -5,7 +5,7 @@ import { routes } from "../../contracts/runtime-routes.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { composerKeyAction, fitComposerField, initialEnterSends } from "../chat/composer-field.js";
-import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/composer-model.js";
+import { PROMPT_TEXT_MAX_CHARACTERS } from "../chat/prompt-limit.js";
 import { useFieldAssist } from "../chat/use-field-assist.js";
 import { Icon } from "../design/icons.js";
 import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";

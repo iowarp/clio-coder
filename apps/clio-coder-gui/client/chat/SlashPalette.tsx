@@ -4,16 +4,12 @@
  * list here only renders and answers the mouse.
  */
 
-import { type RefObject, useEffect, useMemo, useRef } from "react";
+import { type RefObject, Suspense, useEffect, useMemo, useRef } from "react";
 import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { Client } from "../api/client.js";
 import { Dialog } from "../interaction/Dialog.js";
 import { FOCUSABLE_SELECTOR } from "../interaction/use-focus-trap.js";
-import { AsidePanel } from "./AsidePanel.js";
-import { BranchPanel } from "./BranchPanel.js";
-import { ExtensionsPanel } from "./ExtensionsPanel.js";
-import { FleetRunPanel } from "./FleetRunPanel.js";
-import { HandoffPanel } from "./HandoffPanel.js";
+import { AsidePanel, BranchPanel, ExtensionsPanel, FleetRunPanel, HandoffPanel } from "./on-demand-panels.js";
 import type { SlashAction, SlashEntry } from "./slash-model.js";
 import "./slash-palette.css";
 
@@ -142,27 +138,30 @@ export function SlashActionDialog({
 	);
 	const facts = { client, sessionId, sessionOpen, capabilities, running } as const;
 	const copy = DIALOG_COPY[action];
+	// The boundary sits outside the dialog, so the dialog opens, and takes focus, only once its panel is here.
 	return (
-		<Dialog title={copy.title} eyebrow={copy.eyebrow} onClose={onClose} size="wide" initialFocus={landing}>
-			<div className="slash-dialog" ref={body} tabIndex={-1}>
-				{action === "tree" || action === "fork" ? (
-					<BranchPanel {...facts} settledTurns={settledTurns} />
-				) : action === "handoff" ? (
-					<HandoffPanel {...facts} />
-				) : action === "btw" || action === "draft" ? (
-					<AsidePanel
-						client={client}
-						sessionId={sessionId}
-						sessionOpen={sessionOpen}
-						capabilities={capabilities}
-						only={action === "btw" ? "question" : "draft"}
-					/>
-				) : action === "extensions" ? (
-					<ExtensionsPanel {...facts} />
-				) : (
-					<FleetRunPanel {...facts} variant="dialog" />
-				)}
-			</div>
-		</Dialog>
+		<Suspense fallback={null}>
+			<Dialog title={copy.title} eyebrow={copy.eyebrow} onClose={onClose} size="wide" initialFocus={landing}>
+				<div className="slash-dialog" ref={body} tabIndex={-1}>
+					{action === "tree" || action === "fork" ? (
+						<BranchPanel {...facts} settledTurns={settledTurns} />
+					) : action === "handoff" ? (
+						<HandoffPanel {...facts} />
+					) : action === "btw" || action === "draft" ? (
+						<AsidePanel
+							client={client}
+							sessionId={sessionId}
+							sessionOpen={sessionOpen}
+							capabilities={capabilities}
+							only={action === "btw" ? "question" : "draft"}
+						/>
+					) : action === "extensions" ? (
+						<ExtensionsPanel {...facts} />
+					) : (
+						<FleetRunPanel {...facts} variant="dialog" />
+					)}
+				</div>
+			</Dialog>
+		</Suspense>
 	);
 }

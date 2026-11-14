@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router";
 import { routes } from "../../contracts/runtime-routes.js";
 import type { Client } from "../api/client.js";
@@ -24,13 +24,11 @@ import { LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import type { HealthRow } from "../chat/health.js";
 import { compactionRows, summarizeHealth } from "../chat/health.js";
-import { Interview } from "../chat/Interview.js";
 import { LiveJobs } from "../chat/JobStrip.js";
 import { OutputDetailPicker } from "../chat/OutputDetailPicker.js";
 import { PaneContext, type PaneTarget } from "../chat/pane-context.js";
 import { usePaneState } from "../chat/pane-state.js";
 import { ReadoutStrip } from "../chat/ReadoutStrip.js";
-import { RewindHost } from "../chat/RewindDialog.js";
 import { routeFacts } from "../chat/route.js";
 import { PaneToggles, SessionPane } from "../chat/SessionPane.js";
 import { ConversationBanner, TaskSkeleton, TaskUnavailable } from "../chat/SessionStates.js";
@@ -59,11 +57,15 @@ import { rememberedWorkspace, useRenameTask, useSessionWorkers } from "../shell/
 import { openAppWindow } from "../shell/windows.js";
 import "../chat/chat-turn.css";
 import "../chat/conversation.css";
+
+// The rewind dialog and transcript downloads open only from `?rewind=1` and `?download=`, so their code waits for the task page.
+const RewindHost = lazy(() => import("../chat/RewindDialog.js").then((module) => ({ default: module.RewindHost })));
+const Interview = lazy(() => import("../chat/Interview.js").then((module) => ({ default: module.Interview })));
+
 /** The old projects page. Choosing and opening projects now lives in the rail and the Open workspace dialog. */
 export function Workspaces() {
 	return <Navigate to="/" replace />;
 }
-export { Sessions } from "./tasks.js";
 
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
@@ -500,7 +502,9 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 									Close task
 								</MenuItem>
 							</Menu>
-							<RewindHost client={client} snapshot={snapshot} onTurn={transcript.revealTurn} />
+							<Suspense fallback={null}>
+								<RewindHost client={client} snapshot={snapshot} onTurn={transcript.revealTurn} />
+							</Suspense>
 							<Link
 								className="wb-chip wb-chip--place"
 								to={`/workspaces/${snapshot.workspaceId}/sessions`}
@@ -705,12 +709,14 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 								route={route}
 							/>
 						</div>
-						<Interview
-							client={client}
-							sessionId={snapshot.id}
-							sessionOpen={snapshot.state === "open"}
-							capabilities={capabilities.data}
-						/>
+						<Suspense fallback={null}>
+							<Interview
+								client={client}
+								sessionId={snapshot.id}
+								sessionOpen={snapshot.state === "open"}
+								capabilities={capabilities.data}
+							/>
+						</Suspense>
 					</div>
 					<SessionPane
 						open={pane.open}

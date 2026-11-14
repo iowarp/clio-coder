@@ -10,7 +10,7 @@ import type { SessionOverview } from "../../contracts/session-overview.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { clock } from "../api/clock.js";
 import { advanceSessionReadScope, SESSION_CACHES, sessionBuffer } from "../api/sessions.js";
-import { discardDraftStore } from "../chat/composer-model.js";
+import { discardDraftStore } from "../chat/draft-registry.js";
 import { homeDraft, updateHomeDraft } from "../pages/home-draft.js";
 import { type ProjectLaunch, useProjectLaunch } from "../pages/project-open.js";
 import type { SessionControlTarget } from "../pages/session-control-model.js";
