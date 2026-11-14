@@ -20,6 +20,7 @@ import {
 	projectQueue,
 	queueAccess,
 	queueActions,
+	queueRowLabel,
 	queueSummary,
 	resetDraftStores,
 	restoredDraft,
@@ -31,6 +32,7 @@ import {
 	submitLabel,
 	tokenRate,
 	turnOutcome,
+	unreachable,
 	usageSummary,
 	usageTitle,
 } from "../client/chat/composer-model.js";
@@ -206,6 +208,31 @@ test("a send already on the wire blocks the next one", () => {
 	assert.deepEqual(intent, { kind: "blocked", reason: "The previous send is still on the wire." });
 });
 
+test("a send that cannot reach the server says it waits or retries, never that it is still on the wire", () => {
+	const offline = situation({ sending: true, unreached: "offline" });
+	const intent = submitIntent(draft(), offline);
+	assert.equal(intent.kind, "blocked");
+	assert.match(intent.kind === "blocked" ? intent.reason : "", /sends when the connection returns/);
+	assert.doesNotMatch(intent.kind === "blocked" ? intent.reason : "", /on the wire/);
+	assert.deepEqual(composerDelivery(offline, DEFAULT_STEER_MODE, false, false), {
+		label: "Offline",
+		detail: "This message sends when the connection returns. Your draft is kept.",
+		tone: "warn",
+	});
+	const retrying = composerDelivery(
+		situation({ sending: true, unreached: "retrying" }),
+		DEFAULT_STEER_MODE,
+		false,
+		false,
+	);
+	assert.equal(retrying.label, "Retrying");
+	assert.match(retrying.detail, /sent once/);
+	assert.equal(unreachable({ problem: { code: "unavailable", instance: "browser" } }), true);
+	assert.equal(unreachable({ problem: { code: "unavailable", instance: "/api/turn" } }), false);
+	assert.equal(unreachable(new Error("boom")), false);
+	assert.equal(unreachable(null), false);
+});
+
 test("a /name the session does not serve is held with its warning, not warned about and sent", () => {
 	const warning =
 		"/tpyo is not available in this app. Type / to see what is. Start the line with \\/ to send it as text.";
@@ -312,11 +339,23 @@ test("the queue projects in the order the engine will read it and says when each
 test("an empty or absent queue reports nothing waiting rather than an empty list", () => {
 	assert.deepEqual(projectQueue(undefined), []);
 	assert.deepEqual(projectQueue(null), []);
-	assert.equal(queueSummary([]), "Nothing is waiting.");
+	assert.equal(queueSummary([], true), "Nothing is waiting.");
 	assert.equal(
-		queueSummary(projectQueue({ steer: ["a"], followUp: ["b", "c"] })),
-		"1 waiting for the next tool call · 2 waiting for the turn to end.",
+		queueSummary(projectQueue({ steer: ["a"], followUp: ["b", "c"] }), true),
+		"1 message waiting for the next tool call · 2 messages waiting for the turn to end.",
 	);
+});
+
+test("with no turn running the queue reads as held for the next message, never as waiting for a tool call", () => {
+	const one = projectQueue({ steer: ["a"], followUp: [] });
+	assert.equal(queueSummary(one, false), "1 message held, nothing sent. It goes ahead of your next message.");
+	const [first] = one;
+	assert.ok(first);
+	assert.equal(queueRowLabel(first, false), "Held");
+	assert.equal(queueRowLabel(first, true), "Now");
+	const three = projectQueue({ steer: ["a"], followUp: ["b", "c"] });
+	assert.equal(queueSummary(three, false), "3 messages held, nothing sent. They go ahead of your next message.");
+	assert.doesNotMatch(queueSummary(three, false), /tool call/);
 });
 
 test("a stopped open session keeps held queue controls without offering an interrupt", () => {

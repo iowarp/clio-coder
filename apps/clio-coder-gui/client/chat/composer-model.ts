@@ -323,6 +323,11 @@ export interface ComposerSituation {
 	readonly turnRunning: boolean;
 	/** A send this composer already put on the wire and has not settled. */
 	readonly sending: boolean;
+	/**
+	 * That send could not reach the server: `offline` while the browser has no network and the send waits for it,
+	 * `retrying` while it tries again after a request that never arrived. Either way it goes by itself, once.
+	 */
+	readonly unreached?: "offline" | "retrying";
 	/** A retained stop or close must settle before the session accepts another command. */
 	readonly sessionControl?: "sending" | "unresolved";
 	readonly steering: SteeringAffordances;
@@ -392,12 +397,33 @@ function tooLong(text: string, characters: number, bytes: number): string | null
 	return null;
 }
 
+/** A send that has not reached the server yet: what the composer and its button say while it waits. */
+export const UNREACHED = {
+	offline: {
+		label: "Offline",
+		detail: "This message sends when the connection returns. Your draft is kept.",
+		button: "Waiting for connection",
+	},
+	retrying: {
+		label: "Retrying",
+		detail: "CLIO Coder could not be reached. Trying again with the same request; it is sent once.",
+		button: "Retrying…",
+	},
+} as const;
+
+/** True for a request the browser could not deliver at all (no network, server down); never for a server answer. */
+export function unreachable(error: unknown): boolean {
+	const problem = (error as { problem?: { code?: unknown; instance?: unknown } } | null)?.problem;
+	return problem?.code === "unavailable" && problem.instance === "browser";
+}
+
 /**
  * The whole submit policy, in one place. A running turn does not block the
  * composer: it redirects the send into the steering queue when the agent
  * announced one, and explains itself when it did not.
  */
 export function submitIntent(draft: Draft, situation: ComposerSituation): SubmitIntent {
+	if (situation.unreached) return blocked(UNREACHED[situation.unreached].detail);
 	if (situation.sending) return blocked("The previous send is still on the wire.");
 	if (situation.sessionControl) return blocked(controlMessage(situation.sessionControl));
 	if (situation.viewing !== undefined) return blocked(viewingReason(situation.viewing));
@@ -532,14 +558,29 @@ export function projectQueue(snapshot: QueueSnapshot | null | undefined): readon
 	return rows;
 }
 
-export function queueSummary(messages: readonly QueuedMessage[]): string {
+const messagesWaiting = (count: number) => `${count} ${count === 1 ? "message" : "messages"}`;
+
+/**
+ * The queue's one-line summary. While a turn runs each message waits for its slot; with no turn running the engine
+ * holds the queue (an operator stop sends nothing) and a new prompt takes it at its first slot, so the line says that
+ * instead of naming a tool call that will never come.
+ */
+export function queueSummary(messages: readonly QueuedMessage[], running: boolean): string {
 	if (messages.length === 0) return "Nothing is waiting.";
+	if (!running)
+		return `${messagesWaiting(messages.length)} held, nothing sent. ${messages.length === 1 ? "It goes" : "They go"} ahead of your next message.`;
 	const steering = messages.filter((message) => message.queue === "steer").length;
 	const followUp = messages.length - steering;
 	const parts: string[] = [];
-	if (steering > 0) parts.push(`${steering} waiting for the next tool call`);
-	if (followUp > 0) parts.push(`${followUp} waiting for the turn to end`);
+	if (steering > 0) parts.push(`${messagesWaiting(steering)} waiting for the next tool call`);
+	if (followUp > 0) parts.push(`${messagesWaiting(followUp)} waiting for the turn to end`);
 	return `${parts.join(" · ")}.`;
+}
+
+/** A waiting message's mark: its slot while a turn runs, held once none does. */
+export function queueRowLabel(message: QueuedMessage, running: boolean): string {
+	if (!running) return "Held";
+	return message.queue === "steer" ? "Now" : "After this turn";
 }
 
 export interface QueueAction {
@@ -1041,6 +1082,8 @@ export function composerDelivery(
 			detail: CLOSED_SESSION_REASON[situation.sessionState] ?? "This task cannot take a message.",
 			tone: "warn",
 		};
+	if (situation.unreached)
+		return { label: UNREACHED[situation.unreached].label, detail: UNREACHED[situation.unreached].detail, tone: "warn" };
 	if (situation.sending)
 		return { label: "Sending", detail: "You can keep drafting while this request is sent.", tone: "running" };
 	if (readingAttachments)

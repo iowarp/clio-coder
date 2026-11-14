@@ -109,7 +109,14 @@ export function attachmentSummary(current: readonly Attachment[]): string {
 		...(images.length > 0 ? [counted(images.length, "image")] : []),
 		...(files.length > 0 ? [counted(files.length, "file")] : []),
 	];
-	return `${parts.join(" and ")}, about ${Math.round(bytes / 1024)} KiB`;
+	return `${parts.join(" and ")}, about ${attachmentSize(bytes)}`;
+}
+
+/** Whole KiB from 1 KiB up; below that the bytes themselves, so a small paste never reads "0 KiB". */
+export function attachmentSize(bytes: number): string {
+	const whole = Math.round(bytes);
+	if (whole < 1024) return whole === 1 ? "1 byte" : `${whole} bytes`;
+	return `${Math.round(whole / 1024)} KiB`;
 }
 
 /** Attachments go with a new request only: steering text cannot carry them. */

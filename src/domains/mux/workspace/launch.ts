@@ -74,6 +74,8 @@ const SERVER_START_TIMEOUT_MS = 8_000;
 /** How long a server told to stop gets to let go of its socket. */
 const SERVER_STOP_TIMEOUT_MS = 5_000;
 const SERVER_POLL_MS = 100;
+/** A startup ping before the socket listens fails at connect, so a short gap costs little and finds it sooner. */
+const SERVER_START_POLL_MS = 15;
 /** The agent name Clio reports for its own pane (src/domains/mux/contract.ts). */
 const CLIO_AGENT = "clio-coder";
 const WORKSPACE_TOKEN = "clio_coder_workspace";
@@ -303,9 +305,9 @@ async function ensureServer(host: Host): Promise<{ client: MuxClient; started: b
 
 	const deadline = performance.now() + SERVER_START_TIMEOUT_MS;
 	while (performance.now() < deadline && !exited) {
-		await sleep(SERVER_POLL_MS);
 		const started = await pingOnce(host);
 		if (started !== null) return { client: started.client, started: true };
+		await sleep(SERVER_START_POLL_MS);
 	}
 	if (!exited) {
 		// This child has not been handed over to any workspace. Reap it before
@@ -476,7 +478,9 @@ async function openWorkspace(host: Host): Promise<Opened> {
 	const startedServer = ensured.started;
 	let createdWorkspaceId: string | null = null;
 	try {
-		const running = await findRunningClio(host, client);
+		// A server this launch just started, on a session file it just deleted and
+		// under the lock every workspace creator takes, holds no Clio to find.
+		const running = startedServer ? null : await findRunningClio(host, client);
 		if (running) {
 			// Another terminal still shows that Clio. Joining it would share one
 			// conversation and steering queue between two terminals (#420).
@@ -510,11 +514,14 @@ async function openWorkspace(host: Host): Promise<Opened> {
 		const clioPane = created.rootPane;
 		createdWorkspaceId = created.workspace.workspaceId;
 		// Tag before starting Clio: another launcher must see the pending child even before its first self-report.
-		const workspaceNonce = await tagWorkspace(client, clioPane);
+		// Each request has its own connection, so the rename rides the same server tick; its failure is ignored.
+		const [workspaceNonce] = await Promise.all([
+			tagWorkspace(client, clioPane),
+			client.tabRename(clioPane.tabId, "clio").catch(() => undefined),
+		]);
 		// This pane id is new in this server's life, so nobody can be waiting on
 		// its marker; one left by an earlier server would end the launch at once.
 		rmSync(exitMarkerPath(host.socketPath, clioPane.paneId), { force: true });
-		await client.tabRename(clioPane.tabId, "clio").catch(() => undefined);
 		// `pane run` is herdr's own "type this and press enter", so the launcher
 		// inherits whatever shell-readiness handling the installed release has.
 		if (!runHerdr(host, ["pane", "run", clioPane.paneId, launch.line])) {

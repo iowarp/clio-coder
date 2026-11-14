@@ -140,6 +140,8 @@ export interface ReportControls {
 	readonly creditLabel: string;
 	/** Next and the step tabs; off until the host has planned a preview to show. */
 	readonly stepsEnabled: boolean;
+	/** Review's Next: the steps, and a title to go on with; a report without one previews as a bare prefix. */
+	readonly nextEnabled: boolean;
 	/** The host could not plan the report, so the dialog offers to ask again. */
 	readonly retry: boolean;
 }
@@ -162,6 +164,7 @@ export function reportControls(state: ReportDialogState): ReportControls {
 			gates: [],
 			creditLabel: creditLabel(state),
 			stepsEnabled: false,
+			nextEnabled: false,
 			retry: failed,
 		};
 	}
@@ -189,6 +192,7 @@ export function reportControls(state: ReportDialogState): ReportControls {
 		gates: view.plan.gates,
 		creditLabel: creditLabel(state),
 		stepsEnabled: true,
+		nextEnabled: (state.edits.title ?? view.fields.title).trim().length > 0,
 		retry: false,
 	};
 }

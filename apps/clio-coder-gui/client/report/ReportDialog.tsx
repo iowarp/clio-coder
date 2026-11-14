@@ -266,7 +266,7 @@ export function ReportDialog({
 									</button>
 									<button
 										type="button"
-										disabled={!controls.stepsEnabled}
+										disabled={!controls.nextEnabled}
 										onClick={() => dispatch({ type: "go", step: "attach" })}
 									>
 										Next

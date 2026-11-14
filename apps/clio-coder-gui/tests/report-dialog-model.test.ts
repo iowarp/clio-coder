@@ -151,3 +151,21 @@ test("report dialog: a failed plan offers Try again and keeps Next and the steps
 	assert.equal(reportControls(planned).retry, false);
 	assert.equal(reportControls(planned).sendEnabled, true);
 });
+
+test("report dialog: Next waits for a title, whether the host planned none or the reporter cleared it", () => {
+	const planned = reportReducer(INITIAL_REPORT_STATE, { type: "planned", view: view([]) });
+	assert.equal(reportControls(planned).nextEnabled, true);
+	const cleared = reportReducer(planned, { type: "edit", field: "title", value: "   " });
+	assert.equal(reportControls(cleared).nextEnabled, false);
+	assert.equal(reportControls(cleared).stepsEnabled, true);
+	const untitled = reportReducer(INITIAL_REPORT_STATE, {
+		type: "planned",
+		view: { ...view([]), fields: { ...view([]).fields, title: "" } },
+	});
+	assert.equal(reportControls(untitled).nextEnabled, false);
+	assert.equal(
+		reportControls(reportReducer(untitled, { type: "edit", field: "title", value: "Crash" })).nextEnabled,
+		true,
+	);
+	assert.equal(reportControls(INITIAL_REPORT_STATE).nextEnabled, false);
+});

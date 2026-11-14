@@ -12,6 +12,7 @@ import type { SettingsOrigin } from "../core/settings-layers.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { ConfigChangeSource } from "../core/telemetry/live-events.js";
 import { getTerminationCoordinator } from "../core/termination.js";
+import { immediateSequence } from "../core/timers.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
@@ -2578,6 +2579,8 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	};
 	void shell.nextCommittedFrame().then((frame) => {
 		if (startupAbort.signal.aborted) return;
+		// One task per loop iteration, so a key typed after the first frame waits for one of them at most.
+		const afterPaint = immediateSequence();
 		// The startup reload starts operator extension runtimes and commits the
 		// next extension and hook generation, walking every installed plugin
 		// again. Boot already committed a paired generation from the same
@@ -2585,7 +2588,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		// runtimes one frame later and takes the walk off the path to that frame.
 		// A shell that reports no frames still reloads.
 		if (operatorExtensions)
-			setImmediate(() => {
+			afterPaint(() => {
 				if (startupAbort.signal.aborted) return;
 				// Dev copies are taken before the startup reload lists packages.
 				devSession?.start();
@@ -2594,13 +2597,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		if (frame === null) return;
 		// Project agents and playbooks load without trust; a copy that replaces
 		// the operator's or a built-in one by name is said once, after paint.
-		setImmediate(() => {
+		afterPaint(() => {
 			if (startupAbort.signal.aborted) return;
 			const shadows = projectShadowNotice(process.cwd());
 			if (shadows !== null) notify("warning", shadows, "project-shadow");
 		});
 		// Read only the saved target snapshot after paint; never probe for upgrade advice (#416).
-		setImmediate(() => {
+		afterPaint(() => {
 			if (startupAbort.signal.aborted) return;
 			void Promise.all([
 				import("../domains/providers/model-recency.js"),
@@ -2624,13 +2627,13 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		// A session started at yolo before the operator ever accepted it holds at
 		// default and asks once, now that the screen can show the card (#407).
 		if (deps.yoloHeldAtBoot === true && yoloActivation !== undefined) {
-			setImmediate(() => {
+			afterPaint(() => {
 				if (!startupAbort.signal.aborted) void yoloActivation.requestHeldAtBoot();
 			});
 		}
 		// A second terminal in this folder gets its own session; say so when another
 		// one is live here, so a shared folder never reads as a shared session (#420).
-		setImmediate(() => {
+		afterPaint(() => {
 			if (startupAbort.signal.aborted) return;
 			void import("../domains/session/history.js")
 				.then(({ liveSessionsElsewhere }) => {
@@ -2652,7 +2655,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		// host traffic and a Yazi or cliamp boot never sit in front of the paint.
 		// A failure stays silent; the key that wants the dock finds it absent and
 		// reports the reason itself.
-		setImmediate(() => {
+		afterPaint(() => {
 			if (startupAbort.signal.aborted) return;
 			const settings = deps.getSettings?.();
 			void (async () => {

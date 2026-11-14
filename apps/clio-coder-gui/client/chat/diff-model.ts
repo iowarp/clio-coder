@@ -99,6 +99,21 @@ export interface ParsedDiff {
 	readonly rowsDropped: number;
 	/** A proposal built from a whole-file write: every row is the new text, so it has no removals to count. */
 	readonly wholeFile?: boolean;
+	/** A whole-file write whose path holds no file now: it creates one. */
+	readonly newFile?: boolean;
+}
+
+/**
+ * What a whole-file write would replace, as the workspace read it before the write: its comparison with the
+ * proposal (`baseline-diff.ts`), `null` when no file is there, or undefined when it was not read or cannot be compared (a binary, a
+ * cut-short preview, a file too large to compare here).
+ */
+export type ProposalBaseline = ParsedDiff | null | undefined;
+
+/** The workspace path a whole-file write proposes to replace, or null for any other call. */
+export function wholeFileWritePath(input: Record<string, unknown> | undefined): string | null {
+	if (input === undefined || (Array.isArray(input.edits) && input.edits.length > 0)) return null;
+	return typeof input.content === "string" ? text(input.path) : null;
 }
 
 const EMPTY: ParsedDiff = {
@@ -324,8 +339,13 @@ function lines(value: string, limit: number): string[] {
  * between the permission request and the applied result. Every row is local;
  * nothing here claims the change happened.
  */
-export function synthesizeProposedDiff(input: Record<string, unknown> | undefined): ParsedDiff | null {
+export function synthesizeProposedDiff(
+	input: Record<string, unknown> | undefined,
+	baseline?: ProposalBaseline,
+): ParsedDiff | null {
 	if (input === undefined) return null;
+	// A comparison with the file now (`baseline-diff.ts`) is already the whole proposal.
+	if (baseline) return baseline;
 	const rows: DiffRow[] = [];
 	const edits = input.edits;
 	if (Array.isArray(edits) && edits.length > 0) {
@@ -361,7 +381,9 @@ export function synthesizeProposedDiff(input: Record<string, unknown> | undefine
 				: null,
 		noNewlineAtEof: false,
 		rowsDropped: rows.length - bounded.length,
-		...(Array.isArray(edits) && edits.length > 0 ? {} : { wholeFile: true }),
+		...(Array.isArray(edits) && edits.length > 0
+			? {}
+			: { wholeFile: true, ...(baseline === null ? { newFile: true } : {}) }),
 	};
 }
 
@@ -375,6 +397,8 @@ export interface DiffInputs {
 	readonly isError: boolean;
 	/** The operator's answer to this call's approval, when the session still holds it. */
 	readonly decision?: string | undefined;
+	/** The file a whole-file write replaces, as read before it lands. */
+	readonly baseline?: ProposalBaseline;
 }
 
 /**
@@ -441,7 +465,7 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 			path,
 		};
 
-	const proposed = completed ? null : synthesizeProposedDiff(inputs.rawInput);
+	const proposed = completed ? null : synthesizeProposedDiff(inputs.rawInput, inputs.baseline);
 	if (proposed !== null) {
 		const provenance: DiffProvenance = refused ? "rejected" : settled ? "unverified" : "proposed";
 		const note =
@@ -559,8 +583,9 @@ export function changeSpans(rows: readonly DiffRow[]): ReadonlyMap<string, Chang
 
 /** `+12 −3` for the header strip, with the real minus sign. */
 export function diffCounts(diff: ParsedDiff): string {
-	// A whole-file proposal cannot know what it removes until it lands, so it claims no "−0".
-	return diff.wholeFile === true ? `+${diff.adds} · replaces file` : `+${diff.adds} −${diff.dels}`;
+	// A whole-file proposal not compared with the file now cannot know what it removes, so it claims no "−0".
+	if (diff.wholeFile === true) return `+${diff.adds} · ${diff.newFile === true ? "new file" : "replaces file"}`;
+	return `+${diff.adds} −${diff.dels}`;
 }
 
 /** The text an operator copies: code only, no markers, no line numbers. */

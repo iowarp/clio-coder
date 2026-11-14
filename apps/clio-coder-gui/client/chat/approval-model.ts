@@ -35,7 +35,7 @@ export const BUDGET_SECONDS = 600;
 export const SAFETY_POSTURE = "Nothing runs until you answer. The GUI never answers for you.";
 /** The "one use" is load-bearing: there is deliberately no allow-always on the wire. */
 export const CARD_EYEBROW = "Approval needed · one use";
-export const KEYBOARD_HINT = "Alt+A allows once · Alt+R rejects";
+export const KEYBOARD_HINT = "Alt + A allows once · Alt + R rejects";
 
 export const bannerEyebrow = (escalated: boolean): string =>
 	escalated ? "APPROVAL WAITING · ESCALATED" : "APPROVAL NEEDED";
