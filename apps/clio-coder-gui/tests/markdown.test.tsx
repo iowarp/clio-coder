@@ -603,3 +603,10 @@ test("a measured column stays on one line even when the author aligned it", () =
 	match(html, /<td class="md-table__number" style="text-align:right">8\.00e-3<\/td>/u);
 	match(html, /<td style="text-align:left">cavity<\/td>/u);
 });
+
+test("a single newline is a line break, as in the terminal, so a line-per-item reply keeps its lines", () => {
+	// Live: a 2000-line "line N: ok" reply rendered as one wrapped paragraph.
+	const html = renderMarkdown("line 1: ok\nline 2: ok\nline 3: ok");
+	equal((html.match(/<br\/?>/g) ?? []).length, 2);
+	match(html, /line 1: ok<br\/?>\s*line 2: ok/);
+});
