@@ -196,7 +196,7 @@ export function MissionControl({ client }: { client: Client }) {
 							</button>
 						))}
 					</nav>
-					{metrics.data ? <OperatorMetrics client={client} {...metrics.data} compact /> : null}
+					{metrics.data ? <OperatorMetrics client={client} {...metrics.data} workspace={project} compact /> : null}
 					{metrics.isPending ? <p role="status">Reading recorded session metrics…</p> : null}
 					{metrics.error ? (
 						<p role="alert">

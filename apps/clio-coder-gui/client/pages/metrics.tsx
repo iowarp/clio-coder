@@ -52,7 +52,7 @@ export function MetricsPage({ client }: { client: Client }) {
 					<p className="operator-note">
 						30-day local window · {formatTime(metrics.data.from)} to {formatTime(metrics.data.to)} · no live provider probes
 					</p>
-					<OperatorMetrics client={client} {...metrics.data} />
+					<OperatorMetrics client={client} {...metrics.data} workspace={workspace} />
 				</>
 			) : null}
 		</section>

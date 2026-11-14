@@ -4,6 +4,7 @@ import {
 	emptyMeaning,
 	groupControls,
 	matchesControl,
+	numberDraftIssue,
 	selectOptions,
 	sentence,
 	TIMING_SENTENCE,
@@ -92,4 +93,26 @@ test("a write reports the requested change first and names every side effect", (
 	assert.deepEqual(writtenSentences([], controls, "chat.target"), ["Nothing changed; the value was already in effect."]);
 	assert.equal(sentence("never send a pre-warm request"), "Never send a pre-warm request.");
 	assert.equal(sentence("Done."), "Done.");
+});
+
+test("a number draft is checked against the engine's bounds, in plain words, before Save", () => {
+	const bytes = control({
+		path: "context.toolResultMaxBytes",
+		kind: "number",
+		value: "65536",
+		minimum: 4096,
+		integer: true,
+	});
+	assert.equal(numberDraftIssue(bytes, "100"), "Enter a whole number of at least 4,096.");
+	assert.equal(numberDraftIssue(bytes, "4096.5"), "Enter a whole number of at least 4,096.");
+	assert.equal(numberDraftIssue(bytes, "many"), "Enter a whole number of at least 4,096.");
+	assert.equal(numberDraftIssue(bytes, "4096"), null);
+	assert.equal(numberDraftIssue(bytes, ""), "Enter a whole number of at least 4,096.");
+	assert.equal(numberDraftIssue({ ...bytes, optional: true }, ""), null);
+	const turns = control({ kind: "number", minimum: 1, maximum: 16, integer: true });
+	assert.equal(numberDraftIssue(turns, "17"), "Enter a whole number from 1 to 16.");
+	const share = control({ kind: "number", exclusiveMinimum: 0, exclusiveMaximum: 1 });
+	assert.equal(numberDraftIssue(share, "1"), "Enter a number above 0 and below 1.");
+	assert.equal(numberDraftIssue(share, "0.4"), null);
+	assert.equal(numberDraftIssue(control(), "anything"), null);
 });

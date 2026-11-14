@@ -10,7 +10,8 @@ import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { Explained } from "../telemetry/Explained.js";
-import { OperatorMetrics } from "./operator-metrics.js";
+import { sessionTitle } from "./metrics-scope-model.js";
+import { OperatorMetrics, useScopeTasks } from "./operator-metrics.js";
 import { usageCacheEvidence } from "./usage-insights-model.js";
 import { costReportOf, filterUsageFacts, usageLabel, usageView } from "./usage-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./workspace-selection.js";
@@ -28,6 +29,7 @@ export function UsagePage({ client }: { client: Client }) {
 	const view = query.data ? usageView(query.data) : null;
 	const facts = query.data ? filterUsageFacts(query.data.facts, factQuery) : [];
 	const cache = query.data ? usageCacheEvidence(query.data) : null;
+	const { titles } = useScopeTasks(client, selection.id);
 	const cost = (["model", "target"] as const).flatMap((by) => {
 		const report = query.data ? costReportOf(query.data, by) : null;
 		return report ? [report] : [];
@@ -92,7 +94,7 @@ export function UsagePage({ client }: { client: Client }) {
 						</p>
 					)}
 					{query.data.performance ? (
-						<OperatorMetrics client={client} performance={query.data.performance} cost={cost} />
+						<OperatorMetrics client={client} performance={query.data.performance} cost={cost} workspace={selection.id} />
 					) : (
 						<p className="operator-note">Recorded operator metrics are not exposed by this CLIO Coder build.</p>
 					)}
@@ -148,7 +150,7 @@ export function UsagePage({ client }: { client: Client }) {
 									<table className="usage-cache-table">
 										<thead>
 											<tr>
-												<th scope="col">Session</th>
+												<th scope="col">Task</th>
 												<th scope="col">Uncached prefill tokens</th>
 												<th scope="col">Reprocessed prefix tokens · estimated</th>
 												<th scope="col">Measured cache breaks</th>
@@ -158,7 +160,7 @@ export function UsagePage({ client }: { client: Client }) {
 										<tbody>
 											{cache.rows.map((row) => (
 												<tr key={row.key}>
-													<th scope="row">{row.session}</th>
+													<th scope="row">{sessionTitle(row.session, titles)}</th>
 													<td>{row.uncached}</td>
 													<td>{row.reprocessed}</td>
 													<td>{row.breaks}</td>

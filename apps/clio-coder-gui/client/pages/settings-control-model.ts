@@ -209,3 +209,48 @@ export function settingReviewMatches(
 export function settingBaselineChanged(draft: string | null, original: string | undefined, current: string) {
 	return draft !== null && original !== undefined && original !== current;
 }
+
+const figure = (value: number) => value.toLocaleString("en-US", { maximumFractionDigits: 6 });
+
+/** The range a number control accepts, in words: "of at least 4,096", "from 1 to 16", "above 0 and below 1". */
+function rangeWords(control: SettingControl): string {
+	const low =
+		control.minimum !== undefined
+			? { inclusive: true, value: control.minimum }
+			: control.exclusiveMinimum !== undefined
+				? { inclusive: false, value: control.exclusiveMinimum }
+				: null;
+	const high =
+		control.maximum !== undefined
+			? { inclusive: true, value: control.maximum }
+			: control.exclusiveMaximum !== undefined
+				? { inclusive: false, value: control.exclusiveMaximum }
+				: null;
+	if (low?.inclusive && high?.inclusive) return ` from ${figure(low.value)} to ${figure(high.value)}`;
+	const parts = [
+		low ? `${low.inclusive ? "at least" : "above"} ${figure(low.value)}` : null,
+		high ? `${high.inclusive ? "at most" : "below"} ${figure(high.value)}` : null,
+	].filter(Boolean);
+	const words = parts.join(" and ");
+	return !words ? "" : words.startsWith("at ") ? ` of ${words}` : ` ${words}`;
+}
+
+/**
+ * Why a number draft would be refused, checked against the bounds the engine's validation enforces; null when the save
+ * would accept it. An empty draft of an optional control clears it, so it is never an issue.
+ */
+export function numberDraftIssue(control: SettingControl, draft: string): string | null {
+	if (control.kind !== "number") return null;
+	const text = draft.trim();
+	if (!text)
+		return control.optional ? null : `Enter ${control.integer ? "a whole number" : "a number"}${rangeWords(control)}.`;
+	const value = Number(text);
+	const outside =
+		!Number.isFinite(value) ||
+		(control.integer && !Number.isInteger(value)) ||
+		(control.minimum !== undefined && value < control.minimum) ||
+		(control.exclusiveMinimum !== undefined && value <= control.exclusiveMinimum) ||
+		(control.maximum !== undefined && value > control.maximum) ||
+		(control.exclusiveMaximum !== undefined && value >= control.exclusiveMaximum);
+	return outside ? `Enter ${control.integer ? "a whole number" : "a number"}${rangeWords(control)}.` : null;
+}

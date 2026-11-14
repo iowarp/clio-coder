@@ -43,6 +43,13 @@ export const SettingControl = Type.Object(
 		confirm: Type.Optional(Type.String()),
 		/** When present, `confirm` applies only to writes of this value; any other value saves without it. */
 		confirmValue: Type.Optional(Type.String()),
+		/** A number control's bounds, read from the engine's own validation so the page checks what the save checks. */
+		minimum: Type.Optional(Type.Number()),
+		exclusiveMinimum: Type.Optional(Type.Number()),
+		maximum: Type.Optional(Type.Number()),
+		exclusiveMaximum: Type.Optional(Type.Number()),
+		/** True when the engine accepts whole numbers only. */
+		integer: Type.Optional(Type.Boolean()),
 	},
 	closed,
 );

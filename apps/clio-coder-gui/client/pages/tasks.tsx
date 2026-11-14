@@ -12,7 +12,14 @@ import { useInventoryWindow } from "../interaction/use-inventory-window.js";
 import { ClioPulse, PULSE_SIZE } from "../shell/ClioMark.js";
 import { HomeAside } from "../shell/HomeAside.js";
 import { InlineRename } from "../shell/InlineRename.js";
-import { STATE_LABELS, shortAge, type TaskRow, taskRows } from "../shell/shell-model.js";
+import {
+	answeredInOverview,
+	renameBlocker,
+	STATE_LABELS,
+	shortAge,
+	type TaskRow,
+	taskRows,
+} from "../shell/shell-model.js";
 import { TopBar } from "../shell/TopBar.js";
 import { useMinuteClock, useRenameTask, useSessionOverview, useTaskActions } from "../shell/tasks.js";
 import { liveSearchWith, useSearchDraft } from "../shell/use-search-draft.js";
@@ -29,7 +36,8 @@ export function TaskHistoryActions({
 }: {
 	client: Client;
 	row: TaskRow;
-	summary: SessionSummary;
+	/** Absent for an open task the saved history has not listed yet; it can still be named once answered. */
+	summary: SessionSummary | undefined;
 }) {
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState<string | null>(null);
@@ -38,8 +46,8 @@ export function TaskHistoryActions({
 		<div className="taskpage__actions">
 			{editing ? (
 				<InlineRename
-					value={summary.name ?? ""}
-					initialDraft={draft ?? summary.name ?? ""}
+					value={summary?.name ?? ""}
+					initialDraft={draft ?? summary?.name ?? ""}
 					label={`Name ${row.title}`}
 					onCommit={(label) => {
 						setEditing(false);
@@ -65,7 +73,7 @@ export function TaskHistoryActions({
 					{rename.isPending ? "Saving…" : "Rename"}
 				</button>
 			)}
-			{!row.open && summary.endedAt ? (
+			{!row.open && summary?.endedAt ? (
 				<DeleteSession client={client} id={row.id} workspaceId={row.workspaceId} name={row.title} />
 			) : null}
 			{rename.error ? <p role="alert">{rename.error.message}</p> : null}
@@ -294,7 +302,9 @@ export function Sessions({ client }: { client: Client }) {
 												{body}
 											</button>
 										)}
-										{summary ? <TaskHistoryActions client={client} row={row} summary={summary} /> : null}
+										{renameBlocker({ saved: !!summary, answered: session ? answeredInOverview(session) : 0 }) === null ? (
+											<TaskHistoryActions client={client} row={row} summary={summary} />
+										) : null}
 									</li>
 								);
 							})}

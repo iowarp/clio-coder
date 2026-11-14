@@ -228,6 +228,9 @@ export const guiTests = [
 	// x090 spec 12
 	"review-http",
 	"trust-model",
+	// x090 round 2, truth
+	"task-rename",
+	"metrics-scope-model",
 ]
 	.map((name) => `tests/${name}.test.ts`)
 	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");

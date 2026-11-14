@@ -374,3 +374,25 @@ export function settingsSectionFor(pathname: string): SettingsSection | undefine
 export function sessionIdFromPath(pathname: string): string | null {
 	return /^\/sessions\/([^/]+)$/.exec(pathname)?.[1] ?? null;
 }
+
+/**
+ * Whether a task can be renamed yet. The engine saves a task to the project's history once CLIO Coder has
+ * answered in it, and only a saved task takes a name, so an unanswered task offers the action disabled with
+ * that reason instead of offering it and failing.
+ */
+export const RENAME_AFTER_ANSWER = "Rename becomes available after CLIO Coder answers once.";
+
+/** The reason a task cannot be renamed yet, or null when it can. */
+export function renameBlocker({ saved, answered }: { saved: boolean; answered: number }): string | null {
+	return saved || answered > 0 ? null : RENAME_AFTER_ANSWER;
+}
+
+/** Turns of an open task that CLIO Coder finished answering. */
+export function answeredTurns(turns: readonly { status: string }[]): number {
+	return turns.filter((turn) => turn.status === "succeeded").length;
+}
+
+/** The same count from a task's overview row, which knows its turns and the one still running. */
+export function answeredInOverview(item: { turnCount: number; currentTurnId: string | null }): number {
+	return Math.max(0, item.turnCount - (item.currentTurnId ? 1 : 0));
+}
