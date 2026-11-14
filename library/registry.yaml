@@ -420,7 +420,7 @@ entries:
       verifier-report, a /hoare:review prompt and a build-review playbook."
     version: 0.1.0
     sourceUrl: plugins/hoare
-    sha256: a4a7b1825326808a5b2c8b58ebe50732490479a198f2573eed2fa5ec1b5a62e1
+    sha256: 509051ac0e7b9b6fdbbb2287d3ed600213e4ea6bfcf1be829181f7f7d1dfff90
     provides:
       - kind: agent
         name: hoare-verifier

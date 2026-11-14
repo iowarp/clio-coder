@@ -10,12 +10,6 @@ triggers:
   - correctness report
   - verify preconditions and postconditions
   - formal correctness review
-allowed-tools:
-  - read
-  - grep
-  - find
-  - ls
-  - verify
 clio-coder:
   registry-id: hoare-verification
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/plugins/hoare
