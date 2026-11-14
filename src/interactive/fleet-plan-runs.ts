@@ -39,6 +39,11 @@ export interface FleetPlanRunView {
 	steps: ReadonlyArray<FleetPlanStepView>;
 	requiredStepCount: number;
 	succeededStepCount: number;
+	/**
+	 * The plan's loops once it settles. The step counts leave loop steps out, so a plan whose check loop ran
+	 * reads `1/1 steps` beside rows for every cycle; this names what the loops did.
+	 */
+	loops?: { resolved: number; total: number };
 	/** What the plan cost, or null when no step called a model and there was nothing to price. */
 	costText: string | null;
 	/** Why the run ended without its steps settling, such as a refused workspace lock. */
@@ -150,6 +155,9 @@ export function createFleetPlanRuns(
 				state: endState(plan, outcome.cleanRun ? "passed" : "failed"),
 				requiredStepCount: outcome.requiredStepCount,
 				succeededStepCount: outcome.succeededStepCount,
+				...(outcome.result.loops.length > 0
+					? { loops: { resolved: outcome.resolvedLoopCount, total: outcome.result.loops.length } }
+					: {}),
 				costText: plan.steps.some((step) => step.kind === "agent") ? renderPricingSum(outcome.totalCost) : null,
 			}));
 		},
