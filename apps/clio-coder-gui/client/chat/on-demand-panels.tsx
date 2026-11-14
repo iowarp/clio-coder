@@ -10,6 +10,8 @@ const loaders = {
 	filePreview: () => import("./FilePreviewDialog.js"),
 	fleetRun: () => import("./FleetRunPanel.js"),
 	handoff: () => import("./HandoffPanel.js"),
+	historySearch: () => import("./HistorySearch.js"),
+	visualActions: () => import("./VisualActions.js"),
 };
 
 export const AsidePanel = lazy(() => loaders.aside().then((module) => ({ default: module.AsidePanel })));
@@ -20,6 +22,8 @@ export const FilePreviewDialog = lazy(() =>
 );
 export const FleetRunPanel = lazy(() => loaders.fleetRun().then((module) => ({ default: module.FleetRunPanel })));
 export const HandoffPanel = lazy(() => loaders.handoff().then((module) => ({ default: module.HandoffPanel })));
+export const HistorySearch = lazy(() => loaders.historySearch().then((module) => ({ default: module.HistorySearch })));
+export const VisualActions = lazy(() => loaders.visualActions().then((module) => ({ default: module.VisualActions })));
 
 /** Fetches every panel's code once the browser is idle. Returns the cancel for an effect's cleanup. */
 export function preloadPanels(): () => void {

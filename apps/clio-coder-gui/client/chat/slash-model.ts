@@ -14,12 +14,12 @@ import type { AgentCapabilities } from "../../contracts/capabilities.js";
 import type { CommandCatalog, CommandDescriptor } from "../../contracts/steering.js";
 import { prefixScore } from "../interaction/prefix-score.js";
 import { type CommandFields, type CommandPlan, planCommand } from "./command-model.js";
-import type { PaneSection } from "./pane-context.js";
+import type { PaneTarget } from "./pane-context.js";
 
 /** Session actions hosted in a dialog over the conversation. */
 export type SlashAction = "tree" | "fork" | "handoff" | "btw" | "draft" | "extensions" | "fleet-run" | "report";
 /** Pane views a slash name opens beside the conversation, `/decisions` at the board's Decisions. */
-export type SlashPaneView = "context" | "usage" | "board" | { readonly view: "board"; readonly section: PaneSection };
+export type SlashPaneView = PaneTarget;
 
 interface EntryBase {
 	readonly id: string;
@@ -203,6 +203,21 @@ const PANES: readonly PaneSpec[] = [
 		summary: "Open this task's decisions beside the conversation",
 		supported: (capabilities) => !!capabilities.board,
 	},
+	{
+		// The bare hub forms the catalog refuses: the terminal opens its live board and memory view for them.
+		id: "fleet",
+		name: "fleet",
+		view: "agents",
+		summary: "Open the live agents beside the conversation",
+		supported: (capabilities) => !!capabilities.fleet,
+	},
+	{
+		id: "memory",
+		name: "memory",
+		view: { view: "board", section: "memory" },
+		summary: "Open what CLIO Coder learned in this task beside the conversation",
+		supported: (capabilities) => !!capabilities.board,
+	},
 ];
 
 export interface SlashFacts {
@@ -300,7 +315,7 @@ export function exactEntry(entries: readonly SlashEntry[], text: string): SlashE
 /** What a terminal habit does here. A notice keeps the draft and says why nothing ran. */
 export type SlashAliasTarget =
 	| { readonly kind: "command"; readonly command: string; readonly subcommand: string; readonly passRest: boolean }
-	| { readonly kind: "control"; readonly control: "model" | "new" | "help" | "rename" }
+	| { readonly kind: "control"; readonly control: "model" | "new" | "help" | "rename" | "mention" }
 	| { readonly kind: "pane"; readonly view: SlashPaneView }
 	| { readonly kind: "navigate"; readonly path: string }
 	| { readonly kind: "action"; readonly action: SlashAction }
@@ -414,13 +429,45 @@ export const SLASH_ALIASES: readonly SlashAliasSpec[] = [
 		// The task page opens its restore dialog from the URL; the dialog says so when the engine keeps no snapshots.
 		target: { kind: "navigate", path: "?rewind=1" },
 	},
-	...["restart", "upgrade", "panes", "music", "files", "extensions dev"].map(terminalOnly),
-	// x090 spec 12
+	{
+		names: ["btw"],
+		summary: "Ask a side question without adding a turn",
+		hint: "[question]",
+		// A bare `/btw` is the Session row above; this answers the line that carries its question.
+		target: { kind: "action", action: "btw" },
+		available: (facts) => !!facts.capabilities?.aside?.ask,
+	},
+	{
+		names: ["draft"],
+		summary: "Draft a request several ways and compare them",
+		hint: "[request]",
+		target: { kind: "action", action: "draft" },
+		available: (facts) => !!facts.capabilities?.aside?.draft,
+	},
+	{
+		names: ["reload"],
+		summary: "Reload this task's extension runtimes",
+		target: { kind: "action", action: "extensions" },
+		available: (facts) => !!facts.capabilities?.extensions,
+	},
+	{
+		names: ["view"],
+		summary: "Open this task's artifacts beside the conversation",
+		target: { kind: "pane", view: "artifacts" },
+		available: (facts) => facts.paneAvailable,
+	},
+	{
+		names: ["files"],
+		summary: "Pick a file to mention in the message",
+		target: { kind: "control", control: "mention" },
+	},
 	{
 		names: ["trust"],
-		summary: "Review the project files this task ignored",
-		target: { kind: "notice", message: "Open Project trust in the task pane to review the files this task ignored." },
+		summary: "Review the project files this task ignored, in the task overview",
+		target: { kind: "pane", view: "session" },
+		available: (facts) => facts.paneAvailable,
 	},
+	...["restart", "upgrade", "panes", "music", "extensions dev"].map(terminalOnly),
 ];
 
 const ALIAS_BY_NAME = new Map<string, SlashAliasSpec>(

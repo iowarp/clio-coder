@@ -59,7 +59,8 @@ export function fitComposerField(field: HTMLTextAreaElement | null): void {
 	}
 }
 
-export type ComposerKeyAction = "send" | "newline" | "ignore";
+/** `newline` leaves the key to the textarea; `insert-line` is a chord the textarea ignores, so the caller adds the line. */
+export type ComposerKeyAction = "send" | "newline" | "insert-line" | "ignore";
 
 export interface ComposerKeyContext {
 	/** True while a dialog, the palette or any other layer owns the keyboard. */
@@ -81,10 +82,13 @@ export interface ComposerKeyContext {
  * document-level chord. The registry keeps the chord; this keeps the policy.
  */
 export function composerKeyAction(event: KeyEventLike, context: ComposerKeyContext): ComposerKeyAction {
+	// The terminal's other newline chords, Alt+Enter and Ctrl+J, which a browser textarea does not act on.
+	if (!context.composing && matchesKeybinding(KEYBINDINGS.newLine, event)) return "insert-line";
 	if (event.key !== "Enter") return "ignore";
 	if (context.composing) return "newline";
 	if (context.layerOwned) return "newline";
 	if (matchesKeybinding(KEYBINDINGS.send, event)) return "send";
+	if (event.altKey && !event.shiftKey && !event.ctrlKey && !event.metaKey) return "insert-line";
 	if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return "newline";
 	return context.plainEnterSends === false ? "newline" : "send";
 }

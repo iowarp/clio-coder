@@ -344,7 +344,6 @@ export function Home({ client }: { client: Client }) {
 							}}
 							onKeyDown={(event) => {
 								if (assist.keyDown(event)) return;
-								if (event.key !== "Enter") return;
 								// The same Enter policy and stored preference as the conversation composer.
 								const action = composerKeyAction(
 									{
@@ -356,6 +355,15 @@ export function Home({ client }: { client: Client }) {
 									},
 									{ layerOwned: false, composing: event.nativeEvent.isComposing, plainEnterSends: initialEnterSends() },
 								);
+								if (action === "insert-line") {
+									event.preventDefault();
+									const field = event.currentTarget;
+									const { selectionStart, selectionEnd, value } = field;
+									const next = `${value.slice(0, selectionStart)}\n${value.slice(selectionEnd)}`;
+									setText(next);
+									requestAnimationFrame(() => field.setSelectionRange(selectionStart + 1, selectionStart + 1));
+									return;
+								}
 								if (action !== "send") return;
 								event.preventDefault();
 								submit();

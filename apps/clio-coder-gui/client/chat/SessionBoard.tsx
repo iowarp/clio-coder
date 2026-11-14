@@ -46,7 +46,7 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 	/** Changes when a turn settles, which is when the plan and the decisions can have changed. */
 	settledTurns: number;
 	running: boolean;
-	/** A section the pane was opened at, `/decisions`: scrolled to and focused once it has rendered. */
+	/** A section the pane was opened at, `/decisions` or `/memory`: scrolled to and focused once it has rendered. */
 	section?: PaneSection | null;
 	onSectionShown?: () => void;
 }) {
@@ -411,7 +411,9 @@ export const SessionBoardPanel = memo(function SessionBoardPanel({
 						) : null}
 					</section>
 					<section className="drill__section" aria-labelledby={`${titleId}-bank`}>
-						<h3 id={`${titleId}-bank`}>{view.bank.length > 0 ? "What CLIO Coder learned this session" : "Memory"}</h3>
+						<h3 id={`${titleId}-bank`} data-board-section="memory" tabIndex={-1}>
+							{view.bank.length > 0 ? "What CLIO Coder learned this session" : "Memory"}
+						</h3>
 						<p className="drill__note">{view.memory}</p>
 						{view.bank.length > 0 ? (
 							<>
