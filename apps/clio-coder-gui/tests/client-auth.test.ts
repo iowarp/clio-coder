@@ -5,7 +5,7 @@ import { Value } from "typebox/value";
 import { tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { createCredentials } from "../client/api/credentials.js";
-import { dropStoredToken, listenForLaunchLink, refusalReason } from "../client/api/token.js";
+import { adoptLaunchSecret, dropStoredToken, listenForLaunchLink, refusalReason } from "../client/api/token.js";
 import { ClientCredential, LaunchChallenge } from "../contracts/auth.js";
 import { Problem } from "../contracts/common.js";
 import { routes } from "../contracts/routes.js";
@@ -267,6 +267,11 @@ test("a launch link pasted into an open window's address bar reloads it, so the 
 	hashChange("#section");
 	assert.equal(reloads, 0);
 	hashChange(`#ticket=${"a".repeat(43)}`);
+	assert.equal(reloads, 1);
+	// A ticket pasted into the page's own field reloads once, through adoptLaunchSecret, not twice.
+	Object.assign(location, { origin: "http://app", reload: () => {} });
+	adoptLaunchSecret({ ticket: "b".repeat(43) }, "http://app");
+	for (const listener of listeners.get("hashchange") ?? []) listener();
 	assert.equal(reloads, 1);
 });
 
