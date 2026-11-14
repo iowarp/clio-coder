@@ -5,8 +5,10 @@
 	overflow-y: auto;
 	container-type: inline-size;
 	display: grid;
-	align-items: center;
-	padding: var(--space-6) var(--space-6) var(--space-12);
+	/* Top-aligned, so the hero's place depends on the window's height alone: centring it made it jump whenever the
+	   starters left or Task settings opened below it. */
+	align-items: start;
+	padding: clamp(var(--space-8), 18vh, var(--space-16)) var(--space-6) var(--space-12);
 }
 .newtask__inner {
 	display: grid;

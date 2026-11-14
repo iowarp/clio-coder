@@ -32,6 +32,12 @@ const verdictText = {
 		"At least one trust check failed or a validation claim lacked an observed command. The record seal may still be intact; read the five checks below.",
 };
 
+/* Evidence runs carry no task title, so the agent alone left every "coder" run looking the same; the run id's tail
+   tells them apart. */
+function runLabel(run: { agentId: string | null; runId: string }): string {
+	return `${run.agentId ?? "Run"} · ${run.runId.slice(-8)}`;
+}
+
 const trustChecks = [
 	{
 		key: "artifactIntegrity",
@@ -251,7 +257,7 @@ export function EvidencePage({ client }: { client: Client }) {
 		),
 		sort,
 		(item) => ({
-			name: item.run.agentId ?? item.run.runId,
+			name: runLabel(item.run),
 			date: item.run.settledAt ?? "",
 			id: item.run.runId,
 		}),
@@ -357,10 +363,10 @@ export function EvidencePage({ client }: { client: Client }) {
 						<h2 className="inspection-card-title">
 							{live ? (
 								<Link to={listDestination(`/evidence/${encodeURIComponent(run.runId)}`, search, ["q", "verdict", "sort"])}>
-									{run.agentId ?? run.runId}
+									{runLabel(run)}
 								</Link>
 							) : (
-								(run.agentId ?? run.runId)
+								runLabel(run)
 							)}
 						</h2>
 						<p>
@@ -405,7 +411,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 	return (
 		<section className="run-inspection">
 			<Link to={listDestination("/evidence", search, ["q", "verdict", "sort"])}>← Evidence inventory</Link>
-			<PanelHeading panel={PANELS.evidenceBundle} level={1} title={data?.run.agentId ?? "Run evidence"} />
+			<PanelHeading panel={PANELS.evidenceBundle} level={1} title={data ? runLabel(data.run) : "Run evidence"} />
 			{detail.isPending && <p>Reading evidence…</p>}
 			{detail.error && (
 				<>

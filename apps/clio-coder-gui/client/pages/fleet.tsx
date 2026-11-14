@@ -350,7 +350,10 @@ export function FleetPage({ client }: { client: Client }) {
 						<p className="panel-note">
 							{run.targetId} / {run.wireModelId}
 						</p>
-						<p className="panel-note">{run.evidence.integrity.display}</p>
+						{/* The card's status chip reads the status while there is no outcome; such a run has no sealed record yet. */}
+						<p className="panel-note">
+							{run.outcome === null ? "Record written when the run ends" : run.evidence.integrity.display}
+						</p>
 						<div className="panel-note">
 							{formatTime(run.startedAt)} ·{" "}
 							<Explained client={client} label="Run tokens" {...explainable(run.telemetry?.tokens)} /> tokens

@@ -546,12 +546,16 @@ export function LibraryCatalog({
 								{pkg.name}
 								{pkg.version && <span className="version">{pkg.version}</span>}
 							</h3>
-							<p>{pkg.description || "No description."}</p>
+							<p title={pkg.description || undefined}>{pkg.description || "No description."}</p>
 							<small>
 								{pkg.kind} · {originSentence(pkg)}
 								{pkg.requires?.length ? ` · requires ${pkg.requires.join(", ")}` : ""}
 							</small>
-							{pkg.refusal && <p className="library-refusal">{pkg.refusal}</p>}
+							{pkg.refusal && (
+								<p className="library-refusal" title={pkg.refusal}>
+									{pkg.refusal}
+								</p>
+							)}
 							<button
 								type="button"
 								className="library-inspect"
