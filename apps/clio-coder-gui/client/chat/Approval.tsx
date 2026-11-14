@@ -12,7 +12,8 @@ import type { Permission, PermissionDecision } from "../../contracts/permissions
 import { routes } from "../../contracts/runtime-routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { clock, formatDuration } from "../api/clock.js";
+import { formatDuration } from "../api/clock.js";
+import { useSharedSecond } from "../api/second-clock.js";
 import { StatusMark } from "../design/status.js";
 import { announce, announceEscalation, setApprovalPending } from "../interaction/announcer.js";
 import { KEYBINDINGS } from "../interaction/keybindings.js";
@@ -25,6 +26,7 @@ import {
 	CARD_EYEBROW,
 	clampText,
 	decisionChips,
+	decisionRecord,
 	decisionRows,
 	decisionTone,
 	deriveApprovalTimings,
@@ -123,18 +125,6 @@ function useApprovalFocus(id: string | null): void {
 			if (!ran) last.current = previous;
 		};
 	}, [id]);
-}
-
-/** One shared second. A countdown phrased as a consequence still has to move. */
-function useSecond(active: boolean): number {
-	const [now, setNow] = useState(() => clock.now());
-	useEffect(() => {
-		if (!active) return;
-		setNow(clock.now());
-		const timer = setInterval(() => setNow(clock.now()), 1000);
-		return () => clearInterval(timer);
-	}, [active]);
-	return now;
 }
 
 export type AnswerApproval = ReturnType<typeof useAnswerApproval>;
@@ -363,7 +353,7 @@ interface CardProps {
 }
 
 function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, variant }: CardProps) {
-	const now = useSecond(true);
+	const now = useSharedSecond(true);
 	const timings = deriveApprovalTimings(permission, now);
 	const facts = safetyFacts(permission, call?.locations, timings);
 	const chips = decisionChips(permission.decision);
@@ -441,13 +431,14 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	const permission = queue.first;
 	const answerSent = useAnswerSent(session.id, permission?.id);
 	const call = permission ? session.timeline.find((item) => item.toolCallId === permission.toolCallId) : undefined;
-	const now = useSecond(permission !== undefined);
+	const now = useSharedSecond(permission !== undefined);
 	const timings = permission ? deriveApprovalTimings(permission, now) : null;
 	const escalated = timings?.escalated === true;
 	const escalationWindow = timings?.declaredEscalationSeconds ?? null;
 	const id = permission?.id ?? null,
 		title = permission?.title ?? "",
 		kind = permission?.kind ?? "";
+	const spoken = permission ? approvalAnnouncement({ title, kind }, call?.locations) : "";
 
 	// The tab title has exactly one writer (client/interaction/announcer.ts), so this only raises the
 	// flag it composes from; nothing here touches `document.title` directly.
@@ -457,8 +448,8 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	}, [id]);
 	useEffect(() => {
 		if (id === null) return;
-		announce(`${approvalAnnouncement({ title, kind })} Request ${queue.position}.`, "assertive");
-	}, [id, title, kind, queue.position]);
+		announce(`${spoken} Request ${queue.position}.`, "assertive");
+	}, [id, spoken, queue.position]);
 	useApprovalFocus(id);
 	// The declared window, not the observed wait: say what the product promised.
 	useEffect(() => {
@@ -551,7 +542,15 @@ export function AnchoredApproval({
 	const permission = permissionForCall(session, item);
 	const permissionId = permission?.id ?? null;
 	useEffect(() => (permissionId === null ? undefined : registerAnchor(permissionId)), [permissionId]);
-	if (!permission) return null;
+	if (!permission) {
+		// An answered card leaves its outcome where it stood, so Allow or Reject never just vanishes.
+		const record = item.toolCallId === undefined ? null : decisionRecord(session.permissions, item.toolCallId);
+		return record === null ? null : (
+			<p className="approval-record approval-preview__note" data-status={record.status}>
+				{record.summary}
+			</p>
+		);
+	}
 	return (
 		<ApprovalCard
 			sessionId={session.id}
