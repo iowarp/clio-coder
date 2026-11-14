@@ -1,32 +1,16 @@
+// The body of Shortcuts & help. The dialog around it is eager (`LazyDialogs.tsx`), so the keys typed
+// while this chunk loads land in the search field rather than the message box behind it.
+
 import type { RefObject } from "react";
-import { useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../design/icons.js";
-import { Dialog } from "./Dialog.js";
+import { inspectionTabIndex } from "../design/run-inspection-model.js";
 import type { HelpView } from "./help-model.js";
 import { HELP_VIEWS, helpContent } from "./help-model.js";
 import type { HelpMatch } from "./help-reference.js";
+import { Keycaps } from "./Keycaps.js";
 import { PUBLIC_HELP } from "./public-help.js";
 import "./help.css";
-
-function ShortcutKeys({ chord }: { chord: string }) {
-	// A chord's keys sit together; a sequence (`Esc, Esc`) or a choice (`Up / Down`) keeps its separator.
-	const parts = chord.split(/( \+ |, | \/ )/u);
-	return (
-		<span className="help-keys" role="img" aria-label={chord}>
-			{parts.map((part, index) =>
-				index % 2 === 1 ? (
-					part === " + " ? null : (
-						// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed chord never reorder.
-						<span key={index}>{part.trim()}</span>
-					)
-				) : (
-					// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed chord never reorder.
-					<kbd key={index}>{part}</kbd>
-				),
-			)}
-		</span>
-	);
-}
 
 export function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bundledDocsPath?: string | undefined }) {
 	return (
@@ -58,14 +42,30 @@ export function HelpEntries({ match, bundledDocsPath }: { match: HelpMatch; bund
 export function HelpReferenceBody({
 	bundledDocsPath,
 	searchRef,
+	initialQuery = "",
+	claimFocus = false,
 }: {
 	bundledDocsPath?: string | undefined;
 	searchRef?: RefObject<HTMLInputElement | null>;
+	/** What was typed into the loading shell before this body arrived. */
+	initialQuery?: string;
+	/** Take focus on mount, caret at the end: the shell that held it has just been replaced. */
+	claimFocus?: boolean;
 }) {
-	const [query, setQuery] = useState("");
+	const [query, setQuery] = useState(initialQuery);
 	const [view, setView] = useState<HelpView>("guide");
 	const inputId = useId();
 	const contentId = useId();
+	const tabsId = useId();
+	const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+	const claim = useRef(claimFocus);
+	useLayoutEffect(() => {
+		if (!claim.current) return;
+		claim.current = false;
+		const input = searchRef?.current;
+		input?.focus();
+		input?.setSelectionRange(input.value.length, input.value.length);
+	}, [searchRef]);
 	const content = helpContent(query, view);
 	// A view whose only section shares the tab's name would print that name twice; the tab already says it.
 	const viewTitle = HELP_VIEWS.find((item) => item.id === view)?.title;
@@ -102,22 +102,38 @@ export function HelpReferenceBody({
 						</button>
 					) : null}
 				</div>
-				<nav className="help-nav" aria-label="Help topics">
-					{HELP_VIEWS.map((item) => (
+				{/* Topics are tabs: one tab stop, Left and Right move between them, Home and End jump. */}
+				<div className="help-nav" role="tablist" aria-label="Help topics">
+					{HELP_VIEWS.map((item, index) => (
 						<button
 							key={item.id}
+							ref={(element) => {
+								tabs.current[index] = element;
+							}}
+							id={`${tabsId}-${item.id}`}
 							type="button"
-							aria-pressed={!content.searching && view === item.id}
+							role="tab"
+							aria-selected={!content.searching && view === item.id}
 							aria-controls={contentId}
+							tabIndex={view === item.id ? 0 : -1}
 							onClick={() => {
 								setQuery("");
 								setView(item.id);
+							}}
+							onKeyDown={(event) => {
+								const next = inspectionTabIndex(event.key, index, HELP_VIEWS.length);
+								const target = HELP_VIEWS[next];
+								if (!target) return;
+								event.preventDefault();
+								setQuery("");
+								setView(target.id);
+								tabs.current[next]?.focus();
 							}}
 						>
 							{item.title}
 						</button>
 					))}
-				</nav>
+				</div>
 			</div>
 			<section
 				className="help-content"
@@ -125,7 +141,9 @@ export function HelpReferenceBody({
 				key={content.searching ? "search" : view}
 				// biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus this region to scroll inside the dialog trap.
 				tabIndex={0}
-				aria-label="Help content"
+				{...(content.searching
+					? { "aria-label": "Help content" }
+					: { role: "tabpanel", "aria-labelledby": `${tabsId}-${view}` })}
 			>
 				<p className="help-context" role="status">
 					{content.searching
@@ -139,7 +157,7 @@ export function HelpReferenceBody({
 				{content.searching && content.count === 0 ? (
 					<div className="help-empty">
 						<h3>No matches</h3>
-						<p>Try an action like “send”, a chord like “Ctrl+K”, or a topic like “autonomy”.</p>
+						<p>Try an action like “send”, a key like “Ctrl/Cmd + K”, or a topic like “autonomy”.</p>
 					</div>
 				) : null}
 				{content.shortcuts.length > 0 ? (
@@ -155,7 +173,7 @@ export function HelpReferenceBody({
 												<span>{binding.where}</span>
 											</dt>
 											<dd>
-												<ShortcutKeys chord={binding.keys} />
+												<Keycaps className="help-keys" chord={binding.keys} />
 											</dd>
 										</div>
 									))}
@@ -183,40 +201,5 @@ export function HelpReferenceBody({
 				</div>
 			</section>
 		</div>
-	);
-}
-
-export function HelpDialog({
-	open,
-	onClose,
-	bundledDocsPath,
-	onReport,
-}: {
-	open: boolean;
-	onClose: () => void;
-	bundledDocsPath?: string | undefined;
-	/** "Report a problem": the report dialog (R-24). */
-	onReport?: () => void;
-}) {
-	const searchRef = useRef<HTMLInputElement>(null);
-	if (!open) return null;
-	return (
-		<Dialog
-			title="Shortcuts & help"
-			eyebrow="CLIO CODER"
-			size="wide"
-			className="help-dialog"
-			initialFocus={searchRef}
-			onClose={onClose}
-		>
-			{onReport ? (
-				<div className="actions help-dialog__actions">
-					<button type="button" onClick={onReport}>
-						Report a problem
-					</button>
-				</div>
-			) : null}
-			<HelpReferenceBody bundledDocsPath={bundledDocsPath} searchRef={searchRef} />
-		</Dialog>
 	);
 }

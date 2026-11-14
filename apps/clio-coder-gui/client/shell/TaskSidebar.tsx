@@ -10,6 +10,8 @@ import type { ConnectionState } from "../api/events.js";
 import { SESSION_HISTORY_FRESHNESS } from "../api/queries.js";
 import { Icon } from "../design/icons.js";
 import { TONE_GLYPHS } from "../design/status.js";
+import { focusComposerSoon } from "../interaction/focus-return.js";
+import { moveRowFocus } from "../interaction/row-keys.js";
 import { platformLabel, systemStatus } from "../pages/system-model.js";
 import { countRender } from "../render/render-probe.js";
 import { ClioLogo, ClioPulse, PULSE_SIZE } from "./ClioMark.js";
@@ -27,6 +29,7 @@ import "./task-sidebar-actions.css";
 
 const TASKS_PER_PROJECT = 6;
 const PROJECTS_SHOWN = 10;
+const moveTaskFocus = moveRowFocus(".wb-task__main");
 export function TaskSidebar({
 	client,
 	local,
@@ -52,7 +55,8 @@ export function TaskSidebar({
 	connection: ConnectionState;
 	activeWorkspaceId: string | null;
 	onOpenWorkspace: () => void;
-	onSearch: () => void;
+	/** Opens the palette; the Search button is its opener, so Esc returns there even when a click did not focus it. */
+	onSearch: (opener: HTMLElement) => void;
 	onToggle: () => void;
 	onHelp: () => void;
 	/** Called after navigation to finish any open navigation interaction. */
@@ -129,7 +133,12 @@ export function TaskSidebar({
 			<MachineSwitcher local={local} current={client.machine} remoteHost={remoteHost} />
 
 			<nav className="wb-side__discover" aria-label="Find and explore">
-				<button type="button" className="wb-action" onClick={onSearch} title="Search tasks and commands">
+				<button
+					type="button"
+					className="wb-action"
+					onClick={(event) => onSearch(event.currentTarget)}
+					title="Search tasks and commands"
+				>
 					<Icon name="search" />
 					<span>Search</span>
 				</button>
@@ -169,7 +178,10 @@ export function TaskSidebar({
 							type="button"
 							className="wb-action wb-action--primary"
 							disabled={actions.launch.busy}
-							onClick={() => actions.newTask(activeWorkspaceId ?? undefined)}
+							onClick={() => {
+								actions.newTask(activeWorkspaceId ?? undefined);
+								focusComposerSoon();
+							}}
 							title="Open your task composer"
 						>
 							{actions.launch.busy ? <ClioPulse size={PULSE_SIZE.row} /> : <Icon name="compose" />}
@@ -185,8 +197,9 @@ export function TaskSidebar({
 						</button>
 					</nav>
 
+					{/* Up and Down (j and k) move between task rows, as Help says. */}
 					{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users scroll the task list independently. */}
-					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace">
+					<section className="wb-side__tasks" tabIndex={0} aria-label="Tasks by workspace" onKeyDown={moveTaskFocus}>
 						<div className="wb-side__heading">
 							<h2>Workspaces</h2>
 						</div>
@@ -325,7 +338,10 @@ function ProjectGroup({
 					aria-label={`New task in ${workspace.name}`}
 					title={`New task in ${workspace.name}`}
 					disabled={actions.launch.busy}
-					onClick={() => actions.newTask(workspace.id)}
+					onClick={() => {
+						actions.newTask(workspace.id);
+						focusComposerSoon();
+					}}
 				>
 					<Icon name="plus" />
 				</button>
