@@ -16,7 +16,7 @@ import { useShell } from "../shell/shell-context.js";
 import { TopBar } from "../shell/TopBar.js";
 import { rememberWorkspace } from "../shell/tasks.js";
 import { firstRequestBusy, homeDraft, subscribeHomeDraft, updateHomeDraft } from "./home-draft.js";
-import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS } from "./home-draft-model.js";
+import { EMPTY_HOME_DRAFT, HOME_DRAFT_TEXT_MAX_CHARACTERS, setupWorkspaceId } from "./home-draft-model.js";
 import { settleStarted } from "./started-request.js";
 import { reconcileFirstTask, useFirstTask } from "./use-first-task.js";
 import "../chat/composer-box.css";
@@ -199,7 +199,7 @@ export function Home({ client }: { client: Client }) {
 	useEffect(() => {
 		if (!draft.workspaceId && workspaceId) updateHomeDraft({ workspaceId });
 	}, [draft.workspaceId, workspaceId]);
-	const setup = useSetupStatus(client, true, workspaceId);
+	const setup = useSetupStatus(client, true, setupWorkspaceId(workspaceId, list));
 	const ready = setup.data?.state === "ready";
 	const meta = useQuery({
 		queryKey: ["meta"],
