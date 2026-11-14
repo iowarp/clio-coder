@@ -1,23 +1,29 @@
 import type { SessionOverviewItem } from "../../contracts/session-overview.js";
 import type { Workspace } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
+import { READY_LABEL, STATE_LABELS } from "../shell/shell-model.js";
 
 export const SESSION_FILTERS = ["all", "attention", "working", "ready", "closed"] as const;
 export type SessionFilter = (typeof SESSION_FILTERS)[number];
 export const ACTIVITY: Readonly<
 	Record<SessionOverviewItem["activity"], { label: string; tone: StatusTone; group: SessionFilter; order: number }>
 > = {
-	approval: { label: "Approval needed", tone: "warn", group: "attention", order: 0 },
-	question: { label: "Answer needed", tone: "warn", group: "attention", order: 0 },
-	unknown: { label: "Needs recovery", tone: "unverified", group: "attention", order: 1 },
-	failed: { label: "Needs review", tone: "fail", group: "attention", order: 2 },
-	working: { label: "Working", tone: "running", group: "working", order: 3 },
-	starting: { label: "Starting", tone: "running", group: "working", order: 4 },
-	queued: { label: "Queued", tone: "neutral", group: "working", order: 5 },
-	ready: { label: "Ready", tone: "neutral", group: "ready", order: 6 },
-	parked: { label: "Paused", tone: "neutral", group: "ready", order: 7 },
+	approval: { label: STATE_LABELS.approval, tone: "warn", group: "attention", order: 0 },
+	question: { label: STATE_LABELS.question, tone: "warn", group: "attention", order: 0 },
+	unknown: { label: STATE_LABELS.unknown, tone: "unverified", group: "attention", order: 1 },
+	failed: { label: STATE_LABELS.failed, tone: "fail", group: "attention", order: 2 },
+	working: { label: STATE_LABELS.working, tone: "running", group: "working", order: 3 },
+	starting: { label: STATE_LABELS.starting, tone: "running", group: "working", order: 4 },
+	queued: { label: STATE_LABELS.waiting, tone: "neutral", group: "working", order: 5 },
+	ready: { label: READY_LABEL, tone: "neutral", group: "ready", order: 6 },
+	parked: { label: STATE_LABELS.paused, tone: "neutral", group: "ready", order: 7 },
 	closed: { label: "Closed", tone: "neutral", group: "closed", order: 8 },
 };
+
+/** The card's state word: the sidebar's, except that a failed agent is not a failed turn. */
+export function activityLabel(item: Pick<SessionOverviewItem, "activity" | "state">): string {
+	return item.activity === "failed" && item.state === "failed" ? "Session failed" : ACTIVITY[item.activity].label;
+}
 
 export function sessionInventory(
 	items: readonly SessionOverviewItem[],
