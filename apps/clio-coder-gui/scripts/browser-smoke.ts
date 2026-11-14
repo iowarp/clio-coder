@@ -2362,6 +2362,19 @@ try {
 			await row.waitFor();
 			assert.doesNotMatch(await row.innerText(), /no task preview/);
 			assert.match(await row.innerText(), /scout, writer/);
+			// The allowed plan's runs reach the Agents drill, one node per task.
+			await openDrill("Agents");
+			for (const [agent, task] of [
+				["scout", "Survey the soil samples"],
+				["writer", "Draft the comparison report"],
+			] as const) {
+				const node = pane.locator(".worker-graph .agents-node", {
+					has: page.locator(".agents-node__task", { hasText: task }),
+				});
+				await node.first().waitFor();
+				assert.equal((await node.first().locator(".agents-node__agent").innerText()).trim(), agent);
+			}
+			await closePane();
 		});
 		await step("launch link opened twice", async () => {
 			// A launch link works once. The second opening names that, offers this origin's link shape, and centres.

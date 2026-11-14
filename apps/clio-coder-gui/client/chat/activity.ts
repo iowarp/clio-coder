@@ -252,6 +252,12 @@ function changeKey(item: TimelineItem, decisions: CallDecisions | undefined): st
 	return "change:open";
 }
 
+/** A change call its approval gate settled, rejected or refused, so nothing reached the file. */
+export function unappliedChange(item: TimelineItem): boolean {
+	if (item.kind !== "tool" || !CHANGES.has(readGateway(item).name ?? item.title ?? "")) return false;
+	return notApproved(item, readWire(item));
+}
+
 /**
  * What a group did, in words: "read 2 files, ran 1 command". Phrases follow first appearance, reads and
  * changes count distinct paths, and anything unnamed is counted as a tool rather than dropped.

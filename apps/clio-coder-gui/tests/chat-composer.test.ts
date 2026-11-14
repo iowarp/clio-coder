@@ -544,6 +544,7 @@ test("tool time names how many calls it measured, and compactions are counted pe
 		toolMs: 4200,
 		slowest: { name: "Run tests", ms: 3900 },
 		compactions: 1,
+		notApplied: 0,
 	});
 	assert.deepEqual(view.nerd.slice(1), [
 		{ label: "Tool time", value: "4.2 s over 2 of 3" },

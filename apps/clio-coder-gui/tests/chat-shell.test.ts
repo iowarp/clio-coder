@@ -219,7 +219,24 @@ test("turnActivity sums host-timed tool calls and names the slowest; compactions
 		toolMs: 4020,
 		slowest: { name: "Run tests", ms: 3900 },
 		compactions: 2,
+		notApplied: 0,
 	});
+	// A change its approval gate declined reaches no file; a declined read is not a change.
+	const declined = {
+		rawOutput: {
+			result: { content: [{ type: "text", text: "write blocked: write was not approved" }] },
+			isError: true,
+		},
+	};
+	const gated = turnActivity(
+		turnOf([
+			item({ id: "w", kind: "tool", toolCallId: "w", title: "write", status: "failed", ...declined }),
+			item({ id: "r", kind: "tool", toolCallId: "r", title: "read", status: "failed", sequence: 1, ...declined }),
+			item({ id: "e", kind: "tool", toolCallId: "e", title: "edit", status: "completed", sequence: 2 }),
+		]),
+		0,
+	);
+	assert.deepEqual([gated.tools, gated.notApplied], [3, 1]);
 	const counts = compactionsByTurn(
 		[healthRow({ id: "h1", at: "2026-09-20T10:01:00.000Z" }), healthRow({ id: "h2", at: "2026-09-20T10:02:00.000Z" })],
 		[row({ id: "t1", startedAt: "2026-09-20T10:00:00.000Z" })],

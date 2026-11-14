@@ -912,7 +912,7 @@ test("fleet failures show their outcome code and recovery detail in the row and 
 // ---- inspection round 1: one vocabulary, one record, one second ------------------------------------
 
 test("the access sentence is a verb phrase, never a raw ACP kind", () => {
-	const at = [{ path: "/repo/fixture.txt" }];
+	const at = [{ path: "fixture.txt" }];
 	assert.equal(accessSentence({ kind: "edit" }, at), "Edits fixture.txt.");
 	assert.equal(accessSentence({ kind: "execute" }, undefined), "Runs a command in this turn.");
 	assert.equal(accessSentence({ kind: "other" }, undefined), "Acts on this turn.");
