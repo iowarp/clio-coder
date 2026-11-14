@@ -380,6 +380,59 @@ test("the judge reads the call's own turn when the session leaf lags, and never 
 	strictEqual(audits[1]?.workerRunId, "run-1");
 });
 
+// At contained yolo the question channel carries authority: an operator's ask_user answer reads as their own words.
+test("the judge reads the operator's ask_user answers beside their typed messages", async () => {
+	const session = {
+		current: () => ({ id: "session-1" }),
+		readEntries: () => [
+			{
+				kind: "message",
+				turnId: "u1",
+				parentTurnId: null,
+				timestamp: "2026-11-14T00:00:00.000Z",
+				role: "user",
+				payload: { text: "Prepare the release." },
+			} as SessionEntry,
+		],
+		leafId: () => "u1",
+		appendEntry: (input: unknown) => input,
+	} as unknown as SessionContract;
+	const prompts: string[] = [];
+	const asked: string[] = [];
+	const seat = createSafetyJudgeHost({
+		settings: () =>
+			({ ...DEFAULT_SETTINGS, chat: { ...DEFAULT_SETTINGS.chat, target: "local", model: "m" } }) as ClioSettings,
+		complete: async (request) => {
+			prompts.push(request.user);
+			return { text: answer("allow", "operator-named", "Approved on a question.") };
+		},
+		session: () => session,
+		safety: { decisions: { recordSafetyJudge: () => {} } } as never,
+		operatorAnswers: (sessionId) => {
+			asked.push(sessionId);
+			return ['Asked "Push main to origin?", the operator answered: Yes, push'];
+		},
+	});
+	await seat.review({
+		tool: ToolNames.Bash,
+		args: { command: "git push origin main" },
+		decision: {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [] },
+			confirmationRuleId: "bash-unrecognized",
+			rejection: { short: "asks", detail: "asks", hints: [] },
+		},
+		approvalAuthority: "operator",
+		turnId: "u1",
+	});
+	deepStrictEqual(asked, ["session-1"]);
+	match(prompts[0] ?? "", /Prepare the release\./u);
+	match(
+		prompts[0] ?? "",
+		/Message 2 of 2 \(newest\):\nAsked "Push main to origin\?", the operator answered: Yes, push/u,
+	);
+});
+
 test("safety.judge parses from user settings and a project layer cannot set it", async (t) => {
 	const parsed = validateSettings({
 		version: 2,

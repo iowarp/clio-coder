@@ -12,12 +12,12 @@ import { useSessionTelemetry } from "./session-telemetry.js";
 
 const LEVELS: Readonly<Record<AutonomyLevel, { label: string; short: string; icon: "shield" | "bolt" }>> = {
 	default: { label: "Ask first", short: "Ask first", icon: "shield" },
-	yolo: { label: "Run without asking", short: "Auto-run", icon: "bolt" },
+	yolo: { label: "Run without approvals", short: "Auto-run", icon: "bolt" },
 };
 
 /**
  * How much CLIO Coder may do without stopping for you, for this task only. Each mode reads as the
- * engine describes it. Running without asking takes a second, explicit press.
+ * engine describes it. Running without approvals takes a second, explicit press; questions still reach you either way.
  */
 export function AutonomyPill({
 	client,
@@ -126,10 +126,10 @@ export function AutonomyPill({
 						<p>{menu.confirmation}</p>
 						<div>
 							<button type="button" className="primary" disabled={set.isPending} onClick={() => set.mutate("yolo")}>
-								{set.isPending ? "Switching…" : "Run without asking"}
+								{set.isPending ? "Switching…" : "Run without approvals"}
 							</button>
 							<button type="button" onClick={() => setConfirming(false)}>
-								Keep asking
+								Keep approvals
 							</button>
 						</div>
 					</div>

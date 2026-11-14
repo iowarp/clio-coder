@@ -194,6 +194,11 @@ export function createSafetyJudgeHost(deps: {
 	screen?: SafetyJudgeScreen;
 	/** Either escalation threshold was reached; contained yolo ends its run on it (ob-yolo D4). */
 	onEscalation?: (note: SafetyJudgeNote) => void;
+	/**
+	 * What the operator answered on ask_user rounds in this session, as text the judge reads beside
+	 * their typed messages; Clio's picks for an absent operator never reach it.
+	 */
+	operatorAnswers?: (sessionId: string) => ReadonlyArray<string>;
 }): SafetyJudgeSeat {
 	return createSafetyJudge({
 		config: () => resolveSafetyJudgeConfig(deps.settings()),
@@ -212,7 +217,10 @@ export function createSafetyJudgeHost(deps: {
 				// newest ledger message stands in as the leaf, and the call's own turn
 				// still pins the path below.
 			}
-			return operatorMessagesForJudge(session.readEntries(), leaf, turnId);
+			return [
+				...operatorMessagesForJudge(session.readEntries(), leaf, turnId),
+				...(deps.operatorAnswers?.(meta.id) ?? []),
+			];
 		},
 		record: (input) => deps.safety?.decisions.recordSafetyJudge?.(input),
 		note: (note) => {

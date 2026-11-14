@@ -77,7 +77,6 @@ import type { WorkspaceSnapshotOutcome, WorkspaceSnapshotRequest } from "../doma
 import { type WorkspaceSnapshotTrigger, workspaceSnapshotTrigger } from "../domains/workspace-snapshots/trigger.js";
 import type { ImageContent } from "../engine/types.js";
 import { approvalGiver, gateReasonText, withApprovalNote } from "./approval-note.js";
-import { askUserExposure } from "./ask-user.js";
 import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js";
 import type { ToolPresentationPolicy } from "./presentation.js";
 import { type ToolResultDigest, type ToolResultDisposition, toolResultContextText } from "./result-disposition.js";
@@ -401,6 +400,15 @@ export interface RegistryDeps {
 	unattendedAsks?: () => boolean;
 	/** Observes each call `unattendedAsks` refused, for contained yolo's open decisions (ob-yolo D7); decides nothing. */
 	onUnattendedRefusal?: (call: ClassifierCall, decision: SafetyDecision, kind: OpenDecisionKind, rule?: string) => void;
+	/**
+	 * Observes each ask_user round the operator answered themselves, never one
+	 * Clio answered for an absent operator. The main session feeds the answers
+	 * to the safety judge as operator words and reopens the autonomy window.
+	 */
+	onOperatorAnswered?: (
+		answers: ReadonlyArray<{ question: string; answer: string }>,
+		options?: ToolInvokeOptions,
+	) => void;
 	/** The main session's id, which names a read-only run's scratch directory. */
 	currentSessionId?: () => string | undefined;
 	/**
@@ -1729,7 +1737,6 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				),
 			...(deps.git !== undefined ? { git: deps.git } : {}),
 			autonomyExtra: {
-				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
 				// The plan stop only waits for the operator, so the operator's contained
 				// yolo runs a plan as unconfined yolo does. Its workers still meet their
 				// own permits, routes and sandbox.
@@ -2541,6 +2548,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				// An operator's answer can grant what an earlier call was refused.
 				if (effectiveToolCall(call.tool, call.args).toolName === ToolNames.AskUser && askUserAnswered(verdict)) {
 					deniedCalls.clear();
+					if ((deps.principal ?? "main") === "main") deps.onOperatorAnswered?.(operatorAnswers(verdict), options);
 				}
 				if (key !== null && rememberedRefusal(verdict) && verdict.denial !== undefined) {
 					// Only a remembered refusal tells the model its repeat is refused
@@ -3010,6 +3018,19 @@ function askUserAnswered(verdict: RegistryVerdict): boolean {
 	// A round Clio answered for an absent operator (#421) is no operator's answer.
 	if (details?.unattended !== undefined) return false;
 	return details?.cancelled !== true && Array.isArray(details?.answers) && details.answers.length > 0;
+}
+
+/** The answers an operator gave themselves in an answered ask_user round, Clio's picks left out. */
+function operatorAnswers(verdict: RegistryVerdict): Array<{ question: string; answer: string }> {
+	if (verdict.kind !== "ok" || verdict.result.kind !== "ok") return [];
+	const answers = verdict.result.details?.answers;
+	if (!Array.isArray(answers)) return [];
+	return answers.flatMap((raw: unknown) => {
+		if (raw === null || typeof raw !== "object") return [];
+		const { question, answer, auto } = raw as { question?: unknown; answer?: unknown; auto?: unknown };
+		if (auto === true || typeof question !== "string" || typeof answer !== "string") return [];
+		return answer.trim().length > 0 ? [{ question, answer }] : [];
+	});
 }
 
 /** Delegated execution evidence stays in process, never in model-visible result fields. */
