@@ -44,7 +44,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -352,6 +352,15 @@ async function findRunningClio(host: Host, client: MuxClient): Promise<MuxPane |
 	return null;
 }
 
+function removeMarkerOlderThan(marker: string, epochMs: number): void {
+	try {
+		// A second of slack for file systems that keep whole seconds: a marker this pane's Clio wrote is never older.
+		if (statSync(marker).mtimeMs < epochMs - 1_000) rmSync(marker, { force: true });
+	} catch {
+		// No marker is the usual case.
+	}
+}
+
 function runHerdr(host: Host, args: ReadonlyArray<string>): boolean {
 	const result = spawnSync(host.options.herdrPath, [...host.layout.herdrArgs, ...args], {
 		cwd: host.cwd,
@@ -373,9 +382,8 @@ async function stopServerIfEmpty(host: Host, client: MuxClient): Promise<boolean
 	return stopServerAndClean(host, client);
 }
 
-async function stopServerAndClean(host: Host, client: MuxClient): Promise<boolean> {
-	if (!(await stopServer(host, client))) return false;
-	// With the server gone its pane ids start over, so every marker is stale.
+/** Pane ids start over with each server, so with no server running, or one just started, every marker is stale. */
+function sweepExitMarkers(host: Host): void {
 	const stem = basename(exitMarkerStem(host.socketPath));
 	try {
 		for (const name of readdirSync(dirname(host.socketPath))) {
@@ -384,6 +392,11 @@ async function stopServerAndClean(host: Host, client: MuxClient): Promise<boolea
 	} catch {
 		// A marker left behind is cleared by the next Clio in that pane.
 	}
+}
+
+async function stopServerAndClean(host: Host, client: MuxClient): Promise<boolean> {
+	if (!(await stopServer(host, client))) return false;
+	sweepExitMarkers(host);
 	cleanupHostFiles(host);
 	return true;
 }
@@ -505,6 +518,11 @@ async function openWorkspace(host: Host): Promise<Opened> {
 		}
 		const launch = host.platform.paneLaunch(host.options.clioArgv);
 		const paneEnv = { ...host.options.clioEnv, ...launch.env };
+		// A pane that starts Clio itself does so the moment it exists, and a Clio that ends at once writes its marker
+		// before this launcher hears back. Stale markers therefore go before the pane exists: all of them on a server
+		// this launch started, whose pane ids begin again.
+		if (startedServer) sweepExitMarkers(host);
+		const createdAt = Date.now();
 		const created = await client.workspaceCreate({
 			cwd: host.cwd,
 			label: workspaceLabel(host.cwd),
@@ -521,10 +539,13 @@ async function openWorkspace(host: Host): Promise<Opened> {
 		]);
 		// This pane id is new in this server's life, so nobody can be waiting on
 		// its marker; one left by an earlier server would end the launch at once.
-		rmSync(exitMarkerPath(host.socketPath, clioPane.paneId), { force: true });
+		// On a server that was already running, only a marker older than the pane
+		// can be that leftover: a newer one is this pane's own Clio, already gone.
+		if (!startedServer) removeMarkerOlderThan(exitMarkerPath(host.socketPath, clioPane.paneId), createdAt);
 		// `pane run` is herdr's own "type this and press enter", so the launcher
 		// inherits whatever shell-readiness handling the installed release has.
-		if (!runHerdr(host, ["pane", "run", clioPane.paneId, launch.line])) {
+		// A null line means the pane's first process starts Clio from its environment.
+		if (launch.line !== null && !runHerdr(host, ["pane", "run", clioPane.paneId, launch.line])) {
 			await undoLaunch(host, client, { workspaceId: createdWorkspaceId, startedServer });
 			await client.close();
 			return { refused: "the pane host refused to start Clio in the new workspace" };

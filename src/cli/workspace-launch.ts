@@ -177,6 +177,11 @@ export async function maybeLaunchWorkspace(
 
 	const { launchWorkspace } = await import("../domains/mux/workspace/launch.js");
 	const { clioPaneEnv } = await import("../domains/mux/child-env.js");
+	// The pane starts Clio before the host's client is attached, and until then the host cannot say what the
+	// terminal paints behind it or how large it is. This process still owns the real terminal, so it asks and
+	// hands both on.
+	const { probeTerminalBackground, terminalHandover } = await import("../core/terminal-background.js");
+	await probeTerminalBackground();
 	const result = await launchWorkspace({
 		herdrPath: herdr.binaryPath,
 		herdrVersion: herdr.version,
@@ -184,7 +189,7 @@ export async function maybeLaunchWorkspace(
 		outputStyle: settings.interface.outputDetail,
 		cwd: process.cwd(),
 		clioArgv: clioArgv(),
-		clioEnv: clioPaneEnv(process.env, settings.targets),
+		clioEnv: { ...clioPaneEnv(process.env, settings.targets), ...terminalHandover() },
 		notice: (line) => process.stderr.write(`Clio Coder: ${line}.\n`),
 	});
 	if (result.status === "fallback") {

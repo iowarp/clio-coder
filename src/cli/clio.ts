@@ -254,8 +254,10 @@ export async function runClioCommand(
 		if (terminalLeaseEligible(options)) {
 			// Ask for the background before the lease owns stdin and before the
 			// theme is created, so the palette matches a dark or light terminal.
-			const { probeTerminalBackground } = await import("../core/terminal-background.js");
+			const { awaitHandedTerminalSize, probeTerminalBackground } = await import("../core/terminal-background.js");
 			await probeTerminalBackground();
+			// Last before the lease, so everything above already ran while the pane host's client attached.
+			await awaitHandedTerminalSize();
 			const { createProcessTerminalLease, instantShellEnabled } = await import("../interactive/terminal-lease.js");
 			if (instantShellEnabled()) {
 				let stage0FrameId: number | null = null;
