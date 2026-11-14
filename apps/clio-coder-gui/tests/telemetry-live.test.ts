@@ -126,6 +126,9 @@ test("a session's pushed telemetry refreshes now, then at most once per interval
 
 /** Opens a subscription on a fake event stream and returns a way to deliver frames to it. */
 async function liveStream(t: TestContext, queries: QueryClient, timers?: Parameters<typeof subscribe>[5]) {
+	// After-hooks run in registration order; the dispose touches `document`, so it must run before the globals go.
+	let stop = () => {};
+	t.after(() => stop());
 	let source: EventTarget | undefined;
 	class Source extends EventTarget {
 		onerror: (() => void) | null = null;
@@ -148,7 +151,7 @@ async function liveStream(t: TestContext, queries: QueryClient, timers?: Paramet
 	}
 	const client = createClient({ ticket: "ticket" }, credentialFetch());
 	t.after(() => client.credentials.dispose());
-	t.after(subscribe(client, queries, () => {}, undefined, undefined, timers));
+	stop = subscribe(client, queries, () => {}, undefined, undefined, timers);
 	for (let turn = 0; turn < 50 && !source; turn += 1) await setTimeout(1);
 	const opened = source;
 	assert.ok(opened);
