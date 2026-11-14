@@ -236,6 +236,15 @@ export const guiTests = [
 	"row-keys-model",
 	// x090 r2-layout
 	"idle-reads",
+	// Round-2 regressions and the reports bridge. The other GUI files stay full-only: the default qualification's
+	// 2000-test budget has no room for their ~300 tests beside the core tier.
+	"chat-tools",
+	"chat-shell",
+	"interaction",
+	"settings-control-model",
+	"settings-controls-http",
+	"attachments-model",
+	"reports-http",
 ]
 	.map((name) => `tests/${name}.test.ts`)
 	.concat("tests/public-help.test.tsx", "tests/secondary-pages.test.tsx");
