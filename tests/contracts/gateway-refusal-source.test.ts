@@ -114,3 +114,29 @@ test("dispatch delegation refusal names the restricting source and how to widen 
 		assertTurnConstraintCompatibility(request, ["read"], true);
 	}
 });
+
+test("dispatch delegation refusal names recipes whose tools fit the delegated scope", () => {
+	const request = {
+		agentId: "coder",
+		task: "Check",
+		executionRole: "builder" as const,
+		turnConstraints: templateToolConstraints({ name: "advance", delegatedTools: ["read", "grep"] }),
+	};
+	const specs = [
+		{ id: "coder", tools: ["read", "bash"], audience: "base" },
+		{ id: "scout", tools: ["read", "grep"], audience: "base" },
+		{ id: "helper", tools: ["read"], audience: "internal" },
+	] as const;
+	throws(
+		() => assertTurnConstraintCompatibility(request, ["read", "bash"], true, specs),
+		(error: unknown) => {
+			ok(error instanceof Error);
+			match(
+				error.message,
+				/Remedy: dispatch with agent set to one of these recipes, whose tools fit the delegated scope: scout\. Or ask the operator to widen/u,
+			);
+			doesNotMatch(error.message, /helper/u);
+			return true;
+		},
+	);
+});

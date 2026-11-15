@@ -6038,7 +6038,7 @@ export function createDispatchBundle(
 			admission.mcp,
 			req.toolProfile === "council-read-only" && req.gate?.role === "member",
 		);
-		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
+		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http", agents.listSpecs());
 		announceMcpSandboxNoNetwork(
 			req,
 			pathScope,
@@ -10698,7 +10698,7 @@ export function createDispatchBundle(
 			admission.mcp,
 			req.toolProfile === "council-read-only" && req.gate?.role === "member",
 		);
-		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
+		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http", agents.listSpecs());
 		// Preview refuses exactly what dispatch would: a widening narrowing, an
 		// orchestration worker, or a route the runtime cannot honor.
 		const previewPermit = resolveDispatchPermit(
