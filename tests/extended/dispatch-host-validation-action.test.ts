@@ -5,9 +5,20 @@ import { finishRunResult } from "../../src/domains/dispatch/run-settlement.js";
 import { formatDispatchOutput, nextHostValidationAction } from "../../src/tools/dispatch-runner.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
-function ungroundedRun(declaredCheck?: string) {
+function ungroundedRun(declaredCheck?: string, contractKind?: string) {
 	const envelope = fixtureEnvelope("run-unchecked");
 	const draft = fixtureReceiptDraft(envelope);
+	if (contractKind !== undefined) {
+		draft.quality = {
+			...draft.quality,
+			resultContract: {
+				sourceId: `agent-result-contract:${contractKind}:digest`,
+				validatorDigest: "validator",
+				conformance: "pass",
+				quality: "pass",
+			},
+		};
+	}
 	draft.output = { state: "final", text: "Source inspected; tests pass.", bytes: 29, truncated: false };
 	draft.validationGrounding = {
 		claimed: 1,
@@ -61,6 +72,21 @@ describe("dispatch host validation action", () => {
 			formatDispatchOutput("parallel", [run], 16_384),
 			/next host validation for run-unchecked: run verify\(check="test"\)/,
 		);
+	});
+
+	it("tells the parent to use a read-only reviewer's sealed findings instead of running host checks", () => {
+		const run = { ...ungroundedRun(undefined, "verifier-report"), readOnly: true };
+		const output = formatDispatchOutput("parallel", [run], 16_384);
+		match(
+			output,
+			/next step for run-unchecked: use the sealed findings; spot-check consequential claims\. Its passing checks are review judgments/,
+		);
+		strictEqual(/verify\(\)|worker diff/.test(output.split("\n\n")[0] ?? ""), false);
+	});
+
+	it("keeps a report contract's checks out of host validation even off a read-only class", () => {
+		match(nextHostValidationAction(ungroundedRun(undefined, "research-report").receipt) ?? "", /use the sealed findings/);
+		match(nextHostValidationAction(ungroundedRun(undefined, "mutation-report").receipt) ?? "", /inspect the worker diff/);
 	});
 
 	it("does not request another host check after host evidence", () => {

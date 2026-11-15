@@ -539,11 +539,30 @@ class PipelineHaltError extends Error {
 	}
 }
 
+/** Contract kinds whose passing checks name commands a host can rerun; every other report's checks are judgments. */
+const COMMAND_CHECK_CONTRACT_KINDS = ["mutation-report", "verifier-report"] as const;
+
+/**
+ * Whether a run's claimed checks are code checks the host can rerun. A
+ * read-only reviewer's `passed` checks are review judgments, and telling the
+ * parent to inspect a diff and run verify() sent it after a tool the session
+ * never declared (WTF-P session 3nm95m0q8jfb).
+ */
+function claimsHostRerunnableChecks(receipt: RunResult, readOnly: boolean): boolean {
+	if (readOnly) return false;
+	const sourceId = receipt.quality?.resultContract?.sourceId;
+	if (sourceId === undefined) return true;
+	return COMMAND_CHECK_CONTRACT_KINDS.some((kind) => sourceId.startsWith(`agent-result-contract:${kind}:`));
+}
+
 /** Name the next host step from sealed facts when a worker claimed checks it never ran. */
-export function nextHostValidationAction(receipt: RunResult): string | null {
+export function nextHostValidationAction(receipt: RunResult, readOnly = false): string | null {
 	if (receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length) return null;
 	const grounding = receipt.validationGrounding;
 	if (grounding?.basis !== "no-command-executed" || grounding.ungrounded.length === 0) return null;
+	if (!claimsHostRerunnableChecks(receipt, readOnly)) {
+		return `next step for ${receipt.runId}: use the sealed findings; spot-check consequential claims. Its passing checks are review judgments, not commands it ran.`;
+	}
 	const declared = receipt.intent?.verification.map((check) => check.check) ?? [];
 	const action =
 		declared.length > 0
@@ -618,7 +637,7 @@ export function formatDispatchOutput(
 		...new Set(
 			runs
 				.flatMap((run) => [
-					nextHostValidationAction(run.receipt),
+					nextHostValidationAction(run.receipt, run.readOnly === true),
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
 				])
