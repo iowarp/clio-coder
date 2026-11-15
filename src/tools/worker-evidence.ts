@@ -396,6 +396,22 @@ export function workerTextLabel(status: CanonicalTrustStatus): string {
 	}
 }
 
+/** Contract kinds whose passing checks name commands a host can rerun; every other report's checks are judgments. */
+const COMMAND_CHECK_CONTRACT_KINDS = ["mutation-report", "verifier-report"] as const;
+
+/**
+ * Whether a run's passing checks are review judgments rather than commands a
+ * host could rerun: every check of a read-only run, and every check of a
+ * report contract other than the command-check kinds.
+ */
+export function checksAreReviewJudgments(readOnly: boolean, resultContractSourceId: string | undefined): boolean {
+	if (readOnly) return true;
+	if (resultContractSourceId === undefined) return false;
+	return !COMMAND_CHECK_CONTRACT_KINDS.some((kind) =>
+		resultContractSourceId.startsWith(`agent-result-contract:${kind}:`),
+	);
+}
+
 /**
  * Deterministic framing for text that must not be consumed as results. Every
  * trigger reads settled run facts or machine-written guard diagnostics,
@@ -435,10 +451,19 @@ export function workerTextNonEvidenceNotices(
 	const grounding = facts.validationGrounding;
 	if (grounding !== null && grounding.ungrounded.length > 0) {
 		const named = grounding.ungrounded.map((name) => JSON.stringify(name)).join(", ");
+		// A read-only reviewer's checks are judgments with nothing to re-run; the
+		// dispatch's next-step line already points the parent at its sealed
+		// findings, so this notice must not contradict it (WTF-P session 3nm95m0q8jfb).
+		const judgments = checksAreReviewJudgments(
+			facts.verification.basis === "read-only-agent",
+			facts.quality?.resultContract?.sourceId,
+		);
 		notices.push(
-			grounding.basis === "no-command-executed"
-				? `non-evidence: this run reported ${named} as passing and executed no command at all. Re-run the check yourself before repeating the claim.`
-				: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
+			judgments
+				? `non-evidence: this run reported ${named} as passing review judgments and executed no command. They are its reading of the source, not checks that ran; do not report them as verified.`
+				: grounding.basis === "no-command-executed"
+					? `non-evidence: this run reported ${named} as passing and executed no command at all. Re-run the check yourself before repeating the claim.`
+					: `non-evidence: this run reported ${named} as passing through a command the harness cannot identify as that check. Re-run it before repeating the claim.`,
 		);
 	}
 	if (facts.capabilityMismatch !== null) {
