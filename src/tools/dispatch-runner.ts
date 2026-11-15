@@ -118,6 +118,7 @@ import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
+	checksAreReviewJudgments,
 	compactHelperResultLines,
 	finishedRun,
 	finishedRunTrustStatus,
@@ -539,20 +540,14 @@ class PipelineHaltError extends Error {
 	}
 }
 
-/** Contract kinds whose passing checks name commands a host can rerun; every other report's checks are judgments. */
-const COMMAND_CHECK_CONTRACT_KINDS = ["mutation-report", "verifier-report"] as const;
-
 /**
- * Whether a run's claimed checks are code checks the host can rerun. A
- * read-only reviewer's `passed` checks are review judgments, and telling the
- * parent to inspect a diff and run verify() sent it after a tool the session
- * never declared (WTF-P session 3nm95m0q8jfb).
+ * Whether a run's claimed checks are code checks the host can rerun. Telling
+ * the parent to inspect a diff and run verify() for a read-only reviewer's
+ * judgments sent it after a tool the session never declared (WTF-P session
+ * 3nm95m0q8jfb).
  */
 function claimsHostRerunnableChecks(receipt: RunResult, readOnly: boolean): boolean {
-	if (readOnly) return false;
-	const sourceId = receipt.quality?.resultContract?.sourceId;
-	if (sourceId === undefined) return true;
-	return COMMAND_CHECK_CONTRACT_KINDS.some((kind) => sourceId.startsWith(`agent-result-contract:${kind}:`));
+	return !checksAreReviewJudgments(readOnly, receipt.quality?.resultContract?.sourceId);
 }
 
 /** Name the next host step from sealed facts when a worker claimed checks it never ran. */

@@ -84,6 +84,21 @@ describe("dispatch host validation action", () => {
 		strictEqual(/verify\(\)|worker diff/.test(output.split("\n\n")[0] ?? ""), false);
 	});
 
+	it("frames a read-only reviewer's unexecuted checks as judgments, not checks to re-run", () => {
+		const base = ungroundedRun(undefined, "verifier-report");
+		const envelope = fixtureEnvelope("run-unchecked");
+		const { digest: _digest, ...draft } = base.receipt;
+		const receipt = finishRunResult(
+			{ ...draft, verification: { state: "not_applicable", basis: "read-only-agent" } },
+			envelope,
+			{ terminal: { terminalReason: "completed" }, processExitCode: envelope.exitCode, frameType: null, usage: undefined },
+		).result;
+		const output = formatDispatchOutput("parallel", [{ ...base, receipt, readOnly: true }], 16_384);
+		match(output, /non-evidence: this run reported "tests pass" as passing review judgments and executed no command/);
+		strictEqual(output.includes("Re-run the check yourself"), false);
+		match(formatDispatchOutput("parallel", [ungroundedRun()], 16_384), /Re-run the check yourself/);
+	});
+
 	it("keeps a report contract's checks out of host validation even off a read-only class", () => {
 		match(nextHostValidationAction(ungroundedRun(undefined, "research-report").receipt) ?? "", /use the sealed findings/);
 		match(nextHostValidationAction(ungroundedRun(undefined, "mutation-report").receipt) ?? "", /inspect the worker diff/);
