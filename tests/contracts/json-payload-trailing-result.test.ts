@@ -17,7 +17,8 @@ test("a Markdown review that closes with its JSON result yields that result", ()
 		ok: true,
 		value: { verdict: "pass", checks: [{ name: "scope", passed: true, evidence: "plan-01 P2" }] },
 	});
-	const bareAfterBraces = 'The plan keeps `f() {` intact and says "{". Final: {"findings":[{"claim":"a } in a string"}]}';
+	const bareAfterBraces =
+		'The plan keeps `f() {` intact and says "{". Final: {"findings":[{"claim":"a } in a string"}]}';
 	deepStrictEqual(parseJsonObjectPayload(bareAfterBraces), {
 		ok: true,
 		value: { findings: [{ claim: "a } in a string" }] },
