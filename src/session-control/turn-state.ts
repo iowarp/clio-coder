@@ -39,6 +39,7 @@ import type { createEngineAgent } from "../engine/agent.js";
 import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
+import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
 import type { ModelRequestFacts } from "./status-types.js";
 
 export interface ChatLoopTarget {
@@ -271,8 +272,8 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
-	/** The operator turn that already spent its one re-prompt for a tool call the model only wrote out. */
-	toolMarkupRepromptTurnId: string | null;
+	/** Re-prompts spent this operator turn for tool calls the model only wrote out (`claimToolMarkupReprompt`). */
+	toolMarkupReprompt: ToolMarkupRepromptBudget | null;
 	/** Continuation requests, carries and stops; written only through its methods. */
 	readonly continuation: ContinuationState;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
@@ -335,7 +336,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "runtime"
 	| "streamStallReason"
 	| "streamStallStage"
-	| "toolMarkupRepromptTurnId"
+	| "toolMarkupReprompt"
 	| "toolProseAbortReason"
 	| "toolProseAssessedChars"
 	| "turnToolCalls"
@@ -419,7 +420,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		interruptedCall: null,
 		synthesisToolLock: false,
 		toolBudgetLock: false,
-		toolMarkupRepromptTurnId: null,
+		toolMarkupReprompt: null,
 		continuation: new ContinuationState(),
 		toolProseAbortReason: null,
 		streamStallReason: null,

@@ -81,6 +81,7 @@ import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
 	backendCacheVerdict,
+	claimToolMarkupReprompt,
 	classifyTurnEnding,
 	estimatedUsageForInterruptedTurn,
 	extractText,
@@ -93,6 +94,7 @@ import {
 	TOOL_MARKUP_REPROMPT,
 	TOOL_MARKUP_REPROMPT_NOTICE,
 	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
+	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
 	toolNamesFromAgentState,
 	toolResultSummary,
@@ -1541,7 +1543,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// A call the model only wrote out never ran. One more round through normal admission lets it make the call or
 			// say what it did, and Clio never parses or runs the markup itself. A guard's lock already told it tools are off.
 			const noAnswer = turn.message.stopReason === "stop" ? classifyTurnEnding([turn.message]) : null;
-			if (
+			const repromptBudget: ToolMarkupRepromptBudget | null =
 				noAnswer?.kind === "no_answer" &&
 				(noAnswer.cause === "tool_call_in_reasoning" ||
 					noAnswer.cause === "tool_call_as_text" ||
@@ -1550,10 +1552,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.activeInterruptReason === null &&
 				!state.synthesisToolLock &&
 				!state.toolBudgetLock &&
-				state.activeUserTurnId !== null &&
-				state.toolMarkupRepromptTurnId !== state.activeUserTurnId
-			) {
-				state.toolMarkupRepromptTurnId = state.activeUserTurnId;
+				state.activeUserTurnId !== null
+					? claimToolMarkupReprompt(state.toolMarkupReprompt, state.activeUserTurnId, state.turnToolCalls)
+					: null;
+			if (repromptBudget !== null) {
+				state.toolMarkupReprompt = repromptBudget;
 				requiredToolReminder = TOOL_MARKUP_REPROMPT;
 				deps.emitNotice(TOOL_MARKUP_REPROMPT_NOTICE, "warning", TOOL_MARKUP_REPROMPT_NOTICE_KEY);
 				return { action: "continue" };
