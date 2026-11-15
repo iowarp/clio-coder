@@ -190,6 +190,7 @@ export const coreTests = [
 	"middleware-required-tool-gateway",
 	"repetition-detector",
 	"tool-markup-reprompt-budget",
+	"cache-read-unreported",
 	"turn-scope-shell-note",
 	"working-set-skill-protection",
 	"json-payload-trailing-result",

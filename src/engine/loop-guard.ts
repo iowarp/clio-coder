@@ -116,8 +116,9 @@ const LOOP_GUARD_TURN_LIMIT = 32;
 
 /** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
 const SUCCEEDED_FINGERPRINT_LIMIT = 128;
-/** One model-visible line: formatModelRejection clips each line at 300 characters. */
-const PRIOR_FAILURE_CHARS = 200;
+/** formatModelRejection clips each line at 300 characters, so a quoted failure spans at most two lines under that. */
+const PRIOR_FAILURE_LINE_CHARS = 280;
+const PRIOR_FAILURE_LINES = 2;
 
 /** Bucket for calls arriving without a turn id (e.g. pre-session probes). */
 const NO_TURN_BUCKET = "no-turn";
@@ -229,16 +230,36 @@ function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: 
 function priorFailureLine(priorFailure: string | undefined): string {
 	return priorFailure === undefined
 		? ""
-		: `\nThe identical call failed earlier with: ${priorFailure} Fix what that error names before calling it again.`;
+		: `\nThe identical call failed earlier with:\n${priorFailure}\nFix what that error names before calling it again.`;
 }
 
-function clipFailure(message: string): string | undefined {
-	const line = message
-		.split("\n")
-		.map((entry) => entry.trim())
-		.find((entry) => entry.length > 0);
-	if (line === undefined) return undefined;
-	return line.length > PRIOR_FAILURE_CHARS ? `${line.slice(0, PRIOR_FAILURE_CHARS - 1)}…` : line;
+/**
+ * The failure's first paragraph on at most two lines. A validator's header
+ * line ends in a colon and names nothing; the fields it rejected follow on
+ * their own lines, so quoting only the first line restated "Validation failed
+ * for tool ..." and dropped every field (WTF-P campaign). The echoed arguments
+ * after the first blank line stay out.
+ */
+export function clipFailure(message: string): string | undefined {
+	const paragraph: string[] = [];
+	for (const raw of message.split("\n")) {
+		const entry = raw.trim();
+		if (entry.length === 0) {
+			if (paragraph.length > 0) break;
+			continue;
+		}
+		paragraph.push(paragraph.length === 0 ? entry : entry.replace(/^-\s+/, ""));
+	}
+	if (paragraph.length === 0) return undefined;
+	const [head, ...rest] = paragraph;
+	const text = rest.length === 0 ? (head as string) : `${head} ${rest.join("; ")}`;
+	const budget = PRIOR_FAILURE_LINE_CHARS * PRIOR_FAILURE_LINES;
+	const clipped = text.length > budget ? `${text.slice(0, budget - 1)}…` : text;
+	const lines: string[] = [];
+	for (let start = 0; start < clipped.length; start += PRIOR_FAILURE_LINE_CHARS) {
+		lines.push(clipped.slice(start, start + PRIOR_FAILURE_LINE_CHARS));
+	}
+	return lines.join("\n");
 }
 
 /** True when a sanitized locked reply holds nothing but the fallback notice. */
@@ -1006,7 +1027,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 
 	const emitLoopBlocked = (
 		input: MiddlewareHookInput,
-		info: { tool: string; repeatCount: number; blocksThisTurn: number; disposition: LoopBlockedDisposition },
+		info: {
+			tool: string;
+			repeatCount: number;
+			blocksThisTurn: number;
+			disposition: LoopBlockedDisposition;
+			priorFailure?: string;
+		},
 		at: number,
 	): void => {
 		const payload: LoopBlockedPayload = {
@@ -1016,6 +1043,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			budget,
 			interrupted: info.disposition === "stop",
 			disposition: info.disposition,
+			...(info.priorFailure !== undefined ? { priorFailure: info.priorFailure } : {}),
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 		};
@@ -1126,6 +1154,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		identicalBlockStreakByTurn.set(turnKey, { identity, count: streak });
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
 		const reachedBudget = blocksThisTurn >= budget || streak >= CONSECUTIVE_IDENTICAL_BLOCK_LIMIT;
+		const priorFailure = failedResults.get(identity);
+		const failed = priorFailure !== undefined ? { priorFailure } : {};
 		// Budget reached with the synthesis lockout wired: enter the lockout
 		// instead of stopping the turn. The block reason becomes the
 		// synthesize-now directive; the LoopBlocked event carries "lockout"
@@ -1134,11 +1164,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (synthesisLockout && reachedBudget) {
 			enterLockout(input, turnKey, { tool, repeatCount, blocksThisTurn });
 			options.onSynthesisLockout?.();
-			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout" }, now);
+			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout", ...failed }, now);
 			return [
 				{
 					kind: "block_tool",
-					reason: synthesisLockoutDirective(failedResults.get(identity)),
+					reason: synthesisLockoutDirective(priorFailure),
 					severity: "hard-block",
 					...marker,
 				},
@@ -1147,7 +1177,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// Below budget, or a surface without the lockout (workers): the
 		// existing per-block behavior. Reaching the budget without a lockout
 		// still stops the turn with the "being stopped" reason.
-		emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: reachedBudget ? "stop" : "block" }, now);
+		emitLoopBlocked(
+			input,
+			{ tool, repeatCount, blocksThisTurn, disposition: reachedBudget ? "stop" : "block", ...failed },
+			now,
+		);
 		const reason = reachedBudget
 			? `${baseReason} Loop budget exhausted (${blocksThisTurn} blocks this turn); the agent is being stopped.`
 			: baseReason;

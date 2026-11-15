@@ -164,6 +164,44 @@ describe("gateway correction contracts", () => {
 		}
 	});
 
+	it("names unknown fields that sit beside an object argument as possibly belonging inside it", async () => {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
+		const capability = mcpToolName("desk", "record");
+		ok(capability);
+		registry.register({
+			name: capability,
+			placement: "gateway",
+			description: "Write a record",
+			parameters: Type.Object(
+				{
+					uri: Type.String(),
+					record: Type.Optional(Type.Object({}, { additionalProperties: true })),
+					meta: Type.Optional(Type.Object({ owner: Type.String() }, { additionalProperties: false })),
+				},
+				{ additionalProperties: false },
+			),
+			baseActionClass: "write",
+			run: async () => ({ kind: "ok", output: "written" }),
+		});
+		registry.register(createGatewayTool({ registry }));
+		const verdict = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: {
+				op: "call",
+				capability,
+				args: { uri: "project://v", record: { id: "v" }, meta: {}, issues: [], owner: "me" },
+			},
+		});
+		ok(verdict.kind === "ok" && verdict.result.kind === "error", JSON.stringify(verdict));
+		const message = verdict.result.message;
+		match(message, /`owner` belongs inside `meta`/);
+		match(
+			message,
+			/`issues` is not a top-level argument but sits beside `record`, `meta` \(objects\); if it belongs inside one of them, move it there/,
+		);
+		ok(message.indexOf("Misplaced fields") < message.indexOf("Received arguments"), message);
+	});
+
 	it("runs a capability's argument normalizer before validating a gateway call", async () => {
 		const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "yolo" });
 		const scriptRuns: Record<string, unknown>[] = [];

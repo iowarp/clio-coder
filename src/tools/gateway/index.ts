@@ -31,6 +31,7 @@ import { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 import { runGatewayChain } from "./chain.js";
 import { capabilityArgumentShape, gatewayExamples } from "./guidance.js";
 import type { McpCapabilitySource, McpLaunchOptions, McpServerListing } from "./mcp-capabilities.js";
+import { misplacedFieldHint } from "./misplaced-fields.js";
 
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 export {
@@ -152,6 +153,13 @@ function withModelLine(result: ToolResult, line: string): ToolResult {
 				}
 			: result.details;
 	return { ...result, modelContext: `${note}${text}`, ...(details === undefined ? {} : { details }) };
+}
+
+/** The hint goes ahead of the echoed arguments, so it stays in the paragraph a loop-guard quote keeps. */
+function withMisplacedFieldHint(message: string, hint: string | null): string {
+	if (hint === null) return message;
+	const echo = message.indexOf("\n\nReceived arguments:");
+	return echo < 0 ? `${message}\n${hint}` : `${message.slice(0, echo)}\n${hint}${message.slice(echo)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -873,11 +881,15 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// A schema the model read from an outdated recording is the likeliest
 			// reason for the rejection, so the catalog change line belongs here (K9).
 			const changed = isMcpToolName(spec.name) ? (deps.mcp?.takeCatalogChange(spec.name) ?? null) : null;
+			const rejection = withMisplacedFieldHint(
+				error instanceof Error ? error.message : String(error),
+				misplacedFieldHint(spec.parameters, preparedArgs),
+			);
 			return {
 				kind: "error",
 				message:
 					(changed !== null ? `${changed}\n` : "") +
-					`gateway: ${spec.name} arguments rejected: ${error instanceof Error ? error.message : String(error)}. Use gateway(op="describe", capability="${spec.name}") for the schema.` +
+					`gateway: ${spec.name} arguments rejected: ${rejection}. Use gateway(op="describe", capability="${spec.name}") for the schema.` +
 					(examples.length > 0 ? ` Example to adapt, not retry verbatim: ${JSON.stringify(examples[0])}` : ""),
 			};
 		}

@@ -1,8 +1,8 @@
-import { match } from "node:assert/strict";
+import { equal, match } from "node:assert/strict";
 import { test } from "node:test";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { createLoopState, hashToolCall, observe } from "../../src/domains/safety/loop-detector.js";
-import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
+import { clipFailure, createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 
 test("a blocked repeat of a failed call restates why the call failed", () => {
 	let loopState = createLoopState();
@@ -41,6 +41,15 @@ test("a blocked repeat of a failed call restates why the call failed", () => {
 	match(reasons[0] ?? "", /disabled for the rest of this turn/u);
 	match(
 		reasons[0] ?? "",
-		/\nThe identical call failed earlier with: Not written: project:\/\/state already exists; pass expect_revision\. Fix/u,
+		/\nThe identical call failed earlier with:\nNot written: project:\/\/state already exists; pass expect_revision\. Details follow\.\nFix/u,
+	);
+});
+
+test("a restated validation failure keeps the fields it names and drops the echoed arguments", () => {
+	equal(
+		clipFailure(
+			'Validation failed for tool "extension_desk__record":\n  - issues: unknown field\n  - next_actions: unknown field\n\nReceived arguments:\n{"uri":"x"}',
+		),
+		'Validation failed for tool "extension_desk__record": issues: unknown field; next_actions: unknown field',
 	);
 });
