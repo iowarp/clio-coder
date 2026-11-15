@@ -115,7 +115,7 @@ for (const action of ["interruptFromEditor"] as const) {
 // A template with tool constraints sent now while a tool ran was refused by the
 // chat loop, yet the editor was already empty and "queued ahead" was shown.
 it("a send-now the live run refuses keeps its draft and reports nothing queued", async () => {
-	const f = fixture(async (text) => ({ text, images: [], constraints: { allowedTools: ["read"] } }));
+	const f = fixture(async (text) => ({ text, images: [], template: "review", constraints: { allowedTools: ["read"] } }));
 	const notices: string[] = [];
 	f.deps.notify = (_level, text) => notices.push(text);
 	f.deps.chat.runningToolCalls = () => 1;
