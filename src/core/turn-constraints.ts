@@ -5,6 +5,15 @@ export interface ToolSurfaceSource {
 	readonly tools: readonly string[];
 	readonly source: string;
 	readonly remedy: string;
+	/** The prompt template that declared this limit, when one did. */
+	readonly template?: string;
+}
+
+/** The prompt template whose tool scope bounds a turn, when one does. */
+export function turnTemplateName(constraints: TurnConstraints | undefined): string | undefined {
+	for (const entry of [...(constraints?.toolSurfaceSources ?? []), ...(constraints?.delegatedToolSurfaceSources ?? [])])
+		if (entry.template !== undefined && entry.template.length > 0) return entry.template;
+	return undefined;
 }
 
 export function templateToolConstraints(template: {
@@ -17,6 +26,7 @@ export function templateToolConstraints(template: {
 			tools,
 			source: `prompt template "${template.name}" ${field}`,
 			remedy: `Ask the operator to widen ${field} in prompt template "${template.name}", then resubmit.`,
+			...(template.name.length > 0 ? { template: template.name } : {}),
 		},
 	];
 	return {
@@ -200,6 +210,7 @@ function isSurfaceSources(value: unknown): boolean {
 					typeof entry === "object" &&
 					typeof entry.source === "string" &&
 					typeof entry.remedy === "string" &&
+					(entry.template === undefined || typeof entry.template === "string") &&
 					// Source tools only attribute a refusal and never admit anything, so they
 					// take a recipe's tool list verbatim instead of the strict name rule.
 					Array.isArray(entry.tools) &&
@@ -245,6 +256,16 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 		lines.push(
 			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
 		);
+		// A narrowed scope that keeps the shell beside the file tools admits it
+		// for the commands the workflow runs. Given only the list, a model ran
+		// find, ls and grep through bash eight-plus times a turn (WTF-P campaign).
+		const fileTools = [ToolNames.Read, ToolNames.Grep].filter((name) => names.includes(name));
+		if (names.includes(ToolNames.Bash) && fileTools.length > 0) {
+			const listing = [ToolNames.Find, ToolNames.Ls].filter((name) => names.includes(name));
+			lines.push(
+				`bash is admitted for the commands this task runs; use ${fileTools.join(" and ")} for files${listing.length > 0 ? ` and ${listing.join("/")} through gateway for listings` : ""}, not shell commands.`,
+			);
+		}
 	}
 	if (constraints.delegatedTools) {
 		const names = [...new Set(constraints.delegatedTools)].sort();

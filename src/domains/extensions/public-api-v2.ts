@@ -1,4 +1,5 @@
 import type { FactSum } from "../../core/telemetry/fact.js";
+import type { TurnOrigin } from "../../core/turn-origin.js";
 /**
  * Operator runtime API v2. Import these types only; Clio injects the API.
  *
@@ -171,12 +172,23 @@ export interface ExtensionToolHookLanding {
 	dispatch?: ExtensionDispatchCall;
 }
 
+/**
+ * Who started the turn a prompt_submit, turn_start or turn_end hook sees.
+ * `operator` is a prompt the operator submitted; `continuation` is Clio
+ * continuing a turn that stopped (loop guard, tool budget, a failure) under
+ * yolo, with `continuation.index` of `continuation.cap`; `job` is a scheduled
+ * job's turn; `peer` is a message another agent sent into the session.
+ * `template` names the prompt template whose tool scope bounds the turn, and
+ * a continuation keeps it.
+ */
+export type ExtensionTurnOrigin = TurnOrigin;
+
 export type ExtensionHookEvent =
-	| {
+	| ({
 			point: "prompt_submit";
 			/** access: prompt */
 			text?: string;
-	  }
+	  } & ExtensionTurnOrigin)
 	| ({
 			point: "before_tool";
 			tool: string;
@@ -195,19 +207,19 @@ export type ExtensionHookEvent =
 			/** access: tool-results */
 			result?: string;
 	  } & ExtensionToolHookLanding)
-	| {
+	| ({
 			point: "turn_start";
 			turnId: string;
 			/** access: prompt */
 			text?: string;
-	  }
-	| {
+	  } & Partial<ExtensionTurnOrigin>)
+	| ({
 			point: "turn_end";
 			turnId: string;
 			outcome: "completed" | "aborted" | "error";
 			/** access: assistant-text */
 			text?: string;
-	  };
+	  } & Partial<ExtensionTurnOrigin>);
 
 /**
  * Effects an awaited hook may return. Each applies only at the points the
@@ -281,10 +293,22 @@ export interface Interview {
 	step: InterviewStep;
 }
 
+/**
+ * `answers` maps each question id to its value: the chosen option `value`
+ * (`string[]` for `multi`), or the typed text for a `text` question. When the
+ * operator typed text beside chosen options, the option value stays in
+ * `answers` and the text arrives in `notes` under the same id. When the
+ * operator typed free text instead of choosing ("Other"), `answers` carries
+ * that text and `other` marks the id.
+ */
 export interface InterviewAnswer {
 	id: string;
 	step: string;
 	answers: Record<string, string | string[]>;
+	/** Text the operator attached to chosen options, by question id. */
+	notes?: Record<string, string>;
+	/** Question ids answered with free text that names no offered option. */
+	other?: Record<string, true>;
 	/** `back` is reserved: the overlay cannot return to a resolved step yet, so the host never sends it. */
 	nav: "next" | "back" | "cancel";
 	/** Set with `nav: "cancel"` when no operator could answer. */

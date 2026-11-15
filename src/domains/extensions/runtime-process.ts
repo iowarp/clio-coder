@@ -62,7 +62,11 @@ export class ExtensionRuntimeProcess {
 			const manifestName = path.basename(extension.manifestPath);
 			const verified = extensionContentDigestWithCapture(copy, { capture: [manifestName] });
 			if (verified.digest !== extension.provenance.contentDigest)
-				throw new Error("runtime copy does not match installed package digest");
+				throw new Error(
+					`runtime copy of ${extension.id} does not match the package digest recorded for ${extension.provenance.canonicalRoot} ` +
+						`(recorded ${extension.provenance.contentDigest.slice(0, 12)}, copy ${verified.digest.slice(0, 12)}); ` +
+						"the package tree changed after it was digested",
+				);
 			const manifestBytes = verified.captured.get(manifestName);
 			if (!manifestBytes) throw new Error("verified runtime manifest bytes are absent");
 			const parsed = parseExtensionManifest(

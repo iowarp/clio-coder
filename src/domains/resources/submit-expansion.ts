@@ -14,6 +14,7 @@ import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { templateToolConstraints } from "../../core/turn-constraints.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ResourcesContract } from "./contract.js";
+import { pluginResourceComponents } from "./package-references.js";
 
 export interface SubmitExpansion {
 	text: string;
@@ -124,6 +125,23 @@ export interface SubmitExpansionOptions {
 	onExtract?: (shortPath: string) => void;
 }
 
+/**
+ * A plugin template's turn names the resources its plugin declares, so the
+ * model reads a schema by path instead of finding it with bash (WTF-P
+ * campaign: find, read and grep over the plugin tree before every record).
+ */
+function withPluginResources(text: string, template: { name: string; packageRoot?: string }): string {
+	if (template.packageRoot === undefined) return text;
+	const resources = pluginResourceComponents(template.packageRoot);
+	if (resources.length === 0) return text;
+	return [
+		text,
+		"",
+		`[Plugin resources] ${template.name} runs with these files its plugin declares; read them by path when the workflow needs them instead of searching for them:`,
+		...resources.map((resource) => `- ${resource.id}: ${resource.path}`),
+	].join("\n");
+}
+
 export async function expandSubmitText(
 	text: string,
 	resources: ResourcesContract | undefined,
@@ -145,7 +163,9 @@ export async function expandSubmitText(
 			outcome: "expanded",
 			details: { name: promptExpansion.template.name },
 		});
-	const promptText = promptExpansion?.expanded ? promptExpansion.text : parsed.text;
+	const promptText = promptExpansion?.expanded
+		? withPluginResources(promptExpansion.text, promptExpansion.template)
+		: parsed.text;
 	const allowedTools = promptExpansion?.expanded ? promptExpansion.template.allowedTools : undefined;
 	const delegatedTools = promptExpansion?.expanded ? promptExpansion.template.delegatedTools : undefined;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {

@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, join, relative as relativePath, resolve, sep } from "node:path";
+import { type TurnOrigin, turnOriginFromMetadata } from "../core/turn-origin.js";
 import {
 	capabilityEnvelope,
 	type ExtensionContentAccess,
@@ -173,6 +174,7 @@ function hookEvent(
 				point,
 				turnId: turnId ?? "",
 				...(access.includes("prompt") && input.text !== undefined ? { text: input.text } : {}),
+				...turnOriginFromMetadata(input.metadata),
 			};
 		case "turn_end":
 			return {
@@ -185,6 +187,7 @@ function hookEvent(
 							? "error"
 							: "completed",
 				...(access.includes("assistant-text") && input.text !== undefined ? { text: input.text } : {}),
+				...turnOriginFromMetadata(input.metadata),
 			};
 	}
 }
@@ -550,7 +553,7 @@ export interface ExtensionPromptGate {
 	 * model would receive exactly that line. A rewrite of a line a template
 	 * expanded is refused with a notice, since the body is not the line.
 	 */
-	run(typed: string, rewritable: boolean): Promise<ExtensionPromptGateVerdict>;
+	run(typed: string, rewritable: boolean, origin?: TurnOrigin): Promise<ExtensionPromptGateVerdict>;
 }
 
 /**
@@ -580,12 +583,16 @@ export function buildExtensionPromptGate(
 	});
 	return {
 		size: runners.length,
-		async run(typed, rewritable) {
+		async run(typed, rewritable, origin = { origin: "operator" }) {
 			let text = typed;
 			const notices: string[] = [];
 			for (const { extensionId, access, runner } of runners) {
 				const startedAt = performance.now();
-				const verdict = await runner.run({ point: "prompt_submit", ...(access.includes("prompt") ? { text } : {}) });
+				const verdict = await runner.run({
+					point: "prompt_submit",
+					...(access.includes("prompt") ? { text } : {}),
+					...origin,
+				});
 				if (verdict.kind === "failed") {
 					runner.settle(verdict, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);
 					if (verdict.policy === "block")

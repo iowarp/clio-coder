@@ -7,6 +7,7 @@ import {
 	skillInstallOfferTag,
 } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { MarketplaceSkill } from "../resources/skills/marketplace.js";
 import {
 	assertPromotionInstallSource,
@@ -57,6 +58,8 @@ export interface MarketplaceOfferInstallResult {
 export interface MarketplaceOfferDeps {
 	/** Whether the session can render ask_user. Defaults to interactive offers. */
 	interactive?: boolean;
+	/** The submitted turn's explicit scope; a narrowed or skill-free turn gets no offer. */
+	getTurnConstraints?: () => TurnConstraints | undefined;
 	/** Installed skill names the matcher must exclude. */
 	listInstalledSkillNames(): ReadonlyArray<string>;
 	/** The local marketplace lookup (catalog + index); already local-only. */
@@ -330,6 +333,17 @@ export function createMarketplaceOfferRegistration(deps: MarketplaceOfferDeps): 
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
 			if (offersPaused) return NO_EFFECTS;
+			// A turn whose tools were narrowed (a prompt template's allowed-tools,
+			// --allow-tools) or whose skills are off asked for a bounded job; an
+			// install flow there is noise in someone else's workflow.
+			const constraints = deps.getTurnConstraints?.();
+			if (
+				constraints?.allowedTools !== undefined ||
+				constraints?.skills === "disabled" ||
+				constraints?.mode === "answer" ||
+				constraints?.mode === "proposal"
+			)
+				return NO_EFFECTS;
 			// The in-turn offer runs through context and ask_user; a turn that
 			// cannot call both keeps the match for a later turn that can.
 			if (

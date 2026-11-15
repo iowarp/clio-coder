@@ -306,9 +306,37 @@ export type TurnEnding =
 /** The notice key the status surface reads as the one re-prompt for a written-out tool call starting. */
 export const TOOL_MARKUP_REPROMPT_NOTICE_KEY = "turn.tool-markup-reprompt";
 export const TOOL_MARKUP_REPROMPT_NOTICE =
-	"[Clio Coder] The model wrote its tool call as text, so it did not run. Clio asked it once to make the call properly.";
+	"[Clio Coder] The model wrote its tool call as text, so it did not run. Clio asked it to make the call properly.";
 export const TOOL_MARKUP_REPROMPT =
 	"<system-reminder>Your last reply wrote a tool call as text, so it did not run and nothing happened. Calls written as text never run. If the work still needs a tool, make the call through the tool interface now. Otherwise answer in plain prose and say plainly what was not done.</system-reminder>";
+
+/** At most this many written-out-call re-prompts in one operator turn. */
+export const TOOL_MARKUP_REPROMPT_CAP = 3;
+
+/** Which operator turn spent written-out-call re-prompts, how many, and the tool-call count at the last one. */
+export interface ToolMarkupRepromptBudget {
+	turnId: string;
+	count: number;
+	toolCallsAt: number;
+}
+
+/**
+ * Claims one re-prompt for a tool call the model only wrote out. The first in
+ * an operator turn is free; another is granted only when a real call started
+ * since the last one, so a model that recovered and kept working is asked
+ * again, while one that writes markup back to back ends the turn. Qwen-family
+ * models wrote calls into reasoning several times in one long turn (WTF-P
+ * campaign, 2026-11-15), and one re-prompt per turn ended it at the second.
+ */
+export function claimToolMarkupReprompt(
+	budget: ToolMarkupRepromptBudget | null,
+	turnId: string,
+	toolCalls: number,
+): ToolMarkupRepromptBudget | null {
+	if (budget === null || budget.turnId !== turnId) return { turnId, count: 1, toolCallsAt: toolCalls };
+	if (budget.count >= TOOL_MARKUP_REPROMPT_CAP || budget.toolCallsAt === toolCalls) return null;
+	return { turnId, count: budget.count + 1, toolCallsAt: toolCalls };
+}
 
 /** A call that succeeded and was not a question to the operator, so it did work toward the request. */
 function ranRealTool(message: AgentMessage): boolean {

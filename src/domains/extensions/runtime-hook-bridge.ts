@@ -5,6 +5,10 @@ import type { ExtensionHookEvent, ExtensionToolResult, Interview } from "./publi
 export interface ParkedInterviewResult {
 	outcome: "done" | "cancelled";
 	answers: Record<string, Record<string, string | string[]>>;
+	/** By step, then question id: text the operator attached to chosen options. */
+	notes?: Record<string, Record<string, string>>;
+	/** By step, then question id: answers that were free text naming no offered option. */
+	other?: Record<string, Record<string, true>>;
 	/** The extension's closing text when it finished, or why the interview ended. */
 	text: string;
 	/** Set when no operator could be asked, so the caller can tell an absent author from a refusal. */

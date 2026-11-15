@@ -95,7 +95,9 @@ import {
 	type TurnConstraints,
 	toolSurfaceSources,
 	turnScopeGuidance,
+	turnTemplateName,
 } from "../core/turn-constraints.js";
+import type { TurnOrigin } from "../core/turn-origin.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -150,6 +152,7 @@ import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import { scopedCapabilityShapes } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -192,6 +195,7 @@ import {
 } from "./operator-memory.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { runPrewarmRound } from "./prewarm.js";
+import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
@@ -502,6 +506,8 @@ export type ChatLoopEvent = (
 export interface PromptSubmitInput {
 	/** What the operator typed: the template invocation when one expanded. */
 	typed: string;
+	/** Who started this turn: an operator prompt, Clio's continuation of a stopped turn, a job or a peer. */
+	origin: TurnOrigin;
 	/** What the model would receive. */
 	text: string;
 }
@@ -541,6 +547,8 @@ export interface ChatSubmitOptions {
 	requestContinuation?: boolean;
 	/** A yolo continuation of a stopped turn; does not reset the count against its cap (#445). */
 	yoloContinuation?: boolean;
+	/** That continuation's place against `TURN_CONTINUATION_CAP`, for hooks that read the turn's origin. */
+	yoloContinuationAttempt?: number;
 	/**
 	 * Delivery mode when a run is active; ignored when idle. Defaults to
 	 * `next-slot`. `interrupt` cancels the run, waits for it to settle, and
@@ -2076,6 +2084,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			: stop;
 	};
 
+	/**
+	 * Who started a submitted turn, for extension hooks. Clio's continuation of
+	 * a stopped turn runs under the same template scope as the turn it
+	 * continues, so an extension must not read it as a new operator prompt.
+	 */
+	const submittedTurnOrigin = (options: ChatSubmitOptions): TurnOrigin => {
+		const template = turnTemplateName(state.currentTurnConstraints);
+		const origin: TurnOrigin["origin"] = options.machineTurn
+			? "job"
+			: options.yoloContinuation === true
+				? "continuation"
+				: options.origin !== undefined && options.operatorAuthored !== true
+					? "peer"
+					: "operator";
+		return {
+			origin,
+			...(options.yoloContinuationAttempt === undefined
+				? {}
+				: { continuation: { index: options.yoloContinuationAttempt, cap: TURN_CONTINUATION_CAP } }),
+			...(template === undefined ? {} : { template }),
+		};
+	};
+
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
 	const continueStoppedTurn = async (
 		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number },
@@ -2111,6 +2142,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
+				yoloContinuationAttempt: attempt,
 				...(constraints === undefined ? {} : { constraints }),
 			},
 		);
@@ -3020,9 +3052,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
 				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;
+				// A request continuation resumes the turn in progress, so it keeps that turn's origin.
+				if (options.requestContinuation !== true) state.currentTurnOrigin = submittedTurnOrigin(options);
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					markPreparationStep("prompt-hook");
-					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
+					const verdict = await deps.promptSubmit({
+						typed: options.display?.text ?? text,
+						text,
+						origin: state.currentTurnOrigin ?? { origin: "operator" },
+					});
 					if (!admissionCurrent()) return;
 					if (verdict.kind === "block") {
 						emit({
@@ -3216,7 +3254,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
 				// Continuations repeat it so a mid-turn compaction cannot drop it.
-				const turnScope = turnScopeGuidance(state.currentTurnConstraints);
+				const turnScope = [
+					turnScopeGuidance(state.currentTurnConstraints),
+					scopedCapabilityShapes(deps.toolRegistry, state.currentTurnConstraints?.allowedTools),
+				]
+					.filter((part) => part.length > 0)
+					.join("\n");
 				// The prompt delta is read when the text is composed, after
 				// ensureSessionPrompt below has compared the live inputs (#423).
 				const reminderProjection = middleware.takePendingReminderProjection(() =>
@@ -3487,6 +3530,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 				state.toolProseAbortReason = null;
 				state.toolProseAssessedChars = 0;
+				state.repetitionAbortReason = null;
 				state.activeInterruptReason = null;
 				state.interruptedAssistantMessage = null;
 				state.interruptedCall = null;
@@ -3568,6 +3612,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								model: model.id,
 							}),
 						]);
+					}
+					// The repetition check stopped a looping stream. Once per operator
+					// turn the model gets the stopped reply replaced by a nudge and one
+					// more run; an operator's Esc in the same window wins.
+					if (admissionCurrent() && state.repetitionAbortReason !== null && state.activeInterruptReason === null) {
+						const reason = state.repetitionAbortReason;
+						const turnId = state.activeUserTurnId;
+						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
+							state.repetitionRepromptTurnId = turnId;
+							state.repetitionAbortReason = null;
+							const last = agentRuntime.agent.state.messages.at(-1);
+							// The looping reply is in the ledger; replaying it would resend the loop.
+							if (last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted")
+								agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
+							emitNotice(
+								"[Clio Coder] Asking the model once to act or answer instead of repeating.",
+								"warning",
+								REPETITION_REPROMPT_NOTICE_KEY,
+							);
+							const model = agentRuntime.agent.state.model;
+							await agentRuntime.agent.prompt([
+								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }),
+							]);
+						} else {
+							const last = agentRuntime.agent.state.messages.at(-1);
+							if (last?.role === "assistant") (last as { errorMessage?: string }).errorMessage = reason;
+						}
 					}
 					// pi-agent-core does NOT throw on provider failures:
 					// it pushes an assistant message with stopReason="error" and

@@ -1094,13 +1094,15 @@ describe("production compaction controls", () => {
 			return attempts;
 		};
 		// The summary is written on its own route, so the chat window holds only the summary it returns.
+		// The threshold's own 20K headroom holds its 13K summary, so it fires at 0.9 x 200K.
 		strictEqual(await compactAt(53_000, "summary-target/summary"), 0);
-		strictEqual(await compactAt(150_000, "summary-target/summary"), 0);
-		strictEqual(await compactAt(172_000, "summary-target/summary"), 1);
-		// On the chat route, the first summary keeps room for reasoning without claiming the whole output limit.
+		strictEqual(await compactAt(175_000, "summary-target/summary"), 0);
+		strictEqual(await compactAt(185_000, "summary-target/summary"), 1);
+		// On the chat route, the first summary keeps room for reasoning without claiming the whole output limit:
+		// its 26K reserve exceeds that headroom, so it fires at 200K - 26,214.
 		strictEqual(await compactAt(53_000, undefined), 0);
-		strictEqual(await compactAt(150_000, undefined), 0);
-		strictEqual(await compactAt(160_000, undefined), 1);
+		strictEqual(await compactAt(168_000, undefined), 0);
+		strictEqual(await compactAt(179_000, undefined), 1);
 	});
 
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
@@ -1821,6 +1823,11 @@ describe("compaction trigger output reservation", () => {
 	it("counts the summary output reservation against the window", async () => {
 		const { shouldCompact } = await import("../../src/domains/session/compaction/auto.js");
 		strictEqual(shouldCompact(70_000, 0.8, 100_000).shouldCompact, false);
-		strictEqual(shouldCompact(70_000, 0.8, 100_000, 16_000).shouldCompact, true);
+		// The threshold's own 20K headroom already holds a 16K summary.
+		strictEqual(shouldCompact(79_000, 0.8, 100_000, 16_000).shouldCompact, false);
+		strictEqual(shouldCompact(80_000, 0.8, 100_000, 16_000).shouldCompact, true);
+		// A 26K summary on a 0.9 threshold fires where the summary still fits: 131,072 − 26,214.
+		strictEqual(shouldCompact(93_071, 0.9, 131_072, 26_214).shouldCompact, false);
+		strictEqual(shouldCompact(104_858, 0.9, 131_072, 26_214).shouldCompact, true);
 	});
 });

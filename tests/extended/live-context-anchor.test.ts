@@ -219,7 +219,7 @@ describe("live measured context anchor", () => {
 			}),
 			entry("a", "old", "assistant", {
 				content: [{ type: "toolCall", id: "read1", name: "read", arguments: { path: "current.ts" } }],
-				usage: usage(19500, 100),
+				usage: usage(24000, 100),
 			}),
 		];
 		const meta = { id: "anchor-session", cwdHash: "anchor-fixture", cwd: isolated.dir } as SessionMeta;
@@ -247,7 +247,7 @@ describe("live measured context anchor", () => {
 		f.settings.context.workingSet.enabled = true;
 		f.state.lastTurnId = "a";
 		f.runtime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(entries);
-		f.context.reconcileUsage(usage(19500, 100));
+		f.context.reconcileUsage(usage(24000, 100));
 		entries.push(
 			entry("tail", "a", "tool_result", {
 				toolCallId: "read1",
@@ -263,9 +263,10 @@ describe("live measured context anchor", () => {
 		ok(tool);
 		tool.description += "g".repeat(400);
 		const original = structuredClone(entries);
-		const expected = 19600 + estimateAgentMessageTokens(tail) + 100 - 1000;
-		// With the summary's 8192-token output reservation counted, the eviction alone clears the 0.85 trigger.
-		ok(expected + 1000 + 8192 > 32768 * 0.85 && expected + 8192 <= 32768 * 0.85);
+		const expected = 24100 + estimateAgentMessageTokens(tail) + 100 - 1000;
+		// The summary's 8192-token reservation exceeds the 0.85 threshold's headroom, so the trigger is
+		// 32768 - 8192 tokens, and the eviction alone clears it.
+		ok(expected + 1000 >= 32768 - 8192 && expected < 32768 - 8192);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false), true);
 		strictEqual(evictions, 1);
 		strictEqual(f.summaries(), 0);

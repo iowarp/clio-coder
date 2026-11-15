@@ -27,6 +27,7 @@
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import type { TurnOrigin } from "../core/turn-origin.js";
 import type {
 	AuthResolution,
 	ResolvedRuntimeTarget,
@@ -39,6 +40,7 @@ import type { createEngineAgent } from "../engine/agent.js";
 import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { AskUserToolPolicy } from "../tools/registry.js";
+import type { ToolMarkupRepromptBudget } from "./chat-loop-messages.js";
 import type { ModelRequestFacts } from "./status-types.js";
 
 export interface ChatLoopTarget {
@@ -271,12 +273,16 @@ export interface ChatTurnState {
 	 * Cleared with `synthesisToolLock`.
 	 */
 	toolBudgetLock: boolean;
-	/** The operator turn that already spent its one re-prompt for a tool call the model only wrote out. */
-	toolMarkupRepromptTurnId: string | null;
+	/** Re-prompts spent this operator turn for tool calls the model only wrote out (`claimToolMarkupReprompt`). */
+	toolMarkupReprompt: ToolMarkupRepromptBudget | null;
 	/** Continuation requests, carries and stops; written only through its methods. */
 	readonly continuation: ContinuationState;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
+	/** Set when the repetition check stopped a looping stream; consumed by the one nudge after it (`repetition-detector.ts`). */
+	repetitionAbortReason: string | null;
+	/** The operator turn that already spent its one repetition nudge. */
+	repetitionRepromptTurnId: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
 	/** A route pick the waiting request is moving to. Pinned at the pick, so a later pick changes the next turn only. */
@@ -299,6 +305,8 @@ export interface ChatTurnState {
 	turnSharedWorkerNote: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
+	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
+	currentTurnOrigin: TurnOrigin | null;
 	/**
 	 * Tool surface an activated skill narrowed, held across the operator's
 	 * later turns. Replaced when the operator activates a different skill,
@@ -335,7 +343,8 @@ export type TurnRuntimeState = TurnStateView<
 	| "runtime"
 	| "streamStallReason"
 	| "streamStallStage"
-	| "toolMarkupRepromptTurnId"
+	| "repetitionAbortReason"
+	| "toolMarkupReprompt"
 	| "toolProseAbortReason"
 	| "toolProseAssessedChars"
 	| "turnToolCalls"
@@ -348,6 +357,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "activeUserTurnId"
 	| "continuation"
 	| "currentTurnConstraints"
+	| "currentTurnOrigin"
 	| "lastTurnId"
 	| "synthesisToolLock"
 	| "toolBudgetLock"
@@ -419,9 +429,11 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		interruptedCall: null,
 		synthesisToolLock: false,
 		toolBudgetLock: false,
-		toolMarkupRepromptTurnId: null,
+		toolMarkupReprompt: null,
 		continuation: new ContinuationState(),
 		toolProseAbortReason: null,
+		repetitionAbortReason: null,
+		repetitionRepromptTurnId: null,
 		streamStallReason: null,
 		routeMove: null,
 		routeMoveSeat: false,
@@ -434,6 +446,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnSharedWorkerNote: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
+		currentTurnOrigin: null,
 		activeSkillSurface: undefined,
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,

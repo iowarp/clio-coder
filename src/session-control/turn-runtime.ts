@@ -81,6 +81,7 @@ import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
 	backendCacheVerdict,
+	claimToolMarkupReprompt,
 	classifyTurnEnding,
 	estimatedUsageForInterruptedTurn,
 	extractText,
@@ -93,10 +94,12 @@ import {
 	TOOL_MARKUP_REPROMPT,
 	TOOL_MARKUP_REPROMPT_NOTICE,
 	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
+	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import { assessRepetition, repetitionAbortReason, shouldAssessRepetition } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
@@ -1541,7 +1544,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// A call the model only wrote out never ran. One more round through normal admission lets it make the call or
 			// say what it did, and Clio never parses or runs the markup itself. A guard's lock already told it tools are off.
 			const noAnswer = turn.message.stopReason === "stop" ? classifyTurnEnding([turn.message]) : null;
-			if (
+			const repromptBudget: ToolMarkupRepromptBudget | null =
 				noAnswer?.kind === "no_answer" &&
 				(noAnswer.cause === "tool_call_in_reasoning" ||
 					noAnswer.cause === "tool_call_as_text" ||
@@ -1550,10 +1553,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.activeInterruptReason === null &&
 				!state.synthesisToolLock &&
 				!state.toolBudgetLock &&
-				state.activeUserTurnId !== null &&
-				state.toolMarkupRepromptTurnId !== state.activeUserTurnId
-			) {
-				state.toolMarkupRepromptTurnId = state.activeUserTurnId;
+				state.activeUserTurnId !== null
+					? claimToolMarkupReprompt(state.toolMarkupReprompt, state.activeUserTurnId, state.turnToolCalls)
+					: null;
+			if (repromptBudget !== null) {
+				state.toolMarkupReprompt = repromptBudget;
 				requiredToolReminder = TOOL_MARKUP_REPROMPT;
 				deps.emitNotice(TOOL_MARKUP_REPROMPT_NOTICE, "warning", TOOL_MARKUP_REPROMPT_NOTICE_KEY);
 				return { action: "continue" };
@@ -1618,6 +1622,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// at agent_end, no terminal ledger row was ever written for this turn,
 		// so one is synthesized below.
 		let pendingTerminalToolResult: { toolCallId: string; toolName: string } | null = null;
+		// Per streamed assistant message: how far each block was last checked for repetition.
+		let repetitionCheck: { partial: unknown; text: number; thinking: number } = { partial: null, text: 0, thinking: 0 };
 		// state.messages length when this run started; agent state appends every
 		// message of the run (prompts, assistant, tool results) via message_end,
 		// so the slice from here is the run's real message window.
@@ -1653,7 +1659,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
-				middlewareToolChoice.toolStarted(event.toolName);
+				middlewareToolChoice.toolStarted(event.toolName, event.args);
 				deps.toolStartTimes.set(event.toolCallId, eventClock);
 				state.turnToolCalls += 1;
 				// Turn-end detectors (#184 skill wait) reason about the capability
@@ -1896,6 +1902,26 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					delta?: string;
 					partial?: AgentMessage;
 				};
+				if (
+					(assistantEvent.type === "text_delta" || assistantEvent.type === "thinking_delta") &&
+					state.repetitionAbortReason === null &&
+					state.activeInterruptReason === null
+				) {
+					if (repetitionCheck.partial !== assistantEvent.partial)
+						repetitionCheck = { partial: assistantEvent.partial, text: 0, thinking: 0 };
+					const thinking = assistantEvent.type === "thinking_delta";
+					const streamed = thinking ? extractThinking(assistantEvent.partial) : extractText(assistantEvent.partial);
+					if (shouldAssessRepetition(streamed.length, thinking ? repetitionCheck.thinking : repetitionCheck.text)) {
+						if (thinking) repetitionCheck.thinking = streamed.length;
+						else repetitionCheck.text = streamed.length;
+						const repetition = assessRepetition(streamed);
+						if (repetition.kind === "repeating") {
+							state.repetitionAbortReason = repetitionAbortReason(repetition);
+							deps.emitNotice(state.repetitionAbortReason, "warning");
+							localRuntime.agent.abort();
+						}
+					}
+				}
 				if (assistantEvent.type === "text_delta") {
 					const partialText = extractText(assistantEvent.partial);
 					const frame = readDiffusionFrame(assistantEvent);

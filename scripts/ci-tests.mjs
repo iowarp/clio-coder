@@ -179,6 +179,17 @@ export const coreTests = [
 	"anthropic-thread-idle",
 	"store-put-identity",
 	"upgrade-command",
+	"extension-hook-turn-origin",
+	"extension-interview-answer",
+	"extension-test-tmpdir",
+	"extension-validate-workspace",
+	"gateway-scope-shapes",
+	"loop-guard-prior-failure",
+	"middleware-required-tool-gateway",
+	"repetition-detector",
+	"tool-markup-reprompt-budget",
+	"turn-scope-shell-note",
+	"working-set-skill-protection",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

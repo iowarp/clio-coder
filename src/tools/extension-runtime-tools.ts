@@ -69,6 +69,8 @@ export function buildExtensionRuntimeToolSpecs(
 									interview: parked.outcome,
 									...(parked.reason === undefined ? {} : { reason: parked.reason }),
 									answers: parked.answers,
+									...(parked.notes === undefined ? {} : { notes: parked.notes }),
+									...(parked.other === undefined ? {} : { other: parked.other }),
 									text: parked.text,
 								}),
 							);

@@ -169,6 +169,8 @@ An approved extension that declares `runtime.services.embedding: true` gets `ctx
 
 A hook handler returns `effects` (and optionally UI), never a decision it can force past the safety policy. The effects are `block_tool`, `annotate_tool_result`, `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator`, `protect_path`, `request_continuation`, `rewrite_tool_input` and, at `prompt_submit`, `rewrite_prompt` and `block_prompt`. An effect returned at a point that cannot apply it is refused at load. A rewritten tool input is validated against the tool's schema and classified again, so a hook can narrow or redirect a call and never widen its authority. A hook that misses its deadline or throws follows its declared `onTimeout` or `onError`, and a hook that misses three deadlines in a row is disabled for the rest of the generation. Declare `block` only for a real gate.
 
+The `prompt_submit`, `turn_start` and `turn_end` events say who started the turn. `origin` is `operator` for a prompt the operator submitted, `continuation` when CLIO Coder continues a turn that stopped under yolo autonomy (a loop-guard lock, a tool budget, a failure), `job` for a scheduled job's turn, and `peer` for a message another agent sent into the session. A continuation carries `continuation: { index, cap }`, its place against the continuation cap. `template` names the prompt template whose tool scope bounds the turn, and a continuation keeps it. Continuations fire these hooks like any other turn, so a gate still sees them. An extension that keeps run state across a template's turns ends that state on a new `operator` prompt, not on a `continuation`. `prompt_submit` always carries `origin`. A `turn_start` or `turn_end` that resumes a turn inside the host carries the origin of the turn it resumes.
+
 ### Tool hooks on dispatched workers
 
 Session `before_tool` and `after_tool` hooks follow native worker dispatches from
@@ -211,6 +213,13 @@ A skin is a JSON file inside the package, validated at discovery. It overrides p
 ### Interviews
 
 An interview is a multi-step form the host draws, started from a command, an action or a tool result. A step has up to 4 questions of kind `single`, `multi` or `text`, with up to 12 options each. The operator's answers return to the registered `api.interview(id, handler)` handler, which returns the next step or `{ done: true, ... }` with the final output. With no operator to answer, the interview cancels with reason `headless`. An `initial` value is a draft the operator still has to submit.
+
+Each answer the handler receives is `{ id, step, answers, notes?, other?, nav, reason? }`. `answers` maps a question id to the chosen option's `value`, an array of values for `multi`, or the typed text for a `text` question. When the operator chooses an option and attaches a note, `answers` keeps the option value and `notes` carries the text under the same question id. When the operator types free text instead of choosing ("Other"), `answers` carries the text and `other` marks the id with `true`. A tool that parks on an interview returns the same `notes` and `other` maps, keyed by step and then question id, beside its `answers`.
+
+```text
+{ "id": "gate", "step": "confirm", "answers": { "choice": "revise" }, "notes": { "choice": "tighten Task 1" }, "nav": "next" }
+{ "id": "gate", "step": "confirm", "answers": { "choice": "use five sources" }, "other": { "choice": true }, "nav": "next" }
+```
 
 ## Confinement
 

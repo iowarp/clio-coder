@@ -1,5 +1,18 @@
+import { ToolNames } from "../../core/tool-names.js";
 import type { AgentMessage, ToolRoundRecord } from "../../engine/types.js";
 import type { MiddlewareEffect } from "./types.js";
+
+/**
+ * A capability behind the gateway (an extension or MCP tool) starts as
+ * `gateway(op="call", capability=<name>)`, so a requirement naming that
+ * capability is met by the gateway call that carries it.
+ */
+function satisfiesRequired(required: string, toolName: string, args: unknown): boolean {
+	if (toolName === required) return true;
+	if (toolName !== ToolNames.Gateway || typeof args !== "object" || args === null) return false;
+	const record = args as { op?: unknown; capability?: unknown };
+	return record.op === "call" && typeof record.capability === "string" && record.capability.trim() === required;
+}
 
 export type MiddlewareToolChoice = { kind: "auto" } | { kind: "required"; toolName: string } | { kind: "none" };
 type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
@@ -9,13 +22,14 @@ type AssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
  *
  * Tool hooks run inside the registry, after a provider response has already
  * been emitted. Their routing effects therefore apply to the *next* provider
- * round. A required tool clears only when that exact tool starts; a text-only
+ * round. A required tool clears only when that tool starts, directly or as the
+ * capability of a gateway call; a text-only
  * lock wins over later requirements and lasts until the next submitted turn.
  */
 export interface MiddlewareToolChoiceControl {
 	apply(effects: ReadonlyArray<MiddlewareEffect>): void;
 	current(): MiddlewareToolChoice;
-	toolStarted(toolName: string): void;
+	toolStarted(toolName: string, args?: unknown): void;
 	completeRound(message: AssistantMessage): string | null;
 	reset(): void;
 }
@@ -37,8 +51,8 @@ export function createMiddlewareToolChoiceControl(): MiddlewareToolChoiceControl
 			}
 		},
 		current: () => choice,
-		toolStarted(toolName) {
-			if (choice.kind === "required" && choice.toolName === toolName) choice = { kind: "auto" };
+		toolStarted(toolName, args) {
+			if (choice.kind === "required" && satisfiesRequired(choice.toolName, toolName, args)) choice = { kind: "auto" };
 		},
 		completeRound(message) {
 			if (choice.kind !== "required" || message.stopReason === "error" || message.stopReason === "aborted") return null;
@@ -48,7 +62,12 @@ export function createMiddlewareToolChoiceControl(): MiddlewareToolChoiceControl
 			const record = records?.at(-1);
 			if (record?.kind !== "required" || record.toolName !== toolName || record.choice !== "auto") return null;
 			if (followUpUsed) record.enforcement = "follow-up";
-			if (message.content.some((block) => block.type === "toolCall" && block.name === toolName)) return null;
+			if (
+				message.content.some(
+					(block) => block.type === "toolCall" && satisfiesRequired(toolName, block.name, block.arguments),
+				)
+			)
+				return null;
 			if (followUpUsed) {
 				record.enforcement = "unmet";
 				return null;

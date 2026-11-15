@@ -44,23 +44,25 @@ function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUs
 		};
 	if (result.answers.length !== step.questions.length) throw new Error("interview round did not answer every question");
 	const answers: InterviewAnswer["answers"] = {};
+	const notes: Record<string, string> = {};
+	const other: Record<string, true> = {};
 	for (const [index, question] of step.questions.entries()) {
 		const answer = result.answers[index];
 		if (answer === undefined) throw new Error(`missing answer for ${question.id}`);
-		// Typed input is the submitted value, even when attached to selected
-		// choices; the overlay's joined display string is not that value (S4).
-		if (answer.value !== undefined) {
-			answers[question.id] = answer.value;
-			continue;
-		}
+		// Typed input is the submitted value of a text question; the overlay's
+		// joined display string is not that value (S4).
 		if (question.kind === "text") {
-			answers[question.id] = answer.answer;
+			answers[question.id] = answer.value ?? answer.answer;
 			continue;
 		}
 		const options = question.options ?? [];
-		const labels = answer.options ?? (options.some((option) => option.label === answer.answer) ? [answer.answer] : []);
+		const labels =
+			answer.options ??
+			(answer.value === undefined && options.some((option) => option.label === answer.answer) ? [answer.answer] : []);
 		if (labels.length === 0) {
-			answers[question.id] = answer.answer;
+			// "Other": free text that names no offered option.
+			answers[question.id] = answer.value ?? answer.answer;
+			other[question.id] = true;
 			continue;
 		}
 		for (const label of labels) {
@@ -71,8 +73,17 @@ function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUs
 			if (selected.length !== 1) throw new Error(`single question ${question.id} has multiple selected options`);
 			answers[question.id] = selected[0] ?? "";
 		} else answers[question.id] = selected;
+		// A note typed beside chosen options rides next to them; it never
+		// replaces the option value the handler matches on.
+		if (answer.value !== undefined) notes[question.id] = answer.value;
 	}
-	return { ...base, answers, nav: "next" };
+	return {
+		...base,
+		answers,
+		...(Object.keys(notes).length > 0 ? { notes } : {}),
+		...(Object.keys(other).length > 0 ? { other } : {}),
+		nav: "next",
+	};
 }
 
 function initialDrafts(
@@ -193,12 +204,18 @@ export async function runParkedInterview(
 	signal?: AbortSignal,
 ): Promise<ParkedInterviewResult> {
 	const answers: ParkedInterviewResult["answers"] = {};
+	const notes: NonNullable<ParkedInterviewResult["notes"]> = {};
+	const other: NonNullable<ParkedInterviewResult["other"]> = {};
 	const result = await runExtensionInterview(
 		deps,
 		interview,
 		owner,
 		(answer) => {
-			if (answer.nav === "next") answers[answer.step] = answer.answers;
+			if (answer.nav === "next") {
+				answers[answer.step] = answer.answers;
+				if (answer.notes !== undefined) notes[answer.step] = answer.notes;
+				if (answer.other !== undefined) other[answer.step] = answer.other;
+			}
 			return onAnswer(answer);
 		},
 		signal,
@@ -206,6 +223,8 @@ export async function runParkedInterview(
 	return {
 		outcome: result.outcome,
 		answers,
+		...(Object.keys(notes).length > 0 ? { notes } : {}),
+		...(Object.keys(other).length > 0 ? { other } : {}),
 		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
 	};
 }

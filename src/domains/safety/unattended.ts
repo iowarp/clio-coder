@@ -26,9 +26,17 @@ export const AWAY_ASK_WINDOW_MS = 30_000;
  * How long an ask_user round waits for the operator before Clio answers it.
  * Yolo asks like default does, but keeps the window bounded so a long run
  * never parks on a question; an operator observed away (a window lapsed and
- * no key since) gets a short window until they type again.
+ * no key since) gets a short window until they type again. An operator_only
+ * round below yolo has no window.
  */
-export function askUserWindowMs(seconds: number | undefined, context: { yolo: boolean; away: boolean }): number {
+export function askUserWindowMs(
+	seconds: number | undefined,
+	context: { yolo: boolean; away: boolean; operatorOnly?: boolean },
+): number {
+	// Clio can never answer an operator_only question, so a lapsed window only
+	// ends the turn. Below yolo the operator is attending; the question waits
+	// for them however long they read. Yolo keeps its bound so a run never parks.
+	if (context.operatorOnly === true && !context.yolo) return 0;
 	let ms = unattendedWindowMs(seconds);
 	if (ms === 0 && context.yolo) ms = YOLO_ASK_WINDOW_FLOOR_SECONDS * 1000;
 	return ms > 0 && context.away ? Math.min(ms, AWAY_ASK_WINDOW_MS) : ms;
