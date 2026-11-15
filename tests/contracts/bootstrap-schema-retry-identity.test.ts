@@ -118,3 +118,31 @@ test("legacy scope inference refuses absolute paths glued to key separators inst
 		rmSync(cwd, { recursive: true, force: true });
 	}
 });
+
+test("legacy scope inference skips scheme URIs but still refuses file:// paths", () => {
+	const cwd = mkdtempSync(join(tmpdir(), "clio-coder-legacy-scheme-"));
+	try {
+		const scope = resolveDispatchPathScope({
+			agentId: "researcher",
+			executionRole: "researcher",
+			task: "Draft project://paper/background from s3://bucket/notes and https://example.org/a/b",
+			cwd,
+		});
+		deepStrictEqual(
+			scope.workingContextPaths.filter((path) => path.includes("paper") || path.includes("bucket")),
+			[],
+		);
+		throws(
+			() =>
+				resolveDispatchPathScope({
+					agentId: "researcher",
+					executionRole: "researcher",
+					task: "Read file:///etc/hosts",
+					cwd,
+				}),
+			/legacy_scope_path_absolute/u,
+		);
+	} finally {
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
