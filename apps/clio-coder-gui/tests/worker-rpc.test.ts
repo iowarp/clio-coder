@@ -61,14 +61,15 @@ test("ready settles once a lane listens, and a host closed while booting rejects
 test("warm read lanes overlap, so one slow adapter no longer holds the next read", async (t) => {
 	const home = await scratchHome();
 	t.after(home.close);
-	const worker = new WorkerHost("reads", { fixture: true, readDelayMs: 120, readLanes: 2 }, home.env);
+	const worker = new WorkerHost("reads", { fixture: true, readDelayMs: 1000, readLanes: 2 }, home.env);
 	t.after(() => worker.close());
 	await Promise.all([worker.call("tools.list", {}), worker.call("tools.list", {})]);
 	assert.equal(worker.laneCount, 2);
 	const start = performance.now();
 	await Promise.all([worker.call("tools.list", {}), worker.call("tools.list", {})]);
 	const elapsed = performance.now() - start;
-	assert.ok(elapsed < 240, `Two warm lanes must overlap two 120 ms reads; observed ${elapsed} ms`);
+	// Serialized reads take at least 2000 ms; the second of slack absorbs a loaded runner.
+	assert.ok(elapsed < 2000, `Two warm lanes must overlap two 1000 ms reads; observed ${elapsed} ms`);
 });
 
 test("a queued read spends its deadline on its own work, not on the call ahead of it", async (t) => {
