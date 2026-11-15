@@ -54,6 +54,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "run-a-playbook-and-land-it.md",
+    "cover": "cli-playbook-graph",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
@@ -85,6 +86,7 @@
     "time": "4 min",
     "author": "The CLIO Coder team",
     "source": "see-what-a-session-cost-and-what-a-run-did.md",
+    "cover": "tui-usage",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
@@ -208,6 +210,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "write-an-extension-with-declared-capabilities.md",
+    "cover": "cli-extension-validate",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "guides": [
@@ -223,6 +226,7 @@
     "time": "3 min",
     "author": "The CLIO Coder team",
     "source": "diffusion-models.md",
+    "cover": "cli-diffusion-mercury",
     "basis": "Documented workflow, checked against 0.8.0 source without a live Mercury run",
     "versionScope": "0.8.0",
     "status": "Available since 0.5.3, terminal display only",
@@ -241,6 +245,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "panes-and-docks.md",
+    "cover": "tui-worker-list",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "status": "Experimental, off by default, needs Herdr",
@@ -259,6 +264,7 @@
     "time": "3 min",
     "author": "The CLIO Coder team",
     "source": "information-flow-rules.md",
+    "cover": "cli-flow-trust",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "status": "Advanced, opt-in",
@@ -277,6 +283,7 @@
     "time": "6 min",
     "author": "The CLIO Coder team",
     "source": "semantic-context-and-recordings.md",
+    "cover": "cli-recorded-run",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "status": "Beta, off by default",
@@ -295,6 +302,7 @@
     "time": "4 min",
     "source": "run-on-a-local-model.md",
     "author": "The CLIO Coder team",
+    "cover": "cli-local-runtimes",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -312,6 +320,7 @@
     "time": "5 min",
     "source": "submit-a-slurm-job.md",
     "author": "The CLIO Coder team",
+    "cover": "cli-slurm-doctor",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -330,6 +339,7 @@
     "time": "5 min",
     "source": "pre-register-a-benchmark.md",
     "author": "The CLIO Coder team",
+    "cover": "tui-experiment-contract",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -369,6 +379,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "set-up-a-lab-from-one-setup-file.md",
+    "cover": "cli-lab-import",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -387,6 +398,7 @@
     "time": "4 min",
     "author": "The CLIO Coder team",
     "source": "share-a-folder-with-a-teammate-or-a-second-terminal.md",
+    "cover": "cli-project-tighten",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -405,6 +417,7 @@
     "time": "7 min",
     "author": "The CLIO Coder team",
     "source": "run-a-research-campaign-and-a-blind-arena.md",
+    "cover": "cli-arena",
     "basis": "Recorded session",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -423,6 +436,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "report-a-problem-without-leaking-your-machine.md",
+    "cover": "cli-report-preview",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [
@@ -441,6 +455,7 @@
     "time": "5 min",
     "author": "The CLIO Coder team",
     "source": "ask-several-agents-at-once.md",
+    "cover": "tui-poll",
     "basis": "Documented workflow",
     "versionScope": "0.8.0",
     "interfaces": [

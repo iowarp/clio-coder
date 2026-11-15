@@ -1808,6 +1808,610 @@
 				"alt": "Fullscreen terminal recording of the /model picker in CLIO Coder: the session starts on gpt-6-luna, then claude-haiku-5-5 and claude-opus-5-5 on anthropic-max and gpt-6.1-sol on openai-codex are chosen in turn by typing part of the name, and the session returns to gpt-6-luna.",
 				"caption": "One session, two subscriptions: /model lists the models of every connected target and switches between them without leaving the conversation."
 			}
+		},
+		{
+			"id": "stills-covers-cli",
+			"summary": "tutorial covers without a model: report preview, Mercury target, local runtimes, information-flow trust, lab setup import, project settings that only tighten",
+			"title": "Tutorial cover stills",
+			"live": false,
+			"stillsOnly": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"fixture": "calibration-cli",
+			"cols": 120,
+			"rows": 80,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"homeFiles": {
+				"projects/calibration-lab/.clio-coder/safety.yaml": "version: 1\ninformationFlow:\n  targets:\n    local:\n      runtime: llamacpp\n      endpoint: http://127.0.0.1:8080/v1\n  recipients:\n    private-models: [\"target:local\"]\n  sources:\n    - id: secrets-local\n      paths: [secrets/]\n      recipients: [\"group:private-models\"]\n",
+				"projects/calibration-lab/.clio-coder/settings.yaml": "version: 2\nsafety:\n  autonomy: yolo\n  limits:\n    sessionCostUsd: 2\n    chatToolCallsPerTurn: 200\n",
+				"projects/calibration-lab/lab-clio.yaml": "notes: \"Lab gateway, forwarded to port 4000. Ask #research-computing for a key; export it as LAB_API_KEY.\"\ntargets:\n  - id: lab\n    runtime: openai-compat\n    url: http://localhost:4000/v1\n    defaultModel: gpt-oss-120b\n    capabilities: { contextWindow: 131072 }\n    auth: { apiKeyEnvVar: LAB_API_KEY }\nchat: { target: lab }\nfleet: { target: lab, model: gpt-oss-120b }\n",
+				"projects/calibration-lab/notes.txt": "The footer flickers when I resize the terminal on host lab, in /home/researcher/projects/calibration-lab.\n"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder report bug --title \"footer flickers on resize\" --body-file notes.txt --dry-run",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "end of body[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-report-preview",
+					"rows": [1, 71]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder targets add --id mercury --runtime inception --model mercury-3 --api-key-env INCEPTION_API_KEY",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "target mercury saved[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder models --offline --target mercury",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "mercury-3[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-diffusion-mercury",
+					"rows": [1, 18]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure --list | sed -n '/Local HTTP/,$p'",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "ollama[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-local-runtimes",
+					"rows": [1, 25]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder config trust safety",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "--hash [0-9a-f]{64}\\s*\\n[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder config trust safety --hash $(clio-coder config trust safety | grep -o '[0-9a-f]\\{64\\}' | tail -1)",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "approved[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-flow-trust",
+					"rows": [1, 25]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder configure --import lab-clio.yaml --yes",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "Imported[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-lab-import",
+					"rows": [1, 13]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder config trust settings --hash $(clio-coder config trust settings | grep -o '[0-9a-f]\\{64\\}' | tail -1)",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "approved[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder config inspect | grep -E '^  (!|safety.limits.sessionCostUsd)'",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "project value ignored[\\s\\S]*\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-project-tighten",
+					"rows": [1, 12]
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-report-preview": {
+					"label": "Report preview",
+					"alt": "Terminal: report bug with a title and a notes file, as a dry run. The preview says the report would be public, posted from the gh account to github.com/iowarp/clio-coder, with nothing sent yet; the body shows the host name and the project folder replaced by <host> and <path>, then an environment block for 0.8.1 and a report details block. It ends: masked 1 path and 1 host name, no secrets recognized, no diagnostic bundle attached, what sending would do in order, and dry run: nothing sent. No model.",
+					"caption": "The exact text a report would carry, with the machine's names masked, before anything leaves. No model."
+				},
+				"cli-diffusion-mercury": {
+					"label": "Mercury target",
+					"alt": "Terminal: targets add saves a target named mercury on the inception runtime with model mercury-3 and its key read from INCEPTION_API_KEY, warns that the variable is not set in this shell, and models --offline lists Inception: Mercury 3 with a 1m context window and 131k output. No Inception key was available for this capture, so no Mercury answer is shown.",
+					"caption": "Adding Mercury as a target. No Inception key was available here, so the refining answer itself is not shown."
+				},
+				"cli-local-runtimes": {
+					"label": "Local runtimes",
+					"alt": "Terminal: configure --list filtered to its Local HTTP section lists the runtimes for servers on your own machine: Generic Anthropic-compatible, Generic OpenAI-compatible, Lemonade, LiteLLM, llama.cpp, LM Studio, Ollama, SGLang and vLLM, each with whether it needs a key and how many targets use it. No local model server ran for this capture, so none is connected.",
+					"caption": "The local server runtimes CLIO Coder can connect to. No local model ran for this capture."
+				},
+				"cli-flow-trust": {
+					"label": "Approve the policy",
+					"alt": "Terminal: config trust safety prints the project's .clio-coder/safety.yaml, whose information-flow rule lets files under secrets/ go only to the local llama.cpp target at 127.0.0.1:8080, with the file hash, the content hash, the verdict untrusted, and the exact approval command; running that command approves the policy at that hash for this workspace. No model.",
+					"caption": "Review the information-flow policy, then approve exactly those bytes. No model."
+				},
+				"cli-lab-import": {
+					"label": "Import",
+					"alt": "Terminal: configure --import lab-clio.yaml --yes prints the setup file's note, then what it changes: add target lab on openai-compat, prompts go to http://localhost:4000/v1, model gpt-oss-120b with its key from LAB_API_KEY, chat and fleet use lab. It reports Imported 1 target and that LAB_API_KEY is not set in this shell. The gateway address is a local port here; no gateway answered. No model.",
+					"caption": "One setup file adds the lab gateway and says what it will change. No model."
+				},
+				"cli-project-tighten": {
+					"label": "Only stricter",
+					"alt": "Terminal: after the project settings are approved, config inspect shows two warnings that the project's yolo autonomy and its higher chat tool-call limit were ignored because a project may only tighten user settings, while the project's lower session cost ceiling of 2 applies. No model.",
+					"caption": "Approved project settings may only make CLIO Coder stricter. No model."
+				}
+			}
+		},
+		{
+			"id": "stills-covers-tui",
+			"summary": "live Claude Haiku 5.5 session: the experiment-protocol skill writes a contract, then /usage",
+			"title": "Tutorial cover stills in the terminal",
+			"live": true,
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
+			"settings": ["interface: { mode: fullscreen }"],
+			"stillsOnly": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder library install skill:experiment-protocol --project",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is (?:ready|not checked yet)",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "/skill experiment-protocol Compare a lookup-table version of the Kelvin conversion against the current one in temperature.mjs for runtime and accuracy. Stop after you write the contract so I can review it.",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "✓ Done ·",
+					"approve": "Enter\\]? allow",
+					"timeout": 300,
+					"pause": 1.5
+				},
+				{
+					"shot": "tui-experiment-contract"
+				},
+				{
+					"type": "/usage",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"pause": 4
+				},
+				{
+					"shot": "tui-usage"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-experiment-contract": {
+					"label": "Contract",
+					"alt": "Terminal turn on Claude Haiku (claude-haiku-5-5) with the experiment-protocol skill: asked to compare a lookup-table Kelvin conversion against the current one in temperature.mjs and stop after writing the contract, CLIO Coder says where it wrote the contract and that nothing has been measured yet, then lists what it fixed for you to review: the function under test, the table design, the speed-up threshold for each verdict, the accuracy tolerance, and the Node version, host and file hash it pins.",
+					"caption": "The experiment-protocol skill on Claude Haiku (claude-haiku-5-5) writes the thresholds and verdicts down before anything is measured."
+				},
+				"tui-usage": {
+					"label": "/usage",
+					"alt": "Terminal /usage dock after one Claude Haiku (claude-haiku-5-5) turn: tabs for activity, accounts, session, models, workers and health; an activity calendar for the last 182 days; then the session's changes, its duration, estimated cost and tokens, and the Claude subscription's weekly plan use.",
+					"caption": "/usage after one turn on Claude Haiku (claude-haiku-5-5): what the session cost and how much of the plan it used."
+				}
+			}
+		},
+		{
+			"id": "stills-covers-poll",
+			"summary": "live Claude Haiku 5.5 session: /poll asks three read-only scouts one question, then Alt+W lists the workers",
+			"title": "Poll and worker list",
+			"live": true,
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
+			"settings": ["interface: { mode: fullscreen }"],
+			"stillsOnly": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 36,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder",
+					"delay": 20
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "is (?:ready|not checked yet)",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"type": "/poll --options node:test|vitest|jest --rationale 3 Which test runner should a small dependency-free ES module package like this one use?",
+					"delay": 20
+				},
+				{
+					"pause": 0.5,
+					"keys": ["Enter"]
+				},
+				{
+					"until": "voted",
+					"approve": "Enter\\]? allow",
+					"timeout": 400,
+					"pause": 3
+				},
+				{
+					"shot": "tui-poll"
+				},
+				{
+					"keys": ["M-w"]
+				},
+				{
+					"pause": 3
+				},
+				{
+					"shot": "tui-worker-list"
+				},
+				{
+					"keys": ["Escape"]
+				},
+				{
+					"pause": 0.6
+				},
+				{
+					"keys": ["C-d"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 30,
+					"pause": 0.5
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"tui-poll": {
+					"label": "Poll",
+					"alt": "Terminal /poll on Claude Haiku (claude-haiku-5-5): three participants, each a read-only scout on anthropic-max/claude-haiku-5-5, answer one question about which test runner a small dependency-free ES module package should use, choosing from node:test, vitest and jest; each row shows its time and choice, and the poll block reports how many voted, the majority answer and its bar.",
+					"caption": "/poll seats three Claude Haiku (claude-haiku-5-5) participants on one question and counts their independent votes."
+				},
+				"tui-worker-list": {
+					"label": "Workers",
+					"alt": "Terminal Fleet Runs list opened with Alt+W after a Claude Haiku (claude-haiku-5-5) poll: the council run with its duration, and its participants p1 to p3 and the vote synthesis, each with its state, time, output tokens and answer. The capture ran inside tmux, where CLIO Coder keeps workers in this in-app list instead of a Herdr dock beside the conversation.",
+					"caption": "Alt+W lists this session's workers. Inside tmux, as here, the list opens in CLIO Coder rather than in a dock."
+				}
+			}
+		},
+		{
+			"id": "stills-covers-runs",
+			"summary": "live Claude Haiku 5.5 from the shell: a recorded read-only run and its evidence, then a blind arena match",
+			"title": "Recorded run and arena",
+			"live": true,
+			"model": {
+				"target": "anthropic-max",
+				"model": "claude-haiku-5-5",
+				"source": "Claude Haiku 5.5 through a Claude subscription (target anthropic-max)"
+			},
+			"stillsOnly": true,
+			"profile": "configured",
+			"repo": "calibration-lab",
+			"cols": 120,
+			"rows": 60,
+			"env": {
+				"CLIO_CODER_REDUCE_MOTION": "1"
+			},
+			"steps": [
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 15
+				},
+				{
+					"pause": 0.5
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder run --agent coder --read-only --record \"Say which file holds the Kelvin conversion and which test covers absolute zero. Do not change files.\"",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 300,
+					"pause": 1
+				},
+				{
+					"type": "clio-coder evidence list",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-recorded-run",
+					"rows": [1, 24]
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "clio-coder arena run --contender anthropic-max/claude-haiku-5-5 --contender anthropic-max/claude-haiku-5-5 -- \"Make the Kelvin conversion in temperature.mjs clearer without changing any answer. Keep the change minimal.\" > /dev/null 2>&1; echo arena exit $?",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "arena exit \\d+[\\s\\S]*\\$\\s*$",
+					"timeout": 600,
+					"pause": 1
+				},
+				{
+					"keys": ["C-l"]
+				},
+				{
+					"pause": 0.3
+				},
+				{
+					"type": "M=$(clio-coder arena list | awk 'NR==2{print $1}'); clio-coder arena show $M | head -n 45",
+					"delay": 15
+				},
+				{
+					"pause": 0.3,
+					"keys": ["Enter"]
+				},
+				{
+					"wait": "\\$\\s*$",
+					"timeout": 60,
+					"pause": 1
+				},
+				{
+					"shot": "cli-arena"
+				},
+				{
+					"type": "exit"
+				},
+				{
+					"keys": ["Enter"]
+				}
+			],
+			"shots": {
+				"cli-recorded-run": {
+					"label": "Recorded run",
+					"alt": "Terminal: a headless read-only run of the coder agent on Claude Haiku (claude-haiku-5-5) with --record answers which file holds the Kelvin conversion and which test covers absolute zero, prints its result line with the run id, exit 0, target and token count, and the path of the recording manifest under the run's state; evidence list then shows the run as succeeded and assessed. No semantic index is shown: it needs a local embedding model, which was not available for this capture.",
+					"caption": "A worker run recorded with --record on Claude Haiku (claude-haiku-5-5), and its evidence. The semantic index needs a local embedding model and is not shown."
+				},
+				"cli-arena": {
+					"label": "Blind arena",
+					"alt": "Terminal: arena show for a finished match in which two contenders, both Claude Haiku (claude-haiku-5-5) as an A/A match, each made the Kelvin conversion in temperature.mjs clearer in its own worktree. The match is shown blind as A and B with the vote command; each contender has its exit status, turns, tool calls, writes and a one-file diff summary. A's final report notes a test failure that predates its edit and is followed by its diff; the output is cut by head partway through B's report. No research campaign is shown: a campaign runs for many minutes and was not run for this capture.",
+					"caption": "A blind A/A arena match on Claude Haiku (claude-haiku-5-5): two answers labelled A and B, with their diffs, before anyone votes."
+				}
+			}
 		}
 	]
 }
