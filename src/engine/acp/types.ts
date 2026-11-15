@@ -1,6 +1,7 @@
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { PricedByCountsSchema, QuantitySchema, TurnQuantitiesSchema } from "../../core/telemetry/dto.js";
+import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import type { ProjectTrustSurface, WorkspaceTrustVerdict } from "../../core/workspace-trust.js";
 import type { ViewArtifactCategory, ViewArtifactFormat } from "../../domains/session/view-artifacts.js";
 import type { UserTask } from "../../domains/user-tasks/store.js";
@@ -57,12 +58,23 @@ export const ACP_INTERVIEWS_META_KEY = "clio-coder/interviews";
 export const ACP_INTERVIEW_REQUEST_METHOD = "_clio-coder/interview/request";
 export const ACP_INTERVIEW_CANCEL_METHOD = "_clio-coder/interview/cancel";
 /**
- * `_meta` of every interview request: `{version: 1, operatorOnly}`. An
+ * `_meta` of every interview request: `{version: 1, operatorOnly, recommended?}`. An
  * `operator_only` round is the operator's own choice, which no agent or policy
  * may answer for them and which closes unanswered when its window passes, so a
- * client labels that card the way the TUI does.
+ * client labels that card the way the TUI does. `recommended` has one entry per
+ * wire question: the index into that question's `options` the host recommends
+ * (the harness's preselected option, else the one an absent operator gets), or
+ * null for a question without options. It rides in `_meta` and not on the
+ * option because a client that validates the question shape closed would refuse
+ * an unknown option field.
  */
 export const ACP_INTERVIEW_META_KEY = "clio-coder/interview";
+/**
+ * The longest request window a client may negotiate with `timeoutMs` in the
+ * `clio-coder/interviews` or `clio-coder/workerPermissions` opt-in: Node's
+ * timer ceiling, the same bound `clio-coder acp --permission-timeout` takes.
+ */
+export const ACP_MAX_NEGOTIATED_TIMEOUT_MS = MAX_TIMER_DELAY_MS;
 /**
  * `clio-coder/workerPermissions` asks the host to forward a dispatched worker's
  * permission ask as `session/request_permission`. The client must also name the
@@ -74,6 +86,14 @@ export const ACP_WORKER_PERMISSIONS_META_KEY = "clio-coder/workerPermissions";
 export const ACP_PERMISSION_WITHDRAW_METHOD = "_clio-coder/permission/withdraw";
 /** Provenance a forwarded worker ask carries beside the decision facts. */
 export const ACP_WORKER_ASK_META_KEY = "clio-coder/workerAsk";
+/**
+ * `{version: 1, requestId}` on a main-session `session/request_permission`,
+ * sent only to a client that opted into `clio-coder/workerPermissions`. The
+ * withdraw notification names this `requestId` when the host abandons the ask
+ * (its window closed, the prompt was cancelled, or the call was settled
+ * elsewhere), so the client can close the card it still shows.
+ */
+export const ACP_PERMISSION_ASK_META_KEY = "clio-coder/permissionAsk";
 
 /**
  * Every other `_clio-coder/*` method, notification and `_meta` key. The feature
@@ -696,15 +716,29 @@ export const AcpAsideCapability = Type.Object(
 );
 export type AcpAsideCapability = Static<typeof AcpAsideCapability>;
 /** Additive bridge: the runtime announces it only to a client that opted in at initialize. */
+const negotiatedTimeoutMs = Type.Integer({ minimum: 1, maximum: ACP_MAX_NEGOTIATED_TIMEOUT_MS });
 export const AcpInterviewsCapability = Type.Object(
 	{
 		version: Type.Literal(1),
 		request: Type.Literal(ACP_INTERVIEW_REQUEST_METHOD),
 		cancel: Type.Optional(Type.Literal(ACP_INTERVIEW_CANCEL_METHOD)),
+		/** The applied interview window, echoed only when the client asked for one. */
+		timeoutMs: Type.Optional(negotiatedTimeoutMs),
 	},
 	closed,
 );
 export type AcpInterviewsCapability = Static<typeof AcpInterviewsCapability>;
+/** Echoed only to a client that opted in; `timeoutMs` only when it asked for one. */
+export const AcpWorkerPermissionsCapability = Type.Object(
+	{
+		version: Type.Literal(1),
+		withdraw: Type.Literal(ACP_PERMISSION_WITHDRAW_METHOD),
+		/** The applied window for every `session/request_permission`, main-session and worker asks alike. */
+		timeoutMs: Type.Optional(negotiatedTimeoutMs),
+	},
+	closed,
+);
+export type AcpWorkerPermissionsCapability = Static<typeof AcpWorkerPermissionsCapability>;
 
 /** A wire value as the server holds it: its constant tables are readonly and serialize the same. */
 export type AcpWire<T> =
@@ -801,6 +835,7 @@ export interface AcpAgentCapabilitiesMeta {
 	[ACP_WORKSPACE_META_KEY]?: { version: 1; update: "session_info_update" };
 	[ACP_ASIDE_META_KEY]?: AcpAsideCapability;
 	[ACP_INTERVIEWS_META_KEY]?: AcpInterviewsCapability;
+	[ACP_WORKER_PERMISSIONS_META_KEY]?: AcpWorkerPermissionsCapability;
 	[ACP_CONTEXT_META_KEY]?: AcpContextCapability;
 	[ACP_ARTIFACTS_META_KEY]?: AcpWire<AcpArtifactsCapability>;
 	[ACP_FLEET_META_KEY]?: AcpFleetCapability;
@@ -820,8 +855,20 @@ export interface AcpClientCapabilitiesMeta {
 		version: 1;
 		request: typeof ACP_INTERVIEW_REQUEST_METHOD;
 		cancel?: typeof ACP_INTERVIEW_CANCEL_METHOD;
+		/**
+		 * How long an interview round waits for the client, 1 to
+		 * {@link ACP_MAX_NEGOTIATED_TIMEOUT_MS}. Overrides the configured default,
+		 * never an explicit `clio-coder acp --permission-timeout`. Any other value
+		 * refuses the whole opt-in.
+		 */
+		timeoutMs?: number;
 	};
-	[ACP_WORKER_PERMISSIONS_META_KEY]?: { version: 1; withdraw: typeof ACP_PERMISSION_WITHDRAW_METHOD };
+	[ACP_WORKER_PERMISSIONS_META_KEY]?: {
+		version: 1;
+		withdraw: typeof ACP_PERMISSION_WITHDRAW_METHOD;
+		/** The `session/request_permission` window, bounded and pinned like the interview one. */
+		timeoutMs?: number;
+	};
 	[ACP_READOUTS_META_KEY]?: { version: 1 };
 }
 

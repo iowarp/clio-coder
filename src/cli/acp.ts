@@ -178,6 +178,7 @@ export async function runAcpCommand(
 				images: true,
 				interviews: true,
 				workerPermissions: true,
+				...(flags.permissionTimeoutMs === undefined ? {} : { pinnedTimeoutMs: flags.permissionTimeoutMs }),
 				shell: true,
 				queueEdit: true,
 				telemetry: true,
