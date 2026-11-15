@@ -115,6 +115,7 @@ export const coreTests = [
 	"judge-screen-park-surfaces",
 	"acp-v1-basics",
 	"acp-readouts",
+	"acp-attended-remote",
 	"configure-routing",
 	"configure-clio-tool",
 	"settings-authority",
