@@ -1,6 +1,6 @@
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { readPluginManifest } from "../plugins/index.js";
+import { parsePluginManifest, readPluginManifest } from "../plugins/index.js";
 
 export interface PackageReferenceContext {
 	rootPath?: string;
@@ -63,4 +63,36 @@ export function resolvePackagePathReference(value: string, context: PackageRefer
 	if (!match || match[3]?.includes("${"))
 		throw new Error("package path references must occupy one complete argument with no embedded expressions");
 	return referenceResolver({ ...context, rootPath: context.rootPath })(value, match[1] ?? "", match[2], match[3]);
+}
+
+/** At most this many declared resources are named to the model per template turn. */
+const PLUGIN_RESOURCE_LIMIT = 12;
+
+/**
+ * The `resource` components a plugin declares (schemas, templates,
+ * references), resolved inside the package. A template turn names them so the
+ * model reads them directly instead of discovering them through the shell.
+ * An unreadable manifest or an escaping or missing path yields nothing for it.
+ */
+export function pluginResourceComponents(rootPath: string): Array<{ id: string; path: string }> {
+	try {
+		const root = realpathSync(rootPath);
+		const manifest = parsePluginManifest(readFileSync(path.join(root, "plugin.json"), "utf8"), root);
+		const resources: Array<{ id: string; path: string }> = [];
+		for (const component of manifest.clio.components) {
+			if (component.kind !== "resource" || resources.length >= PLUGIN_RESOURCE_LIMIT) continue;
+			try {
+				const resolved = realpathSync(path.resolve(root, component.path));
+				const rel = path.relative(root, resolved);
+				if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
+				resources.push({ id: component.id, path: resolved });
+			} catch {
+				// A declared resource that does not exist is not offered; the plugin's own checks report it.
+			}
+		}
+		return resources;
+	} catch {
+		// Naming resources is guidance; a manifest that cannot be read leaves the turn without it.
+		return [];
+	}
 }

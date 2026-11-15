@@ -49,6 +49,8 @@ export interface PromptTemplate {
 	 * intersects the session's limits, so a template narrows and never widens.
 	 */
 	allowedTools?: readonly string[];
+	/** The installed plugin package that declares this template; absent for every other root. */
+	packageRoot?: string;
 	/**
 	 * Frontmatter `delegated-tools`, parsed like `allowed-tools`: the turn's
 	 * delegation ceiling for dispatched workers. Absent, the turn's own
@@ -339,6 +341,7 @@ function loadPromptFile(
 		sourceInfo,
 		trusted: root.trusted !== false,
 		displayOnly: booleanField(frontmatter, "display-only") ?? booleanField(frontmatter, "displayOnly") ?? false,
+		...(root.plugin === true && root.rootPath !== undefined ? { packageRoot: root.rootPath } : {}),
 	};
 	if (argumentHint) template.argumentHint = argumentHint;
 	const allowedTools = root.foreign

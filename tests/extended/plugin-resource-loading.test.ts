@@ -157,7 +157,10 @@ it("plugin resources retain their owner", async () => {
 			parsePendingSkillRequests: (text: string) => ({ text, pendingSkillRequests: [] }),
 			expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts),
 		} as unknown as ResourcesContract;
-		await expandSubmitText("/materio:help", resources, cwd);
+		const expanded = await expandSubmitText("/materio:help", resources, cwd);
+		// The turn names the plugin's declared resources by path, so the model need not search for them.
+		const resourceLine = expanded.text.split("\n").find((line) => line.startsWith("- reference: "));
+		ok(resourceLine?.endsWith("assets/reference.txt"), expanded.text);
 		const used = activity.find((row) => row.type === PLUGIN_RESOURCE_USE && row.kind === "prompt");
 		ok(used);
 		deepStrictEqual(used.owner, owner);
