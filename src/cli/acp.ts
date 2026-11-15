@@ -8,7 +8,7 @@ import { runClioCommand } from "./clio.js";
 import { restoreStdout, takeOverStdout, writeRawStdout } from "./output-guard.js";
 import { printError } from "./shared.js";
 
-const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]
+const HELP = `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]
 clio-coder acp [--cwd PATH] auth login
 
 Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
@@ -18,6 +18,10 @@ Serve Clio Coder as an Agent Client Protocol v1 agent over stdio.
   --permission-timeout MS  How long a mediated permission request may wait for the
                            client before the prompt expires. Defaults to the configured
                            integrations.externalAgents.defaults.permissionTimeoutMs.
+                           A client's negotiated timeoutMs never overrides this flag.
+  --autonomy LEVEL         The most autonomy any session may run at: default or yolo.
+                           It lowers the configured level, never raises it; with
+                           default, a client's attempt to choose yolo is refused.
   --allow-tools NAMES      Limit the session's tools to these comma-separated
                            capabilities, as clio-coder run does; none disables all.
   --delegate-tools NAMES   Limit the tools the session's dispatched workers may hold.
@@ -32,6 +36,7 @@ available through /library agents, /run, the dispatch board, and run records.
 interface AcpFlags {
 	cwd?: string;
 	permissionTimeoutMs?: number;
+	autonomyCeiling?: "default" | "yolo";
 	toolLimits?: SessionToolLimits;
 	readOnly?: true;
 }
@@ -54,6 +59,12 @@ export function parseAcpFlags(args: ReadonlyArray<string>): AcpFlags | string {
 				return `--permission-timeout needs a whole number from 1 to ${MAX_TIMER_DELAY_MS} milliseconds`;
 			}
 			flags.permissionTimeoutMs = ms;
+			index += 1;
+			continue;
+		}
+		if (arg === "--autonomy") {
+			if (value !== "default" && value !== "yolo") return "--autonomy needs default or yolo";
+			flags.autonomyCeiling = value;
 			index += 1;
 			continue;
 		}
@@ -192,6 +203,7 @@ export async function runAcpCommand(
 							handshake,
 							onReady: ready,
 							...(flags.permissionTimeoutMs === undefined ? {} : { permissionTimeoutMs: flags.permissionTimeoutMs }),
+							...(flags.autonomyCeiling === undefined ? {} : { autonomyCeiling: flags.autonomyCeiling }),
 						},
 					}),
 			});
