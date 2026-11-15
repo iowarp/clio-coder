@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
+import { type TurnConstraints, templateToolConstraints } from "../../src/core/turn-constraints.js";
 import { createReadOnlyExplorationNudgeRegistration } from "../../src/domains/middleware/dispatch-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import { createMarketplaceOfferRegistration } from "../../src/domains/middleware/marketplace-offer.js";
@@ -55,9 +56,10 @@ describe("reminders gate on the turn's callable tools", () => {
 	});
 
 	it("marketplace offer needs both context and ask_user", () => {
-		const offer = () =>
+		const offer = (constraints?: TurnConstraints) =>
 			createMarketplaceOfferRegistration({
 				interactive: true,
+				getTurnConstraints: () => constraints,
 				listInstalledSkillNames: () => [],
 				listMarketplaceEntries: () => [
 					{
@@ -85,6 +87,9 @@ describe("reminders gate on the turn's callable tools", () => {
 		const effects = registration.evaluate(turn(surface(ToolNames.AskUser, ToolNames.Context)));
 		strictEqual(effects.length, 1);
 		ok(effects[0]?.kind === "inject_reminder" && effects[0].message.includes("ask_user"));
+		// A prompt template that narrowed the turn's tools gets no install flow, even with both tools admitted.
+		const narrowed = offer(templateToolConstraints({ name: "advance", allowedTools: ["ask_user", "context", "read"] }));
+		deepStrictEqual(narrowed.evaluate(turn(surface(ToolNames.AskUser, ToolNames.Context))), []);
 	});
 
 	it("read-only exploration follow-up names Scout only when dispatch is callable", () => {

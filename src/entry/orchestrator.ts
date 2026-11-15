@@ -1764,6 +1764,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middlewareRegistrar.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
+				getTurnConstraints: () => chat.currentTurnConstraints?.(),
 				listInstalledSkillNames: () => [
 					...installedSkillNames(resources.skillsForDisplay(process.cwd()).items, process.cwd()),
 				],
