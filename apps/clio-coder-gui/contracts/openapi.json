@@ -12626,6 +12626,11 @@
 												"cancel": {
 													"type": "string",
 													"const": "_clio-coder/interview/cancel"
+												},
+												"timeoutMs": {
+													"type": "integer",
+													"minimum": 1,
+													"maximum": 2147483647
 												}
 											},
 											"additionalProperties": false
