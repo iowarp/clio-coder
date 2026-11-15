@@ -715,6 +715,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 						images: [],
 						...(flushed.display ? { display: flushed.display } : {}),
 						...(flushed.referencedPaths ? { workingContextPaths: flushed.referencedPaths } : {}),
+						...(flushed.constraints ? { constraints: flushed.constraints } : {}),
 					}
 				: await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {

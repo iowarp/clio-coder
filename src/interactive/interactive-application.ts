@@ -1747,7 +1747,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 			toEditor: (entry) => {
 				if (deps.chat.removeQueuedEntry(entry.id, "to-editor") === null) return;
 				const current = editor.getExpandedText();
-				editor.setRestoredText([entry.text, current].filter((part) => part.trim().length > 0).join("\n\n"));
+				// A queued template turn returns as the line typed, not its expanded body.
+				const restored = entry.constraints !== undefined ? (entry.display?.text ?? entry.text) : entry.text;
+				editor.setRestoredText([restored, current].filter((part) => part.trim().length > 0).join("\n\n"));
 				notify("info", RESTORED_DRAFT_NOTICE, "queue:restored");
 			},
 			sendNow: (entry) => editorSubmit.interruptFromEditor(entry.text, entry),

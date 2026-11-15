@@ -398,7 +398,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				...(sub.images.length > 0 ? { images: sub.images } : {}),
 				...(sub.workingContextPaths.length > 0 ? { workingContextPaths: sub.workingContextPaths } : {}),
 				...(sub.pendingSkillRequests.length > 0 ? { pendingSkillRequests: sub.pendingSkillRequests } : {}),
-				...(sub.constraints ? { constraints: sub.constraints } : {}),
+				// A template typed while a run streams waits in the queue and starts as its own turn at the settle.
+				...(sub.constraints ? { constraints: sub.constraints, queueConstrainedTurn: true } : {}),
 				// A captured boot record joins the live turn's FIFO follow-up queue so
 				// records keep their order as separate turns. Enter while streaming is
 				// the operator correcting the run, so it rides the next steering slot;

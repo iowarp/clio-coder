@@ -15,6 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { TurnQueuesState } from "./turn-state.js";
@@ -61,6 +62,14 @@ export interface QueuedChatMessage {
 	 * model at the next slot without passing the fresh-prompt path again.
 	 */
 	referencedPaths?: ReadonlyArray<string>;
+	/**
+	 * A prompt template's tool limits. Such an entry is never handed to the
+	 * running turn, since those limits bind a whole turn: it waits as a
+	 * follow-up and the settle starts it as its own turn. Before, Enter on a
+	 * template during a run was refused and the line put back in the editor,
+	 * where a driver's next keystrokes appended to it (WTF-P, 2026-11-15).
+	 */
+	constraints?: TurnConstraints;
 }
 
 /** Why an entry left the queue without being delivered by the engine. */
@@ -97,6 +106,8 @@ export interface QueueEnqueueOptions {
 	referencedPaths?: ReadonlyArray<string>;
 	/** This entry is a message already taken off the queue, such as a send-now the run refused: it keeps its identity. */
 	continues?: Pick<QueuedChatMessage, "id" | "enqueuedAt">;
+	/** See {@link QueuedChatMessage.constraints}. */
+	constraints?: TurnConstraints;
 }
 
 export interface QueuedMessagesSnapshot {
@@ -135,6 +146,8 @@ export interface TurnQueuesDeps {
 			workingContextPaths?: ReadonlyArray<string>;
 			origin?: string;
 			queued?: QueuedChatMessage;
+			display?: NonNullable<QueuedChatMessage["display"]>;
+			constraints?: TurnConstraints;
 		},
 	) => Promise<void>;
 	now?: () => number;
@@ -278,6 +291,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			...(display ? { display } : {}),
 			...(paths.length > 0 ? { referencedPaths: [...paths] } : {}),
 			...(options?.origin !== undefined ? { origin: options.origin, pinned: true } : {}),
+			...(options?.constraints !== undefined ? { constraints: options.constraints, pinned: true } : {}),
 		};
 		queuedAt.set(entry, performance.now());
 		if (heldFor === "operator" && options?.origin === undefined) typedAfterStop.add(entry);
@@ -342,7 +356,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 
 	/** Hand every entry of `kind` to the engine; returns how many went. */
 	const handOver = (agent: EngineAgent, kind: QueuedMessageKind, point: QueueDeliveryPoint): number => {
-		const due = queue.filter((entry) => entry.kind === kind);
+		const due = queue.filter((entry) => entry.kind === kind && entry.constraints === undefined);
 		if (due.length === 0) return 0;
 		for (const entry of due) {
 			queue.splice(queue.indexOf(entry), 1);
@@ -391,8 +405,9 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 		},
 		setEntryKind(id, kind) {
 			const entry = queue[find(id)];
-			// A machine prompt stays a follow-up: it is never a steer, whoever asks.
-			if (!entry || fromMachine(entry)) return false;
+			// A machine prompt stays a follow-up: it is never a steer, whoever asks. A
+			// template's turn stays one too: its limits cannot bind a steer.
+			if (!entry || fromMachine(entry) || entry.constraints !== undefined) return false;
 			entry.kind = kind;
 			entry.pinned = true;
 			emitQueueUpdate();
@@ -557,12 +572,16 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 			if (!first) return false;
 			state.continuation.dropRequest();
 			state.runtime?.agent.clearAllQueues();
-			flushNext = !afterStop && queue.length > 0;
+			// A queued template turn is never flushed into another prompt; it waits for its own settle.
+			const riding = queue.filter((entry) => entry.constraints === undefined).length;
+			flushNext = !afterStop && riding > 0;
 			emitQueueUpdate();
 			deps.emitNotice(
 				afterStop
-					? `[Clio Coder] the run has stopped; sending the message typed after the stop as a new prompt.${queue.length > 0 ? ` ${queue.length} held ${queue.length === 1 ? "message lands" : "messages land"} at its first slot.` : ""}`
-					: "[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.",
+					? `[Clio Coder] the run has stopped; sending the message typed after the stop as a new prompt.${riding > 0 ? ` ${riding} held ${riding === 1 ? "message lands" : "messages land"} at its first slot.` : ""}`
+					: first.constraints !== undefined
+						? `[Clio Coder] the run ended; starting the queued ${first.display?.text.split(/\s+/u)[0] ?? "prompt template"} as its own turn.`
+						: "[Clio Coder] steering arrived as the run ended; resubmitting as a fresh prompt.",
 			);
 			// The resubmit's own user echo is suppressed (markPersistedUserEcho), so
 			// this is the only place the first text can enter the transcript; the
@@ -574,6 +593,11 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 					? { workingContextPaths: first.referencedPaths }
 					: {}),
 				...(first.origin !== undefined ? { origin: first.origin } : {}),
+				// A template's turn starts as the operator typed it, so prompt_submit
+				// hooks read the invocation and its limits bound the turn.
+				...(first.constraints !== undefined
+					? { constraints: first.constraints, ...(first.display ? { display: first.display } : {}) }
+					: {}),
 				queued: first,
 			});
 			return true;

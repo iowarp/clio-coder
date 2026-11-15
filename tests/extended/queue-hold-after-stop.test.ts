@@ -19,7 +19,12 @@ function fixture() {
 	const held: number[] = [];
 	const notices: string[] = [];
 	const dropped: string[][] = [];
-	const submitted: Array<{ text: string; queued?: QueuedChatMessage }> = [];
+	const submitted: Array<{
+		text: string;
+		queued?: QueuedChatMessage;
+		constraints?: QueuedChatMessage["constraints"];
+		display?: QueuedChatMessage["display"];
+	}> = [];
 	const queues = createTurnQueues({
 		state: state as unknown as ChatTurnState,
 		emitQueueUpdateEvent: () => {},
@@ -28,7 +33,12 @@ function fixture() {
 		emitQueueHeld: (count) => held.push(count),
 		emitQueueDropped: (texts) => dropped.push(texts),
 		submit: async (text, options) => {
-			submitted.push({ text, ...(options?.queued ? { queued: options.queued } : {}) });
+			submitted.push({
+				text,
+				...(options?.queued ? { queued: options.queued } : {}),
+				...(options?.constraints ? { constraints: options.constraints } : {}),
+				...(options?.display ? { display: options.display } : {}),
+			});
 		},
 	});
 	const texts = () => queues.entries().map((entry) => entry.text);
@@ -53,6 +63,23 @@ it("an operator stop sends nothing, keeps entries separate and in order, and ann
 	f.queues.settleSubmit(true);
 	f.queues.settleSubmit(true);
 	assert.deepEqual(f.held, [2]);
+});
+
+it("a template queued during a run never rides it and starts as its own turn at the settle", async () => {
+	const f = fixture();
+	const constraints = { allowedTools: ["read"] };
+	const display = { text: "/desk:advance", note: "prompt template /desk:advance" };
+	const queued = f.queues.queueFollowUp("Advance the desk.", display, { constraints });
+	assert.ok(queued);
+	assert.equal(f.queues.setEntryKind(queued.id, "steer"), false);
+	f.queues.handOverAtFinishTurn(true);
+	assert.deepEqual(f.steered, []);
+	f.state.streaming = false;
+	assert.equal(await f.queues.resubmitStranded(), true);
+	assert.equal(f.submitted[0]?.text, "Advance the desk.");
+	assert.deepEqual(f.submitted[0]?.constraints, constraints);
+	assert.deepEqual(f.submitted[0]?.display, display);
+	assert.match(f.notices.at(-1) ?? "", /starting the queued \/desk:advance as its own turn/);
 });
 
 it("a held queue survives a prompt the operator did not type, and lands at the first slot of one they did", () => {
