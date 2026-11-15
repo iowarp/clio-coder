@@ -4,8 +4,8 @@
   "corpusPolicy": "site/public-docs.json",
   "source": {
     "version": "0.8.1",
-    "ref": "48c67d0a0d40dc66fed6a214dce8919744679e50",
-    "commit": "48c67d0a0d40dc66fed6a214dce8919744679e50",
+    "ref": "e0c37ee0db81972a2a1e44c94c5dd73646ec2358",
+    "commit": "e0c37ee0db81972a2a1e44c94c5dd73646ec2358",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "d03be65a1426cb29a0262909b9e75531620caf6fbbaecb34e4cbb6aafcf184e4",
-      "sourceSha256": "20afde31c541cc618ace46d7b2d327b9b616cfbaf1f08bf1aa0797ff01bf4df6"
+      "sourceSha256": "6e42e8cc7952bcf789de2850ec0368d9b46f9031ae590b17d4f2a991d5a74bfb"
     },
     {
       "path": "guide/hpc-clusters.md",
