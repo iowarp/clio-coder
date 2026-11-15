@@ -116,6 +116,8 @@ const LOOP_GUARD_TURN_LIMIT = 32;
 
 /** Bounded per-fingerprint success memory for the block-reason evidence anchor. */
 const SUCCEEDED_FINGERPRINT_LIMIT = 128;
+/** One model-visible line: formatModelRejection clips each line at 300 characters. */
+const PRIOR_FAILURE_CHARS = 200;
 
 /** Bucket for calls arriving without a turn id (e.g. pre-session probes). */
 const NO_TURN_BUCKET = "no-turn";
@@ -206,7 +208,7 @@ function loopNextMove(tool: string): string {
  * says so and points the model at that result: for a weak local model "you
  * already have this answer" is the strongest available anchor.
  */
-function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number): string {
+function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number, priorFailure?: string): string {
 	const evidence =
 		priorSuccesses > 0
 			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run, ` +
@@ -215,8 +217,28 @@ function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: 
 	return (
 		`loop detected: ${tool} was called ${repeatCount} times with identical arguments among this turn's recent ` +
 		// formatModelRejection clips each line at 300 characters; the next move needs its own.
-		`tool calls. Repeating the exact call is blocked. ${evidence.trimEnd()}\nNext: ${loopNextMove(tool)}`
+		`tool calls. Repeating the exact call is blocked. ${evidence.trimEnd()}${priorFailureLine(priorFailure)}\nNext: ${loopNextMove(tool)}`
 	);
+}
+
+/**
+ * A model that repeats a call which failed for a stated reason has lost that
+ * reason; the block says it again so the fix is in front of the model (WTF-P
+ * campaign: an extension asked for expect_revision three times).
+ */
+function priorFailureLine(priorFailure: string | undefined): string {
+	return priorFailure === undefined
+		? ""
+		: `\nThe identical call failed earlier with: ${priorFailure} Fix what that error names before calling it again.`;
+}
+
+function clipFailure(message: string): string | undefined {
+	const line = message
+		.split("\n")
+		.map((entry) => entry.trim())
+		.find((entry) => entry.length > 0);
+	if (line === undefined) return undefined;
+	return line.length > PRIOR_FAILURE_CHARS ? `${line.slice(0, PRIOR_FAILURE_CHARS - 1)}…` : line;
 }
 
 /** True when a sanitized locked reply holds nothing but the fallback notice. */
@@ -304,11 +326,11 @@ export function lockedSynthesisRepromptMessages(
  * the blocked call's result; the agent loop ends naturally on the first round
  * that emits text without a tool call.
  */
-function synthesisLockoutDirective(): string {
+function synthesisLockoutDirective(priorFailure?: string): string {
 	return (
 		// One line per instruction: formatModelRejection clips each line at 300 characters.
 		"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now " +
-		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above.\nAnswer " +
+		`disabled for the rest of this turn. Everything you retrieved is already in the conversation above.${priorFailureLine(priorFailure)}\nAnswer ` +
 		"now from what you have gathered, preserving the required result format (JSON for a JSON result contract; otherwise prose).\nDo not write tool-call markup such as " +
 		"<tool_call> blocks; tool calls are disabled and will not run."
 	);
@@ -656,6 +678,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * many distinct calls before it starts repeating one).
 	 */
 	const succeededFingerprints = new Map<string, number>();
+	// Last error text per call identity, so a blocked repeat can restate why it failed.
+	const failedResults = new Map<string, string>();
 	/**
 	 * Per-turn streak of consecutive same-shape calls (size args ignored) whose
 	 * outputs hashed identically. Only the latest streak per turn is tracked:
@@ -806,6 +830,22 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	// A successful call records a success for its canonical fingerprint.
 	// Blocked calls never reach here, so only real results anchor.
 	const recordSuccessfulResult = (input: MiddlewareHookInput): void => {
+		const identityTool = input.toolName;
+		if (typeof identityTool === "string" && identityTool.length > 0) {
+			const identity = callIdentity(identityTool, input.toolArgs);
+			const failure =
+				input.metadata?.resultKind !== "ok" && typeof input.metadata?.errorMessage === "string"
+					? clipFailure(input.metadata.errorMessage)
+					: undefined;
+			failedResults.delete(identity);
+			if (failure !== undefined) {
+				if (failedResults.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
+					const oldest = failedResults.keys().next().value;
+					if (oldest !== undefined) failedResults.delete(oldest);
+				}
+				failedResults.set(identity, failure);
+			}
+		}
 		if (input.metadata?.resultKind !== "ok") return;
 		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
@@ -1066,7 +1106,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			enterLockout(input, turnKey, { tool, repeatCount, blocksThisTurn });
 			options.onSynthesisLockout?.();
 			emitLoopBlocked(input, { tool, repeatCount, blocksThisTurn, disposition: "lockout" }, now);
-			return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block", ...marker }];
+			return [
+				{
+					kind: "block_tool",
+					reason: synthesisLockoutDirective(failedResults.get(identity)),
+					severity: "hard-block",
+					...marker,
+				},
+			];
 		}
 		// Below budget, or a surface without the lockout (workers): the
 		// existing per-block behavior. Reaching the budget without a lockout
@@ -1616,7 +1663,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						turnKey,
 						tool,
 						verdict.count,
-						loopBlockBaseReason(tool, verdict.count, priorSuccesses),
+						loopBlockBaseReason(tool, verdict.count, priorSuccesses, failedResults.get(fingerprint)),
 						now,
 						priorSuccesses > 0,
 					);
