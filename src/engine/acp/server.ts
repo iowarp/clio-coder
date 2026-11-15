@@ -5510,6 +5510,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		telemetry.bind(replay !== undefined);
 	};
 
+	/** Whether a live process other than this one holds the session's ledger now, read from its record. */
+	const heldElsewhere = (id: string): boolean => {
+		try {
+			const current = workspaceMeta(id);
+			return current.endedAt === null && liveSessionOwner(current) !== null;
+		} catch {
+			return false;
+		}
+	};
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
 		requireInitialized();
 		requireAuthenticated();
@@ -5524,7 +5533,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
 			const stored = workspaceMeta(id);
 			// A record whose owner is gone crashed, and resuming claims it atomically, as the terminal's /resume does.
-			if (stored.endedAt === null && liveSessionOwner(stored) !== null) {
+			if (heldElsewhere(id)) {
 				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 			}
 			if (
@@ -5567,6 +5576,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					} catch {
 						// Best effort: no replay has been emitted and the slot remains unused.
 					}
+				}
+				// Another process claimed the session between the check above and the
+				// resume's locked claim, which refused it. The client gets the same
+				// code as the early check rather than a generic load failure.
+				if (heldElsewhere(id)) {
+					throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 				}
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 			}
