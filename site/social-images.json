@@ -34,7 +34,7 @@
 			"path": "assets/social/gui-task.png",
 			"width": 1200,
 			"height": 630,
-			"sha256": "5097e54b28a94e7e63e30570b91745e87e2f7ccae65256877b1f12a8c24464dd"
+			"sha256": "ec4b4dcfb5038ef1aab8779180042c091ae122dda65e259411ae173d0e8d633c"
 		},
 		"tui-configure-saved": {
 			"source": "assets/guides/tui-configure-saved.png",

@@ -235,12 +235,12 @@
 			"width": 2880,
 			"height": 1920,
 			"label": "Task",
-			"alt": "CLIO Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.",
-			"caption": "A completed desktop task: test results, reference temperatures, and the Session column alongside the conversation.",
+			"alt": "CLIO Coder 0.8.1 desktop app after a completed task on GPT-6 Luna in the calibration-lab workspace: the answer reports npm test passed with 7 tests and 0 failures and lists the reference temperatures, with the turn's time, tokens, estimated cost and tool calls beneath it, and the Task details column showing the task complete.",
+			"caption": "A completed desktop task on GPT-6 Luna: the test result and reference temperatures in the conversation, with Task details beside it.",
 			"interface": "Desktop (alpha)",
-			"version": "0.6.0-dev",
-			"capturedAt": "2026-10-03",
-			"source": "Current main-checkout dist/ (v060 source HEAD a7505259128dcd00cd7d63f958aa67c6a89c70dd), private clio-coder gui --foreground --no-open server on an OS-assigned free port, isolated CLIO_CODER config/data/state/cache under the site-design scratch directory. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Live tasks used only target litellm, model dynamo/qwopus3.8-27b-flash@q5_k_m, one task at a time. Requested npm test and the reference temperatures in calibration.test.mjs. All seven existing tests passed; captured the completed response."
+			"version": "0.8.1",
+			"capturedAt": "2026-11-14",
+			"source": "CLIO Coder 0.8.1 from the published npm tarball, private clio-coder gui --foreground --no-open server inside a bubblewrap sandbox: home /home/researcher, host lab, isolated CLIO_CODER config/data/state/cache holding only the openai-codex and anthropic-max subscription logins. Chrome at 1440x960, device scale 2, dark theme and reduced motion. Chat: GPT-6 Luna through a ChatGPT subscription (target openai-codex). In the unmodified calibration-lab example, requested npm test and the reference temperatures calibration.test.mjs checks; all seven tests passed. Opened Task details and captured the completed response."
 		},
 		"gui-home": {
 			"image": "assets/guides/gui-home.webp",
