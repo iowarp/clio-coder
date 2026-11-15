@@ -454,11 +454,15 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.registerAskUserHandler ? { registerHandler: deps.app.registerAskUserHandler } : {}),
 		...(openAskUserOverlayFactory ? { openAskUserOverlay: openAskUserOverlayFactory } : {}),
 		...(deps.onOperatorParked ? { onOperatorParked: deps.onOperatorParked } : {}),
-		getUnattendedWindowMs: () => {
+		getUnattendedWindowMs: (questions) => {
 			const safety = deps.app.getSettings?.().safety;
 			const lastInput = deps.lastOperatorInputAt?.();
 			const away = awaySince !== null && (lastInput === undefined || lastInput < awaySince);
-			return askUserWindowMs(safety?.unattendedAfterSeconds, { yolo: safety?.autonomy === "yolo", away });
+			return askUserWindowMs(safety?.unattendedAfterSeconds, {
+				yolo: safety?.autonomy === "yolo",
+				away,
+				operatorOnly: questions.some((question) => question.operator_only === true),
+			});
 		},
 		onRoundTimedOut: (questions, result) => {
 			awaySince = Date.now();

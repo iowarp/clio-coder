@@ -59,7 +59,7 @@ export interface OverlayAskUserLifecycleDeps {
 	 * Clio answers for the operator (`safety.unattendedAfterSeconds`, #421).
 	 * Read per round; 0 or absent waits forever.
 	 */
-	getUnattendedWindowMs?(): number;
+	getUnattendedWindowMs?(questions: ReadonlyArray<AskUserQuestion>): number;
 	unattendedTimers?: UnattendedTimers;
 	/** A round closed with nobody answering; the tool is about to choose for the operator. */
 	onRoundTimedOut?(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): void;
@@ -289,7 +289,7 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		pendingCancel = cancel;
 		// Only the ask_user tool's own rounds may answer themselves; a settings
 		// confirmation or any other caller keeps waiting for the operator.
-		const windowMs = invokeOptions?.unattendedFallback === true ? (deps.getUnattendedWindowMs?.() ?? 0) : 0;
+		const windowMs = invokeOptions?.unattendedFallback === true ? (deps.getUnattendedWindowMs?.(questions) ?? 0) : 0;
 		// A round nobody's tool asked for is the operator's own action asking to be confirmed.
 		const confirmation = !recordAnswer && !toolBacked;
 		const round = {
