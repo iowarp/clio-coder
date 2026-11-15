@@ -68,7 +68,9 @@ import {
 	type ObservedRunEffects,
 	parseWorkerResultContract,
 	RESULT_CONTRACT_REPAIR_LIMIT,
+	RESULT_CONTRACT_REPAIR_TOOL,
 	type ResultContract,
+	resultContractReminder,
 	resultContractRepairMessages,
 	resultContractRepairUserMessage,
 	resultContractShape,
@@ -573,6 +575,26 @@ function workerResponseFormatFor(input: WorkerRunInput): Record<string, unknown>
 	const dialect = responseSchemaDialectFor(input.runtime.id);
 	if (dialect === null) throw responseSchemaRuntimeRefusal(input);
 	return responseFormatFor(dialect, input.responseSchema, "clio_result");
+}
+
+/**
+ * Append the result-contract reminder to the last tool result of every work
+ * round. It is a function of history alone, so a round's reminder is
+ * byte-identical on every later request and the provider prefix cache holds;
+ * stored history, grounding and eviction never see it. A repair round's own
+ * result already quotes the exact shape and is left alone.
+ */
+export function withResultContractReminders<M extends { role: string }>(messages: M[], reminder: string | null): M[] {
+	if (reminder === null) return messages;
+	let changed = false;
+	const projected = messages.map((message, index) => {
+		if (message.role !== "toolResult" || messages[index + 1]?.role === "toolResult") return message;
+		const result = message as unknown as { toolName?: unknown; content?: unknown };
+		if (result.toolName === RESULT_CONTRACT_REPAIR_TOOL || !Array.isArray(result.content)) return message;
+		changed = true;
+		return { ...message, content: [...result.content, { type: "text", text: reminder }] };
+	});
+	return changed ? projected : messages;
 }
 
 interface ReadCitationRequest {
@@ -1209,6 +1231,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The constraint rides samplingParams, which the completions adapter merges
 	// into the body after every named field.
 	const workerResponseFormat = workerResponseFormatFor(input);
+	// The helper protocol names its own terminal tool, so only a prose-parsed contract carries the reminder.
+	const contractReminder =
+		input.resultContract !== undefined && !helperToolAvailable ? resultContractReminder(input.resultContract) : null;
 	const options: EngineAgentOptions = {
 		// The run's restrictions are judged against the target as configured for
 		// this run before each request, the same verdict the parent would reach.
@@ -1391,7 +1416,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A refreshed credential replaces the one Pi resolved for this round; the
 			// next round resolves its own through getApiKey (#427).
 			let roundApiKey: string | undefined;
-			const request = (projected: AgentMessage[]) => {
+			const request = (history: AgentMessage[]) => {
+				const projected = withResultContractReminders(history, contractReminder);
 				const middlewareChoice = middlewareToolChoice.current();
 				// Codex retains the work phase's parallel setting for WS deltas;
 				// beforeToolCall still rejects mixed or duplicate handoffs (#423).
