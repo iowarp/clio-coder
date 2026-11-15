@@ -7,9 +7,9 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
 - Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
 - Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
-- Current release: v0.8.0. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+- Current release: v0.8.1. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
 
-This file holds the public CLIO Coder guides (documentation for v0.8.0), tutorials, and research pages as Markdown. Each section names the page it comes from.
+This file holds the public CLIO Coder guides (documentation for v0.8.1), tutorials, and research pages as Markdown. Each section names the page it comes from.
 
 ---
 
@@ -277,7 +277,7 @@ Every connection names a runtime, which fixes how CLIO Coder talks to the server
 
 A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.
 
-When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
+When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
 
 ---
 
@@ -407,7 +407,7 @@ Tool results are bounded. Each reading tool has a size cap per call, and all of 
 
 Run `clio-coder --allow-tools read,grep,find,ls` to limit the main agent to those tools, and `--delegate-tools` to limit its workers. Both take a comma-separated list or `none`. A prompt, skill or worker recipe can narrow these limits but never widen them. `/view` shows what the tools produced, a cut result in full included.
 
-The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/architecture/prompt-envelope-and-tools.md).
+The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/prompt-envelope-and-tools.md).
 
 ---
 
@@ -722,7 +722,7 @@ Some failures retry automatically and some never do:
 - No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.
 - Backoff starts at 500 ms, doubles, and stops at 60 seconds.
 
-A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
+A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
 
 ---
 
@@ -980,13 +980,13 @@ clio-coder acp --cwd /path/to/project
 | `--delegate-tools NAMES` | Limits the tools the session's dispatched workers may hold. |
 | `--read-only` | Holds every session at the read-only ceiling. No file outside CLIO Coder's own home changes. |
 
-`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
+`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
 
 ## Built on the Pi SDK
 
 CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.8.0 pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
 
-Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/architecture/pi-boundary.md).
+Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/pi-boundary.md).
 
 ---
 
@@ -1923,7 +1923,7 @@ CLIO Coder works in the repository you open. For your first session, give it a s
 
 **Version scope**
 
-This tutorial describes v0.8.0. The recordings on this page come from a small JavaScript project with one failing test and Qwen 3.8 27B on a local model server. The first starts with no model configured. The install step was not recorded.
+This tutorial describes v0.8.1. The recordings on this page come from a small JavaScript project with one failing test and GPT-6 Luna through a ChatGPT subscription. The first starts with no model configured and one stored sign-in. The install step was not recorded.
 
 ## 1. Install CLIO Coder
 
@@ -1950,13 +1950,13 @@ No model target is configured. Clio needs a model before it can do anything else
 
 Setup looks for a provider key in your environment, a stored sign-in and a local model server, and lists what it found. Pick one, or choose **Set up something else** and answer what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team. Use a model that supports tool calling.
 
-CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the recording, setup found a model server and saved it:
+CLIO Coder sends the model one short test request and saves only when it answers; a browser sign-in you complete is the exception. In the first recording, setup found the stored ChatGPT sign-in and recommended gpt-6-luna. Choosing it printed these lines before chat opened:
 
 ```text
-◇  Testing litellm / qwen3.8-27b ... answered in 0.4 s.
-◇  target litellm saved, runtime litellm
-◇  chat runs on litellm, model qwen3.8-27b
-◇  fleet default is litellm
+◇  Testing openai-codex / gpt-6-luna ... answered in 1.5 s.
+◇  target openai-codex saved, runtime openai-codex
+◇  chat runs on openai-codex, model gpt-6-luna
+◇  fleet default is openai-codex
 ◇  settings written to ~/.config/clio-coder/settings.yaml
 ◇  Saved. Chat and workers use this model. Change it any time with /model or /config.
 ```
@@ -1973,7 +1973,7 @@ clio-coder doctor
 
 ## 3. Open a workspace
 
-When setup saves, the terminal workspace opens in the same folder. In the recording, its header read `Model      litellm · qwen3.8-27b` and the status line ended `200K ctx`, the context window of the model it found. Later, `clio-coder` opens the workspace directly.
+When setup saves, the terminal workspace opens in the same folder. In the recording, its header read `Model      openai-codex · gpt-6-luna` and the status line reported `GPT-6-luna is ready`. Later, `clio-coder` opens the workspace directly.
 
 Or open the desktop alpha in your browser:
 
@@ -1989,7 +1989,7 @@ Try this request:
 
 > Explain how this repository builds and runs its tests. Identify the main entry points and suggest one verification task. Do not change files yet.
 
-Follow the tool activity as CLIO Coder reads the repository. The recording ends while it plans its first reads. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
+Follow the tool activity as CLIO Coder reads the repository. In the recording, the agent read `package.json`, `README.md`, `temperature.mjs` and `calibration.test.mjs`, then named `npm test` as the test command and the two files as the main entry points. If an approval card appears, read the call before allowing it. If the answer misses an important directory or build system, name it in a follow-up.
 
 ## 5. Make the next task specific
 
@@ -1997,47 +1997,49 @@ Once you understand the project, ask for one change you can check. Name the prob
 
 > The absolute-zero test fails. Find the cause, fix it, and run the test check.
 
-![Terminal recording of a first task in CLIO Coder 0.8.0: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and that negative Kelvin is still rejected.](https://coder.iowarp.ai/assets/guides/cast-first-task.webp)
+![Terminal recording of a first task in CLIO Coder 0.8.1: asked why the absolute-zero test fails, the agent reads the source, changes kelvin <= 0 to kelvin < 0 in temperature.mjs, runs the declared test check with exit 0, and reports that all seven tests pass and that negative Kelvin is still rejected.](https://coder.iowarp.ai/assets/guides/cast-first-task.webp)
 
 *A first task at default autonomy: the agent finds an off-by-one guard, edits it, and runs the project's declared test check without asking.*
 
-[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-first-task.cast), 0:27. Transcript:
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-first-task.cast), 0:24. Transcript:
 
 ```text
 A first task in CLIO Coder: fix a failing test and verify
-Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
 
 == ready
 
-~/projects/calibration-lab $ clio-coder
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Model      litellm · qwen3.8-27b                                                                                     │
-│ Autonomy   Default · reviewed approvals                                                                              │
-│ Awareness  Not indexed yet                                                                                           │
-│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
-│ /context init to index this repo                                                                                     │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+┌─ >C_ Clio Coder v0.8.1 ─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Model      openai-codex · gpt-6-luna                                                                                │
+│ Autonomy   Default · reviewed approvals                                                                             │
+│ Awareness  Not indexed yet                                                                                          │
+│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
+│ /context init to index this repo                                                                                    │
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main                                                                     200K ctx
+default · ~/projects/calibration-lab · main                                                                     272K ctx
 i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
 
 == tui-verify
 
-▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 30ms
-▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 31ms
+i Reply from openai-codex · gpt-6-luna
 
-│ Thinking · Found it. The absolute zero test on line 20 asserts `kelvinToCelsius(0)` === -273.15, but `kelvinToCelsius`
-│ throws a RangeError when kelvin <= 0 (line 21). The test also expects 0 K to be valid. Fix: allow 0 K (change `kelvin
-│ <= 0` to `kelvin < 0`).
+▸ navigated project · 1 result ✓ · 179ms
+▸ found `**/*` · limit 20 · 4 paths ✓ · 28ms
+▸ searched for `absolute|kelvin|273|0` · limit 20 · 20+ matches · truncated ✓ · 28ms
+▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 15ms
+▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 9ms
 
-✦ I found the issue: kelvinToCelsius(0) at temperature.mjs:21 rejects 0 K with a RangeError due to the kelvin <= 0
-  check, but the test at calibration.test.mjs:20 expects absolute zero to be valid. I'll fix it by changing the guard to
-  kelvin < 0.
+$ checked test · 1.4KB ✗ · 607ms
+  │ … 29 earlier lines · /view
+  │       at Test.postRun (node:internal/test_runner/test:1542:19)
+  │       at Test.run (node:internal/test_runner/test:1467:12)
+  │       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
 
-± edited temperature.mjs · +1 -1 ✓ · 308ms
+± edited temperature.mjs · +1 -1 ✓ · 32ms
   │ -21    if (kelvin <= 0) {
   │ +21    if (kelvin < 0) {
   │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
@@ -2046,25 +2048,33 @@ i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo a
   │  25 }
   │     ...
 
-│ Thinking · /view
-
-$ checked test · exit 0 · 19 lines ✓ · 558ms
+$ checked test · exit 0 · 19 lines ✓ · 229ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 75.108879
+  │ ℹ duration_ms 52.268068
 
-│ Thinking · All 7 tests passed. The "rejects temperatures below absolute zero" test includes kelvinToCelsius(-0.001)
-│ and (-1), both
+✦ Fixed kelvinToCelsius: it rejected 0 K with `kelvin <
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● Qwen3.8 is thinking · Esc stops ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● GPT-6-luna is writing · Esc stops ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                             13.7K/200K (6.9%) · ≈117 tok/s
+default · ~/projects/calibration-lab · main *                                              14.4K/272K (5.3%) · ≈47 tok/s
 Type to steer · Esc stops the run · Alt+U Dashboard
 
 == tui-verify-result
 
-± edited temperature.mjs · +1 -1 ✓ · 308ms
+▸ found `**/*` · limit 20 · 4 paths ✓ · 28ms
+▸ searched for `absolute|kelvin|273|0` · limit 20 · 20+ matches · truncated ✓ · 28ms
+▸ read temperature.mjs · line_numbers · lines 1-41 of 41 · 1.5KB ✓ · 15ms
+▸ read calibration.test.mjs · line_numbers · lines 1-67 of 67 · 3.3KB ✓ · 9ms
+
+$ checked test · 1.4KB ✗ · 607ms
+  │ … 29 earlier lines · /view
+  │       at Test.postRun (node:internal/test_runner/test:1542:19)
+  │       at Test.run (node:internal/test_runner/test:1467:12)
+  │       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+± edited temperature.mjs · +1 -1 ✓ · 32ms
   │ -21    if (kelvin <= 0) {
   │ +21    if (kelvin < 0) {
   │  22       throw new RangeError(`Kelvin temperature ${kelvin} is below absolute zero (0 K)`);
@@ -2073,35 +2083,25 @@ Type to steer · Esc stops the run · Alt+U Dashboard
   │  25 }
   │     ...
 
-│ Thinking · /view
-
-$ checked test · exit 0 · 19 lines ✓ · 558ms
+$ checked test · exit 0 · 19 lines ✓ · 229ms
   │ … 17 earlier lines · /view
   │ ℹ todo 0
-  │ ℹ duration_ms 75.108879
+  │ ℹ duration_ms 52.268068
 
-│ … 3 rows · /view
-│ edge case: `-0 < 0` is false, so kelvinToCelsius(-0) returns -273.15. This is definitely correct behavior (in JS, -0
-│ is treated numerically as 0). No need to belabor the point. Done.
+✦ Fixed kelvinToCelsius: it rejected 0 K with kelvin <= 0, even though absolute zero is valid. Changed the check to
+  reject only values below zero. The test check passes: 7 tests, 0 failures.
 
-✦ Fixed. The cause: kelvinToCelsius rejected kelvin <= 0, so the test's kelvinToCelsius(0) at calibration.test.mjs:20
-  threw a RangeError — the guard treated 0 K itself as invalid instead of only below-absolute-zero values. Changing it
-  to kelvin < 0 at temperature.mjs:21 keeps negative Kelvin (e.g. -0.001, -1) rejected, as the RangeError test still
-  confirms.
+✓ Done · 13s · 6 calls · in 13.5k · out 378 · cached 53.8k
 
-  All 7 tests pass now, measured with the test check.
-
-✓ Done · 15s · 5 calls · in 15.3k · out 750 · cached 47.1k
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna finished · memory review on GPT-6-luna · 1.7s · you can send ━
  Ask Clio…  / for commands
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                          14.1K/200K (7.1%) · last 93 tok/s
-i tip: /help lists every command and key, and you can ask me about Clio itself any…     Alt+U +1 more · Ctrl+G X dismiss
+default · ~/projects/calibration-lab · main *                                          14.5K/272K (5.3%) · last 58 tok/s
+i checks passed; coverage of the change not measured                                    Alt+U +1 more · Ctrl+G X dismiss
 Alt+M Model · ? Keys
 ```
 
-The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `All 7 tests pass now, measured with the test check.`
+The agent changed `kelvin <= 0` to `kelvin < 0` in `temperature.mjs`, ran the declared test check (`checked test · exit 0`), and ended its report with `The test check passes: 7 tests, 0 failures.`
 
 Use your project's real test name. Read the diff and the check output yourself before you commit the change.
 
@@ -2138,13 +2138,108 @@ cd /path/to/your/project
 clio-coder
 ```
 
-![CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the Qwen 3.8 model ready.](https://coder.iowarp.ai/assets/tui-boot.webp)
+![CLIO Coder terminal at start: the CLIO Coder wordmark beside the selected model and autonomy, the workspace with its Git state, and the composer reporting the GPT-6-luna model ready.](https://coder.iowarp.ai/assets/tui-boot.webp)
 
 The terminal combines the conversation, tool calls, permissions, and worker activity. Type `/help` to see available commands, or `/model` to choose a model.
 
 ![CLIO Coder in the terminal changing one line of temperature.mjs to fix a failing test, then running the declared test check through verify with exit 0](https://coder.iowarp.ai/assets/tui-verify.webp)
 
 Each tool call stays on its own line with its result, so you can see what ran before you read the answer. `/view` opens the recorded calls and their output.
+
+![Fullscreen terminal recording of GPT-6 Luna in CLIO Coder through the openai-codex target: asked why the absolute-zero test fails, the agent searches the project, edits one line of temperature.mjs from kelvin <= 0 to kelvin < 0, runs the declared test check with exit 0, and reports that all 7 tests pass.](https://coder.iowarp.ai/assets/guides/anim-fix-a-test.webp)
+
+*A short task on a ChatGPT subscription model: the agent finds the off-by-one guard, edits it, and runs the project's test check.*
+
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/anim-fix-a-test.cast), 0:25. Transcript:
+
+```text
+Fixing a failing test in CLIO Coder with GPT-6 Luna
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
+
+== ready
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== asked
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+Why does the absolute-zero test fail?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== edited
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+  Why does the absolute-zero test fail? Fix it and rerun the tests.
+
+i Reply from openai-codex · gpt-6-luna
+
+▸ explored 2 searches, 2 files ✓
+  │ project · `absolute|zero|273.15` · temperature.mjs · calibration.test.mjs
+
+± edited temperature.mjs · +1 -1 ✓ · 144ms
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● GPT-6-luna is waiting for a response · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                        13.6K/272K (5.0%)
+Type to steer · Esc stops the run
+
+== checked
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+  Why does the absolute-zero test fail? Fix it and rerun the tests.
+
+i Reply from openai-codex · gpt-6-luna
+
+▸ explored 2 searches, 2 files ✓
+  │ project · `absolute|zero|273.15` · temperature.mjs · calibration.test.mjs
+
+± edited temperature.mjs · +1 -1 ✓ · 144ms
+$ checked test · exit 0 · 19 lines ✓ · 486ms
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● GPT-6-luna is waiting for a response · Esc stops ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                        13.8K/272K (5.1%)
+Type to steer · Esc stops the run
+
+== done
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+  Why does the absolute-zero test fail? Fix it and rerun the tests.
+
+i Reply from openai-codex · gpt-6-luna
+
+▸ explored 2 searches, 2 files ✓
+  │ project · `absolute|zero|273.15` · temperature.mjs · calibration.test.mjs
+
+± edited temperature.mjs · +1 -1 ✓ · 144ms
+$ checked test · exit 0 · 19 lines ✓ · 486ms
+
+✦ kelvinToCelsius rejected kelvin <= 0, so it treated exactly 0 K—the absolute-zero boundary—as
+  below absolute zero. Changed the check to kelvin < 0. All 7 tests pass.
+
+✓ 11s
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna finished ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main *                                      13.9K/272K (5.1%)
+i checks passed; coverage of the change not measured                                Ctrl+G X dismiss
+```
 
 During a turn, **Enter** queues a message that CLIO Coder reads at the next pause between tool calls, **Alt+S** sends it now, and **Escape** cancels the run.
 
@@ -2239,106 +2334,94 @@ Look for the `shell sandbox` row. It names the backend and where contained comma
 
 A contained command can write the workspace, the scratch roots, `/tmp`, and a private tool cache. Your own `~/.cache` and `~/.npm` stay read-only. Credentials, credential variables, secret files such as `.env`, and the SSH agent are hidden, new local Unix sockets are refused, and the network stays on. A directory your scripts must always write belongs in `safety.scratchRoots`.
 
-A secret path is also refused before any sandbox is involved. In the recording below, asked `Show me the API token in .env.`, the agent tried `ls -la .env 2>&1 | head`, and CLIO Coder stopped it:
+A secret path is also refused before any sandbox is involved. In the recording below, asked to run `cat .env` with bash and report what happens, the agent tried `cat .env; echo "exit=$?"`, and CLIO Coder stopped it:
 
 ```text
 rule: secret_path_bash
 This is a hard block; confirmation cannot override it.
 ```
 
-![Terminal recording in which the user asks CLIO Coder for the API token in the project's .env. The agent's ls -la .env command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent answers that it cannot show the token and gives the command to view it in the user's own terminal.](https://coder.iowarp.ai/assets/guides/cast-sandbox.webp)
+![Terminal recording in which the user asks CLIO Coder on Claude Haiku 5.5 to run cat .env with bash and report what happens. The command is blocked under rule secret_path_bash as a hard block that confirmation cannot override, and the agent reports that nothing from .env was printed, names the rule and the zeroAccessPaths entry, and does not retry.](https://coder.iowarp.ai/assets/guides/cast-sandbox.webp)
 
-*The project's .env is refused outright; confirmation cannot override the block.*
+*The project's .env is refused outright; confirmation cannot override the block, and the agent does not try another way in.*
 
-[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-sandbox.cast), 0:33. Transcript:
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cast-sandbox.cast), 0:16. Transcript:
 
 ```text
 CLIO Coder refuses to read a project secret
-Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
 
 == ready
 
-~/projects/calibration-lab $ clio-coder
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
-┌─ >C_ Clio Coder v0.8.0 ──────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Model      litellm · qwen3.8-27b                                                                                     │
-│ Autonomy   Default · reviewed approvals                                                                              │
-│ Awareness  Not indexed yet                                                                                           │
-│ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ │
-│ /context init to index this repo                                                                                     │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 is ready · no request yet ━
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-haiku-5-5
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ◌ Claude-haiku-5-5 is not checked yet · anthropic-max has not answered a check ━
  Ask Clio…  / for commands
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                                                   200K ctx
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ think low ━
+default · ~/projects/calibration-lab · main *                                                                     1M ctx
 i clio-coder: No CLIO-CODER.md detected. Run /context init to explore the repo and bootstrap context.   Ctrl+G X dismiss
 
 == blocked
 
-~/projects/calibration-lab $ clio-coder
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-haiku-5-5
 
-▌ Show me the API token in .env.
+▌ Test the sandbox: run cat .env with bash and tell me exactly what happens. If it is blocked, name the rule.
 
-i Reply from litellm · qwen3.8-27b
+i Reply from anthropic-max · claude-haiku-5-5
 
 │ Thinking · /view
 
-$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
+$ blocked `cat .env; echo "exit=$?"` · output_policy metadata-only ✗ · bash blocked: runs a command · 26ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ … 2 rows · /view
-│ command output.
-│ So my answer: I can't show you the API token —
+│ Thinking · /view
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⡿ Qwen3.8 is thinking · Esc stops ━
+✦ The sandbox blocked it. cat .env did not run, and nothing from .env was printed.
+
+  - Rule: secret_path_bash. It is a hard block
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⣽ Claude-haiku-5-5 is writing · Esc stops ━
  Ask Clio…  / for commands
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                              12.9K/200K (6.5%) · ≈79 tok/s
-! Clio's safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
-Type to steer · Esc stops the run · Alt+U Dashboard
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · think low ━
+default · ~/projects/calibration-lab · main *                                                            16.7K/1M (1.7%)
+! Clio's safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
+Type to steer · Esc stops the run
 
 == answer
 
-Clio Coder: terminal panes are not installed. Install them with `clio-coder panes install`.
->C_ Clio Coder v0.8.0 · litellm · qwen3.8-27b
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-haiku-5-5
 
-▌ Show me the API token in .env.
+▌ Test the sandbox: run cat .env with bash and tell me exactly what happens. If it is blocked, name the rule.
 
-i Reply from litellm · qwen3.8-27b
+i Reply from anthropic-max · claude-haiku-5-5
 
 │ Thinking · /view
 
-$ blocked `ls -la .env 2>&1 | head` ✗ · bash blocked: runs a command · 41ms
+$ blocked `cat .env; echo "exit=$?"` · output_policy metadata-only ✗ · bash blocked: runs a command · 26ms
   │ … 4 earlier lines · /view
   │ rule: secret_path_bash
   │ This is a hard block; confirmation cannot override it.
 
-│ … 4 rows · /view
-│ can't read it or echo its contents into this chat. If you need the token, read it directly on your machine, e.g. `cat
-│ .env` (or `grep TOKEN .env`) in your own terminal.
+│ Thinking · /view · 456 tokens
 
-✦ I can't show it. .env is a zero-access secret path under Clio's safety policy — I can't read it or echo its contents
-  into this chat, and that's a hard block, not something a confirmation would lift.
+✦ The sandbox blocked it. cat .env did not run, and nothing from .env was printed.
 
-  If you need the token, pull it in your own terminal where it stays on your machine:
+  - Rule: secret_path_bash. It is a hard block of Clio's safety net, so confirmation cannot override it.
+  - Reason given: .env matches the zeroAccessPaths entry /home/researcher/projects/calibration-lab/.env.
+  - Classification: the call was classed as execute.
 
-  code
-    grep 'TOKEN' .env
+  I did not retry or reword the call. The policy message suggests checking whether a variable exists with grep -sq
+  "^NAME=" <file>, but that is a different check from the one you asked for, so I did not run it.
 
-  or just cat .env.
+✓ 4.6s
 
-✓ Done · 23s · 2 calls · in 4.7k · out 1.7k · cached 18.4k
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Qwen3.8 finished ━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Claude-haiku-5-5 finished ━
  Ask Clio…  / for commands
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · ● ○ ○ ○ ━
-default · ~/projects/calibration-lab · main *                                         13.1K/200K (6.5%) · last 101 tok/s
-! Clio's safety net blocked bash because it runs a command. This gate applies at every… Alt+U +1 more · Ctrl+G X dismiss
-Alt+M Model · ? Keys
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ctx ▰▱▱▱▱▱▱▱▱▱ · think low ━
+default · ~/projects/calibration-lab · main *                                                            16.9K/1M (1.7%)
+! Clio's safety net blocked bash because it runs a command. This gate applies at every…    Alt+U more · Ctrl+G X dismiss
 ```
 
 ### Give it a task and watch what happens
@@ -2542,7 +2625,7 @@ You can start a task and leave. Headless `clio-coder run` does one turn with nob
 
 **Version scope**
 
-This guide describes v0.8.0. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
+This guide describes v0.8.1. A headless run has no one to ask: it denies whatever the safety judge does not allow, and `ask_user` is not available.
 
 ## Before you start
 
@@ -2598,18 +2681,21 @@ A finished turn with its exit code, not a parked prompt. An exit of 4 means the 
 
 Stderr names the session and ends with an `observed:` line that counts tool calls, refusals, writes, and checks. When `--max-cost-usd` meets a route with no price, stderr says the cap cannot bound it; declare `targets[].pricing` to fix that. A script should read the exit code or the `run_end` frame, not the prose answer.
 
-In a separate run of the first step, made for this guide apart from the session at the top of the page, Qwen 3.8 27B worked on a repository with one failing parser test. It fixed the parser, ran the test, committed on the branch, and pushed nothing. Stderr read:
+In a separate run of the first step, made for this guide apart from the session at the top of the page, Claude Haiku 5.5 on the `anthropic-max` route worked on a repository with one failing parser test. It split each line at the first `=`, ran the test check, committed on the branch, and pushed nothing.
+
+That route carries a price estimate, so `--max-cost-usd` could bound it and stderr printed no unpriced-route notice. Stderr read:
 
 ```text
-clio-coder run: --max-cost-usd does not bound unpriced routes: litellm/qwen3.8-27b; declare targets[].pricing to bound them
-clio-coder run: session sjajclvyg6cw
-clio-coder run: observed: 10 tool calls, 0 refused · 1 write · checks passed: npm run test, git diff
+clio-coder run: session n5iuvnc76u7o
+clio-coder run: observed: 8 tool calls, 0 refused · 1 write · checks passed: npm run test, git status
 ```
+
+On a route with no price, such as a gateway target without `targets[].pricing`, the same command first prints `clio-coder run: --max-cost-usd does not bound unpriced routes: <target>/<model>; declare targets[].pricing to bound them`.
 
 A `--json` run of the third step from the same set ended with this frame:
 
 ```json
-{"type":"run_end","startedAt":"2026-11-12T19:02:57.365Z","endedAt":"2026-11-12T19:03:09.119Z","exitCode":0,"outcome":"succeeded","safety":{"decisions":{"allowed":3,"blocked":0,"permissionRequested":0},"blockedAttempts":[]}}
+{"type":"run_end","startedAt":"2026-11-14T23:34:24.017Z","endedAt":"2026-11-14T23:34:31.467Z","exitCode":0,"outcome":"succeeded","safety":{"decisions":{"allowed":4,"blocked":0,"permissionRequested":0},"blockedAttempts":[]}}
 ```
 
 | Exit | What it means |
@@ -2879,19 +2965,105 @@ Answer what you have, then provide the key, sign-in, or server address it asks f
 
 Setup sends the model one short test request and saves when it answers. After a failure you can try again, change the key or address, or choose **Save anyway**. The first connection supplies the chat and worker defaults, and `/model` changes the model later.
 
-![Guided setup in the terminal after it found a model server: it offers the LiteLLM gateway on this machine with model qwen3.8-27b, or Set up something else for an API key, a subscription, or another server.](https://coder.iowarp.ai/assets/guides/tui-configure-detected.webp)
+![Guided setup in the terminal after it found a stored login: it offers OpenAI Codex, signed in, with model gpt-6-luna recommended, or Set up something else for an API key, a subscription, or a server.](https://coder.iowarp.ai/assets/guides/tui-configure-detected.webp)
 
-*When setup finds a model server it offers it first; Set up something else leads to the routes.*
+*When setup finds a stored login it offers that first; Set up something else leads to the other routes.*
 
 ![Guided setup in the terminal asking what you have: an API key, a subscription, a model server or gateway, or a setup file from your lab or team, with the providers behind the first three and a path or https address for the setup file.](https://coder.iowarp.ai/assets/guides/tui-configure-source.webp)
 
 *Guided setup asks what you have: an API key, a subscription, a model server or gateway, or a setup file.*
 
-![Guided setup after choosing a model server and entering its address: the server is reachable with one model, qwen3.8-27b is taken as the only one listed, the test message is answered, and the connection is saved as the chat and worker default, with a note that the server reported no context window.](https://coder.iowarp.ai/assets/guides/tui-configure-saved.webp)
+![Guided setup after accepting the stored OpenAI Codex login: the recommended model gpt-6-luna answers the test message and the connection is saved as the chat and worker default.](https://coder.iowarp.ai/assets/guides/tui-configure-saved.webp)
 
-*A server that lists one model skips the picker; setup tests it and saves. Review choices appear only when the test fails.*
+*Accepting the offer tests the recommended model and saves it; review choices appear only when the test fails.*
 
-Guided setup in the terminal: a model server it found, the routes it offers, and the saved connection.
+Guided setup in the terminal: a stored sign-in it found, the routes it offers, and the saved connection.
+
+After setup, `/model` lists the models of every connected target and switches the conversation between them:
+
+![Fullscreen terminal recording of the /model picker in CLIO Coder: the session starts on gpt-6-luna, then claude-haiku-5-5 and claude-opus-5-5 on anthropic-max and gpt-6.1-sol on openai-codex are chosen in turn by typing part of the name, and the session returns to gpt-6-luna.](https://coder.iowarp.ai/assets/guides/anim-model-switch.webp)
+
+*One session, two subscriptions: /model lists the models of every connected target and switches between them without leaving the conversation.*
+
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/anim-model-switch.cast), 0:29. Transcript:
+
+```text
+Switching models in CLIO Coder
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
+
+== ready
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== models
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Models ━
+  focus · 2 of 26 models · 2 targets · 0 local · 26 cloud · ✓ current openai-codex · gpt-6-luna
+  refreshing all targets and model catalogs…
+      model              ctx  caps  target         runtime
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  ❯ ✓ gpt-6-luna        272k  TRV   openai-codex   OpenAI Codex
+      claude-haiku-5-5    1m  TRV   anthropic-max  Anthropic (Claude Pro/Max)
+  1–2 of 2 models · Tab shows all 26
+
+  ✓ healthy 267ms · in use, its connection's default · signed in through the browser
+  context   272k tokens
+  thinking  low
+  can use   tools, reasoning, vision
+  replies   up to 128k tokens · streamed · takes images
+  runtime   OpenAI Codex · provider catalog; openai-codex does not list its models live
+━━━━━━━━━━━━━━━━━ [type] filter · [Enter] use · [s] save · [Tab] focus/all · [*] fav · [Esc] close ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+i clio-coder: No CLIO-CODER.md detected. Run /context init to explore… Alt+U more · Ctrl+G X dismiss
+
+== haiku
+
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-haiku-5-5
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Claude-haiku-5-5 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                   1M ctx
+✓ active this session: anthropic-max · claude-haiku-5-5                             Ctrl+G X dismiss
+
+== opus
+
+>C_ Clio Coder v0.8.1 · anthropic-max · claude-opus-5-5
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ Claude-opus-5-5 is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                   1M ctx
+✓ active this session: anthropic-max · claude-opus-5-5                              Ctrl+G X dismiss
+
+== sol
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6.1-sol
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6.1-sol is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 500K ctx
+✓ active this session: openai-codex · gpt-6.1-sol                                   Ctrl+G X dismiss
+
+== back
+
+>C_ Clio Coder v0.8.1 · openai-codex · gpt-6-luna
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ✓ GPT-6-luna is ready · no request yet ━
+ Ask Clio…  / for commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ● ○ ○ ○ ━
+default · ~/projects/calibration-lab · main                                                 272K ctx
+✓ active this session: openai-codex · gpt-6-luna                                    Ctrl+G X dismiss
+```
 
 **What you should see**
 
@@ -2911,11 +3083,11 @@ The model answering you need not handle every delegated task. The terminal `/set
 
 `clio-coder configure --settings` opens the shell menu, which uses eight sections instead: the conversation model is under **Chat** and worker defaults under **Fleet**. On the desktop, Settings has a **Models** page and a **Fleet routes** tab. Select a connection and model for conversation, then use worker defaults or profiles for delegated work.
 
-![Terminal Settings open on Models: the healthy litellm connection used by chat and workers, the chat connection and model qwen3.8-27b, thinking level and maximum answer length, beside the list of settings sections.](https://coder.iowarp.ai/assets/guides/tui-settings-models.webp)
+![Terminal Settings open on Models: the healthy openai-codex connection used by chat and workers, the chat connection and model gpt-6-luna, thinking level and maximum answer length, beside the list of settings sections.](https://coder.iowarp.ai/assets/guides/tui-settings-models.webp)
 
 *Settings: the model answering you, under Models.*
 
-![Terminal Settings open on Workers at the top: the default worker's connection litellm, model qwen3.8-27b, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.](https://coder.iowarp.ai/assets/guides/tui-settings-workers.webp)
+![Terminal Settings open on Workers at the top: the default worker's connection openai-codex, model gpt-6-luna, thinking level Off and location Automatic, then profiles, agent routes, automatic routing and machines.](https://coder.iowarp.ai/assets/guides/tui-settings-workers.webp)
 
 *Settings: the default worker's connection, model and thinking level, under Workers.*
 
@@ -3087,7 +3259,7 @@ The codemap locates structural information without reading every file into the c
 
 In the terminal, `/context` shows usage, output reservation, remaining headroom, and any pending handoff. On the desktop alpha, the Session column has **Context** and **Branches** cards, and typing `/` in the composer offers `/context`, `/tree`, `/fork`, and `/handoff`.
 
-![Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 200,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.](https://coder.iowarp.ai/assets/guides/tui-context.webp)
+![Terminal Context Window dock after one short turn: a usage bar with the tokens in use out of the 272,000-token window, split into system prompt, tool definitions, agent fleet, project context, messages, tool results and assistant output, then free space, the autocompact reserve, and the next request's input, output reserve and headroom.](https://coder.iowarp.ai/assets/guides/tui-context.webp)
 
 */context: the probed window, tokens in use, and what fills them.*
 
@@ -3511,21 +3683,22 @@ Model facts distinguish network reachability, access to the model listing, model
 
 Each registered node adds a `fleet node <id>` row to `doctor` with its host, remote version and project check. The recording shows the report on a fresh install, before any node or model is added; each warning names the command that clears it.
 
-![Terminal doctor report on a fresh npm install of CLIO Coder 0.8.0: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.](https://coder.iowarp.ai/assets/guides/cli-doctor.webp)
+![Terminal doctor report on a fresh npm install of CLIO Coder 0.8.1: a WARN that no model target is configured yet, OK rows for the version, install method, Node.js, directories, credentials, migrations, local worker capacity, toolchain, store and shell sandbox, INFO rows for optional tools that are not installed, and a WARN that the pane host is not installed.](https://coder.iowarp.ai/assets/guides/cli-doctor.webp)
 
 *doctor --fix creates a fresh install's state; doctor then passes every check except the model target and the pane host, and names the command that adds each.*
 
-[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cli-doctor.cast), 0:08. Transcript:
+[Recording (asciicast)](https://coder.iowarp.ai/assets/casts/cli-doctor.cast), 0:07. Transcript:
 
 ```text
 CLIO Coder doctor on a fresh install
-Recorded with CLIO Coder 0.8.0. Each section is the terminal screen at that moment.
+Recorded with CLIO Coder 0.8.1. Each section is the terminal screen at that moment.
 
 == repaired
 
-OK   Clio Coder version     0.8.0
+WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
+OK   Clio Coder version     0.8.1
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.20.0
+OK   node version           v24.22.2
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -3537,15 +3710,14 @@ OK   state dir mode         tightened to 700
 OK   data dir mode          tightened to 700
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
+OK   state metadata         0.8.1 (repaired 2026-11-14T23:15:14.120Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 19.7 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   local worker capacity  24 usable CPUs, 36.9 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
 OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 0 B
-OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -3556,7 +3728,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 380.2 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
@@ -3569,9 +3741,9 @@ OK   shell sandbox          default-autonomy shell commands run in the bwrap san
 
 ~ $ clio-coder doctor
 WARN chat                   cannot run yet: no model target is configured; run `clio-coder configure` to choose one
-OK   Clio Coder version     0.8.0
+OK   Clio Coder version     0.8.1
 OK   install method         npm (/opt/clio-coder/lib/node_modules/@iowarp/clio-coder; npm global; follows latest through npm; update after exit off (prefix not user-writable))
-OK   node version           v24.20.0
+OK   node version           v24.22.2
 OK   platform               linux-x64
 OK   engine runtime         ready
 OK   directory layout       config, data, state, and cache roots are absolute, distinct, and non-nesting
@@ -3581,15 +3753,14 @@ OK   state dir              /home/researcher/.local/state/clio-coder
 OK   cache dir              /home/researcher/.cache/clio-coder
 OK   settings.yaml          /home/researcher/.config/clio-coder/settings.yaml
 OK   credentials            600
-OK   state metadata         0.8.0 (repaired 2026-11-13T00:17:01.419Z)
+OK   state metadata         0.8.1 (repaired 2026-11-14T23:15:14.120Z)
 OK   lifecycle migrations   9 registered, all recorded
 OK   session store          /home/researcher/.local/state/clio-coder/sessions (no sessions recorded)
 INFO telemetry              mode standard; research capture off; 0 workspace consents recorded
 OK   installation files     build outputs present
-OK   local worker capacity  24 usable CPUs, 19.4 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
+OK   local worker capacity  24 usable CPUs, 36.8 GiB available memory; 8 local workers (built-in safety cap). GPU/VRAM and model fit are not checked.
 OK   state storage          121 B (121 bytes); largest contributor home.json at 121 B (121 bytes)
 OK   home storage           config 8.3 KB, data 0 B, cache 60.3 KB
-OK   interop pi             version unknown (no ACP recipe) at /opt/node/bin/pi
 INFO external tool asciinema not found (install with `clio-coder tools install asciinema`)
 WARN external tool herdr    pane host 0.9.5 is not installed; run `clio-coder panes install`
 OK   external tool yazi     experimental integration disabled by settings
@@ -3600,7 +3771,7 @@ OK   pdf attachments        /usr/bin/pdftotext: pdftotext version 24.02.0; pdfin
 OK   toolchain              found: cc, c++, gfortran, mpicc, mpicxx, mpirun, cmake, make, python3; not on PATH: clang, nvcc, ninja, meson, sbatch
 INFO slurm mcp              not set up: clio-kit, sbatch, and squeue are not on PATH and no mcp.yaml declares the Slurm server; see docs/guide/slurm.md
 OK   store backend          local (no selection; the default)
-OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 420.5 GiB free at /home/researcher/.local/share/clio-coder)
+OK   store root             /home/researcher/.local/share/clio-coder/store (not created yet; 380.2 GiB free at /home/researcher/.local/share/clio-coder)
 OK   panes mode             Clio's private pane host opens with bare `clio-coder`; this command is not running inside one
 OK   panes layout           off
 OK   naming                 clean: immutable history, git refs, worktree markers
@@ -4000,7 +4171,7 @@ Native workers check each model request. Coding agents that make their own model
 **Next steps**
 
 - [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html)
-- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/beb9ea08bbde0994b8c14c17d6f2f97b9660c6cf/docs/guide/information-flow.md)
+- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/guide/information-flow.md)
 - [Choose a model for your project](https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html)
 
 ---
@@ -4495,7 +4666,7 @@ A lab or site that runs its own model gateway can connect every member's CLIO Co
 
 **Version scope**
 
-This tutorial describes v0.8.0. The output below is from `clio-coder configure --import` run against a fresh CLIO Coder home.
+This tutorial describes v0.8.1. The output below is from `clio-coder configure --import` run against a fresh CLIO Coder home.
 
 ## Before you start
 
@@ -4511,11 +4682,11 @@ targets:
   - id: lab
     runtime: openai-compat
     url: https://llm.lab.example.org/v1
-    defaultModel: qwen3-coder-480b
+    defaultModel: gpt-oss-120b
     capabilities: { contextWindow: 131072 }
     auth: { apiKeyEnvVar: LAB_API_KEY }
 chat: { target: lab }
-fleet: { target: lab, model: qwen3-coder-480b }
+fleet: { target: lab, model: gpt-oss-120b }
 ```
 
 `targets` lists the model endpoints. `chat` and `fleet` choose which target the main session and its workers use. `notes` is shown to the member before they confirm, so use it to say how to get a key.
@@ -4544,6 +4715,8 @@ The same rule refuses request headers and safety settings, so a member never has
 clio-coder configure --import lab-clio.yaml
 ```
 
+In a terminal, the command prints what the file will change and asks `Apply these changes? [y/N]`. Answer `n` and nothing changes. `--yes` applies without asking. With `--yes`, and no `LAB_API_KEY` exported yet, the import printed:
+
 **What you should see**
 
 ```text
@@ -4552,13 +4725,14 @@ Lab gateway. Ask #research-computing for a key; export it as LAB_API_KEY.
 
   add target lab (openai-compat)
     prompts go to https://llm.lab.example.org/v1
-    model qwen3-coder-480b; key from $LAB_API_KEY
-  chat uses lab / qwen3-coder-480b
-  fleet uses lab / qwen3-coder-480b
-Apply these changes? [y/N]
+    model gpt-oss-120b; key from $LAB_API_KEY
+  chat uses lab / gpt-oss-120b
+  fleet uses lab / gpt-oss-120b
+Imported 1 target.
+  lab reads its key from LAB_API_KEY, which is not set in this shell.
 ```
 
-Answer `n` and nothing changes. Answer `y` and it prints `Imported 1 target.` and one line per target: `lab: ready`, or what is still missing, such as `lab reads its key from LAB_API_KEY, which is not set in this shell.`
+After `Imported`, each target gets one line: `lab: ready`, or what is still missing, as here.
 
 A plain `http` address to anything other than this machine or a private network address adds a warning that prompts and keys cross the network unencrypted.
 
@@ -4586,7 +4760,7 @@ clio-coder configure --import https://lab.example.org/clio-coder/setup.yaml
 
 Only the `lab` target and the chat and fleet routes change. Their other targets, project settings and stored keys stay as they were.
 
-Importing the same file again prints `Setup file already imported; nothing changed` with the status line, so it is safe to put in a login script with `--yes`. Without a terminal and without `--yes`, the command prints the preview and exits 2 without saving.
+Importing the same file again prints `Setup file already imported; nothing changed (lab-clio.yaml).` with the status line, so it is safe to put in a login script with `--yes`. Without a terminal and without `--yes`, the command prints the preview and exits 2 without saving.
 
 ## Change the file later
 
@@ -4719,7 +4893,7 @@ You changed some code and it feels faster, or one model's answer looks better th
 
 **Version scope**
 
-This guide describes v0.8.0. The output below comes from one recorded session with a single model, Qwen 3.8 27B, on a small Python project. One model is enough to learn both commands. It is not enough to rank models, and the arena section shows why.
+This guide describes v0.8.1. The output below comes from one recorded session on a small Python project. The campaign's agent ran on Claude Haiku 5.5 through the `anthropic-max` route, and the arena put Claude Haiku 5.5 against GPT-6 Luna on the `openai-codex` route. One match is enough to learn both commands. It is not enough to rank models, and the arena section shows why.
 
 ## Before you start
 
@@ -4754,6 +4928,8 @@ checks:
 
 Every check needs `id`, `description`, `command`, `cwd`, `timeoutMs` and `tags`; an empty `tags: []` is allowed. Commit the catalog and every file the checks run or name. Each campaign worktree starts from `HEAD`, so an uncommitted `bench.py` or reference file is not there.
 
+Keep build output such as `__pycache__/` out of Git: a tracked `.pyc` rewritten by a check run counts as a change outside `--scope`, and the iteration is archived without being measured.
+
 The tolerance is your definition of the same answer. Here, a relative difference up to one part in a billion still passes.
 
 ## Run a short campaign
@@ -4769,65 +4945,68 @@ clio-coder research start --check bench --metric wall_ms --direction min \
 **What the recorded session printed**
 
 ```text
-campaign r20261112-192812-1d5d (stopped: max-iterations)
+campaign r20261114-233756-1d28 (stopped: max-iterations)
 objective: min wall_ms from check bench; min improvement +5.00%, 5 pairs
 gates: correct; scope: stats.py
 protected: .clio-coder/verifiers.yaml, bench.py, check.py, tests/reference/stats.json
 agent: autonomy default
-branch: clio/research/r20261112-192812-1d5d at 37407c7dee9e (base 39930e6fbfbf, 2 ratchets)
-budget: 2/2 iterations, 25 min wall; spend not measured; 2 run(s) had unknown spend
-A/A: quiet; unchanged, median delta +4.04%, 95% CI [-0.96%, +6.93%]
-  it-0001  ratcheted; improved, median delta -99.74%, 95% CI [-99.76%, -99.71%]; gates correct pass; cost unknown
-  it-0002  ratcheted; improved, median delta -17.69%, 95% CI [-27.80%, -12.04%]; gates correct pass; cost unknown
+branch: clio/research/r20261114-233756-1d28 at f94cd0f0c1dc (base f68a37ce7951, 2 ratchets)
+budget: 2/2 iterations, 25 min wall; spend ~$0.0032 est
+A/A: quiet; unchanged, median delta +0.55%, 95% CI [-8.30%, +4.42%]
+  it-0001  ratcheted; improved, median delta -57.05%, 95% CI [-57.83%, -55.97%]; gates correct pass; cost ~$0.0018 est
+  it-0002  ratcheted; improved, median delta -99.44%, 95% CI [-99.45%, -99.38%]; gates correct pass; cost ~$0.0014 est
 stopped: max-iterations: ran 2 of 2 iterations
 ```
 
 ## Read the result line by line
 
-Start with the A/A line. Before any change, CLIO Coder timed the unchanged code against itself in five interleaved pairs. The medians moved 4.04%, and the 95% interval spans zero, so the noise stayed under the 5% threshold. If the base against itself already looked like a change, the campaign would have stopped there unless you passed `--allow-noisy`.
+Start with the A/A line. Before any change, CLIO Coder timed the unchanged code against itself in five interleaved pairs. The medians moved 0.55%, and the 95% interval spans zero, so the noise stayed under the 5% threshold. If the base against itself already looked like a change, the campaign would have stopped there unless you passed `--allow-noisy`.
 
-Each iteration counts as improved only when the median moves at least 5% the right way and the bootstrap interval excludes zero. The first iteration removed almost all the time. The second found a further 17.69%, a gain that would be invisible by eye. Both passed the `correct` gate.
+Each iteration counts as improved only when the median moves at least 5% the right way and the bootstrap interval excludes zero. The first iteration cut the time by 57.05%. The second, measured against the first iteration's commit, removed almost all of what was left. Both passed the `correct` gate.
 
-`spend not measured` is honest. This model was reached through a gateway with no price, so CLIO Coder cannot know what the runs cost, and it does not count unknown spend as zero. With `--max-cost-usd` on such a route, the campaign stops as `budget-unenforceable` unless you also pass `--allow-unpriced`.
+`~$0.0032 est` is an estimate, marked as one. The `anthropic-max` route is a subscription, so CLIO Coder priced its tokens from its catalog instead of a bill.
+
+On a route with no price at all, such as a gateway target without `targets[].pricing`, the line reads `spend not measured`, because CLIO Coder does not count unknown spend as zero. With `--max-cost-usd` on such a route, the campaign stops as `budget-unenforceable` unless you also pass `--allow-unpriced`.
 
 ## Audit it and take the change
 
 ```sh
-clio-coder research report r20261112-192812-1d5d
-git diff HEAD clio/research/r20261112-192812-1d5d
+clio-coder research report r20261114-233756-1d28
+git diff HEAD clio/research/r20261114-233756-1d28
 ```
 
 `report` regrades the A/A check and every iteration from the stored samples with the recorded seed. In the recorded session each line ended `agrees with the journal`, and the command exited 0. It exits 1 when a grade disagrees.
 
-The result lives on the branch `clio/research/<id>`, and your checkout is never touched. Here the branch replaced an insertion sort with `sorted()`, stopped `variance` from recomputing the mean for every element, and used `sum()` for the mean. Review the diff and merge it yourself.
+The result lives on the branch `clio/research/<id>`, and your checkout is never touched. Here the branch replaced an insertion sort with `sorted()` and stopped `variance` from recomputing the mean for every element. Review the diff and merge it yourself.
 
 ## Compare answers blind
 
 ```sh
 clio-coder arena run --suite speed --check correct \
-  --contender litellm/qwen3.8-27b --contender litellm/qwen3.8-27b \
+  --contender anthropic-max/claude-haiku-5-5 --contender openai-codex/gpt-6-luna \
   -- "Make summary() in stats.py faster without changing any answer. Keep the change minimal."
 ```
 
-A contender is `<target>/<model>`. Each one runs as a normal `clio-coder run` in its own worktree from `HEAD`, and `--check` runs the named check on each result. Naming the same model twice is an A/A match: it shows how much two runs of one model differ before you read anything into a difference between two models.
+A contender is `<target>/<model>`. Each one runs as a normal `clio-coder run` in its own worktree from `HEAD`, and `--check` runs the named check on each result. Naming the same model twice instead makes an A/A match, which shows how much two runs of one model differ before you read anything into a difference between two models.
 
 To name your own contenders, `clio-coder targets` lists each target id with its model, a local server's target included.
 
 | | Contender A | Contender B |
 | --- | --- | --- |
-| Change | One line: `variance` reuses the mean it already computed | Two edits: the same fix, and `sorted()` for the median |
-| Diff | `+1 -1` | `+2 -7` |
+| Change | `variance` reuses the mean it already computed | The same edit, line for line |
+| Diff | `+1 -5` | `+1 -5` |
 | `correct` check | Pass, every answer bit-identical | Pass, every answer bit-identical |
-| Its own timing claim | 155 ms to 69 ms | 176 ms to 0.465 ms |
+| Work shown | 10 turns, 13 tool calls | 4 turns, 5 tool calls |
+| Its own timing claim | `correct` and `bench` checks passed | Speed not measured, said so |
 
-One model, one prompt and one starting commit gave two different readings of "keep the change minimal". That spread is the noise any model comparison has to beat.
+Both contenders made the same edit and both left the quadratic insertion sort alone, citing the minimal-change instruction. What separated them was how they reported: one claimed a passing benchmark, the other said plainly that it had not timed anything.
 
 ## Vote, then reveal
 
 ```sh
-clio-coder arena show 20261112-193135-2727
-clio-coder arena vote 20261112-193135-2727 B --note "both exact; B removes the quadratic sort too, still a small diff"
-clio-coder arena show 20261112-193135-2727 --reveal
+clio-coder arena show 20261114-233756-7102
+clio-coder arena vote 20261114-233756-7102 tie --note "same one-line fix, both exact; B said up front it did not time it"
+clio-coder arena show 20261114-233756-7102 --reveal
 clio-coder arena standings --suite speed
 ```
 
@@ -4836,23 +5015,34 @@ Before a vote, `show` lists A and B in a seeded random order and hides the targe
 **What the recorded session printed**
 
 ```text
-recorded B for match 20261112-193135-2727; arena show 20261112-193135-2727 reveals who is who
+recorded tie for match 20261114-233756-7102; arena show 20261114-233756-7102 reveals who is who
 ```
 
-After the reveal, `standings` printed:
+The reveal named the contenders:
 
 ```text
-no voted matches yet (1 recorded)
+   A = openai-codex/gpt-6-luna  22.5s  tokens 77.4k  cost ~$0.0020 est  session 31viz4dfrb0k
+   B = anthropic-max/claude-haiku-5-5  10.3s  tokens 51.7k  cost ~$0.0019 est  session 36ja80a9wg03
 ```
 
-That is the inconclusive result, reported as it is. A match that pits a model against itself says nothing about the model, so standings skip it. To rank models, run matches with two or more different contenders. A rating appears once a model has 5 votes, and one vote is one person's judgment on one prompt.
+`standings` then printed:
+
+```text
+TARGET/MODEL                    VOTES  WINS  LOSSES  TIES  BOTH-BAD  ELO
+anthropic-max/claude-haiku-5-5  1      0     0       1     0         n/a (<5 votes)
+openai-codex/gpt-6-luna         1      0     0       1     0         n/a (<5 votes)
+
+1 voted of 1 matches in suite speed. These are your recorded votes; Clio does not judge.
+```
+
+That is the inconclusive result, reported as it is. Two models gave the same code, and one tie says nothing about either. A rating appears once a model has 5 votes, and one vote is one person's judgment on one prompt. A match that pits a model against itself is never counted in standings.
 
 **Boundaries**
 
 - A campaign is only as good as its checks. A benchmark that measures the wrong thing will be optimized anyway.
 - The `correct` gate checks one holdout input. Iteration answers that pass it can still differ elsewhere.
 - Research runs one candidate per iteration and optimizes one number at a time.
-- A single vote, and a single A/A match, are anecdotes. Standings mean something only after many matches with different contenders.
+- A single vote is an anecdote. Standings mean something only after many matches with different contenders.
 
 **Next steps**
 
@@ -4993,7 +5183,7 @@ Sometimes one agent's answer is not enough. `/poll` asks two to five agents the 
 
 **Version scope**
 
-This tutorial describes v0.8.0. The output below is from CLIO Coder run against a fresh CLIO Coder home and a one-file Node package, with one local model (Qwen 3.8 27B) serving every participant. The package's Git status was clean afterwards.
+This tutorial describes v0.8.1. The output below is from CLIO Coder run against a fresh CLIO Coder home and a one-file Node package, with participants seated on two models: Claude Haiku 5.5 on the `anthropic-max` route and GPT-6 Luna on the `openai-codex` route. The package's Git status was clean afterwards.
 
 ## Before you start
 
@@ -5006,10 +5196,10 @@ This tutorial describes v0.8.0. The output below is from CLIO Coder run against 
 `/poll` takes the number of participants, then the question. `--options` limits each vote to one of the listed answers, and `--rationale` asks for a short reason with each vote:
 
 ```text
-/poll --options node:test|vitest|jest --rationale 3 Which test runner should a small dependency-free ES module package like this one use?
+/poll --options node:test|vitest|jest --rationale --models anthropic-max/claude-haiku-5-5,openai-codex/gpt-6-luna 3 Which test runner should a small dependency-free ES module package like this one use?
 ```
 
-Without `--models`, every participant runs on your chat model. `--models litellm,big-box/qwen3-coder-next` seats them in turn on the routes you list, so the answers can come from different models. Each participant answers alone: no one sees another's answer.
+Without `--models`, every participant runs on your chat model. `--models` takes a comma-separated list of `target` or `target/model` routes and seats participants on them in turn, so here p1 and p3 ran on Claude Haiku 5.5 and p2 on GPT-6 Luna. Each participant answers alone: no one sees another's answer.
 
 ## Approve the plan
 
@@ -5017,9 +5207,9 @@ A poll is a small fleet, so at the default autonomy level CLIO Coder shows the p
 
 ```text
 Plan ────────────────────────────── Alt+V shows every field
-p1    scout on litellm · qwen3.8-27b
-p2    scout on litellm · qwen3.8-27b
-p3    scout on litellm · qwen3.8-27b
+p1    scout on anthropic-max · claude-haiku-5-5
+p2    scout on openai-codex · gpt-6-luna
+p3    scout on anthropic-max · claude-haiku-5-5
 cost  counts against this session's $5.00 limit
 ```
 
@@ -5034,7 +5224,9 @@ poll       3 of 3 voted; majority: node:test
 node:test  ### 3 (100%)
 ```
 
-The headline reads `majority` when one answer has more than half the votes, `plurality` when it leads without a majority, and `tie` when the top two are level. Here all three read `package.json`, saw a `node --test` script and kept it. `/view` opens each full answer. A participant whose vote names none of the options is asked again, with the options quoted.
+The headline reads `majority` when one answer has more than half the votes, `plurality` when it leads without a majority, and `tie` when the top two are level.
+
+Here all three chose `node:test` in about two seconds each, on both models, and gave the same reason: it ships with Node and adds no dependency. `/view` opens each full answer. A participant whose vote names none of the options is asked again, with the options quoted.
 
 ## Declare a council roster
 
@@ -5051,8 +5243,8 @@ fleet:
   rosters:
     default:
       members:
-        - { label: reader, target: litellm }
-        - { label: tester, target: litellm, agent: tester }
+        - { label: reader, target: anthropic-max, model: claude-haiku-5-5 }
+        - { label: tester, target: openai-codex, model: gpt-6-luna, agent: tester }
 ```
 
 The roster is read on the next command, without a restart. `--roster <name>` picks another roster. A member whose target runs on an SSH fleet node, or on an agent runtime that cannot enforce read-only tools, such as an ACP peer, is refused before you approve anything.
@@ -5063,13 +5255,19 @@ The roster is read on the next command, without a restart. `--roster <name>` pic
 /council --synthesis judge Is add() in index.js covered by a test, and what is the smallest test that would cover it?
 ```
 
-The plan card listed `reader` as `scout`, `tester` as `tester`, and a synthesis run as `oracle`. The `tester` member kept its own way of working, but the council's read-only tools still applied, so it argued for a test without writing one. After both answered, the judge read their answers, checked them against the files and wrote one answer. It opened:
+The plan card listed `reader` as `scout` on Claude Haiku 5.5, `tester` as `tester` on GPT-6 Luna, and a synthesis run as `oracle` on the fleet's default route, here GPT-6 Luna. The `tester` member kept its own way of working, but the council's read-only tools still applied, so it answered without writing a test. It made 4 tool calls and answered:
 
 ```text
-Both council members agree on the facts, and my own inspection confirms them:
+Yes. `index.test.js` directly tests `add(2, 2) === 4`, which covers the function’s basic behavior. The smallest test is that existing assertion; no additional test is needed for basic coverage.
 ```
 
-It went on to say that `index.test.js` already imports `add` and checks `add(2,2)` against 4 under `node:test`, so the function is covered.
+The `reader` member finished in 1.13 seconds without answering the question. Its whole answer was one pending finding: `read index.js and index.test.js to determine coverage of add()`. The judge read both answers and wrote one, with the verdict `covered`:
+
+```text
+Yes. `index.test.js` tests `add(2, 2) === 4`. The smallest test is a single assertion that calls `add` with two inputs and checks the expected result; the existing test already does this.
+```
+
+A council does not hide a weak member. `/view` shows each member's answer beside the synthesis, so you can see that this verdict rests on one member's reading.
 
 `--synthesis vote` tallies the members' votes instead, and `none`, the default, returns each answer as it is. `--rounds 2` or `3` shows each member the others' previous answers before it answers again. `--deadline 90s` stops a member that runs too long, and the council returns the rest marked partial.
 
@@ -5082,7 +5280,7 @@ The answers stay out of your main conversation. `/fleet share <runId>` brings on
 **Boundaries**
 
 - Members on one model are not fully independent. They share its habits, so a unanimous vote from one model is weaker evidence than a split across several. Use `--models` or a mixed roster to spread the question.
-- Every member is a model run and counts against your spending limit. Here the `tester` member alone used 22,122 tokens.
+- Every member is a model run and counts against your spending limit. Here the `tester` member alone used 7,056 tokens.
 - Members run on this machine only. A council never writes files or makes a worktree.
 
 **Next steps**
