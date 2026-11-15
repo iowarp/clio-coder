@@ -178,7 +178,7 @@ export async function prepare(directory, credits) {
 
 // The budget catches a tier that grows by accident; raise it on purpose when a tier grows on purpose. The GUI tier
 // runs every app test file, so it grows with each one added.
-const QUALIFICATION_TEST_BUDGET = 2500;
+export const QUALIFICATION_TEST_BUDGET = 2500;
 
 export async function testCandidate(directory, commit, results = "test-results.json") {
 	const receipt = verifyCandidate(directory, commit);

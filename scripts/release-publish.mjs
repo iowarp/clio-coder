@@ -16,7 +16,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { draftAction, isVersionBranch, toolingOnly } from "./release/plan.mjs";
-import { git, installers, root, run, verifyCandidate } from "./release-candidate.mjs";
+import { git, installers, QUALIFICATION_TEST_BUDGET, root, run, verifyCandidate } from "./release-candidate.mjs";
 import { DEV_VERSION, publishTagErrors, releaseVersionErrors, snapshotVersion } from "./release-version-policy.mjs";
 
 const repository = "iowarp/clio-coder";
@@ -398,7 +398,7 @@ export async function preflight(directory, commit, runId, branch, rehearse = fal
 			results.sha256 !== receipt.files[basename(receipt.tarball)] ||
 			!Number.isSafeInteger(results.total) ||
 			results.total < 1 ||
-			results.total + 3 > 2000 ||
+			results.total + 3 > QUALIFICATION_TEST_BUDGET ||
 			!["core", "gui", "package"].every(
 				(tier) => Number.isSafeInteger(results.counts?.[tier]) && results.counts[tier] > 0,
 			) ||
