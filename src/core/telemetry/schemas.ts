@@ -155,6 +155,8 @@ const call = {
 		vocabulary(["auto", "none", "required", "unknown"]),
 		Type.Object({ name: ExistingId }, closed),
 	]),
+	/** Present only when the request bound its reply to a JSON schema through `response_format`. */
+	responseFormat: Type.Optional(vocabulary(["json-schema"])),
 };
 const span = { start: duration, end: duration };
 const sha256Hex = Type.String({ pattern: "^[0-9a-f]{64}$" });

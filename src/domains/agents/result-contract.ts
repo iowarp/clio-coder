@@ -192,6 +192,49 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 	}
 }
 
+/**
+ * The schema a final-only round binds a prose-parsed contract to on a runtime
+ * that enforces `response_format`, or null when the contract has no single
+ * JSON-object form or its form is too conditional for one schema (an assured
+ * verifier's obligations). It constrains shape only: the validator remains the
+ * authority on verdict agreement, grounding and size.
+ */
+export function resultContractResponseSchema(contract: ResultContract): Record<string, unknown> | null {
+	const helper = internalHelperResultSchema(contract);
+	if (helper !== null) return helper;
+	const text = { type: "string", minLength: 1 };
+	const object = (properties: Record<string, unknown>) => ({
+		type: "object",
+		properties,
+		required: Object.keys(properties),
+		additionalProperties: false,
+	});
+	switch (contract.kind) {
+		case "verifier-report":
+			if (contract.assurance !== undefined) return null;
+			return object({
+				verdict: { type: "string", enum: ["pass", "fail"] },
+				checks: { type: "array", items: object({ name: text, passed: { type: "boolean" }, evidence: text }) },
+			});
+		case "debugger-report":
+			return object({
+				diagnosis: text,
+				reproduction: { type: "string", enum: ["reproduced", "not-reproduced", "unknown"] },
+				evidence: { type: "array", items: text },
+			});
+		case "council-ballot":
+			return object({
+				verdict:
+					contract.options !== undefined && contract.options.length > 0
+						? { type: "string", enum: [...contract.options] }
+						: text,
+				text,
+			});
+		default:
+			return null;
+	}
+}
+
 /** Decode a helper value through exactly the ordinary contract and grounding checks. */
 export function validateStructuredHelperResult(
 	input: Omit<ResultContractValidationInput, "output"> & { data: unknown },
@@ -2183,6 +2226,53 @@ export function resultContractShape(contract: ResultContract): string {
 		case "code-report":
 			return '{"passed":false,"exitCode":1,"checks":[{"name":"test","passed":false,"evidence":"exit 1"}],"artifactPaths":["/path/command.log"],"outputExcerpt":"..."}';
 	}
+}
+
+/**
+ * The compact output form a work round's reminder quotes, or null for a
+ * contract whose result is not one JSON object a model writes (an artifact on
+ * disk, any final text, a deterministic command). Kept to one line: it rides on
+ * every tool batch, so a long wire example such as mutation-report's would cost
+ * its bytes once per round.
+ */
+function resultContractReminderForm(contract: ResultContract): string | null {
+	switch (contract.kind) {
+		case "architect-plan":
+		case "external-delegation":
+		case "artifact-report":
+		case "code-report":
+			return null;
+		case "scout-report":
+			return '{"findings":[{"claim":"...","path":"src/file.ts","line":1}],"needsSplit":false,"proposedSubtasks":[]}';
+		case "verifier-report":
+			return contract.assurance === undefined
+				? '{"verdict":"pass|fail","checks":[{"name":"...","passed":true,"evidence":"..."}]}'
+				: `{"verdict":"pass|fail","assurance":"${contract.assurance}","checks":[{"name":"...","passed":false,"evidence":"...","obligation":{...}}]}`;
+		case "debugger-report":
+			return '{"diagnosis":"...","reproduction":"reproduced|not-reproduced|unknown","evidence":["..."]}';
+		case "research-report":
+			return '{"source":"local|external","findings":[{"claim":"...","evidence":"..."}]}';
+		case "mutation-report":
+			return '{"mutatedPaths":["..."],"validations":[{"name":"...","passed":true,"evidence":"..."}],"summary":"..."}';
+		case "council-ballot":
+			return councilBallotShape(contract.options);
+		default:
+			return resultContractShape(contract);
+	}
+}
+
+/**
+ * One line naming the exact form of the final message, appended to each work
+ * round's tool results so it is the most recent instruction whenever the model
+ * decides to stop. A recipe that states its contract only at the end of a long
+ * system prompt loses it to a small model's recency: a 27B reviewer wrote a
+ * correct review as Markdown three times, and passed once the same line moved
+ * to the top of the recipe (WTF-P run mbh8qfocfm9p).
+ */
+export function resultContractReminder(contract: ResultContract): string | null {
+	const form = resultContractReminderForm(contract);
+	if (form === null) return null;
+	return `[result contract: ${contract.kind}] When you finish, your final message is exactly one JSON object of the form ${form} and nothing else: no Markdown, code fences or commentary. Until then, keep working with the admitted tools.`;
 }
 
 export interface ResultContractRepairInput {
