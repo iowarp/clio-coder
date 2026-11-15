@@ -12,7 +12,8 @@
  * Pure over the entry, the index, and the policy input.
  */
 
-import type { SessionEntry } from "../../session/entries.js";
+import { skillActivationFromToolDetails } from "../../../core/skill-activation.js";
+import { latestSkillContextState, type SessionEntry } from "../../session/entries.js";
 import type { PolicyInput } from "./contract.js";
 import type { ChainMember, PathIndex, PathObservation } from "./path-index.js";
 import { hasLegacyCompactionMarker, isRecord, isRefusedVerdict, recalledRef, toolResultBodyTokens } from "./payload.js";
@@ -141,6 +142,49 @@ function hasUnindexedChainFailure(payload: unknown, members: ReadonlyArray<Chain
 	);
 }
 
+const activeSkillLoadCache = new WeakMap<ReadonlyArray<SessionEntry>, ReadonlySet<string>>();
+
+function skillLoadKey(entry: SessionEntry): string | null {
+	if (entry.kind !== "message" || entry.role !== "tool_result" || !isRecord(entry.payload)) return null;
+	const result = isRecord(entry.payload.result) ? entry.payload.result : null;
+	const activation = skillActivationFromToolDetails(result?.details);
+	return activation === null ? null : `${activation.name}\0${activation.hash}`;
+}
+
+/**
+ * The tool results that carry an active skill's body: the newest load of each
+ * skill the session's skill state names, or of every loaded skill when the
+ * state is unknown. A `context(scope="skills")` load is a tool result whose
+ * body is the skill, and replay re-injects nothing for it, so evicting it left
+ * the model with a marker in place of instructions it was still following.
+ */
+function activeSkillLoads(entries: ReadonlyArray<SessionEntry>): ReadonlySet<string> {
+	const cached = activeSkillLoadCache.get(entries);
+	if (cached !== undefined) return cached;
+	const state = latestSkillContextState(entries);
+	let active: Set<string> | null = null;
+	if (state !== undefined && state.unknown !== true) {
+		const refs = new Set(state.activationRefs);
+		active = new Set();
+		for (const entry of entries) {
+			if (entry.kind === "skillActivation" && refs.has(entry.turnId))
+				active.add(`${entry.activation.name}\0${entry.activation.hash}`);
+		}
+	}
+	const kept = new Set<string>();
+	const seen = new Set<string>();
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry === undefined) continue;
+		const key = skillLoadKey(entry);
+		if (key === null || seen.has(key)) continue;
+		seen.add(key);
+		if (active === null || active.has(key)) kept.add(entry.turnId);
+	}
+	activeSkillLoadCache.set(entries, kept);
+	return kept;
+}
+
 export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolean {
 	// Only two things ever leave the working set: a tool result's body and an
 	// assistant turn's thinking. Everything else (operator words, summaries,
@@ -161,8 +205,9 @@ export function isProtected(entry: SessionEntry, ctx: ProtectionContext): boolea
 	if (members !== undefined && hasUnindexedChainFailure(entry.payload, members)) return true;
 
 	// Profile pins and the churn pin come before the floor: a pinned unit stays
-	// whatever its size.
+	// whatever its size. So does the body of a skill the session still runs.
 	if (ctx.pins?.has(entry.turnId)) return true;
+	if (activeSkillLoads(ctx.input.entries).has(entry.turnId)) return true;
 	if (ctx.pinRecalledTwice === true) {
 		const ref = recalledRef(entry.payload);
 		if (ref !== null && (ctx.input.view.recallsByRef.get(ref) ?? 0) >= 2) return true;
