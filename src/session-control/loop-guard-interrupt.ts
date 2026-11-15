@@ -65,6 +65,21 @@ export function toolBudgetStopReason(evt: ToolBudgetExceededPayload): string {
 	);
 }
 
+/**
+ * What a continuation after a loop stop must change. The continuation used to
+ * say only "continue from where it stopped" over the same context, and a
+ * model that had diagnosed its own malformed call in its closing message sent
+ * the identical call twice more (WTF-P campaign). The failure the guard quoted
+ * goes first, then the instruction to change the call before retrying it.
+ */
+export function loopGuardContinuationDetail(guard: { tool: string; failure: string }): string {
+	return [
+		`The loop guard stopped repeats of a ${guard.tool} call that kept failing with:`,
+		guard.failure,
+		`An identical ${guard.tool} call will be blocked again. Before retrying it, change the arguments so they fix what that error names; if your last message already diagnosed the fault, apply that diagnosis to the call. If the call cannot be fixed, report the blocker instead of retrying.`,
+	].join("\n");
+}
+
 /** Audit reason (short) for an identical-call loop interrupt. */
 export function loopBlockedAuditReason(evt: LoopBlockedPayload): string {
 	return `loop: ${evt.tool} repeated ${evt.repeatCount}x`;

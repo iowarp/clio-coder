@@ -16,7 +16,16 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const RATE_LIMITED = "429 rate_limit_error: This request would exceed your rate limit";
 
 /** What one model call does: cross the budget, lock the tools, both, finish, or throw. */
-type Step = "budget" | "hard" | "loop-stop" | "esc-then-hard" | "lockout" | "both" | "done" | { throws: string };
+type Step =
+	| "budget"
+	| "hard"
+	| "loop-stop"
+	| "esc-then-hard"
+	| "lockout"
+	| "failed-lockout"
+	| "both"
+	| "done"
+	| { throws: string };
 
 interface Harness {
 	loop: ReturnType<typeof createChatLoop>;
@@ -123,6 +132,13 @@ async function harness(script: readonly Step[], options: { autonomy?: "yolo" | "
 								at: Date.now(),
 							} as never);
 						}
+						if (current === "failed-lockout") {
+							context.bus.emit("safety.loop_blocked", {
+								tool: "extension_desk__record",
+								disposition: "lockout",
+								priorFailure: "Validation failed: issues: unknown field",
+							} as never);
+						}
 						if (current === "lockout" || current === "both") {
 							context.bus.emit("safety.loop_blocked", { disposition: "lockout" } as never);
 						}
@@ -227,6 +243,21 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			]);
 			ok((run.prompts[1] ?? "").includes("This is continuation 1 of 3."));
 			ok((run.prompts[3] ?? "").includes("This is continuation 3 of 3."));
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("opens a continuation after a failed call's lockout with that failure, once", async () => {
+		const run = await harness(["failed-lockout", "lockout", "done"]);
+		try {
+			await run.loop.submit("record the validation");
+			await run.loop.whenSettled();
+			strictEqual(run.prompts.length, 3);
+			const first = run.prompts[1] ?? "";
+			ok(first.includes("extension_desk__record call that kept failing with:\nValidation failed: issues: unknown field"));
+			ok(first.includes("Before retrying it, change the arguments"));
+			ok(!(run.prompts[2] ?? "").includes("kept failing with"));
 		} finally {
 			await run.close();
 		}

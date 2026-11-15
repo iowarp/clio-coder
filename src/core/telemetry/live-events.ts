@@ -264,6 +264,8 @@ export interface LoopBlockedPayload {
 	interrupted: boolean;
 	/** Escalation stage of this block; see {@link LoopBlockedDisposition}. */
 	disposition: LoopBlockedDisposition;
+	/** The blocked call's own earlier failure, as the block restates it; absent when it never failed. */
+	priorFailure?: string;
 	at: number;
 	turnId?: string;
 }

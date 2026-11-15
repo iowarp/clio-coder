@@ -185,6 +185,7 @@ import {
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
+import { loopGuardContinuationDetail } from "./loop-guard-interrupt.js";
 import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
 import {
@@ -2036,10 +2037,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			context.invalidateSessionPromptCache();
 		}) ?? null;
 
+	/** The failed call behind this turn's loop lockout or stop; read once as the turn settles. */
+	let loopGuardFailure: { tool: string; failure: string } | null = null;
 	const unsubscribeSynthesisLock =
 		deps.bus?.subscribe("safety.loop_blocked", (payload) => {
-			const disposition = (payload as { disposition?: unknown } | null)?.disposition;
-			if (disposition === "lockout") state.synthesisToolLock = true;
+			const event = payload as { disposition?: unknown; tool?: unknown; priorFailure?: unknown } | null;
+			if (event?.disposition === "lockout") state.synthesisToolLock = true;
+			if (
+				(event?.disposition === "lockout" || event?.disposition === "stop") &&
+				typeof event.tool === "string" &&
+				typeof event.priorFailure === "string"
+			) {
+				loopGuardFailure = { tool: event.tool, failure: event.priorFailure };
+			}
 		}) ?? null;
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", () => {
@@ -2070,7 +2080,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 */
 	const yoloContinuationDue = (
 		guardInterrupted = false,
-	): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number } | null => {
+		guardFailure: { tool: string; failure: string } | null = null,
+	): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
 		const failed = state.continuation.stop;
 		// Continuing would send this provider a request before the time it named.
@@ -2086,8 +2097,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
 						: null);
 		if (stop === null) return null;
-		return continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP
-			? null
+		if (continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP)
+			return null;
+		return stop.cause === "loop_guard" && guardFailure !== null
+			? { ...stop, detail: loopGuardContinuationDetail(guardFailure) }
 			: stop;
 	};
 
@@ -2119,7 +2132,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
 	const continueStoppedTurn = async (
-		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number },
+		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string },
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
 	): Promise<void> => {
@@ -2148,7 +2161,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (disposed || generation !== submitGeneration || state.activeUserTurnId !== null || state.streaming) return;
 		if (await queues.resubmitStranded()) return;
 		await api.submit(
-			`[Clio Coder] The previous turn stopped: ${stop.reason}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}`,
+			`[Clio Coder] The previous turn stopped: ${stop.reason}. Its work and tool results are above. Continue from where it stopped, and if the work is already finished, say so and stop.${counted ? ` This is continuation ${attempt} of ${TURN_CONTINUATION_CAP}.` : ""}${stop.detail === undefined ? "" : `\n${stop.detail}`}`,
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
@@ -3935,9 +3948,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						});
 					}
 					state.activeUserTurnId = null;
+					const guardFailure = loopGuardFailure;
+					loopGuardFailure = null;
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
-							? yoloContinuationDue(guardStopped)
+							? yoloContinuationDue(guardStopped, guardFailure)
 							: null;
 					if (
 						!disposed &&
