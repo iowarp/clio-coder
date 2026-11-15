@@ -380,7 +380,7 @@ Inside a session, `/extensions` opens the extension reference with each package'
 
 ## Authoring
 
-`clio-coder extensions init <id>` scaffolds a package from a template (`status`, `hook`, `panel`, `tool` or `workspace`), each with a manifest, a TypeScript entrypoint and a test. `clio-coder extensions validate <path>` checks the manifest, prints the envelope and its digest, and runs a registration check that starts the entrypoint in a private copy to confirm the code registers exactly what the manifest declares, without activating it or calling a handler. `clio-coder extensions test <path>` runs the package's `**/*.test.ts` files with `node --test`. Tests import a host from `@iowarp/clio-coder/extensions/testing`:
+`clio-coder extensions init <id>` scaffolds a package from a template (`status`, `hook`, `panel`, `tool` or `workspace`), each with a manifest, a TypeScript entrypoint and a test. `clio-coder extensions validate <path>` checks the manifest, prints the envelope and its digest, and runs a registration check that starts the entrypoint in a private copy to confirm the code registers exactly what the manifest declares, without activating it or calling a handler. The check runs in a scratch workspace, so write roots the package declares are not created in your tree; when the private copy no longer matches the package, the error names the extension, the path and both digests. `clio-coder extensions test <path>` runs the package's `**/*.test.ts` files with `node --test`, in a temporary directory it creates for the run, passes as `TMPDIR`, `TMP` and `TEMP`, and removes afterwards. Tests import a host from `@iowarp/clio-coder/extensions/testing`:
 
 ```typescript
 import { createExtensionTestHost } from "@iowarp/clio-coder/extensions/testing";

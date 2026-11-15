@@ -823,6 +823,13 @@ unrun check does not withhold. A withheld merge ends the run `failed` with outco
 `merge_withheld`, which suppresses automatic retry; its work stays committed on the preserved
 branch, and the detail names the `clio-coder fleet land` command that applies it.
 
+When a worker claimed passing checks but executed no command and no host verification ran,
+the dispatch result names the parent's next step. For a run that can change code, under a
+`mutation-report` or `verifier-report` contract or none, it names the declared `verify` checks
+to run in the host workspace, or says to inspect the diff and pick an applicable host check. For
+a read-only run, or a contract whose passing checks are review judgments, it says to use the
+sealed findings and spot-check consequential claims instead.
+
 A merge-mode run whose host verification rejected the tree fails with
 `host_verification_rejected` and keeps its branch with the work committed. The detail
 names the `clio-coder fleet land` command that applies it. That detail, the run's evidence line for the

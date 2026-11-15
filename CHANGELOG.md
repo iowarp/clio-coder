@@ -4,6 +4,47 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Added
+
+- ACP (wire contract): the `clio-coder/interviews` and `clio-coder/workerPermissions` opt-ins take an optional `timeoutMs` (1 to 2147483647 ms) that sets the interview window and the window of every `session/request_permission`. It replaces the configured default but never an explicit `--permission-timeout`, the applied value is echoed under `agentCapabilities._meta`, and `clio-coder/workerPermissions` is now echoed too. A malformed value refuses that opt-in.
+- ACP (wire contract): for a client that opted into `clio-coder/workerPermissions`, a main-session `session/request_permission` carries `_meta["clio-coder/permissionAsk"] = {version: 1, requestId}`, and the server sends `_clio-coder/permission/withdraw` with that id when the ask times out, is cancelled, fails or is settled elsewhere, as it already did for worker asks.
+- ACP (wire contract): `_meta["clio-coder/interview"].recommended` names, per question, the index of the option the host recommends, or `null`.
+- `clio-coder acp --autonomy default|yolo` caps every hosted session; with `default`, a client's `session/set_mode`, `autonomy` option or `safety.autonomy` patch to `yolo` fails `yolo_refused`.
+- Extensions (extension-facing contract): `prompt_submit`, `turn_start` and `turn_end` hook events carry `origin` (`operator`, `continuation`, `job` or `peer`), a continuation's `index` and `cap`, and the `template` whose tool scope bounds the turn.
+- Extensions (extension-facing contract): an interview answer keeps the chosen option in `answers` and carries an attached note in `notes`, with `other` marking typed free text; parked tool results carry the same maps by step.
+- Plugins (plugin-facing): when a plugin's prompt template expands, the turn lists the plugin's declared `resource` components (id and path, at most 12) after the template body.
+- A turn scope that admits extension or MCP capabilities carries one compact argument signature per capability in its reminder (1600-byte budget), so the model needs fewer `gateway` describe calls.
+- Workers under a result contract parsed from prose get one line after every work round's tool results naming the exact final JSON form.
+- A worker that finishes a JSON result contract with prose gets a final-only repair round bound to the contract's schema through `response_format` on `llamacpp`, `lmstudio` and `litellm` targets whose model reports `structuredOutputs: json-schema`; `call.started` telemetry records `responseFormat: json-schema` for those rounds.
+- A model stream that keeps repeating the same sentences is stopped and the model is nudged once per operator turn; a second loop ends the turn with the reason on the message.
+- A prompt template with `allowed-tools` typed during a run is queued and starts as its own turn with its tool limits when the run settles; the `--session-file` live record gains `pendingInput` listing queued input.
+
+### Changed
+
+- An `operator_only` question waits for the operator with no countdown below yolo; yolo keeps its bounded window.
+- Automatic compaction fires at the smaller of `threshold × window` and the window minus the summary reserve, so the summary reserve no longer stacks on a threshold whose headroom already holds it (a 0.9 threshold on a 131K window had fired at 70%).
+- A reply with no answer and no tool call is re-prompted like a written-out tool call, and a written-out call is re-prompted again once a real call follows; the two share three re-prompts per operator turn, and two back to back end the turn.
+- The loop guard restates a repeated call's earlier error in its block and lockout, and the yolo continuation after a loop lock quotes that error and asks for changed arguments.
+- The per-turn tool budget refusal lists the turn's calls by tool, most used first, counting a gateway call as its capability.
+- A gateway argument rejection names unknown fields that belong inside a nested object argument.
+- A turn scope that keeps `bash` beside `read` or `grep` says `bash` is for the task's commands and file reads and listings go through the file tools and the gateway.
+- A dispatch refused for exceeding the delegated tool scope names the agent it checked and up to five recipes whose tools fit.
+- A read-only reviewer's return tells the parent to use its sealed findings and spot-check claims, instead of rerunning host checks for review judgments.
+- No marketplace install offer on a turn whose tools were narrowed, whose skills are disabled, or that runs in `answer` or `proposal` mode.
+- `telemetry cache`, the `doctor` cache row and the footer turn chip say a provider left its cache reads unreported, and that reuse is unmeasured rather than a miss, instead of an unknown share.
+
+### Fixed
+
+- ACP (wire contract): a session another process claims while `session/resume` or `session/load` runs fails `session_open` instead of `internal_error`.
+- Extension hooks and tools in the TUI wait for the startup reload, so a prompt submitted at once no longer runs `prompt_submit`, `turn_start` and `before_tool` against no runtime.
+- A plugin template changed on disk under a running session refuses with the plugin's name and `/reload library` instead of "not a command", and send-now refuses a `/name` that expands to no template.
+- `require_tool` naming an extension or MCP capability clears when a `gateway` call to that capability starts, in main turns and workers.
+- Working-set eviction keeps the body of an active skill loaded through `context(scope="skills")`.
+- A worker reply that ends with its JSON result after Markdown, fences or braces in prose still satisfies its result contract.
+- Legacy dispatch scope inference skips scheme URIs such as `project://paper/background` instead of refusing them as absolute paths; `file://` stays visible.
+- `extensions validate` registers the package in a scratch workspace, so declared write roots no longer break the digest check, and a copy mismatch names the extension, path and both digests.
+- `extensions test` gives package tests a temporary directory of their own as `TMPDIR`, `TMP` and `TEMP`.
+
 ## 0.8.1 - 2026-11-14
 
 CLIO Coder is an open-source coding-agent harness that works with any model you have and ties every claim about your code to a check it actually ran. It is the coding harness of the CLIO ecosystem from the Gnosis Research Center at Illinois Tech, and it is built for everyday developers as much as for people who write and run science on supercomputers: HPC researchers, storage and I/O engineers, developers of scientific libraries and data formats, and teams bringing LLM agents onto shared clusters. It runs the models your lab already has, from GPU servers on your own network to institutional endpoints and cloud subscriptions, on a login node without root, inside a sandbox built for shared systems.

@@ -221,6 +221,8 @@ The ledger keeps a separate per-call observation on each assistant entry's `prom
 
 `/context` reads the newest main-loop call's cache facts from the journal ([context-overlay.ts](../../src/interactive/context-overlay.ts)). The `prompt cache:` line names whether the compiled prompt shell was reused or recompiled, then what the backend did: `backend reused` for a hot call, `backend partly reused` or `backend cold` with the call's re-prefill, or `backend small`, followed by `cache read` and `uncached prefill`, both the journal call's. When the provider's usage omits the read but the serving backend reported `cache_n`, the line shows `server cache read` with that figure. When the verdict is unknown, or neither the provider nor the server reported a cache read, it says `server does not report cache reads` instead of calling the backend cold.
 
+A provider that omits its cache read leaves the call's read unknown, never zero, and CLIO Coder does not infer reuse from time to first token. When some calls reported no read, `clio-coder telemetry cache` adds a `reads` line and the `clio-coder doctor` cache row ends with `<n> of <m> calls reported no cache read; the cached share counts only the calls that did`; when none did, both say `no call reported a cache read (<n> calls); reuse is unmeasured, not a miss`. The footer's turn chip then reads `cache read not reported`.
+
 A cold call after a recorded reason adds `last cache-affecting events: …` with each reason in prose, and the cache line stays an annotation. A reused shell with a cold backend and no recorded reason is a warning: CLIO Coder kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
 
 ### What the serving backend reports
