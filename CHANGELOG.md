@@ -2,6 +2,8 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
 ## 0.8.1 - 2026-11-14
 
 CLIO Coder is an open-source coding-agent harness that works with any model you have and ties every claim about your code to a check it actually ran. It is the coding harness of the CLIO ecosystem from the Gnosis Research Center at Illinois Tech, and it is built for everyday developers as much as for people who write and run science on supercomputers: HPC researchers, storage and I/O engineers, developers of scientific libraries and data formats, and teams bringing LLM agents onto shared clusters. It runs the models your lab already has, from GPU servers on your own network to institutional endpoints and cloud subscriptions, on a login node without root, inside a sandbox built for shared systems.
