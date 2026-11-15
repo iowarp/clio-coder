@@ -2,7 +2,25 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.2 - 2026-11-15
+
+CLIO Coder is an open-source coding-agent harness that works with any model you have and ties every claim about your code to a check it actually ran. It is the coding harness of the CLIO ecosystem from the Gnosis Research Center at Illinois Tech, and it is built for everyday developers as much as for people who write and run science on supercomputers: HPC researchers, storage and I/O engineers, developers of scientific libraries and data formats, and teams bringing LLM agents onto shared clusters. It runs the models your lab already has, from GPU servers on your own network to institutional endpoints and cloud subscriptions, on a login node without root, inside a sandbox built for shared systems.
+
+This release makes CLIO Coder steadier for the people and programs that drive it from outside the terminal. A remote client such as a chat bridge can negotiate how long a person has to answer, learns when a question it still shows was abandoned, and can launch CLIO Coder with yolo turned off. Extensions and plugins learn where a turn came from, receive the option and the note an operator chose, and get a clear message when a plugin changed on disk. Workers bound to a JSON result contract converge on local models, and turns that used to stop on a looping, empty or malformed reply now recover once and keep working. Most of these fixes come from a live writing campaign that drove the WTF-P extension on a local 27B model.
+
+### Highlights
+
+- **Answer from anywhere.** An ACP client that a person answers from another device, often minutes later, negotiates the interview and permission windows at `initialize`. A main-session permission ask carries an id and is withdrawn when it closes, interviews name the recommended option, and `clio-coder acp --autonomy default` keeps every hosted session out of yolo.
+- **Extension runs survive continuations.** Hook events carry the turn's `origin`, so an extension can tell CLIO Coder's own continuation from a new operator prompt, and a continuation keeps the template's tool scope and the extension's turn state. Interview answers keep the chosen option when the operator attaches a note.
+- **Result contracts that hold on local models.** A worker under a JSON result contract sees the exact final form after every tool batch, a JSON result that follows Markdown still counts, and a prose answer gets one repair round bound to the contract's schema on llama.cpp, LM Studio and LiteLLM routes that support it.
+- **Turns recover instead of stopping.** A stream that repeats itself is stopped and nudged, an empty reply or a tool call written into reasoning is re-prompted, the loop guard quotes the error the model kept repeating, and a gateway rejection says when fields belong inside an object argument.
+- **Honest numbers.** Automatic compaction no longer fires well before the threshold you set, and a provider that does not report cache reads is shown as unreported rather than as a miss.
+
+### Upgrade notes
+
+- **Compaction fires later.** Automatic compaction now fires at `context.compaction.threshold` unless the summary reserve needs more room, so long sessions hold more context before compacting. A 0.9 threshold on a 131K window had fired at 70%.
+- **`operator_only` questions wait for you.** Below yolo they have no countdown; yolo keeps its bounded window.
+- **ACP clients.** A malformed `timeoutMs` in `clio-coder/interviews` or `clio-coder/workerPermissions` refuses that opt-in. An explicit `clio-coder acp --permission-timeout` still wins over a client's `timeoutMs`, so a bridge that wants the client's window should stop passing the flag.
 
 ### Added
 
