@@ -53,7 +53,9 @@ const capabilities = {
 	contextWindow: 131072,
 	maxTokens: 4096,
 };
-type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard";
+type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard" | "repeat";
+const LOOP =
+	"I should check the outline record first. The outline has seven sections. Let me read it again to be sure. ";
 
 // Only the HTTP transport is deterministic. pi's SSE decoder, provider adapter,
 // engine Agent, chat event pipeline, renderer and session writer are real.
@@ -84,7 +86,7 @@ function transport(mode: WireMode) {
 							`data: ${JSON.stringify({ id: "fixture-completion", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
 						),
 					);
-				if (mode === "success" || (mode === "tool" && calls === 1)) {
+				if (mode === "success" || (mode === "tool" && calls === 1) || (mode === "repeat" && calls > 1)) {
 					send(
 						mode === "tool"
 							? {
@@ -107,6 +109,12 @@ function transport(mode: WireMode) {
 					return;
 				}
 				signal?.addEventListener("abort", abort, { once: true });
+				if (mode === "repeat") {
+					// Reasoning that cycles three sentences and never ends; only an abort stops it.
+					for (let chunk = 0; chunk < 60; chunk++)
+						send({ ...(chunk === 0 ? { role: "assistant" } : {}), reasoning_content: LOOP });
+					return;
+				}
 				if (mode === "guard") {
 					send({
 						role: "assistant",
@@ -996,6 +1004,23 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 		strictEqual(journal.envelopes.size, 1);
 		const envelope = [...journal.envelopes.values()][0];
 		deepStrictEqual([envelope?.outcome, envelope?.exitCode], ["canceled", 143]);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a looping stream is stopped and re-prompted once with a nudge, without resending the loop", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("repeat");
+	try {
+		await f.loop.submit("Advance the paper.");
+		strictEqual(f.wire().calls(), 2);
+		const retry = f.wire().requestBodies()[1] ?? "";
+		ok(retry.includes("clio_repetition_reprompt"), retry);
+		strictEqual(retry.includes("seven sections"), false, "the stopped loop is not sent back");
+		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.repetition-reprompt"));
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
 		await f.close();
 	}

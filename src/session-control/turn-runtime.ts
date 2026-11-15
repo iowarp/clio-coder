@@ -99,6 +99,7 @@ import {
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import { assessRepetition, repetitionAbortReason, shouldAssessRepetition } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
@@ -1621,6 +1622,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// at agent_end, no terminal ledger row was ever written for this turn,
 		// so one is synthesized below.
 		let pendingTerminalToolResult: { toolCallId: string; toolName: string } | null = null;
+		// Per streamed assistant message: how far each block was last checked for repetition.
+		let repetitionCheck: { partial: unknown; text: number; thinking: number } = { partial: null, text: 0, thinking: 0 };
 		// state.messages length when this run started; agent state appends every
 		// message of the run (prompts, assistant, tool results) via message_end,
 		// so the slice from here is the run's real message window.
@@ -1899,6 +1902,26 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					delta?: string;
 					partial?: AgentMessage;
 				};
+				if (
+					(assistantEvent.type === "text_delta" || assistantEvent.type === "thinking_delta") &&
+					state.repetitionAbortReason === null &&
+					state.activeInterruptReason === null
+				) {
+					if (repetitionCheck.partial !== assistantEvent.partial)
+						repetitionCheck = { partial: assistantEvent.partial, text: 0, thinking: 0 };
+					const thinking = assistantEvent.type === "thinking_delta";
+					const streamed = thinking ? extractThinking(assistantEvent.partial) : extractText(assistantEvent.partial);
+					if (shouldAssessRepetition(streamed.length, thinking ? repetitionCheck.thinking : repetitionCheck.text)) {
+						if (thinking) repetitionCheck.thinking = streamed.length;
+						else repetitionCheck.text = streamed.length;
+						const repetition = assessRepetition(streamed);
+						if (repetition.kind === "repeating") {
+							state.repetitionAbortReason = repetitionAbortReason(repetition);
+							deps.emitNotice(state.repetitionAbortReason, "warning");
+							localRuntime.agent.abort();
+						}
+					}
+				}
 				if (assistantEvent.type === "text_delta") {
 					const partialText = extractText(assistantEvent.partial);
 					const frame = readDiffusionFrame(assistantEvent);

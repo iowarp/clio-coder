@@ -195,6 +195,7 @@ import {
 } from "./operator-memory.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { runPrewarmRound } from "./prewarm.js";
+import { REPETITION_REPROMPT_NOTICE_KEY, repetitionRepromptMessages } from "./repetition-detector.js";
 import { retireActiveUserContextForNextOperator, retiredUserContextWasSent } from "./session-replay-messages.js";
 import { type OutOfTurnRoute, runOutOfTurnRound, runSideQuestion, type SideQuestionResult } from "./side-question.js";
 import type { AgentStatusEvent, ModelRequestFacts } from "./status-types.js";
@@ -3529,6 +3530,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				agentRuntime.agent.maxRetryDelayMs = retrySettings().maxDelayMs;
 				state.toolProseAbortReason = null;
 				state.toolProseAssessedChars = 0;
+				state.repetitionAbortReason = null;
 				state.activeInterruptReason = null;
 				state.interruptedAssistantMessage = null;
 				state.interruptedCall = null;
@@ -3610,6 +3612,33 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								model: model.id,
 							}),
 						]);
+					}
+					// The repetition check stopped a looping stream. Once per operator
+					// turn the model gets the stopped reply replaced by a nudge and one
+					// more run; an operator's Esc in the same window wins.
+					if (admissionCurrent() && state.repetitionAbortReason !== null && state.activeInterruptReason === null) {
+						const reason = state.repetitionAbortReason;
+						const turnId = state.activeUserTurnId;
+						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
+							state.repetitionRepromptTurnId = turnId;
+							state.repetitionAbortReason = null;
+							const last = agentRuntime.agent.state.messages.at(-1);
+							// The looping reply is in the ledger; replaying it would resend the loop.
+							if (last?.role === "assistant" && (last as { stopReason?: unknown }).stopReason === "aborted")
+								agentRuntime.agent.state.messages = agentRuntime.agent.state.messages.slice(0, -1);
+							emitNotice(
+								"[Clio Coder] Asking the model once to act or answer instead of repeating.",
+								"warning",
+								REPETITION_REPROMPT_NOTICE_KEY,
+							);
+							const model = agentRuntime.agent.state.model;
+							await agentRuntime.agent.prompt([
+								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }),
+							]);
+						} else {
+							const last = agentRuntime.agent.state.messages.at(-1);
+							if (last?.role === "assistant") (last as { errorMessage?: string }).errorMessage = reason;
+						}
 					}
 					// pi-agent-core does NOT throw on provider failures:
 					// it pushes an assistant message with stopReason="error" and

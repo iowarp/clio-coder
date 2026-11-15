@@ -279,6 +279,10 @@ export interface ChatTurnState {
 	readonly continuation: ContinuationState;
 	/** Reason a streaming tool-prose cutoff (or hard-block reminder) aborted the run. */
 	toolProseAbortReason: string | null;
+	/** Set when the repetition check stopped a looping stream; consumed by the one nudge after it (`repetition-detector.ts`). */
+	repetitionAbortReason: string | null;
+	/** The operator turn that already spent its one repetition nudge. */
+	repetitionRepromptTurnId: string | null;
 	/** Reason the stall watchdog aborted a silent stream. Set just before `agent.abort()` and consumed by `reclassifyStallAbort` once the run settles, which is what separates a watchdog abort from an operator Esc. */
 	streamStallReason: string | null;
 	/** A route pick the waiting request is moving to. Pinned at the pick, so a later pick changes the next turn only. */
@@ -339,6 +343,7 @@ export type TurnRuntimeState = TurnStateView<
 	| "runtime"
 	| "streamStallReason"
 	| "streamStallStage"
+	| "repetitionAbortReason"
 	| "toolMarkupReprompt"
 	| "toolProseAbortReason"
 	| "toolProseAssessedChars"
@@ -427,6 +432,8 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		toolMarkupReprompt: null,
 		continuation: new ContinuationState(),
 		toolProseAbortReason: null,
+		repetitionAbortReason: null,
+		repetitionRepromptTurnId: null,
 		streamStallReason: null,
 		routeMove: null,
 		routeMoveSeat: false,
