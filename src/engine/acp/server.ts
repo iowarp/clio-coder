@@ -283,6 +283,7 @@ import {
 	ACP_INTERVIEWS_META_KEY,
 	ACP_MAX_CHUNK_BYTES,
 	ACP_MAX_JOBS,
+	ACP_MAX_NEGOTIATED_TIMEOUT_MS,
 	ACP_MAX_RAW_DIFF_BYTES,
 	ACP_MAX_RAW_RECORD_BYTES,
 	ACP_MAX_STRING_BYTES,
@@ -290,6 +291,7 @@ import {
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MEMORY_PROPOSE_METHOD,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
+	ACP_PERMISSION_ASK_META_KEY,
 	ACP_PERMISSION_WITHDRAW_METHOD,
 	ACP_QUEUE_CHANGED_NOTIFICATION,
 	ACP_QUEUE_EDIT_METHOD,
@@ -367,7 +369,8 @@ export interface AcpInterviewBinding {
 	sessionId: () => string | null;
 	/** True once the client advertised the capability at initialize. */
 	enabled: () => boolean;
-	timeoutMs?: number;
+	/** The round's request window; a function when the client negotiates it after the binding attaches. */
+	timeoutMs?: number | (() => number);
 	diagnostics?: (line: string) => void;
 }
 
@@ -2791,6 +2794,8 @@ function enqueuePermissionRequest(
 
 /** How often a worker ask retries binding to an open tool call while the model is between calls. */
 const ACP_WORKER_ASK_BIND_POLL_MS = 200;
+/** How often an outstanding main-session ask checks that its call is still parked, for a client that takes withdrawals. */
+const ACP_MAIN_ASK_SETTLED_POLL_MS = 250;
 const ACP_MAX_WORKER_ASK_ID_BYTES = 128;
 
 interface AcpWorkerAsk {
@@ -2851,7 +2856,8 @@ function installWorkerAskBridge(
 		bus?: TelemetryHub;
 		toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
 		activeSessionId: () => string | null;
-		permissionTimeoutMs: number;
+		/** The window a client-facing ask gets, read per ask because the client negotiates it at initialize. */
+		permissionTimeoutMs: () => number;
 		cancelActivePrompt: (reason: string) => void;
 		workerAsks?: AcpWorkerAskPort;
 		diagnostics?: (line: string) => void;
@@ -2873,11 +2879,12 @@ function installWorkerAskBridge(
 		if (ask === null || waiting.has(ask.requestId)) return;
 		const owningSessionId = input.activeSessionId();
 		if (owningSessionId === null || (payload.sessionId !== undefined && payload.sessionId !== owningSessionId)) return;
+		const windowMs = input.permissionTimeoutMs();
 		const askWindowMs = Math.min(
-			input.permissionTimeoutMs,
+			windowMs,
 			typeof payload.timeoutMs === "number" && Number.isFinite(payload.timeoutMs) && payload.timeoutMs > 0
 				? payload.timeoutMs
-				: input.permissionTimeoutMs,
+				: windowMs,
 		);
 		const giveUpAt = performance.now() + askWindowMs;
 		let settledElsewhere = false;
@@ -3220,7 +3227,8 @@ function installPermissionBridge(input: {
 	 * rebuilt from the registry's arguments.
 	 */
 	toolCallSnapshot: (wireId: string) => AcpToolCallSnapshot | null;
-	permissionTimeoutMs: number;
+	/** The window a client-facing ask gets, read per ask because the client negotiates it at initialize. */
+	permissionTimeoutMs: () => number;
 	expireActivePrompt: () => void;
 	cancelActivePrompt: (reason: string) => void;
 	/** Forwarded worker asks; absent leaves them to the worker's own timeout fallback. */
@@ -3376,6 +3384,34 @@ function installPermissionBridge(input: {
 			const cancelled = new Promise<{ kind: "cancelled"; reason: string }>((resolveCancelled) => {
 				queue.cancel = (reason: string) => resolveCancelled({ kind: "cancelled", reason });
 			});
+			// A client that takes withdrawn asks gets the same notice for a main-session
+			// ask that it gets for a worker's, keyed by the id on the request, so a card
+			// a person answers minutes later from another device does not outlive the
+			// ask. Every other client sees exactly the request it saw before.
+			const withdrawable = input.workerAsks?.enabled() === true;
+			const withdraw = (): void => {
+				if (!withdrawable) return;
+				try {
+					input.workerAsks?.withdraw(sessionId, meta.requestId);
+				} catch (err) {
+					input.diagnostics?.(
+						`permission ${meta.requestId} could not be withdrawn: ${err instanceof Error ? err.message : String(err)}`,
+					);
+				}
+			};
+			// Settled elsewhere: the parked call left the registry without this ask
+			// answering it (its turn aborted, or another path stopped it). The registry
+			// has no event for that, so the park is polled while the request is out.
+			let settledPoll: ReturnType<typeof setInterval> | undefined;
+			const registry = input.toolRegistry;
+			const settledElsewhere = withdrawable
+				? new Promise<{ kind: "settled" }>((resolveSettled) => {
+						settledPoll = setInterval(() => {
+							if (!registry?.isParked(meta.requestId)) resolveSettled({ kind: "settled" });
+						}, ACP_MAIN_ASK_SETTLED_POLL_MS);
+						settledPoll.unref?.();
+					})
+				: new Promise<never>(() => {});
 			try {
 				const answered = Promise.resolve()
 					.then(() =>
@@ -3434,17 +3470,23 @@ function installPermissionBridge(input: {
 									...(meta.dispatchPlan !== undefined
 										? { [ACP_DISPATCH_PLAN_META_KEY]: projectDispatchPlanMeta(meta.dispatchPlan) }
 										: {}),
+									...(withdrawable ? { [ACP_PERMISSION_ASK_META_KEY]: { version: 1, requestId: meta.requestId } } : {}),
 								},
 							},
-							input.permissionTimeoutMs,
+							input.permissionTimeoutMs(),
 						),
 					)
 					.then(
 						(response) => ({ kind: "response" as const, response }),
 						(err: unknown) => ({ kind: "failed" as const, err }),
 					);
-				const outcome = await Promise.race([answered, cancelled]);
+				const outcome = await Promise.race([answered, cancelled, settledElsewhere]);
+				if (outcome.kind === "settled") {
+					withdraw();
+					return;
+				}
 				if (outcome.kind === "cancelled") {
+					withdraw();
 					void resolve({ status: "denied", decidedBy: "cancelled", reason: outcome.reason });
 					return;
 				}
@@ -3498,6 +3540,8 @@ function installPermissionBridge(input: {
 				}
 				const err = outcome.err;
 				const message = `ACP permission request failed: ${err instanceof Error ? err.message : String(err)}`;
+				// The client may still show the card for a request that failed or timed out on this side.
+				withdraw();
 				if (err instanceof AcpTimeoutError) {
 					void resolve({ status: "expired", decidedBy: "timeout", reason: "permission approval expired" }, "expire", () => {
 						emitQueuedExpiryResolutions(meta.requestId);
@@ -3513,6 +3557,7 @@ function installPermissionBridge(input: {
 					queuedRequestDetails.clear();
 				});
 			} finally {
+				if (settledPoll !== undefined) clearInterval(settledPoll);
 				queue.cancel = null;
 				queuedRequestIds.delete(meta.requestId);
 				queuedRequestDetails.delete(meta.requestId);
@@ -3730,6 +3775,11 @@ export interface AcpHandshakeFeatures {
 	interviews?: boolean;
 	/** Whether the host can forward worker permission asks over `session/request_permission`; absent reads as false. */
 	workerPermissions?: boolean;
+	/**
+	 * The operator's explicit `--permission-timeout`. A client's negotiated
+	 * `timeoutMs` never overrides it, and the echo names this value instead.
+	 */
+	pinnedTimeoutMs?: number;
 	/** Whether `_clio-coder/session/shell` runs operator shell lines; absent reads as false. */
 	shell?: boolean;
 	/** Whether `_clio-coder/session/queue_edit` acts on one queued entry; absent reads as false. */
@@ -3793,6 +3843,10 @@ export interface AcpHandshake {
 	readonly interviewsEnabled: boolean;
 	/** The client advertised `clio-coder/workerPermissions`: a person answers forwarded worker asks. */
 	readonly workerPermissionsEnabled: boolean;
+	/** The applied interview window when the client negotiated one at initialize, else null. */
+	readonly interviewTimeoutMs: number | null;
+	/** The applied `session/request_permission` window when the client negotiated one at initialize, else null. */
+	readonly permissionRequestTimeoutMs: number | null;
 	/** The client advertised `clio-coder/queue` and is sent `_clio-coder/session/queue_changed`. */
 	readonly queueEventsEnabled: boolean;
 	/** The client advertised `clio-coder/readouts`: it is sent readouts frames and admission `_meta`. */
@@ -3805,6 +3859,18 @@ export interface AcpHandshake {
 	logout(params: unknown): Record<string, never>;
 }
 
+/**
+ * An opt-in's optional `timeoutMs`: absent, or a whole number of milliseconds
+ * the request timer can hold. Anything else refuses the whole opt-in, the rule
+ * every attended opt-in follows for a request it cannot honour as written.
+ */
+function negotiableTimeout(value: unknown): boolean {
+	return (
+		value === undefined ||
+		(typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= ACP_MAX_NEGOTIATED_TIMEOUT_MS)
+	);
+}
+
 /** The front and the bound server use one handshake and one capability projection. */
 export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake {
 	let initialized = false;
@@ -3812,6 +3878,8 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 	let toolProgressEnabled = false;
 	let interviewsEnabled = false;
 	let workerPermissionsEnabled = false;
+	let interviewTimeoutMs: number | null = null;
+	let permissionRequestTimeoutMs: number | null = null;
 	let queueEventsEnabled = false;
 	let readoutsEnabled = false;
 	let settingsSource: AcpSettingsSource = "acp";
@@ -3845,6 +3913,12 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 		},
 		get workerPermissionsEnabled() {
 			return workerPermissionsEnabled;
+		},
+		get interviewTimeoutMs() {
+			return interviewTimeoutMs;
+		},
+		get permissionRequestTimeoutMs() {
+			return permissionRequestTimeoutMs;
 		},
 		get queueEventsEnabled() {
 			return queueEventsEnabled;
@@ -3909,7 +3983,12 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				features.interviews === true &&
 				interviewRequest !== null &&
 				interviewRequest.version === 1 &&
-				interviewRequest.request === ACP_INTERVIEW_REQUEST_METHOD;
+				interviewRequest.request === ACP_INTERVIEW_REQUEST_METHOD &&
+				negotiableTimeout(interviewRequest.timeoutMs);
+			interviewTimeoutMs =
+				interviewsEnabled && interviewRequest?.timeoutMs !== undefined
+					? (features.pinnedTimeoutMs ?? (interviewRequest.timeoutMs as number))
+					: null;
 			const workerPermissionsRequest =
 				clientMeta !== null && isRecord(clientMeta[ACP_WORKER_PERMISSIONS_META_KEY])
 					? clientMeta[ACP_WORKER_PERMISSIONS_META_KEY]
@@ -3918,7 +3997,14 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 				features.workerPermissions === true &&
 				workerPermissionsRequest !== null &&
 				workerPermissionsRequest.version === 1 &&
-				workerPermissionsRequest.withdraw === ACP_PERMISSION_WITHDRAW_METHOD;
+				workerPermissionsRequest.withdraw === ACP_PERMISSION_WITHDRAW_METHOD &&
+				negotiableTimeout(workerPermissionsRequest.timeoutMs);
+			// A remote person often answers minutes later, so the client may widen
+			// (or narrow) the window it is given; the operator's explicit flag still wins.
+			permissionRequestTimeoutMs =
+				workerPermissionsEnabled && workerPermissionsRequest?.timeoutMs !== undefined
+					? (features.pinnedTimeoutMs ?? (workerPermissionsRequest.timeoutMs as number))
+					: null;
 			// A queue snapshot on every enqueue, hand-over and edit is only worth
 			// sending to a client that replaces its list with it instead of polling.
 			const queueRequest =
@@ -4109,6 +4195,16 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 										version: 1,
 										request: ACP_INTERVIEW_REQUEST_METHOD,
 										cancel: ACP_INTERVIEW_CANCEL_METHOD,
+										...(interviewTimeoutMs !== null ? { timeoutMs: interviewTimeoutMs } : {}),
+									},
+								}
+							: {}),
+						...(workerPermissionsEnabled
+							? {
+									[ACP_WORKER_PERMISSIONS_META_KEY]: {
+										version: 1,
+										withdraw: ACP_PERMISSION_WITHDRAW_METHOD,
+										...(permissionRequestTimeoutMs !== null ? { timeoutMs: permissionRequestTimeoutMs } : {}),
 									},
 								}
 							: {}),
@@ -4357,6 +4453,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	) {
 		throw new Error(`ACP permission timeout must be between 1 and ${MAX_TIMER_DELAY_MS} milliseconds`);
 	}
+	// A client's negotiated window replaces the configured default. The handshake
+	// already answers the operator's explicit --permission-timeout for one, so
+	// the flag still wins.
+	const permissionWindowMs = (): number => handshake.permissionRequestTimeoutMs ?? permissionTimeoutMs;
+	const interviewWindowMs = (): number => handshake.interviewTimeoutMs ?? permissionTimeoutMs;
 	const permission = installPermissionBridge({
 		transport: options.transport,
 		toolRegistry: options.toolRegistry,
@@ -4371,7 +4472,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		},
 		toolCallSnapshot: (wireId) =>
 			activePromptState === null ? null : (activePromptState.toolCallSnapshots.get(wireId) ?? null),
-		permissionTimeoutMs,
+		permissionTimeoutMs: permissionWindowMs,
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
 		...(options.session !== undefined ? { session: options.session } : {}),
 		workerAskNotice: (sessionId, text) => {
@@ -5409,6 +5510,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		telemetry.bind(replay !== undefined);
 	};
 
+	/** Whether a live process other than this one holds the session's ledger now, read from its record. */
+	const heldElsewhere = (id: string): boolean => {
+		try {
+			const current = workspaceMeta(id);
+			return current.endedAt === null && liveSessionOwner(current) !== null;
+		} catch {
+			return false;
+		}
+	};
 	const restoreSession = async (params: unknown, replayToClient: boolean) => {
 		requireInitialized();
 		requireAuthenticated();
@@ -5423,7 +5533,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const clientMcpServers = parseClientMcpServers(request.mcpServers, replayToClient);
 			const stored = workspaceMeta(id);
 			// A record whose owner is gone crashed, and resuming claims it atomically, as the terminal's /resume does.
-			if (stored.endedAt === null && liveSessionOwner(stored) !== null) {
+			if (heldElsewhere(id)) {
 				throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 			}
 			if (
@@ -5466,6 +5576,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					} catch {
 						// Best effort: no replay has been emitted and the slot remains unused.
 					}
+				}
+				// Another process claimed the session between the check above and the
+				// resume's locked claim, which refused it. The client gets the same
+				// code as the early check rather than a generic load failure.
+				if (heldElsewhere(id)) {
+					throw new AcpRequestError(-32602, "session may already be open", { code: "session_open" });
 				}
 				throw new AcpRequestError(-32603, "session could not be loaded", { code: "internal_error" });
 			}
@@ -7850,7 +7966,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		transport: options.transport,
 		sessionId: () => activeSessionId ?? boundSessionId,
 		enabled: () => handshake.initialized && handshake.interviewsEnabled,
-		timeoutMs: permissionTimeoutMs,
+		timeoutMs: interviewWindowMs,
 		...(options.diagnostics !== undefined ? { diagnostics: options.diagnostics } : {}),
 	});
 	options.onReady?.();

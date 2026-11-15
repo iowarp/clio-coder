@@ -75,6 +75,15 @@ export function yoloRootRefusal(facts: YoloHostFacts = readYoloHostFacts()): str
 }
 
 /**
+ * Why yolo is refused because the operator launched `clio-coder acp --autonomy default`, or null. The flag caps the
+ * process: a client's session mode, config option or settings patch can lower autonomy under it, never raise it.
+ */
+export function launchAutonomyRefusal(ceiling: "default" | "yolo" | undefined): string | null {
+	if (ceiling === undefined || ceiling === "yolo") return null;
+	return `yolo is refused: this ACP server was started with --autonomy ${ceiling}, which caps every session it hosts`;
+}
+
+/**
  * Why yolo is refused because a session below yolo started this process from its bash tool, or null.
  * A delegated run never gets more autonomy than its dispatcher; the session marks its level in every bash command's
  * environment.

@@ -248,15 +248,19 @@ test("ACP interview channel maps the client's reply, its cancel and a turn abort
 	deepStrictEqual(await channel.ask([question]), reply);
 	strictEqual(requests[0]?.method, "_clio-coder/interview/request");
 	strictEqual(requests[0]?.params.sessionId, "session-1");
-	// The wire question has no field for the harness-only default focus.
+	// The wire question keeps its shape; the harness's preselected option rides in _meta.
 	deepStrictEqual((requests[0]?.params.questions as unknown[])[0], {
 		question: "Merge?",
 		header: "Merge task branch?",
 		options: [{ label: "Merge" }, { label: "Keep branch", description: "Leave it." }],
 	});
-	deepStrictEqual(requests[0]?.params._meta, { "clio-coder/interview": { version: 1, operatorOnly: false } });
+	deepStrictEqual(requests[0]?.params._meta, {
+		"clio-coder/interview": { version: 1, operatorOnly: false, recommended: [1] },
+	});
 	await channel.ask([{ ...question, operator_only: true }]);
-	deepStrictEqual(requests[1]?.params._meta, { "clio-coder/interview": { version: 1, operatorOnly: true } });
+	deepStrictEqual(requests[1]?.params._meta, {
+		"clio-coder/interview": { version: 1, operatorOnly: true, recommended: [1] },
+	});
 	strictEqual("operator_only" in ((requests[1]?.params.questions as unknown[])[0] as object), false);
 
 	reply = { answers: [], cancelled: true };

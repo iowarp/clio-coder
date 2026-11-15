@@ -30,7 +30,12 @@ import type { DecisionBoardStore } from "../../domains/session/decision-board.js
 import { formatDecisionCorrectionTurn } from "../../session-control/decision-correction.js";
 import { councilShortfall, voteTally } from "../../session-control/poll.js";
 import type { CouncilDispatchOutcome } from "../../session-control/slash-commands.js";
-import type { AskUserHandler, AskUserQuestion, AskUserResult } from "../../tools/ask-user.js";
+import {
+	type AskUserHandler,
+	type AskUserQuestion,
+	type AskUserResult,
+	recommendedOptionIndex,
+} from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { AcpTimeoutError } from "./errors.js";
 import type { AcpBoardActions, AcpInterviewBinding, AcpInterviewChannel } from "./server.js";
@@ -201,29 +206,44 @@ function cut(value: string, max: number): string {
 	return value.length > max ? value.slice(0, max) : value;
 }
 
-/** The client's request shape. `defaultOption` is harness-only focus state the wire has no field for. */
-function wireQuestion(question: AskUserQuestion): WireQuestion | null {
+/**
+ * The client's request shape, and the wire index of the option the host
+ * recommends: the harness's `defaultOption` when it set one, else the option an
+ * absent operator gets (`recommendedOptionIndex`). Null when that option did not
+ * survive to the wire or the question has none.
+ */
+function wireQuestion(question: AskUserQuestion): { wire: WireQuestion; recommended: number | null } | null {
 	const text = cut(sanitizeCallTargetText(question.question), MAX_QUESTION_CHARS);
 	if (text.length === 0) return null;
-	const options = (question.options ?? [])
-		.map((option) => ({
+	const source = question.options ?? [];
+	const preferred =
+		question.defaultOption !== undefined && source[question.defaultOption] !== undefined
+			? question.defaultOption
+			: recommendedOptionIndex(question);
+	const kept = source
+		.map((option, index) => ({
+			index,
 			label: cut(sanitizeCallTargetText(option.label), MAX_LABEL_CHARS),
 			description: option.description,
 		}))
 		.filter((option) => option.label.length > 0)
-		.slice(0, MAX_OPTIONS)
-		.map((option) => ({
-			label: option.label,
-			...(option.description !== undefined && option.description.length > 0
-				? { description: cut(sanitizeCallTargetText(option.description), MAX_DESCRIPTION_CHARS) }
-				: {}),
-		}));
+		.slice(0, MAX_OPTIONS);
+	const recommendedAt = kept.findIndex((option) => option.index === preferred);
+	const options = kept.map((option) => ({
+		label: option.label,
+		...(option.description !== undefined && option.description.length > 0
+			? { description: cut(sanitizeCallTargetText(option.description), MAX_DESCRIPTION_CHARS) }
+			: {}),
+	}));
 	const header = question.header !== undefined ? cut(sanitizeCallTargetText(question.header), MAX_HEADER_CHARS) : "";
 	return {
-		question: text,
-		...(header.length > 0 ? { header } : {}),
-		...(options.length > 0 ? { options } : {}),
-		...(question.multi_select === true ? { multi_select: true } : {}),
+		wire: {
+			question: text,
+			...(header.length > 0 ? { header } : {}),
+			...(options.length > 0 ? { options } : {}),
+			...(question.multi_select === true ? { multi_select: true } : {}),
+		},
+		recommended: recommendedAt < 0 ? null : recommendedAt,
 	};
 }
 
@@ -305,14 +325,17 @@ export function createAcpInterviewChannel(
 		if (bound === null || !bound.enabled()) return cancelled();
 		const sessionId = bound.sessionId();
 		const shown = questions.slice(0, MAX_QUESTIONS).map(wireQuestion);
-		const wire = shown.filter((question): question is WireQuestion => question !== null);
+		const projected = shown.filter((question) => question !== null);
+		const wire = projected.map((question) => question.wire);
 		if (sessionId === null || wire.length === 0 || wire.length !== shown.length) return cancelled();
 		const signal = options?.signal;
 		if (signal?.aborted === true) return cancelled();
 		const interviewId = `interview-${randomUUID()}`;
 		const operatorOnly = questions.some((question) => question.operator_only === true);
 		const fallback = options?.unattendedFallback === true;
-		const requestTimeoutMs = bound.timeoutMs ?? DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
+		const requestTimeoutMs =
+			(typeof bound.timeoutMs === "function" ? bound.timeoutMs() : bound.timeoutMs) ??
+			DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
 		const unattendedMs = fallback ? (unattendedWindow() ?? 0) : 0;
 		const timeoutMs = unattendedMs > 0 ? Math.min(unattendedMs, requestTimeoutMs) : requestTimeoutMs;
 		let onAbort: (() => void) | undefined;
@@ -334,7 +357,13 @@ export function createAcpInterviewChannel(
 							sessionId,
 							interviewId,
 							questions: wire,
-							_meta: { [ACP_INTERVIEW_META_KEY]: { version: 1, operatorOnly } },
+							_meta: {
+								[ACP_INTERVIEW_META_KEY]: {
+									version: 1,
+									operatorOnly,
+									recommended: projected.map((question) => question.recommended),
+								},
+							},
 						},
 						timeoutMs,
 					),

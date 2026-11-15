@@ -97,5 +97,7 @@ export interface BootOptions {
 		onReady?: () => void;
 		transportOptions?: StdioServerTransportOptions;
 		permissionTimeoutMs?: number;
+		/** `clio-coder acp --autonomy`: the most autonomy any hosted session runs at; it lowers settings, never raises them. */
+		autonomyCeiling?: "default" | "yolo";
 	};
 }

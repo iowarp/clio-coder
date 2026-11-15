@@ -84,7 +84,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { narrowTurnConstraints, templateToolConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
-import { autonomyCeilingRefusal, yoloRootRefusal } from "../core/yolo-host.js";
+import { autonomyCeilingRefusal, launchAutonomyRefusal, yoloRootRefusal } from "../core/yolo-host.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import {
@@ -1628,7 +1628,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let activeAcpSessionAutonomy: AutonomyLevel | null = null;
 	// Root outside a container never runs yolo (#407). The uid and the
 	// container do not change while the process runs, so it is read once.
-	const yoloRefusal = yoloRootRefusal() ?? autonomyCeilingRefusal();
+	const yoloRefusal =
+		yoloRootRefusal() ?? launchAutonomyRefusal(options.acp?.autonomyCeiling) ?? autonomyCeilingRefusal();
 	// The one effective-autonomy resolution. Every admission surface (registry
 	// admission, dispatch plan provenance, ACP session snapshot) resolves
 	// through these two functions so a fallback added to one surface cannot

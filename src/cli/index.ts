@@ -272,7 +272,9 @@ async function main(argv: string[]): Promise<number> {
 	if (autonomy !== undefined && subcommand) {
 		// Silently dropping a safety level would be worse than refusing it.
 		printError(
-			`--autonomy before a subcommand applies to the interactive session only. For a headless turn use: clio-coder run --autonomy ${autonomy} "<task>"`,
+			subcommand === "acp"
+				? `--autonomy before a subcommand applies to the interactive session only; pass it after it: clio-coder acp --autonomy ${autonomy}`
+				: `--autonomy before a subcommand applies to the interactive session only. For a headless turn use: clio-coder run --autonomy ${autonomy} "<task>"`,
 		);
 		return 2;
 	}

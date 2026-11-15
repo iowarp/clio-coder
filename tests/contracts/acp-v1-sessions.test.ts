@@ -181,6 +181,7 @@ function fixture(
 		updates,
 		events,
 		history,
+		session,
 		routingChanges,
 		get cancelled() {
 			return cancelled;
@@ -575,6 +576,27 @@ test("ACP load reopens a crashed session and refuses one whose owner is alive", 
 		// No process has this pid: the kernel caps pids well below it.
 		Object.assign(row, { owner: { pid: 2 ** 31 - 1, host: hostname(), birth: null } });
 		await peer.call("session/load", load);
+	} finally {
+		await peer.stop();
+	}
+});
+
+// A live terminal session must not get a second writer from a remote client's resume.
+test("ACP resume refuses a session another process claims between its check and the resume's own claim", async () => {
+	const peer = fixture();
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const row = peer.history.find((meta) => meta.id === "session-2");
+		ok(row);
+		// The record read ended at the check; the locked claim then finds a live owner and refuses.
+		peer.session.resume = () => {
+			Object.assign(row, { endedAt: null, owner: { pid: process.pid, host: hostname(), birth: null } });
+			throw new Error("session session-2 is open in another process; end it there first");
+		};
+		await rejects(
+			peer.call("session/resume", { sessionId: "session-2", cwd: peer.cwd, mcpServers: [] }),
+			(err: AcpRequestError) => err.detail.code === "session_open",
+		);
 	} finally {
 		await peer.stop();
 	}
