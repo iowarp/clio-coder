@@ -73,8 +73,8 @@ import {
 	type ResultContract,
 	resultContractReminder,
 	resultContractRepairMessages,
-	resultContractResponseSchema,
 	resultContractRepairUserMessage,
+	resultContractResponseSchema,
 	resultContractShape,
 	type StructuredHelperResult,
 	validateResultContract,
@@ -586,7 +586,7 @@ function workerResponseFormatFor(input: WorkerRunInput): Record<string, unknown>
  * stored history, grounding and eviction never see it. A repair round's own
  * result already quotes the exact shape and is left alone.
  */
-export function withResultContractReminders<M extends { role: string }>(messages: M[], reminder: string | null): M[] {
+function withResultContractReminders<M extends { role: string }>(messages: M[], reminder: string | null): M[] {
 	if (reminder === null) return messages;
 	let changed = false;
 	const projected = messages.map((message, index) => {
@@ -610,7 +610,7 @@ export function withResultContractReminders<M extends { role: string }>(messages
  * trusted with it. A run that carries `responseSchema` already binds every
  * round.
  */
-export function workerContractResponseFormatFor(input: WorkerRunInput): Record<string, unknown> | undefined {
+function workerContractResponseFormatFor(input: WorkerRunInput): Record<string, unknown> | undefined {
 	if (input.responseSchema !== undefined || input.resultContract === undefined) return undefined;
 	if (input.runtime.apiFamily !== "openai-completions") return undefined;
 	if (input.modelCapabilities?.structuredOutputs !== "json-schema") return undefined;

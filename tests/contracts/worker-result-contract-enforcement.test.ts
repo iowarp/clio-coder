@@ -92,8 +92,13 @@ async function runReviewer(replies: Reply[], structuredOutputs: "json-schema" | 
 const read = { toolCall: { name: "read", arguments: JSON.stringify({ path: "plan.md" }) } };
 const lastToolText = (body: Body | undefined) => JSON.stringify(body?.messages.filter((m) => m.role === "tool").at(-1));
 
-test("a prose answer is repaired in a final-only round bound to the contract's schema", { timeout: 15_000 }, async () => {
-	const { result, bodies, events } = await runReviewer([read, { text: MARKDOWN_REVIEW }, { text: REPORT }], "json-schema");
+test("a prose answer is repaired in a final-only round bound to the contract's schema", {
+	timeout: 15_000,
+}, async () => {
+	const { result, bodies, events } = await runReviewer(
+		[read, { text: MARKDOWN_REVIEW }, { text: REPORT }],
+		"json-schema",
+	);
 	strictEqual(result.exitCode, 0, JSON.stringify(events.filter((event) => event.type === "clio_coder_run_outcome")));
 	strictEqual(bodies.length, 3);
 	// Work rounds keep their tools and carry no schema.

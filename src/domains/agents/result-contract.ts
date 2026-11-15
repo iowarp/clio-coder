@@ -224,7 +224,10 @@ export function resultContractResponseSchema(contract: ResultContract): Record<s
 			});
 		case "council-ballot":
 			return object({
-				verdict: contract.options !== undefined && contract.options.length > 0 ? { type: "string", enum: [...contract.options] } : text,
+				verdict:
+					contract.options !== undefined && contract.options.length > 0
+						? { type: "string", enum: [...contract.options] }
+						: text,
 				text,
 			});
 		default:

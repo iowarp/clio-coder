@@ -366,7 +366,10 @@ export function beginCall(
 ): TelemetryCall {
 	const ctx = given ?? processOwner?.context;
 	const callId = newCallId();
-	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>): TelemetryCall => {
+	const attempt = (
+		number: number,
+		request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>,
+	): TelemetryCall => {
 		const attemptId = newAttemptId();
 		const scope = ctx ? { ...ctx, callId, attemptId } : undefined;
 		const start = performance.now();
