@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { UnixSocketMode } from "../../../core/sandbox/types.js";
@@ -75,9 +75,15 @@ export async function validateExtensionPackage(
 			},
 		};
 		scratch = mkdtempSync(join(tmpdir(), "clio-coder-author-validate-"));
+		// Startup prepares declared write roots under the workspace. The author's
+		// cwd is often the package itself, so a root such as `.planning` landed
+		// inside the tree that was just digested and the copy no longer matched.
+		// Registration needs no real workspace; a private one keeps the source untouched.
+		const workspace = join(scratch, "workspace");
+		mkdirSync(workspace);
 		child = new ExtensionRuntimeProcessV2(extension, {
 			snapshot: {
-				workspace: realpathSync(process.cwd()),
+				workspace: realpathSync(workspace),
 				sessionId: null,
 				generation: 1,
 				mode: "headless",
