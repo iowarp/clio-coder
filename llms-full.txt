@@ -7,9 +7,9 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
 - Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
 - Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
-- Current release: v0.8.1. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+- Current release: v0.8.2. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
 
-This file holds the public CLIO Coder guides (documentation for v0.8.1), tutorials, and research pages as Markdown. Each section names the page it comes from.
+This file holds the public CLIO Coder guides (documentation for v0.8.2), tutorials, and research pages as Markdown. Each section names the page it comes from.
 
 ---
 
@@ -277,7 +277,7 @@ Every connection names a runtime, which fixes how CLIO Coder talks to the server
 
 A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through `openai-compat` or `anthropic-compat`, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.
 
-When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
+When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the `runtimes/` folder of CLIO Coder's config directory, or an npm package listed under `integrations.runtimePlugins`, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The [provider adapter cookbook](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/provider-adapter-cookbook.md) describes the runtime descriptor a plugin exports.
 
 ---
 
@@ -407,7 +407,7 @@ Tool results are bounded. Each reading tool has a size cap per call, and all of 
 
 Run `clio-coder --allow-tools read,grep,find,ls` to limit the main agent to those tools, and `--delegate-tools` to limit its workers. Both take a comma-separated list or `none`. A prompt, skill or worker recipe can narrow these limits but never widen them. `/view` shows what the tools produced, a cut result in full included.
 
-The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/prompt-envelope-and-tools.md).
+The full guide lists every tool and its limits. Developers can read [how the prompt and tool surface are assembled](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/prompt-envelope-and-tools.md).
 
 ---
 
@@ -722,7 +722,7 @@ Some failures retry automatically and some never do:
 - No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.
 - Backoff starts at 500 ms, doubles, and stops at 60 seconds.
 
-A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
+A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as `stalled` and retry without that node, and each reroute is recorded on the run. Read the stop reason in **Workers** or with `clio-coder fleet status` before retrying by hand. The [dispatch mechanics reference](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/worker-dispatch-mechanics.md) gives the full failure taxonomy and exit codes.
 
 ---
 
@@ -980,13 +980,13 @@ clio-coder acp --cwd /path/to/project
 | `--delegate-tools NAMES` | Limits the tools the session's dispatched workers may hold. |
 | `--read-only` | Holds every session at the read-only ceiling. No file outside CLIO Coder's own home changes. |
 
-`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
+`clio-coder acp auth login` opens the interactive Quick Connect setup, so an editor's terminal sign-in step can create a connection. Stdout carries only protocol messages; diagnostics go to stderr. The [ACP protocol reference](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/acp.md) covers capabilities, authentication, permissions, and telemetry in detail. Consult the full guide for peer-specific setup and for installing CLIO Coder's portable library in other agents.
 
 ## Built on the Pi SDK
 
 CLIO Coder's model connections, agent loop, and terminal interface are built on the Pi SDK. Version 0.8.0 pins the Pi 1.5.2 packages to exact versions and bundles the one terminal package it patches, so an npm install needs no patch step. CLIO Coder owns everything above that layer: permissions, workers, sessions, run records, and its own handling for local model servers.
 
-Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/pi-boundary.md).
+Pi's coding agent is also a delegation peer. With the `pi` command installed and signed in, a target on the `pi-cli` runtime runs headless worker tasks under Pi's own login. Like other peers that run their own tool loop, it needs `trustedUnmediated: true` on the target before it may take write-capable work. Developers upgrading the SDK can read the [Pi SDK boundary](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/pi-boundary.md).
 
 ---
 
@@ -4171,7 +4171,7 @@ Native workers check each model request. Coding agents that make their own model
 **Next steps**
 
 - [Tools and permissions](https://coder.iowarp.ai/docs/guide/tool-usage.html)
-- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/guide/information-flow.md)
+- [Information flow guide in the repository](https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/guide/information-flow.md)
 - [Choose a model for your project](https://coder.iowarp.ai/tutorials/choose-model-for-your-project.html)
 
 ---

@@ -69,7 +69,7 @@
 <a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a>
 <a href="/docs/guide/glossary.html">Glossary</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Tools and permissions</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/guide/tool-usage.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/tool-usage.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#ask-for-a-bounded-change">Ask for a bounded change</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Tools and permissions</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/guide/tool-usage.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/tool-usage.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#ask-for-a-bounded-change">Ask for a bounded change</a>
 <a href="#understand-permission-requests">Understand permission requests</a>
 <a href="#what-the-sandbox-hides">What the sandbox hides</a>
 <a href="#verify-using-your-projects-checks">Verify using your project&#39;s checks</a>
@@ -103,7 +103,7 @@
 <p>Tool results are bounded. Each reading tool has a size cap per call, and all of them share a budget per turn that grows with the model&#39;s context window. A cut result ends with one notice line that says how much was shown and gives the exact argument for the next page. When the cap cut content that was already collected, the notice also names a read-only overflow copy in CLIO Coder&#39;s state directory, outside your workspace. The permission rules above apply to every tool, whether it is attached or reached through <code>gateway</code>.</p>
 <h2 id="limit-what-the-agent-may-use">Limit what the agent may use</h2>
 <p>Run <code>clio-coder --allow-tools read,grep,find,ls</code> to limit the main agent to those tools, and <code>--delegate-tools</code> to limit its workers. Both take a comma-separated list or <code>none</code>. A prompt, skill or worker recipe can narrow these limits but never widen them. <code>/view</code> shows what the tools produced, a cut result in full included.</p>
-<p>The full guide lists every tool and its limits. Developers can read <a href="https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/prompt-envelope-and-tools.md">how the prompt and tool surface are assembled</a>.</p>
+<p>The full guide lists every tool and its limits. Developers can read <a href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/prompt-envelope-and-tools.md">how the prompt and tool surface are assembled</a>.</p>
 <h2 id="related-tutorials-and-research">Related tutorials and research</h2>
 <nav class="guide-next" aria-label="Related tutorials and research"><ul>
 <li><a href="/tutorials/let-it-work-with-containment-and-rewind.html">Let CLIO Coder work without watching every call <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
@@ -112,7 +112,7 @@
 <li><a href="/tutorials/keep-results-in-the-project-store.html">Keep results outside the tree with the project store <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 <li><a href="/research/scientific-and-hpc-workflows.html">What would make a scientist trust an agent&#39;s change? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 </ul>
-</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/e0c37ee0db81972a2a1e44c94c5dd73646ec2358" data-source-version="0.8.1" data-source-ref="e0c37ee0db81972a2a1e44c94c5dd73646ec2358" data-source-commit="e0c37ee0db81972a2a1e44c94c5dd73646ec2358">Guide to v0.8.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/16c731c643999348ff65abd75e7fd720d280ae08" data-source-version="0.8.2" data-source-ref="16c731c643999348ff65abd75e7fd720d280ae08" data-source-commit="16c731c643999348ff65abd75e7fd720d280ae08">Guide to v0.8.2</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#ask-for-a-bounded-change">Ask for a bounded change</a>
 <a href="#understand-permission-requests">Understand permission requests</a>
 <a href="#what-the-sandbox-hides">What the sandbox hides</a>

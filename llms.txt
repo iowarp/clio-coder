@@ -7,7 +7,7 @@ CLIO Coder reads, edits, and runs checks in your repository. It records what pas
 - Install on macOS, Linux, or WSL: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`
 - Install with npm (Node.js 22.19 or newer): `npm install -g @iowarp/clio-coder`
 - Connect a model in a project: `clio-coder configure`; then run `clio-coder` for the terminal or `clio-coder gui --open` for the desktop alpha.
-- Current release: v0.8.1. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
+- Current release: v0.8.2. Source: https://github.com/iowarp/clio-coder. License: Apache 2.0.
 
 ## Start
 

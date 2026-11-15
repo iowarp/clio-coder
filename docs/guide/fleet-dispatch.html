@@ -69,7 +69,7 @@
 <a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a>
 <a href="/docs/guide/glossary.html">Glossary</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Workers and fleets</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/guide/fleet-dispatch.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/fleet-dispatch.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>
 <a href="#run-a-playbook-when-you-need-one">Run a playbook when you need one</a>
@@ -112,7 +112,7 @@ clio-coder fleet status</code></pre></div>
 <li>No attempt retries automatically after it ran a state-changing call, or when its records cannot prove the checkout unchanged.</li>
 <li>Backoff starts at 500 ms, doubles, and stops at 60 seconds.</li>
 </ul>
-<p>A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as <code>stalled</code> and retry without that node, and each reroute is recorded on the run. Read the stop reason in <strong>Workers</strong> or with <code>clio-coder fleet status</code> before retrying by hand. The <a href="https://github.com/iowarp/clio-coder/blob/e0c37ee0db81972a2a1e44c94c5dd73646ec2358/docs/architecture/worker-dispatch-mechanics.md">dispatch mechanics reference</a> gives the full failure taxonomy and exit codes.</p>
+<p>A remote node that fails its channel twice in a row is marked offline. Its in-flight runs settle as <code>stalled</code> and retry without that node, and each reroute is recorded on the run. Read the stop reason in <strong>Workers</strong> or with <code>clio-coder fleet status</code> before retrying by hand. The <a href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/worker-dispatch-mechanics.md">dispatch mechanics reference</a> gives the full failure taxonomy and exit codes.</p>
 <h2 id="related-tutorials-and-research">Related tutorials and research</h2>
 <nav class="guide-next" aria-label="Related tutorials and research"><ul>
 <li><a href="/tutorials/run-a-playbook-and-land-it.html">Run a playbook from plan to commit <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
@@ -123,7 +123,7 @@ clio-coder fleet status</code></pre></div>
 <li><a href="/research/sealed-run-records.html">Can an agent run be a scientific record? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 <li><a href="/research/fleets-and-local-models.html">When do several agents or small models pay off? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 </ul>
-</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/e0c37ee0db81972a2a1e44c94c5dd73646ec2358" data-source-version="0.8.1" data-source-ref="e0c37ee0db81972a2a1e44c94c5dd73646ec2358" data-source-commit="e0c37ee0db81972a2a1e44c94c5dd73646ec2358">Guide to v0.8.1</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/16c731c643999348ff65abd75e7fd720d280ae08" data-source-version="0.8.2" data-source-ref="16c731c643999348ff65abd75e7fd720d280ae08" data-source-commit="16c731c643999348ff65abd75e7fd720d280ae08">Guide to v0.8.2</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#delegate-a-focused-task">Delegate a focused task</a>
 <a href="#follow-the-work">Follow the work</a>
 <a href="#permissions-sandbox-and-merges">Permissions, sandbox, and merges</a>
