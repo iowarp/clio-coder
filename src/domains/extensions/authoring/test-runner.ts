@@ -1,4 +1,5 @@
-import { readdirSync, realpathSync } from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolvePackageRoot } from "../../../core/package-root.js";
 import { runCommandVector } from "../../../core/safe-exec.js";
@@ -19,6 +20,18 @@ export async function testExtensionPackage(root: string): Promise<number> {
 		.map((entry) => join(entry.parentPath, entry.name))
 		.sort();
 	if (files.length === 0) throw new Error(`no **/*.test.ts files in ${path}`);
+	// Package tests get a temp directory this run owns and removes, so a test
+	// that reads TMPDIR works where the caller's environment has none, and no
+	// run leaves files in a shared temp root.
+	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-extension-test-"));
+	try {
+		return await runPackageTests(path, files, scratch);
+	} finally {
+		rmSync(scratch, { recursive: true, force: true });
+	}
+}
+
+async function runPackageTests(path: string, files: ReadonlyArray<string>, scratch: string): Promise<number> {
 	const result = await runCommandVector(
 		process.execPath,
 		[
@@ -33,6 +46,9 @@ export async function testExtensionPackage(root: string): Promise<number> {
 			workspaceRoot: path,
 			timeoutMs: 120000,
 			env: {
+				TMPDIR: scratch,
+				TMP: scratch,
+				TEMP: scratch,
 				CLIO_CODER_CONFIG_DIR: clioConfigDir(),
 				CLIO_CODER_DATA_DIR: clioDataDir(),
 				CLIO_CODER_STATE_DIR: clioStateDir(),
