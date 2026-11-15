@@ -191,6 +191,8 @@ export const coreTests = [
 	"tool-markup-reprompt-budget",
 	"turn-scope-shell-note",
 	"working-set-skill-protection",
+	"json-payload-trailing-result",
+	"loop-guard-budget-by-tool",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working
