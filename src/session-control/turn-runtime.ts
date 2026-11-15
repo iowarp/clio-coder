@@ -1653,7 +1653,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			}
 			if (event.type === "tool_execution_start") {
 				toolsInFlight += 1;
-				middlewareToolChoice.toolStarted(event.toolName);
+				middlewareToolChoice.toolStarted(event.toolName, event.args);
 				deps.toolStartTimes.set(event.toolCallId, eventClock);
 				state.turnToolCalls += 1;
 				// Turn-end detectors (#184 skill wait) reason about the capability

@@ -1769,7 +1769,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		}
 		if (event.type === "tool_execution_start" && event.toolName !== INTERNAL_HELPER_RESULT_TOOL) {
 			toolExecutionsStarted += 1;
-			middlewareToolChoice.toolStarted(event.toolName);
+			middlewareToolChoice.toolStarted(event.toolName, event.args);
 		}
 		// Read spans this run actually observed. They ground the terminal result
 		// (a cited line has to fall inside one) and they are handed back verbatim
