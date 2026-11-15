@@ -152,6 +152,7 @@ import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import { scopedCapabilityShapes } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -3252,7 +3253,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
 				// Continuations repeat it so a mid-turn compaction cannot drop it.
-				const turnScope = turnScopeGuidance(state.currentTurnConstraints);
+				const turnScope = [
+					turnScopeGuidance(state.currentTurnConstraints),
+					scopedCapabilityShapes(deps.toolRegistry, state.currentTurnConstraints?.allowedTools),
+				]
+					.filter((part) => part.length > 0)
+					.join("\n");
 				// The prompt delta is read when the text is composed, after
 				// ensureSessionPrompt below has compared the live inputs (#423).
 				const reminderProjection = middleware.takePendingReminderProjection(() =>
