@@ -109,6 +109,7 @@ export const coreTests = [
 	"worker-grant-broker",
 	"worker-permit",
 	"worker-refusal-limit",
+	"worker-result-contract-enforcement",
 	"job-admission",
 	"job-tool",
 	"monitor-collect",

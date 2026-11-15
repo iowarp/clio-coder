@@ -192,6 +192,46 @@ export function internalHelperResultSchema(contract: ResultContract): Record<str
 	}
 }
 
+/**
+ * The schema a final-only round binds a prose-parsed contract to on a runtime
+ * that enforces `response_format`, or null when the contract has no single
+ * JSON-object form or its form is too conditional for one schema (an assured
+ * verifier's obligations). It constrains shape only: the validator remains the
+ * authority on verdict agreement, grounding and size.
+ */
+export function resultContractResponseSchema(contract: ResultContract): Record<string, unknown> | null {
+	const helper = internalHelperResultSchema(contract);
+	if (helper !== null) return helper;
+	const text = { type: "string", minLength: 1 };
+	const object = (properties: Record<string, unknown>) => ({
+		type: "object",
+		properties,
+		required: Object.keys(properties),
+		additionalProperties: false,
+	});
+	switch (contract.kind) {
+		case "verifier-report":
+			if (contract.assurance !== undefined) return null;
+			return object({
+				verdict: { type: "string", enum: ["pass", "fail"] },
+				checks: { type: "array", items: object({ name: text, passed: { type: "boolean" }, evidence: text }) },
+			});
+		case "debugger-report":
+			return object({
+				diagnosis: text,
+				reproduction: { type: "string", enum: ["reproduced", "not-reproduced", "unknown"] },
+				evidence: { type: "array", items: text },
+			});
+		case "council-ballot":
+			return object({
+				verdict: contract.options !== undefined && contract.options.length > 0 ? { type: "string", enum: [...contract.options] } : text,
+				text,
+			});
+		default:
+			return null;
+	}
+}
+
 /** Decode a helper value through exactly the ordinary contract and grounding checks. */
 export function validateStructuredHelperResult(
 	input: Omit<ResultContractValidationInput, "output"> & { data: unknown },

@@ -48,6 +48,7 @@ import {
 } from "../core/guardrails.js";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import {
+	isResponseSchemaRejection,
 	responseFormatFor,
 	responseSchemaDialectFor,
 	runtimeSpeaksResponseSchemaDialect,
@@ -72,6 +73,7 @@ import {
 	type ResultContract,
 	resultContractReminder,
 	resultContractRepairMessages,
+	resultContractResponseSchema,
 	resultContractRepairUserMessage,
 	resultContractShape,
 	type StructuredHelperResult,
@@ -595,6 +597,45 @@ export function withResultContractReminders<M extends { role: string }>(messages
 		return { ...message, content: [...result.content, { type: "text", text: reminder }] };
 	});
 	return changed ? projected : messages;
+}
+
+/**
+ * The `response_format` a prose-parsed result contract's final-only rounds
+ * carry, or undefined when this run cannot enforce one. It rides only rounds
+ * that ship no tools, because llama-server cannot build a schema grammar
+ * beside a tool grammar ({@link responseSchemaConflictsWithTools}); work rounds
+ * stay unconstrained. The gate is the measured dialect table plus the resolved
+ * model's own `structuredOutputs`, the same pair dispatch `responseSchema`
+ * admission reads, so a gateway that would silently ignore the field is never
+ * trusted with it. A run that carries `responseSchema` already binds every
+ * round.
+ */
+export function workerContractResponseFormatFor(input: WorkerRunInput): Record<string, unknown> | undefined {
+	if (input.responseSchema !== undefined || input.resultContract === undefined) return undefined;
+	if (input.runtime.apiFamily !== "openai-completions") return undefined;
+	if (input.modelCapabilities?.structuredOutputs !== "json-schema") return undefined;
+	const dialect = responseSchemaDialectFor(input.runtime.id);
+	if (dialect === null) return undefined;
+	const schema = resultContractResponseSchema(input.resultContract);
+	return schema === null ? undefined : responseFormatFor(dialect, schema, "clio_result");
+}
+
+/**
+ * Whether a terminal reply is a finished answer in the wrong form: prose where
+ * the contract's JSON object belongs. A reply announcing more work, or one the
+ * tool-call lockout already replaced, is not; those keep their own repairs.
+ */
+function finishedReplyWithoutJsonResult(message: AgentMessage): boolean {
+	if (!isAssistantMessage(message)) return false;
+	const text = assistantMessageText(message)?.trim() ?? "";
+	if (text.length === 0 || text === lockedSynthesisFallbackText()) return false;
+	if (parseJsonObjectPayload(text).ok) return false;
+	const stopReason = message.stopReason;
+	return !shouldRequestStalledTurnContinuation({
+		hook: "turn_end",
+		text,
+		metadata: { turnToolCalls: 0, ...(typeof stopReason === "string" ? { stopReason } : {}) },
+	});
 }
 
 interface ReadCitationRequest {
@@ -1231,6 +1272,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// The constraint rides samplingParams, which the completions adapter merges
 	// into the body after every named field.
 	const workerResponseFormat = workerResponseFormatFor(input);
+	// Cleared for the rest of the run when the server refuses the field, so a
+	// contract round falls back to its prompt rather than failing.
+	let contractResponseFormat = workerContractResponseFormatFor(input);
 	// The helper protocol names its own terminal tool, so only a prose-parsed contract carries the reminder.
 	const contractReminder =
 		input.resultContract !== undefined && !helperToolAvailable ? resultContractReminder(input.resultContract) : null;
@@ -1396,8 +1440,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// profiles and run overrides, which the adapters apply underneath.
 			const sampling =
 				input.sampling === "deterministic" ? deterministicSampling(currentModel, input.runtime.id) : undefined;
-			const requestOptions =
-				sampling === undefined && workerResponseFormat === undefined
+			// A final-only round (synthesis lock or final-only repair) ships no tools,
+			// so a contract's schema can bind it without meeting a tool grammar.
+			const contractFormat =
+				contractResponseFormat !== undefined && synthesisToolLock && !helperToolAvailable
+					? contractResponseFormat
+					: undefined;
+			const optionsWith = (responseFormat: Record<string, unknown> | undefined) =>
+				sampling === undefined && responseFormat === undefined
 					? streamOptions
 					: {
 							...streamOptions,
@@ -1405,9 +1455,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							samplingParams: {
 								...streamOptions?.samplingParams,
 								...sampling?.samplingParams,
-								...(workerResponseFormat !== undefined ? { response_format: workerResponseFormat } : {}),
+								...(responseFormat !== undefined ? { response_format: responseFormat } : {}),
 							},
 						};
+			let requestOptions = optionsWith(workerResponseFormat ?? contractFormat);
 			// Routed per attempt: the lock and the middleware choice can flip between
 			// the first call and the overflow retry. The terminal handoff comes first
 			// because it names its tool and keeps the surface a lock would remove. A
@@ -1516,6 +1567,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						workerTelemetry?.attempt({
 							roundKind,
 							toolChoice: choice === "auto" || choice === "none" ? choice : toolName ? { name: toolName } : "auto",
+							...(attempt.options?.samplingParams?.response_format !== undefined
+								? { responseFormat: "json-schema" as const }
+								: {}),
 						});
 						const resolvedAttempt = resolvedRequestContext(attempt.context);
 						const attemptContext =
@@ -1587,7 +1641,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			// A token the server rejects as expired earns one locked refresh and one
 			// retry of the same request, as the main turn does; a failed refresh ends
 			// the round with the login remedy (#427).
-			const first = retryStreamOnceOnAuthRejection(
+			const authRetried = retryStreamOnceOnAuthRejection(
 				request(messages),
 				(error) => isProviderAuthRejection(error.errorMessage, roundProviderHttpStatus ?? undefined),
 				async () => {
@@ -1597,6 +1651,21 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					return request(messages);
 				},
 			);
+			// A server that refuses the contract's schema before answering gets the
+			// same round once without it; the prompt and validator still hold the
+			// contract, and later rounds stop sending the field.
+			const first =
+				contractFormat === undefined
+					? authRetried
+					: retryStreamOnceOnAuthRejection(
+							authRetried,
+							(error) => isResponseSchemaRejection(error.errorMessage),
+							async () => {
+								contractResponseFormat = undefined;
+								requestOptions = optionsWith(workerResponseFormat);
+								return request(messages);
+							},
+						);
 			// The server is the authority on its own limit. An unreported window, a
 			// window that changed since it was resolved, or a server tokenizer that
 			// counts above Clio's estimate all surface as a server overflow. It earns
@@ -1757,6 +1826,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						: choice.kind === "required"
 							? { name: choice.toolName }
 							: "auto",
+				// The same predicate streamFn applies to this round's request.
+				...(workerResponseFormat !== undefined ||
+				(contractResponseFormat !== undefined && synthesisToolLock && !helperToolAvailable)
+					? { responseFormat: "json-schema" as const }
+					: {}),
 			});
 			callTracking = null;
 			callUsageReported = false;
@@ -1952,7 +2026,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				if (zeroToolViolation !== null || resultContractRepairsStarted < RESULT_CONTRACT_REPAIR_LIMIT) {
 					if (zeroToolViolation !== null) zeroToolRepairQueued = true;
 					else resultContractRepairsQueued += 1;
-					if (zeroToolViolation === null && !resultContractRevisionActive && workerBudget.revision !== undefined) {
+					// A finished answer in prose needs no more work, only its form. Where
+					// the runtime can bind that form, the repair round goes final-only so
+					// the schema can ride it; tools there would keep it unconstrained, and
+					// the revision allowance stays unspent.
+					const constrainedRepair =
+						contractResponseFormat !== undefined &&
+						zeroToolViolation === null &&
+						finishedReplyWithoutJsonResult(event.message);
+					if (
+						zeroToolViolation === null &&
+						!constrainedRepair &&
+						!resultContractRevisionActive &&
+						workerBudget.revision !== undefined
+					) {
 						resultContractRevisionActive = loopGuardRegistration.extendWorkerToolCallPhase(workerBudget.revision);
 						if (resultContractRevisionActive) {
 							synthesisToolLock = false;
@@ -1960,6 +2047,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 							stopAfterToolResultCallId = null;
 						}
 					}
+					if (constrainedRepair) synthesisToolLock = true;
 					const revisionToolsAvailable =
 						(workerBudget.mode === "advisory" || resultContractRevisionActive) && !synthesisToolLock;
 					// Legacy enforced budgets need preauthorized growth to retain repair tools.

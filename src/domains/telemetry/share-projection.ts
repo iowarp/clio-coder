@@ -89,7 +89,7 @@ const MEMORY_ROUTE = { targetId: "model-id", modelId: "model-id" } as const sati
 const fact = (value: FieldProjection) => ({ ...keep("kind", "source", "method", "reason"), value }) as const;
 // A tool choice is a mode or a tool's name: `tool` keeps the modes with the built-in tools.
 const CALL = {
-	...keep("objects", "attempt", "roundKind"),
+	...keep("objects", "attempt", "roundKind", "responseFormat"),
 	callId: "id",
 	attemptId: "id",
 	toolChoice: "tool",

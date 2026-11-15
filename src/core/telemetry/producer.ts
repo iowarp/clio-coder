@@ -294,7 +294,7 @@ export interface TelemetryCall {
 	 */
 	abandon(cause: FailureCause): CallSettled | undefined;
 	/** One successor per settled attempt. A live attempt cannot silently disappear (#434). */
-	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall | null;
+	nextAttempt(request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>): TelemetryCall | null;
 }
 
 /** Also how a host settles an attempt whose process died before settling it (#434). */
@@ -366,7 +366,7 @@ export function beginCall(
 ): TelemetryCall {
 	const ctx = given ?? processOwner?.context;
 	const callId = newCallId();
-	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice">>): TelemetryCall => {
+	const attempt = (number: number, request?: Partial<Pick<CallStarted, "roundKind" | "toolChoice" | "responseFormat">>): TelemetryCall => {
 		const attemptId = newAttemptId();
 		const scope = ctx ? { ...ctx, callId, attemptId } : undefined;
 		const start = performance.now();
