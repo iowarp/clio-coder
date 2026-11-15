@@ -95,7 +95,9 @@ import {
 	type TurnConstraints,
 	toolSurfaceSources,
 	turnScopeGuidance,
+	turnTemplateName,
 } from "../core/turn-constraints.js";
+import type { TurnOrigin } from "../core/turn-origin.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -502,6 +504,8 @@ export type ChatLoopEvent = (
 export interface PromptSubmitInput {
 	/** What the operator typed: the template invocation when one expanded. */
 	typed: string;
+	/** Who started this turn: an operator prompt, Clio's continuation of a stopped turn, a job or a peer. */
+	origin: TurnOrigin;
 	/** What the model would receive. */
 	text: string;
 }
@@ -541,6 +545,8 @@ export interface ChatSubmitOptions {
 	requestContinuation?: boolean;
 	/** A yolo continuation of a stopped turn; does not reset the count against its cap (#445). */
 	yoloContinuation?: boolean;
+	/** That continuation's place against `TURN_CONTINUATION_CAP`, for hooks that read the turn's origin. */
+	yoloContinuationAttempt?: number;
 	/**
 	 * Delivery mode when a run is active; ignored when idle. Defaults to
 	 * `next-slot`. `interrupt` cancels the run, waits for it to settle, and
@@ -2076,6 +2082,29 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			: stop;
 	};
 
+	/**
+	 * Who started a submitted turn, for extension hooks. Clio's continuation of
+	 * a stopped turn runs under the same template scope as the turn it
+	 * continues, so an extension must not read it as a new operator prompt.
+	 */
+	const submittedTurnOrigin = (options: ChatSubmitOptions): TurnOrigin => {
+		const template = turnTemplateName(state.currentTurnConstraints);
+		const origin: TurnOrigin["origin"] = options.machineTurn
+			? "job"
+			: options.yoloContinuation === true
+				? "continuation"
+				: options.origin !== undefined && options.operatorAuthored !== true
+					? "peer"
+					: "operator";
+		return {
+			origin,
+			...(options.yoloContinuationAttempt === undefined
+				? {}
+				: { continuation: { index: options.yoloContinuationAttempt, cap: TURN_CONTINUATION_CAP } }),
+			...(template === undefined ? {} : { template }),
+		};
+	};
+
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
 	const continueStoppedTurn = async (
 		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number },
@@ -2111,6 +2140,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			{
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
+				yoloContinuationAttempt: attempt,
 				...(constraints === undefined ? {} : { constraints }),
 			},
 		);
@@ -3020,9 +3050,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
 				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;
+				// A request continuation resumes the turn in progress, so it keeps that turn's origin.
+				if (options.requestContinuation !== true) state.currentTurnOrigin = submittedTurnOrigin(options);
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					markPreparationStep("prompt-hook");
-					const verdict = await deps.promptSubmit({ typed: options.display?.text ?? text, text });
+					const verdict = await deps.promptSubmit({
+						typed: options.display?.text ?? text,
+						text,
+						origin: state.currentTurnOrigin ?? { origin: "operator" },
+					});
 					if (!admissionCurrent()) return;
 					if (verdict.kind === "block") {
 						emit({

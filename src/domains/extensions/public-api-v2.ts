@@ -1,4 +1,5 @@
 import type { FactSum } from "../../core/telemetry/fact.js";
+import type { TurnOrigin } from "../../core/turn-origin.js";
 /**
  * Operator runtime API v2. Import these types only; Clio injects the API.
  *
@@ -171,12 +172,23 @@ export interface ExtensionToolHookLanding {
 	dispatch?: ExtensionDispatchCall;
 }
 
+/**
+ * Who started the turn a prompt_submit, turn_start or turn_end hook sees.
+ * `operator` is a prompt the operator submitted; `continuation` is Clio
+ * continuing a turn that stopped (loop guard, tool budget, a failure) under
+ * yolo, with `continuation.index` of `continuation.cap`; `job` is a scheduled
+ * job's turn; `peer` is a message another agent sent into the session.
+ * `template` names the prompt template whose tool scope bounds the turn, and
+ * a continuation keeps it.
+ */
+export type ExtensionTurnOrigin = TurnOrigin;
+
 export type ExtensionHookEvent =
-	| {
+	| ({
 			point: "prompt_submit";
 			/** access: prompt */
 			text?: string;
-	  }
+	  } & ExtensionTurnOrigin)
 	| ({
 			point: "before_tool";
 			tool: string;
@@ -195,19 +207,19 @@ export type ExtensionHookEvent =
 			/** access: tool-results */
 			result?: string;
 	  } & ExtensionToolHookLanding)
-	| {
+	| ({
 			point: "turn_start";
 			turnId: string;
 			/** access: prompt */
 			text?: string;
-	  }
-	| {
+	  } & Partial<ExtensionTurnOrigin>)
+	| ({
 			point: "turn_end";
 			turnId: string;
 			outcome: "completed" | "aborted" | "error";
 			/** access: assistant-text */
 			text?: string;
-	  };
+	  } & Partial<ExtensionTurnOrigin>);
 
 /**
  * Effects an awaited hook may return. Each applies only at the points the

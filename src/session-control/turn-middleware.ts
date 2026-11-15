@@ -11,6 +11,7 @@ import type { TelemetryHub } from "../core/telemetry/hub.js";
 import { normalizeTokenUsage } from "../core/token-split.js";
 import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsContinuation, turnAllowsTool } from "../core/turn-constraints.js";
+import { turnOriginMetadata } from "../core/turn-origin.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
@@ -370,6 +371,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				// a fresh session's opening turn has an empty conversation.
 				conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
 				pendingSkillRequests: pendingSkillRequestCount,
+				...turnOriginMetadata(state.currentTurnOrigin),
 			},
 		};
 	};
@@ -459,6 +461,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				sharedWorkerNote: state.turnSharedWorkerNote,
 				turnMode: state.currentTurnConstraints?.mode ?? "",
 				toolsLocked: state.synthesisToolLock || state.toolBudgetLock,
+				...turnOriginMetadata(state.currentTurnOrigin),
 			};
 			// The final call's input includes cache tokens and measures the context
 			// a plan-close continuation would repeat (#431).

@@ -5,6 +5,15 @@ export interface ToolSurfaceSource {
 	readonly tools: readonly string[];
 	readonly source: string;
 	readonly remedy: string;
+	/** The prompt template that declared this limit, when one did. */
+	readonly template?: string;
+}
+
+/** The prompt template whose tool scope bounds a turn, when one does. */
+export function turnTemplateName(constraints: TurnConstraints | undefined): string | undefined {
+	for (const entry of [...(constraints?.toolSurfaceSources ?? []), ...(constraints?.delegatedToolSurfaceSources ?? [])])
+		if (entry.template !== undefined && entry.template.length > 0) return entry.template;
+	return undefined;
 }
 
 export function templateToolConstraints(template: {
@@ -17,6 +26,7 @@ export function templateToolConstraints(template: {
 			tools,
 			source: `prompt template "${template.name}" ${field}`,
 			remedy: `Ask the operator to widen ${field} in prompt template "${template.name}", then resubmit.`,
+			...(template.name.length > 0 ? { template: template.name } : {}),
 		},
 	];
 	return {
@@ -200,6 +210,7 @@ function isSurfaceSources(value: unknown): boolean {
 					typeof entry === "object" &&
 					typeof entry.source === "string" &&
 					typeof entry.remedy === "string" &&
+					(entry.template === undefined || typeof entry.template === "string") &&
 					// Source tools only attribute a refusal and never admit anything, so they
 					// take a recipe's tool list verbatim instead of the strict name rule.
 					Array.isArray(entry.tools) &&

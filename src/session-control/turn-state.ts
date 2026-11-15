@@ -27,6 +27,7 @@
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import type { TurnOrigin } from "../core/turn-origin.js";
 import type {
 	AuthResolution,
 	ResolvedRuntimeTarget,
@@ -300,6 +301,8 @@ export interface ChatTurnState {
 	turnSharedWorkerNote: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
 	currentTurnConstraints: TurnConstraints | undefined;
+	/** Who started the current submitted turn; hooks read it on prompt_submit, turn_start and turn_end. */
+	currentTurnOrigin: TurnOrigin | null;
 	/**
 	 * Tool surface an activated skill narrowed, held across the operator's
 	 * later turns. Replaced when the operator activates a different skill,
@@ -349,6 +352,7 @@ export type TurnMiddlewareState = TurnStateView<
 	| "activeUserTurnId"
 	| "continuation"
 	| "currentTurnConstraints"
+	| "currentTurnOrigin"
 	| "lastTurnId"
 	| "synthesisToolLock"
 	| "toolBudgetLock"
@@ -435,6 +439,7 @@ export function createTurnState(_initialThinkingLevel?: ThinkingLevel): ChatTurn
 		turnSharedWorkerNote: false,
 		currentPendingSkillPolicy: undefined,
 		currentTurnConstraints: undefined,
+		currentTurnOrigin: null,
 		activeSkillSurface: undefined,
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,

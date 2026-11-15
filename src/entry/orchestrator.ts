@@ -3235,11 +3235,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// The turn_start observation rides the prompt seam, so it names the line
 		// the operator typed (or a hook's rewrite of it), never an expanded
 		// template body.
-		promptSubmit: async ({ typed, text }: { typed: string; text: string }) => {
+		promptSubmit: async ({ typed, text, origin }) => {
 			const gate = extensionReload.promptGate();
 			const verdict =
 				gate !== null && gate.size > 0
-					? await gate.run(typed, typed === text)
+					? await gate.run(typed, typed === text, origin)
 					: { kind: "pass" as const, text: typed, notices: [] };
 			const executor = runtimeHooks.current();
 			for (const notice of verdict.notices) executor?.notify(notice);
