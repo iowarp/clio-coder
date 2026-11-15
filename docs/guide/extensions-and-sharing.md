@@ -112,11 +112,25 @@ A template's `allowed-tools` narrows the expanded turn to the named
 capabilities, and `delegated-tools` narrows the tools its dispatched workers may
 hold. Both accept a comma-separated string or YAML list. Without
 `delegated-tools`, the template's own allowlist is also its delegation ceiling.
-Neither can widen session `--allow-tools` or `--delegate-tools` limits. Core
+Neither can widen session `--allow-tools` or `--delegate-tools` limits. A dispatch
+whose worker tools exceed the delegation ceiling is refused with the agent it
+checked and up to five dispatchable recipes whose declared tools all fit, so the
+model can name one instead of asking the operator to widen the ceiling. Core
 names normalize to canonical spelling; MCP and extension capability names keep
 their qualified spelling. Imported prompts and skills retain their narrower
 translated tool lists. See `src/domains/resources/prompts/loader.ts` and
 `src/core/turn-constraints.ts`.
+
+When a plugin's template expands, the turn lists the `resource` components that
+plugin declares, after the template body, as a `[Plugin resources]` block of id
+and resolved path (at most 12, each contained in the package), so the model reads
+them by path instead of searching for them. A plugin opts in by declaring
+components of kind `resource`.
+
+A plugin reinstalled or changed on disk under a running session no longer matches
+the session's snapshot. Its templates then refuse with the plugin's name and
+`/reload library` instead of answering "not a command"; reload to pick up the new
+copy.
 
 ### Display-only templates
 

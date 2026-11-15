@@ -93,7 +93,10 @@ approval artifact remains the operator-visible record.
 An absolute or malformed path token in prose is not silently dropped. It throws
 `DispatchPathScopeInferenceError` with code `legacy_scope_path_absolute` or
 `legacy_scope_path_malformed`, because a token the inference cannot normalize is
-exactly where a silent omission would hide an applicable rule.
+exactly where a silent omission would hide an applicable rule. A `<scheme>://` URI
+other than `file://`, such as `https://example.org/x` or `project://paper/background`,
+names a resource and is skipped; `file://` stays visible because its path names the
+filesystem.
 
 ### 2.2 Partial intent
 

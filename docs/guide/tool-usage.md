@@ -71,7 +71,10 @@ One gateway provides `find`, `describe`, `call`, and `chain`. Source: [index.ts]
 
 `find` returns bounded pages within 32 KiB, including required argument names and bounded validated argument examples for registered capabilities. A first-page `find` whose query names a gateway capability exactly also returns, as `described`, what `describe` would answer, so the call needs no describe round trip; a recorded MCP catalog entry is described from the catalog without launching its server. Startup capability guidance also includes a bounded argument cue and example. `describe` returns schema, usage, and
 authority notes; `call` validates against the live schema and runs under the
-capability's own authority. Direct tools are called directly, or included as
+capability's own authority. When a rejection names unknown fields that sit beside an
+object argument, it reads the capability's schema: a field the nested schema declares
+is named as belonging inside that object, and any other such field gets the advice to
+move it there if it belongs inside. That line comes before the echoed arguments. Direct tools are called directly, or included as
 steps in a chain. Describing `gateway` returns composition syntax; describing
 `dispatch` returns its full schema even though it is attached.
 
