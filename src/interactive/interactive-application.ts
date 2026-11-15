@@ -689,6 +689,22 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	let scheduleOperatorMaintenance = (): void => {};
 	let operatorTimer: ReturnType<typeof setTimeout> | undefined;
 	let operatorPanelValid: (() => boolean) | undefined;
+	// The startup reload starts runtimes after the first frame, so a prompt
+	// submitted as soon as the editor takes keys ran its prompt_submit and
+	// before_tool hooks against no runtime and they failed open. Hook and tool
+	// calls wait for that reload, as the headless and ACP host does
+	// (extension-host.ts), and the reload counts the session as idle meanwhile:
+	// nothing runs yet that it could swap out, and a turn parked on a hook
+	// must not hold back the generation it waits for.
+	let extensionStartupPending = true;
+	let extensionsAwaitGeneration = (): boolean => false;
+	let finishExtensionStartup = (): void => {};
+	const extensionStartup = new Promise<void>((resolve) => {
+		finishExtensionStartup = () => {
+			extensionStartupPending = false;
+			resolve();
+		};
+	});
 	const operatorExtensions = deps.extensions
 		? new OperatorExtensions({
 				embed: async (request, signal, workspace) => {
@@ -702,10 +718,12 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					mode: "interactive",
 				}),
 				isIdle: () =>
-					!deps.chat.isStreaming() &&
-					deps.chat.turnPreparation().phase === "idle" &&
-					(overlayLifecycle?.getState() ?? "closed") === "closed" &&
-					!editorSubmit?.hasActiveEditorBash(),
+					extensionStartupPending ||
+					extensionsAwaitGeneration() ||
+					(!deps.chat.isStreaming() &&
+						deps.chat.turnPreparation().phase === "idle" &&
+						(overlayLifecycle?.getState() ?? "closed") === "closed" &&
+						!editorSubmit?.hasActiveEditorBash()),
 				list: (cwd) => deps.extensions?.list(cwd, { all: true }) ?? [],
 				...(deps.reloadExtensions ? { commitHooks: deps.reloadExtensions } : {}),
 				onChange: () => refreshOperatorUi(),
@@ -772,12 +790,17 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 					notify: (level, text) => notify(level, text, "operator-extensions:dev"),
 				})
 			: undefined;
+	if (operatorExtensions) extensionsAwaitGeneration = () => operatorExtensions.v2.awaitingGeneration;
+	const extensionsSettled = <T>(run: () => Promise<T>): Promise<T> =>
+		extensionStartup.then(() => operatorExtensions?.v2.whenLive()).then(run, run);
 	if (operatorExtensions)
 		deps.runtimeHooks?.bind({
-			hook: (extensionId, event, timeoutMs, signal) => operatorExtensions.hook(extensionId, event, timeoutMs, signal),
+			hook: (extensionId, event, timeoutMs, signal) =>
+				extensionsSettled(() => operatorExtensions.hook(extensionId, event, timeoutMs, signal)),
 			notify: (message) => notify("warning", message, "operator-extensions:hook"),
 			observeTurnStart: (text) => turnObservations?.turnStart(text),
-			tool: (extensionId, name, input, signal) => operatorExtensions.tool(extensionId, name, input, signal),
+			tool: (extensionId, name, input, signal) =>
+				extensionsSettled(() => operatorExtensions.tool(extensionId, name, input, signal)),
 			// A tool's interview is asked like the model's own question, so a
 			// permission card preempts it and it resumes afterwards.
 			interview: (extensionId, interview, signal) =>
@@ -2536,6 +2559,9 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		});
 
 	const startupAbort = new AbortController();
+	// A startup that never reaches its reload must not park hook calls forever.
+	startupAbort.signal.addEventListener("abort", () => finishExtensionStartup(), { once: true });
+	if (!operatorExtensions) finishExtensionStartup();
 	const startupWorkspace = process.cwd();
 	const startupSession = deps.session?.current() ?? null;
 	let startupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2594,7 +2620,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				if (startupAbort.signal.aborted) return;
 				// Dev copies are taken before the startup reload lists packages.
 				devSession?.start();
-				void operatorExtensions.reload("startup");
+				void operatorExtensions.reload("startup").finally(finishExtensionStartup);
 			});
 		if (frame === null) return;
 		// Project agents and playbooks load without trust; a copy that replaces
