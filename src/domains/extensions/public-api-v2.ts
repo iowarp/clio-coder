@@ -281,10 +281,22 @@ export interface Interview {
 	step: InterviewStep;
 }
 
+/**
+ * `answers` maps each question id to its value: the chosen option `value`
+ * (`string[]` for `multi`), or the typed text for a `text` question. When the
+ * operator typed text beside chosen options, the option value stays in
+ * `answers` and the text arrives in `notes` under the same id. When the
+ * operator typed free text instead of choosing ("Other"), `answers` carries
+ * that text and `other` marks the id.
+ */
 export interface InterviewAnswer {
 	id: string;
 	step: string;
 	answers: Record<string, string | string[]>;
+	/** Text the operator attached to chosen options, by question id. */
+	notes?: Record<string, string>;
+	/** Question ids answered with free text that names no offered option. */
+	other?: Record<string, true>;
 	/** `back` is reserved: the overlay cannot return to a resolved step yet, so the host never sends it. */
 	nav: "next" | "back" | "cancel";
 	/** Set with `nav: "cancel"` when no operator could answer. */

@@ -212,6 +212,13 @@ A skin is a JSON file inside the package, validated at discovery. It overrides p
 
 An interview is a multi-step form the host draws, started from a command, an action or a tool result. A step has up to 4 questions of kind `single`, `multi` or `text`, with up to 12 options each. The operator's answers return to the registered `api.interview(id, handler)` handler, which returns the next step or `{ done: true, ... }` with the final output. With no operator to answer, the interview cancels with reason `headless`. An `initial` value is a draft the operator still has to submit.
 
+Each answer the handler receives is `{ id, step, answers, notes?, other?, nav, reason? }`. `answers` maps a question id to the chosen option's `value`, an array of values for `multi`, or the typed text for a `text` question. When the operator chooses an option and attaches a note, `answers` keeps the option value and `notes` carries the text under the same question id. When the operator types free text instead of choosing ("Other"), `answers` carries the text and `other` marks the id with `true`. A tool that parks on an interview returns the same `notes` and `other` maps, keyed by step and then question id, beside its `answers`.
+
+```text
+{ "id": "gate", "step": "confirm", "answers": { "choice": "revise" }, "notes": { "choice": "tighten Task 1" }, "nav": "next" }
+{ "id": "gate", "step": "confirm", "answers": { "choice": "use five sources" }, "other": { "choice": true }, "nav": "next" }
+```
+
 ## Confinement
 
 Node permission flags built from the manifest (`--permission`, `--allow-fs-read`, `--allow-fs-write`, and `--allow-child-process` only when `exec` is declared) limit the child to its private package copy, its store and the roots it declared. Those flags are a seat belt against mistakes, not a boundary against hostile code: a package that may run programs can do anything those programs can.
