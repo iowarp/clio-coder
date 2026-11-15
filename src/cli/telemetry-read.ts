@@ -14,7 +14,7 @@ import type {
 } from "../core/telemetry/dto.js";
 import { parseFactRef } from "../core/telemetry/dto.js";
 import { AgentRole, Disposition } from "../core/telemetry/enums.js";
-import { renderCount } from "../core/telemetry/render.js";
+import { renderCount, unreportedCacheReadWords } from "../core/telemetry/render.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	loadRunScopeFiles,
@@ -284,11 +284,13 @@ function printCost(dto: CostReportV1): string {
 
 function printCache(dto: CacheReportV1): string {
 	const v = dto.verdicts;
+	const unreported = unreportedCacheReadWords(dto.cacheRead.fact);
 	const lines = [
 		...(dto.share
 			? [`cached share ${dto.share.display} (session), last turn ${dto.lastTurnShare?.display ?? "unknown"}`]
 			: []),
 		`verdicts  hot ${v.hot} · partial ${v.partial} · cold ${v.cold} · small ${v.small} · unknown ${v.unknown}`,
+		...(unreported === null ? [] : [`reads     ${unreported}`]),
 		`tokens    cache read ${show(dto.cacheRead)} · cache write ${show(dto.cacheWrite)} · uncached prefill ${show(dto.uncachedPrefill)} · re-prefilled ${show(dto.rePrefilled)}`,
 		`bill      ${show(dto.breakUsd)}`,
 		...(dto.engineFloor ?? []).map(

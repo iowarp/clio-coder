@@ -148,6 +148,22 @@ export function renderCountSum(sum: FactSum, unit = "call"): string {
 }
 
 /**
+ * What the calls behind a cache-read figure did not report, or null when every call reported one. A local server
+ * behind LiteLLM reused its prefix (300-700 ms to first token on 18-23K-token prompts) while every call omitted its
+ * cache read, and an unknown share read as a cache that served nothing (WTF-P campaign, 2026-11-15). Clio does not
+ * infer reuse from timing; it says the reads went unreported, so no call is taken for a miss.
+ */
+export function unreportedCacheReadWords(fact: Fact<number> | FactSum): string | null {
+	if ("kind" in fact)
+		return fact.kind === "unknown" ? "the provider did not report a cache read; reuse is unmeasured, not a miss" : null;
+	if (fact.unknownCount === 0) return null;
+	const reported = fact.coverage.measured + fact.coverage.estimated;
+	return reported === 0
+		? `no call reported a cache read (${plural(fact.unknownCount, "call")}); reuse is unmeasured, not a miss`
+		: `${renderCount(fact.unknownCount)} of ${plural(reported + fact.unknownCount, "call")} reported no cache read; the cached share counts only the calls that did`;
+}
+
+/**
  * A count or count sum in the footer's narrow form (`12.3k`). The width changes, the honesty does not: an estimate
  * keeps `~`, a partial sum keeps `≥` and `+?`, an unknown is `?` and never `0`, and an absent count is `n/a` (R1, R10).
  */

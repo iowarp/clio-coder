@@ -316,7 +316,12 @@ export function lastTurnDetails(
 		: "";
 	const cache = turn
 		? [
-				turn.cacheRead === null || turn.cacheRead === "0" ? null : `cache read ${turn.cacheRead}`,
+				// No call this turn reported its cache read: say so, since `cache read ?` read as a cache that missed.
+				turn.cacheRead === null || turn.cacheRead === "0"
+					? null
+					: turn.cacheRead === "?"
+						? "cache read not reported"
+						: `cache read ${turn.cacheRead}`,
 				turn.cacheWrite === null || turn.cacheWrite === "0" ? null : `write ${turn.cacheWrite}`,
 			]
 				.filter(Boolean)
