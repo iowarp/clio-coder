@@ -58,10 +58,15 @@ export async function harness(
 ) {
 	const home = await scratchHome();
 	const env = { ...home.env, ...options.env };
+	// CLI children run the checkout's own source, never whatever `clio-coder` is on PATH. A test may still point
+	// them at a fixture through options.env. The domain lanes get the same env, as the server gives its lanes the
+	// CliRunner's: the reads lane's machine registry read spawns the CLI too, and without the override it found no
+	// CLI on a runner with neither a root dist/ nor clio-coder on PATH and answered 503.
+	const cliEnv = { CLIO_CODER_WEB_CLI: sourceCli, ...env };
 	const lane = (name: "reads" | "ops") =>
 		options.lanes === false
 			? (absentLane(name) as unknown as WorkerHost)
-			: new WorkerHost(name, { fixture: true, ...settings }, env);
+			: new WorkerHost(name, { fixture: true, ...settings }, cliEnv);
 	const reads = lane("reads"),
 		ops = lane("ops");
 	const hub = new EventHub(),
@@ -85,9 +90,6 @@ export async function harness(
 	);
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces, reads);
-	// CLI children run the checkout's own source, never whatever `clio-coder` is on PATH. A test may still point
-	// them at a fixture through options.env.
-	const cliEnv = { CLIO_CODER_WEB_CLI: sourceCli, ...env };
 	const cli = new CliRunner(cliEnv);
 	// Wired as the server wires it: a written turn limit is re-read from the user layer and applied.
 	const settingsService: SettingsService = new SettingsService(reads, workspaces, ops, () =>
