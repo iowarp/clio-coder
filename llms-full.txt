@@ -2271,9 +2271,9 @@ A first run with no model connection opens on guided setup, which asks the same 
 
 *Start another task in the open workspace, with recent tasks kept in the left rail.*
 
-![CLIO Coder desktop after a completed calibration task: seven passing tests and the reference temperatures in the conversation, with task status, workspace, model, context and usage in the Session column.](https://coder.iowarp.ai/assets/gui-task.webp)
+![CLIO Coder 0.8.1 desktop app after a completed task on GPT-6 Luna in the calibration-lab workspace: the answer reports npm test passed with 7 tests and 0 failures and lists the reference temperatures, with the turn's time, tokens, estimated cost and tool calls beneath it, and the Task details column showing the task complete.](https://coder.iowarp.ai/assets/gui-task.webp)
 
-*A completed desktop task: test results, reference temperatures, and the Session column alongside the conversation.*
+*A completed desktop task on GPT-6 Luna: the test result and reference temperatures in the conversation, with Task details beside it.*
 
 ![CLIO Coder desktop waiting for approval to run npm run check: the command, authorization, consequences, Reject and Allow once controls, with task activity and context in the Session column.](https://coder.iowarp.ai/assets/guides/gui-approval.webp)
 
