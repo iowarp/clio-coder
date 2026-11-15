@@ -461,6 +461,21 @@ export function isLoopGuardSynthesisBackstopReason(reason: string): boolean {
 	return /^loop guard: tool calls stayed disabled and .+ was called again instead of answering/.test(reason);
 }
 
+/** Tools named in the budget refusal; one model-visible line stays under the 300-character clip. */
+const BUDGET_BY_TOOL_LIMIT = 6;
+
+/**
+ * Where a turn's calls went, most used first. A prompt template that runs a
+ * multi-step workflow learns from it which steps spent the budget, so its
+ * summary can say where it stopped (WTF-P /wtfp:advance, 2026-11-15).
+ */
+function turnCallsByTool(byTool: ReadonlyMap<string, number>): string {
+	const ranked = [...byTool].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+	const shown = ranked.slice(0, BUDGET_BY_TOOL_LIMIT).map(([tool, calls]) => `${tool} ${calls}`);
+	const rest = ranked.slice(BUDGET_BY_TOOL_LIMIT).reduce((sum, [, calls]) => sum + calls, 0);
+	return `This turn's calls by tool: ${shown.join(", ")}${rest > 0 ? `, other ${rest}` : ""}.`;
+}
+
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
 export interface OrchTurnToolCallBudget {
 	/** Distinct calls in a turn that trigger the re-plan nudge. */
@@ -639,6 +654,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const identicalBlockStreakByTurn = new Map<string, { identity: string; count: number }>();
 	const unavailableChecks = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
+	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
+	const callsByToolByTurn = new Map<string, Map<string, number>>();
 	/**
 	 * Per-turn count of parent-workspace mutations, including sealed delegated
 	 * work. The identical-call key carries it, so a check rerun after a change
@@ -1030,6 +1047,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (turnBudget === undefined) return null;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
+		let byTool = callsByToolByTurn.get(turnKey);
+		if (byTool === undefined) {
+			while (callsByToolByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = callsByToolByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				callsByToolByTurn.delete(oldest);
+			}
+			byTool = new Map();
+			callsByToolByTurn.set(turnKey, byTool);
+		}
+		const effectiveTool = effectiveToolCall(input.toolName ?? "unknown", input.toolArgs).toolName;
+		byTool.set(effectiveTool, (byTool.get(effectiveTool) ?? 0) + 1);
 		if (callsThisTurn >= turnBudget.hard) {
 			// Hard ceiling: interrupt the turn the same way the block budget does.
 			// The bus event drives chat.cancel() in the interactive layer; the
@@ -1061,7 +1090,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
 						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
-						`propose, and end your reply.`,
+						`propose, and end your reply.\n${turnCallsByTool(byTool)}`,
 					severity: "hard-block",
 				},
 			];
