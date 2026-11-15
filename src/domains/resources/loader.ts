@@ -48,6 +48,29 @@ export interface ResourcesLoader {
 	reload(): Promise<void>;
 }
 
+/**
+ * A plugin template the session listed at its last reload but whose tree no
+ * longer verifies, almost always because the plugin was reinstalled or edited
+ * under the running session. Saying "not a command" for a name autocomplete
+ * still offers sent operators looking for a typo, while the plugin's extension
+ * kept running the copy it started from (WTF-P, 2026-11-15). The refusal names
+ * the reload instead, and keeps the literal line away from the model.
+ */
+function driftedPluginTemplate(
+	expansion: Extract<PromptTemplateExpansion, { expanded: false }>,
+	template: PromptTemplate,
+): PromptTemplateExpansion {
+	const owner = template.sourceInfo.owner;
+	if (owner?.kind !== "plugin") return expansion;
+	return {
+		...expansion,
+		refusal: {
+			template,
+			message: `/${template.name}: plugin ${owner.id} changed on disk since this session loaded it. Run /reload library to load the new copy, or /reload all to also restart its extension.`,
+		},
+	};
+}
+
 export function createResourcesLoader(options: ResourceLoaderOptions = {}): ResourcesLoader {
 	const defaultCwd = options.cwd ?? process.cwd();
 	const skillOptions = (): Pick<
@@ -108,9 +131,12 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 				// absent from the listing cannot expand and needs no tree walk. Unknown
 				// commands reach here on every typo, before anything has painted.
 				const listed = loadPromptTemplates({ ...promptOptions(cwd), verifyPluginTrees: false });
-				if (!listed.items.some((template) => template.name === command.name))
-					return expandPromptTemplateInput(text, listed);
-				return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
+				const listedTemplate = listed.items.find((template) => template.name === command.name);
+				if (listedTemplate === undefined) return expandPromptTemplateInput(text, listed);
+				const expansion = expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
+				return expansion.expanded || expansion.refusal || expansion.display
+					? expansion
+					: driftedPluginTemplate(expansion, listedTemplate);
 			});
 		},
 		async reload() {

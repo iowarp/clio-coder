@@ -563,6 +563,13 @@ export interface ChatSubmitOptions {
 	/** Carry the rest of the queue with this prompt's first model call, instead of at its first slot. */
 	flushQueue?: boolean;
 	/**
+	 * While a run is active, queue a constrained submission to start as its own
+	 * turn when the run settles instead of refusing it. The interactive Enter
+	 * path sets it; a send-now still interrupts, and a caller that needs the
+	 * turn's answer (ACP, headless) keeps the refusal.
+	 */
+	queueConstrainedTurn?: boolean;
+	/**
 	 * Queue the message at the head of the steering queue instead of the tail:
 	 * a send-now the operator chose to wait with, or one the run refused.
 	 */
@@ -2107,6 +2114,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		};
 	};
 
+	const restorableQueuedText = (entry: QueuedChatMessage): string =>
+		entry.constraints !== undefined ? (entry.display?.text ?? entry.text) : entry.text;
+
 	/** Give a stopped turn another one, fresh budget included, with what stopped it in the prompt (#445). */
 	const continueStoppedTurn = async (
 		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number },
@@ -2795,8 +2805,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		discoverOperatorEgg: (text, ask) =>
 			deps.headless ? Promise.resolve(false) : eggs.discover(text, ask ?? deps.eggAsk),
 		refuseSkillRequests,
-		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
-		restorableQueuedTexts: () => queues.restorableQueued().map((entry) => entry.text),
+		// A queued template turn returns as the line the operator typed; its text is the expanded body.
+		clearQueuedFollowUps: () => queues.clearQueuedMirror().map(restorableQueuedText),
+		restorableQueuedTexts: () => queues.restorableQueued().map(restorableQueuedText),
 		queuedMessages: () => queues.queuedMessages(),
 
 		async submit(text: string, options: ChatSubmitOptions = {}): Promise<void> {
@@ -2890,6 +2901,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 				if (!interrupted) {
+					if (constrained && options.queueConstrainedTurn === true && refusal === null && trimmed.length > 0) {
+						const referencedPaths = options.workingContextPaths ?? [];
+						if (referencedPaths.length > 0) {
+							deps.labelReferencedPaths?.(referencedPaths);
+							context.addWorkingContextPaths(referencedPaths);
+						}
+						const entry = queues.queueFollowUp(text, options.display, {
+							referencedPaths,
+							...(options.constraints ? { constraints: options.constraints } : {}),
+							...(continuedMessage ? { continues: continuedMessage } : {}),
+						});
+						// Silent like any queued message: the queue panel is the signal, and the settle names it as it starts.
+						if (entry !== null) return;
+					}
 					if (constrained) {
 						emitAdmissionNotice(
 							`A submission with explicit task constraints must start a fresh turn; ${

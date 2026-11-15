@@ -14,16 +14,69 @@
  * what it needs. None of them may return or throw on the first span that merely
  * looks plausible: the context-bootstrap reader did exactly that and turned a
  * complete handbook into "Unterminated string in JSON".
+ *
+ * After those three, a review written as Markdown that ends with its JSON
+ * result still counts: every later fenced block, then every balanced top-level
+ * object, each tried from the last back, since a result closes the answer
+ * (WTF-P plan-checker, 2026-11-15). These only add spans after the original
+ * three, so whatever parsed before still parses to the same object.
  */
 function jsonPayloadCandidates(text: string): string[] {
 	const trimmed = text.trim();
 	const candidates = [trimmed];
-	const fenced = /```[A-Za-z0-9_-]*\s*\n?([\s\S]*?)```/.exec(trimmed)?.[1]?.trim();
-	if (fenced !== undefined && fenced.length > 0) candidates.push(fenced);
+	const fences = [...trimmed.matchAll(/```[A-Za-z0-9_-]*\s*\n?([\s\S]*?)```/g)]
+		.map((match) => match[1]?.trim() ?? "")
+		.filter((body) => body.length > 0);
+	if (fences[0] !== undefined) candidates.push(fences[0]);
 	const start = trimmed.indexOf("{");
 	const end = trimmed.lastIndexOf("}");
 	if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
-	return candidates;
+	candidates.push(...fences.slice(1).reverse(), ...balancedObjectSpans(trimmed));
+	return [...new Set(candidates)];
+}
+
+/** Brace openings tried from the end; bounds the scan on a long reply that never closes its result. */
+const BALANCED_OBJECT_START_LIMIT = 64;
+
+/**
+ * Balanced `{...}` spans, braces inside JSON strings ignored, the span that
+ * ends last first and the outermost of those first, so a closing result wins
+ * over the checks nested inside it. Each opening brace is matched on its own,
+ * so an unmatched `{` in prose cannot swallow the object after it.
+ */
+function balancedObjectSpans(text: string): string[] {
+	const starts: number[] = [];
+	for (let index = text.lastIndexOf("{"); index >= 0 && starts.length < BALANCED_OBJECT_START_LIMIT; ) {
+		starts.push(index);
+		index = index === 0 ? -1 : text.lastIndexOf("{", index - 1);
+	}
+	const spans: Array<{ start: number; end: number }> = [];
+	for (const start of starts) {
+		const end = matchingBrace(text, start);
+		if (end !== -1) spans.push({ start, end });
+	}
+	spans.sort((left, right) => right.end - left.end || left.start - right.start);
+	return spans.map(({ start, end }) => text.slice(start, end + 1));
+}
+
+function matchingBrace(text: string, start: number): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < text.length; index += 1) {
+		const char = text[index];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (char === "\\") escaped = true;
+			else if (char === '"') inString = false;
+		} else if (char === '"') inString = true;
+		else if (char === "{") depth += 1;
+		else if (char === "}") {
+			depth -= 1;
+			if (depth === 0) return index;
+		}
+	}
+	return -1;
 }
 
 export type JsonObjectPayload =

@@ -58,6 +58,13 @@ export interface SessionFileLiveRecord {
 	lastTurn: SessionFileLastTurn | null;
 	/** Awaiting states only: the tool and the first 200 characters of its command or question, redacted. */
 	waitingOn?: { tool: string; text: string };
+	/**
+	 * Input the operator submitted that has not reached the model yet: queued
+	 * messages, and of those the prompt templates waiting to start their own
+	 * turn when the run ends. A driver reads it to tell a sent line from one
+	 * still pending (WTF-P, 2026-11-15).
+	 */
+	pendingInput: { queued: number; queuedTurns: number };
 	build: { id: string | null; commit: string | null };
 	cwd: string;
 }
@@ -171,6 +178,7 @@ export function createSessionFileRecorder(deps: {
 	let stopReason: string | null = null;
 	let toolCalls = 0;
 	let failedToolCalls = 0;
+	let pendingInput: SessionFileLiveRecord["pendingInput"] = { queued: 0, queuedTurns: 0 };
 	const pending = new Map<string, { tool: string; args: unknown }>();
 	const now = (): Date => deps.now?.() ?? new Date();
 	const warn = (error: unknown): void => {
@@ -198,6 +206,7 @@ export function createSessionFileRecorder(deps: {
 			turns,
 			lastTurn,
 			...(waitingOn ? { waitingOn } : {}),
+			pendingInput,
 			build: {
 				id: runningBuildId,
 				commit: provenance ? `${provenance.commit}${provenance.dirty ? "-dirty" : ""}` : null,
@@ -268,6 +277,15 @@ export function createSessionFileRecorder(deps: {
 					askWaiting = undefined;
 					settle();
 				}
+			} else if (event.type === "queue_update") {
+				const next = {
+					queued: event.messages.length,
+					queuedTurns: event.messages.filter((entry) => entry.constraints !== undefined).length,
+				};
+				if (next.queued === pendingInput.queued && next.queuedTurns === pendingInput.queuedTurns) return;
+				pendingInput = next;
+				// Before the first transition there is no live record to amend.
+				if (since !== "") writeLive();
 			} else if (event.type === "agent_end" && !event.retryPending) {
 				// An attempt that recovery will retry ends no turn.
 				inTurn = false;

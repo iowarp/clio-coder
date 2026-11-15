@@ -62,6 +62,10 @@ export interface EditorSubmitExpansion {
 	display?: { text: string; note?: string };
 	/** A prompt template's `allowed-tools`; see `SubmitExpansion.constraints`. */
 	constraints?: TurnConstraints;
+	/** See `SubmitExpansion.template`. */
+	template?: string;
+	/** See `SubmitExpansion.promptRefusal`. */
+	promptRefusal?: string;
 }
 
 export interface EditorSubmitEditor {
@@ -653,6 +657,16 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		return true;
 	};
 
+	/** A `/name` send-now line that expanded to nothing, with what Enter would have said about it. */
+	const unresolvedSlashCommand = (text: string, submitted: EditorSubmitExpansion): string | null => {
+		const command = parseSlashCommand(text);
+		if (command.kind !== "unknown-command" || submitted.template !== undefined) return null;
+		return (
+			submitted.promptRefusal ??
+			`/${command.token} is not a prompt template, so a send-now cannot send it; press Enter to run it as a command`
+		);
+	};
+
 	const interruptFromEditor = (explicitText?: string, entry?: QueuedChatMessage): void => {
 		const streaming = deps.chat.isStreaming();
 		const snapshot = captureDraft();
@@ -701,10 +715,20 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 						images: [],
 						...(flushed.display ? { display: flushed.display } : {}),
 						...(flushed.referencedPaths ? { workingContextPaths: flushed.referencedPaths } : {}),
+						...(flushed.constraints ? { constraints: flushed.constraints } : {}),
 					}
 				: await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
 				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
+				return;
+			}
+			// Enter answers a `/name` that runs nothing with a notice and keeps the
+			// draft; a send-now must not hand the same literal line to the model, where
+			// an extension hook would read it as the command it names (WTF-P, 2026-11-15).
+			const unresolved = !flushed ? unresolvedSlashCommand(text, submitted) : null;
+			if (unresolved !== null) {
+				deps.notify("warning", unresolved, "command:busy");
+				deps.ui.requestRender();
 				return;
 			}
 			if (!flushed) deps.editor.addToHistory(text);

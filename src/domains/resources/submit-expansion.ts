@@ -33,6 +33,14 @@ export interface SubmitExpansion {
 	display?: { text: string; note?: string };
 	/** An expanded template's `allowed-tools` and `delegated-tools`, submitted as the turn's constraint. */
 	constraints?: TurnConstraints;
+	/** The prompt template `text` expanded from, when one did. */
+	template?: string;
+	/**
+	 * Why a `/name` line that names a template did not expand, such as a plugin
+	 * changed on disk under the session. `text` is then the literal line, which
+	 * a caller that bypasses slash dispatch must not send to the model.
+	 */
+	promptRefusal?: string;
 }
 
 const ATTACHMENT_NOTE_LIMIT = 3;
@@ -191,6 +199,10 @@ export async function expandSubmitText(
 		workingContextPaths: fileExpansion.referencedPaths,
 		pendingSkillRequests: parsed.pendingSkillRequests,
 		...(display ? { display } : {}),
+		...(promptExpansion?.expanded ? { template: promptExpansion.template.name } : {}),
+		...(promptExpansion?.expanded === false && promptExpansion.refusal
+			? { promptRefusal: promptExpansion.refusal.message }
+			: {}),
 		...(allowedTools || delegatedTools
 			? {
 					constraints: templateToolConstraints({

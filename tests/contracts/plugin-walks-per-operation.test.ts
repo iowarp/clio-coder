@@ -240,7 +240,13 @@ describe("plugin walks per repeated operation", () => {
 				menu?.items.some((item) => item.value === "walk-kit-0-run"),
 				"completion lists from the committed snapshot",
 			);
-			ok(!loader.expandPromptTemplate("/walk-kit-0-run", cwd).expanded, "a drifted template must not expand");
+			const drifted = loader.expandPromptTemplate("/walk-kit-0-run", cwd);
+			ok(!drifted.expanded, "a drifted template must not expand");
+			ok(
+				drifted.refusal?.message.includes("plugin walk-kit-0 changed on disk") &&
+					drifted.refusal.message.includes("/reload library"),
+				`a drifted template names the reload, not a typo: ${drifted.expanded ? "" : (drifted.refusal?.message ?? "no refusal")}`,
+			);
 		} finally {
 			process.chdir(previous);
 		}
