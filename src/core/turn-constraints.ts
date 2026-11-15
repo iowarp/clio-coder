@@ -256,6 +256,16 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 		lines.push(
 			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
 		);
+		// A narrowed scope that keeps the shell beside the file tools admits it
+		// for the commands the workflow runs. Given only the list, a model ran
+		// find, ls and grep through bash eight-plus times a turn (WTF-P campaign).
+		const fileTools = [ToolNames.Read, ToolNames.Grep].filter((name) => names.includes(name));
+		if (names.includes(ToolNames.Bash) && fileTools.length > 0) {
+			const listing = [ToolNames.Find, ToolNames.Ls].filter((name) => names.includes(name));
+			lines.push(
+				`bash is admitted for the commands this task runs; use ${fileTools.join(" and ")} for files${listing.length > 0 ? ` and ${listing.join("/")} through gateway for listings` : ""}, not shell commands.`,
+			);
+		}
 	}
 	if (constraints.delegatedTools) {
 		const names = [...new Set(constraints.delegatedTools)].sort();
