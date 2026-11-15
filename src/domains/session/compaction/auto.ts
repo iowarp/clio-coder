@@ -29,6 +29,10 @@ export const DEFAULT_COMPACTION_THRESHOLD = 0.8;
  *   - thresholds outside (0, 1] disable the trigger.
  * `reserveOutputTokens` counts the summary output the compaction call will
  * request, so the trigger fires while that request still fits the window.
+ * It counts only the part the threshold's own headroom does not already
+ * leave free: the trigger is min(threshold × window, window − reserve). Adding
+ * the whole reserve on top of the threshold fired a 0.9 threshold at 70% of a
+ * 131K window (26K reserve), well before the summary needed the room.
  */
 export function shouldCompact(
 	contextTokens: number,
@@ -48,7 +52,8 @@ export function shouldCompact(
 	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return base;
 
 	const reserve = Number.isFinite(reserveOutputTokens) && reserveOutputTokens > 0 ? reserveOutputTokens : 0;
-	const pressure = (contextTokens + reserve) / contextWindow;
+	const uncovered = Math.max(0, reserve - (1 - threshold) * contextWindow);
+	const pressure = (contextTokens + uncovered) / contextWindow;
 	return {
 		shouldCompact: pressure >= threshold,
 		pressure,
