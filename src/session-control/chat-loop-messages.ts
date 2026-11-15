@@ -310,7 +310,43 @@ export const TOOL_MARKUP_REPROMPT_NOTICE =
 export const TOOL_MARKUP_REPROMPT =
 	"<system-reminder>Your last reply wrote a tool call as text, so it did not run and nothing happened. Calls written as text never run. If the work still needs a tool, make the call through the tool interface now. Otherwise answer in plain prose and say plainly what was not done.</system-reminder>";
 
-/** At most this many written-out-call re-prompts in one operator turn. */
+/** The notice key for the re-prompt after a reply that held neither an answer nor a tool call. */
+export const EMPTY_ANSWER_REPROMPT_NOTICE_KEY = "turn.empty-answer-reprompt";
+export const EMPTY_ANSWER_REPROMPT_NOTICE =
+	"[Clio Coder] The model ended its reply with no answer and no tool call. Clio asked it to continue.";
+export const EMPTY_ANSWER_REPROMPT =
+	"<system-reminder>Your last reply was empty: it held no answer and no tool call, so nothing happened and the operator saw nothing. Act now: if the work still needs a tool, make the call through the tool interface; otherwise write your answer in plain prose and say plainly what was not done.</system-reminder>";
+
+/**
+ * The re-prompt for a reply that answered nothing, or null when its ending is
+ * not one. A local Qwen-family model ended six turns with long reasoning and
+ * no reply (WTF-P campaign, 2026-11-15), each a turn the operator had to ask
+ * again; the reasoning usually held the next step it never took.
+ */
+export function noAnswerReprompt(
+	ending: TurnEnding | null,
+): { reminder: string; notice: string; noticeKey: string } | null {
+	if (ending?.kind !== "no_answer") return null;
+	switch (ending.cause) {
+		case "tool_call_in_reasoning":
+		case "tool_call_as_text":
+		case "tool_call_announced":
+			return {
+				reminder: TOOL_MARKUP_REPROMPT,
+				notice: TOOL_MARKUP_REPROMPT_NOTICE,
+				noticeKey: TOOL_MARKUP_REPROMPT_NOTICE_KEY,
+			};
+		case "reasoning_only":
+		case "empty":
+			return {
+				reminder: EMPTY_ANSWER_REPROMPT,
+				notice: EMPTY_ANSWER_REPROMPT_NOTICE,
+				noticeKey: EMPTY_ANSWER_REPROMPT_NOTICE_KEY,
+			};
+	}
+}
+
+/** At most this many no-answer re-prompts (written-out calls or empty replies) in one operator turn. */
 export const TOOL_MARKUP_REPROMPT_CAP = 3;
 
 /** Which operator turn spent written-out-call re-prompts, how many, and the tool-call count at the last one. */

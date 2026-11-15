@@ -83,17 +83,16 @@ import {
 	backendCacheVerdict,
 	claimToolMarkupReprompt,
 	classifyTurnEnding,
+	endedOnCancelledInterview,
 	estimatedUsageForInterruptedTurn,
 	extractText,
 	extractThinking,
 	fallbackIdentityPrompt,
 	hasStructuredToolCall,
 	isEmptyAbortedAssistantMessage,
+	noAnswerReprompt,
 	noteWrittenCalls,
 	sumRunUsage,
-	TOOL_MARKUP_REPROMPT,
-	TOOL_MARKUP_REPROMPT_NOTICE,
-	TOOL_MARKUP_REPROMPT_NOTICE_KEY,
 	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
 	toolNamesFromAgentState,
@@ -1541,14 +1540,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (requiredToolReminder !== null && currentRun() && state.activeInterruptReason === null) {
 				return { action: "continue" };
 			}
-			// A call the model only wrote out never ran. One more round through normal admission lets it make the call or
-			// say what it did, and Clio never parses or runs the markup itself. A guard's lock already told it tools are off.
-			const noAnswer = turn.message.stopReason === "stop" ? classifyTurnEnding([turn.message]) : null;
+			// A call the model only wrote out never ran, and an empty reply answered nothing. One more round through normal
+			// admission lets it make the call or answer, and Clio never parses or runs the markup itself. A guard's lock
+			// already told it tools are off, and an interview the operator dismissed is theirs to follow up.
+			const reprompt =
+				turn.message.stopReason === "stop" &&
+				!endedOnCancelledInterview(localRuntime.agent.state.messages.filter((message) => message !== turn.message))
+					? noAnswerReprompt(classifyTurnEnding([turn.message]))
+					: null;
 			const repromptBudget: ToolMarkupRepromptBudget | null =
-				noAnswer?.kind === "no_answer" &&
-				(noAnswer.cause === "tool_call_in_reasoning" ||
-					noAnswer.cause === "tool_call_as_text" ||
-					noAnswer.cause === "tool_call_announced") &&
+				reprompt !== null &&
 				currentRun() &&
 				state.activeInterruptReason === null &&
 				!state.synthesisToolLock &&
@@ -1556,10 +1557,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.activeUserTurnId !== null
 					? claimToolMarkupReprompt(state.toolMarkupReprompt, state.activeUserTurnId, state.turnToolCalls)
 					: null;
-			if (repromptBudget !== null) {
+			if (repromptBudget !== null && reprompt !== null) {
 				state.toolMarkupReprompt = repromptBudget;
-				requiredToolReminder = TOOL_MARKUP_REPROMPT;
-				deps.emitNotice(TOOL_MARKUP_REPROMPT_NOTICE, "warning", TOOL_MARKUP_REPROMPT_NOTICE_KEY);
+				requiredToolReminder = reprompt.reminder;
+				deps.emitNotice(reprompt.notice, "warning", reprompt.noticeKey);
 				return { action: "continue" };
 			}
 			const terminal = pendingTerminalToolResult;
