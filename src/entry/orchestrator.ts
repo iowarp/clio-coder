@@ -177,6 +177,7 @@ import {
 	formatRegistrationConflict,
 	writeMiddlewareDiagnosticToStderr,
 } from "../domains/middleware/index.js";
+import { createLocalClockReminderRegistration } from "../domains/middleware/local-clock-reminder.js";
 import type { MemoryGuardian } from "../domains/middleware/memory-guardian.js";
 import { MEMORY_INTERVENTION_ACTIVITY_LIMIT } from "../domains/middleware/memory-intervention.js";
 import { createPlanCloseRegistration } from "../domains/middleware/plan-close.js";
@@ -1308,6 +1309,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// local models only comply when the instruction rides the user message.
 	middlewareRegistrar.registerHook(createTaskBoardReminderRegistration());
 	middlewareRegistrar.registerHook(createStaleBuildReminderRegistration());
+	middlewareRegistrar.registerHook(createLocalClockReminderRegistration());
 	const taskMemoryBank = memoryOwner.bank;
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred

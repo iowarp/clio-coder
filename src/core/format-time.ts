@@ -107,3 +107,54 @@ export function relative(instant: Instant, now: number = Date.now()): string {
 	if (day < 30) return `${Math.floor(day / 7)}w ago`;
 	return dateLocal(ms);
 }
+
+/** The operator's IANA zone: `TZ` when set, else the zone Intl resolves for this process. */
+function operatorTimeZone(): string {
+	const configured = process.env.TZ;
+	if (configured !== undefined && configured.length > 0) return configured;
+	return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+}
+
+/** `UTC-06:00` for the zone at this instant, so a daylight-saving change shows. */
+function utcOffset(ms: number, zone: string): string {
+	try {
+		const name = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longOffset" })
+			.formatToParts(ms)
+			.find((part) => part.type === "timeZoneName")?.value;
+		if (name === undefined || name === "GMT") return "UTC+00:00";
+		return name.replace(/^GMT/u, "UTC");
+	} catch {
+		// An unknown zone name renders no offset rather than throwing into a prompt.
+		return "";
+	}
+}
+
+/**
+ * The operator's calendar facts at an instant: local date, weekday, `HH:MM`,
+ * zone and offset. Models otherwise date ids and records from their training
+ * prior, and one named an archive for the day after the operator's today
+ * (WTF-P 0.8.3 A4).
+ */
+export function operatorCalendar(instant: Instant = Date.now()): {
+	date: string;
+	weekday: string;
+	time: string;
+	zone: string;
+} {
+	const ms = toEpochMs(instant) ?? Date.now();
+	syncZone();
+	const zoneName = operatorTimeZone();
+	const offset = utcOffset(ms, zoneName);
+	let weekday = "";
+	try {
+		weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: zoneName }).format(ms);
+	} catch {
+		// Same as the offset: an unknown zone drops the weekday, never the date.
+	}
+	return {
+		date: dateFormatter.format(ms),
+		weekday,
+		time: clockFormatter.format(ms).slice(0, 5),
+		zone: offset.length > 0 ? `${zoneName} (${offset})` : zoneName,
+	};
+}

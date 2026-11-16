@@ -64,6 +64,12 @@ export interface SessionPromptInputs {
 	/** Live source of each active route, recomputed per compile so compaction cannot lose it (DF-7). */
 	routeSources?: Readonly<Record<RouteName, RouteSource>>;
 	contextWindow?: number | null;
+	/**
+	 * The operator's local calendar date and zone at compile time. Date only, so
+	 * the prefix changes once a day; the clock time rides in the turn reminder
+	 * (WTF-P 0.8.3 A4).
+	 */
+	localDate?: { date: string; weekday: string; zone: string };
 	providerSupportsTools?: boolean | null;
 	/** The opt-in semantic index is enabled for this run and context is reachable. */
 	semanticSearchAvailable?: boolean;
@@ -379,6 +385,12 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
 	if (inputs.routeSources) lines.push(formatRouteSources(inputs.routeSources));
 	if (typeof inputs.contextWindow === "number" && inputs.contextWindow > 0) {
 		lines.push(`Context window: ${inputs.contextWindow}`);
+	}
+	if (inputs.localDate !== undefined) {
+		const { date, weekday, zone } = inputs.localDate;
+		lines.push(
+			`Operator's local date: ${date}${weekday ? ` (${weekday})` : ""}, time zone ${zone}. Any date you write, in an id, a record or prose, comes from this date, never a later one.`,
+		);
 	}
 	const guidance = inputs.thinkingGuidance?.trim();
 	if (guidance && guidance.length > 0) {

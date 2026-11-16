@@ -7,6 +7,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 ### Added
 
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
+- A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
 
 ### Changed
 

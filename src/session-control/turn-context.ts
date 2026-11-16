@@ -2,6 +2,7 @@ import { assistantOutputChars } from "../core/assistant-output.js";
 import { semanticUsable } from "../core/config.js";
 import type { ContextOperationFact } from "../core/context-operation.js";
 import { CONTEXT_OPERATION_CUSTOM_TYPE, createContextOperation } from "../core/context-operation.js";
+import { operatorCalendar } from "../core/format-time.js";
 import { isHostPolicyMessage } from "../core/host-policy-message.js";
 import { providerCheckpointFromMessage, providerFallbackDigests } from "../core/provider-checkpoint-handle.js";
 import { mainSessionShellSandboxed } from "../core/sandbox/main-session.js";
@@ -2924,6 +2925,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// A thinking-only override must not rewrite the cached Routes line (#423).
 			frozenRouteSources ??= deps.getRouteSources?.();
 			frozenRouteIdentity = routeIdentity;
+			// A turn that crosses midnight recompiles here on its next submit (WTF-P 0.8.3 A4).
+			const calendar = operatorCalendar();
 			const sessionInputs: SessionPromptInputs = {
 				...(standingConstraints ? { turnConstraints: standingConstraints } : {}),
 				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
@@ -2933,6 +2936,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				model: agentRuntime.wireModelId,
 				...(frozenRouteSources ? { routeSources: frozenRouteSources } : {}),
 				contextWindow,
+				localDate: { date: calendar.date, weekday: calendar.weekday, zone: calendar.zone },
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
 				semanticSearchAvailable: semanticUsable(settings.context.semantic),
 				toolNames,
