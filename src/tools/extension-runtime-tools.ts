@@ -103,9 +103,17 @@ export function buildExtensionRuntimeToolSpecs(
 									text: parked.text,
 								}),
 							);
-							return parked.outcome === "done"
-								? { kind: "ok", output, details: { owner } }
-								: { kind: "error", message: output, details: { owner } };
+							// The interview's shape rides the details, which the session ledger keeps, so a reader such as
+							// `campaign run` counts the gates a run reached without parsing what the model was shown.
+							const details = {
+								owner,
+								interview: {
+									outcome: parked.outcome,
+									...(parked.reason === undefined ? {} : { reason: parked.reason }),
+									checkpoints: parked.checkpoints ?? [],
+								},
+							};
+							return parked.outcome === "done" ? { kind: "ok", output, details } : { kind: "error", message: output, details };
 						}
 						const full = result.data === undefined ? result.text : `${result.text}\n${JSON.stringify(result.data)}`;
 						const compact = result.summary === undefined ? null : compactResult(result.summary, full, options?.sessionId);

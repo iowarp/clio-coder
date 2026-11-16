@@ -224,8 +224,15 @@ export async function runParkedInterview(
 	const notes: NonNullable<ParkedInterviewResult["notes"]> = {};
 	const other: NonNullable<ParkedInterviewResult["other"]> = {};
 	const scripted: NonNullable<ParkedInterviewResult["scripted"]> = {};
+	const checkpoints: string[] = [];
+	const ask: AskUserHandler = (questions, options) => {
+		for (const question of questions)
+			if (question.checkpoint !== undefined && !checkpoints.includes(question.checkpoint))
+				checkpoints.push(question.checkpoint);
+		return deps.ask(questions, options);
+	};
 	const result = await runExtensionInterview(
-		deps,
+		{ ...deps, ask },
 		interview,
 		owner,
 		(answer) => {
@@ -246,6 +253,7 @@ export async function runParkedInterview(
 		...(Object.keys(other).length > 0 ? { other } : {}),
 		...(Object.keys(scripted).length > 0 ? { scripted } : {}),
 		...(result.unscripted === true ? { reason: "unscripted" as const } : {}),
+		...(checkpoints.length > 0 ? { checkpoints } : {}),
 		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
 	};
 }
@@ -275,5 +283,20 @@ export async function cancelUnansweredInterview(
 	} catch (error) {
 		text = `${fallback}; the extension's handler failed: ${error instanceof Error ? error.message : String(error)}`;
 	}
-	return { outcome: "cancelled", answers: {}, text, reason: "headless" };
+	const questions: ReadonlyArray<unknown> = Array.isArray(interview?.step?.questions) ? interview.step.questions : [];
+	const checkpoints = [
+		...new Set(
+			questions.flatMap((question) => {
+				const checkpoint = (question as { checkpoint?: unknown } | null)?.checkpoint;
+				return typeof checkpoint === "string" ? [checkpoint] : [];
+			}),
+		),
+	];
+	return {
+		outcome: "cancelled",
+		answers: {},
+		text,
+		reason: "headless",
+		...(checkpoints.length > 0 ? { checkpoints } : {}),
+	};
 }

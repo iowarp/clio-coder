@@ -368,7 +368,9 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 				(spec.name === ToolNames.Verify &&
 					isRecord(verdict.result.details?.judgement) &&
 					verdict.result.details.judgement.execution === "unavailable") ||
-				(spec.name === ToolNames.Gateway && verdict.result.details?.op === "chain"))
+				(spec.name === ToolNames.Gateway && verdict.result.details?.op === "chain") ||
+				// A cancelled extension interview keeps the checkpoints it put to the author on the ledger.
+				isRecord(verdict.result.details?.interview))
 		) {
 			return projectToolResult(verdict.result);
 		}

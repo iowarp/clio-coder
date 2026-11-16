@@ -19,6 +19,8 @@ export interface ParkedInterviewResult {
 	reason?: "headless" | "unscripted";
 	/** By step: the answers file and, by question id, its entry that answered the step. */
 	scripted?: Record<string, { file: string; rules: Record<string, string> }>;
+	/** The checkpoint ids the interview's questions declared, in the order they were put to the author. */
+	checkpoints?: string[];
 }
 
 /** What the surface that owns api 2 runtimes offers the middleware registrations of their hooks. */
