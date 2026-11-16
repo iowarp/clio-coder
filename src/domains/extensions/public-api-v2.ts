@@ -274,6 +274,12 @@ export interface InterviewQuestion {
 	kind: "single" | "multi" | "text";
 	options?: Array<{ value: string; label: string; detail?: string }>;
 	initial?: string | string[];
+	/**
+	 * The checkpoint this question settles, in the extension's own id. A
+	 * headless `clio-coder run --answers` file answers the question by it
+	 * (`id: <checkpoint>`); the operator never sees it.
+	 */
+	checkpoint?: string;
 }
 
 export interface InterviewStep {
@@ -311,8 +317,18 @@ export interface InterviewAnswer {
 	other?: Record<string, true>;
 	/** `back` is reserved: the overlay cannot return to a resolved step yet, so the host never sends it. */
 	nav: "next" | "back" | "cancel";
-	/** Set with `nav: "cancel"` when no operator could answer. */
-	reason?: "operator" | "headless" | "preempted";
+	/**
+	 * Set with `nav: "cancel"` when no operator could answer. `unscripted` is a
+	 * headless run whose `--answers` file has no entry for a question of this
+	 * step; that run ends without answering it.
+	 */
+	reason?: "operator" | "headless" | "preempted" | "unscripted";
+	/**
+	 * Set with `nav: "next"` when the operator's answers to this step were
+	 * written ahead in a `clio-coder run --answers` file: the file, and by
+	 * question id the entry of it that matched. Absent on a live answer.
+	 */
+	scripted?: { file: string; rules: Record<string, string> };
 }
 
 export type InterviewNext = { step: InterviewStep; total?: number } | ({ done: true } & ExtensionOutputV2);

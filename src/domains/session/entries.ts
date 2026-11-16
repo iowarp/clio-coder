@@ -501,6 +501,11 @@ export interface DecisionRecord {
 	 * `action=complete` and answers Clio chose for an absent operator never do.
 	 */
 	operator_choice?: true;
+	/**
+	 * The operator's answer was written ahead in a `clio-coder run --answers`
+	 * file: the file and the entry that matched. Absent on a live answer.
+	 */
+	scripted?: { file: string; rule: string };
 }
 
 /**
@@ -834,6 +839,10 @@ function isTaskLedgerEvidence(value: unknown): value is TaskLedgerValidationEvid
 	);
 }
 
+function isScriptedSource(value: unknown): boolean {
+	return isRecord(value) && isString(value.file) && isString(value.rule);
+}
+
 export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (!isRecord(value)) return false;
 	if (!isString(value.key) || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(value.key)) return false;
@@ -844,6 +853,7 @@ export function isDecisionRecord(value: unknown): value is DecisionRecord {
 	if (value.alternatives !== undefined && !isStringArray(value.alternatives)) return false;
 	if (!isOptionalString(value.rationale)) return false;
 	if (value.operator_choice !== undefined && (value.operator_choice !== true || value.source === "agent")) return false;
+	if (value.scripted !== undefined && (!isScriptedSource(value.scripted) || value.source === "agent")) return false;
 	if (!isOptionalString(value.revisedAt) || !isOptionalString(value.correction)) return false;
 	return value.status === "superseded"
 		? isString(value.revisedAt)

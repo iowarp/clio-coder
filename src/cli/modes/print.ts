@@ -71,6 +71,7 @@ import {
 import { TOOL_PLANES } from "../../tools/policy.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
+import { type ScriptedAnswers, UNSCRIPTED_EXIT_CODE, unscriptedRunMessage } from "../run-answers.js";
 import { noteRunEndWritten } from "../run-failure.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import {
@@ -169,6 +170,8 @@ export interface HeadlessMainAgentOptions {
 	autonomyHalt?: () => AutonomyHalt | null;
 	/** The yolo audit for `--json`: null when the run never ran at yolo (ob-yolo D7). */
 	autonomy?: () => AutonomyReport | null;
+	/** `--answers`: a question the file does not script stops the turn and fails the run with exit 5 (WTF-P 0.8.3 B1). */
+	answers?: ScriptedAnswers;
 }
 
 interface HeadlessMainAgentResult {
@@ -1213,6 +1216,12 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		process.stderr.write(`clio-coder run: ${notice.message}\n`);
 	});
 
+	// The first question the answers file does not script stops the turn once the call that asked it settles,
+	// so an extension still hears its step cancelled as unscripted before the run ends.
+	const scripted = options.answers;
+	const unsubscribeUnscripted = scripted?.onUnscripted((question) =>
+		chat.cancel({ reason: unscriptedRunMessage(scripted, question), atToolBoundary: true }),
+	);
 	let cleanupSteer: (() => void) | undefined;
 	if (options.steerChannel) {
 		cleanupSteer = setupSteerChannel(options.steerChannel, (line) => {
@@ -1249,6 +1258,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			cleanupSteer();
 		}
 		unsubscribeScopeNotices?.();
+		unsubscribeUnscripted?.();
 		unsubscribe();
 	}
 	// Detached workers outlive the turn but not the process, so wait for them
@@ -1429,6 +1439,20 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			outcomeDetail: halt.kind === "judge" ? JUDGE_STREAK_REASON : AUTONOMOUS_CAP_REASON,
 		};
 		stderrMessage = failureMessage;
+	}
+	// The run stopped on a question nobody scripted, whatever the stopped turn left behind; a signal still outranks it.
+	const unscripted = scripted !== undefined && !termination.isShuttingDown() ? scripted.unscripted() : null;
+	if (scripted !== undefined && unscripted !== null) {
+		const failureMessage = unscriptedRunMessage(scripted, unscripted);
+		terminal = {
+			exitCode: UNSCRIPTED_EXIT_CODE,
+			outcome: "failed",
+			status: "failed",
+			failureMessage,
+			outcomeDetail: "unscripted",
+		};
+		stderrMessage = failureMessage;
+		stdoutMessage = null;
 	}
 	const exitCode = terminal.exitCode;
 	const autonomy = mode === "json" ? (options.autonomy?.() ?? null) : null;

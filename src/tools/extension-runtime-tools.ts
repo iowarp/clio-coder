@@ -73,6 +73,7 @@ export function buildExtensionRuntimeToolSpecs(
 									answers: parked.answers,
 									...(parked.notes === undefined ? {} : { notes: parked.notes }),
 									...(parked.other === undefined ? {} : { other: parked.other }),
+									...(parked.scripted === undefined ? {} : { scripted: parked.scripted }),
 									text: parked.text,
 								}),
 							);

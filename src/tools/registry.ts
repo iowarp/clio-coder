@@ -660,6 +660,17 @@ export interface ToolInvokeOptions {
 
 export type AskUserInterviewStatus = "idle" | "active" | "complete" | "cancelled";
 
+/**
+ * Where an operator answer written ahead came from: the `clio-coder run
+ * --answers` file and the entry of it that matched (WTF-P 0.8.3 B1). The
+ * answer is the operator's, recorded so a reader can tell it from one typed
+ * live and from one Clio chose when nobody answered.
+ */
+export interface ScriptedAnswerSource {
+	file: string;
+	rule: string;
+}
+
 export interface AskUserTranscriptQuestion {
 	question: string;
 	header?: string;
@@ -686,6 +697,8 @@ export interface AskUserTranscriptAnswer {
 	value?: string;
 	/** Clio chose this answer because nobody answered within the unattended window (#421). */
 	auto?: true;
+	/** The answer came from the operator's `run --answers` file. */
+	scripted?: ScriptedAnswerSource;
 }
 
 export interface AskUserTranscriptDecision {
@@ -711,6 +724,8 @@ export interface AskUserTranscriptDecision {
 	 * never set on an answer Clio chose for an absent operator.
 	 */
 	operator_choice?: true;
+	/** The operator's answer came from a `run --answers` file; never set with `source: "agent"`. */
+	scripted?: ScriptedAnswerSource;
 }
 
 export interface AskUserTranscriptRound {

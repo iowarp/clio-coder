@@ -50,6 +50,7 @@ import { writeFrame } from "./modes/jsonl.js";
 import type { RunJsonAdmissionRefusedFrame, RunJsonAgentFrame } from "./modes/run-json-schema.js";
 import { RUN_JSON_SCHEMA_VERSION } from "./modes/run-json-schema.js";
 import { flushRawStdout, handleRunStdoutErrors, restoreStdout, takeOverStdout } from "./output-guard.js";
+import { loadScriptedAnswers } from "./run-answers.js";
 import { startRunOutput, withRunFailureReporting, writeRunDiagnostic } from "./run-failure.js";
 import { RUN_HELP as HELP, RUN_USAGE as USAGE } from "./run-help.js";
 import { formatDispatchHumanOutput, verifierVerdict } from "./run-output.js";
@@ -453,6 +454,11 @@ async function executeRunCommand(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			if (parsed.answersFile !== undefined && parsed.agentId !== undefined) {
+				writeRunDiagnostic("clio-coder run: --answers applies to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
 			// Yolo as root outside a container is refused before boot (#407), as is
 			// yolo above the autonomy ceiling of the session that started this run.
 			if (parsed.autonomy === "yolo") {
@@ -487,6 +493,13 @@ async function executeRunCommand(
 					for (const message of skillPathErrors) {
 						writeRunDiagnostic(`clio-coder run: --skill ${message}\n`);
 					}
+					return 2;
+				}
+
+				// Read after --cwd, so a relative path names a file in the run's directory, and before any model call.
+				const answers = parsed.answersFile === undefined ? undefined : loadScriptedAnswers(parsed.answersFile);
+				if (answers !== undefined && "error" in answers) {
+					writeRunDiagnostic(`clio-coder run: ${answers.error}\n`);
 					return 2;
 				}
 
@@ -557,6 +570,7 @@ async function executeRunCommand(
 										}
 									: {}),
 								...(deadline !== undefined ? { deadline } : {}),
+								...(answers !== undefined ? { answers } : {}),
 								...(parsed.sessionId !== undefined
 									? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
 									: parsed.continueSession

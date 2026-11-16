@@ -11,8 +11,14 @@ export interface ParkedInterviewResult {
 	other?: Record<string, Record<string, true>>;
 	/** The extension's closing text when it finished, or why the interview ended. */
 	text: string;
-	/** Set when no operator could be asked, so the caller can tell an absent author from a refusal. */
-	reason?: "headless";
+	/**
+	 * Set when no operator could be asked, so the caller can tell an absent
+	 * author from a refusal: `headless` when nobody could answer at all, and
+	 * `unscripted` when a run's `--answers` file had no answer for a question.
+	 */
+	reason?: "headless" | "unscripted";
+	/** By step: the answers file and, by question id, its entry that answered the step. */
+	scripted?: Record<string, { file: string; rules: Record<string, string> }>;
 }
 
 /** What the surface that owns api 2 runtimes offers the middleware registrations of their hooks. */

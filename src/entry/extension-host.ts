@@ -17,7 +17,8 @@ import { cancelUnansweredInterview, runParkedInterview } from "../tools/extensio
  * Hosts api 2 extension runtimes for a session with no terminal: a headless
  * `clio-coder run` and an ACP session. Hooks, runtime tools, observations and
  * maintenance ticks work as they do in the terminal, and a tool's interview
- * goes to the ACP client's interview channel. With no channel the interview is
+ * goes to the ACP client's interview channel or a headless run's answers file
+ * (`run --answers`). With neither the interview is
  * cancelled at once with reason `headless`, so the extension records that no
  * author was available instead of the call waiting. Workspaces, skins, docks,
  * mute and the dev scope stay terminal-only: nothing here draws what a
@@ -38,7 +39,7 @@ export interface ExtensionHostOptions {
 	readOnly?: OperatorExtensionsOptions["readOnly"];
 	/** One line naming the extension and the reason. */
 	notify: (message: string) => void;
-	/** ACP's interview channel when the client answers interviews. */
+	/** ACP's interview channel when the client answers interviews, or a headless run's `--answers` file. */
 	ask?: AskUserHandler;
 }
 

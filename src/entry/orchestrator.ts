@@ -2013,7 +2013,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(decision.policy?.reasonCode !== undefined ? { reasonCode: decision.policy.reasonCode } : {}),
 		});
 	});
-	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? null;
+	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? options.headless?.answers?.ask ?? null;
 	// The interactive surface installs this so the report tool can open an agent's draft for review (R-12).
 	let reportReviewOpener: ((draftId: string) => void) | null = null;
 	const reportSession = reportWiring({
@@ -2023,8 +2023,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		identitySettings: () => ({ targets: getCurrentSettings().targets }),
 	});
 	// ask_user is a human interview tool, so it is registered only where a person
-	// answers: the TUI, or an ACP client that advertised interviews. Headless and
-	// plain ACP surfaces have no operator, so the tool is absent there (documented
+	// answers: the TUI, an ACP client that advertised interviews, or a run's --answers
+	// file. Headless and plain ACP surfaces have no operator, so it is absent there (documented
 	// in `clio-coder run --help`). Skills that interview fall back to their stated
 	// defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
@@ -2624,7 +2624,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		userTasks,
 		dispatch,
 		bus,
-		...(interactive || acpInterviews ? { askUser: askUserBridge } : {}),
+		...(interactive || acpInterviews || options.headless?.answers ? { askUser: askUserBridge } : {}),
 		// R-12: the agent drafts or offers a Clio Coder report; the host keeps the budget and never sends.
 		report: {
 			...reportSession,
@@ -4360,9 +4360,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
 			}
 			// Started only for a run that reaches the model, so the early exits
-			// above spawn no runtime. No operator answers here, so a tool's
-			// interview is cancelled with reason headless.
-			headlessExtensionHost = await startSessionExtensionHost("headless");
+			// above spawn no runtime. Only a --answers file answers here; without
+			// one a tool's interview is cancelled with reason headless.
+			headlessExtensionHost = await startSessionExtensionHost("headless", options.headless.answers?.ask);
 			// The first turn's turn_start reaches a runtime only once the startup
 			// generation has committed. A run whose startup failed goes on without runtimes.
 			await headlessExtensionHost?.ready.catch(() => undefined);
@@ -4432,6 +4432,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
 				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				...(options.headless.deadline !== undefined ? { deadline: options.headless.deadline } : {}),
+				...(options.headless.answers !== undefined ? { answers: options.headless.answers } : {}),
 				...(options.headless.verify !== undefined
 					? { verify: { ...options.headless.verify, credited: () => creditedRunChecks } }
 					: {}),
