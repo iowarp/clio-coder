@@ -4,6 +4,29 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+This release fixes what a full WTF-P 0.8.2 drive found on the official 0.8.2 install: a seven-section technical report taken from outline to a delivered milestone at autonomy `yolo` on openai-codex, over about 30 desk steps. Each fix below names its finding id from that run.
+
+### Upgrade notes
+
+- **`operator_only` questions wait at yolo too.** They no longer close after `safety.unattendedAfterSeconds` at any autonomy level; an ACP round is bounded only by the client's request timeout.
+- **A yolo cap stops at the tool boundary.** When the token, call or minute cap latches, the round's tool batch runs to settlement and the turn ends before its next model request, so a cap can overshoot by the calls of that one batch.
+
+### Changed
+
+- F-C3: a trusted project's `safety.judge` may set `target` and `model` when the target is one the user settings declare. `enabled`, `environment`, `allow` and `deny` stay user-only, and an undeclared target drops the project's judge route whole.
+
+### Fixed
+
+- F-C12: an intent with no `write_roots` (absent or `[]`) leaves the worker unbounded under its cwd, and narrowing now treats that workspace as its write ceiling. A `before_tool` rewrite that adds write roots inside the workspace is admitted and reaches the worker; a root outside it, by path or by link, is still refused.
+- F-C13: the loop guard counts an identical-argument repeat only while the results match byte for byte, so a stateful extension tool such as `next_step` is no longer blocked on its third call. A block says a repeat "returns the same text" only when the last two results matched.
+- F-C14: a yolo continuation after the per-turn tool budget, its hard ceiling or a synthesis lock says the new turn's tool budget is reset and every tool is available again.
+- F-C15: secret redaction no longer blanks the word after a prose compound, so the footer shows "5M-token cap" instead of "5M-token [redacted]"; `token=value` and `--token value` stay redacted.
+- F-C16: a yolo cap halt no longer aborts a tool call in flight; the call finishes and no further model request is made. A safety judge halt still stops at once.
+- F-C17: `install.sh --no-gui` no longer hands an existing desktop app over during the post-install step, which rewrote the Windows Start Menu shortcut under WSL, and no longer prints the desktop hint.
+- F-C1: an `operator_only` question stays open past the unattended window at every autonomy level.
+- F-C2: the context ledger and `/context` report the fraction automatic compaction actually fires at once the summary reserve counts, not the configured threshold alone.
+- F-C4, F-C5, F-C10, F-C11: re-verified as fixed on 0.8.2. The first TUI prompt waits for extension runtimes before `prompt_submit` and `turn_start` run, a stream that repeats itself is stopped and nudged, logical URIs such as `project://paper/background` are not read as absolute paths, and a delegated-tools refusal names the recipes whose tools fit the scope.
+
 ## 0.8.2 - 2026-11-15
 
 CLIO Coder is an open-source coding-agent harness that works with any model you have and ties every claim about your code to a check it actually ran. It is the coding harness of the CLIO ecosystem from the Gnosis Research Center at Illinois Tech, and it is built for everyday developers as much as for people who write and run science on supercomputers: HPC researchers, storage and I/O engineers, developers of scientific libraries and data formats, and teams bringing LLM agents onto shared clusters. It runs the models your lab already has, from GPU servers on your own network to institutional endpoints and cloud subscriptions, on a login node without root, inside a sandbox built for shared systems.
