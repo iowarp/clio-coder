@@ -1,5 +1,6 @@
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { isModelTier, type ModelTier } from "../../../core/model-tier.js";
 import { parseCommandArgs, substituteArgs } from "../../../engine/prompt-templates.js";
 import { INTEROP_AGENT_KINDS, interopUserRoot } from "../../interop/registry.js";
 import {
@@ -57,6 +58,13 @@ export interface PromptTemplate {
 	 * `allowedTools` is the ceiling. It only narrows the session's ceiling.
 	 */
 	delegatedTools?: readonly string[];
+	/**
+	 * Frontmatter `variants`: a body per model tier, each an inline string or
+	 * `{file: <path>}` relative to the template's directory. Expansion picks
+	 * the running model's tier, then `standard`, then the main body
+	 * (WTF-P 0.8.3 C1).
+	 */
+	variants?: Readonly<Partial<Record<ModelTier, string>>>;
 }
 
 export interface PromptTemplateRoot {
@@ -122,7 +130,14 @@ export type PromptTemplateExpansion =
 			args: string[];
 			template: PromptTemplate;
 			diagnostics: ResourceDiagnostic[];
+			/** The variant whose body was sent; absent when the main body was. */
+			variant?: ModelTier;
 	  };
+
+export interface PromptTemplateExpansionOptions {
+	/** The tier of the model that will run the expanded turn; absent reads as `standard`. */
+	tier?: ModelTier;
+}
 
 /**
  * Clio's own prompt roots plus the command and prompt directories the other
@@ -291,6 +306,103 @@ export function promptTemplateDisplayText(template: Pick<PromptTemplate, "conten
 	return content.trimEnd();
 }
 
+/** A variant `file` must stay inside the package that declares it, or the discovery root outside a package. */
+function readVariantFile(
+	reference: string,
+	filePath: string,
+	root: PromptTemplateRoot,
+): { body: string } | { reason: string } {
+	const boundary = root.plugin === true && root.rootPath !== undefined ? root.rootPath : root.path;
+	const target = path.resolve(path.dirname(filePath), reference);
+	const inside = (base: string, value: string): boolean => {
+		const relative = path.relative(base, value);
+		return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+	};
+	try {
+		if (!inside(boundary, target) || !inside(realpathSync(boundary), realpathSync(target)))
+			return { reason: `prompt template variant file ${reference} is outside ${boundary}` };
+		if (!lstatSync(target).isFile()) return { reason: `prompt template variant file ${reference} is not a file` };
+		const raw = readFileSync(target, "utf8");
+		const split = splitYamlFrontmatter(raw);
+		return { body: split.ok ? split.body : raw };
+	} catch (error) {
+		return {
+			reason: `prompt template variant file ${reference} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+/**
+ * Frontmatter `variants`, self-contained so other frontmatter keys merge
+ * beside it. A malformed entry is a warning and is skipped, so the template
+ * falls back to its other bodies; a declared file that cannot be read makes
+ * the template unavailable, as a bad `${pluginRoot}` reference does.
+ */
+function templateVariants(
+	frontmatter: Record<string, unknown>,
+	filePath: string,
+	root: PromptTemplateRoot,
+	diagnostics: ResourceDiagnostic[],
+): { variants?: Partial<Record<ModelTier, string>> } | { reason: string } {
+	const raw = frontmatter.variants;
+	if (raw === undefined) return {};
+	const warn = (message: string): void => {
+		diagnostics.push({ type: "warning", message, path: filePath });
+	};
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		warn("prompt template variants must be a map of small, standard and frontier; ignored");
+		return {};
+	}
+	const variants: Partial<Record<ModelTier, string>> = {};
+	for (const [tier, value] of Object.entries(raw)) {
+		if (!isModelTier(tier)) {
+			warn(`prompt template variant ${tier} is not a tier (small, standard, frontier); ignored`);
+			continue;
+		}
+		let body: string;
+		if (typeof value === "string") body = value;
+		else if (
+			typeof value === "object" &&
+			value !== null &&
+			!Array.isArray(value) &&
+			Object.keys(value).length === 1 &&
+			typeof (value as { file?: unknown }).file === "string"
+		) {
+			const read = readVariantFile((value as { file: string }).file, filePath, root);
+			if ("reason" in read) return read;
+			body = read.body;
+		} else {
+			warn(`prompt template variant ${tier} must be a body string or {file: <path>}; ignored`);
+			continue;
+		}
+		const resolution = resolvePackageRootReferences(body, root);
+		if ("reason" in resolution) return resolution;
+		const trimmed = resolution.body.trim();
+		if (trimmed.length === 0) {
+			warn(`prompt template variant ${tier} is empty; ignored`);
+			continue;
+		}
+		variants[tier] = trimmed;
+	}
+	return Object.keys(variants).length > 0 ? { variants } : {};
+}
+
+/**
+ * The body a template sends for a model of `tier`: that tier's variant, else
+ * the `standard` variant, else the main body. The tier settles once per
+ * session model, so a template sends the same body on every turn of it.
+ */
+export function promptTemplateBody(
+	template: Pick<PromptTemplate, "content" | "variants">,
+	tier: ModelTier = "standard",
+): { body: string; variant?: ModelTier } {
+	for (const candidate of [tier, "standard"] as const) {
+		const body = template.variants?.[candidate];
+		if (body !== undefined) return { body, variant: candidate };
+	}
+	return { body: template.content };
+}
+
 function loadPromptFile(
 	filePath: string,
 	root: PromptTemplateRoot,
@@ -352,6 +464,10 @@ function loadPromptFile(
 		? importedToolSurface(frontmatter, `prompt template ${name}`, filePath, diagnostics, "delegated-tools")
 		: templateToolSurface(frontmatter, "delegated-tools", filePath, diagnostics);
 	if (delegatedTools) template.delegatedTools = delegatedTools;
+	const variants = templateVariants(frontmatter, filePath, root, diagnostics);
+	if ("reason" in variants)
+		return unavailableTemplate(name, filePath, root, variants.reason, diagnostics, declaredDescription ?? undefined);
+	if (variants.variants) template.variants = variants.variants;
 	return { name, value: template, source: sourceInfo };
 }
 
@@ -449,7 +565,11 @@ export function parsePromptCommand(input: string): { name: string; rest: string 
 	return { name, rest };
 }
 
-export function expandPromptTemplateInput(input: string, templates: PromptTemplateList): PromptTemplateExpansion {
+export function expandPromptTemplateInput(
+	input: string,
+	templates: PromptTemplateList,
+	options: PromptTemplateExpansionOptions = {},
+): PromptTemplateExpansion {
 	const command = parsePromptCommand(input);
 	if (!command) return { expanded: false, text: input, args: [], diagnostics: templates.diagnostics };
 	const template = templates.items.find((entry) => entry.name === command.name);
@@ -489,11 +609,13 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 			display: { template, text: promptTemplateDisplayText(template) },
 		};
 	}
+	const selected = promptTemplateBody(template, options.tier);
 	return {
 		expanded: true,
-		text: substituteArgs(template.content, args, command.rest),
+		text: substituteArgs(selected.body, args, command.rest),
 		args,
 		template,
 		diagnostics: templates.diagnostics,
+		...(selected.variant !== undefined ? { variant: selected.variant } : {}),
 	};
 }

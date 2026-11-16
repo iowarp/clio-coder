@@ -1,6 +1,7 @@
 import { type ClioSettings, readSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
+import { runtimeModelInfo } from "../../core/model-tier.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
 import { releaseModelsLoadedDuring, releaseScopeFor } from "../../engine/apis/residency.js";
@@ -27,6 +28,7 @@ import { probeToolCall } from "./probe/tool-call.js";
 import { createProfileKnowledgeBase } from "./profile-knowledge.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { runtimeNotRegistered } from "./retired-runtimes.js";
+import { resolveRuntimeTarget } from "./runtime-resolution.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import { readTargetCheck } from "./target-check-record.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
@@ -964,6 +966,22 @@ export function createProvidersBundle(
 			},
 		},
 		knowledgeBase: kb,
+		modelTierOverride(wireModelId) {
+			return (options.getSettings?.() ?? readConfig()).models?.[wireModelId]?.tier ?? null;
+		},
+		chatModel() {
+			// The session's own route, the one its chat loop resolves, not the one settings.yaml saved.
+			const chat = (options.getSettings?.() ?? readConfig()).chat;
+			if (!chat.target) return null;
+			const resolved = resolveRuntimeTarget(contract, {
+				targetId: chat.target,
+				...(chat.model ? { wireModelId: chat.model } : {}),
+				requestedThinkingLevel: chat.thinkingLevel,
+				use: "orchestrator",
+				requireTools: false,
+			});
+			return resolved.ok ? runtimeModelInfo(resolved.target) : null;
+		},
 	};
 
 	return { extension, contract };

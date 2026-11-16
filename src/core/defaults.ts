@@ -12,6 +12,7 @@ import type { AutonomyLevel, YoloConfinement } from "../domains/safety/autonomy.
 import type { ProfileId } from "../domains/system-one/profiles.js";
 import type { TurnControlSettings } from "../domains/turn-control/index.js";
 import { GUARDRAIL_DEFAULTS } from "./guardrails.js";
+import type { ModelTier } from "./model-tier.js";
 import type { SandboxMode, UnixSocketMode } from "./sandbox/types.js";
 import type { TelemetrySettings } from "./telemetry/capture.js";
 
@@ -750,6 +751,12 @@ export interface SafetyJudgeSettings {
 export type WorkspaceSnapshotMode = "auto" | "off";
 export const WORKSPACE_SNAPSHOT_MODES: ReadonlyArray<WorkspaceSnapshotMode> = ["auto", "off"];
 
+/**
+ * Operator facts about a model, keyed by wire model id. `tier` overrides
+ * `defaultModelTier` for that model on every target (WTF-P 0.8.3 C1).
+ */
+export type ModelSettings = Record<string, { tier?: ModelTier }>;
+
 export interface IntegrationsSettings {
 	projectResources: ProjectResourcesSettings;
 	externalAgents: ExternalAgentsSettings;
@@ -962,6 +969,7 @@ export const DEFAULT_SETTINGS = {
 	prompts: {
 		profile: "v1" as "v1" | "v2",
 	},
+	models: {} as ModelSettings,
 };
 
 /**
@@ -1236,6 +1244,12 @@ report:
 # evaluation). Applies to the next session.
 prompts:
   profile: v1
+
+# Per-model overrides keyed by wire model id. tier (small | standard | frontier)
+# replaces the heuristic that hooks and prompt template variants read, e.g.
+#   models:
+#     qwen3-32b: { tier: small }
+models: {}
 `;
 
 /**

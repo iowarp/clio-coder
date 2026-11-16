@@ -480,6 +480,7 @@ function cloneHookInput(input: MiddlewareHookInput): MiddlewareHookInput {
 	if (input.correlationId !== undefined) cloned.correlationId = input.correlationId;
 	if (input.toolName !== undefined) cloned.toolName = input.toolName;
 	if (input.modelId !== undefined) cloned.modelId = input.modelId;
+	if (input.model !== undefined) cloned.model = { ...input.model };
 	if (input.metadata !== undefined) cloned.metadata = { ...input.metadata };
 	if (input.toolArgs !== undefined) cloned.toolArgs = { ...input.toolArgs };
 	if (input.toolResultDetails !== undefined) cloned.toolResultDetails = { ...input.toolResultDetails };

@@ -10,6 +10,7 @@ import type {
 import { getToolStateChanges } from "@earendil-works/pi-ai";
 import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
+import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
@@ -1206,6 +1207,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
+			// The worker's own model, resolved by the orchestrator, so hooks judge the worker by it.
+			...(input.runtimeResolution !== undefined ? { model: snapshotModelInfo(input.runtimeResolution) } : {}),
 			supportsImages: acceptsImageInput({
 				runtimeId: input.runtime.id,
 				vision: input.modelCapabilities?.vision,

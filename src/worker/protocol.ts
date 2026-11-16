@@ -1,5 +1,6 @@
 import type { FlowRestrictionSet } from "../core/flow-restrictions.js";
 import { isFlowRestrictionSet } from "../core/flow-restrictions.js";
+import { type ModelRunInfo, parseModelRunInfo } from "../core/model-tier.js";
 /**
  * Worker wire protocol: lanes, bounds, and the attestation frame schema.
  *
@@ -434,6 +435,8 @@ export interface WorkerHookRequest {
 	durationMs?: number;
 	/** The bounded result digest, at after_tool. */
 	result?: string;
+	/** The worker's own model, so the session's hook judges the call by the model that made it. */
+	model?: ModelRunInfo;
 }
 
 /** The dispatched run a hook request belongs to, as the orchestrator knows it. */
@@ -466,7 +469,7 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
 
 export function parseWorkerHookRequest(value: unknown): WorkerHookRequest | null {
 	if (!plainRecord(value)) return null;
-	const { requestId, hookId, point, tool, args, landing, workspaceRoot, outcome, durationMs, result } = value;
+	const { requestId, hookId, point, tool, args, landing, workspaceRoot, outcome, durationMs, result, model } = value;
 	if (typeof requestId !== "string" || requestId.length === 0 || requestId.length > 128) return null;
 	if (typeof hookId !== "string" || hookId.length === 0 || hookId.length > 512) return null;
 	if (point !== "before_tool" && point !== "after_tool") return null;
@@ -482,6 +485,8 @@ export function parseWorkerHookRequest(value: unknown): WorkerHookRequest | null
 	if (durationMs !== undefined && (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0))
 		return null;
 	if (result !== undefined && typeof result !== "string") return null;
+	const parsedModel = model === undefined ? undefined : parseModelRunInfo(model);
+	if (parsedModel === null) return null;
 	return {
 		requestId,
 		hookId,
@@ -493,6 +498,7 @@ export function parseWorkerHookRequest(value: unknown): WorkerHookRequest | null
 		...(outcome === undefined ? {} : { outcome }),
 		...(durationMs === undefined ? {} : { durationMs }),
 		...(result === undefined ? {} : { result }),
+		...(parsedModel === undefined ? {} : { model: parsedModel }),
 	};
 }
 

@@ -1,3 +1,4 @@
+import type { ModelRunInfo } from "../../core/model-tier.js";
 import type { ToolResultDigest } from "../../tools/result-disposition.js";
 
 /**
@@ -171,6 +172,12 @@ export interface MiddlewareHookInput {
 	correlationId?: string;
 	toolName?: string;
 	modelId?: string;
+	/**
+	 * The model the call or turn runs on: id, target, effective context
+	 * window, thinking level, whether prompt caching is on, and its tier. A
+	 * dispatched worker's calls carry the worker's own model (WTF-P 0.8.3 C1).
+	 */
+	model?: Readonly<ModelRunInfo>;
 	metadata?: MiddlewareMetadata;
 	/**
 	 * Tool-call arguments, supplied by the registry on before_tool and

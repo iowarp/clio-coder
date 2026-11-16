@@ -1,3 +1,4 @@
+import { defaultModelTier, type ModelTier } from "../../core/model-tier.js";
 import { runOverrides } from "../../core/run-overrides.js";
 import { pricingBasisFields } from "../../core/telemetry/pricing.js";
 import { targetRequiresAuth } from "./auth/index.js";
@@ -122,6 +123,10 @@ export interface ResolvedRuntimeTarget {
 	modelReasoningAuthoritative: boolean;
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
+	/** See `resolvedModelTier`; fixed for the process once a model first resolves (WTF-P 0.8.3 C1). */
+	modelTier?: ModelTier;
+	/** False only when the route turns prompt caching off; see `promptCachingFor`. */
+	promptCaching?: boolean;
 	contextWindowDetails: ContextWindowDetails;
 	maxOutputTokensField: ResolvedNumericField;
 	/**
@@ -167,6 +172,9 @@ export interface RuntimeTargetSnapshot {
 	response: ResolvedModelRuntimeCapabilities["response"];
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
+	/** The orchestrator's tier for this model, so a worker reports and renders by its own model. */
+	modelTier?: ModelTier;
+	promptCaching?: boolean;
 	toolsVerification?: ToolsVerification;
 }
 
@@ -577,8 +585,53 @@ export function resolveRuntimeTarget(
 		maxOutputTokensField,
 	};
 	if (runtime.tier !== undefined) resolved.runtimeTier = runtime.tier;
+	resolved.modelTier = resolvedModelTier(providers, resolved);
+	resolved.promptCaching = promptCachingFor(target, runtime);
 	if (toolsVerification) resolved.toolsVerification = toolsVerification;
 	return { ok: true, target: resolved, diagnostics };
+}
+
+/**
+ * Tiers this process already settled, by target, runtime and model. A model's
+ * tier must not move under a running session: a later probe that reports a
+ * different window would otherwise switch a template's variant mid-session.
+ * A model switch resolves a different key, and a restart starts empty.
+ */
+const settledModelTiers = new Map<string, ModelTier>();
+
+/** The operator's `models.<id>.tier` when set, otherwise `defaultModelTier` over what resolution knows. */
+function resolvedModelTier(
+	providers: ProvidersContract,
+	resolved: Pick<
+		ResolvedRuntimeTarget,
+		"targetId" | "runtimeId" | "wireModelId" | "contextWindowDetails" | "runtimeTier"
+	>,
+): ModelTier {
+	const key = `${resolved.targetId}\u0000${resolved.runtimeId}\u0000${resolved.wireModelId}`;
+	const settled = settledModelTiers.get(key);
+	if (settled !== undefined) return settled;
+	const tier =
+		providers.modelTierOverride?.(resolved.wireModelId) ??
+		defaultModelTier({
+			modelId: resolved.wireModelId,
+			contextWindow: resolved.contextWindowDetails.effectiveContextWindow,
+			...(resolved.runtimeTier !== undefined ? { runtimeTier: resolved.runtimeTier } : {}),
+			inCatalog: getCatalogModelForRuntime(resolved.runtimeId, resolved.wireModelId) !== undefined,
+		});
+	settledModelTiers.set(key, tier);
+	return tier;
+}
+
+/**
+ * Whether requests on this route may use the provider's prompt cache: false
+ * when the target sets `cache.retention: none`, or when an Anthropic route
+ * leaves retention to `CLIO_CODER_ANTHROPIC_CACHE_RETENTION` and that says
+ * none, the same order `effectiveCacheRetention` applies per request.
+ */
+function promptCachingFor(target: TargetDescriptor, runtime: RuntimeDescriptor): boolean {
+	const retention = target.cache?.retention;
+	if (retention !== undefined) return retention !== "none";
+	return !(runtime.apiFamily === "anthropic-messages" && process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION === "none");
 }
 
 /** The live tool-call probe's answer for this exact model, when one ran and was not skipped. */
@@ -712,6 +765,8 @@ export function runtimeTargetSnapshot(target: ResolvedRuntimeTarget): RuntimeTar
 		diagnostics: target.diagnostics.map((entry) => ({ ...entry })),
 	};
 	if (target.runtimeTier !== undefined) snapshot.runtimeTier = target.runtimeTier;
+	if (target.modelTier !== undefined) snapshot.modelTier = target.modelTier;
+	if (target.promptCaching !== undefined) snapshot.promptCaching = target.promptCaching;
 	if (target.toolsVerification !== undefined) snapshot.toolsVerification = { ...target.toolsVerification };
 	return snapshot;
 }

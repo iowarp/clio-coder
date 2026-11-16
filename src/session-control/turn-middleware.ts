@@ -5,6 +5,7 @@
  * nudge. Owns every `deps.middleware` interaction of the loop.
  */
 
+import { runtimeModelInfo } from "../core/model-tier.js";
 import { systemReminderBlock } from "../core/reminder-framing.js";
 import { ownerTelemetryContext } from "../core/telemetry/context.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
@@ -357,6 +358,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			hook: "turn_start",
 			...(sessionId ? { sessionId } : {}),
 			modelId: agentRuntime.wireModelId,
+			model: runtimeModelInfo(agentRuntime.runtimeResolution),
 			// The raw user text so the skills reminder can tell a substantive task
 			// turn from a bare greeting; the runtime caps it on clone.
 			text: promptText.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
@@ -486,6 +488,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				...(sessionId ? { sessionId } : {}),
 				...(state.lastTurnId ? { turnId: state.lastTurnId } : {}),
 				modelId: agentRuntime.wireModelId,
+				model: runtimeModelInfo(agentRuntime.runtimeResolution),
 				text: text.slice(0, MIDDLEWARE_HOOK_TEXT_MAX_CHARS),
 				metadata,
 			};

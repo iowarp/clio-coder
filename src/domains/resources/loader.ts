@@ -1,3 +1,4 @@
+import type { ModelTier } from "../../core/model-tier.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import { enabledPluginResourceRootsFor, withPluginDiscoveryPass } from "../plugins/index.js";
 import type { ResourceDiagnostic } from "./collision.js";
@@ -7,6 +8,7 @@ import {
 	loadPromptTemplates,
 	type PromptTemplate,
 	type PromptTemplateExpansion,
+	type PromptTemplateExpansionOptions,
 	parsePromptCommand,
 } from "./prompts/loader.js";
 import {
@@ -28,6 +30,8 @@ export interface ResourceLoaderOptions {
 	/** Slash-command names prompt templates may not claim. */
 	reservedPromptNames?: ReadonlySet<string>;
 	skills?: () => Pick<LoadSkillsInput, "trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths">;
+	/** The tier of the model a submitted turn runs on, for template variants; absent reads as `standard`. */
+	modelTier?: () => ModelTier | undefined;
 }
 
 export interface ResourcesLoader {
@@ -44,7 +48,7 @@ export interface ResourcesLoader {
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
 	/** Prompt templates for display only; see {@link ResourcesContract.promptsForDisplay}. */
 	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
-	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
+	expandPromptTemplate(text: string, cwd?: string, options?: PromptTemplateExpansionOptions): PromptTemplateExpansion;
 	reload(): Promise<void>;
 }
 
@@ -121,19 +125,21 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		promptsForDisplay(cwd = defaultCwd) {
 			return loadPromptTemplates({ ...promptOptions(cwd), verifyPluginTrees: false });
 		},
-		expandPromptTemplate(text, cwd = defaultCwd) {
+		expandPromptTemplate(text, cwd = defaultCwd, expansionOptions = {}) {
 			// Only `/name` can expand, and no caller reads an unexpanded result's
 			// diagnostics, so text without the prefix skips the template listing.
 			const command = parsePromptCommand(text);
 			if (command === null) return { expanded: false, text, args: [], diagnostics: [] };
+			const tier = expansionOptions.tier ?? options.modelTier?.();
+			const variant: PromptTemplateExpansionOptions = tier !== undefined ? { tier } : {};
 			return withPluginDiscoveryPass(() => {
 				// A verified read only narrows the committed snapshot's roots, so a name
 				// absent from the listing cannot expand and needs no tree walk. Unknown
 				// commands reach here on every typo, before anything has painted.
 				const listed = loadPromptTemplates({ ...promptOptions(cwd), verifyPluginTrees: false });
 				const listedTemplate = listed.items.find((template) => template.name === command.name);
-				if (listedTemplate === undefined) return expandPromptTemplateInput(text, listed);
-				const expansion = expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
+				if (listedTemplate === undefined) return expandPromptTemplateInput(text, listed, variant);
+				const expansion = expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)), variant);
 				return expansion.expanded || expansion.refusal || expansion.display
 					? expansion
 					: driftedPluginTemplate(expansion, listedTemplate);

@@ -248,6 +248,7 @@ export const SETTINGS_FIELD_NAMES = [
 	"thinkingFormat",
 	"thinkingLevel",
 	"threshold",
+	"tier",
 	"timeoutMs",
 	"timeoutSeconds",
 	"toolCallFormat",

@@ -559,6 +559,7 @@ const CHOICES: Record<string, readonly string[]> = {
 	"integrations.externalAgents.defaults.toolGovernance": ["clio-coder-policy", "agent-managed", "deny-all"],
 };
 const STRUCTURED = new Set([
+	"models",
 	"context.semantic.inboxes",
 	"fleet.profiles",
 	"fleet.rosters",
@@ -732,6 +733,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"fleet.profiles": [
 		"Worker profiles",
 		"Named target, model, thinking, and placement choices. Use Fleet's profile actions for guided edits, or edit this JSON object.",
+	],
+	models: [
+		"Model tiers",
+		'Map a model id to its tier (small, standard or frontier) for hooks and prompt template variants, as JSON such as {"qwen3-32b": {"tier": "small"}}. Unlisted models get a tier from their context window, size and catalog entry.',
 	],
 	"fleet.agentProfiles": [
 		"Agent profile assignments",
