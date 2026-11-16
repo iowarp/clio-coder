@@ -646,6 +646,12 @@ export interface ChatCancelOptions {
 	source?: TurnAbortSource;
 	/** Short reason carried by the live `turn.aborted` payload. Defaults to a source-appropriate phrase. */
 	auditReason?: string;
+	/**
+	 * Stop at the next tool boundary instead of now: a tool batch already
+	 * requested runs to settlement, and the turn stops before its next model
+	 * request. An extension write aborted mid-call can be left half applied (F-C16).
+	 */
+	atToolBoundary?: boolean;
 }
 
 export interface SideQuestionOptions {
@@ -1921,6 +1927,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emit(event as ChatLoopEvent);
 	};
 
+	/** A stop waiting for the running round's tool batch to settle (F-C16); cleared when the submit settles. */
+	let boundaryStop: ChatCancelOptions | null = null;
 	const turnRuntime = createTurnRuntime({
 		onMemoryRequestSubmitted: deps.onMemoryRequestSubmitted,
 		turnIdentity: () => submitGeneration,
@@ -1954,6 +1962,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		continuity,
 		hasQueuedSteering: () => queues.hasPendingSteer(),
+		stopAtToolBoundary: () => {
+			const stop = boundaryStop;
+			if (stop === null) return false;
+			boundaryStop = null;
+			api.cancel(stop);
+			return true;
+		},
 		queueHandOver: {
 			atFinishTurn: (final) => queues.handOverAtFinishTurn(final),
 			afterPrepareNextTurn: () => queues.handOverAfterPrepareNextTurn(),
@@ -3582,6 +3597,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				context.consumeExpectedColdReasons(agentRuntime.runtimeId);
 
 				// 7. Run the prompt, then route the settled state through recovery.
+				boundaryStop = null;
 				state.streaming = true;
 				deps.autonomy?.turnStarted();
 				const foregroundOn = (runtime: AgentRuntime): (() => void) => {
@@ -3802,6 +3818,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 					if (generation !== submitGeneration) return;
 					state.streaming = false;
+					// A run that ended without reaching its tool boundary has nothing left to stop.
+					boundaryStop = null;
 					if (state.activeInterruptReason !== null) {
 						const reason = state.activeInterruptReason;
 						state.activeInterruptReason = null;
@@ -3986,6 +4004,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		cancel(options?: ChatCancelOptions): void {
+			if (options?.atToolBoundary === true) {
+				const { atToolBoundary: _deferred, ...stop } = options;
+				// Mid-run the stop waits for the round's tool batch; finishTurn lands it
+				// before the next model request. Between runs nothing is in flight.
+				if (state.streaming && state.runtime?.agent.signal?.aborted !== true) {
+					boundaryStop ??= stop;
+					return;
+				}
+				api.cancel(stop);
+				return;
+			}
+			// A stop now supersedes one still waiting for the tool boundary.
+			boundaryStop = null;
 			const machineCancellation = pendingMachineCancellation;
 			pendingMachineCancellation = null;
 			const preserveQueue = machineCancellation !== null && machineCancellation === machineTurnRunning;

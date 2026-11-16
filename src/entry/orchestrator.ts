@@ -1805,6 +1805,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				)}`,
 				source: "autonomy",
 				auditReason: `${prefix}: ${halt.detail}`,
+				// A cap lets a started tool call finish and stops before the next request (F-C16); a judge halt is immediate.
+				...(halt.kind === "judge" ? {} : { atToolBoundary: true }),
 			});
 		},
 	});

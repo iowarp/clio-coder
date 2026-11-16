@@ -284,6 +284,11 @@ export interface TurnRuntimeDeps {
 		atFinishTurn(final: boolean): void;
 		afterPrepareNextTurn(): void;
 	};
+	/**
+	 * A stop deferred to the tool boundary lands here, after the round's tool
+	 * batch settled and before the next model request: true ends the run (F-C16).
+	 */
+	stopAtToolBoundary?: () => boolean;
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
@@ -1522,6 +1527,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// call finishTurn, or its thrown-failure path.
 		let turnEndFiredFor: AgentMessage | null = null;
 		handle.agent.finishTurn = async (turn) => {
+			// The tool batch has settled and no request has left for the next round.
+			if (currentRun() && deps.stopAtToolBoundary?.() === true) return { action: "end" };
 			// A tool batch that did not terminate, or an operator message already
 			// queued, carries the run on: this is not its final turn.
 			const final = !hasStructuredToolCall(turn.message) || pendingTerminalToolResult !== null;
