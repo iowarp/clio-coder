@@ -49,6 +49,8 @@ import type { FinishedRun } from "./worker-evidence.js";
 const LIST_LIMIT = 20;
 const PEEK_MAX_BYTES = 8 * 1024;
 const RECORD_MAX_BYTES = 14 * 1024;
+/** The answer leads a record and the JSON takes what is left, so the whole stays under the 16 KiB summary bound. */
+const RECORD_ANSWER_MAX_BYTES = 12_000;
 const WAIT_DEFAULT_TIMEOUT_MS = 60_000;
 const WAIT_MAX_TIMEOUT_MS = 10 * 60_000;
 /**
@@ -437,17 +439,33 @@ function runRecord(deps: MonitorToolDeps, runId: string, ownership: DispatchOwne
 	}
 	const inspection = inspectRunTrustStatus(record);
 	const verified = inspection.integrity.state === "verified";
+	// The deliverable is shown only under a seal that verifies; an open or failed seal vouches for none of it.
+	const result = verified ? record.result : null;
+	const answer = result?.state === "resolved" ? result.value.output : null;
+	// A compact dispatch result points here for the whole answer, so it leads as plain text and the JSON below
+	// carries a stand-in instead of a second, escaped copy (WTF-P 0.8.3 C3).
+	const answerSection =
+		answer === null
+			? ""
+			: `answer (${answer.state}, ${answer.bytes} bytes${answer.truncated ? ", stored truncated" : ""}):\n${truncateUtf8(
+					answer.text,
+					RECORD_ANSWER_MAX_BYTES,
+					`\n[answer cut at ${RECORD_ANSWER_MAX_BYTES} bytes; the whole text is output.text in ${durableRunEvidence(run).resultPath ?? "the run's result object"}]`,
+				)}\n\nrun record:\n`;
 	const shown = {
 		seal: record.seal,
 		settled: record.settled,
-		// The deliverable is shown only under a seal that verifies; an open or failed seal vouches for none of it.
-		result: verified ? record.result : null,
+		result:
+			answer === null || result?.state !== "resolved"
+				? result
+				: { ...result, value: { ...result.value, output: { ...answer, text: "[the answer above]" } } },
 	};
-	const body = truncateUtf8(
+	const recordBytes = Math.max(2048, RECORD_MAX_BYTES - Buffer.byteLength(answerSection, "utf8"));
+	const body = `${answerSection}${truncateUtf8(
 		JSON.stringify(shown, null, 2),
-		RECORD_MAX_BYTES,
-		`\n[run record truncated; mode="record" shows the first ${RECORD_MAX_BYTES} bytes]`,
-	);
+		recordBytes,
+		`\n[run record truncated; mode="record" shows the first ${recordBytes} bytes]`,
+	)}`;
 	return {
 		kind: "ok",
 		output: body,

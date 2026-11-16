@@ -577,10 +577,11 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		object: (args, context) => {
 			const path = pathArg(args, "path", context, null);
 			const line = typeof args.line === "number" ? args.line : null;
-			const subject = text(args, "target") ?? (path === null || line === null ? path : `${path}:${line}`);
+			const subject =
+				text(args, "target") ?? text(args, "ref") ?? (path === null || line === null ? path : `${path}:${line}`);
 			return plain(joinDefined("ledger", text(args, "action"), text(args, "kind"), subject));
 		},
-		consumes: ["action", "kind", "target", "path", "line"],
+		consumes: ["action", "kind", "target", "ref", "path", "line"],
 	},
 	[ToolNames.SelfCompact]: {
 		class: "knowledge",
