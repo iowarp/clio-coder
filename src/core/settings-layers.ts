@@ -22,6 +22,7 @@
 
 import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml } from "yaml";
 import {
 	type AutonomyLevel,
@@ -438,7 +439,8 @@ function stripProjectReview(
  * operator before answering a card or a question itself (#421), so a
  * repository cannot shorten it to answer ahead of them. The safety judge
  * reviews calls against the operator's words, so a repository can neither
- * write its rules nor choose its model.
+ * write its rules nor switch it off; it may only move the judge's route
+ * (`projectJudgeRoute`).
  */
 const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }> = [
 	{ key: "scratchRoots", message: "scratch roots are set only in user settings; project value ignored" },
@@ -464,15 +466,67 @@ const OPERATOR_ONLY_SAFETY_KEYS: ReadonlyArray<{ key: string; message: string }>
 		key: "yoloUnconfinedAccepted",
 		message: "unconfined yolo acceptance is recorded only in user settings; project value ignored",
 	},
-	// The judge decides which calls run without the operator, so a repository
-	// could otherwise add allow rules, retarget it or switch it off.
-	{ key: "judge", message: "the safety judge is configured only in user settings; project value ignored" },
 ];
+
+/** The judge fields a trusted project may set: its route, never its rules or whether it runs. */
+const PROJECT_JUDGE_ROUTE_KEYS = new Set(["target", "model"]);
+
+/**
+ * A trusted project's `safety.judge`, cut to its route. A project kept fully on
+ * one provider had to edit the operator's user file to move the judge there
+ * (F-C3). Naming a target the user layer declares only narrows where the
+ * judge's data goes, so target and model stay; a target the user layer does
+ * not declare, `enabled`, `environment` and the allow and deny rules decide
+ * which calls run without the operator and are dropped.
+ */
+function projectJudgeRoute(
+	judge: unknown,
+	origin: SettingsOrigin,
+	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+	if (!isRecord(judge)) {
+		issues.push({
+			origin,
+			path: "safety.judge",
+			message: "the safety judge's route is set as a map; project value ignored",
+		});
+		return undefined;
+	}
+	const route: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(judge)) {
+		if (!PROJECT_JUDGE_ROUTE_KEYS.has(key)) {
+			issues.push({
+				origin,
+				path: `safety.judge.${key}`,
+				message: "a project sets only the safety judge's target and model; project value ignored",
+			});
+			continue;
+		}
+		if (key === "target" && typeof value === "string") {
+			const declared = Array.isArray(userBlob?.targets)
+				? userBlob.targets.some((entry) => isRecord(entry) && entry.id === value)
+				: false;
+			if (!declared) {
+				// The model was chosen for that target, so neither half of the route stays.
+				issues.push({
+					origin,
+					path: "safety.judge.target",
+					message: `a project may point the safety judge only at a target your user settings declare, and '${value}' is not one; project target and model ignored`,
+				});
+				return undefined;
+			}
+		}
+		route[key] = value;
+	}
+	return Object.keys(route).length === 0 ? undefined : route;
+}
 
 function stripProjectOperatorSafety(
 	blob: Record<string, unknown>,
 	origin: SettingsOrigin,
 	issues: SettingsLayerIssue[],
+	userBlob: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
 	if (!isRecord(blob.safety)) return blob;
 	const safety: Record<string, unknown> = { ...blob.safety };
@@ -482,6 +536,14 @@ function stripProjectOperatorSafety(
 		issues.push({ origin, path: `safety.${key}`, message });
 		delete safety[key];
 		stripped = true;
+	}
+	if (Object.hasOwn(safety, "judge")) {
+		const route = projectJudgeRoute(safety.judge, origin, issues, userBlob);
+		if (!isDeepStrictEqual(route, safety.judge)) {
+			stripped = true;
+			if (route === undefined) delete safety.judge;
+			else safety.judge = route;
+		}
 	}
 	if (!stripped) return blob;
 	const cleaned = { ...blob };
@@ -700,6 +762,7 @@ function prepareProjectLayers(
 									stripProjectRuntimeTrust(stripProjectAutonomy(raw.blob, origin, issues, operatorLevel), origin, issues),
 									origin,
 									issues,
+									userBlob,
 								),
 								origin,
 								issues,

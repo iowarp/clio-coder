@@ -433,7 +433,7 @@ test("the judge reads the operator's ask_user answers beside their typed message
 	);
 });
 
-test("safety.judge parses from user settings and a project layer cannot set it", async (t) => {
+test("safety.judge parses from user settings and a project layer cannot set its rules", async (t) => {
 	const parsed = validateSettings({
 		version: 2,
 		targets: [{ id: "local", runtime: "openai-compat", defaultModel: "m" }],
@@ -473,9 +473,56 @@ test("safety.judge parses from user settings and a project layer cannot set it",
 		strictEqual(layered.settings.safety.judge.enabled, true);
 		deepStrictEqual(layered.settings.safety.judge.allow, []);
 		deepStrictEqual(layered.settings.safety.judge.deny, ["operator rule"]);
-		match(
-			layered.issues.find((issue) => issue.origin === "project.local" && issue.path === "safety.judge")?.message ?? "",
-			/user settings/u,
-		);
+		for (const path of ["safety.judge.enabled", "safety.judge.allow"])
+			match(
+				layered.issues.find((issue) => issue.origin === "project.local" && issue.path === path)?.message ?? "",
+				/only the safety judge's target and model/u,
+				path,
+			);
 	}
+});
+
+test("a trusted project moves the safety judge to a target the user layer declares, and nowhere else (F-C3)", async (t) => {
+	const home = await isolateClioEnv("clio-safety-judge-route-");
+	t.after(() => home.restore());
+	const workspace = join(home.dir, "workspace");
+	mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+	mkdirSync(join(home.dir, "config"), { recursive: true });
+	writeFileSync(
+		join(home.dir, "config", "settings.yaml"),
+		[
+			"version: 2",
+			"targets:",
+			"  - { id: local, runtime: openai-compat, url: 'http://127.0.0.1:9', defaultModel: m }",
+			"  - { id: openai-codex, runtime: openai-codex, defaultModel: gpt-6-luna }",
+			"safety:",
+			"  judge: { target: local, model: m, deny: [operator rule] }",
+			"",
+		].join("\n"),
+	);
+	const local = join(workspace, ".clio-coder", "settings.local.yaml");
+	const trust = () => {
+		const snapshot = captureProjectSurface(workspace, "settings");
+		if (!snapshot.contentHash) throw new Error("missing project settings hash");
+		recordProjectSurfaceTrust(workspace, "settings", snapshot.contentHash);
+	};
+	writeFileSync(local, "safety:\n  judge: { target: openai-codex, model: gpt-6-luna }\n");
+	const untrusted = readLayeredSettings(workspace).settings.safety.judge;
+	strictEqual(untrusted.target, "local");
+	trust();
+	const moved = readLayeredSettings(workspace);
+	strictEqual(moved.settings.safety.judge.target, "openai-codex");
+	strictEqual(moved.settings.safety.judge.model, "gpt-6-luna");
+	deepStrictEqual(moved.settings.safety.judge.deny, ["operator rule"]);
+	strictEqual(moved.settings.safety.judge.enabled, true);
+
+	writeFileSync(local, "safety:\n  judge: { target: repo-endpoint, model: exfil }\n");
+	trust();
+	const refused = readLayeredSettings(workspace);
+	strictEqual(refused.settings.safety.judge.target, "local");
+	strictEqual(refused.settings.safety.judge.model, "m");
+	match(
+		refused.issues.find((issue) => issue.path === "safety.judge.target")?.message ?? "",
+		/only at a target your user settings declare/u,
+	);
 });
