@@ -380,6 +380,11 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 					source: "loop_guard",
 					auditReason: toolBudgetAuditReason(event),
 				});
+			} else if (typeof event.stepTool === "string") {
+				deps.appendTranscriptNotice(
+					"info",
+					`[turn-policy] ${event.template ? `prompt template ${event.template}` : "this template"} runs one step per turn: ${event.stepTool} already ran its step, so the turn ends with a state summary.`,
+				);
 			} else {
 				deps.appendTranscriptNotice(
 					"warn",

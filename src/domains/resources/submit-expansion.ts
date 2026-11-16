@@ -31,7 +31,7 @@ export interface SubmitExpansion {
 	 * note names the attached files by their short paths.
 	 */
 	display?: { text: string; note?: string };
-	/** An expanded template's `allowed-tools`, `delegated-tools` and `budget`, submitted as the turn's constraint. */
+	/** An expanded template's `allowed-tools`, `delegated-tools`, `budget` and `turnPolicy`, submitted as the turn's constraint. */
 	constraints?: TurnConstraints;
 	/** The prompt template `text` expanded from, when one did. */
 	template?: string;

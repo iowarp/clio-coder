@@ -3525,10 +3525,12 @@ function buildToolHookInput(
 	// outer occurrence. Every other hook still fires under the inner name.
 	if (options?.nested === true) metadata.nested = true;
 	if (options?.origin === "harness") metadata.origin = "harness";
-	// A prompt template's budget, for the loop guard's per-turn tool-call budget.
-	const budget = options?.turnConstraints?.budget;
+	// A prompt template's turn bounds, for the loop guard's per-turn budget and step policy.
+	const { budget, turnPolicy } = options?.turnConstraints ?? {};
 	if (budget?.toolCalls !== undefined) metadata.templateToolCalls = budget.toolCalls;
-	if (budget?.toolCalls !== undefined && budget.template) metadata.templateName = budget.template;
+	if (turnPolicy !== undefined) metadata.templateStepTool = turnPolicy.stepTool;
+	const template = budget?.template ?? turnPolicy?.template;
+	if ((budget?.toolCalls !== undefined || turnPolicy !== undefined) && template) metadata.templateName = template;
 	// An approval the operator granted, not the judge's, so guidance can count real stops.
 	if (options?.approval !== undefined && (options.approval.issuer ?? "operator") === "operator")
 		metadata.operatorApproved = true;

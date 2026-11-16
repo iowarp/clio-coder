@@ -534,6 +534,20 @@ function turnCallsByTool(byTool: ReadonlyMap<string, number>): string {
 	return `This turn's calls by tool: ${shown.join(", ")}${rest > 0 ? `, other ${rest}` : ""}.`;
 }
 
+/**
+ * The refusal a step-policy turn gets once its step tool already ran: the call
+ * did not run, tools are locked, and the reply is the state summary the next
+ * turn starts from (WTF-P 0.8.3 C5).
+ */
+function stepPolicyReason(stepTool: string, template: string | undefined): string {
+	return (
+		`turn policy: ${template ? `prompt template "${template}"` : "this turn's template"} runs one step per turn, and this turn ` +
+		`already ran its ${stepTool} step, so this call did not run and tools are locked for the rest of the turn. ` +
+		`End the turn now with a compact state summary: the step you ran, its outcome, what changed, and the after value ` +
+		`for the next ${stepTool} call. The next turn starts the next step.`
+	);
+}
+
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
 export interface OrchTurnToolCallBudget {
 	/** Distinct calls in a turn that trigger the re-plan nudge. */
@@ -716,6 +730,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const callsByTurn = new Map<string, number>();
 	/** Per turn: calls by effective tool (a gateway call counts as its capability), named in the budget refusal. */
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
+	/** Per turn under a step policy: its step tool succeeded ("done"), then a second call locked the turn ("locked"). */
+	const stepByTurn = new Map<string, "done" | "locked">();
 	/**
 	 * Per-turn count of parent-workspace mutations, including sealed delegated
 	 * work. The identical-call key carries it, so a check rerun after a change
@@ -1164,7 +1180,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		callsThisTurn: number,
 		interrupted: boolean,
 		at: number,
-		bound?: { template?: string },
+		bound?: { template?: string; stepTool?: string },
 	): void => {
 		const payload: ToolBudgetExceededPayload = {
 			tool: input.toolName ?? "unknown",
@@ -1175,6 +1191,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
 			...(bound?.template !== undefined ? { template: bound.template } : {}),
+			...(bound?.stepTool !== undefined ? { stepTool: bound.stepTool } : {}),
 		};
 		options.bus?.emit("safety.tool_budget_exceeded", payload);
 	};
@@ -1259,6 +1276,44 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			];
 		}
 		return null;
+	};
+
+	/**
+	 * A step-policy turn after its step tool succeeded: a second call to it,
+	 * and every call after that, is refused with the step text. The first
+	 * refusal locks tools for the turn (`lock_tools`, a text-only round that
+	 * keeps the prompt prefix and tool schemas) and raises the tool-budget lock,
+	 * so a yolo turn continues into a fresh turn that runs the next step. The
+	 * call still counts toward the turn budget, whose hard ceiling stays the
+	 * backstop for a model that keeps calling (WTF-P 0.8.3 C5).
+	 */
+	const evaluateStepPolicy = (
+		input: MiddlewareHookInput,
+		turnKey: string,
+		now: number,
+	): ReadonlyArray<MiddlewareEffect> | null => {
+		const stepTool = input.metadata?.templateStepTool;
+		const step = stepByTurn.get(turnKey);
+		if (typeof stepTool !== "string" || step === undefined || (step === "done" && input.toolName !== stepTool))
+			return null;
+		const template = typeof input.metadata?.templateName === "string" ? input.metadata.templateName : undefined;
+		const refusal: MiddlewareEffect = {
+			kind: "block_tool",
+			reason: stepPolicyReason(stepTool, template),
+			severity: "hard-block",
+		};
+		const budgetBlock = evaluateTurnBudget(input, now);
+		if (step === "locked") return budgetBlock ?? [refusal];
+		stepByTurn.set(turnKey, "locked");
+		if (budgetBlock === null) {
+			const calls = callsByTurn.get(turnKey) ?? 1;
+			const hard = resolveTurnBudget(input)?.budget.hard ?? calls;
+			emitBudgetEvent(input, { soft: calls, hard }, calls, false, now, {
+				...(template !== undefined ? { template } : {}),
+				stepTool,
+			});
+		}
+		return [...(budgetBlock ?? [refusal]), { kind: "lock_tools" }];
 	};
 
 	// Shared loop-block machinery for both detectors: bump the turn's block
@@ -1567,6 +1622,19 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			}
 			if (input.hook === "after_tool") {
 				const turnKey = input.turnId ?? NO_TURN_BUCKET;
+				if (
+					typeof input.metadata?.templateStepTool === "string" &&
+					input.toolName === input.metadata.templateStepTool &&
+					input.metadata.resultKind === "ok" &&
+					!stepByTurn.has(turnKey)
+				) {
+					while (stepByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+						const oldest = stepByTurn.keys().next().value;
+						if (typeof oldest !== "string") break;
+						stepByTurn.delete(oldest);
+					}
+					stepByTurn.set(turnKey, "done");
+				}
 				const judgement = input.toolResultDetails?.judgement as { execution?: unknown } | undefined;
 				if (
 					options.toolCallCap !== undefined &&
@@ -1715,6 +1783,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					}
 					return [{ kind: "block_tool", reason: synthesisLockoutDirective(), severity: "hard-block" }];
 				}
+
+				const step = evaluateStepPolicy(input, turnKey, now);
+				if (step !== null) return step;
 
 				// Soft agent budget and its reserve window, resolved before the call is
 				// counted: every refusal below is steering the harness authored, and a

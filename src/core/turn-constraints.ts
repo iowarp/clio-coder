@@ -21,15 +21,19 @@ interface TemplateConstraintSource {
 	allowedTools?: readonly string[];
 	delegatedTools?: readonly string[];
 	budget?: { toolCalls?: number; observationBytes?: number };
+	turnPolicy?: { mode: "step"; stepTool: string };
 }
 
 /**
- * An expanded template's turn constraint: its tool scope and its budget.
- * Undefined when the template declares neither, so a plain
+ * An expanded template's turn constraint: its tool scope, its budget and its
+ * turn policy. Undefined when the template declares none of them, so a plain
  * template submits no constraint at all.
  */
 export function templateTurnConstraints(template: TemplateConstraintSource): TurnConstraints | undefined {
-	return template.allowedTools === undefined && template.delegatedTools === undefined && template.budget === undefined
+	return template.allowedTools === undefined &&
+		template.delegatedTools === undefined &&
+		template.budget === undefined &&
+		template.turnPolicy === undefined
 		? undefined
 		: templateToolConstraints(template);
 }
@@ -57,6 +61,9 @@ export function templateToolConstraints(template: TemplateConstraintSource): Tur
 					delegatedToolSurfaceSources: limit(template.delegatedTools, "delegated-tools"),
 				}),
 		...(template.budget === undefined ? {} : { budget: { ...template.budget, template: template.name } }),
+		...(template.turnPolicy === undefined
+			? {}
+			: { turnPolicy: { mode: "step" as const, stepTool: template.turnPolicy.stepTool, template: template.name } }),
 	};
 }
 
@@ -114,12 +121,25 @@ export interface TurnConstraints {
 	 * effective limit is the smaller of the two, so a template never raises one.
 	 */
 	readonly budget?: TurnBudget;
+	/** A prompt template's turn policy: one step of its step tool per turn. */
+	readonly turnPolicy?: TurnStepPolicy;
 }
 
 /** Template budget bounds; `template` names the prompt template that set them, for refusal text. */
 export interface TurnBudget {
 	readonly toolCalls?: number;
 	readonly observationBytes?: number;
+	readonly template?: string;
+}
+
+/**
+ * `turnPolicy: {mode: step, stepTool}`: once the step tool succeeds in a turn,
+ * a second call to it is refused and the turn locks to a text-only summary, so
+ * each turn runs one step and a continuation starts the next one.
+ */
+export interface TurnStepPolicy {
+	readonly mode: "step";
+	readonly stepTool: string;
 	readonly template?: string;
 }
 
@@ -138,7 +158,8 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		!isToolNameList(value.delegatedTools) ||
 		!isSurfaceSources(value.toolSurfaceSources) ||
 		!isSurfaceSources(value.delegatedToolSurfaceSources) ||
-		!isTurnBudget(value.budget)
+		!isTurnBudget(value.budget) ||
+		!isTurnStepPolicy(value.turnPolicy)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
@@ -158,6 +179,7 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 			? {}
 			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
 		...(value.budget === undefined ? {} : { budget: Object.freeze({ ...value.budget }) }),
+		...(value.turnPolicy === undefined ? {} : { turnPolicy: Object.freeze({ ...value.turnPolicy }) }),
 	});
 }
 
@@ -172,6 +194,19 @@ function isTurnBudget(value: unknown): boolean {
 		bound(budget.toolCalls) &&
 		bound(budget.observationBytes) &&
 		(budget.template === undefined || typeof budget.template === "string")
+	);
+}
+
+function isTurnStepPolicy(value: unknown): boolean {
+	if (value === undefined) return true;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+	const policy = value as Record<string, unknown>;
+	return (
+		Object.keys(policy).every((key) => key === "mode" || key === "stepTool" || key === "template") &&
+		policy.mode === "step" &&
+		typeof policy.stepTool === "string" &&
+		/^[a-zA-Z0-9_.-]+$/.test(policy.stepTool) &&
+		(policy.template === undefined || typeof policy.template === "string")
 	);
 }
 
@@ -237,9 +272,11 @@ export function narrowTurnConstraints(
 	// dropped a headless run's own --mode the moment a template expanded.
 	const mode = narrowerMode(session.mode, turn.mode);
 	const budget = narrowerBudget(session.budget, turn.budget);
+	const turnPolicy = turn.turnPolicy ?? session.turnPolicy;
 	return {
 		...(mode === undefined ? {} : { mode }),
 		...(budget === undefined ? {} : { budget }),
+		...(turnPolicy === undefined ? {} : { turnPolicy }),
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),
@@ -350,6 +387,11 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 			`Budget for this turn${budget.template ? ` from prompt template "${budget.template}"` : ""}: at most ${bounds.join(" and ")}.`,
 		);
 	}
+	const policy = constraints.turnPolicy;
+	if (policy !== undefined)
+		lines.push(
+			`One step per turn: once ${policy.stepTool} returns a step, run that step, then end the turn with a compact state summary (the step, its outcome, what changed, and the after value for the next ${policy.stepTool} call). Do not call ${policy.stepTool} again this turn; the next turn starts the next step.`,
+		);
 	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
 }
 
@@ -369,8 +411,14 @@ export function turnDelegatesTool(constraints: TurnConstraints | undefined, capa
  * ceiling rather than the parent's wider one.
  */
 export function workerTurnConstraints(constraints: TurnConstraints): TurnConstraints {
-	// A template's budget bounds the main turn, not a worker's run.
-	const { delegatedTools, delegatedToolSurfaceSources: _delegatedSources, budget: _budget, ...rest } = constraints;
+	// A template's budget and step policy bound the main turn, not a worker's run.
+	const {
+		delegatedTools,
+		delegatedToolSurfaceSources: _delegatedSources,
+		budget: _budget,
+		turnPolicy: _turnPolicy,
+		...rest
+	} = constraints;
 	return Object.freeze({
 		...rest,
 		...(delegatedTools === undefined

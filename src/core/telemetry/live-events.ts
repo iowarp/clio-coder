@@ -293,8 +293,10 @@ export interface ToolBudgetExceededPayload {
 	interrupted: boolean;
 	at: number;
 	turnId?: string;
-	/** The prompt template whose `budget.toolCalls` set this limit. */
+	/** The prompt template whose `budget.toolCalls` or step policy set this limit. */
 	template?: string;
+	/** Present when a template's step policy, not a call count, ended the turn: its step tool. */
+	stepTool?: string;
 }
 
 /**
