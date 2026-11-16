@@ -491,7 +491,12 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		thinking_level: Type.Optional(StringEnum(THINKING_LEVELS)),
 		cwd: Type.Optional(Type.String({ description: "Default worker working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
-		max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned (default 20000)." })),
+		max_output_bytes: Type.Optional(
+			Type.Number({
+				description:
+					'Unset, each run returns a compact form: key facts, trust line and an answer excerpt; monitor(mode="record") has the whole answer. Set, each run returns its full answer within this many bytes in total (default 20000).',
+			}),
+		),
 		result_summary_max_bytes: Type.Optional(
 			Type.Integer({
 				minimum: 1,

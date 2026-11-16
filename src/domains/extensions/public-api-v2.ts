@@ -381,6 +381,11 @@ export interface ExtensionHookResult {
 /** A tool that returns `interview` parks until the operator finishes it; the answers become the result. */
 export interface ExtensionToolResult {
 	text: string;
+	/**
+	 * A short form the model sees in place of `text` and `data`, at most 2048 bytes. The host stores the full result
+	 * for the session and gives the model a `detail_ref` it fetches with `ledger(action="detail", ref=...)`.
+	 */
+	summary?: string;
 	data?: unknown;
 	isError?: boolean;
 	card?: View;

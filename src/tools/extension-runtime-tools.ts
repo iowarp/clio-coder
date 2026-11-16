@@ -5,6 +5,7 @@ import { extensionIdentity } from "../domains/extensions/activity.js";
 import { extensionToolName } from "../domains/extensions/command-schema.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import { type InstalledExtension, isLoadableExtension } from "../domains/extensions/types.js";
+import { storeToolDetail } from "../domains/session/tool-details.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 /** What a tool returns to the model is bounded like a command tool's output. */
@@ -14,6 +15,31 @@ function bounded(text: string): string {
 	return Buffer.byteLength(text) > RUNTIME_TOOL_OUTPUT_BYTES
 		? `${Buffer.from(text).subarray(0, RUNTIME_TOOL_OUTPUT_BYTES).toString("utf8")}\n[output truncated]`
 		: text;
+}
+
+/**
+ * A result with a summary reaches the model as that summary and a `detail_ref`; the full output is stored for the
+ * session and `ledger(action="detail", ref=...)` returns it (WTF-P 0.8.3 C3). Without a session store to hold the
+ * detail, the model gets the full output as before, so nothing becomes unreachable.
+ */
+function compactResult(
+	summary: string,
+	full: string,
+	sessionId: string | undefined,
+): { output: string; details: { detailRef: string; detailBytes: number } } | null {
+	if (sessionId === undefined || sessionId.length === 0) return null;
+	let ref: string;
+	try {
+		ref = storeToolDetail(sessionId, full);
+	} catch {
+		// The session has no store directory (an unsaved or foreign session id); fall back to the full output.
+		return null;
+	}
+	const bytes = Buffer.byteLength(full);
+	return {
+		output: `${summary}\ndetail_ref: ${ref} (${bytes} bytes; read it with ledger action="detail" ref="${ref}")`,
+		details: { detailRef: ref, detailBytes: bytes },
+	};
 }
 
 /**
@@ -81,12 +107,11 @@ export function buildExtensionRuntimeToolSpecs(
 								? { kind: "ok", output, details: { owner } }
 								: { kind: "error", message: output, details: { owner } };
 						}
-						const output = bounded(
-							result.data === undefined ? result.text : `${result.text}\n${JSON.stringify(result.data)}`,
-						);
-						return result.isError === true
-							? { kind: "error", message: output, details: { owner } }
-							: { kind: "ok", output, details: { owner } };
+						const full = result.data === undefined ? result.text : `${result.text}\n${JSON.stringify(result.data)}`;
+						const compact = result.summary === undefined ? null : compactResult(result.summary, full, options?.sessionId);
+						const output = compact?.output ?? bounded(full);
+						const details = { owner, ...(compact?.details ?? {}) };
+						return result.isError === true ? { kind: "error", message: output, details } : { kind: "ok", output, details };
 					} catch (error) {
 						return {
 							kind: "error",
