@@ -198,6 +198,7 @@ async function leafHelp(command: string): Promise<string | null> {
 	if (command === "share" || command === "import") return (await import("./telemetry-share.js")).SHARE_HELP;
 	if (command === "insights") return (await import("./telemetry-insights.js")).INSIGHTS_HELP;
 	if (command === "consent" || command === "prune" || command === "doctor") return HELP;
+	if (command === "tokens") return (await import("./telemetry-tokens.js")).TOKENS_HELP;
 	return null;
 }
 
@@ -222,11 +223,12 @@ export async function runTelemetryCommand(argv: ReadonlyArray<string>): Promise<
 	if (argv[0] === "verify") return (await import("./telemetry-verify.js")).runTelemetryVerify(argv.slice(1));
 	if (argv[0] === "doctor") return (await import("./telemetry-doctor.js")).runTelemetryDoctor(argv.slice(1));
 	if (argv[0] === "insights") return (await import("./telemetry-insights.js")).runTelemetryInsights(argv.slice(1));
+	if (argv[0] === "tokens") return (await import("./telemetry-tokens.js")).runTelemetryTokens(argv.slice(1));
 	if (argv[0] !== undefined) printError(`unknown telemetry command: ${argv[0]}`);
 	process.stderr.write(await fullHelp());
 	return 2;
 }
 
 async function fullHelp(): Promise<string> {
-	return `${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}`;
+	return `${(await import("./telemetry-read.js")).READ_HELP}${HELP}${(await import("./telemetry-share.js")).SHARE_HELP}${(await import("./telemetry-insights.js")).INSIGHTS_HELP}${(await import("./telemetry-tokens.js")).TOKENS_HELP}`;
 }
