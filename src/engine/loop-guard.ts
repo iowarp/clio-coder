@@ -22,6 +22,7 @@ import {
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { markHostAuthored } from "../core/message-accounting.js";
+import { READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -29,7 +30,7 @@ import type {
 	ToolBudgetExceededPayload,
 } from "../core/telemetry/live-events.js";
 import { stripDeadToolCallMarkup } from "../core/tool-call-markup.js";
-import { ToolNames } from "../core/tool-names.js";
+import { isHarnessExtensionToolName, ToolNames } from "../core/tool-names.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import { dispatchMutatedParentWorkspace } from "../domains/dispatch/workspace-mutation.js";
 import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.js";
@@ -53,7 +54,17 @@ export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
  * few verbatim repeats (threshold-1 free calls plus this many blocked retries)
  * rather than spinning for tens of seconds before the stop lands.
  */
-export const INTERACTIVE_LOOP_BLOCK_BUDGET = 2;
+export const INTERACTIVE_LOOP_BLOCK_BUDGET = 3;
+
+/**
+ * Blocks of one call identity in a turn, consecutive or not, that lock the
+ * turn's tools on the interactive surface. One block alone never locks: a
+ * desk drive lost its last next_step to a single false block (WTF-P 0.8.3 A2).
+ */
+export const INTERACTIVE_SAME_CALL_BLOCK_LIMIT = 2;
+
+/** A short worker run keeps the two-block bound it had before the interactive budget rose. */
+const WORKER_LOOP_BLOCK_FLOOR = 2;
 
 /**
  * Blocks of one identical call in a row, with no other call run between them,
@@ -82,8 +93,8 @@ const WORKER_LOOP_BLOCK_CALLS_PER_BLOCK = 10;
  * exactly the bound it has today.
  */
 export function workerLoopBlockBudget(toolCalls: number): number {
-	if (!Number.isSafeInteger(toolCalls) || toolCalls <= 0) return INTERACTIVE_LOOP_BLOCK_BUDGET;
-	return Math.max(INTERACTIVE_LOOP_BLOCK_BUDGET, Math.ceil(toolCalls / WORKER_LOOP_BLOCK_CALLS_PER_BLOCK));
+	if (!Number.isSafeInteger(toolCalls) || toolCalls <= 0) return WORKER_LOOP_BLOCK_FLOOR;
+	return Math.max(WORKER_LOOP_BLOCK_FLOOR, Math.ceil(toolCalls / WORKER_LOOP_BLOCK_CALLS_PER_BLOCK));
 }
 
 /**
@@ -159,6 +170,24 @@ const CROSS_ARGUMENT_RESULT_MIN_BYTES = 64;
 function callIdentity(tool: string, args: Record<string, unknown> | undefined): string {
 	const git = tool === ToolNames.Git && args !== undefined ? gitCallIdentity(args) : null;
 	return hashToolCall(tool, git ?? args ?? {});
+}
+
+/** Output to the null device or between descriptors writes no file. */
+const SHELL_NULL_REDIRECT = /\d?>>?\s*\/dev\/null|\d?>&\d/g;
+/** Signs a read-only-looking command still writes: redirection, in-place edits, file utilities, git verbs that move refs or the tree. */
+const SHELL_WRITE_SIGN =
+	/>|(?:^|\s)(?:-i\b|--in-place\b|-delete\b|-exec\b)|\b(?:tee|rm|mv|cp|mkdir|touch|chmod|chown|ln)\b|\bgit\s+(?:add|am|apply|branch\s+-[dDmM]|checkout|cherry-pick|clean|commit|fetch|init|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|tag)\b/;
+
+/**
+ * Whether a bash command can only read: every `&&`, `||`, `;` or pipe segment
+ * starts with a read-only command and nothing in it writes. Anything else may
+ * have changed what a later identical read returns.
+ */
+function shellCommandOnlyReads(command: unknown): boolean {
+	if (typeof command !== "string" || command.trim().length === 0) return false;
+	const text = command.replace(SHELL_NULL_REDIRECT, " ");
+	if (SHELL_WRITE_SIGN.test(text) || /[`]|\$\(/.test(text) || text.includes("\n")) return false;
+	return text.split(/&&|\|\||;|\|/).every((segment) => READ_ONLY_SHELL_COMMAND_PATTERN.test(segment));
 }
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
@@ -526,6 +555,8 @@ export interface CreateLoopGuardRegistrationOptions {
 	bus?: TelemetryHub;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
 	turnBlockBudget?: number;
+	/** Blocks of one call identity in a turn that reach the lockout before the block budget does. */
+	sameCallBlockLimit?: number;
 	/**
 	 * Worker only: hard cap on observed tool-call attempts for the lifetime of
 	 * this registration. Absent means uncapped (the orchestrator has an
@@ -691,6 +722,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * is fresh while a verbatim repeat with nothing changed still counts.
 	 */
 	const mutationEpochByTurn = new Map<string, number>();
+	/**
+	 * Per turn: successful calls that may have changed state, the workspace
+	 * writes above plus bash commands that are not plain reads and extension
+	 * calls not declared read-only, and how many each call identity made. A
+	 * call's repeat key counts only the others', so a mutating call repeated
+	 * verbatim still loops while it resets every other call's count (F-C13).
+	 */
+	const stateChangesByTurn = new Map<string, number>();
+	const stateChangesByIdentityByTurn = new Map<string, Map<string, number>>();
+	const repeatEpoch = (turnKey: string, identity: string): number =>
+		(stateChangesByTurn.get(turnKey) ?? 0) - (stateChangesByIdentityByTurn.get(turnKey)?.get(identity) ?? 0);
 	/** Successful collect snapshots only; a lower pending count advances this call's repeat epoch. */
 	const monitorCollectProgress = new Map<string, { pendingCount: number; epoch: number }>();
 	/**
@@ -709,8 +751,20 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 */
 	const lockoutByTurn = new Map<
 		string,
-		{ tool: string; repeatCount: number; blocksThisTurn: number; denials: number; correlationId?: string }
+		{
+			tool: string;
+			repeatCount: number;
+			blocksThisTurn: number;
+			denials: number;
+			correlationId?: string;
+			/** The batch holding the turn's first block, whose other calls the lockout never refuses. */
+			exemptBatch?: string;
+		}
 	>();
+	/** Per turn: the model round (correlation id) of the first block since the last recovery. */
+	const firstBlockBatchByTurn = new Map<string, string>();
+	/** Per turn: blocks by call identity, consecutive or not. */
+	const blocksByIdentityByTurn = new Map<string, Map<string, number>>();
 	/**
 	 * Lifetime-cap synthesis lockout (workers). Entered exactly once when the
 	 * observed attempt count crosses the cap while the synthesis lockout is
@@ -871,18 +925,47 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 
 	// after_tool touchpoint: the parent workspace changed. A failed dispatch can
 	// still carry a verified receipt for work already applied to that workspace.
+	// Also records the wider state changes the repeat key counts (F-C13).
 	const recordWorkspaceMutation = (input: MiddlewareHookInput): boolean => {
-		const directWrite =
-			input.metadata?.resultKind === "ok" && (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit);
+		const ok = input.metadata?.resultKind === "ok";
+		const directWrite = ok && (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit);
 		const delegatedWrite =
 			input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails);
-		if (!directWrite && !delegatedWrite) return false;
+		// A desk read, a desk record write, a desk read: the third read answers
+		// from the new record, so it is not a repeat of the first two (F-C13).
+		// Any extension tool that did not declare itself read-only may have
+		// written, and so may any bash command that is not a plain read. These
+		// re-key repeats only; the workspace epoch the registry's denial memory
+		// and read coverage key on still moves for file writes alone.
+		const stateChange =
+			ok &&
+			input.toolName !== undefined &&
+			((input.toolName === ToolNames.Bash && !shellCommandOnlyReads(input.toolArgs?.command)) ||
+				(isHarnessExtensionToolName(input.toolName) && input.metadata?.toolReadOnly !== true));
 		// A write that republished identical bytes changed nothing. Counting it
 		// as a mutation re-keys every later repeat, so a worker that rewrites a
 		// committed file and re-runs `git commit` between each attempt never
 		// reaches a third identical call and burns the whole tool-call cap.
-		if (directWrite && input.toolResultDetails?.unchanged === true) return false;
-		bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
+		const workspaceWrite = delegatedWrite || (directWrite && input.toolResultDetails?.unchanged !== true);
+		if (!workspaceWrite && !stateChange) return false;
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		bumpBoundedCounter(stateChangesByTurn, turnKey);
+		if (input.toolName !== undefined) {
+			let byIdentity = stateChangesByIdentityByTurn.get(turnKey);
+			if (byIdentity === undefined) {
+				while (stateChangesByIdentityByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+					const oldest = stateChangesByIdentityByTurn.keys().next().value;
+					if (typeof oldest !== "string") break;
+					stateChangesByIdentityByTurn.delete(oldest);
+				}
+				byIdentity = new Map();
+				stateChangesByIdentityByTurn.set(turnKey, byIdentity);
+			}
+			// Evicting an identity only raises its epoch, which admits more, never less.
+			bumpBoundedCounter(byIdentity, callIdentity(input.toolName, input.toolArgs), SUCCEEDED_FINGERPRINT_LIMIT);
+		}
+		if (!workspaceWrite) return false;
+		bumpBoundedCounter(mutationEpochByTurn, turnKey);
 		readCoverage.clear();
 		redundantReadsByTurn.clear();
 		return true;
@@ -1025,10 +1108,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				lockoutByTurn.delete(oldest);
 			}
 		}
+		const firstBatch = firstBlockBatchByTurn.get(turnKey);
 		lockoutByTurn.set(turnKey, {
 			...state,
 			denials: 0,
 			...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+			...(firstBatch !== undefined && firstBatch === input.correlationId ? { exemptBatch: firstBatch } : {}),
 		});
 	};
 
@@ -1176,7 +1261,30 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		}
 		identicalBlockStreakByTurn.set(turnKey, { identity, count: streak });
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
-		const reachedBudget = blocksThisTurn >= budget || streak >= CONSECUTIVE_IDENTICAL_BLOCK_LIMIT;
+		if (blocksThisTurn === 1) {
+			if (input.correlationId !== undefined) {
+				if (!firstBlockBatchByTurn.has(turnKey) && firstBlockBatchByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+					const oldest = firstBlockBatchByTurn.keys().next().value;
+					if (oldest !== undefined) firstBlockBatchByTurn.delete(oldest);
+				}
+				firstBlockBatchByTurn.set(turnKey, input.correlationId);
+			} else firstBlockBatchByTurn.delete(turnKey);
+		}
+		let byIdentity = blocksByIdentityByTurn.get(turnKey);
+		if (byIdentity === undefined) {
+			while (blocksByIdentityByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+				const oldest = blocksByIdentityByTurn.keys().next().value;
+				if (typeof oldest !== "string") break;
+				blocksByIdentityByTurn.delete(oldest);
+			}
+			byIdentity = new Map();
+			blocksByIdentityByTurn.set(turnKey, byIdentity);
+		}
+		const sameCallBlocks = bumpBoundedCounter(byIdentity, identity, SUCCEEDED_FINGERPRINT_LIMIT);
+		const reachedBudget =
+			blocksThisTurn >= budget ||
+			streak >= CONSECUTIVE_IDENTICAL_BLOCK_LIMIT ||
+			(options.sameCallBlockLimit !== undefined && sameCallBlocks >= options.sameCallBlockLimit);
 		const priorFailure = failedResults.get(identity);
 		const failed = priorFailure !== undefined ? { priorFailure } : {};
 		// Budget reached with the synthesis lockout wired: enter the lockout
@@ -1560,7 +1668,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// attempt so a wide parallel batch cannot turn a graceful lock into a
 				// lifetime-cap failure before the model gets its synthesis round.
 				const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
-				if (lockout !== undefined) {
+				// The other calls of the batch that held the turn's first block were
+				// emitted before the model saw any block; refusing them all for one
+				// sibling's repeat lost a drive's final next_step (WTF-P 0.8.3 A2).
+				const exemptSibling = lockout?.exemptBatch !== undefined && input.correlationId === lockout.exemptBatch;
+				if (lockout !== undefined && !exemptSibling) {
 					if (reachesLockoutBackstop(lockout, input)) {
 						emitLoopBlocked(
 							input,
@@ -1725,7 +1837,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// calls five times, every one admitted, because the detector kept
 				// only a 30 s window or the last four attempts and no batch ever
 				// showed a third repeat inside either.
-				const epoch = mutationEpochByTurn.get(turnKey) ?? 0;
+				const epoch = repeatEpoch(turnKey, callIdentity(input.toolName ?? "", input.toolArgs));
 				// A successful collect that observed fewer pending runs restarts only
 				// this collect call; other tools retain their normal repeat keys.
 				const collectEpoch =
@@ -1741,8 +1853,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					collectEpoch === null
 						? `${turnKey}|${epoch}|${creditEpoch}|${fingerprint}`
 						: `${turnKey}|${epoch}|collect:${collectEpoch}|${fingerprint}`;
-				const verdict = options.safety.observeLoop(repeatKey, now);
-				if (verdict.looping) {
+				// An extension tool declared neither read-only nor idempotent, such as
+				// a desk's next_step, answers the same arguments with a new step, so a
+				// verbatim repeat is not a loop. Stagnation and the turn budget still
+				// bound it (F-C13).
+				const repeatCandidate = !(
+					input.toolName !== undefined &&
+					isHarnessExtensionToolName(input.toolName) &&
+					input.metadata?.toolReadOnly === false &&
+					input.metadata?.toolIdempotent === false
+				);
+				const verdict = repeatCandidate ? options.safety.observeLoop(repeatKey, now) : null;
+				if (verdict?.looping === true) {
 					const tool = input.toolName ?? "unknown";
 					const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
 					return blockAsLoop(

@@ -318,6 +318,7 @@ import {
 import {
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
+	INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
 	readOrchTurnToolCallBudget,
 } from "../engine/loop-guard.js";
 import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
@@ -1240,6 +1241,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		safety,
 		bus,
 		turnBlockBudget: INTERACTIVE_LOOP_BLOCK_BUDGET,
+		sameCallBlockLimit: INTERACTIVE_SAME_CALL_BLOCK_LIMIT,
 		turnToolCallBudget: () => readOrchTurnToolCallBudget(),
 		// Interactive/headless/ACP all share this orchestrator guard: at the
 		// block budget, lock tools for the rest of the turn so the model

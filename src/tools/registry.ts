@@ -167,6 +167,14 @@ export interface ToolMetadata {
 	retrySafety: ToolRetrySafety;
 	/** Read-only idempotent MCP polling: bounded by call budgets rather than repetition. */
 	repeatableRead?: boolean;
+	/**
+	 * Declared by an api 2 extension tool: the call changes no state. The loop
+	 * guard reads any other successful extension call as a possible mutation
+	 * that resets identical-call counts (F-C13). Absent on every other tool.
+	 */
+	readOnly?: boolean;
+	/** Declared by an api 2 extension tool: identical arguments have the same effect, so a verbatim repeat is a loop candidate. */
+	idempotent?: boolean;
 	/** Expected result-size behavior at the registry boundary. */
 	resultSizePolicy: ToolResultSizePolicy;
 	/** Independent operator-presentation and model-context policy for this result. */
@@ -1487,7 +1495,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			result,
 			resultDigest,
 			deps.flow?.carried() ?? null,
-			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata?.repeatableRead === true,
+			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata,
 		);
 		const effects = noteGuardRule(deps.middleware.runHook(input));
 		try {
@@ -1627,7 +1635,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			result,
 			resultDigest,
 			deps.flow?.carried() ?? null,
-			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata?.repeatableRead === true,
+			tools.get(effectiveToolCall(call.tool, call.args).toolName as ToolName)?.metadata,
 		);
 		const input = {
 			...built,
@@ -3492,14 +3500,17 @@ function buildToolHookInput(
 	result: ToolResult | undefined,
 	resultDigest: ToolResultDigest | undefined,
 	carriedFlow: FlowRestrictionSet | null,
-	repeatableRead: boolean,
+	effectiveMetadata: ToolMetadata | undefined,
 ): MiddlewareHookInput {
 	const metadata: Record<string, MiddlewareMetadataValue> = {
 		posture,
 		actionClass: decision.classification.actionClass,
 		decisionKind: decision.kind,
-		repeatableRead,
+		repeatableRead: effectiveMetadata?.repeatableRead === true,
 	};
+	// Declared effect of the tool the call runs (a gateway call's capability), for the loop guard (F-C13).
+	if (effectiveMetadata?.readOnly !== undefined) metadata.toolReadOnly = effectiveMetadata.readOnly;
+	if (effectiveMetadata?.idempotent !== undefined) metadata.toolIdempotent = effectiveMetadata.idempotent;
 	// Stable call identity for repetition detectors (engine/loop-guard.ts).
 	// Computed for before_tool only; after_tool consumers identify the call
 	// via toolCallId.

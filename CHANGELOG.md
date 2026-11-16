@@ -4,6 +4,18 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
+### Added
+
+- A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
+
+### Changed
+
+- A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
+
+### Fixed
+
+- A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
+
 ## 0.8.3 - 2026-11-16
 
 This release fixes what a full WTF-P 0.8.2 drive found on the official 0.8.2 install: a seven-section technical report taken from outline to a delivered milestone at autonomy `yolo` on openai-codex, over about 30 desk steps. Each fix below names its finding id from that run.

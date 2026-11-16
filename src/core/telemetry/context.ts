@@ -215,3 +215,26 @@ export function observedToolCallOrigin(
 	}
 	return undefined;
 }
+
+/**
+ * The model response that emitted a tool call, named by that response's first
+ * tool-call id, so calls one response emitted in parallel share it. The loop
+ * guard counts a round once and spares the siblings of a turn's first block
+ * (WTF-P 0.8.3 A2).
+ */
+export function toolCallBatchId(messages: readonly unknown[], toolCallId: string | undefined): string | undefined {
+	if (!toolCallId) return undefined;
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (!message || typeof message !== "object") continue;
+		const row = message as Record<string, unknown>;
+		if (row.role !== "assistant" || !Array.isArray(row.content)) continue;
+		const calls = row.content.filter(
+			(block): block is { id: unknown } => block && typeof block === "object" && block.type === "toolCall",
+		);
+		if (!calls.some((block) => block.id === toolCallId)) continue;
+		const first = calls[0]?.id;
+		return typeof first === "string" ? `model-response:${first}` : undefined;
+	}
+	return undefined;
+}

@@ -40,6 +40,14 @@ export interface ExtensionRuntimeToolDeclaration {
 	 * but run no program.
 	 */
 	actionClass: "read" | "write" | "execute";
+	/**
+	 * The call changes no state, so a successful one never resets another call's
+	 * repeat count in the loop guard. Separate from `actionClass`: a package that
+	 * writes its own records must declare every tool `execute`, its readers too.
+	 */
+	readOnly: boolean;
+	/** Identical arguments have the same effect, so an identical repeat is a loop candidate (F-C13). */
+	idempotent: boolean;
 	timeoutMs: number;
 }
 

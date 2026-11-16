@@ -212,7 +212,15 @@ function parseTools(value: unknown): ExtensionRuntimeToolDeclaration[] {
 	const names = new Set<string>();
 	return list(value, "runtime.tools", RUNTIME_V2_LIMITS.tools).map((item, index) => {
 		const path = `runtime.tools[${index}]`;
-		const raw = record(item, path, ["name", "description", "inputSchema", "actionClass", "timeoutMs"]);
+		const raw = record(item, path, [
+			"name",
+			"description",
+			"inputSchema",
+			"actionClass",
+			"readOnly",
+			"idempotent",
+			"timeoutMs",
+		]);
 		// Single underscores only: the qualified name joins the package id with a double one.
 		const name = named(raw.name, `${path}.name`, /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/, 40);
 		if (names.has(name)) fail(`${path}.name`, `repeats '${name}'`);
@@ -225,11 +233,16 @@ function parseTools(value: unknown): ExtensionRuntimeToolDeclaration[] {
 			(schema as { type?: unknown }).type !== "object"
 		)
 			fail(`${path}.inputSchema`, "must be an object schema");
+		const actionClass = choice(raw.actionClass, `${path}.actionClass`, ["read", "write", "execute"], "execute");
+		const readOnly = flag(raw.readOnly, `${path}.readOnly`, actionClass === "read");
+		if (actionClass === "write" && readOnly) fail(`${path}.readOnly`, "cannot be true for a write tool");
 		return {
 			name,
 			description: text(raw.description, `${path}.description`, 1000),
 			inputSchema: schema as Record<string, unknown>,
-			actionClass: choice(raw.actionClass, `${path}.actionClass`, ["read", "write", "execute"], "execute"),
+			actionClass,
+			readOnly,
+			idempotent: flag(raw.idempotent, `${path}.idempotent`, false),
 			timeoutMs: milliseconds(
 				raw.timeoutMs,
 				`${path}.timeoutMs`,

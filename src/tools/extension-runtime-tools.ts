@@ -49,6 +49,8 @@ export function buildExtensionRuntimeToolSpecs(
 					objective: tool.description,
 					uiLabel: `${extensionId}/${tool.name}`,
 					retrySafety: "not_retry_safe",
+					readOnly: tool.readOnly,
+					idempotent: tool.idempotent,
 					resultSizePolicy: { kind: "bounded", maxBytes: RUNTIME_TOOL_OUTPUT_BYTES },
 					costLatency: "local_slow",
 				},
