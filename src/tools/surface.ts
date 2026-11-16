@@ -62,6 +62,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Grep]: "direct",
 	[ToolNames.Find]: "direct",
 	[ToolNames.Ls]: "direct",
+	[ToolNames.Count]: "direct",
 	[ToolNames.CodeNav]: "direct",
 	[ToolNames.Context]: "direct",
 	[ToolNames.SelfCompact]: "direct",
@@ -112,13 +113,14 @@ export function toolSpecPlacement(spec: { name: string; placement?: ToolPlacemen
 }
 
 /**
- * Directory listing and path search that bash already runs as recognized
- * commands: `ls` and `find` on workspace paths need no approval. A surface
- * that attaches bash reaches these two through the gateway instead of carrying
- * their schemas on every request (1.2 KB of a coder's), and a surface without
- * bash keeps them attached.
+ * Directory listing, path search and file counts that bash already runs as
+ * recognized commands: `ls`, `find` and `wc` on workspace paths need no
+ * approval. A surface that attaches bash reaches these through the gateway
+ * instead of carrying their schemas on every request (1.2 KB of a coder's for
+ * the first two), and a surface without bash, such as a delegated writer's,
+ * keeps them attached.
  */
-const SHELL_COVERED_TOOLS: ReadonlySet<string> = new Set([ToolNames.Find, ToolNames.Ls]);
+const SHELL_COVERED_TOOLS: ReadonlySet<string> = new Set([ToolNames.Find, ToolNames.Ls, ToolNames.Count]);
 
 /**
  * Placement of a tool by name on one admitted surface. `null` is an unscoped

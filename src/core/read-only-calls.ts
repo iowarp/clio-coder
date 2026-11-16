@@ -5,6 +5,7 @@ export const EXPLORATION_TOOL_NAMES = new Set<string>([
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Ls,
+	ToolNames.Count,
 	ToolNames.CodeNav,
 	ToolNames.Context,
 	ToolNames.Git,

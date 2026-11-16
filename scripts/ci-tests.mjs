@@ -200,6 +200,7 @@ export const coreTests = [
 	"loop-guard-mutation-reset",
 	"verifier-review-verdict-label",
 	"operator-local-date",
+	"count-tool",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

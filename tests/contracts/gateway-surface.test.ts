@@ -120,7 +120,7 @@ describe("gateway surface placement", () => {
 	it("attaches only direct schemas to the agent and keeps every capability name on the effective list", () => {
 		const registry = createWorkerToolRegistry();
 		const attached = resolveAgentTools({ registry }).map((tool) => tool.name);
-		const shellCovered: string[] = [ToolNames.Find, ToolNames.Ls];
+		const shellCovered: string[] = [ToolNames.Find, ToolNames.Ls, ToolNames.Count];
 		deepStrictEqual(attached, [...registry.listRegistered()].filter((name) => !shellCovered.includes(name)).sort());
 		for (const name of GATEWAY_BUILTINS) ok(!attached.includes(name), `${name} has no attached schema`);
 	});

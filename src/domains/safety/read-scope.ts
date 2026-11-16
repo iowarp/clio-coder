@@ -18,6 +18,7 @@ import { isSameOrDescendant } from "./path-policy.js";
 const READ_SCOPE_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Read,
 	ToolNames.Ls,
+	ToolNames.Count,
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Data,

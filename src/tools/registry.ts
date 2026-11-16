@@ -2969,6 +2969,7 @@ const FLOW_BLOCK_REASON_CODE = "information-flow";
 const FLOW_SOURCE_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Read,
 	ToolNames.Ls,
+	ToolNames.Count,
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Data,

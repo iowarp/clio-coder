@@ -24,7 +24,10 @@ export function pathToolLanding(
 	args: Readonly<Record<string, unknown>> | undefined,
 ): ToolCallLanding | null {
 	const raw = typeof args?.path === "string" ? args.path : undefined;
-	if (READ_PATH_TOOLS.has(tool) || (tool === ToolNames.Read && raw !== undefined && raw.length > 0)) {
+	if (
+		READ_PATH_TOOLS.has(tool) ||
+		((tool === ToolNames.Read || tool === ToolNames.Count) && raw !== undefined && raw.length > 0)
+	) {
 		const target = resolveReadTarget(raw !== undefined && raw.length > 0 ? raw : ".");
 		return { path: { arg: "path", path: target.path, resolved: target.physical !== undefined } };
 	}

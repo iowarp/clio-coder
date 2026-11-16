@@ -10,6 +10,7 @@ import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine
 import { AcpToolMediator } from "../../src/engine/acp/tool-mediator.js";
 import { emitClaudeToolPermissionDecision } from "../../src/engine/claude/tool-safety.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { countTool } from "../../src/tools/count.js";
 import { findTool } from "../../src/tools/find.js";
 import { grepTool } from "../../src/tools/grep.js";
 import { lsTool } from "../../src/tools/ls.js";
@@ -33,6 +34,7 @@ describe("read scope admission", () => {
 	const SCOPED = [
 		{ tool: ToolNames.Read, spec: readTool, outside: "../outside/notes.txt", linked: "data/out/outside/notes.txt" },
 		{ tool: ToolNames.Ls, spec: lsTool, outside: "../outside", linked: "data/out/outside" },
+		{ tool: ToolNames.Count, spec: countTool, outside: "../outside/notes.txt", linked: "data/out/outside/notes.txt" },
 		{ tool: ToolNames.Grep, spec: grepTool, outside: "../outside", linked: "data/out/outside" },
 		{ tool: ToolNames.Find, spec: findTool, outside: "../outside", linked: "data/out/outside" },
 	] as const;

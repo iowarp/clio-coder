@@ -460,6 +460,8 @@ function toolMatches(pattern: string, tool: string): boolean {
 const READ_PATH_TOOLS: ReadonlyMap<string, string> = new Map([
 	[ToolNames.Read, "path"],
 	[ToolNames.Ls, "path"],
+	// count reads every byte of its file to count it, so a restricted file is read through it.
+	[ToolNames.Count, "path"],
 	[ToolNames.Grep, "path"],
 	[ToolNames.Find, "path"],
 	[ToolNames.Data, "path"],

@@ -2985,6 +2985,7 @@ function pathPolicyTargets(
 	switch (call.tool) {
 		case ToolNames.Read:
 		case ToolNames.Ls:
+		case ToolNames.Count:
 		case ToolNames.Grep:
 		case ToolNames.Find: {
 			const target = pathArg(args) ?? ".";

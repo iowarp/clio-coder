@@ -39,6 +39,7 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.Grep]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Find]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Ls]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	[ToolNames.Count]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.CodeNav]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.SelfCompact]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Context]: { plane: "observe", actionClass: "read", executionMode: "parallel" },

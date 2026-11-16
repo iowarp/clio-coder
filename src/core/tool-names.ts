@@ -4,7 +4,7 @@
  *
  * The surface is organized in eight planes; each plane is one policy unit
  * (action class, size posture, details schema, concurrency rule):
- *   OBSERVE      evidence, read, grep, find, ls, code_nav, context, credential_present, clio_docs, clio_library, data, vision, memory_recall
+ *   OBSERVE      evidence, read, grep, find, ls, count, code_nav, context, credential_present, clio_docs, clio_library, data, vision, memory_recall
  *   MUTATE       write, edit
  *   EXECUTE      bash, git, verify, run_script
  *   ORCHESTRATE  dispatch, monitor, steer, tasks, ledger, panes, music, limitation, decide, consult
@@ -24,6 +24,7 @@ export const ToolNames = {
 	Grep: "grep",
 	Find: "find",
 	Ls: "ls",
+	Count: "count",
 	CodeNav: "code_nav",
 	Context: "context",
 	SelfCompact: "self_compact",

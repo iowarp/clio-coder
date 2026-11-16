@@ -164,6 +164,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Grep:
 		case ToolNames.Find:
 		case ToolNames.Ls:
+		case ToolNames.Count:
 		// web_read is the GET-only half of the web split: no method, headers,
 		// or body can make it outward, so it is read class unconditionally.
 		case ToolNames.WebRead:
@@ -683,6 +684,7 @@ export function webFetchIsOutward(args: Record<string, unknown> | undefined): bo
 const PATH_UTILS_TOOLS: ReadonlySet<string> = new Set([
 	ToolNames.Read,
 	ToolNames.Ls,
+	ToolNames.Count,
 	ToolNames.Grep,
 	ToolNames.Find,
 	ToolNames.Write,

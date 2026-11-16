@@ -8,6 +8,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
 - A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
+- B3: a builtin `count` tool gives a file's words (whitespace-separated runs, as `wc -w`), lines and bytes, so a delegated worker without bash can check its length against a budget. A template lists it in `delegated-tools`. It is held to the same workspace scope and information-flow rules as `read`, and a surface that also carries bash reaches it through the gateway, so the main session's schema set is unchanged.
 
 ### Changed
 

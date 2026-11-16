@@ -27,6 +27,7 @@ import { createConfigureClioTool } from "./configure-clio.js";
 import { type ConsultDeps, createConsultTool } from "./consult.js";
 import type { ContextSemanticDeps } from "./context/semantic.js";
 import { createContextToolSurface } from "./context/surface.js";
+import { countTool } from "./count.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDecideTool } from "./decide.js";
 import { editTool } from "./edit.js";
@@ -165,6 +166,9 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	});
 	registry.register({
 		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
+	});
+	registry.register({
+		...builtin(countTool, { path: "src/tools/count.ts", scope: "core" }),
 	});
 	if (includeNetworkTools) {
 		// Both halves of the web split share one implementation module; the

@@ -110,6 +110,13 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.ls, "Raise limit or list a narrower directory."),
 		costLatency: "local_fast",
 	},
+	[ToolNames.Count]: {
+		objective: "Count a file's words, lines and bytes without reading it into context.",
+		uiLabel: "Count",
+		retrySafety: "idempotent",
+		resultSizePolicy: { kind: "exact", maxBytes: 1_024 },
+		costLatency: "local_fast",
+	},
 	[ToolNames.CodeNav]: {
 		objective: "Navigate the codemap index by symbol, path, entry points, outline, imports, or importers.",
 		discoveryHint:
