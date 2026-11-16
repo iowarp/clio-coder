@@ -684,7 +684,16 @@ export async function runUpgradeCommand(
 				presenter.commandAdvice("To remove only it, run:", "clio-coder uninstall --inactive");
 			}
 		}
-		if (!opts.dryRun && existsSync(backgroundOwner)) {
+		// An installer run with --no-gui touches no desktop step, the existing app's handover, restart and Windows
+		// shortcut included (F-C17); the app keeps running from where it was.
+		const desktopDeclined = opts.postInstall && process.env.CLIO_CODER_INSTALL_GUI === "0";
+		if (!opts.dryRun && desktopDeclined && existsSync(backgroundOwner)) {
+			presenter.note("Left the desktop app as it was, as the installer's --no-gui asked.");
+			presenter.commandAdvice(
+				"Move it to this installation when you want it to follow:",
+				"clio-coder gui background install --handover",
+			);
+		} else if (!opts.dryRun && existsSync(backgroundOwner)) {
 			const owner = opts.postInstall ? backgroundPackageRoot(stateDir) : null;
 			if (owner !== null && installIdentity(owner) !== installIdentity(activeInstallation.root)) {
 				// The service still runs another installation's Node and server; it follows the active one.

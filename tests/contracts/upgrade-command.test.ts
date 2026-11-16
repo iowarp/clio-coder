@@ -231,6 +231,24 @@ test("post-install moves a background app another installation owns and names th
 	assert.deepEqual(f.calls().at(-1)?.args, ["gui", "background", "restart", "--if-idle"]);
 });
 
+test("an installer post-install under --no-gui leaves the desktop app, its handover and its shortcut alone (F-C17)", (t) => {
+	const f = installedFixture();
+	t.after(f.home.cleanup);
+	const background = join(f.home.dir, "state/gui/background");
+	mkdirSync(background, { recursive: true });
+	writeFileSync(join(background, "owner.json"), "{}\n");
+	// Another installation owns the app, so a post-install would otherwise hand it over and rewrite its shortcut.
+	writeFileSync(join(background, "server.json"), JSON.stringify({ packageRoot: join(f.home.dir, "elsewhere") }));
+	const untouched = `runBackgroundHandover: async () => { throw new Error("must not hand over"); },
+		runBackgroundRestart: async () => { throw new Error("must not restart"); },`;
+	const declined = f.run(["--post-install", "--skip-migrations"], untouched, { CLIO_CODER_INSTALL_GUI: "0" });
+	assert.equal(declined.status, 0, declined.stderr + declined.stdout);
+	assert.doesNotMatch(declined.stdout + declined.stderr, /must not (hand over|restart)/);
+	assert.match(declined.stdout, /Left the desktop app as it was/);
+	// No child ran at all, so no `gui background install` could write a launcher or a Start Menu shortcut.
+	assert.equal(existsSync(join(f.home.dir, "calls.jsonl")), false);
+});
+
 test("restart follows successful checks, relaunches with argv the real parser accepts, and propagates the new CLI's exit status", (t) => {
 	const f = installedFixture();
 	t.after(f.home.cleanup);

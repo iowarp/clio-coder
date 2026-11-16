@@ -604,7 +604,7 @@ print_next_steps() {
 	if ! { version_ge "${installed_version%%-*}" "0.7.1" && "$node_bin" "$entry" setup --next </dev/null 2>/dev/null; }; then
 		printf 'Run: clio-coder\n'
 	fi
-	printf 'Desktop app: clio-coder gui\n'
+	[ "$install_gui" = 0 ] || printf 'Desktop app: clio-coder gui\n'
 }
 
 # The desktop app is the GUI's background service: one `gui background install` adds the login
@@ -1079,7 +1079,8 @@ if(!versions.length)process.exit(1);process.stdout.write(versions.sort(semver.rc
 		fail "candidate checks failed; previous install remains active. Repair with the new version itself, then rerun this installer: \"$node_bin\" \"$entry\" doctor --fix"
 	}
 	if [ "$post_install" = 1 ]; then
-		"$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
+		# --no-gui reaches the post-install too, so it leaves an existing desktop setup and its shortcut alone (F-C17).
+		CLIO_CODER_INSTALL_GUI="$install_gui" "$node_bin" "$entry" upgrade --post-install </dev/null || fail "package is installed, but local migrations/initialization need attention; run: $launcher upgrade --post-install. Previous binary remains available via --rollback."
 	fi
 	if version_ge "${installed_version%%-*}" "0.6.2"; then provision_workspace; fi
 	offer_gui

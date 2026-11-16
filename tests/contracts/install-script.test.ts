@@ -58,6 +58,13 @@ describe("contracts/install-script", () => {
 		strictEqual(text.indexOf("\nmain() {"), text.lastIndexOf("\nmain() {"));
 	});
 
+	it("hands --no-gui to the post-install and drops the desktop hint, so no desktop step runs (F-C17)", () => {
+		const text = readFileSync(SCRIPT, "utf8");
+		match(text, /CLIO_CODER_INSTALL_GUI="\$install_gui" "\$node_bin" "\$entry" upgrade --post-install/u);
+		match(text, /\[ "\$install_gui" = 0 \] \|\| printf 'Desktop app: clio-coder gui\\n'/u);
+		match(text, /offer_gui\(\) \{\n\t\[ "\$install_gui" != 0 \] \|\| return 0/u);
+	});
+
 	it("fails closed only on a definitive Node signature failure", () => {
 		const root = mkdtempSync(join(tmpdir(), "clio-coder-install-sig-"));
 		try {
