@@ -69,7 +69,7 @@
 <a href="/docs/guide/system-one.html">System One decision models</a>
 <a href="/docs/guide/information-flow.html">Information flow</a>
 <a href="/docs/guide/glossary.html">Glossary</a></details></div></div></details></aside>
-  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Connect a model</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/guide/configuration-and-targets.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/configuration-and-targets.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#connect-the-way-you-already-work">Connect the way you already work</a>
+  <article class="doc-article"><div class="doc-toolbar"><p id="doc-path">Connect a model</p><a id="doc-github" href="https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/guide/configuration-and-targets.md">Read the full guide <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div><div class="doc" id="doc" data-doc="guide/configuration-and-targets.md"><details class="doc-toc-mobile"><summary>On this page</summary><a href="#connect-the-way-you-already-work">Connect the way you already work</a>
 <a href="#use-a-local-model-server">Use a local model server</a>
 <a href="#settings-center">Settings Center</a>
 <a href="#check-the-connection">Check the connection</a>
@@ -163,7 +163,7 @@ clio-coder targets --probe</code></pre></div>
 </tr>
 </tbody></table></div>
 <p>A server that speaks the OpenAI or Anthropic API but has no runtime of its own usually works through <code>openai-compat</code> or <code>anthropic-compat</code>, or through a LiteLLM gateway. Local runtimes probe the server, report the loaded models, and price usage as free; the compatible runtimes make no local-server assumptions and never price as free.</p>
-<p>When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the <code>runtimes/</code> folder of CLIO Coder&#39;s config directory, or an npm package listed under <code>integrations.runtimePlugins</code>, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The <a href="https://github.com/iowarp/clio-coder/blob/16c731c643999348ff65abd75e7fd720d280ae08/docs/architecture/provider-adapter-cookbook.md">provider adapter cookbook</a> describes the runtime descriptor a plugin exports.</p>
+<p>When none of these fits, a developer can add a runtime as a plugin: a JavaScript file in the <code>runtimes/</code> folder of CLIO Coder&#39;s config directory, or an npm package listed under <code>integrations.runtimePlugins</code>, which takes effect after a restart. A broken plugin is reported on stderr and never stops startup. The <a href="https://github.com/iowarp/clio-coder/blob/f7c15144937cf81de0321a3875ba57148a7f9834/docs/architecture/provider-adapter-cookbook.md">provider adapter cookbook</a> describes the runtime descriptor a plugin exports.</p>
 <h2 id="related-tutorials-and-research">Related tutorials and research</h2>
 <nav class="guide-next" aria-label="Related tutorials and research"><ul>
 <li><a href="/tutorials/choose-model-for-your-project.html">Choose a model for your project <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
@@ -173,7 +173,7 @@ clio-coder targets --probe</code></pre></div>
 <li><a href="/tutorials/share-a-folder-with-a-teammate-or-a-second-terminal.html">Share a folder with a teammate or a second terminal <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 <li><a href="/research/fleets-and-local-models.html">When do several agents or small models pay off? <span class="arrow arrow-forward" aria-hidden="true">→</span></a></li>
 </ul>
-</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/16c731c643999348ff65abd75e7fd720d280ae08" data-source-version="0.8.2" data-source-ref="16c731c643999348ff65abd75e7fd720d280ae08" data-source-commit="16c731c643999348ff65abd75e7fd720d280ae08">Guide to v0.8.2</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
+</nav></div><div class="doc-end"><span>Updated <time datetime="2026-11-12T17:09:46-06:00">November 12, 2026</time></span><a id="doc-snapshot-source" href="https://github.com/iowarp/clio-coder/tree/f7c15144937cf81de0321a3875ba57148a7f9834" data-source-version="0.8.3" data-source-ref="f7c15144937cf81de0321a3875ba57148a7f9834" data-source-commit="f7c15144937cf81de0321a3875ba57148a7f9834">Guide to v0.8.3</a><a href="https://github.com/iowarp/clio-coder/issues">Suggest an improvement <span class="arrow arrow-diagonal" aria-hidden="true">↗</span></a></div></article>
   <aside class="docs-toc" aria-label="On this page"><h2>On this page</h2><a href="#connect-the-way-you-already-work">Connect the way you already work</a>
 <a href="#use-a-local-model-server">Use a local model server</a>
 <a href="#settings-center">Settings Center</a>

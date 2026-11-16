@@ -3,9 +3,9 @@
   "corpus": "public-guides",
   "corpusPolicy": "site/public-docs.json",
   "source": {
-    "version": "0.8.2",
-    "ref": "16c731c643999348ff65abd75e7fd720d280ae08",
-    "commit": "16c731c643999348ff65abd75e7fd720d280ae08",
+    "version": "0.8.3",
+    "ref": "f7c15144937cf81de0321a3875ba57148a7f9834",
+    "commit": "f7c15144937cf81de0321a3875ba57148a7f9834",
     "mode": "repository"
   },
   "files": [
@@ -13,7 +13,7 @@
       "path": "README.md",
       "source": "README.md",
       "sha256": "d03be65a1426cb29a0262909b9e75531620caf6fbbaecb34e4cbb6aafcf184e4",
-      "sourceSha256": "c41bda225114dc76a186d47942f13ece69f5a1e8ab347864785a5220c08dd99c"
+      "sourceSha256": "a13550501934d8c9920f998d9011db83f819ea3687145870755d3f6728d37608"
     },
     {
       "path": "guide/hpc-clusters.md",
@@ -25,13 +25,13 @@
       "path": "guide/configuration-and-targets.md",
       "source": "docs/guide/configuration-and-targets.md",
       "sha256": "c79032eff45e4933671eb740251f72ee0fa9a7a54e67f937d38784b1daac8570",
-      "sourceSha256": "2d373cd13179e813b6b31e4e6095ee0b9679613817abd6534eef4ceb805f460f"
+      "sourceSha256": "79003a51d3e552610795251afa51da4bf55ea9f256bab1c9fa4337ceba123847"
     },
     {
       "path": "guide/commands-and-modes.md",
       "source": "docs/guide/commands-and-modes.md",
       "sha256": "a8d75c9765c071c0cc85e8b005bfa9d41bd6c03f6b55d7b4c7ff39e0029d450c",
-      "sourceSha256": "0a3304ac4ded268fc4b2db5c69cef7c1b10200a7f137fc154048eed15b507491"
+      "sourceSha256": "f13af6a02ca59812dd52e9b0e517cb6a97e9defccc16076c4c0d6957956a9676"
     },
     {
       "path": "guide/tool-usage.md",
@@ -151,7 +151,7 @@
       "path": "guide/environment-variables.md",
       "source": "docs/guide/environment-variables.md",
       "sha256": "3403ac4b876a5b141f4c280073989cc27a16c8f5c0e6a7e71e1a3bf90dfae51c",
-      "sourceSha256": "5acf7f5d41a4c6ac383b1d7ff22ad8f1d03bf5492570e0a6ff80da7fdd7f8fb8"
+      "sourceSha256": "79d526706973a75164a1e09de800d2e62f6d81a7c5588eebd198aa70be0aa346"
     },
     {
       "path": "guide/system-one.md",
