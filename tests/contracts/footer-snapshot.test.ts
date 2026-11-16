@@ -2,6 +2,7 @@ import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual }
 import { it, test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import { redactSecretString } from "../../src/domains/safety/redaction.js";
 import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createFollowUpQueuePanel } from "../../src/interactive/follow-up-queue-panel.js";
@@ -280,4 +281,16 @@ test("footer, queue and action hints spell live keybindings consistently", () =>
 it("the dashboard names image input for both vision and text-only models", () => {
 	deepStrictEqual(capabilityLabels({ ...EMPTY_CAPABILITIES, chat: true }).includes("images no"), true);
 	deepStrictEqual(capabilityLabels({ ...EMPTY_CAPABILITIES, chat: true, vision: true }).includes("images yes"), true);
+});
+
+it("the yolo cap notice shows its cap word, while a secret after = or a flag stays redacted (F-C15)", () => {
+	const text = "yolo paused: the 5M-token cap was reached.";
+	const notice: Notification = { id: "cap", text, level: "warning", key: "autonomy.cap", addedAt: 0, expiresAt: null };
+	const panel = formatNotificationPanel([notice], 120).map(stripTerminalSequences).join("\n");
+	match(panel, /the 5M-token cap was reached/u);
+	doesNotMatch(panel, /\[redacted\]/u);
+	strictEqual(redactSecretString("5M-token cap"), "5M-token cap");
+	strictEqual(redactSecretString("token=abc123secret"), "token=[redacted]");
+	strictEqual(redactSecretString("gh auth --with-token abc123secret"), "gh auth --with-token [redacted]");
+	strictEqual(redactSecretString("x-token=abc123secret"), "x-token=[redacted]");
 });

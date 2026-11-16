@@ -173,7 +173,12 @@ function redactSecretFlags(value: string): string {
 			if (whitespace.exec(value) === null) continue;
 			valueStart = whitespace.lastIndex;
 		}
-		if (secretFlagStart(word[0]) === null) continue;
+		const dash = secretFlagStart(word[0]);
+		if (dash === null) continue;
+		// A value after whitespace belongs to a shell flag: a dash that opens the word, or a `--` run glued to text
+		// before it. One dash inside a word joins prose, as in "the 5M-token cap", whose next word is no secret;
+		// only `=` hands such a word its value (F-C15).
+		if (value[end] !== "=" && dash > 0 && word[0][dash - 1] !== "-" && word[0][dash + 1] !== "-") continue;
 		argument.lastIndex = valueStart;
 		if (argument.exec(value) === null) continue;
 		if (ENV_REFERENCE_RE.test(value.slice(valueStart, argument.lastIndex))) continue;
