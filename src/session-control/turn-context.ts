@@ -118,6 +118,7 @@ import { type AutonomyLevel, effectiveYoloConfinement } from "../domains/safety/
 import {
 	AutoCompactionTrigger,
 	DEFAULT_COMPACTION_THRESHOLD,
+	effectiveCompactionThreshold,
 	shouldCompact,
 } from "../domains/session/compaction/auto.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
@@ -3408,6 +3409,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					),
 			);
 			const compactionCeilingTokens = economic.ceilingTokens;
+			// The trigger counts the summary reserve the threshold's headroom does not cover, so the
+			// ledger names the fraction it actually fires at (F-C2).
+			const ledgerThreshold =
+				compactionThreshold === null
+					? null
+					: routed
+						? effectiveCompactionThreshold(
+								economic.threshold,
+								economic.triggerWindow,
+								summaryOutputReserve(routed.agent.state.model, {
+									summaryOnChatRoute: summaryOnChatRoute(routed, settings.context.compaction?.model),
+								}),
+							)
+						: economic.threshold;
 			const provider = routed?.targetId ?? settings.chat?.target ?? null;
 			const model = routed?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
@@ -3418,7 +3433,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					model,
 					...window,
 					toolCount: liveToolCount,
-					compactionThreshold: compactionThreshold === null ? null : economic.threshold,
+					compactionThreshold: ledgerThreshold,
 					compactionCeilingTokens,
 					compactionAuto,
 					promptCache: lastPromptCache,
@@ -3435,7 +3450,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				provider,
 				model,
 				...window,
-				compactionThreshold: compactionThreshold === null ? null : economic.threshold,
+				compactionThreshold: ledgerThreshold,
 				compactionCeilingTokens,
 				compactionAuto,
 				systemPromptTokens: currentContextSnapshot.categories.system,

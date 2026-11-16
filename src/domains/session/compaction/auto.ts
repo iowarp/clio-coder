@@ -64,6 +64,22 @@ export function shouldCompact(
 }
 
 /**
+ * The fraction of `contextWindow` where {@link shouldCompact} fires once the
+ * summary reserve is counted: min(threshold, 1 − reserve / window). Surfaces
+ * that print "autocompact at N%" show this, so a 0.9 threshold on a route whose
+ * reserve fires it at 80% does not read as 90% (F-C2).
+ */
+export function effectiveCompactionThreshold(
+	threshold: number,
+	contextWindow: number,
+	reserveOutputTokens = 0,
+): number {
+	if (!Number.isFinite(contextWindow) || contextWindow <= 0) return threshold;
+	if (!Number.isFinite(reserveOutputTokens) || reserveOutputTokens <= 0) return threshold;
+	return Math.max(0, Math.min(threshold, 1 - reserveOutputTokens / contextWindow));
+}
+
+/**
  * Coalesces concurrent `fire(task)` calls onto a single in-flight Promise.
  *
  * A chat session can race a threshold-driven trigger and an overflow-recovery

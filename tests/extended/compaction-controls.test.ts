@@ -1830,4 +1830,16 @@ describe("compaction trigger output reservation", () => {
 		strictEqual(shouldCompact(93_071, 0.9, 131_072, 26_214).shouldCompact, false);
 		strictEqual(shouldCompact(104_858, 0.9, 131_072, 26_214).shouldCompact, true);
 	});
+
+	it("names the fraction the trigger fires at, so /context and the trigger agree (F-C2)", async () => {
+		const { effectiveCompactionThreshold, shouldCompact } = await import("../../src/domains/session/compaction/auto.js");
+		const fraction = effectiveCompactionThreshold(0.9, 131_072, 26_214);
+		// Exact up to float rounding: 1 − 26,214 / 131,072, within 1e-12 absolute.
+		ok(Math.abs(fraction - (1 - 26_214 / 131_072)) < 1e-12, String(fraction));
+		strictEqual(shouldCompact(Math.ceil(fraction * 131_072), 0.9, 131_072, 26_214).shouldCompact, true);
+		strictEqual(shouldCompact(Math.floor(fraction * 131_072) - 1, 0.9, 131_072, 26_214).shouldCompact, false);
+		// A reserve the threshold's headroom covers leaves the threshold as configured.
+		strictEqual(effectiveCompactionThreshold(0.8, 100_000, 16_000), 0.8);
+		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
+	});
 });
