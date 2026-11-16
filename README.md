@@ -29,7 +29,7 @@ No root and no account. The first launch connects a model.
 <p align="center">
   <a href="#why-clio-coder">Why</a> ·
   <a href="#built-for-science-and-hpc">Science and HPC</a> ·
-  <a href="#new-in-082">New in 0.8.2</a> ·
+  <a href="#new-in-083">New in 0.8.3</a> ·
   <a href="#get-started"><strong>Get started</strong></a> ·
   <a href="#models">Models</a> ·
   <a href="#safety-and-control">Safety</a> ·
@@ -97,14 +97,14 @@ without root, older glibc, `module load`, proxies and
 [shared login nodes](docs/guide/hpc-clusters.md#shared-login-nodes). Then see
 [Slurm](docs/guide/slurm.md) and the [store](docs/guide/store.md).
 
-## New in 0.8.2
+## New in 0.8.3
 
-- **Answer from anywhere.** An ACP client that a person answers from another device negotiates how long each question and approval waits, learns when one it still shows was abandoned, and can start `clio-coder acp --autonomy default` to keep every session out of yolo.
-- **Extension runs survive continuations.** Hook events say whether a turn is your prompt, CLIO Coder's own continuation or a scheduled job, and interview answers keep the option you chose when you add a note.
-- **Result contracts that hold on local models.** Workers see the exact final JSON form after every tool batch, and a prose answer gets one schema-bound repair round on llama.cpp, LM Studio and LiteLLM routes that support it.
-- **Turns recover instead of stopping.** A looping stream, an empty reply or a tool call written into reasoning gets one nudge, and the loop guard quotes the error the model kept repeating.
+- **Extensions can confine every worker.** A desk that adds write roots to a dispatch whose intent declared none now narrows it inside the workspace instead of being refused.
+- **Stateful tools are not mistaken for loops.** A repeated call counts as a loop only while its results match, so an extension's `next_step` keeps handing out steps.
+- **Yolo stops cleanly.** A token, call or minute cap lets the running tool call finish and stops before the next model request, and a continuation after the tool budget says every tool is available again.
+- **Your questions wait for you.** An `operator_only` question stays open however long you are away, at every autonomy level.
 
-0.8.2 changes when automatic compaction fires and how `operator_only` questions wait. Read the
+0.8.3 changes how `operator_only` questions wait at yolo and where a yolo cap stops. Read the
 [Upgrade notes](CHANGELOG.md#upgrade-notes) before upgrading.
 
 > **Pre-1.0.** The terminal is the primary interface, and the desktop app is
@@ -189,7 +189,7 @@ offers it on first use, or install it up front with
 From source, build the release tag:
 
 ```bash
-git clone --branch v0.8.2 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.8.3 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local

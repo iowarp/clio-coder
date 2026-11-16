@@ -2,7 +2,7 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.3 - 2026-11-16
 
 This release fixes what a full WTF-P 0.8.2 drive found on the official 0.8.2 install: a seven-section technical report taken from outline to a delivered milestone at autonomy `yolo` on openai-codex, over about 30 desk steps. Each fix below names its finding id from that run.
 
