@@ -167,15 +167,22 @@ function requestNarrows(original: DispatchRequest, rewritten: DispatchRequest, m
 	// That tree does not exist at admission, so the real-path check below would
 	// judge the wrong filesystem; its roots must stay as approved (WX4).
 	if ((original.worktree === true || mode === "compete") && !sameRoots(originalRoots, rewrittenRoots)) return false;
-	// An unrestricted original admits any roots; a confined one admits only roots inside it.
-	if (originalRoots.length === 0) return true;
-	if (rewrittenRoots.length === 0 || !rewrittenRoots.every((root) => writeRootsCover(originalRoots, root))) return false;
+	const cwd = original.cwd ?? process.cwd();
+	const memo = createPathWalkMemo();
+	// An original without write roots writes anywhere under its cwd, so that
+	// workspace is its ceiling (F-C12): roots inside it narrow, roots that reach
+	// outside it by link do not. A confined original admits only roots inside it.
+	const unconfined = originalRoots.length === 0;
+	if (unconfined && rewrittenRoots.length === 0) return true;
+	if (
+		!unconfined &&
+		(rewrittenRoots.length === 0 || !rewrittenRoots.every((root) => writeRootsCover(originalRoots, root)))
+	)
+		return false;
 	// The text check alone passes src/vendor/ under an approved src/ even when
 	// src/vendor links to ../lib, and enforcement then admits writes under lib/
 	// (WX3). Each rewritten root must also stay inside an approved one by real path.
-	const cwd = original.cwd ?? process.cwd();
-	const memo = createPathWalkMemo();
-	const approved = originalRoots.flatMap((root) => physicalWriteRoot(cwd, root, memo) ?? []);
+	const approved = (unconfined ? ["./"] : originalRoots).flatMap((root) => physicalWriteRoot(cwd, root, memo) ?? []);
 	return rewrittenRoots.every((root) => {
 		const physical = physicalWriteRoot(cwd, root, memo);
 		return physical !== null && writeRootsCover(approved, physical);

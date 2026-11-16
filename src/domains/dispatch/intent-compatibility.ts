@@ -252,7 +252,8 @@ export function dispatchIntentRefusals(
  * tightly than the call that contains them. Narrowing is monotonic: a per-task
  * declaration may shrink the ceiling and may never reach outside it. Read scope
  * is checked against reads plus writes because a declared write root is
- * necessarily readable; write scope is checked against writes alone.
+ * necessarily readable; write scope is checked against writes alone, and an
+ * enclosing intent without write roots bounds writes only by the workspace.
  */
 export function dispatchIntentScopeWidening(
 	ceiling: Pick<DispatchIntent, "readRoots" | "writeRoots" | "relevantPaths">,
@@ -264,6 +265,12 @@ export function dispatchIntentScopeWidening(
 		relevantPaths: [...ceiling.readRoots, ...ceiling.writeRoots, ...ceiling.relevantPaths],
 	} as const;
 	for (const field of ["readRoots", "writeRoots", "relevantPaths"] as const) {
+		// An enclosing intent that declares no write roots puts no write boundary
+		// on the worker: it writes anywhere under its cwd. Its write ceiling is
+		// that workspace, not empty, so declaring roots there confines the worker.
+		// Normalization already refuses roots that are absolute or escape the
+		// repository (F-C12).
+		if (field === "writeRoots" && ceiling.writeRoots.length === 0) continue;
 		const outside = narrowed[field].find(
 			(candidate) => !pathBoundaryCovers(ceilings[field], candidate) && !writeRootsCover(ceiling.writeRoots, candidate),
 		);

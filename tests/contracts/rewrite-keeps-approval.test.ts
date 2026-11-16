@@ -21,7 +21,7 @@ import { isolateDispatchState, restoreDispatchState } from "../harness/dispatch.
 beforeEach(async () => isolateDispatchState());
 afterEach(() => restoreDispatchState());
 
-type Intent = { write_roots: string[]; relevant_paths?: string[] };
+type Intent = { write_roots?: string[]; read_roots?: string[]; relevant_paths?: string[] };
 type Task = { task: string; intent: Intent };
 const task = (root: string, extra: Omit<Intent, "write_roots"> = {}): Task => ({
 	task: "Edit the module.",
@@ -88,6 +88,10 @@ async function approvedDispatch(rewritten: Task[], options: DispatchCase = {}) {
 						plans.push(request.plan);
 					}
 					throw new Error("stub workers");
+				},
+				dispatch: async (request: DispatchRequest) => {
+					ran.push([...(request.intent?.writeRoots ?? [])]);
+					throw new Error("stub worker");
 				},
 			} as unknown as DispatchContract,
 			getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
@@ -211,6 +215,77 @@ describe("an approved dispatch rewritten by a before_tool hook", () => {
 		} finally {
 			process.chdir(home);
 			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("a rewrite that adds write roots to an intent that declared none", () => {
+	// F-C12: such an intent leaves the worker unbounded under its cwd, so that
+	// workspace is the ceiling a desk narrows, not an empty one.
+	const intentArgs = (intent: Intent) => ({ intent });
+
+	for (const intent of [{ read_roots: ["paper/"] }, { read_roots: ["paper/"], write_roots: [] }] as Intent[]) {
+		const label = intent.write_roots === undefined ? "read_roots only" : "write_roots: []";
+		it(`admits an in-workspace write root added beside the shared intent and hands it to the worker (${label})`, async () => {
+			// The desk's shape: the model's intent rides at the top level, the rewrite confines the task.
+			const { verdict, ran } = await approvedDispatch(
+				[{ task: "Edit the module.", intent: { write_roots: ["paper/x.md"] } }],
+				{ original: [{ task: "Edit the module." } as never], args: intentArgs(intent) },
+			);
+			strictEqual(verdict.kind, "ok");
+			deepStrictEqual(ran, [["paper/x.md"]]);
+		});
+
+		it(`refuses a write root outside the workspace (${label})`, async () => {
+			const { verdict, ran } = await approvedDispatch(
+				[{ task: "Edit the module.", intent: { write_roots: ["../elsewhere/"] } }],
+				{ original: [{ task: "Edit the module." } as never], args: intentArgs(intent) },
+			);
+			const text =
+				verdict.kind === "blocked"
+					? verdict.reason
+					: verdict.kind === "ok" && verdict.result.kind === "error"
+						? verdict.result.message
+						: "";
+			match(text, /escapes the repository root/);
+			deepStrictEqual(ran, []);
+		});
+	}
+
+	it("carries an approval across a rewrite that confines an unconfined intent inside the workspace", () => {
+		const request = (writeRoots: string[], cwd?: string) => ({
+			agentId: "coder",
+			task: "Edit the module.",
+			...(cwd !== undefined ? { cwd } : {}),
+			intent: {
+				version: 2,
+				readRoots: ["paper/"],
+				writeRoots,
+				relevantPaths: [],
+				pathProvenance: [],
+				expectedOutputs: [],
+				verification: [],
+			},
+		});
+		const snapshot = (writeRoots: string[], cwd?: string) =>
+			({
+				kind: "dispatch",
+				mode: "parallel",
+				writers: 1,
+				requests: [request(writeRoots, cwd)],
+				planView: { topology: "parallel", taskCount: 1, planScale: true, text: "", hash: "", tasks: [] },
+			}) as unknown as DispatchExecutionSnapshot;
+		strictEqual(dispatchRewriteNarrows(snapshot([]), snapshot(["paper/x.md"])), true);
+		const cwd = mkdtempSync(join(tmpdir(), "rewrite-keeps-approval-"));
+		const outside = mkdtempSync(join(tmpdir(), "rewrite-outside-"));
+		try {
+			mkdirSync(join(cwd, "paper"));
+			symlinkSync(outside, join(cwd, "paper", "ext"));
+			strictEqual(dispatchRewriteNarrows(snapshot([], cwd), snapshot(["paper/x.md"], cwd)), true);
+			strictEqual(dispatchRewriteNarrows(snapshot([], cwd), snapshot(["paper/ext/"], cwd)), false);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
 		}
 	});
 });
