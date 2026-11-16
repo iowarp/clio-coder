@@ -66,6 +66,16 @@ export function toolBudgetStopReason(evt: ToolBudgetExceededPayload): string {
 }
 
 /**
+ * What a continuation after a turn-wide tool block must say first. The budget
+ * block tells the model every further call this turn is blocked, and a
+ * continuation that said only "continue from where it stopped" left the model
+ * reporting read and write unavailable though the new turn admitted both
+ * (F-C14). The locks are per turn, so the new turn says so plainly.
+ */
+export const TOOL_LOCK_RESET_DETAIL =
+	"This is a new turn; the tool budget is reset and every tool the turn held is available again.";
+
+/**
  * What a continuation after a loop stop must change. The continuation used to
  * say only "continue from where it stopped" over the same context, and a
  * model that had diagnosed its own malformed call in its closing message sent

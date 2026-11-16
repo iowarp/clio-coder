@@ -190,6 +190,13 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 			const continuation = run.prompts[1] ?? "";
 			ok(continuation.includes("The previous turn stopped: it reached the per-turn tool budget"), continuation);
 			ok(!continuation.includes("This is continuation"), continuation);
+			// F-C14: the budget block said every further call was blocked; the new turn says it holds them again.
+			ok(
+				continuation.includes(
+					"This is a new turn; the tool budget is reset and every tool the turn held is available again.",
+				),
+				continuation,
+			);
 		} finally {
 			await run.close();
 		}
@@ -224,6 +231,10 @@ describe("yolo continuation of a stopped turn (#445)", () => {
 					step,
 				);
 				ok((run.prompts[1] ?? "").includes("The previous turn stopped: the loop guard stopped it"), step);
+				ok(
+					(run.prompts[1] ?? "").includes("the tool budget is reset and every tool the turn held is available again"),
+					step,
+				);
 			} finally {
 				await run.close();
 			}

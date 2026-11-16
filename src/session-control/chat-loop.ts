@@ -185,7 +185,7 @@ import {
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
-import { loopGuardContinuationDetail } from "./loop-guard-interrupt.js";
+import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
 import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
 import {
@@ -2099,9 +2099,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		if (stop === null) return null;
 		if (continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP)
 			return null;
-		return stop.cause === "loop_guard" && guardFailure !== null
-			? { ...stop, detail: loopGuardContinuationDetail(guardFailure) }
-			: stop;
+		// A turn whose tools were blocked turn-wide (the budget, its hard ceiling,
+		// or a synthesis lock) continues in a new turn that holds them again (F-C14).
+		const toolsWereLocked = failed === null && (state.toolBudgetLock || state.synthesisToolLock || guardInterrupted);
+		const detail = [
+			...(toolsWereLocked ? [TOOL_LOCK_RESET_DETAIL] : []),
+			...(stop.cause === "loop_guard" && guardFailure !== null ? [loopGuardContinuationDetail(guardFailure)] : []),
+		];
+		return detail.length === 0 ? stop : { ...stop, detail: detail.join("\n") };
 	};
 
 	/**
