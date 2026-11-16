@@ -710,7 +710,7 @@ export function formatDispatchOutput(
 					: "(no assistant text captured in the run result)";
 			return [
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${uncommittedSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
-				`  ${workerTextLabel(trustStatus)}`,
+				`  ${workerTextLabel(trustStatus, view)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(view, trustStatus, answerText).map((notice) => `  ${notice}`),
 			];

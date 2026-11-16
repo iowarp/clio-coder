@@ -198,6 +198,7 @@ export const coreTests = [
 	"json-payload-trailing-result",
 	"loop-guard-budget-by-tool",
 	"loop-guard-mutation-reset",
+	"verifier-review-verdict-label",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

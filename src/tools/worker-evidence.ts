@@ -3,6 +3,7 @@ import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
 import type { EvidenceAssessed, RunResultObject, RunSettled } from "../core/telemetry/schemas.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
+	parseVerifierResult,
 	RESULT_SUMMARY_MAX_BYTES_CEILING,
 	resultContractAuthorship,
 	type StructuredHelperResult,
@@ -375,7 +376,9 @@ function canonicalTrustLabels(status: CanonicalTrustStatus): string[] {
  * verification. The string is shared by dispatch and monitor so detached
  * collection cannot silently assign a different evidence meaning.
  */
-export function workerTextLabel(status: CanonicalTrustStatus): string {
+export function workerTextLabel(status: CanonicalTrustStatus, run?: FinishedRun | null): string {
+	const verdict = reviewVerdictLabel(status, run ?? null);
+	if (verdict !== null) return verdict;
 	switch (status.validationGrounding.state) {
 		case "validated":
 			return "worker output (tool-verified):";
@@ -394,6 +397,24 @@ export function workerTextLabel(status: CanonicalTrustStatus): string {
 		default:
 			return "worker claims (unverified prose):";
 	}
+}
+
+/**
+ * A verifier-report whose own verdict failed with no executed check behind the
+ * failure is a review verdict, not a failed validation. Calling it "a check ran
+ * and did not pass" beside a notice that the run executed no command read as a
+ * failed run, and the orchestrator recorded nothing (WTF-P 0.8.3 A3).
+ */
+function reviewVerdictLabel(status: CanonicalTrustStatus, run: FinishedRun | null): string | null {
+	if (run === null) return null;
+	const entry = status.validationGrounding;
+	if (entry.state !== "failed" || entry.authority.id !== "result-quality") return null;
+	if (!run.facts.quality?.resultContract?.sourceId.startsWith("agent-result-contract:verifier-report:")) return null;
+	const output = run.delivered?.output;
+	const parsed = output?.state === "final" ? parseVerifierResult(output.text) : null;
+	if (parsed?.verdict !== "fail") return null;
+	const findings = parsed.checks.filter((check) => !check.passed).length;
+	return `review verdict: fail (${findings} ${findings === 1 ? "finding" : "findings"}):`;
 }
 
 /** Contract kinds whose passing checks name commands a host can rerun; every other report's checks are judgments. */

@@ -148,7 +148,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 		);
 	}
 	if (row.evidence.integrityNote) lines.push(`  ${row.evidence.integrityNote}`);
-	lines.push(`  ${workerTextLabel(row.evidence.trustStatus)}`);
+	lines.push(`  ${workerTextLabel(row.evidence.trustStatus, row.evidence.run)}`);
 	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {
 		const capped = truncateUtf8(

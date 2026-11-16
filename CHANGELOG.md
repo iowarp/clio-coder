@@ -15,6 +15,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 ### Fixed
 
 - A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
+- A3: a verifier-report whose fail verdict no executed check produced is labelled `review verdict: fail (N findings)` in dispatch and collect results, not "validation failed; a check ran and did not pass". A check that ran and failed keeps the validation wording.
 
 ## 0.8.3 - 2026-11-16
 
