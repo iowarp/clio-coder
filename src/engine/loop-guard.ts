@@ -1164,6 +1164,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		callsThisTurn: number,
 		interrupted: boolean,
 		at: number,
+		bound?: { template?: string },
 	): void => {
 		const payload: ToolBudgetExceededPayload = {
 			tool: input.toolName ?? "unknown",
@@ -1173,14 +1174,40 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			interrupted,
 			at,
 			...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+			...(bound?.template !== undefined ? { template: bound.template } : {}),
 		};
 		options.bus?.emit("safety.tool_budget_exceeded", payload);
 	};
 
-	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
+	/**
+	 * The turn's budget: the operator's, lowered by a prompt template's
+	 * `budget.toolCalls` when that is smaller. The hard ceiling keeps its margin
+	 * above the lowered soft budget, so a template budget ends the turn exactly
+	 * the way the operator's does, only sooner, and never later (WTF-P 0.8.3 B4).
+	 */
+	const resolveTurnBudget = (
+		input: MiddlewareHookInput,
+	): { budget: OrchTurnToolCallBudget; template?: string } | undefined => {
 		const budgetSource = options.turnToolCallBudget;
-		const turnBudget = typeof budgetSource === "function" ? budgetSource() : budgetSource;
-		if (turnBudget === undefined) return null;
+		const operator = typeof budgetSource === "function" ? budgetSource() : budgetSource;
+		if (operator === undefined) return undefined;
+		const templateCalls = input.metadata?.templateToolCalls;
+		if (typeof templateCalls !== "number" || !(templateCalls >= 1) || templateCalls >= operator.soft)
+			return { budget: operator };
+		const template = input.metadata?.templateName;
+		return {
+			budget: { soft: templateCalls, hard: Math.min(operator.hard, templateCalls + ORCH_TURN_TOOL_CALL_HARD_MARGIN) },
+			template: typeof template === "string" && template.length > 0 ? template : "unnamed",
+		};
+	};
+
+	const evaluateTurnBudget = (input: MiddlewareHookInput, now: number): ReadonlyArray<MiddlewareEffect> | null => {
+		const resolved = resolveTurnBudget(input);
+		if (resolved === undefined) return null;
+		const turnBudget = resolved.budget;
+		const bound = resolved.template === undefined ? undefined : { template: resolved.template };
+		const source =
+			resolved.template === undefined ? "" : `, set by prompt template "${resolved.template}" budget.toolCalls`;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
 		let byTool = callsByToolByTurn.get(turnKey);
@@ -1199,13 +1226,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// Hard ceiling: interrupt the turn the same way the block budget does.
 			// The bus event drives chat.cancel() in the interactive layer; the
 			// block effect makes the in-flight attempt fail with the same reason.
-			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, turnBudget, callsThisTurn, true, now);
+			if (callsThisTurn === turnBudget.hard) emitBudgetEvent(input, turnBudget, callsThisTurn, true, now, bound);
 			return [
 				{
 					kind: "block_tool",
 					reason:
 						`tool-call budget exhausted: ${callsThisTurn} tool calls in this turn reached the hard ceiling ` +
-						`(${turnBudget.hard}); the turn is being stopped. Summarize what you found and end your reply.`,
+						`(${turnBudget.hard}${source}); the turn is being stopped. Summarize what you found and end your reply.`,
 					severity: "hard-block",
 				},
 			];
@@ -1218,12 +1245,12 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// ever run. The operator sees one warn notice per turn (the first
 			// crossing); the model keeps getting the directive on every further
 			// over-budget attempt so it cannot quietly resume spraying calls.
-			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, turnBudget, callsThisTurn, false, now);
+			if (callsThisTurn === turnBudget.soft) emitBudgetEvent(input, turnBudget, callsThisTurn, false, now, bound);
 			return [
 				{
 					kind: "block_tool",
 					reason:
-						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
+						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}${source}). ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
 						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
 						`propose, and end your reply.\n${turnCallsByTool(byTool)}`,

@@ -293,6 +293,8 @@ export interface ToolBudgetExceededPayload {
 	interrupted: boolean;
 	at: number;
 	turnId?: string;
+	/** The prompt template whose `budget.toolCalls` set this limit. */
+	template?: string;
 }
 
 /**

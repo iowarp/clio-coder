@@ -383,7 +383,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			} else {
 				deps.appendTranscriptNotice(
 					"warn",
-					`[loop-guard] tool-call budget reached: ${event.callsThisTurn} calls this turn (soft budget ${event.softBudget}); ${event.tool} blocked, model asked to re-plan.`,
+					`[loop-guard] tool-call budget reached: ${event.callsThisTurn} calls this turn (soft budget ${event.softBudget}${event.template ? ` from prompt template ${event.template}` : ""}); ${event.tool} blocked, model asked to re-plan.`,
 				);
 			}
 			deps.requestRender();

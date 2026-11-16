@@ -16,11 +16,25 @@ export function turnTemplateName(constraints: TurnConstraints | undefined): stri
 	return undefined;
 }
 
-export function templateToolConstraints(template: {
+interface TemplateConstraintSource {
 	name: string;
 	allowedTools?: readonly string[];
 	delegatedTools?: readonly string[];
-}): TurnConstraints {
+	budget?: { toolCalls?: number; observationBytes?: number };
+}
+
+/**
+ * An expanded template's turn constraint: its tool scope and its budget.
+ * Undefined when the template declares neither, so a plain
+ * template submits no constraint at all.
+ */
+export function templateTurnConstraints(template: TemplateConstraintSource): TurnConstraints | undefined {
+	return template.allowedTools === undefined && template.delegatedTools === undefined && template.budget === undefined
+		? undefined
+		: templateToolConstraints(template);
+}
+
+export function templateToolConstraints(template: TemplateConstraintSource): TurnConstraints {
 	const limit = (tools: readonly string[], field: string): ToolSurfaceSource[] => [
 		{
 			tools,
@@ -42,6 +56,7 @@ export function templateToolConstraints(template: {
 					delegatedTools: template.delegatedTools,
 					delegatedToolSurfaceSources: limit(template.delegatedTools, "delegated-tools"),
 				}),
+		...(template.budget === undefined ? {} : { budget: { ...template.budget, template: template.name } }),
 	};
 }
 
@@ -93,6 +108,19 @@ export interface TurnConstraints {
 	 * `mode`, which only shapes the workflow, no approval clears it.
 	 */
 	readonly readOnly?: true;
+	/**
+	 * A prompt template's per-turn budget. It only lowers the operator's
+	 * `safety.limits.chatToolCallsPerTurn` and `observationBytesPerTurn`; the
+	 * effective limit is the smaller of the two, so a template never raises one.
+	 */
+	readonly budget?: TurnBudget;
+}
+
+/** Template budget bounds; `template` names the prompt template that set them, for refusal text. */
+export interface TurnBudget {
+	readonly toolCalls?: number;
+	readonly observationBytes?: number;
+	readonly template?: string;
 }
 
 /** Snapshot caller-owned input before asynchronous admission or queuing. */
@@ -109,7 +137,8 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		!isToolNameList(value.allowedTools) ||
 		!isToolNameList(value.delegatedTools) ||
 		!isSurfaceSources(value.toolSurfaceSources) ||
-		!isSurfaceSources(value.delegatedToolSurfaceSources)
+		!isSurfaceSources(value.delegatedToolSurfaceSources) ||
+		!isTurnBudget(value.budget)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
@@ -128,7 +157,41 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		...(value.delegatedTools === undefined
 			? {}
 			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
+		...(value.budget === undefined ? {} : { budget: Object.freeze({ ...value.budget }) }),
 	});
+}
+
+function isTurnBudget(value: unknown): boolean {
+	if (value === undefined) return true;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+	const budget = value as Record<string, unknown>;
+	const bound = (entry: unknown): boolean =>
+		entry === undefined || (typeof entry === "number" && Number.isSafeInteger(entry) && entry > 0);
+	return (
+		Object.keys(budget).every((key) => key === "toolCalls" || key === "observationBytes" || key === "template") &&
+		bound(budget.toolCalls) &&
+		bound(budget.observationBytes) &&
+		(budget.template === undefined || typeof budget.template === "string")
+	);
+}
+
+/** Each bound is the smaller of the two layers', named after the layer that set it. */
+function narrowerBudget(first: TurnBudget | undefined, second: TurnBudget | undefined): TurnBudget | undefined {
+	if (first === undefined) return second;
+	if (second === undefined) return first;
+	const lower = (key: "toolCalls" | "observationBytes"): TurnBudget | undefined => {
+		const a = first[key];
+		const b = second[key];
+		return a === undefined ? (b === undefined ? undefined : second) : b === undefined || a <= b ? first : second;
+	};
+	const calls = lower("toolCalls");
+	const bytes = lower("observationBytes");
+	const template = calls?.template ?? bytes?.template;
+	return {
+		...(calls?.toolCalls === undefined ? {} : { toolCalls: calls.toolCalls }),
+		...(bytes?.observationBytes === undefined ? {} : { observationBytes: bytes.observationBytes }),
+		...(template === undefined ? {} : { template }),
+	};
 }
 
 function intersectLists(
@@ -173,8 +236,10 @@ export function narrowTurnConstraints(
 	// A template's turn carries only allowed-tools, so keeping turn.mode alone
 	// dropped a headless run's own --mode the moment a template expanded.
 	const mode = narrowerMode(session.mode, turn.mode);
+	const budget = narrowerBudget(session.budget, turn.budget);
 	return {
 		...(mode === undefined ? {} : { mode }),
+		...(budget === undefined ? {} : { budget }),
 		...(delegation === undefined ? {} : { delegation }),
 		...(skills === undefined ? {} : { skills }),
 		...(readOnly ? { readOnly: true as const } : {}),
@@ -275,6 +340,16 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 				: "Delegated workers may use no tools for this turn.",
 		);
 	}
+	const budget = constraints.budget;
+	if (budget?.toolCalls !== undefined || budget?.observationBytes !== undefined) {
+		const bounds = [
+			...(budget.toolCalls === undefined ? [] : [`${budget.toolCalls} tool calls`]),
+			...(budget.observationBytes === undefined ? [] : [`${budget.observationBytes} bytes of tool output`]),
+		];
+		lines.push(
+			`Budget for this turn${budget.template ? ` from prompt template "${budget.template}"` : ""}: at most ${bounds.join(" and ")}.`,
+		);
+	}
 	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
 }
 
@@ -294,7 +369,8 @@ export function turnDelegatesTool(constraints: TurnConstraints | undefined, capa
  * ceiling rather than the parent's wider one.
  */
 export function workerTurnConstraints(constraints: TurnConstraints): TurnConstraints {
-	const { delegatedTools, delegatedToolSurfaceSources: _delegatedSources, ...rest } = constraints;
+	// A template's budget bounds the main turn, not a worker's run.
+	const { delegatedTools, delegatedToolSurfaceSources: _delegatedSources, budget: _budget, ...rest } = constraints;
 	return Object.freeze({
 		...rest,
 		...(delegatedTools === undefined
