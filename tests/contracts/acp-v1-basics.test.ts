@@ -407,7 +407,12 @@ test("ACP interview of an ask_user round waits the shorter window and lapses to 
 	// A round nobody's ask_user tool asked (a harness confirmation) keeps the cancel and the client's own timeout.
 	unattendedMs = 30_000;
 	deepStrictEqual(await channel.ask(round), { answers: [], cancelled: true });
-	deepStrictEqual(timeouts, [30_000, 605_000, 605_000]);
+	// F-C1: an operator_only round outlasts the unattended window; only the client's request timeout bounds it.
+	deepStrictEqual(await channel.ask([{ ...round[0], operator_only: true }] as never, { unattendedFallback: true }), {
+		answers: [],
+		timedOut: { afterSeconds: 605 },
+	});
+	deepStrictEqual(timeouts, [30_000, 605_000, 605_000, 605_000]);
 });
 
 test("ACP sends startup notices once as session metadata, never as reply text", async () => {

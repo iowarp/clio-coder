@@ -528,9 +528,9 @@ describe("ask_user: who answered, and how long a round waits", () => {
 		strictEqual(askUserWindowMs(300, { yolo: true, away: true }), AWAY_ASK_WINDOW_MS);
 		strictEqual(askUserWindowMs(10, { yolo: false, away: true }), 10_000);
 		strictEqual(askUserWindowMs(0, { yolo: false, away: true }), 0);
-		// An operator_only question waits for an attending operator; yolo keeps its bound.
-		strictEqual(askUserWindowMs(300, { yolo: false, away: false, operatorOnly: true }), 0);
-		strictEqual(askUserWindowMs(300, { yolo: false, away: true, operatorOnly: true }), 0);
-		strictEqual(askUserWindowMs(300, { yolo: true, away: false, operatorOnly: true }), 300_000);
+		// F-C1: an operator_only question stays open past the unattended window at every autonomy level.
+		for (const yolo of [false, true])
+			for (const away of [false, true])
+				strictEqual(askUserWindowMs(300, { yolo, away, operatorOnly: true }), 0, `yolo ${yolo}, away ${away}`);
 	});
 });

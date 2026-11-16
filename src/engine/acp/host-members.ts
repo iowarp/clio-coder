@@ -336,7 +336,8 @@ export function createAcpInterviewChannel(
 		const requestTimeoutMs =
 			(typeof bound.timeoutMs === "function" ? bound.timeoutMs() : bound.timeoutMs) ??
 			DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS;
-		const unattendedMs = fallback ? (unattendedWindow() ?? 0) : 0;
+		// Clio cannot answer an operator_only round, so the unattended window never closes it (F-C1).
+		const unattendedMs = fallback && !operatorOnly ? (unattendedWindow() ?? 0) : 0;
 		const timeoutMs = unattendedMs > 0 ? Math.min(unattendedMs, requestTimeoutMs) : requestTimeoutMs;
 		let onAbort: (() => void) | undefined;
 		let wasCancelled = false;
