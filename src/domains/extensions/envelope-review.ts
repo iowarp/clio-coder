@@ -40,6 +40,7 @@ export function envelopeLines(envelope: ExtensionCapabilityEnvelope, extensionId
 		`Events: ${list([...envelope.events, ...(envelope.tickMs !== undefined ? [`tick ${envelope.tickMs / 1000}s`] : [])])}`,
 		`Hooks: ${list(hooks)}`,
 		`Tools: ${list(envelope.tools.map((tool) => `${tool.name} (${tool.actionClass})`))}`,
+		...(envelope.promote ? [`Attached to every request: ${list(envelope.promote)}`] : []),
 		`Interface: ${list(envelope.ui)}`,
 	];
 	if (envelope.workspaces.length > 0)

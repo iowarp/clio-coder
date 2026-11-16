@@ -4,6 +4,7 @@ import type { DynamicToolName } from "../core/tool-names.js";
 import { extensionIdentity } from "../domains/extensions/activity.js";
 import { extensionToolName } from "../domains/extensions/command-schema.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
+import { RUNTIME_V2_LIMITS } from "../domains/extensions/runtime-schema-v2.js";
 import { type InstalledExtension, isLoadableExtension } from "../domains/extensions/types.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -17,11 +18,42 @@ function bounded(text: string): string {
 }
 
 /**
- * Gateway specs for the tools the running api 2 runtimes of one extension
- * generation serve. Registering one never runs package code: a call goes to
- * the live runtime through the bridge its session host binds, so with no runtime
- * the call fails instead of starting one. Placement is the gateway, so the
- * provider's tool schema set is the same before and after a reload.
+ * Which promoted tools of one extension generation a session attaches, by
+ * registry name. Packages are taken in id order and each manifest's own order
+ * is kept, so the same generation always attaches the same set whatever order
+ * discovery listed it in. Past the session cap a promoted tool is `held`: it
+ * stays behind the gateway, where it still runs.
+ */
+export function promotedRuntimeTools(packages: ReadonlyArray<InstalledExtension>): {
+	attached: ReadonlySet<string>;
+	held: ReadonlyArray<string>;
+} {
+	const names = packages
+		.filter((entry) => isLoadableExtension(entry) && entry.runtimeV2 !== undefined)
+		.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+		.flatMap((entry) => (entry.runtimeV2?.promote ?? []).map((tool) => extensionToolName(entry.id, tool)));
+	const unique = [...new Set(names)];
+	return {
+		attached: new Set(unique.slice(0, RUNTIME_V2_LIMITS.promotedToolsPerSession)),
+		held: unique.slice(RUNTIME_V2_LIMITS.promotedToolsPerSession),
+	};
+}
+
+/**
+ * Specs for the tools the running api 2 runtimes of one extension generation
+ * serve. Registering one never runs package code: a call goes to the live
+ * runtime through the bridge its session host binds, so with no runtime the
+ * call fails instead of starting one.
+ *
+ * Placement is the gateway unless the manifest promotes the tool (B2). A
+ * promoted spec differs from its gateway form in placement alone: the name,
+ * description, schema, action class and `run` are built the same way, so
+ * admission, approval and the loop guard's call identity cannot tell the two
+ * apart, and the gateway refuses a direct-placed name, which leaves one route
+ * to the tool. The provider's tool schema set therefore depends only on the
+ * published generation: a reload that leaves the promoted declarations alone
+ * leaves it byte-identical, and one that changes them changes the session's
+ * tool signature, which the next turn records as `tool_surface_change` (#423).
  *
  * A result that asks for an interview parks the call until the operator
  * finishes or cancels it, and the answers become the result.
@@ -31,6 +63,7 @@ export function buildExtensionRuntimeToolSpecs(
 	bridge: ExtensionRuntimeHookBridge,
 ): ToolSpec[] {
 	const specs: ToolSpec[] = [];
+	const { attached } = promotedRuntimeTools(packages);
 	for (const entry of packages) {
 		if (!isLoadableExtension(entry) || entry.runtimeV2 === undefined) continue;
 		const extensionId = entry.id;
@@ -43,7 +76,7 @@ export function buildExtensionRuntimeToolSpecs(
 				parameters: tool.inputSchema as TSchema,
 				baseActionClass: tool.actionClass,
 				executionMode: "sequential",
-				placement: "gateway",
+				placement: attached.has(name) ? "direct" : "gateway",
 				sourceInfo: { path: entry.manifestPath, scope: "domain", extension: entry.provenance, owner },
 				metadata: {
 					objective: tool.description,

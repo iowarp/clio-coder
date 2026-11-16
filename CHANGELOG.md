@@ -8,6 +8,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
 - A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
+- B2: an api 2 extension may list up to four of its tools under `runtime.promote` in `clio-coder-extension.yaml`. The session attaches a promoted tool's schema to every request under its usual name `extension_<id>__<tool>`, so a hook's `require_tool` naming it becomes the provider's tool choice. The set belongs to the installed extension, never to a turn or a template, so the attached schemas are the same bytes on every turn; a reload that changes it is reported as a tool list change on the next turn. A session attaches at most eight promoted tools and each one's description and input schema may total 2048 bytes. Promotion is part of the capability envelope the operator approves. Dispatched workers never receive promoted tools.
 
 ### Changed
 

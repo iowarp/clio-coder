@@ -30,6 +30,12 @@ export const RUNTIME_V2_LIMITS = {
 	tools: 32,
 	toolMs: 30000,
 	toolMsMax: 300000,
+	/** Promoted tools one package may attach to every request (B2). */
+	promotedTools: 4,
+	/** Promoted tools one session attaches across all packages; the rest stay behind the gateway. */
+	promotedToolsPerSession: 8,
+	/** Description plus input schema of one promoted tool, which every request then carries. */
+	promotedToolBytes: 2048,
 	tickMsMin: 5000,
 	tickMsMax: 3600000,
 	workspaces: 4,
@@ -254,6 +260,28 @@ function parseTools(value: unknown): ExtensionRuntimeToolDeclaration[] {
 	});
 }
 
+/**
+ * The count and byte caps bound what a manifest can add to the provider
+ * prefix: a promoted schema is paid for on every request of the session.
+ */
+function parsePromote(value: unknown, tools: ReadonlyArray<ExtensionRuntimeToolDeclaration>): string[] {
+	const names = list(value, "runtime.promote", RUNTIME_V2_LIMITS.promotedTools).map((item, index) => {
+		const path = `runtime.promote[${index}]`;
+		const name = text(item, path, 40);
+		const tool = tools.find((entry) => entry.name === name);
+		if (!tool) fail(path, `'${name}' is not a declared runtime tool`);
+		const bytes = Buffer.byteLength(tool.description) + Buffer.byteLength(JSON.stringify(tool.inputSchema));
+		if (bytes > RUNTIME_V2_LIMITS.promotedToolBytes)
+			fail(
+				path,
+				`'${name}' would attach ${bytes} bytes of description and input schema to every request; a promoted tool allows at most ${RUNTIME_V2_LIMITS.promotedToolBytes}`,
+			);
+		return name;
+	});
+	if (new Set(names).size !== names.length) fail("runtime.promote", "lists a tool twice");
+	return names;
+}
+
 function parseWorkspaces(value: unknown): ExtensionWorkspaceDeclaration[] {
 	const ids = new Set<string>();
 	return list(value, "runtime.workspaces", RUNTIME_V2_LIMITS.workspaces).map((item, index) => {
@@ -364,6 +392,7 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 		"watch",
 		"hooks",
 		"tools",
+		"promote",
 		"ui",
 		"workspaces",
 		"access",
@@ -382,6 +411,8 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 	if (new Set(watch).size !== watch.length) fail("runtime.watch", "lists a glob twice");
 	const state = record(raw.state ?? {}, "runtime.state", ["session", "store"]);
 	const services = record(raw.services ?? {}, "runtime.services", ["embedding"]);
+	const tools = parseTools(raw.tools);
+	const promote = parsePromote(raw.promote, tools);
 	const declaration: ExtensionRuntimeDeclarationV2 = {
 		api: 2,
 		entrypoint,
@@ -389,7 +420,8 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 		...parseEvents(raw.events),
 		watch,
 		hooks: parseHooks(raw.hooks),
-		tools: parseTools(raw.tools),
+		tools,
+		...(promote.length > 0 ? { promote } : {}),
 		ui: choices(raw.ui, "runtime.ui", SLOTS),
 		workspaces: parseWorkspaces(raw.workspaces),
 		access: choices(raw.access, "runtime.access", ACCESS),
@@ -449,6 +481,7 @@ export function capabilityEnvelope(
 		watch: declaration.watch,
 		hooks: declaration.hooks,
 		tools: declaration.tools.map((tool) => ({ name: tool.name, actionClass: tool.actionClass })),
+		...(declaration.promote !== undefined ? { promote: declaration.promote } : {}),
 		ui: declaration.ui,
 		workspaces: declaration.workspaces.map((workspace) => ({
 			id: workspace.id,
@@ -544,6 +577,8 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 		else if (prior.actionClass === "execute" && tool.actionClass === "read")
 			growth.push(`tool ${tool.name} now claims to be read-only`);
 	}
+	// Every request then carries these schemas, so the operator's token budget is what grows.
+	push("attaches tool schemas to every request", added(approved.promote ?? [], next.promote ?? []));
 	push("new interface slots", added(approved.ui, next.ui));
 	for (const workspace of next.workspaces) {
 		const prior = approved.workspaces.find((entry) => entry.id === workspace.id);
