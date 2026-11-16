@@ -586,12 +586,18 @@ export function buildExtensionPromptGate(
 		async run(typed, rewritable, origin = { origin: "operator" }) {
 			let text = typed;
 			const notices: string[] = [];
+			const { lastToolCall, ...turnOrigin } = origin;
 			for (const { extensionId, access, runner } of runners) {
 				const startedAt = performance.now();
+				// The call's arguments cross under tool-args, as a before_tool hook's do; its name and outcome always cross.
+				const { args, ...call } = lastToolCall ?? { tool: "", outcome: "ok" as const };
 				const verdict = await runner.run({
 					point: "prompt_submit",
 					...(access.includes("prompt") ? { text } : {}),
-					...origin,
+					...turnOrigin,
+					...(lastToolCall === undefined
+						? {}
+						: { lastToolCall: { ...call, ...(args !== undefined && access.includes("tool-args") ? { args } : {}) } }),
 				});
 				if (verdict.kind === "failed") {
 					runner.settle(verdict, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);

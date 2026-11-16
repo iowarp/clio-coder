@@ -98,7 +98,7 @@ import {
 	turnScopeGuidance,
 	turnTemplateName,
 } from "../core/turn-constraints.js";
-import type { TurnOrigin } from "../core/turn-origin.js";
+import type { TurnOrigin, TurnToolCall } from "../core/turn-origin.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
@@ -178,6 +178,7 @@ import {
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens } from "./compaction-lines.js";
+import { lastToolCallOf } from "./continuation-tool-call.js";
 import {
 	DRAFT_MAX_TOKENS,
 	DRAFT_TEMPERATURES,
@@ -551,6 +552,8 @@ export interface ChatSubmitOptions {
 	yoloContinuation?: boolean;
 	/** That continuation's place against `TURN_CONTINUATION_CAP`, for hooks that read the turn's origin. */
 	yoloContinuationAttempt?: number;
+	/** The last tool call the stopped turn made, which the continuation's prompt_submit hooks read (WTF-P 0.8.3 B6). */
+	continuationToolCall?: TurnToolCall;
 	/**
 	 * Delivery mode when a run is active; ignored when idle. Defaults to
 	 * `next-slot`. `interrupt` cancels the run, waits for it to settle, and
@@ -2158,6 +2161,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		stop: { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string },
 		generation: number,
 		constraints: ChatSubmitOptions["constraints"],
+		lastToolCall: TurnToolCall | null,
 	): Promise<void> => {
 		const counted = continuationCountsAgainstCap(stop.cause);
 		const attempt = counted ? state.continuation.countYoloContinuation() : state.continuation.yoloContinuations;
@@ -2189,6 +2193,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				origin: `yolo continuation ${attempt}`,
 				yoloContinuation: true,
 				yoloContinuationAttempt: attempt,
+				...(lastToolCall === null ? {} : { continuationToolCall: lastToolCall }),
 				...(constraints === undefined ? {} : { constraints }),
 			},
 		);
@@ -3117,10 +3122,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (options.requestContinuation !== true) state.currentTurnOrigin = submittedTurnOrigin(options);
 				if (deps.promptSubmit && options.requestContinuation !== true) {
 					markPreparationStep("prompt-hook");
+					const origin = state.currentTurnOrigin ?? { origin: "operator" as const };
 					const verdict = await deps.promptSubmit({
 						typed: options.display?.text ?? text,
 						text,
-						origin: state.currentTurnOrigin ?? { origin: "operator" },
+						// Only a continuation's hooks hear what the turn it continues last called.
+						origin:
+							options.yoloContinuation === true && options.continuationToolCall !== undefined
+								? { ...origin, lastToolCall: options.continuationToolCall }
+								: origin,
 					});
 					if (!admissionCurrent()) return;
 					if (verdict.kind === "block") {
@@ -3988,7 +3998,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					) {
 						if (state.continuation.requested) await queues.resubmitRequestContinuation();
 						else if (continuation !== null) {
-							await continueStoppedTurn(continuation, generation, options.constraints);
+							// Read before the resubmit appends anything: the stopped turn's own last call.
+							const lastToolCall = lastToolCallOf(agentRuntime.agent.state.messages.slice(machineMessageStart));
+							await continueStoppedTurn(continuation, generation, options.constraints, lastToolCall);
 						}
 					}
 				}

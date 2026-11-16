@@ -181,13 +181,29 @@ export interface ExtensionToolHookLanding {
  * `template` names the prompt template whose tool scope bounds the turn, and
  * a continuation keeps it.
  */
-export type ExtensionTurnOrigin = TurnOrigin;
+export type ExtensionTurnOrigin = Omit<TurnOrigin, "lastToolCall">;
+
+/**
+ * The last tool call the stopped turn made, on a continuation's prompt_submit
+ * (Clio Coder 0.8.4 and later). `tool` is the tool as before_tool names it,
+ * `outcome` how it settled (`unfinished` when the turn stopped before it
+ * returned). `args` are redacted and clipped (long strings and arrays cut, with
+ * a note of what was), and cross only with `access: tool-args`.
+ */
+export interface ExtensionContinuationToolCall {
+	tool: string;
+	/** access: tool-args */
+	args?: Record<string, unknown>;
+	outcome: "ok" | "error" | "unfinished";
+}
 
 export type ExtensionHookEvent =
 	| ({
 			point: "prompt_submit";
 			/** access: prompt */
 			text?: string;
+			/** Present on a continuation whose stopped turn made a tool call; never on an operator prompt. */
+			lastToolCall?: ExtensionContinuationToolCall;
 	  } & ExtensionTurnOrigin)
 	| ({
 			point: "before_tool";
