@@ -207,13 +207,21 @@ function loopNextMove(tool: string): string {
  * Base block reason: names the loop and the next move (block #1). When the
  * same call already returned a successful result earlier this run, the reason
  * says so and points the model at that result: for a weak local model "you
- * already have this answer" is the strongest available anchor.
+ * already have this answer" is the strongest available anchor. It claims the
+ * next call returns the same text only when the last two results matched
+ * byte for byte; a stateful tool answers the same arguments differently (F-C13).
  */
-function loopBlockBaseReason(tool: string, repeatCount: number, priorSuccesses: number, priorFailure?: string): string {
+function loopBlockBaseReason(
+	tool: string,
+	repeatCount: number,
+	priorSuccesses: number,
+	priorFailure?: string,
+	resultsMatched = false,
+): string {
 	const evidence =
 		priorSuccesses > 0
 			? `This exact call already succeeded ${priorSuccesses} ${priorSuccesses === 1 ? "time" : "times"} this run, ` +
-				"and its result is already in the conversation above; calling it again returns the same text. "
+				`and its result is already in the conversation above${resultsMatched ? "; calling it again returns the same text" : ""}. `
 			: "";
 	return (
 		`loop detected: ${tool} was called ${repeatCount} times with identical arguments among this turn's recent ` +
@@ -685,8 +693,14 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const mutationEpochByTurn = new Map<string, number>();
 	/** Successful collect snapshots only; a lower pending count advances this call's repeat epoch. */
 	const monitorCollectProgress = new Map<string, { pendingCount: number; epoch: number }>();
-	/** Per turn and bash call: the repeat epoch a slow run or a changed result earned, and the last result seen (#445). */
-	const bashRepeatCredit = new Map<string, { epoch: number; lastResult: string | null }>();
+	/**
+	 * Per turn and call identity: the repeat epoch a changed result (or, for
+	 * bash, a slow run) earned, the last result seen, and whether that result
+	 * matched the one before it. A stateful tool such as an extension's
+	 * next_step returns a new answer to the same arguments, which is progress,
+	 * so only identical results count toward a repeat (#445, F-C13).
+	 */
+	const repeatCredit = new Map<string, { epoch: number; lastResult: string | null; repeatedResult: boolean }>();
 	/**
 	 * Turns whose tool use is locked to synthesis after reaching the block
 	 * budget. Key present means locked; the value carries the block that tripped
@@ -788,28 +802,37 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		);
 	};
 
-	const bashRepeatCreditKey = (turnKey: string, args: Readonly<Record<string, unknown>> | undefined): string =>
-		`${turnKey}\0${callIdentity(ToolNames.Bash, args as Record<string, unknown> | undefined)}`;
+	const repeatCreditKey = (turnKey: string, tool: string, args: Readonly<Record<string, unknown>> | undefined): string =>
+		`${turnKey}\0${callIdentity(tool, args as Record<string, unknown> | undefined)}`;
 
-	/** Grant the next repeat of this bash call a new epoch; true when it ran long enough to clear the stagnation streak too. */
-	const recordBashRepeatCredit = (input: MiddlewareHookInput): boolean => {
-		if (input.toolName !== ToolNames.Bash) return false;
-		const key = bashRepeatCreditKey(input.turnId ?? NO_TURN_BUCKET, input.toolArgs);
-		const previous = bashRepeatCredit.get(key);
+	/**
+	 * Grant the next repeat of this call a new epoch when its result changed, or
+	 * when a bash call ran long; true when the bash call ran long enough to clear
+	 * the stagnation streak too.
+	 */
+	const recordRepeatCredit = (input: MiddlewareHookInput): boolean => {
+		const tool = input.toolName;
+		if (typeof tool !== "string" || tool.length === 0) return false;
+		const key = repeatCreditKey(input.turnId ?? NO_TURN_BUCKET, tool, input.toolArgs);
+		const previous = repeatCredit.get(key);
 		const elapsedMs = input.toolResultDetails?.elapsedMs;
-		const ranLong = typeof elapsedMs === "number" && elapsedMs >= BASH_REPEAT_CREDIT_MS;
+		const ranLong = tool === ToolNames.Bash && typeof elapsedMs === "number" && elapsedMs >= BASH_REPEAT_CREDIT_MS;
 		const outcome = input.metadata?.outcomeFingerprint;
 		const lastResult = typeof outcome === "string" ? outcome : null;
 		const changed =
 			previous !== undefined && previous.lastResult !== null && lastResult !== null && previous.lastResult !== lastResult;
 		if (previous === undefined) {
-			while (bashRepeatCredit.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
-				const oldest = bashRepeatCredit.keys().next().value;
+			while (repeatCredit.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
+				const oldest = repeatCredit.keys().next().value;
 				if (typeof oldest !== "string") break;
-				bashRepeatCredit.delete(oldest);
+				repeatCredit.delete(oldest);
 			}
 		}
-		bashRepeatCredit.set(key, { epoch: (previous?.epoch ?? 0) + (ranLong || changed ? 1 : 0), lastResult });
+		repeatCredit.set(key, {
+			epoch: (previous?.epoch ?? 0) + (ranLong || changed ? 1 : 0),
+			lastResult,
+			repeatedResult: previous !== undefined && lastResult !== null && previous.lastResult === lastResult,
+		});
 		return ranLong;
 	};
 
@@ -1449,7 +1472,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				}
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
-				if (recordBashRepeatCredit(input)) stagnationByTurn.delete(turnKey);
+				if (recordRepeatCredit(input)) stagnationByTurn.delete(turnKey);
 				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input), ...readEofEffects(input)];
 				if (
 					options.toolBudgetAdvisory &&
@@ -1709,10 +1732,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					input.toolName === ToolNames.Monitor && input.toolArgs?.mode === "collect"
 						? (monitorCollectProgress.get(monitorCollectKey(turnKey, input.toolArgs))?.epoch ?? 0)
 						: null;
-				const creditEpoch =
-					input.toolName === ToolNames.Bash
-						? (bashRepeatCredit.get(bashRepeatCreditKey(turnKey, input.toolArgs))?.epoch ?? 0)
-						: 0;
+				const credit =
+					input.toolName !== undefined
+						? repeatCredit.get(repeatCreditKey(turnKey, input.toolName, input.toolArgs))
+						: undefined;
+				const creditEpoch = credit?.epoch ?? 0;
 				const repeatKey =
 					collectEpoch === null
 						? `${turnKey}|${epoch}|${creditEpoch}|${fingerprint}`
@@ -1726,7 +1750,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						turnKey,
 						tool,
 						verdict.count,
-						loopBlockBaseReason(tool, verdict.count, priorSuccesses, failedResults.get(fingerprint)),
+						loopBlockBaseReason(
+							tool,
+							verdict.count,
+							priorSuccesses,
+							failedResults.get(fingerprint),
+							credit?.repeatedResult === true,
+						),
 						now,
 						priorSuccesses > 0,
 					);

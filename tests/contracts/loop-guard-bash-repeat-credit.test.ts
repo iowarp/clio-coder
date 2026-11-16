@@ -10,7 +10,14 @@ import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
  * epoch, so a slow identical command no longer trips the loop guard. The turn
  * tool budget and the session cost ceiling still bound it.
  */
-function harness(budget?: { soft: number; hard: number }, turnBlockBudget = 2) {
+function harness(
+	budget?: { soft: number; hard: number },
+	turnBlockBudget = 2,
+	tool = {
+		name: "bash",
+		args: { command: "sleep 300; gh pr checks 42", timeout_ms: 600_000 } as Record<string, unknown>,
+	},
+) {
 	let loopState = createLoopState();
 	const safety = {
 		observeLoop(key: string, now: number) {
@@ -25,14 +32,14 @@ function harness(budget?: { soft: number; hard: number }, turnBlockBudget = 2) {
 		turnSynthesisLockout: true,
 		...(budget === undefined ? {} : { turnToolCallBudget: () => budget }),
 	});
-	const args = { command: "sleep 300; gh pr checks 42", timeout_ms: 600_000 };
+	const args = tool.args;
 	const reasons: string[] = [];
 	const call = (result: { elapsedMs: number; output: string; failed?: boolean }): boolean => {
-		const base = { turnId: "turn-1", toolName: "bash", toolArgs: args };
+		const base = { turnId: "turn-1", toolName: tool.name, toolArgs: args };
 		const before = guard.evaluate({
 			...base,
 			hook: "before_tool",
-			metadata: { callFingerprint: hashToolCall("bash", args) },
+			metadata: { callFingerprint: hashToolCall(tool.name, args) },
 		} as MiddlewareHookInput);
 		const block = before.find((effect) => effect.kind === "block_tool");
 		if (block !== undefined) {
@@ -108,6 +115,37 @@ describe("loop guard bash repeat credit (#445)", () => {
 		deepStrictEqual(
 			admitted(() => call({ elapsedMs: 300_000, output: "pending" }), 6),
 			[true, true, true, true, false, false],
+		);
+	});
+});
+
+describe("loop guard result credit for a stateful tool (F-C13)", () => {
+	const nextStep = { name: "extension_wtfp__next_step", args: {} };
+
+	it("admits identical-argument calls whose results differ", () => {
+		const { call } = harness(undefined, 2, nextStep);
+		ok(
+			admitted((index) => call({ elapsedMs: 10, output: `step ${index + 1}: draft section ${index + 1}` }), 6).every(
+				Boolean,
+			),
+		);
+	});
+
+	it("still blocks the third identical call when its results were identical, and says they matched", () => {
+		const { call, reasons } = harness(undefined, 2, nextStep);
+		deepStrictEqual(
+			admitted(() => call({ elapsedMs: 10, output: "step 4: review the outline" }), 3),
+			[true, true, false],
+		);
+		ok(/calling it again returns the same text/u.test(reasons[0] ?? ""), reasons[0]);
+	});
+
+	it("blocks once a changing tool settles on one result", () => {
+		const { call } = harness(undefined, 2, nextStep);
+		const outputs = ["step 1", "step 2", "done", "done", "done"];
+		deepStrictEqual(
+			admitted((index) => call({ elapsedMs: 10, output: outputs[index] ?? "done" }), 5),
+			[true, true, true, true, false],
 		);
 	});
 });
