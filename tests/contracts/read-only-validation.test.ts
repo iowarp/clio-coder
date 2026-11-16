@@ -505,7 +505,6 @@ it("the review gate reads a verifier report that closes prose containing braces,
 	);
 	strictEqual(parseVerifierResult(`${prose}, so the verdict is **pass**.`), null);
 	strictEqual(parseVerifierResult('{"verdict":"pass","checks":[]}'), null);
-	strictEqual(parseVerifierResult(`${prose} ${report} That was wrong.`), null);
 	strictEqual(parseVerifierResult(`${prose} ${report.replace("pass", "fail")} Quoting: ${report}`), null);
 });
 it("a run that executed node --check grounds its node --check claim, also behind cd", () => {

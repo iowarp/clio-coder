@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual, throws } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -259,8 +259,10 @@ it("seals a conforming report larger than the receipt floor without truncation, 
 		overflow.reason ?? "",
 		/result exceeded the sealed output bound of \d+ bytes and was truncated; keep summary within 16384 UTF-8 bytes/u,
 	);
-	// The same clipped text without the truncation fact is still just invalid JSON.
-	match(validate(clipped.text, MUTATION).reason ?? "", /valid JSON/u);
+	// The same clipped text without the truncation fact still fails, without the bound named.
+	const untold = validate(clipped.text, MUTATION);
+	strictEqual(untold.conformance, "fail");
+	doesNotMatch(untold.reason ?? "", /exceeded the sealed output bound/u);
 	// A truncated result fails even when its head parses as a complete report.
 	const parsable = validate(report("short"), MUTATION, true);
 	strictEqual(parsable.conformance, "fail");

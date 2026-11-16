@@ -53,6 +53,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 			agents: agents.contract,
 			getCwd: () => cwd,
 			io: { stdout() {}, stderr() {} },
+			chat: {},
 			chatPanel: { appendReplayBlock() {}, appendUser() {} },
 			requestRender() {},
 			reloadClasses: () => {
