@@ -1495,23 +1495,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				const restored = context.installMemoryRestoration(localRuntime);
 				if (!currentRun() || signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				// A tool hook changed a pinned block, or the guard's compaction dropped one: it rides the next request.
+				const pinned = context.appendPinnedContext(localRuntime);
 				// Preparation can be long (compaction). A message typed during it is
 				// handed over now so Pi's poll right after this hook takes it.
 				deps.queueHandOver?.afterPrepareNextTurn();
 				// Compaction owns any replacement snapshot. Without one, publish the
 				// already-accounted reminder through context, not message events that
 				// would manufacture a new operator turn and reset task authority.
-				return (
-					(!restored ? update : undefined) ??
-					(contextChanged || restored
-						? {
-								context: {
-									messages: [...localRuntime.agent.state.messages],
-									tools: [...localRuntime.agent.state.tools],
-								},
-							}
-						: undefined)
-				);
+				const messages = { messages: [...localRuntime.agent.state.messages], tools: [...localRuntime.agent.state.tools] };
+				if (!restored && update !== undefined) return pinned ? { ...update, context: messages } : update;
+				return contextChanged || restored || pinned ? { context: messages } : undefined;
 			} finally {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();

@@ -3202,6 +3202,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getTaskEstablished: taskEstablished,
 		visionSidecar,
 		getReadySkillCount,
+		pinnedContext: () => runtimeHooks.pinned(),
 		...(options.headless === undefined ? { getRouteSources: () => routeProvenance().active } : {}),
 		interactiveGuidance: !options.headless && !options.acp,
 		// Headless binds its single task's ceiling after template expansion (#423).

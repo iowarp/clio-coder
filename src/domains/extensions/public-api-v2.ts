@@ -238,7 +238,14 @@ export type ExtensionEffect =
 	| { kind: "request_continuation"; message: string; note?: string }
 	| { kind: "rewrite_tool_input"; args: Record<string, unknown>; reason: string }
 	| { kind: "rewrite_prompt"; text: string; reason: string }
-	| { kind: "block_prompt"; reason: string };
+	| { kind: "block_prompt"; reason: string }
+	/**
+	 * The extension's one pinned context block for the session, at most 8 KB
+	 * of UTF-8: durable state the model keeps in view through compaction. A
+	 * new value replaces the old one; empty text clears it. Workers never
+	 * receive it.
+	 */
+	| { kind: "pin_context"; text: string };
 
 export type ExtensionEffectKind = ExtensionEffect["kind"];
 

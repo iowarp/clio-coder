@@ -1,5 +1,6 @@
 import { validateInterview, validateInterviewStep } from "./interview-schema.js";
 import type { ExtensionRuntimeDeclarationV2, ExtensionSlot } from "./manifest-v2.js";
+import { PINNED_CONTEXT_MAX_BYTES } from "./pinned-context.js";
 import type { ExtensionStatus } from "./public-api.js";
 import type {
 	ExtensionEffect,
@@ -30,9 +31,14 @@ export type OutputOrigin = "command" | "action" | "observation" | "tool";
 const REGIONS: ReadonlyArray<WorkspaceRegion> = ["header", "board", "rail", "footer"];
 const TONES = ["neutral", "positive", "warning", "error"] as const;
 
-/** The middleware applies each effect at fixed points; one returned elsewhere would be dropped silently. */
+/**
+ * The middleware applies each effect at fixed points; one returned elsewhere would be dropped silently.
+ * `pin_context` applies where the extension's state moves: the operator's prompt, a tool call that ran, and the
+ * start of a turn. A before_tool pin would describe a call that may still be refused, and a turn_end pin reaches
+ * the model no sooner than the next turn_start, which can set it.
+ */
 const EFFECTS_AT: Record<ExtensionHookPoint, ReadonlyArray<ExtensionEffectKind>> = {
-	prompt_submit: ["rewrite_prompt", "block_prompt", "notify_operator"],
+	prompt_submit: ["rewrite_prompt", "block_prompt", "notify_operator", "pin_context"],
 	before_tool: [
 		"block_tool",
 		"annotate_tool_result",
@@ -41,8 +47,8 @@ const EFFECTS_AT: Record<ExtensionHookPoint, ReadonlyArray<ExtensionEffectKind>>
 		"lock_tools",
 		"rewrite_tool_input",
 	],
-	after_tool: ["annotate_tool_result", "protect_path", "require_tool", "lock_tools"],
-	turn_start: ["inject_reminder", "require_tool", "lock_tools", "notify_operator"],
+	after_tool: ["annotate_tool_result", "protect_path", "require_tool", "lock_tools", "pin_context"],
+	turn_start: ["inject_reminder", "require_tool", "lock_tools", "notify_operator", "pin_context"],
 	turn_end: ["inject_reminder", "request_continuation", "notify_operator"],
 };
 
@@ -288,6 +294,13 @@ function effect(
 				reason: text(raw.reason, `${what}.reason`, max),
 			};
 		}
+		case "pin_context": {
+			const raw = record(value, what, ["kind", "text"]);
+			if (typeof raw.text !== "string") throw new Error(`${what}.text must be text`);
+			if (Buffer.byteLength(raw.text) > PINNED_CONTEXT_MAX_BYTES)
+				throw new Error(`${what}.text exceeds the ${PINNED_CONTEXT_MAX_BYTES}-byte pinned context limit`);
+			return { kind: "pin_context", text: extensionPlainText(raw.text) };
+		}
 	}
 }
 
@@ -304,6 +317,9 @@ export function parseExtensionHookResult(
 		if (!Array.isArray(raw.effects) || raw.effects.length > RUNTIME_V2_LIMITS.effects)
 			throw new Error(`effects allows at most ${RUNTIME_V2_LIMITS.effects} entries`);
 		result.effects = raw.effects.map((entry, at) => effect(entry, at, point, declaration));
+		// One block per extension: two values in one answer would leave which one stands to effect order.
+		if (result.effects.filter((entry) => entry.kind === "pin_context").length > 1)
+			throw new Error("effects may set pin_context at most once");
 	}
 	if (raw.ui !== undefined) result.ui = ambient(record(raw.ui, "ui", AMBIENT_KEYS), declaration);
 	return result;
