@@ -13,6 +13,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 ### Changed
 
 - A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
+- B2: an extension hook's `require_tool` naming one of the package's own tools is refused unless the manifest promotes that tool, and the refusal names the `runtime.promote` entry to add. A requirement naming a builtin, an MCP tool or another package's tool behaves as before.
 
 ### Fixed
 

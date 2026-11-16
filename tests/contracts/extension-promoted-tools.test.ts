@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createExtensionsBundle } from "../../src/domains/extensions/extension.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
+import { parseExtensionHookResult } from "../../src/domains/extensions/runtime-output-v2.js";
 import {
 	capabilityEnvelope,
 	envelopeDigest,
@@ -21,6 +22,7 @@ import { applyToolRounds, type ToolRound } from "../../src/engine/provider-paylo
 import type { AgentTool, EngineModel } from "../../src/engine/types.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createExtensionReloadCoordinator } from "../../src/entry/extension-reload.js";
+import { buildExtensionRuntimeHooks } from "../../src/entry/extension-runtime-hooks.js";
 import { toolSignatureFromState } from "../../src/session-control/chat-loop-messages.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { buildExtensionRuntimeToolSpecs } from "../../src/tools/extension-runtime-tools.js";
@@ -75,6 +77,26 @@ test("runtime.promote names declared tools and is capped by count and by schema 
 			}),
 		/'wide' would attach \d+ bytes of description and input schema to every request; a promoted tool allows at most 2048/u,
 	);
+});
+
+test("a hook requires its own tool only when the manifest promotes it", () => {
+	const declaration = runtime({ promote: ["next_step"] });
+	const require = (toolName: string) =>
+		parseExtensionHookResult({ effects: [{ kind: "require_tool", toolName }] }, declaration, "turn_start", "desk");
+	deepStrictEqual(require("extension_desk__next_step").effects, [
+		{ kind: "require_tool", toolName: "extension_desk__next_step" },
+	]);
+	throws(
+		() => require("extension_desk__status"),
+		/effects\[0\]\.toolName extension_desk__status is not promoted, so no request can require it; list status under runtime\.promote/u,
+	);
+	throws(
+		() => require("next_step"),
+		/effects\[0\]\.toolName 'next_step' is this package's tool extension_desk__next_step; name it in full/u,
+	);
+	// Names outside the package stay the host's to judge, as before.
+	for (const outside of ["read", "extension_other__status", "mcp_files__list"])
+		deepStrictEqual(require(outside).effects, [{ kind: "require_tool", toolName: outside }]);
 });
 
 function writeRuntime(dir: string, id: string, runtimeBlock: Record<string, unknown>): string {
@@ -220,7 +242,13 @@ test("a promoted tool is attached under its one name, and a requirement pins the
 	const control = createMiddlewareToolChoiceControl();
 	const free = await wire(tools, []);
 	equal(free.tool_choice, undefined);
-	control.apply([{ kind: "require_tool", toolName: "extension_desk__next_step" }]);
+	const returned = parseExtensionHookResult(
+		{ effects: [{ kind: "require_tool", toolName: "extension_desk__next_step" }] },
+		packages[0]?.runtimeV2 ?? runtime({}),
+		"turn_start",
+		"desk",
+	);
+	control.apply((returned.effects ?? []).flatMap((effect) => (effect.kind === "require_tool" ? [effect] : [])));
 	const choice = control.current();
 	ok(choice.kind === "required");
 	const pinned = await wire(tools, [{ kind: "required", toolName: choice.toolName }]);
@@ -304,4 +332,34 @@ test("the promoted set follows the published generation: an unchanged reload kee
 	equal(coordinator.reload().status, "committed");
 	deepStrictEqual(attached(), ["extension_desk__next_step"]);
 	equal(signature(), booted, "the same promoted declarations serialize to the same bytes again");
+});
+
+test("a requirement for a promoted tool reaches the session's turn and never a dispatched worker's", async (t) => {
+	const env = await isolateClioEnv("clio-coder-promoted-worker-");
+	t.after(() => env.restore());
+	const cwd = path.join(env.dir, "workspace");
+	mkdirSync(cwd);
+	install(env.dir, cwd, "desk", {
+		tools: [tool("next_step")],
+		promote: ["next_step"],
+		hooks: [{ on: "after_tool", tools: ["write"], timeoutMs: 1000 }],
+	});
+	const bridge = createExtensionRuntimeHookBridge();
+	bridge.bind({
+		hook: async () => ({ kind: "ok", effects: [{ kind: "require_tool", toolName: "extension_desk__next_step" }] }),
+		notify: () => {},
+	});
+	const hooks = buildExtensionRuntimeHooks(listInstalledExtensions(cwd, { all: true }), bridge, {
+		generation: 1,
+		recordReceipt: () => {},
+	});
+	const [registration] = hooks.registrations;
+	const worker = hooks.workerEvaluators.get(registration?.id ?? "");
+	ok(registration?.evaluateAsync && worker);
+	const input = { hook: "after_tool" as const, toolName: "write", metadata: { resultKind: "ok" } };
+	deepStrictEqual(await registration.evaluateAsync(input), [
+		{ kind: "require_tool", toolName: "extension_desk__next_step" },
+	]);
+	// The worker runs in its own process with none of the session's runtime tools, so it is never asked for one.
+	deepStrictEqual(await worker(input), []);
 });

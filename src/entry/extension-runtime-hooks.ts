@@ -11,6 +11,7 @@ import {
 	type ExtensionToolHookLanding,
 	envelopeDigest,
 	extensionHookToolMatcher,
+	extensionToolName,
 	type InstalledExtension,
 	isLoadableExtension,
 	type LoadableExtension,
@@ -483,6 +484,11 @@ export function buildExtensionRuntimeHooks(
 		const access = entry.runtimeV2?.access ?? [];
 		const id = `extension:${entry.id}:${point}:${index}`;
 		const runner = createRuntimeHookRunner(entry, hook, point, id, digest, bridge, options);
+		// Runtime tools are served by the session's process alone, so a dispatched worker has none of them:
+		// requiring one for a worker's call would ask it for a tool it cannot reach (B2).
+		const sessionOnlyTools = new Set(
+			(entry.runtimeV2?.tools ?? []).map((tool) => extensionToolName(entry.id, tool.name)),
+		);
 		const evaluate = async (
 			input: MiddlewareHookInput,
 			origin: HookCallOrigin,
@@ -495,6 +501,7 @@ export function buildExtensionRuntimeHooks(
 				verdict.kind === "ok"
 					? verdict.effects.flatMap((effect) => {
 							const mapped = middlewareEffect(effect, entry.id);
+							if (origin === "worker" && mapped?.kind === "require_tool" && sessionOnlyTools.has(mapped.toolName)) return [];
 							return mapped === null ? [] : [mapped];
 						})
 					: verdict.policy === "block"

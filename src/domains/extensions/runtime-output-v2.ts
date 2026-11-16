@@ -1,3 +1,5 @@
+import { isBuiltinToolName, type ToolName } from "../../core/tool-names.js";
+import { extensionToolName } from "./command-schema.js";
 import { validateInterview, validateInterviewStep } from "./interview-schema.js";
 import type { ExtensionRuntimeDeclarationV2, ExtensionSlot } from "./manifest-v2.js";
 import type { ExtensionStatus } from "./public-api.js";
@@ -191,11 +193,39 @@ export function parseExtensionOutputV2(
 	return output;
 }
 
+/**
+ * A package requires its own tool only when the manifest promotes it (B2).
+ * Promotion is what puts the schema in the request, and only a tool in the
+ * request can be the provider's tool choice; an unpromoted one could be asked
+ * for in a reminder at best, which is not what a requirement says. Like a
+ * rewrite without its content access, the effect is refused, so the author
+ * sees it in `extensions test` and the operator in the hook's failure notice.
+ * A name outside the package (a builtin, an MCP tool) is the host's to judge.
+ */
+function requirableTool(
+	toolName: string,
+	what: string,
+	declaration: ExtensionRuntimeDeclarationV2,
+	extensionId: string,
+): void {
+	for (const tool of declaration.tools) {
+		const qualified = extensionToolName(extensionId, tool.name);
+		// A bare name that is also a builtin keeps meaning the builtin.
+		if (toolName === tool.name && !isBuiltinToolName(toolName as ToolName))
+			throw new Error(`${what} '${toolName}' is this package's tool ${qualified}; name it in full`);
+		if (toolName === qualified && declaration.promote?.includes(tool.name) !== true)
+			throw new Error(
+				`${what} ${qualified} is not promoted, so no request can require it; list ${tool.name} under runtime.promote`,
+			);
+	}
+}
+
 function effect(
 	value: unknown,
 	at: number,
 	point: ExtensionHookPoint,
 	declaration: ExtensionRuntimeDeclarationV2,
+	extensionId: string,
 ): ExtensionEffect {
 	const what = `effects[${at}]`;
 	const kind = (value as { kind?: unknown } | null)?.kind;
@@ -237,7 +267,9 @@ function effect(
 		}
 		case "require_tool": {
 			const raw = record(value, what, ["kind", "toolName"]);
-			return { kind: "require_tool", toolName: text(raw.toolName, `${what}.toolName`, 64) };
+			const toolName = text(raw.toolName, `${what}.toolName`, 64);
+			requirableTool(toolName, `${what}.toolName`, declaration, extensionId);
+			return { kind: "require_tool", toolName };
 		}
 		case "lock_tools":
 			record(value, what, ["kind"]);
@@ -295,6 +327,7 @@ export function parseExtensionHookResult(
 	value: unknown,
 	declaration: ExtensionRuntimeDeclarationV2,
 	point: ExtensionHookPoint,
+	extensionId: string,
 ): ExtensionHookResult {
 	if (value === null || value === undefined) return {};
 	bounded(value, "hook result", RUNTIME_V2_LIMITS.outputBytes);
@@ -303,7 +336,7 @@ export function parseExtensionHookResult(
 	if (raw.effects !== undefined) {
 		if (!Array.isArray(raw.effects) || raw.effects.length > RUNTIME_V2_LIMITS.effects)
 			throw new Error(`effects allows at most ${RUNTIME_V2_LIMITS.effects} entries`);
-		result.effects = raw.effects.map((entry, at) => effect(entry, at, point, declaration));
+		result.effects = raw.effects.map((entry, at) => effect(entry, at, point, declaration, extensionId));
 	}
 	if (raw.ui !== undefined) result.ui = ambient(record(raw.ui, "ui", AMBIENT_KEYS), declaration);
 	return result;
