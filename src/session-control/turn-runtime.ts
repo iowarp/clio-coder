@@ -73,8 +73,8 @@ import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import type { CacheKeepaliveReply, CacheKeepaliveRequest } from "../engine/cache-keepalive.js";
 import {
 	type DeclaredToolEffect,
-	lockedSynthesisSystemPrompt,
 	sanitizeLockedSynthesisMessage,
+	withLockedSynthesisDirective,
 } from "../engine/loop-guard.js";
 import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
@@ -363,6 +363,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
 	/** What this session's requests stubbed; a rebuilt agent keeps it, another session id starts it over. */
 	const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
+	// The window checks price the same aged request; only `transformContext` below commits a batch.
+	context.bindObservationAging(observationAging);
+	/** A text-only round: the synthesis lock, or a middleware tool lock until the next submitted turn. */
+	const lockedRound = (): boolean => Boolean(state.synthesisToolLock) || middlewareToolChoice.current().kind === "none";
 
 	/**
 	 * Authoritative admission outcome per call, keyed by the engine's
@@ -1105,11 +1109,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								await request.options?.onResponse?.(...args);
 							},
 						};
-						let sent = request.context;
-						if (state.synthesisToolLock || (middlewareChoice.kind === "none" && request.options?.toolChoice === "auto")) {
-							const resolved = resolvedRequestContext(request.context);
-							sent = { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") };
-						}
+						// Every attempt of a locked round carries the same tail directive; the prompt prefix never changes.
+						const sent = lockedRound() ? withLockedSynthesisDirective(request.context) : request.context;
 						if (attempt) {
 							attemptRequest = {
 								model: currentModel,
@@ -1231,9 +1232,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				const view = context.refreshLiveBudget();
 				const resolved = resolvedRequestContext(request);
-				const actual = state.synthesisToolLock
-					? { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") }
-					: request;
+				const actual = lockedRound() ? withLockedSynthesisDirective(request) : request;
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))

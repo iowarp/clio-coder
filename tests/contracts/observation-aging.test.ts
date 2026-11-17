@@ -116,6 +116,36 @@ it("superseded results wait below the threshold, stub in one batch past it, stay
 	strictEqual(text(later.messages[13]), body(small, "fifth"));
 });
 
+it("a repeat that delivered less than the earlier read supersedes nothing (Astra r1-3)", () => {
+	const read = (id: string, output: string, shownCount: number, truncated: boolean): AgentMessage =>
+		({
+			...(result(id, "read", output) as object),
+			details: { observation: { tool: "read", unit: "lines", shownCount, shownBytes: output.length, truncated } },
+		}) as unknown as AgentMessage;
+	const args = { path: "big.ts" };
+	const whole = body(40_000, "whole");
+	const messages: AgentMessage[] = [
+		call("a", "read", args),
+		read("a", whole, 800, false),
+		// The pool is exhausted: an ok notice that shows nothing.
+		call("b", "read", args),
+		read("b", "[observation budget exhausted for this turn before read reading big.ts]", 0, true),
+		// A budget-clipped repeat shows fewer bytes than the first read did.
+		call("c", "read", args),
+		read("c", body(10_000, "clipped"), 200, true),
+	];
+	const kept = ageObservations(messages, new Set(), declared, 1);
+	strictEqual(kept.batch, null);
+	deepStrictEqual(kept.messages, messages);
+	// A complete repeat supersedes all three; the notice is shorter than a stub and stays.
+	messages.push(call("d", "read", args), read("d", whole, 800, false));
+	const aged = ageObservations(messages, new Set(), declared, 1);
+	strictEqual(aged.batch?.results, 2);
+	ok(text(aged.messages[1]).startsWith("[observation aged] read "));
+	ok(text(aged.messages[5]).startsWith("[observation aged] read "));
+	strictEqual(text(aged.messages[7]), whole);
+});
+
 it("the gate admits small or uncached routes only; a cached frontier route is untouched", () => {
 	ok(observationAgingApplies({ modelTier: "small", promptCaching: true }));
 	ok(observationAgingApplies({ modelTier: "frontier", promptCaching: false }));
@@ -149,7 +179,14 @@ function transport() {
 		const encoder = new TextEncoder();
 		const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) =>
 			encoder.encode(
-				`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+				`data: ${JSON.stringify({
+					id: "fixture",
+					object: "chat.completion.chunk",
+					model: model.id,
+					choices: [{ index: 0, delta, finish_reason }],
+					// A provider count anchors the live budget, as a real route's usage does.
+					...(finish_reason ? { usage: { prompt_tokens: 3000 + 10_000 * call, completion_tokens: 20 } } : {}),
+				})}\n\n`,
 			);
 		const tool = call <= 2;
 		const stream = new ReadableStream<Uint8Array>({
@@ -185,6 +222,8 @@ async function drive(retention: "none" | undefined): Promise<{
 	requests: AgentMessage[][];
 	events: ChatLoopEvent[];
 	ledger: string;
+	/** The published next-request input at each send, after the post-tool guard and admission. */
+	published: Array<number | null>;
 }> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -212,6 +251,7 @@ async function drive(retention: "none" | undefined): Promise<{
 	});
 	const wire = transport();
 	const events: ChatLoopEvent[] = [];
+	const published: Array<number | null> = [];
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
@@ -224,6 +264,7 @@ async function drive(retention: "none" | undefined): Promise<{
 				...options,
 				streamFn: (requestModel, requestContext, requestOptions) => {
 					wire.requests.push(structuredClone(requestContext.messages) as AgentMessage[]);
+					published.push(loop.contextUsage().tokens);
 					return openAICompletionsApiProvider.streamSimple(requestModel as Model<"openai-completions">, requestContext, {
 						...requestOptions,
 						apiKey: "fixture",
@@ -238,7 +279,7 @@ async function drive(retention: "none" | undefined): Promise<{
 	try {
 		await loop.submit("Read the record twice.");
 		await loop.whenSettled();
-		return { requests: wire.requests, events, ledger: JSON.stringify(session.readEntries()) };
+		return { requests: wire.requests, events, ledger: JSON.stringify(session.readEntries()), published };
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();
@@ -276,4 +317,9 @@ it("an uncached route's request stubs the superseded read while the ledger keeps
 	const cached = await drive(undefined);
 	strictEqual(cached.requests.length, 3);
 	deepStrictEqual(toolResults(cached.requests[2]), [RECORD, RECORD]);
+	// Astra r1-5: the window checks price the request the provider receives. The aged route's third request is
+	// about one 40 KB read (10K tokens) smaller, and so is its published budget; the requests before it agree.
+	deepStrictEqual(uncached.published.slice(0, 2), cached.published.slice(0, 2));
+	const [agedTokens, wholeTokens] = [uncached.published[2] ?? 0, cached.published[2] ?? 0];
+	ok(wholeTokens - agedTokens > 9_000 && wholeTokens - agedTokens < 10_500, `${agedTokens} vs ${wholeTokens}`);
 });

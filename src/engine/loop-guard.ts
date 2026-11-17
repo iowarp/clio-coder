@@ -25,6 +25,7 @@ import {
 } from "../core/guardrails.js";
 import { markHostAuthored } from "../core/message-accounting.js";
 import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
+import { systemReminderBlock, TOOL_RESULT_NOTES_SEPARATOR, toolResultNote } from "../core/reminder-framing.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -355,14 +356,58 @@ export function isLockedSynthesisFallbackOnly(message: AgentMessage | undefined)
 
 export const LOCKED_SYNTHESIS_REPROMPT_TOOL = "clio_synthesis_reprompt";
 
+const LOCKED_SYNTHESIS_PHASE = "Current execution phase: final synthesis";
+const LOCKED_SYNTHESIS_DIRECTIVE =
+	"Tools are disabled for the rest of this run. Earlier instructions to use tools apply only to the completed tool phase. Do not emit tool calls or tool-call markup. Return the final result now using the evidence already observed; preserve all safety rules and the required result format. Do not invent missing evidence.";
+
 /** Preserve the task and safety contract while retiring the earlier tool-use phase. */
 export function lockedSynthesisSystemPrompt(systemPrompt: string, requiredResult?: string): string {
 	return [
 		systemPrompt,
-		"# Current execution phase: final synthesis",
-		"Tools are disabled for the rest of this run. Earlier instructions to use tools apply only to the completed tool phase. Do not emit tool calls or tool-call markup. Return the final result now using the evidence already observed; preserve all safety rules and the required result format. Do not invent missing evidence.",
+		`# ${LOCKED_SYNTHESIS_PHASE}`,
+		LOCKED_SYNTHESIS_DIRECTIVE,
 		...(requiredResult ? [`Required terminal result: ${requiredResult}`] : []),
 	].join("\n\n");
+}
+
+type RequestMessage = { role: string; content?: unknown; timestamp?: unknown };
+
+/**
+ * The main loop's locked round: the synthesis directive rides the tail of the
+ * outgoing copy, so the system prompt and every earlier message keep the bytes
+ * an unlocked round sends and a prefix cache survives entering and leaving the
+ * round. A trailing tool result, the usual last message after a tool batch,
+ * gets it as a host note; a trailing user message gets a `<system-reminder>`
+ * block; anything else gets a reminder user message at the end. The copy is
+ * request-only and the same on every attempt; the caller never persists it.
+ */
+export function withLockedSynthesisDirective<C extends { messages: ReadonlyArray<unknown> }>(context: C): C {
+	const directive = `${LOCKED_SYNTHESIS_PHASE}. ${LOCKED_SYNTHESIS_DIRECTIVE}`;
+	const messages = [...context.messages] as RequestMessage[];
+	let index = messages.length - 1;
+	while (index >= 0 && messages[index]?.role === "system") index -= 1;
+	const last = messages[index];
+	if (last?.role === "toolResult") {
+		const note = toolResultNote("warn", directive);
+		const content = Array.isArray(last.content) ? [...(last.content as Array<{ type?: unknown; text?: unknown }>)] : [];
+		const tail = content.at(-1);
+		if (tail?.type === "text" && typeof tail.text === "string")
+			content[content.length - 1] = { ...tail, text: `${tail.text}${TOOL_RESULT_NOTES_SEPARATOR}${note}` };
+		else content.push({ type: "text", text: note });
+		messages[index] = { ...last, content };
+	} else if (last?.role === "user") {
+		const block = systemReminderBlock([directive]);
+		messages[index] = {
+			...last,
+			content:
+				typeof last.content === "string"
+					? `${last.content}\n\n${block}`
+					: [...(Array.isArray(last.content) ? last.content : []), { type: "text", text: block }],
+		};
+	} else {
+		messages.push({ role: "user", content: systemReminderBlock([directive]), timestamp: last?.timestamp ?? 0 });
+	}
+	return { ...context, messages };
 }
 
 /**
