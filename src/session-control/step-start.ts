@@ -23,56 +23,87 @@ export function compactStepStartDue(route: StepStartRoute): boolean {
 	return route.modelTier === "small" || route.promptCaching === false;
 }
 
+/** Where the session stands: its id and the leaf turn of its active branch. */
+export interface StepPosition {
+	sessionId: string | null;
+	leafTurnId: string | null;
+}
+
 interface StepChain {
+	/** The session the chain began in; a step from another session never reads it. */
+	sessionId: string | null;
 	template: string;
 	stepTool: string;
 	/** The expanded template text of the operator turn that started the chain. */
 	body: string;
 	/** The last settled step turn's final text; absent until one settles cleanly. */
 	finalText?: string;
+	/** The leaf the settled step turn left; the next step's lead requires the session to stand on it still. */
+	settledLeaf?: string;
 }
 
 export interface StepStartTracker {
 	/**
 	 * A step turn is starting. Returns the checkpoint lead when this turn
-	 * follows a settled step turn of the same template and step tool, and null
-	 * otherwise. A continuation reuses the chain's template body; an operator
-	 * turn's own text is the body, so its lead leaves the body out.
+	 * follows a settled step turn of the same template and step tool, in the
+	 * same session, whose leaf is still the session's leaf, and null otherwise.
+	 * A continuation reuses the chain's template body; an operator turn's own
+	 * text is the body, so its lead leaves the body out.
 	 */
-	begin(constraints: TurnConstraints | undefined, text: string, continuation: boolean): string | null;
-	/** The turn settled: keep its final text for the next step, or drop the chain when it ended badly. */
-	settle(constraints: TurnConstraints | undefined, finalText: string, clean: boolean): void;
+	begin(
+		constraints: TurnConstraints | undefined,
+		text: string,
+		continuation: boolean,
+		position: StepPosition,
+	): string | null;
+	/** The turn settled: keep its final text and leaf for the next step, or drop the chain when it ended badly. */
+	settle(constraints: TurnConstraints | undefined, finalText: string, clean: boolean, position: StepPosition): void;
+	/** The session changed or navigated: no later step continues this chain. */
+	reset(): void;
 }
 
 export function createStepStartTracker(): StepStartTracker {
 	let chain: StepChain | null = null;
 	return {
-		begin(constraints, text, continuation) {
+		begin(constraints, text, continuation, position) {
 			const policy = constraints?.turnPolicy;
 			if (policy === undefined) {
 				chain = null;
 				return null;
 			}
 			const template = policy.template ?? "";
-			const same = chain !== null && chain.template === template && chain.stepTool === policy.stepTool;
+			const same =
+				chain !== null &&
+				chain.sessionId === position.sessionId &&
+				chain.template === template &&
+				chain.stepTool === policy.stepTool;
 			const previous = same ? chain : null;
 			const body = continuation && previous !== null ? previous.body : text;
-			chain = { template, stepTool: policy.stepTool, body };
-			if (previous?.finalText === undefined) return null;
+			chain = { sessionId: position.sessionId, template, stepTool: policy.stepTool, body };
+			if (previous?.finalText === undefined || previous.settledLeaf !== position.leafTurnId) return null;
 			return stepCheckpointLead(template, policy.stepTool, previous.finalText, continuation ? body : null);
 		},
-		settle(constraints, finalText, clean) {
+		settle(constraints, finalText, clean, position) {
 			const policy = constraints?.turnPolicy;
-			if (chain === null || policy === undefined || chain.stepTool !== policy.stepTool) {
+			if (
+				chain === null ||
+				policy === undefined ||
+				chain.stepTool !== policy.stepTool ||
+				chain.sessionId !== position.sessionId
+			) {
 				chain = null;
 				return;
 			}
 			const summary = finalText.trim();
-			if (!clean || summary.length === 0) {
+			if (!clean || summary.length === 0 || position.leafTurnId === null) {
 				chain = null;
 				return;
 			}
 			chain.finalText = summary;
+			chain.settledLeaf = position.leafTurnId;
+		},
+		reset() {
+			chain = null;
 		},
 	};
 }

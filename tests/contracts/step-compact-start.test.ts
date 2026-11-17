@@ -10,6 +10,7 @@ import type { SessionContract, TurnInput } from "../../src/domains/session/contr
 import { type SessionEntry, SKILL_CONTEXT_STATE } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
+import { createStepStartTracker } from "../../src/session-control/step-start.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -384,5 +385,30 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		} finally {
 			await run.close();
 		}
+	});
+
+	it("a settled step leads only the same session standing on the settled leaf", () => {
+		const constraints = { turnPolicy: { mode: "step" as const, stepTool: STEP, template: "wtfp:advance" } };
+		const a = { sessionId: "session-a", leafTurnId: "a-leaf" };
+		const settled = () => {
+			const tracker = createStepStartTracker();
+			strictEqual(tracker.begin(constraints, BODY, false, { ...a, leafTurnId: "a-start" }), null);
+			tracker.settle(constraints, "Session A finished the paper.", true, a);
+			return tracker;
+		};
+		ok(settled().begin(constraints, BODY, true, a)?.includes("Session A finished the paper."));
+		// A resumed session B invoking the same template never takes A's summary as its checkpoint lead.
+		strictEqual(settled().begin(constraints, BODY, false, { sessionId: "session-b", leafTurnId: "a-leaf" }), null);
+		// A tree navigation inside A left the settled leaf.
+		strictEqual(settled().begin(constraints, BODY, false, { ...a, leafTurnId: "a-sibling" }), null);
+		const reset = settled();
+		reset.reset();
+		strictEqual(reset.begin(constraints, BODY, true, a), null);
+		// A late settlement from session A does not arm the chain session B began.
+		const late = createStepStartTracker();
+		late.begin(constraints, BODY, false, { sessionId: "session-b", leafTurnId: "b-leaf" });
+		late.settle(constraints, "Session A finished the paper.", true, a);
+		strictEqual(late.begin(constraints, BODY, true, a), null);
+		strictEqual(late.begin(constraints, BODY, true, { sessionId: "session-b", leafTurnId: "b-leaf" }), null);
 	});
 });
