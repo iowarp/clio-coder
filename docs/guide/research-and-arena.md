@@ -254,6 +254,54 @@ answers, diffs and check output, a vote panel, and standings. See [Graphical app
 The Research page browses a project's campaigns with their iteration timeline, regrades one, and starts or stops a
 campaign, one per project at a time. See [Graphical application](gui.md#research-page).
 
+## Model campaigns
+
+`clio-coder campaign run` answers a third question: how does one seeded project, driven the same way, go on each of
+several models? It is built for extension-driven pipelines that put gates to the author, and it is unrelated to the
+research campaigns above.
+
+```bash
+clio-coder campaign run --fixture ./fixtures/brownfield --roster roster.yaml --answers answers.yaml \
+  --prompt "/wtfp:advance" --out ./campaign-out --timeout 1800 --probe wtfp:status
+```
+
+```yaml
+roster:
+  - target: openai-codex
+    model: gpt-6-luna
+    thinking: high          # optional, the entry's --thinking
+    label: luna-high        # optional, defaults to <target>/<model>[@<thinking>]
+  - target: lab
+    model: qwen3-32b
+```
+
+The roster is a mapping with one key, `roster`, a non-empty list of entries with `target`, `model`, an optional
+`thinking` level and an optional `label`. Labels name each entry's rows and directory, so they must be unique: at most
+80 letters, digits and `. _ @ / : + -`, starting with a letter or digit. The answers file is a
+[`run --answers`](commands-and-modes.md#script-the-author-with---answers) file. Both are validated before anything
+starts, and so is `--out`, which must be absent or empty and must not lie inside the fixture.
+
+Entries run one at a time. Each gets a fresh copy of the fixture under `<out>/<NN>-<label>/project` and its own empty
+CLIO Coder data, state and cache under `<out>/<NN>-<label>/home`, so entries share no sessions or memory. `<NN>` is the entry's position from `01`, and the label's characters other than
+letters, digits, `.`, `_` and `-` become `-` in the directory name. Each uses
+your config directory as it is (targets, credentials, installed extensions and MCP configuration), the way your own
+`clio-coder run` would: nothing secret is copied under `--out`, and a login an entry refreshes is saved to your
+credential store. Each entry's environment is filtered the way an arena contender's is (see [Limits](#limits)). The
+entry runs headless `clio-coder run --cwd <copy> --target <target> --model <model> --answers <file>`, with
+`--thinking`, `--timeout` and `--autonomy yolo` when given, and its output goes to `run.stdout.log` and
+`run.stderr.log` beside the copy. `--autonomy yolo` is contained yolo only. `--probe <extension>:<command>` then runs
+`clio-coder extensions run <extension> <command> --json` in the copy and records its result as the desk's final
+status.
+
+The report gives, per entry, its status, exit code, the extension gates reached (the checkpoint ids its interviews
+put to the author), extension refusals (hook `block_tool` effects and refused extension tool calls), loop-guard
+blocks, input tokens with their fresh and cached parts, output tokens, wall time and the probe's first line. Gates and
+refusals come from the entry's session ledger and journal, and tokens from the provider-measured totals that
+`clio-coder telemetry tokens` reads. The status is `completed` (exit 0), `unscripted` (exit 5, a question the answers
+file does not script), `timed-out`, `failed` (any other exit), `canceled`, or `error` when the entry could not be set up
+or launched. A failing entry is reported and the campaign continues. `--json` prints the whole campaign, and each
+entry also writes `<out>/<NN>-<label>/entry.json`.
+
 ## Where things are stored
 
 | What | Where |
@@ -263,6 +311,7 @@ campaign, one per project at a time. See [Graphical application](gui.md#research
 | Research results | The branch `clio/research/<id>` |
 | Arena matches | `.clio-coder/arena/<match-id>/`: `match.json`, each contender's `contender-N.ndjson` stream and `contender-N.diff`, and `vote.json` |
 | Arena vote journal | `.clio-coder/arena/votes.jsonl`, every vote including replaced ones |
+| Model campaigns | The `--out` directory you name: per entry `<NN>-<label>/` holds `project/`, `home/`, `run.stdout.log`, `run.stderr.log` and `entry.json` |
 
 The full list is in [Artifact placement](../architecture/artifact-placement.md).
 
@@ -294,6 +343,8 @@ The full list is in [Artifact placement](../architecture/artifact-placement.md).
 | `research report` | Every regrade agrees with the journal | A regrade disagrees, or the campaign is missing | Usage | |
 | `arena run` | Every contender finished | The match failed | Usage | 130 SIGINT, 143 SIGTERM, 129 SIGHUP |
 | `arena show`, `vote` | Done | Unknown match, reveal before a vote, or a second vote without `--replace` | Usage | |
+| `campaign run` | Every entry was run, whatever its status | The campaign itself failed | Usage, including an invalid roster or answers file | The signal's exit code |
 
 Implementation: [research](../../src/domains/research/index.ts), [arena](../../src/domains/arena/index.ts),
-[research CLI](../../src/cli/research.ts) and [arena CLI](../../src/cli/arena.ts).
+[campaign](../../src/domains/campaign/index.ts), [research CLI](../../src/cli/research.ts), [arena CLI](../../src/cli/arena.ts)
+and [campaign CLI](../../src/cli/campaign.ts).
