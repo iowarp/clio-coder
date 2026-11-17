@@ -591,9 +591,9 @@ export function envelopeGrowth(approved: ExtensionCapabilityEnvelope, next: Exte
 	for (const tool of next.tools) {
 		const prior = approved.tools.find((entry) => entry.name === tool.name);
 		if (!prior) growth.push(`new tool: ${tool.name} (${tool.actionClass})`);
-		// A read tool skips the approval an execute tool gets, so that direction is the wider one.
-		else if (prior.actionClass === "execute" && tool.actionClass === "read")
-			growth.push(`tool ${tool.name} now claims to be read-only`);
+		// Each class meets a different admission rule, so no direction of a change is narrower in every policy.
+		else if (prior.actionClass !== tool.actionClass)
+			growth.push(`tool ${tool.name} is now ${tool.actionClass} (approved ${prior.actionClass})`);
 	}
 	// Every request then carries these schemas, so the operator's token budget is what grows.
 	push("attaches tool schemas to every request", added(approved.promote ?? [], next.promote ?? []));

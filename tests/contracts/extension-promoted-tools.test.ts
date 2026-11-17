@@ -79,6 +79,23 @@ test("runtime.promote names declared tools and is capped by count and by schema 
 	);
 });
 
+test("a reload that reclassifies an approved tool asks again and names both classes", () => {
+	// Astra r6-2: only execute to read used to count, so execute to write reloaded without a consent ask.
+	const writer = (actionClass: string) =>
+		capabilityEnvelope(
+			parseExtensionRuntimeV2({
+				api: 2,
+				entrypoint: "extension.mjs",
+				tools: [{ ...tool("gate"), actionClass }],
+				permissions: { fs: { write: ["out"] } },
+			}),
+		);
+	notEqual(envelopeDigest(writer("execute")), envelopeDigest(writer("write")));
+	deepStrictEqual(envelopeGrowth(writer("execute"), writer("write")), ["tool gate is now write (approved execute)"]);
+	deepStrictEqual(envelopeGrowth(writer("write"), writer("execute")), ["tool gate is now execute (approved write)"]);
+	deepStrictEqual(envelopeGrowth(capabilityEnvelope(runtime({})), capabilityEnvelope(runtime({}))), []);
+});
+
 test("a hook requires its own tool only when the manifest promotes it", () => {
 	const declaration = runtime({ promote: ["next_step"] });
 	const require = (toolName: string) =>
