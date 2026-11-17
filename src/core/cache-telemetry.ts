@@ -74,6 +74,8 @@ export type CacheBreakCause =
 	| "input_changed"
 	| "compaction"
 	| "working_set_evict"
+	/** An observation-aging batch stubbed superseded tool results earlier in the request (WTF-P 0.8.3 C3). */
+	| "observation_aging"
 	| "model_changed"
 	| "transport_reset"
 	| "idle_expiry"
@@ -154,6 +156,7 @@ export function buildCacheCallObservation(
 		prompt_recompiled: "prompt_recompiled",
 		compaction: "compaction",
 		working_set_evict: "working_set_evict",
+		observation_aging: "observation_aging",
 	};
 	const expected = previous?.inclusiveInputTokens ?? null;
 	const read = usage.cacheRead;

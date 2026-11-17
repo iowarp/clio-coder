@@ -297,3 +297,22 @@ export function createLedgerTool(deps: LedgerToolDeps): ToolSpec {
 		},
 	};
 }
+
+/**
+ * The ledger as a session with no dispatch board has it: `detail` alone, so an extension result's `detail_ref`
+ * stays readable where no coordination board exists (WTF-P 0.8.3 C3).
+ */
+export function createDetailLedgerTool(): ToolSpec {
+	const full = createLedgerTool({});
+	return {
+		...full,
+		description:
+			"Returns the full result a compact tool result stored under its detail_ref, paged by offset. " +
+			"This session has no dispatch board, so detail is the only action.",
+		parameters: Type.Object({
+			action: StringEnum(["detail"] as const, { description: "detail (the default when ref is given)." }),
+			ref: Type.String({ description: "A tool result's detail_ref, e.g. xd_0123456789abcdef." }),
+			offset: Type.Optional(Type.Number({ description: "Byte offset of the page to return." })),
+		}),
+	};
+}

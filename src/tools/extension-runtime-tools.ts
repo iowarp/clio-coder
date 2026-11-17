@@ -1,13 +1,15 @@
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
-import type { DynamicToolName } from "../core/tool-names.js";
+import { type DynamicToolName, ToolNames } from "../core/tool-names.js";
 import { extensionIdentity } from "../domains/extensions/activity.js";
 import { extensionToolName } from "../domains/extensions/command-schema.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import { RUNTIME_V2_LIMITS } from "../domains/extensions/runtime-schema-v2.js";
 import { type InstalledExtension, isLoadableExtension } from "../domains/extensions/types.js";
 import { storeToolDetail } from "../domains/session/tool-details.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import { builtin } from "./builtin-tool-catalog.js";
+import { createDetailLedgerTool } from "./ledger.js";
+import type { ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
 
 /** What a tool returns to the model is bounded like a command tool's output. */
 const RUNTIME_TOOL_OUTPUT_BYTES = 256 * 1024;
@@ -41,6 +43,23 @@ function compactResult(
 		output: `${summary}\ndetail_ref: ${ref} (${bytes} bytes; read it with ledger action="detail" ref="${ref}")`,
 		details: { detailRef: ref, detailBytes: bytes },
 	};
+}
+
+/**
+ * A summary's `detail_ref` is read through `ledger(action="detail")`, which a session registers only beside dispatch.
+ * Once a generation serves a runtime tool, a session without a ledger gets the detail-only one behind the gateway
+ * (WTF-P 0.8.3 C3). Gateway placement with no startup prompt entry adds no schema or prompt byte to any request, so
+ * the session's tool signature is the same with or without it, and it stays across reloads so a ref an earlier
+ * generation produced stays readable.
+ */
+export function ensureDetailLedger(registry: Pick<ToolRegistry, "get" | "register">): void {
+	if (registry.get(ToolNames.Ledger)) return;
+	const ledger = builtin(createDetailLedgerTool(), { path: "src/tools/ledger.ts", scope: "core" });
+	registry.register({
+		...ledger,
+		placement: "gateway",
+		...(ledger.metadata ? { metadata: { ...ledger.metadata, startupPrompt: false } } : {}),
+	});
 }
 
 /**

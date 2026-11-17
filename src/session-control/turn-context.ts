@@ -814,6 +814,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// dispatch traffic, and compaction retain the local-native disturbance gate.
 	const TIER_INDEPENDENT_COLD_REASONS: ReadonlySet<ExpectedColdReason> = new Set([
 		"working_set_evict",
+		"observation_aging",
 		"thinking_change",
 		"model_changed",
 		"input_changed",

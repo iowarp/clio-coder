@@ -128,7 +128,14 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		...keep("disposition", "usage", "pricing", "stages", "transport", "interruptedEstimate", "billing"),
 		responseId: "id",
 		cache: {
-			...keep("expectedColdReasons", "rePrefilledTokens", "uncachedPrefillTokens", "verdict", "bill"),
+			...keep(
+				"expectedColdReasons",
+				"observationAgingBytes",
+				"rePrefilledTokens",
+				"uncachedPrefillTokens",
+				"verdict",
+				"bill",
+			),
 			// Digests of the request's text: a short message could be guessed from its digest.
 			structure: "drop",
 			firstDivergentSection: fact("token"),
