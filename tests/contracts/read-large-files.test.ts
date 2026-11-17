@@ -504,6 +504,18 @@ describe("read windowed reader", () => {
 		strictEqual((second.details?.observation as Observation).totalCount, null);
 	});
 
+	it("charges parallel reads to the turn pool before any of them awaits", async () => {
+		configureGuardrails({ readMaxBytes: 4096, observationTurnBudgetBytes: 8192 });
+		const paths = ["a", "b", "c", "d"].map((name) => join(scratch.dir, `${name}.txt`));
+		for (const path of paths) writeFileSync(path, Array.from({ length: 400 }, (_, i) => fixedLine(i + 1, 64)).join(""));
+		const options = { sessionId: "read-parallel", turnId: scratch.dir };
+		const results = await Promise.all(paths.map((path) => readTool.run({ path }, options)));
+		// Each sibling used to reserve against the untouched pool across its stat
+		// and return a full 4 KiB slice, spending the 8 KiB pool twice over.
+		const exhausted = results.map((result) => result.kind === "ok" && result.output.startsWith("[observation budget"));
+		deepStrictEqual(exhausted, [false, false, true, true]);
+	});
+
 	it("reports a file that changes in flight with both identities and a notice", async () => {
 		const path = join(scratch.dir, "inflight.log");
 		writeFileSync(path, Array.from({ length: 6 }, (_, i) => `row ${i + 1}\n`).join(""));
