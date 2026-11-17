@@ -211,6 +211,32 @@ summary and the operator starts the next step. A gateway call to the step tool
 counts as a call to it. A malformed policy, a bare `turnPolicy: step` included,
 makes the template unavailable.
 
+`when` scopes the policy to the routes where it pays off. It lists one or more
+of the [model tiers](configuration-and-targets.md#model-tiers) `small`,
+`standard` and `frontier`, plus `uncached` for a route that does not cache
+prompts:
+
+```yaml
+turnPolicy:
+  mode: step
+  stepTool: extension_wtfp__next_step
+  when: [small, uncached]
+```
+
+The policy applies to a turn when any token matches the session's chat route at
+that turn's start, using the tier a `models.<id>.tier` setting pins. On any
+other route the turn runs with no step policy at all: the step tool is not
+refused, tools never lock to a text-only round, no step continuation follows,
+and no step checkpoint is written. CLIO Coder judges the route again at every
+turn the template starts, yolo step continuations included, so a model switch
+takes effect on the next turn. The turn's scope reminder says whether the
+policy applies on the current route; the system prompt and tool schemas stay
+the same either way. Without `when` the policy applies on every route. The list
+must be non-empty, with each known token named once; anything else makes the
+template unavailable. On a cached `standard` or `frontier` route the full
+history is kept anyway, so scoping the policy to `[small, uncached]` lets those
+routes chain steps in one turn instead of stopping for a re-prompt after each.
+
 On a route whose model tier is `small`, or that does not cache prompts
 ([model tiers](configuration-and-targets.md#model-tiers)), each step turn after
 the first starts from a compact state instead of the full history. Before the

@@ -84,6 +84,15 @@ separately declared tick. Ticks coalesce while the runtime is busy.
 `turnPolicy: step` turn starts from on a small or uncached route, so a handler
 that rebuilds state after compaction can branch on it.
 
+A prompt template's `turnPolicy: {mode: step, stepTool: <tool>}` ends each turn
+after one step of its step tool. Add `when` to apply it only on some routes,
+for example `when: [small, uncached]`. Tokens are the model tiers `small`,
+`standard` and `frontier`, plus `uncached` for a route that does not cache
+prompts. The route is judged at each turn the template starts; on a route no
+token matches, the turn runs with no step policy at all, so a cached frontier
+route can chain steps in one turn. An empty, repeated or unknown token makes
+the template unavailable.
+
 The consent digest includes command names, prompt takeovers, state flags when
 either is set, the embedding service, events/tick, watch, hooks, tool
 names/action classes, promoted tools, UI, workspace IDs/regions/board/keys,

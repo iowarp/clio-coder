@@ -330,7 +330,7 @@ entries:
       - debug extension reload
     version: 0.1.2
     sourceUrl: skills/meta/extension-authoring
-    sha256: 6c2b101cbb8b917c9e17f43fd192d201e7d8e1e13a6423d921f411ee0594561f
+    sha256: 8b2fd4b44086644bd20b8a4370d9bddd3fd098a15445730b8b76868ee8425166
     provides:
       - kind: skill
         name: extension-authoring
