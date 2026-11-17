@@ -2,9 +2,12 @@ import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ModelTier } from "../../src/core/model-tier.js";
+import { subscribeExtensionObservations } from "../../src/domains/extensions/bus-observations.js";
+import type { ExtensionObservationV2 } from "../../src/domains/extensions/public-api-v2.js";
+import type { MiddlewareContract, MiddlewareHookInput } from "../../src/domains/middleware/index.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { type SessionEntry, SKILL_CONTEXT_STATE } from "../../src/domains/session/entries.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -19,6 +22,75 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const STEP = "extension_wtfp__next_step";
 const BODY = "Advance the paper one step: call extension_wtfp__next_step, run the step it returns, then summarize.";
 const MARKER = "TOOL-RESULT-MARKER section intro: 412 words";
+const SKILL_BODY = "SKILL-BODY-MARKER: every figure in the paper is a labelled diagram.";
+
+/** A resumed session whose earlier turn loaded a skill through the tool, with its full receipt (as compaction verifies it). */
+function skillLoad(): { entries: SessionEntry[]; leaf: string } {
+	const timestamp = new Date().toISOString();
+	const message = (turnId: string, role: string, payload: unknown, parentTurnId: string | null) =>
+		({ kind: "message", turnId, parentTurnId, timestamp, role, payload }) as SessionEntry;
+	const activation = {
+		name: "diagram",
+		filePath: "/skills/diagram/SKILL.md",
+		hash: "a".repeat(64),
+		source: "clio-coder",
+		sourceOrigin: "project",
+		triggeredBy: "tool" as const,
+		turnId: "skill-request",
+		drift: "match" as const,
+	};
+	const args = { scope: "skills", name: "diagram" };
+	const bytes = Buffer.byteLength(SKILL_BODY);
+	return {
+		leaf: "skill-selected",
+		entries: [
+			message("skill-request", "user", { text: "[Skill request] diagram", operatorText: "" }, null),
+			message(
+				"skill-assistant",
+				"assistant",
+				{ content: [{ type: "toolCall", id: "load", name: "context", arguments: args }] },
+				"skill-request",
+			),
+			message("skill-call", "tool_call", { toolCallId: "load", name: "context", args }, "skill-assistant"),
+			{ kind: "skillActivation", turnId: "skill-activation", parentTurnId: "skill-request", timestamp, activation },
+			message(
+				"skill-result",
+				"tool_result",
+				{
+					toolCallId: "load",
+					toolName: "context",
+					isError: false,
+					outcome: "ok",
+					resultSummary: { bytes, truncated: false },
+					result: {
+						content: [{ type: "text", text: SKILL_BODY }],
+						details: {
+							kind: "ok",
+							name: "diagram",
+							path: activation.filePath,
+							hash: activation.hash,
+							source: activation.source,
+							sourceOrigin: "project",
+							scope: "project",
+							sourceInfo: { path: activation.filePath, scope: "project", source: "project" },
+							drift: "match",
+							observation: { truncated: false, shownBytes: bytes, totalBytes: bytes },
+						},
+					},
+				},
+				"skill-call",
+			),
+			{
+				kind: "custom",
+				turnId: "skill-selected",
+				parentTurnId: "skill-result",
+				timestamp,
+				customType: SKILL_CONTEXT_STATE,
+				data: { version: 1, activationRefs: ["skill-activation"] },
+			} as SessionEntry,
+		],
+	};
+}
 
 interface Run {
 	histories: string[];
@@ -26,6 +98,8 @@ interface Run {
 	texts: string[];
 	entries: SessionEntry[];
 	continued: string[];
+	hooks: MiddlewareHookInput[];
+	observations: ExtensionObservationV2[];
 	close(): Promise<void>;
 }
 
@@ -35,6 +109,8 @@ interface Drive {
 	uncached?: boolean;
 	/** How the first step turn stops: its step policy (the default), or a loop-guard tool lockout. */
 	firstStop?: "step" | "loop_guard";
+	/** Resume a session that already loaded a skill. */
+	skill?: boolean;
 }
 
 async function stepDrive(route: Drive): Promise<Run> {
@@ -56,8 +132,9 @@ async function stepDrive(route: Drive): Promise<Run> {
 		...(context.getContract("providers") as ProvidersContract),
 		modelTierOverride: () => route.tier,
 	} as ProvidersContract;
-	const entries: SessionEntry[] = [];
-	let leaf: string | null = null;
+	const seed = route.skill === true ? skillLoad() : null;
+	const entries: SessionEntry[] = seed?.entries ?? [];
+	let leaf: string | null = seed?.leaf ?? null;
 	const session = {
 		current: () => ({ id: "step-session", cwd: scratch.dir, cwdHash: "step-repo" }),
 		tree: () => ({ leafId: leaf }),
@@ -89,6 +166,16 @@ async function stepDrive(route: Drive): Promise<Run> {
 	context.bus.subscribe("turn.continued", (payload) => {
 		continued.push((payload as { cause: string }).cause);
 	});
+	const hooks: MiddlewareHookInput[] = [];
+	const middleware: MiddlewareContract = {
+		runHook(input) {
+			hooks.push(input);
+			return { hook: input.hook, input, effects: [], ruleIds: [] };
+		},
+		snapshot: () => ({ version: 1, rules: [] }),
+	};
+	const observations: ExtensionObservationV2[] = [];
+	const unobserve = subscribeExtensionObservations(context.bus, (observation) => observations.push(observation));
 	const histories: string[] = [];
 	const texts: string[] = [];
 	let prompts = 0;
@@ -100,6 +187,7 @@ async function stepDrive(route: Drive): Promise<Run> {
 		session,
 		bus: context.bus,
 		readSessionEntries: () => entries,
+		middleware,
 		pinnedContext: () => [{ extensionId: "wtfp", text: "Milestone 2: methods. Next: plan-section" }],
 		createAgent: ((agentOptions: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 			let listener: (event: AgentEvent) => unknown = () => {};
@@ -184,6 +272,7 @@ async function stepDrive(route: Drive): Promise<Run> {
 			};
 		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
+	if (seed !== null) loop.resetForSession(seed.leaf);
 	await loop.submit(BODY, {
 		constraints: { turnPolicy: { mode: "step", stepTool: STEP, template: "wtfp:advance" } },
 		display: { text: "/wtfp:advance" },
@@ -194,7 +283,10 @@ async function stepDrive(route: Drive): Promise<Run> {
 		texts,
 		entries,
 		continued,
+		hooks,
+		observations,
 		close: async () => {
+			unobserve();
 			loop.dispose();
 			await loop.whenSettled();
 			scratch.restore();
@@ -263,6 +355,32 @@ describe("step turns start from a compact state on small or uncached routes", ()
 			ok(second.includes("TOOL-RESULT-MARKER"), second);
 			ok(!second.includes("Step checkpoint."), second);
 			ok(!run.entries.some((entry) => entry.kind === "compactionSummary"));
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("a step checkpoint fires on_compaction with trigger step and carries the loaded skill to the next request", async () => {
+		const run = await stepDrive({ model: "step-skill-model", tier: "small", skill: true });
+		try {
+			const compaction = run.hooks.filter((input) => input.hook === "on_compaction");
+			strictEqual(compaction.length, 1);
+			strictEqual(compaction[0]?.metadata?.trigger, "step");
+			strictEqual(compaction[0]?.metadata?.stage, "step_checkpoint");
+			ok(
+				run.observations.some(
+					(observation) =>
+						observation.event === "compaction_end" && observation.trigger === "step" && observation.outcome === "ok",
+				),
+			);
+			const checkpoint = run.entries.find((entry) => entry.kind === "compactionSummary");
+			ok(checkpoint?.kind === "compactionSummary");
+			strictEqual(checkpoint.skillContext?.skills[0]?.activationRef, "skill-activation");
+			const second = run.histories[1] ?? "";
+			const at = second.indexOf("Step checkpoint.");
+			ok(at >= 0, second);
+			ok(second.indexOf("SKILL-BODY-MARKER", at) > at, second);
+			ok(!second.includes("TOOL-RESULT-MARKER"), second);
 		} finally {
 			await run.close();
 		}
