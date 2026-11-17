@@ -1,5 +1,6 @@
 /** Type-only boot contract kept outside the heavyweight orchestrator graph. */
 
+import type { ScriptedAnswers } from "../cli/run-answers.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SessionToolLimits } from "../core/tool-limit-flags.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
@@ -90,6 +91,11 @@ export interface BootOptions {
 		deadline?: HeadlessRunDeadline;
 		/** `clio-coder run --verify`: the run's own acceptance checks and the limit for each. */
 		verify?: { checks: ReadonlyArray<SessionVerifier>; timeoutMs: number };
+		/**
+		 * `clio-coder run --answers`: the author's scripted answers. With it the run
+		 * registers ask_user and asks extension interviews, answered from the file.
+		 */
+		answers?: ScriptedAnswers;
 	};
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;

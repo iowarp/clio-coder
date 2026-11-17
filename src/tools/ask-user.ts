@@ -16,6 +16,7 @@ import type {
 	AskUserTranscriptAnswer,
 	AskUserTranscriptDecision,
 	AskUserTranscriptQuestion,
+	ScriptedAnswerSource,
 	ToolInvokeOptions,
 	ToolResult,
 	ToolSpec,
@@ -56,6 +57,11 @@ export interface AskUserQuestion {
 	 * becomes a decision marked `operator_choice`.
 	 */
 	operator_only?: true;
+	/**
+	 * The checkpoint an extension's interview question settles, as the extension
+	 * declared it. Harness callers only; a `run --answers` entry matches it by `id`.
+	 */
+	checkpoint?: string;
 }
 
 export interface AskUserAnswer {
@@ -73,6 +79,8 @@ export interface AskUserAnswer {
 	value?: string;
 	/** Clio chose this answer because nobody answered within the unattended window (#421). */
 	auto?: true;
+	/** The operator's answer came from a `run --answers` file: which file, and which of its entries matched. */
+	scripted?: ScriptedAnswerSource;
 }
 
 export interface AskUserDecision {
@@ -93,6 +101,8 @@ export interface AskUserDecision {
 	rationale?: string;
 	/** The operator's own answer to an `operator_only` question; derived by the harness, never model-supplied. */
 	operator_choice?: true;
+	/** The answer came from the operator's `run --answers` file; derived by the harness. */
+	scripted?: ScriptedAnswerSource;
 }
 
 export interface AskUserResult {
@@ -111,6 +121,11 @@ export interface AskUserResult {
 	 * ask_user tool chooses for every question left.
 	 */
 	timedOut?: { afterSeconds: number };
+	/**
+	 * Set with `cancelled` when a headless run's answers file scripted no answer
+	 * for the round, so nobody answered it and the run ends (WTF-P 0.8.3 B1).
+	 */
+	unscripted?: true;
 }
 
 /** The answer to a free-text question nobody answered in time. */
@@ -398,6 +413,15 @@ function normalizeTimedOut(value: unknown): { afterSeconds: number } | undefined
 		: undefined;
 }
 
+/** Where a scripted answer came from, dropped unless it names both the file and the rule. */
+function normalizeScripted(value: unknown): ScriptedAnswerSource | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const { file, rule } = value as { file?: unknown; rule?: unknown };
+	return typeof file === "string" && file.length > 0 && typeof rule === "string" && rule.length > 0
+		? { file, rule }
+		: undefined;
+}
+
 function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, result: AskUserResult): AskUserResult {
 	if (result.unavailable === true) return unavailableAskUserResult();
 	const timedOut = normalizeTimedOut(result.timedOut);
@@ -414,13 +438,16 @@ function normalizeAskUserResult(questions: ReadonlyArray<AskUserQuestion>, resul
 		// other display string; `value` is the record.
 		const options = normalizeAnswerOptions(raw.options);
 		const value = typeof raw.value === "string" && raw.value.length > 0 ? raw.value : undefined;
+		const scripted = normalizeScripted(raw.scripted);
 		answers.push({
 			question,
 			answer,
 			...(options ? { options } : {}),
 			...(value !== undefined ? { value } : {}),
+			...(scripted ? { scripted } : {}),
 		});
 	}
+	if (result.cancelled === true && result.unscripted === true) return { answers: [], cancelled: true, unscripted: true };
 	// Esc ends the turn, but what the operator already recorded stays theirs.
 	if (result.cancelled === true) return { answers, cancelled: true };
 	return { answers, ...(timedOut !== undefined ? { timedOut } : {}) };
@@ -541,6 +568,7 @@ function transcriptAnswers(answers: ReadonlyArray<AskUserAnswer>): AskUserTransc
 		...(answer.options && answer.options.length > 0 ? { options: [...answer.options] } : {}),
 		...(answer.value !== undefined ? { value: answer.value } : {}),
 		...(answer.auto === true ? { auto: true as const } : {}),
+		...(answer.scripted ? { scripted: { ...answer.scripted } } : {}),
 	}));
 }
 
@@ -598,6 +626,7 @@ function decisionFromAnswer(
 			: question?.operator_only === true
 				? { operator_choice: true as const }
 				: {}),
+		...(answer.auto !== true && answer.scripted ? { scripted: { ...answer.scripted } } : {}),
 	};
 }
 
@@ -613,6 +642,7 @@ function toTranscriptDecision(decision: AskUserDecision): AskUserTranscriptDecis
 		...(decision.alternatives && decision.alternatives.length > 0 ? { alternatives: [...decision.alternatives] } : {}),
 		...(decision.rationale ? { rationale: decision.rationale } : {}),
 		...(decision.operator_choice === true && decision.source !== "agent" ? { operator_choice: true as const } : {}),
+		...(decision.scripted && decision.source !== "agent" ? { scripted: { ...decision.scripted } } : {}),
 	};
 }
 
@@ -786,11 +816,13 @@ function renderAskUserState(
 			? "The operator answered this standalone question. Act on the answer within the requested scope. The earlier completed interview and its decisions are unchanged."
 			: policy.status === "active"
 				? "The interview modal remains open. Ask only new necessary follow-up rounds. When enough information is collected, call ask_user with action=complete before final prose."
-				: policy.status === "cancelled"
-					? latestAnswers.length > 0
-						? "The operator recorded latest_answers, then dismissed the interview before answering the rest. A dismissal is not approval: make no edits, run no commands and dispatch no workers on these answers or a guess. The turn ends here; wait for the operator's next message, and do not ask again what latest_answers already says."
-						: "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
-					: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
+				: event === "unscripted"
+					? "No entry in this run's --answers file matches this question, so nobody answered it and the run ends here. Make no edits, run no commands and dispatch no workers on a guessed answer."
+					: policy.status === "cancelled"
+						? latestAnswers.length > 0
+							? "The operator recorded latest_answers, then dismissed the interview before answering the rest. A dismissal is not approval: make no edits, run no commands and dispatch no workers on these answers or a guess. The turn ends here; wait for the operator's next message, and do not ask again what latest_answers already says."
+							: "The operator dismissed the interview without answering. A dismissal is not approval: make no edits, run no commands and dispatch no workers on a guessed answer. The turn ends here; wait for the operator's next message."
+						: "The interview is closed. Act on the answers now: approval means do the work. If the operator declines or says the work is enough, end in one sentence without restating earlier output. Use the compact decisions below; open the transcript only if its history is needed. End with the result, without a new question or offer.";
 	return [
 		`ask_user result: ${event}`,
 		guidance,
@@ -1128,7 +1160,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					policy.cancelled = true;
 					policy.endedAt = answeredAt;
 					if (!standalone) await persistAskUserTranscript(policy, options);
-					return okInterviewResult(policy, "cancelled", result.answers);
+					return okInterviewResult(policy, result.unscripted === true ? "unscripted" : "cancelled", result.answers);
 				}
 				if (timedOut !== undefined) {
 					// Clio answered for an absent operator, so the interview closes

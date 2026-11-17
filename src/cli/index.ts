@@ -102,6 +102,7 @@ Usage:
   clio-coder memory               list, propose, promote, approve, reject, or prune memory
   clio-coder claims [show <id>|export|import <file>|compact]  list, share or compact the project's recorded claims and worker disputes
   clio-coder arena run|show|vote|list|standings  run one prompt on 2 to 4 contenders, vote blind, read standings
+  clio-coder campaign run          run one seeded project across a roster of models; per-entry gates, refusals, tokens, wall time
   clio-coder research start|resume|status|report|list  hill climb a check's metric within a budget; inspect or regrade campaigns
   clio-coder semantic             configure, qualify, manage inboxes, refresh, reembed, search, or inspect the semantic index (beta)
   clio-coder session list|terminate <id> [--force]  open sessions on this state dir from any host; end or release one
@@ -109,6 +110,7 @@ Usage:
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder telemetry inspect|calls|cost|cache|timeline|why-stopped|explain  read session and run telemetry (--json for the DTO)
   clio-coder telemetry insights [--project [<dir>]]  per-project research task categories and autonomy, a local heuristic
+  clio-coder telemetry tokens --session <id> [--by-source]  per-turn input tokens, cached and fresh, split by source
   clio-coder telemetry consent|share|import|prune|verify  manage research content consent; share or import telemetry archives; apply retention; verify a sealed scope or archive
   clio-coder systemone status|use|off|check  System One decisions: choose and check an engine (experimental)
   clio-coder extensions           install, list, enable, disable, or remove extension packages
@@ -358,6 +360,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["memory", async (subArgs) => (await import("./memory.js")).runMemoryCommand(subArgs)],
 	["claims", async (subArgs) => (await import("./claims.js")).runClaimsCommand(subArgs)],
 	["arena", async (subArgs) => (await import("./arena.js")).runArenaCommand(subArgs)],
+	["campaign", async (subArgs) => (await import("./campaign.js")).runCampaignCommand(subArgs)],
 	["research", async (subArgs) => (await import("./research.js")).runResearchCommand(subArgs)],
 	["semantic", async (subArgs) => (await import("./semantic.js")).runSemanticCommand(subArgs)],
 	["usage", async (subArgs) => (await import("./usage.js")).runUsageCommand(subArgs)],

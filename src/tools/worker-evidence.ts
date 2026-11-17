@@ -119,6 +119,31 @@ function taskWorktreeLines(run: FinishedRun): string[] {
 	];
 }
 
+/**
+ * The answer budget of a run in a compact dispatch or collect result (WTF-P 0.8.3 C3). The run line, the trust or
+ * verdict line and the evidence notices carry the run's key facts; the answer itself is an excerpt, and the sealed
+ * record holds the whole of it.
+ */
+export const COMPACT_ANSWER_BYTES = 2000;
+
+/** Where the whole answer of a compacted run is read. */
+function fullRecordPointer(runId: string): string {
+	return `monitor(mode="record", run_id=${JSON.stringify(runId)})`;
+}
+
+/**
+ * An answer cut to `maxBytes` at a line boundary when one falls in its second half, followed by how much was cut
+ * and where the rest is. An answer within the budget is returned whole.
+ */
+export function compactAnswer(text: string, runId: string, maxBytes = COMPACT_ANSWER_BYTES): string {
+	const total = Buffer.byteLength(text, "utf8");
+	if (total <= maxBytes) return text;
+	const head = truncateUtf8(text, maxBytes, "");
+	const lineEnd = head.lastIndexOf("\n");
+	const kept = lineEnd >= head.length / 2 ? head.slice(0, lineEnd) : head;
+	return `${kept}\n[answer excerpt: ${Buffer.byteLength(kept, "utf8")} of ${total} bytes; the whole answer is in ${fullRecordPointer(runId)}]`;
+}
+
 export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegrity, maxBytes: number): string[] | null {
 	const result = runHelperResult(run, integrity);
 	if (result === null) return null;
@@ -134,7 +159,7 @@ export function compactHelperResultLines(run: FinishedRun, integrity: RunIntegri
 			: []),
 		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the run record for the full result]")}`,
 		...taskWorktreeLines(run),
-		`  Run record available on demand: monitor(mode="record", run_id=${JSON.stringify(run.runId)}).`,
+		`  Run record available on demand: ${fullRecordPointer(run.runId)}.`,
 		...skillLoadLabels(run).map((label) => `  ${label}`),
 	];
 }
@@ -335,6 +360,24 @@ export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): st
 			: []),
 		projectContext,
 	];
+}
+
+/**
+ * Run labels that describe how a run was set up rather than what it delivered: the trust axes the `trust=` summary
+ * already states, budget policy, briefing and context sizing, and the response model observation. A compact dispatch
+ * result leaves them to the sealed record (WTF-P 0.8.3 C3).
+ */
+const DIAGNOSTIC_LABEL_PREFIXES = [
+	"trust_status=",
+	"budget_",
+	"briefing=",
+	"project_context=",
+	"context=",
+	"response_model_id_observation=",
+];
+
+export function compactEvidenceLabels(labels: ReadonlyArray<string>): string[] {
+	return labels.filter((label) => !DIAGNOSTIC_LABEL_PREFIXES.some((prefix) => label.startsWith(prefix)));
 }
 
 /** Delivery guidance uses only an authenticated, terminal mutation report. */

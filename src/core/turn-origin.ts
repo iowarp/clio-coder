@@ -7,12 +7,29 @@
  */
 export type TurnOriginKind = "operator" | "continuation" | "job" | "peer";
 
+/**
+ * A tool call as a continuation's hooks read it: the tool, its arguments
+ * redacted and clipped, and how it settled (`unfinished` when the turn stopped
+ * before it returned).
+ */
+export interface TurnToolCall {
+	tool: string;
+	args?: Record<string, unknown>;
+	outcome: "ok" | "error" | "unfinished";
+}
+
 export interface TurnOrigin {
 	origin: TurnOriginKind;
 	/** A yolo continuation's place against its cap; the first continuation is 1. */
 	continuation?: { index: number; cap: number };
 	/** The prompt template whose tool scope bounds the turn, when one does. */
 	template?: string;
+	/**
+	 * The last tool call the stopped turn made, on a continuation's
+	 * prompt_submit only (WTF-P 0.8.3 B6). Turn metadata never carries it, so
+	 * turn_start and turn_end do not see it.
+	 */
+	lastToolCall?: TurnToolCall;
 }
 
 type ScalarMetadata = Record<string, string | number | boolean>;

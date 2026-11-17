@@ -73,7 +73,12 @@ export interface DispatchRunExecutionSnapshot {
 	readonly detach: boolean;
 	readonly timeoutMs: number | undefined;
 	readonly maxOutputBytes: number;
+	/** Present as `full` when the caller set max_output_bytes; otherwise each run returns its compact form. */
+	readonly resultForm?: DispatchResultForm;
 }
+
+/** How a dispatch result renders each run's answer for the model (WTF-P 0.8.3 C3). */
+export type DispatchResultForm = "compact" | "full";
 
 /** Immutable, operator-visible destination of a compete-winner application. */
 export interface DispatchApplyWinnerExecutionSnapshot {

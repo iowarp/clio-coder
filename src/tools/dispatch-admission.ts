@@ -477,6 +477,8 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 		detach: args.detach === true,
 		timeoutMs: timeoutMsArg(args),
 		maxOutputBytes: maxOutputBytesArg(args),
+		// An explicit output budget asks for the answers themselves; without one each run returns its compact form.
+		...(typeof args.max_output_bytes === "number" ? { resultForm: "full" as const } : {}),
 	});
 	const markPrepared = (args: Record<string, unknown>): Record<string, unknown> => {
 		const exposed = resolvedDispatchPlanFromArgs(args);

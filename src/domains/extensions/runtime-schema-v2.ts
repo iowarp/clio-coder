@@ -52,6 +52,8 @@ export const RUNTIME_V2_LIMITS = {
 	effectTextChars: 2000,
 	promptChars: 8000,
 	toolTextBytes: 200 * 1024,
+	/** A tool's summary replaces its full result in model context, so it stays a few hundred tokens (WTF-P 0.8.3 C3). */
+	toolSummaryBytes: 2048,
 } as const;
 
 const EVENTS: ReadonlyArray<Exclude<ExtensionObservationEventV2, "tick">> = [

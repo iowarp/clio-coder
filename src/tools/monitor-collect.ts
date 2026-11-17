@@ -19,8 +19,9 @@ import { flowRestrictionsOfRuns } from "./dispatch-runner.js";
 import type { MonitorToolDeps } from "./monitor.js";
 import type { ToolResult } from "./registry.js";
 import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
-import { truncateUtf8 } from "./truncate-utf8.js";
 import {
+	COMPACT_ANSWER_BYTES,
+	compactAnswer,
 	compactHelperResultLines,
 	type FinishedRun,
 	runEvidenceLabels,
@@ -29,7 +30,6 @@ import {
 	workerTextNonEvidenceNotices,
 } from "./worker-evidence.js";
 
-const COLLECT_TEXT_BYTES = 2000;
 /** Pending/completed rows, text and board remain in the monitor's existing result/details shape. */
 export type CollectOutcome = ToolResult;
 
@@ -122,7 +122,7 @@ interface CollectedRunRow extends CollectRow {
 
 function collectRunLine(row: CollectedRunRow): string[] {
 	if (row.evidence.run !== null) {
-		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COLLECT_TEXT_BYTES);
+		const helperLines = compactHelperResultLines(row.evidence.run, row.evidence.integrity, COMPACT_ANSWER_BYTES);
 		if (helperLines !== null) return helperLines;
 	}
 	const run = row.run;
@@ -151,11 +151,7 @@ function collectRunLine(row: CollectedRunRow): string[] {
 	lines.push(`  ${workerTextLabel(row.evidence.trustStatus, row.evidence.run)}`);
 	const output = row.evidence.run?.delivered?.output ?? null;
 	if (output) {
-		const capped = truncateUtf8(
-			output.text,
-			COLLECT_TEXT_BYTES,
-			`\n[preview clipped at ${COLLECT_TEXT_BYTES} bytes; the complete captured text is output.text in ${row.evidence.resultPath ?? "the run's result object"}]`,
-		);
+		const capped = compactAnswer(output.text, row.runId);
 		const qualifier = output.state === "partial" ? " (partial; the run did not complete this message)" : "";
 		const truncatedNote = output.truncated ? ` (stored output truncated; full text was ${output.bytes} bytes)` : "";
 		lines.push(`  agent output${qualifier}${truncatedNote}:`, ...capped.split("\n").map((line) => `  ${line}`));

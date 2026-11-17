@@ -109,6 +109,7 @@ import { runScoutContinuationPlan, scoutPlanAuthorityGranted, scoutTransitionDet
 import type {
 	DispatchCompeteSettings,
 	DispatchCouncilSettings,
+	DispatchResultForm,
 	DispatchReviewSettings,
 	DispatchToolDeps,
 } from "./dispatch-types.js";
@@ -118,7 +119,10 @@ import { FLOW_RESTRICTIONS_DETAIL } from "./registry.js";
 import { leftUncommittedReport } from "./task-worktree.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
+	COMPACT_ANSWER_BYTES,
 	checksAreReviewJudgments,
+	compactAnswer,
+	compactEvidenceLabels,
 	compactHelperResultLines,
 	finishedRun,
 	finishedRunTrustStatus,
@@ -617,14 +621,21 @@ function withAgentLedgerBoard(body: string, board: string | null): string {
 	return board === null ? body : `${body}\n\n${board}`;
 }
 
+/**
+ * The model-facing dispatch result. `compact` (the default) keeps each run's key facts, its trust or verdict line and
+ * evidence notices, and an excerpt of its answer, pointing at `monitor(mode="record")` for the rest; `full` returns
+ * each answer up to its share of `maxOutputBytes`, the form a caller gets by setting max_output_bytes (WTF-P 0.8.3 C3).
+ */
 export function formatDispatchOutput(
 	mode: string,
 	runs: ReadonlyArray<CompletedRun>,
 	maxOutputBytes: number,
 	board: string | null = null,
+	form: DispatchResultForm = "compact",
 ): string {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
-	const perRunOutputBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
+	const shareBytes = Math.max(1024, Math.floor(maxOutputBytes / Math.max(1, runs.length)));
+	const perRunOutputBytes = form === "compact" ? Math.min(shareBytes, COMPACT_ANSWER_BYTES) : shareBytes;
 	// Integrity failures and the spot-check reminder lead the summary: the
 	// truncation below keeps the head and drops the tail, and neither warning
 	// may be hidden behind a successful process outcome or a long answer.
@@ -675,9 +686,10 @@ export function formatDispatchOutput(
 			const provenance = provenanceCompactSuffix(extractRunProvenance(receipt));
 			// Evidence confidence comes from the run's settled facts, the same ones its run.settled records.
 			const trustStatus = finishedRunTrustStatus(view, PRODUCER_INTEGRITY);
-			const evidenceSuffix = ` ${runEvidenceLabels(view, PRODUCER_INTEGRITY).join(" ")}`;
+			const labels = runEvidenceLabels(view, PRODUCER_INTEGRITY);
+			const evidenceSuffix = ` ${(form === "compact" ? compactEvidenceLabels(labels) : labels).join(" ")}`;
 			const routingSuffix =
-				receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
+				form === "full" && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
 					: "";
 			const external = receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined;
@@ -705,9 +717,11 @@ export function formatDispatchOutput(
 					? (receipt.output?.text ?? "")
 					: "";
 			const output =
-				answerText.length > 0
-					? truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER)
-					: "(no assistant text captured in the run result)";
+				answerText.length === 0
+					? "(no assistant text captured in the run result)"
+					: form === "compact"
+						? compactAnswer(answerText, receipt.runId, perRunOutputBytes)
+						: truncateUtf8(answerText, perRunOutputBytes, TRUNCATION_MARKER);
 			return [
 				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${renderFactField(receipt.spend.totalTokens)}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}${uncommittedSuffix}${run.recording ? ` recording_manifest=${JSON.stringify(run.recording.manifestPath)}` : ""}`,
 				`  ${workerTextLabel(trustStatus, view)}`,
@@ -2057,8 +2071,13 @@ async function runApplyWinner(
 	};
 }
 
-function reviewGateResult(deps: DispatchToolDeps, outcome: GateRunOutcome, maxOutputBytes: number): ToolResult {
-	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes);
+function reviewGateResult(
+	deps: DispatchToolDeps,
+	outcome: GateRunOutcome,
+	maxOutputBytes: number,
+	form: DispatchResultForm,
+): ToolResult {
+	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes, null, form);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "review", outcome.runs),
 		gate: {
@@ -2091,8 +2110,9 @@ function competeResult(
 	outcome: CompeteOutcome,
 	autonomy: AutonomyLevel,
 	maxOutputBytes: number,
+	form: DispatchResultForm,
 ): ToolResult {
-	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes);
+	const body = formatDispatchOutput("compete", outcome.runs, maxOutputBytes, null, form);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "compete", outcome.runs),
 		compete: {
@@ -2537,6 +2557,7 @@ export async function runDispatchTool(
 	const mode = snapshot.mode;
 	if (options?.signal?.aborted) return { kind: "error", message: "dispatch: aborted" };
 	const maxOutputBytes = snapshot.maxOutputBytes;
+	const resultForm = snapshot.resultForm ?? "compact";
 	const timeoutMs = snapshot.timeoutMs;
 	// All modes, including derived Scout/review runs, share the invocation's
 	// admission bounds. Keep these off the serializable approved request.
@@ -2778,7 +2799,7 @@ export async function runDispatchTool(
 						return { value: completed, integrityValid: true };
 					},
 				});
-				const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes);
+				const output = formatDispatchOutput("fleet", outcome.runs, maxOutputBytes, null, resultForm);
 				const details = {
 					...dispatchDetails(deps, "fleet", outcome.runs),
 					executionPlanHash: executable.hash,
@@ -2842,7 +2863,7 @@ export async function runDispatchTool(
 			}
 			try {
 				const outcome = await runCompete(deps, requests[0], compete, autonomy, timeoutMs, options?.signal, gateTelemetry);
-				return competeResult(deps, outcome, autonomy, maxOutputBytes);
+				return competeResult(deps, outcome, autonomy, maxOutputBytes, resultForm);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
@@ -2868,7 +2889,7 @@ export async function runDispatchTool(
 			}
 			try {
 				const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal, gateTelemetry);
-				return reviewGateResult(deps, outcome, maxOutputBytes);
+				return reviewGateResult(deps, outcome, maxOutputBytes, resultForm);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
@@ -2892,7 +2913,7 @@ export async function runDispatchTool(
 				runs = batch.runs;
 				board = batch.board;
 			}
-			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board)]
+			const output = [externalFailures, formatDispatchOutput(mode, runs, maxOutputBytes, board, resultForm)]
 				.filter(Boolean)
 				.join("\n\n");
 			const details = {
@@ -2908,7 +2929,7 @@ export async function runDispatchTool(
 			}
 			if (err instanceof PipelineHaltError) {
 				const haltMessage = `dispatch: ${err.message}`;
-				const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes);
+				const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes, null, resultForm);
 				return {
 					kind: "error",
 					message: `${haltMessage}\n\n${output}`,

@@ -182,7 +182,21 @@ export interface ExtensionToolHookLanding {
  * `template` names the prompt template whose tool scope bounds the turn, and
  * a continuation keeps it.
  */
-export type ExtensionTurnOrigin = TurnOrigin;
+export type ExtensionTurnOrigin = Omit<TurnOrigin, "lastToolCall">;
+
+/**
+ * The last tool call the stopped turn made, on a continuation's prompt_submit
+ * (Clio Coder 0.8.4 and later). `tool` is the tool as before_tool names it,
+ * `outcome` how it settled (`unfinished` when the turn stopped before it
+ * returned). `args` are redacted and clipped (long strings and arrays cut, with
+ * a note of what was), and cross only with `access: tool-args`.
+ */
+export interface ExtensionContinuationToolCall {
+	tool: string;
+	/** access: tool-args */
+	args?: Record<string, unknown>;
+	outcome: "ok" | "error" | "unfinished";
+}
 
 /**
  * The model a hook's call or turn runs on, present on every hook event from
@@ -205,6 +219,8 @@ export type ExtensionHookEvent = (
 			point: "prompt_submit";
 			/** access: prompt */
 			text?: string;
+			/** Present on a continuation whose stopped turn made a tool call; never on an operator prompt. */
+			lastToolCall?: ExtensionContinuationToolCall;
 	  } & ExtensionTurnOrigin)
 	| ({
 			point: "before_tool";
@@ -306,6 +322,12 @@ export interface InterviewQuestion {
 	kind: "single" | "multi" | "text";
 	options?: Array<{ value: string; label: string; detail?: string }>;
 	initial?: string | string[];
+	/**
+	 * The checkpoint this question settles, in the extension's own id. A
+	 * headless `clio-coder run --answers` file answers the question by it
+	 * (`id: <checkpoint>`); the operator never sees it.
+	 */
+	checkpoint?: string;
 }
 
 export interface InterviewStep {
@@ -343,8 +365,18 @@ export interface InterviewAnswer {
 	other?: Record<string, true>;
 	/** `back` is reserved: the overlay cannot return to a resolved step yet, so the host never sends it. */
 	nav: "next" | "back" | "cancel";
-	/** Set with `nav: "cancel"` when no operator could answer. */
-	reason?: "operator" | "headless" | "preempted";
+	/**
+	 * Set with `nav: "cancel"` when no operator could answer. `unscripted` is a
+	 * headless run whose `--answers` file has no entry for a question of this
+	 * step; that run ends without answering it.
+	 */
+	reason?: "operator" | "headless" | "preempted" | "unscripted";
+	/**
+	 * Set with `nav: "next"` when the operator's answers to this step were
+	 * written ahead in a `clio-coder run --answers` file: the file, and by
+	 * question id the entry of it that matched. Absent on a live answer.
+	 */
+	scripted?: { file: string; rules: Record<string, string> };
 }
 
 export type InterviewNext = { step: InterviewStep; total?: number } | ({ done: true } & ExtensionOutputV2);
@@ -381,6 +413,11 @@ export interface ExtensionHookResult {
 /** A tool that returns `interview` parks until the operator finishes it; the answers become the result. */
 export interface ExtensionToolResult {
 	text: string;
+	/**
+	 * A short form the model sees in place of `text` and `data`, at most 2048 bytes. The host stores the full result
+	 * for the session and gives the model a `detail_ref` it fetches with `ledger(action="detail", ref=...)`.
+	 */
+	summary?: string;
 	data?: unknown;
 	isError?: boolean;
 	card?: View;

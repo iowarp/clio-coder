@@ -95,6 +95,7 @@ function question(value: unknown, path: string): InterviewQuestion {
 		initial: optional((value, path) =>
 			Array.isArray(value) ? array(SURFACE_LIMITS.interviewOptions, label)(value, path) : text(value, path),
 		),
+		checkpoint: optional(identifier),
 	}) as unknown as InterviewQuestion;
 	const options = copy.options ?? [];
 	if (copy.kind === "text") {

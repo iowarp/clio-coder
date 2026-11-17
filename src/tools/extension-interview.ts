@@ -29,6 +29,7 @@ function stepToQuestions(step: InterviewStep): AskUserQuestion[] {
 				: {}),
 			...(question.kind === "multi" ? { multi_select: true } : {}),
 			...(preferred < 0 ? {} : { defaultOption: preferred }),
+			...(question.checkpoint === undefined ? {} : { checkpoint: question.checkpoint }),
 		};
 	});
 }
@@ -40,15 +41,20 @@ function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUs
 			...base,
 			answers: {},
 			nav: "cancel",
-			reason: result.unavailable ? "preempted" : "operator",
+			reason: result.unavailable ? "preempted" : result.unscripted ? "unscripted" : "operator",
 		};
 	if (result.answers.length !== step.questions.length) throw new Error("interview round did not answer every question");
 	const answers: InterviewAnswer["answers"] = {};
 	const notes: Record<string, string> = {};
 	const other: Record<string, true> = {};
+	let scripted: InterviewAnswer["scripted"];
 	for (const [index, question] of step.questions.entries()) {
 		const answer = result.answers[index];
 		if (answer === undefined) throw new Error(`missing answer for ${question.id}`);
+		if (answer.scripted !== undefined) {
+			scripted ??= { file: answer.scripted.file, rules: {} };
+			scripted.rules[question.id] = answer.scripted.rule;
+		}
 		// Typed input is the submitted value of a text question; the overlay's
 		// joined display string is not that value (S4).
 		if (question.kind === "text") {
@@ -82,6 +88,7 @@ function resultToAnswer(interview: Interview, step: InterviewStep, result: AskUs
 		answers,
 		...(Object.keys(notes).length > 0 ? { notes } : {}),
 		...(Object.keys(other).length > 0 ? { other } : {}),
+		...(scripted === undefined ? {} : { scripted }),
 		nav: "next",
 	};
 }
@@ -115,18 +122,28 @@ export async function runExtensionInterview(
 	owner: { extensionId: string; title: string },
 	onAnswer: (answer: InterviewAnswer) => Promise<InterviewNext>,
 	signal?: AbortSignal,
-): Promise<{ outcome: "done" | "cancelled"; output?: ExtensionOutputV2; reason?: string }> {
+): Promise<{
+	outcome: "done" | "cancelled";
+	output?: ExtensionOutputV2;
+	reason?: string;
+	/** The step was cancelled because a run's answers file had no answer for it. */
+	unscripted?: true;
+}> {
 	const hold = createHarnessHold();
 	let active = interview;
 	let position = 1;
 	const cancel = async (
 		answer: InterviewAnswer,
 		reason?: string,
-	): Promise<{ outcome: "cancelled"; reason?: string }> => {
+	): Promise<{ outcome: "cancelled"; reason?: string; unscripted?: true }> => {
 		await onAnswer(answer);
-		return { outcome: "cancelled", ...(reason === undefined ? {} : { reason }) };
+		return {
+			outcome: "cancelled",
+			...(reason === undefined ? {} : { reason }),
+			...(answer.reason === "unscripted" ? { unscripted: true as const } : {}),
+		};
 	};
-	const interrupted = (reason: string): Promise<{ outcome: "cancelled"; reason?: string }> =>
+	const interrupted = (reason: string): Promise<{ outcome: "cancelled"; reason?: string; unscripted?: true }> =>
 		cancel(
 			{
 				id: active.id,
@@ -206,8 +223,16 @@ export async function runParkedInterview(
 	const answers: ParkedInterviewResult["answers"] = {};
 	const notes: NonNullable<ParkedInterviewResult["notes"]> = {};
 	const other: NonNullable<ParkedInterviewResult["other"]> = {};
+	const scripted: NonNullable<ParkedInterviewResult["scripted"]> = {};
+	const checkpoints: string[] = [];
+	const ask: AskUserHandler = (questions, options) => {
+		for (const question of questions)
+			if (question.checkpoint !== undefined && !checkpoints.includes(question.checkpoint))
+				checkpoints.push(question.checkpoint);
+		return deps.ask(questions, options);
+	};
 	const result = await runExtensionInterview(
-		deps,
+		{ ...deps, ask },
 		interview,
 		owner,
 		(answer) => {
@@ -215,6 +240,7 @@ export async function runParkedInterview(
 				answers[answer.step] = answer.answers;
 				if (answer.notes !== undefined) notes[answer.step] = answer.notes;
 				if (answer.other !== undefined) other[answer.step] = answer.other;
+				if (answer.scripted !== undefined) scripted[answer.step] = answer.scripted;
 			}
 			return onAnswer(answer);
 		},
@@ -225,6 +251,9 @@ export async function runParkedInterview(
 		answers,
 		...(Object.keys(notes).length > 0 ? { notes } : {}),
 		...(Object.keys(other).length > 0 ? { other } : {}),
+		...(Object.keys(scripted).length > 0 ? { scripted } : {}),
+		...(result.unscripted === true ? { reason: "unscripted" as const } : {}),
+		...(checkpoints.length > 0 ? { checkpoints } : {}),
 		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
 	};
 }
@@ -254,5 +283,20 @@ export async function cancelUnansweredInterview(
 	} catch (error) {
 		text = `${fallback}; the extension's handler failed: ${error instanceof Error ? error.message : String(error)}`;
 	}
-	return { outcome: "cancelled", answers: {}, text, reason: "headless" };
+	const questions: ReadonlyArray<unknown> = Array.isArray(interview?.step?.questions) ? interview.step.questions : [];
+	const checkpoints = [
+		...new Set(
+			questions.flatMap((question) => {
+				const checkpoint = (question as { checkpoint?: unknown } | null)?.checkpoint;
+				return typeof checkpoint === "string" ? [checkpoint] : [];
+			}),
+		),
+	];
+	return {
+		outcome: "cancelled",
+		answers: {},
+		text,
+		reason: "headless",
+		...(checkpoints.length > 0 ? { checkpoints } : {}),
+	};
 }

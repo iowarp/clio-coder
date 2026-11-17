@@ -63,6 +63,8 @@ export interface RunCliArgs {
 	verify: string[];
 	/** `--verify-timeout`: the limit for each `--verify` check, in seconds. */
 	verifyTimeoutSeconds?: number;
+	/** `--answers`: the file that scripts the author's answers for a headless run. */
+	answersFile?: string;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -286,6 +288,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--continue") {
 			parsed.continueSession = true;
+			continue;
+		}
+		if (arg === "--answers") {
+			const value = need(arg);
+			if (value !== null) parsed.answersFile = value;
 			continue;
 		}
 		if (arg === "--steer-channel") {

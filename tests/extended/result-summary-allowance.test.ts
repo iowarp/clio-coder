@@ -353,14 +353,17 @@ it("round-trips a 1200-word cited Coder explanation through dispatch, the receip
 		strictEqual(JSON.parse(resolvedRunResult(receipt).output?.text ?? "{}").summary, EXPLANATION);
 		strictEqual(receipt.settled.toolActivity?.mutatingSucceeded, false);
 		if (result.kind !== "ok") return;
-		// The dispatch return carries the whole report under the default preview limit.
-		ok(result.output.includes("Stencil note 10."));
 		const run = bundle.contract.listRuns()[0];
 		ok(run);
+		// The default dispatch return is compact; the sealed record holds the whole report (WTF-P 0.8.3 C3).
+		ok(!result.output.includes("Stencil note 10."));
+		match(result.output, new RegExp(`the whole answer is in monitor\\(mode="record", run_id="${run.id}"\\)`, "u"));
+		const record = await monitor.run({ mode: "record", run_id: run.id }, {});
+		ok(record.kind === "ok" && record.output.includes("Stencil note 10."));
 		const collected = await monitor.run({ mode: "collect", run_ids: [run.id] }, {});
 		strictEqual(collected.kind, "ok");
 		if (collected.kind !== "ok") return;
-		match(collected.output, /preview clipped at 2000 bytes; the complete captured text is output\.text in .*\.json/u);
+		match(collected.output, /answer excerpt: \d+ of \d+ bytes; the whole answer is in monitor\(mode="record"/u);
 		ok(!collected.output.includes("stored output truncated"));
 	} finally {
 		await bundle.extension.stop?.();
