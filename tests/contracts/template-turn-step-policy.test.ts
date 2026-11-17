@@ -13,8 +13,8 @@ import {
 	workerTurnConstraints,
 } from "../../src/core/turn-constraints.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
+import type { MiddlewareEffect, MiddlewareHookRegistration } from "../../src/domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
-import type { MiddlewareEffect } from "../../src/domains/middleware/types.js";
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
@@ -32,7 +32,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 
 const STEP = "extension_desk__next_step";
 
-function fixture() {
+function fixture(extra: MiddlewareHookRegistration[] = []) {
 	let loopState = createLoopState();
 	const safety = createWorkerSafety();
 	const guardSafety = {
@@ -54,7 +54,7 @@ function fixture() {
 		turnToolCallBudget: () => ({ soft: 60, hard: 75 }),
 		turnSynthesisLockout: true,
 	});
-	const middleware = createMiddlewareBundle({ registrations: [guard] }).contract;
+	const middleware = createMiddlewareBundle({ registrations: [guard, ...extra] }).contract;
 	const choice = createMiddlewareToolChoiceControl();
 	const effects: MiddlewareEffect[] = [];
 	const registry = createRegistry({
@@ -81,7 +81,7 @@ function fixture() {
 			},
 		});
 	}
-	return { registry, events, effects, choice, ran, hold };
+	return { registry, guard, events, effects, choice, ran, hold };
 }
 
 describe("template turnPolicy step", () => {
@@ -210,6 +210,35 @@ describe("template turnPolicy step", () => {
 		const failed = await call("call-1", "assistant-1");
 		ok(failed.kind === "ok" && failed.result.kind === "error", JSON.stringify(failed));
 		strictEqual((await call("call-2", "assistant-2")).kind, "ok");
+	});
+
+	it("judges a hook-rewritten step call again as the same call, not its own sibling", async () => {
+		// Astra r2-3: the registry rejudges the rewritten arguments with the same call id and batch.
+		const rewriter: MiddlewareHookRegistration = {
+			id: "extension:desk:before_tool:0",
+			description: "adds an optional argument",
+			hooks: ["before_tool"],
+			awaited: true,
+			evaluate: () => [],
+			evaluateAsync: async () => [
+				{ kind: "rewrite_tool_input", args: { after: "rewritten" }, reason: "default", source: "desk" },
+			],
+		};
+		const { registry, guard, ran } = fixture([rewriter]);
+		const constraints = snapshotTurnConstraints({
+			turnPolicy: { mode: "step", stepTool: STEP, template: "desk:advance" },
+		});
+		const options = (toolCallId: string) => ({
+			sessionId: "s1",
+			turnId: "t1",
+			toolCallId,
+			correlationId: "assistant-1",
+			...(constraints ? { turnConstraints: constraints } : {}),
+		});
+		const verdict = await registry.invoke({ tool: STEP, args: {} }, options("call-1"));
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		deepStrictEqual(ran, [`${STEP}:rewritten`]);
+		strictEqual(guard.callCount(), 1);
 	});
 
 	it("leaves chaining unchanged without a turn policy", async () => {

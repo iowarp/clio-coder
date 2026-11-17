@@ -794,6 +794,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 */
 	const stepInFlightByTurn = new Map<string, { batch?: string; call?: string }>();
 	/**
+	 * Calls this guard admitted, by turn and call id, until their result comes
+	 * back. The registry judges a call again after an extension rewrites its
+	 * input; that second pass checks the new arguments but is the same call, so
+	 * it never spends the caps or the turn budget again (Astra r2-3).
+	 */
+	const admittedCalls = new Map<string, number>();
+	/**
 	 * Per-turn count of parent-workspace mutations, including sealed delegated
 	 * work. The identical-call key carries it, so a check rerun after a change
 	 * is fresh while a verbatim repeat with nothing changed still counts.
@@ -1379,7 +1386,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// A call admitted in another batch whose result never came back was refused
 			// by a later guard; only a sibling of the same batch, or a call with no batch
 			// to tell them apart, is still running.
+			// The admitted call itself, judged again after a rewrite, is not its own sibling.
 			const admitted = stepInFlightByTurn.get(turnKey);
+			if (admitted !== undefined && admitted.call !== undefined && admitted.call === input.toolCallId) return null;
 			if (admitted !== undefined && (admitted.batch === undefined || admitted.batch === input.correlationId))
 				return [{ kind: "block_tool", reason: parallelStepReason(stepTool, template), severity: "hard-block" }];
 			return null;
@@ -1724,6 +1733,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					}
 					stepByTurn.set(turnKey, "done");
 				}
+				if (input.toolCallId !== undefined) admittedCalls.delete(`${turnKey}\0${input.toolCallId}`);
 				const inFlight = stepInFlightByTurn.get(turnKey);
 				if (
 					inFlight !== undefined &&
@@ -1814,6 +1824,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			}
 			const now = options.now?.() ?? Date.now();
 			const turnKey = input.turnId ?? NO_TURN_BUCKET;
+			const callKey = input.toolCallId === undefined ? undefined : `${turnKey}\0${input.toolCallId}`;
+			// A rewrite's second judgement: only the checks that read the arguments run again.
+			const rejudge = callKey !== undefined && admittedCalls.has(callKey);
+			const turnBudgetEffects = (): ReadonlyArray<MiddlewareEffect> =>
+				rejudge ? [] : (evaluateTurnBudget(input, now) ?? []);
 			const decide = (): ReadonlyArray<MiddlewareEffect> => {
 				// DF-10: startup failures belong to the entry, not to its test arguments or cwd.
 				let check = typeof input.toolArgs?.check === "string" ? input.toolArgs.check.trim() : "";
@@ -1838,7 +1853,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// Once a synthesis phase begins, sibling calls from the already-emitted
 				// parallel batch are denied without consuming the lifetime cap or the
 				// per-round non-compliance backstop.
-				if (capLockout !== null && cap !== undefined) {
+				if (capLockout !== null && cap !== undefined && !rejudge) {
 					if (reachesLockoutBackstop(capLockout, input)) {
 						return [
 							{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
@@ -1846,7 +1861,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					}
 					return [{ kind: "block_tool", reason: workerToolCallCapSynthesisReason(cap), severity: "hard-block" }];
 				}
-				if (softLockout !== null && softLimit !== undefined) {
+				if (softLockout !== null && softLimit !== undefined && !rejudge) {
 					if (reachesLockoutBackstop(softLockout, input)) {
 						return [
 							{ kind: "block_tool", reason: synthesisBackstopReason(input.toolName ?? "unknown"), severity: "hard-block" },
@@ -1858,7 +1873,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// Synthesis lockout after repeated calls. Check before counting the
 				// attempt so a wide parallel batch cannot turn a graceful lock into a
 				// lifetime-cap failure before the model gets its synthesis round.
-				const lockout = synthesisLockout ? lockoutByTurn.get(turnKey) : undefined;
+				const lockout = synthesisLockout && !rejudge ? lockoutByTurn.get(turnKey) : undefined;
 				// The other calls of the batch that held the turn's first block were
 				// emitted before the model saw any block; refusing them all for one
 				// sibling's repeat lost a drive's final next_step (WTF-P 0.8.3 A2).
@@ -1890,7 +1905,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// reserve by writing instead of grepping got killed by it. The bound on
 				// refusals is reserveDenials and the synthesis backstop, both per model
 				// round; the cap bounds executed work.
-				if (softLimit !== undefined) {
+				if (softLimit !== undefined && !rejudge) {
 					const spentSoftLimit = softAdmittedCount >= softLimit;
 					// The soft budget ends discovery, not the run's own product. An agent
 					// with no delivery tools has nothing left to do with a tool call, so
@@ -1945,7 +1960,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// telemetry, worker aborts, and A2's cap-exhaustion notice stay
 				// untouched; reads and this agent's delivery tools keep flowing through
 				// the repetition and stagnation detectors below.
-				if (reserveThreshold !== null && cap !== undefined && count >= reserveThreshold && !reserveAdmits(input.toolName)) {
+				if (
+					reserveThreshold !== null &&
+					cap !== undefined &&
+					!rejudge &&
+					count >= reserveThreshold &&
+					!reserveAdmits(input.toolName)
+				) {
 					if (reachesLockoutBackstop(reserveDenials, input)) {
 						if (synthesisLockout) {
 							capLockout = {
@@ -1965,9 +1986,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					];
 				}
 
-				count += 1;
+				if (!rejudge) count += 1;
 				reserveDenials = { denials: 0 };
-				if (softLimit !== undefined) {
+				if (softLimit !== undefined && !rejudge) {
 					softAdmittedCount += 1;
 					if (softReadReserveThreshold !== null && softAdmittedCount >= softReadReserveThreshold) enterSoftReadReserve();
 					if (softAdmittedCount >= softLimit) {
@@ -2009,7 +2030,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 
 				// Idempotent read-only polls may return the same cursor indefinitely.
 				// They still spend the worker cap and the per-turn soft/hard budget.
-				if (input.metadata?.repeatableRead === true) return evaluateTurnBudget(input, now) ?? [];
+				if (input.metadata?.repeatableRead === true) return turnBudgetEffects();
 
 				// Identical-repeat detection runs BEFORE the volume budget so verbatim
 				// retries of budget-blocked calls still reach the detector. Its tighter
@@ -2019,7 +2040,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// churn all the way to the hard ceiling.
 				const fingerprint = input.metadata?.callFingerprint;
 				if (typeof fingerprint !== "string" || fingerprint.length === 0) {
-					return evaluateTurnBudget(input, now) ?? [];
+					return turnBudgetEffects();
 				}
 				// The detector key is turn-scoped: its state lives for the whole
 				// session, and the detector now retains the most recent attempts
@@ -2102,16 +2123,16 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 						);
 					}
 				}
-				return evaluateTurnBudget(input, now) ?? [];
+				return turnBudgetEffects();
 			};
 			const verdict = boundRunDenials(decide(), input);
+			const admitted = !verdict.some((effect) => effect.kind === "block_tool");
+			if (callKey !== undefined) {
+				if (!admitted) admittedCalls.delete(callKey);
+				else if (!rejudge) bumpBoundedCounter(admittedCalls, callKey, SUCCEEDED_FINGERPRINT_LIMIT);
+			}
 			const stepTool = input.metadata?.templateStepTool;
-			if (
-				typeof stepTool === "string" &&
-				input.toolName === stepTool &&
-				!stepByTurn.has(turnKey) &&
-				!verdict.some((effect) => effect.kind === "block_tool")
-			) {
+			if (typeof stepTool === "string" && input.toolName === stepTool && !stepByTurn.has(turnKey) && admitted) {
 				while (!stepInFlightByTurn.has(turnKey) && stepInFlightByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
 					const oldest = stepInFlightByTurn.keys().next().value;
 					if (typeof oldest !== "string") break;
