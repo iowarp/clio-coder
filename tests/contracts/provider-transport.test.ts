@@ -496,6 +496,14 @@ describe("provider transport boundary", () => {
 		deepStrictEqual(silent.responseModelIdObservation, { state: "not-reported" });
 		strictEqual(silent.usage.cacheReadField, "omitted");
 		strictEqual(silent.backendTimings, undefined);
+		// Astra r1-6: Pi normalizes DeepSeek's prompt_cache_hit_tokens, so presence must count it too.
+		const deepseek = await done([
+			{
+				choices: [{ index: 0, delta: { content: "ok" }, finish_reason: "stop" }],
+				usage: { prompt_tokens: 10000, completion_tokens: 1, total_tokens: 10001, prompt_cache_hit_tokens: 8192 },
+			},
+		]);
+		deepStrictEqual([deepseek.usage.cacheRead, deepseek.usage.cacheReadField], [8192, "sent"]);
 	});
 
 	it("applies LiteLLM request controls and records its physical route", async () => {

@@ -7,6 +7,7 @@ import {
 	type StreamOptions,
 } from "@earendil-works/pi-ai";
 import type { ResponseModelIdObservation } from "../../core/response-model-id.js";
+import type { CacheReadField } from "../../core/token-split.js";
 import type { CodexQuotaObservation } from "../types.js";
 import { codexAccountScope, parseCodexQuotaEvent } from "./codex-quota.js";
 import { withProxyConnectionNote } from "./proxy-connection-error.js";
@@ -18,6 +19,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Terminal events whose `response.usage` Pi's finalizeResponse normalizes; Codex sends `response.done`. */
+const USAGE_EVENTS: ReadonlySet<unknown> = new Set(["response.completed", "response.incomplete", "response.done"]);
+
+/**
+ * Whether a terminal event's usage sent a cache-read count. Pi (pi-ai 1.5.2)
+ * reads only `input_tokens_details.cached_tokens` and turns its absence into
+ * 0, so presence is judged on that field alone and moves with a Pi upgrade.
+ * Null when the event carries no usage, which Pi also leaves untouched.
+ */
+function responsesCacheReadField(data: Record<string, unknown>): CacheReadField | null {
+	if (!USAGE_EVENTS.has(data.type) || !isRecord(data.response) || !isRecord(data.response.usage)) return null;
+	const details = data.response.usage.input_tokens_details;
+	const cached = isRecord(details) ? details.cached_tokens : undefined;
+	return typeof cached === "number" && Number.isFinite(cached) && cached >= 0 ? "sent" : "omitted";
+}
+
 /**
  * Record the model a Responses-family provider reports for its response.
  * Codex and OpenAI Responses name it as `response.model` on the lifecycle
@@ -25,7 +42,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * drop it, so every Codex call was stored as `not-observed` although the
  * provider had reported the model (DF-15). The completions path has its own
  * capture in `openai-completions.ts`; this is the Responses counterpart, and
- * it only annotates the terminal message, never the stream's content.
+ * it only annotates the terminal message, never the stream's content. It
+ * also marks whether the terminal usage sent a cache-read count, as the
+ * completions capture does, so an omitted count is never classified cold.
  * OAI-1 / #423 shares this callback and terminal annotation for sanitized Codex
  * quota events, preserving the existing transport and caller-owned callback.
  */
@@ -39,6 +58,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 	let quota: CodexQuotaObservation | null = null;
 	const accountScope = model.api === "openai-codex-responses" ? codexAccountScope(options?.apiKey) : null;
 	let reportedModelId: string | null = null;
+	let cacheReadField: CacheReadField = "omitted";
 	const onProviderStreamEvent = options?.onProviderStreamEvent;
 	const source = invoke({
 		...options,
@@ -48,6 +68,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 				sawResponse = true;
 				const reported = data.response.model;
 				if (typeof reported === "string" && reported.trim().length > 0) reportedModelId = reported.trim();
+				cacheReadField = responsesCacheReadField(data) ?? cacheReadField;
 			}
 			await onProviderStreamEvent?.(data, eventModel);
 		},
@@ -62,9 +83,12 @@ export function observeResponsesModelId<T extends StreamOptions>(
 	void (async () => {
 		try {
 			for await (const event of source) {
-				if (event.type === "done") event.message.responseModelIdObservation = observation();
-				else if (event.type === "error") {
+				if (event.type === "done") {
+					event.message.responseModelIdObservation = observation();
+					event.message.usage.cacheReadField = cacheReadField;
+				} else if (event.type === "error") {
 					event.error.responseModelIdObservation = observation();
+					event.error.usage.cacheReadField = cacheReadField;
 					if (event.error.errorMessage !== undefined)
 						event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
 				}
@@ -92,6 +116,7 @@ export function observeResponsesModelId<T extends StreamOptions>(
 					cacheWrite: 0,
 					totalTokens: 0,
 					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					cacheReadField,
 				},
 				stopReason: reason,
 				errorMessage: withProxyConnectionNote(cause instanceof Error ? cause.message : String(cause), model.baseUrl),
