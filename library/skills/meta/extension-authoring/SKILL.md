@@ -6,7 +6,7 @@ triggers:
   - add an extension hook
   - create an extension workspace
   - debug extension reload
-version: 0.1.1
+version: 0.1.2
 license: Apache-2.0
 allowed-tools:
   - read

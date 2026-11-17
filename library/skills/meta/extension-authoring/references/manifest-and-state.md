@@ -45,7 +45,7 @@ not depend on repository-private imports or a bundler's import rewriting.
 | `events` | Observation names below, plus at most one `{tick: 5s}` (or integer milliseconds). Register `api.on("tick", ...)`. Tick range 5 s–1 h. | Background work and polling frequency; observations cannot gate calls. |
 | `watch` | Up to 8 contained workspace-relative globs; must accompany `fs_changed`, and vice versa. Host batches up to 64 paths after a 500 ms debounce. | Files observed and refresh work; watch Git metadata and use a tick for working-file changes. |
 | `hooks` | Up to 16 `{on, tools?, timeoutMs?, onTimeout?, onError?}`; tools filter applies only to before/after tool. | Awaited latency and possible refusal. See the hooks table. |
-| `tools` | Up to 32 `{name, description, inputSchema, actionClass?, readOnly?, idempotent?, timeoutMs?}`. Schema must be an object schema; names use single underscores. The model calls `extension_<id>__<name>` through the gateway. Default action class `execute`, timeout 30 s. `readOnly` defaults to true for `read` and cannot be true for `write`; `idempotent` defaults false. | Intended model-callable behavior and safety/approval. A `read` declaration cannot accompany exec or workspace writes. `readOnly`/`idempotent` only change loop-guard counting (see below). |
+| `tools` | Up to 32 `{name, description, inputSchema, actionClass?, readOnly?, idempotent?, timeoutMs?}`. Schema must be an object schema; names use single underscores. The model calls `extension_<id>__<name>` through the gateway. Default action class `execute`, timeout 30 s. `readOnly` defaults to true for `read` and cannot be true for `write`; `idempotent` defaults false. | Intended model-callable behavior and safety/approval. A `read` declaration cannot accompany exec or workspace writes. `readOnly`/`idempotent` change loop-guard counting and observation aging (see below). |
 | `promote` | Up to 4 declared tool names whose schemas every request carries; each tool's description plus schema at most 2048 bytes. At most 8 attach per session, by package id order. | Token cost on every request. Required before a hook can `require_tool` its own tool. Adding one asks for consent again. |
 | `ui` | `status`, `band`, `card`, `toast`, `panel`, `dock`, `interview`; declare each returned slot. | Screen space and interaction. Plain `text` remains the headless fallback. |
 | `workspaces` | Up to 4 `{id, title, regions, board?, skin?, keys?}`; regions: `header`, `board`, `islands`, `rail`, `footer`. Board placement `band` or `island` needs the board region. Skin is a contained `.json` path. Up to 12 `{key, action, label}` bindings. | Taking the screen on an explicit command/action; placement, branding and key ownership. |
@@ -63,7 +63,10 @@ running runtime fails instead of starting one. Command tools from
 Loop guard: only a tool declared `readOnly` or `idempotent` counts toward
 identical-call repeats, and a successful call of a tool not declared read-only
 resets every other call's identical count, so read, write, read of one record
-is admitted.
+is admitted. The same declaration gates observation aging: on a small-tier or
+uncached route an earlier result is stubbed once a later identical call
+replaced it only for a `readOnly` or `idempotent` tool, so declare
+`readOnly: true` on tools that only read and leave step tools unannotated.
 
 A tool result may add `summary` (non-empty, at most 2048 bytes). The model then
 sees the summary and a `detail_ref`; the full `text` and `data` are stored for
@@ -76,6 +79,10 @@ Observation names: `session_open`, `session_close`, `turn_start`, `turn_end`,
 `dispatch_completed`, `dispatch_failed`, `compaction_end`, `budget_alert`,
 `safety_blocked`, `fs_changed`, `workspace_enter`, `workspace_leave`, plus the
 separately declared tick. Ticks coalesce while the runtime is busy.
+`compaction_end` carries `outcome` (`ok|failed|unknown`) and `trigger`
+(`auto|force|overflow|step|unknown`); `step` is the checkpoint a
+`turnPolicy: step` turn starts from on a small or uncached route, so a handler
+that rebuilds state after compaction can branch on it.
 
 The consent digest includes command names, prompt takeovers, state flags when
 either is set, the embedding service, events/tick, watch, hooks, tool

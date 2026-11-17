@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "extension-authoring",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "Builds, tests, and debugs Clio Coder api 2 extensions with declared capabilities and host-rendered views. Not for instruction-only skills; use skill-authoring.",
 	"license": "Apache-2.0",
 	"extensions": {

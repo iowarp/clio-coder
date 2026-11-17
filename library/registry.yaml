@@ -328,9 +328,9 @@ entries:
       - add an extension hook
       - create an extension workspace
       - debug extension reload
-    version: 0.1.1
+    version: 0.1.2
     sourceUrl: skills/meta/extension-authoring
-    sha256: f41fa0e02ca3fccfda0f0ba2436195dc5550f3d0b58c95944428aa70c793911f
+    sha256: 6c2b101cbb8b917c9e17f43fd192d201e7d8e1e13a6423d921f411ee0594561f
     provides:
       - kind: skill
         name: extension-authoring

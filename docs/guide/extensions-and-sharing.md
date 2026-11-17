@@ -219,9 +219,13 @@ the turn starts from the previous step turn's final text, the template body,
 and the operator notes, file facts and recallable refs a compaction keeps. The
 system prompt and tool schemas do not change, and an extension's pinned context
 block is sent again in the same request. The earlier turns stay in the session
-ledger, so resume and `context(scope="recall")` still reach them. The
-checkpoint carries no active skill text, so a skill a step needs is loaded in
-that step. A step turn that was cancelled, that failed, or that the loop guard
+ledger, so resume and `context(scope="recall")` still reach them. After
+writing it CLIO Coder does what it does after a native compaction: the
+`on_compaction` hook and the api 2 `compaction_end` observation fire with
+trigger `step`, the checkpoint carries the loaded skills' verified text and the
+continuity payload, which are sent again right after the summary, and memory
+restores into the turn's tail. When a loaded skill cannot be carried that way,
+the turn keeps the full history instead. A step turn that was cancelled, that failed, or that the loop guard
 or the tool budget stopped before its step ended leaves no state summary, and
 the turn after it keeps the full history. The checkpoint is recorded as a
 compaction with trigger `step` and as the `step_checkpoint` cold reason. Routes
