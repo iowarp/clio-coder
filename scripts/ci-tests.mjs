@@ -202,6 +202,15 @@ export const coreTests = [
 	"verifier-review-verdict-label",
 	"operator-local-date",
 	"count-tool",
+	"template-turn-budget",
+	"template-turn-step-policy",
+	"model-tier-metadata",
+	"extension-pinned-context",
+	"run-answers-scripted",
+	"continuation-last-tool-call",
+	"telemetry-token-sources",
+	"compact-tool-results",
+	"campaign-run",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working
