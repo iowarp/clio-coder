@@ -19,6 +19,7 @@
 
 import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
+import { normalizeGatewayArguments } from "../core/gateway-envelope.js";
 import { runtimeModelField } from "../core/model-tier.js";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
@@ -435,11 +436,12 @@ function toolSettledFacets(
 		facets.checkKind = details.checkKind as NonNullable<ToolSettledFacets["checkKind"]>;
 	if (skillActivation !== undefined && skillActivation.name.length <= 512) facets.skill = skillActivation.name;
 	if (tool === ToolNames.Gateway) {
+		const envelope = normalizeGatewayArguments(args);
 		const named =
-			args.op === "call"
-				? [args.capability]
-				: args.op === "chain" && Array.isArray(args.steps)
-					? args.steps.map((step) => (isRecord(step) ? step.capability : undefined))
+			envelope.op === "call"
+				? [envelope.capability]
+				: envelope.op === "chain" && Array.isArray(envelope.steps)
+					? envelope.steps.map((step) => (isRecord(step) ? step.capability : undefined))
 					: [];
 		const capabilities = [
 			...new Set(

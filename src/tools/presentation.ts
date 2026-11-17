@@ -16,6 +16,7 @@
 
 import os from "node:os";
 import path from "node:path";
+import { normalizeGatewayArguments } from "../core/gateway-envelope.js";
 import { ToolNames } from "../core/tool-names.js";
 
 export type ToolFoldDefault = "expanded" | "folded";
@@ -873,7 +874,8 @@ export function resolveToolRow(
 ): ResolvedToolRow {
 	const record = rowArgs(args);
 	if (toolName === ToolNames.Gateway) {
-		const op = record.op;
+		const envelope = normalizeGatewayArguments(record);
+		const op = envelope.op;
 		const fromDetails =
 			details !== null &&
 			typeof details === "object" &&
@@ -881,16 +883,16 @@ export function resolveToolRow(
 				? (details as { capability: string }).capability
 				: null;
 		const capability = (
-			fromDetails ?? (op === "call" && typeof record.capability === "string" ? record.capability : "")
+			fromDetails ?? (op === "call" && typeof envelope.capability === "string" ? envelope.capability : "")
 		).trim();
 		if (capability.length > 0 && capability !== ToolNames.Gateway && op !== "describe" && op !== "find") {
-			const inner = rowArgs(record.args);
+			const inner = rowArgs(envelope.args);
 			const resolved = resolveToolRow(capability, inner, details, actionClass, context);
 			return { ...resolved, viaGateway: true };
 		}
 		const spec = TOOL_ROWS[ToolNames.Gateway] as ToolRowSpec;
 		if (op === "describe") {
-			const described = typeof record.capability === "string" ? record.capability : "";
+			const described = typeof envelope.capability === "string" ? envelope.capability : "";
 			return {
 				spec: { ...spec, verbs: ["describing", "described"] },
 				toolName,

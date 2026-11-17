@@ -1,3 +1,4 @@
+import { gatewayCallCapability } from "../../core/gateway-envelope.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { AgentMessage, ToolRoundRecord } from "../../engine/types.js";
 import type { MiddlewareEffect } from "./types.js";
@@ -5,13 +6,12 @@ import type { MiddlewareEffect } from "./types.js";
 /**
  * A capability behind the gateway (an extension or MCP tool) starts as
  * `gateway(op="call", capability=<name>)`, so a requirement naming that
- * capability is met by the gateway call that carries it.
+ * capability is met by the gateway call that carries it, read as the gateway
+ * reads it (an `args`-only shorthand is a call).
  */
 function satisfiesRequired(required: string, toolName: string, args: unknown): boolean {
 	if (toolName === required) return true;
-	if (toolName !== ToolNames.Gateway || typeof args !== "object" || args === null) return false;
-	const record = args as { op?: unknown; capability?: unknown };
-	return record.op === "call" && typeof record.capability === "string" && record.capability.trim() === required;
+	return toolName === ToolNames.Gateway && gatewayCallCapability(args) === required;
 }
 
 export type MiddlewareToolChoice = { kind: "auto" } | { kind: "required"; toolName: string } | { kind: "none" };

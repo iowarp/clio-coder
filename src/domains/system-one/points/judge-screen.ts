@@ -17,6 +17,7 @@
  * without real probabilities is skipped before any byte leaves.
  */
 
+import { normalizeGatewayArguments } from "../../../core/gateway-envelope.js";
 import { isMcpToolName, ToolNames } from "../../../core/tool-names.js";
 import { INSTRUCTION_SHAPED_NOTE, UNTRUSTED_CONTENT_BANNER } from "../../../core/untrusted-content.js";
 import { isTrue } from "../answers.js";
@@ -124,8 +125,11 @@ function gatewayRead(args: Record<string, unknown> | null | undefined): ReadCall
 		}
 		return undefined;
 	}
-	const capability = args?.capability ?? args?.name;
-	return args?.op === "call" && typeof capability === "string" ? readOf(capability.trim(), args.args) : undefined;
+	if (!args) return undefined;
+	const envelope = normalizeGatewayArguments(args);
+	return envelope.op === "call" && typeof envelope.capability === "string"
+		? readOf(envelope.capability.trim(), envelope.args)
+		: undefined;
 }
 
 /** The call behind each result, which is the only place its target is written down. */

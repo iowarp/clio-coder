@@ -7,6 +7,7 @@
  * or spoof the UI that approves it.
  */
 
+import { normalizeGatewayArguments } from "../../core/gateway-envelope.js";
 import { STORE_REPLACES_ARG, storeReplacedBlob } from "../../core/store-paths.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { characterClassSwitchRate, createRedactionTally, redactSecretsText } from "../evidence/redact.js";
@@ -308,7 +309,8 @@ function boundActionObject(value: unknown): { object: string; truncated: boolean
  * gateway, so naming the wrapper put `gateway gateway run script shell bash` on
  * the doing line for a run that was only looking a tool up.
  */
-function describeGatewayCall(args: Record<string, unknown> | undefined): CallActionDescriptor | null {
+function describeGatewayCall(raw: Record<string, unknown> | undefined): CallActionDescriptor | null {
+	const args = raw === undefined ? undefined : normalizeGatewayArguments(raw);
 	const capability = boundActionObject(args?.capability);
 	if (args?.op === "call" && capability !== null && capability.object !== "gateway") {
 		const inner = args.args;
