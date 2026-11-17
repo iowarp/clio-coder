@@ -103,6 +103,7 @@ import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
+import type { PinnedContextBlock } from "../domains/extensions/pinned-context.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
@@ -1115,6 +1116,8 @@ export interface CreateChatLoopDeps {
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => void;
 	getReadySkillCount?: () => number;
+	/** The api 2 extensions' pinned context blocks; only a main session supplies them, so workers never see one. */
+	pinnedContext?: () => ReadonlyArray<PinnedContextBlock>;
 	/** Live source of each active route for the attended prompt (DF-7). */
 	getRouteSources?: () => Readonly<Record<RouteName, RouteSource>>;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
@@ -1626,6 +1629,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			new Map([...(deps.getMemoryRecordStatuses?.(ids) ?? []), ...operatorMemory.noteStandings(ids)]),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
+		...(deps.pinnedContext ? { pinnedContext: deps.pinnedContext } : {}),
 		...(deps.getRouteSources ? { getRouteSources: deps.getRouteSources } : {}),
 		getPendingHandoff: () => {
 			const sessionId = deps.session?.current()?.id;
@@ -3334,8 +3338,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					.join("\n");
 				// The prompt delta is read when the text is composed, after
 				// ensureSessionPrompt below has compared the live inputs (#423).
+				// Pinned extension blocks are read then too, after any compaction.
 				const reminderProjection = middleware.takePendingReminderProjection(() =>
-					[turnScope, context.sessionPromptDelta()].filter((part) => part.length > 0),
+					[turnScope, context.sessionPromptDelta(), ...context.pinnedContextDelta(agentRuntime)].filter(
+						(part) => part.length > 0,
+					),
 				);
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.

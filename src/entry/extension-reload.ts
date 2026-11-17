@@ -69,6 +69,7 @@ import {
 	buildWorkerExtensionHooks,
 	type ExtensionPromptGate,
 	evaluateWorkerHookRequest,
+	pinnableExtensionIds,
 	type WorkerHookEvaluator,
 } from "./extension-runtime-hooks.js";
 
@@ -461,6 +462,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			replacement.publish();
 			promptGate = nextPromptGate;
 			publishedPackages = candidate.snapshot.packages;
+			deps.runtimeHooks?.retainPinned(pinnableExtensionIds(candidate.snapshot.packages));
 			const workerHookLines: string[] = [];
 			let dropped: ReadonlyArray<WorkerExtensionHook> = [];
 			workerDeclarations =

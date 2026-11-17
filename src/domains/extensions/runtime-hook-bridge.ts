@@ -1,4 +1,5 @@
 import type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
+import { createPinnedContextStore, type PinnedContextStore } from "./pinned-context.js";
 import type { ExtensionHookEvent, ExtensionToolResult, Interview } from "./public-api-v2.js";
 
 /** What the operator answered in an interview a tool call asked for, step by step. */
@@ -40,14 +41,20 @@ export interface ExtensionRuntimeHookExecutor {
  * unbinds, a hook reads as a runtime that is not running, so its `onError`
  * policy decides.
  */
-export interface ExtensionRuntimeHookBridge {
+export interface ExtensionRuntimeHookBridge extends PinnedContextStore {
 	bind(executor: ExtensionRuntimeHookExecutor | null): void;
 	current(): ExtensionRuntimeHookExecutor | null;
 }
 
+/**
+ * The bridge also holds the session's pinned context blocks: the hooks that
+ * set them and the turn that sends them share it, and only a main session has
+ * one, so a dispatched worker never sees a block.
+ */
 export function createExtensionRuntimeHookBridge(): ExtensionRuntimeHookBridge {
 	let executor: ExtensionRuntimeHookExecutor | null = null;
 	return {
+		...createPinnedContextStore(),
 		bind(next) {
 			executor = next;
 		},

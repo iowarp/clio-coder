@@ -61,7 +61,7 @@ import type {
 } from "../core/cache-telemetry.js";
 import { buildCacheCallObservation, firstChangedSection, uncachedPrefillTokens } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
-import { hostFramedTexts, neutralizeFraming } from "../core/reminder-framing.js";
+import { hostFramedTexts, neutralizeFraming, systemReminderBlock } from "../core/reminder-framing.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
@@ -96,6 +96,7 @@ import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
+import { type PinnedContextBlock, pinnedContextDelta } from "../domains/extensions/pinned-context.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import {
 	type MemoryRecordStanding,
@@ -255,6 +256,8 @@ export interface TurnContextDeps {
 	memoryEnabled?: (() => boolean) | undefined;
 	getMemoryRecordStatuses?: ((ids: readonly string[]) => ReadonlyMap<string, MemoryRecordStanding>) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
+	/** The extensions' pinned context blocks, sent in the message tail whenever context lacks their current value. */
+	pinnedContext?: (() => ReadonlyArray<PinnedContextBlock>) | undefined;
 	/** Live source of each active route for the attended prompt; absent for headless runs. */
 	getRouteSources?: (() => Readonly<Record<RouteName, RouteSource>>) | undefined;
 	/**
@@ -400,6 +403,18 @@ export interface TurnContext {
 	/** The last reduction that ended in a stop or failure settled its own transcript card, which already says so. */
 	lastCompactionCardSettled(): boolean;
 	cancelCompaction(): void;
+	/**
+	 * The pinned context blocks the context does not carry at their current
+	 * value, read live against the messages as they stand, so a turn composed
+	 * after a compaction sends a dropped block again verbatim.
+	 */
+	pinnedContextDelta(agentRuntime: AgentRuntime): string[];
+	/**
+	 * Between tool batches, append the pinned context blocks the context no
+	 * longer carries at their current value (a hook changed one, or a
+	 * compaction dropped it) as a host-framed tail; true when it appended.
+	 */
+	appendPinnedContext(agentRuntime: AgentRuntime): boolean;
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
 		signal?: AbortSignal,
@@ -661,6 +676,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let thinkingUsesConfigurationUpdate = false;
 	let frozenMemorySessionId = "";
 	let sessionPromptDelta = "";
+	// The pinned blocks the context lacks at their current value. Read against the messages as they stand, after any
+	// compaction, so a block a summary dropped goes again verbatim and an unchanged one never repeats.
+	const pinnedDelta = (agentRuntime: AgentRuntime): string[] => {
+		const blocks = deps.pinnedContext?.() ?? [];
+		return blocks.length === 0 ? [] : pinnedContextDelta(blocks, hostFramedTexts(agentRuntime.agent.state.messages));
+	};
 	let announcedProjectPreloadSession: string | null = null;
 	// The hash this process compiled *for the session that is current now*, and
 	// the manifest's `previousHash` whenever it is set. It is not read off
@@ -3291,6 +3312,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return (deps.readSessionEntries?.() ?? []).some(
 				(entry) => entry.kind === "message" && entry.role === "user" && entry.turnId === turnId,
 			);
+		},
+
+		pinnedContextDelta: pinnedDelta,
+
+		appendPinnedContext(agentRuntime): boolean {
+			const delta = pinnedDelta(agentRuntime);
+			if (delta.length === 0) return false;
+			// A context-only tail, like a deferred reminder: the cached prefix keeps its bytes (#423).
+			agentRuntime.agent.state.messages.push({ role: "user", content: systemReminderBlock(delta), timestamp: Date.now() });
+			return true;
 		},
 
 		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal, contextChanged = false) {

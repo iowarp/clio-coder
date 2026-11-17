@@ -132,8 +132,38 @@ function middlewareEffect(effect: ExtensionEffect, extensionId: string): Middlew
 			};
 		default:
 			// Prompt effects never reach the middleware: buildExtensionPromptGate applies them.
+			// A pin_context sets the session's pinned block through the bridge instead.
 			return null;
 	}
+}
+
+/**
+ * Set the extension's pinned block from a hook answer; true when one was set.
+ * The block is the session's: a dispatched worker's call runs in a tree that
+ * may never merge, so a pin it returns is said and not applied.
+ */
+function applyPin(
+	effects: ReadonlyArray<ExtensionEffect>,
+	extensionId: string,
+	origin: HookCallOrigin,
+	bridge: ExtensionRuntimeHookBridge,
+): boolean {
+	const pin = effects.find((effect) => effect.kind === "pin_context");
+	if (pin === undefined) return false;
+	if (origin === "session") {
+		bridge.pin(extensionId, pin.text);
+		return true;
+	}
+	try {
+		bridge
+			.current()
+			?.notify(
+				`extension ${extensionId}: pin_context from a dispatched worker's call was not applied; the block is the session's`,
+			);
+	} catch {
+		// A notice sink has no authority over the call.
+	}
+	return false;
 }
 
 /**
@@ -446,6 +476,15 @@ function eachRuntimeHook(
 	}
 }
 
+/** The extensions of a generation whose hooks may hold a pinned block; a reload clears the rest. */
+export function pinnableExtensionIds(packages: ReadonlyArray<InstalledExtension>): Set<string> {
+	const ids = new Set<string>();
+	eachRuntimeHook(packages, (entry) => {
+		ids.add(entry.id);
+	});
+	return ids;
+}
+
 /** One hook run for a dispatched worker's call, with the session's deadline, policy and receipt. */
 export type WorkerHookEvaluator = (
 	input: MiddlewareHookInput,
@@ -507,6 +546,7 @@ export function buildExtensionRuntimeHooks(
 		): Promise<MiddlewareEffect[]> => {
 			const startedAt = performance.now();
 			const verdict = await runner.run(hookEvent(point, input, access, workspace), origin, budgetMs);
+			const pinned = verdict.kind === "ok" ? applyPin(verdict.effects, entry.id, origin, bridge) : false;
 			const effects =
 				verdict.kind === "ok"
 					? verdict.effects.flatMap((effect) => {
@@ -520,7 +560,7 @@ export function buildExtensionRuntimeHooks(
 			runner.settle(
 				verdict,
 				startedAt,
-				effects.map((effect) => effect.kind),
+				[...effects.map((effect) => effect.kind), ...(pinned ? ["pin_context"] : [])],
 				input.toolName,
 				input.sessionId,
 				input.runId,
@@ -643,6 +683,9 @@ export function buildExtensionPromptGate(
 					} else if (effect.kind === "notify_operator") {
 						applied.push("notify_operator");
 						notices.push(`${extensionId}: ${effect.message}`);
+					} else if (effect.kind === "pin_context") {
+						bridge.pin(extensionId, effect.text);
+						applied.push("pin_context");
 					}
 				}
 				runner.settle(verdict, startedAt, applied);
