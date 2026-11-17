@@ -132,10 +132,13 @@ export function entryRoots(home: string, operatorConfig: string): EntryRoots {
 	};
 }
 
-/** The environment that points a Clio process at these roots and nowhere else. */
+/**
+ * The environment that points a Clio process at these roots. Each root is named by its own variable, which beats
+ * `CLIO_CODER_HOME`, so that one is left as the operator has it: the config root is theirs and lies outside the
+ * entry's home.
+ */
 export function entryRootEnv(roots: EntryRoots): Record<string, string> {
 	return {
-		CLIO_CODER_HOME: roots.home,
 		CLIO_CODER_CONFIG_DIR: roots.config,
 		CLIO_CODER_DATA_DIR: roots.data,
 		CLIO_CODER_STATE_DIR: roots.state,
