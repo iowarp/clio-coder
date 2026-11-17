@@ -18,6 +18,12 @@ import { resolvedRequestContext } from "./context.js";
 import type { EngineModel, ToolRoundRecord } from "./types.js";
 
 type Choice<T extends { toolChoice?: unknown }> = NonNullable<T["toolChoice"]>;
+/**
+ * Pi types Codex's option as the string choices only, but its body builder
+ * copies `toolChoice` into `tool_choice` verbatim, so the Responses function
+ * form reaches the wire as written.
+ */
+type CodexChoice = Choice<OpenAICodexResponsesOptions> | Extract<Choice<OpenAIResponsesOptions>, { type: "function" }>;
 
 /**
  * Each API's own spelling of "call this tool", typed by that adapter's option
@@ -39,12 +45,17 @@ const NAMED_CHOICE = {
 		rejected ? "auto" : { type: "function", function: { name } },
 	"openai-responses": (name: string, rejected: boolean): Choice<OpenAIResponsesOptions> =>
 		rejected ? "auto" : { type: "function", name },
-	// Codex previously rejected forcing with "Unsupported parameter: 'tool_choice'
-	// is not supported by rustponsesapi" (#426). Live full requests now accept
-	// required/named, but Pi's delta omits tools and then Codex rejects it:
-	// "Tool choice 'required' must be specified with 'tools' parameter."
-	// Keep auto over the narrowed tool; live text-only "none" is accepted (#426).
-	"openai-codex-responses": (): Choice<OpenAICodexResponsesOptions> => "auto",
+	// Codex once rejected every forced choice ("Unsupported parameter:
+	// 'tool_choice' is not supported by rustponsesapi", #426) and later a forced
+	// choice on a tool-less WebSocket delta ("Tool choice 'required' must be
+	// specified with 'tools' parameter"). Live on gpt-6-luna in November 2026 it
+	// takes the named function choice over the full list declared in
+	// additional_tools; a pinned round after an unpinned one changes tool_choice,
+	// so Pi sends it whole rather than as a delta. A rejection before output
+	// retries the round once with auto, remembered per target and model, and the
+	// round keeps the full tool list either way, so the cached prefix survives.
+	"openai-codex-responses": (name: string, rejected: boolean): CodexChoice =>
+		rejected ? "auto" : { type: "function", name },
 	"openai-completions": (_name: string, rejected: boolean): Choice<OpenAICompletionsOptions> =>
 		rejected ? "auto" : "required",
 } as const;
@@ -259,11 +270,15 @@ function toolsRemovedRound(
 }
 
 /**
- * Route this round to one declared tool. Anthropic keeps the complete tool
- * surface, including during terminal handoff, to retain the cached schema
- * prefix (#423). Other APIs narrow to the required tool, so a spelling that
- * cannot name one ("any", "required") still picks exactly it. Returns undefined
- * when the API has no spelling for it or the tool is not declared.
+ * Route this round to one declared tool. Anthropic and the OpenAI Responses
+ * APIs (Codex included) keep the complete tool surface, including during
+ * terminal handoff, to retain the cached schema prefix (#423): their named
+ * choice picks the tool out of the full list, and a narrowed list would change
+ * the tool declarations Pi places at the head of the prompt, so every pinned
+ * round would miss the prefix cache. Other APIs narrow to the required tool,
+ * so a spelling that cannot name one ("any", "required") still picks exactly
+ * it. Returns undefined when the API has no spelling for it or the tool is not
+ * declared.
  *
  * Claude models that accept a forced choice cannot think beside it, so the
  * round drops `reasoning`; the next round without one resumes the configured
@@ -293,7 +308,9 @@ function requiredRound(
 	const toolChoice = NAMED_CHOICE[api](name, automatic) as NonNullable<SimpleStreamOptions["toolChoice"]>;
 	let next: SimpleStreamOptions = { ...options, toolChoice };
 	const narrowed: Context =
-		api === "anthropic-messages" ? context : { ...resolved, tools: tools.filter((tool) => tool.name === name) };
+		api === "anthropic-messages" || isOpenAIResponsesApi(api)
+			? context
+			: { ...resolved, tools: tools.filter((tool) => tool.name === name) };
 	if (!automatic && (api === "anthropic-messages" || (api === "bedrock-converse-stream" && /claude/iu.test(model.id)))) {
 		const { reasoning: _reasoning, ...withoutReasoning } = next;
 		next = withoutReasoning;
@@ -353,11 +370,9 @@ export function applyToolRounds(
 		const downgradeReason =
 			rejection ??
 			(round.kind === "required" && choice === "auto"
-				? model.api === "openai-codex-responses"
-					? "Codex forced tool_choice is unsafe with tool-less WS deltas (#426)"
-					: model.api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] })
-						? "Anthropic cache-preserving tool routing (#423)"
-						: "Model does not support forced tool_choice"
+				? model.api === "anthropic-messages" && claudeVersionAtLeast(model, { haiku: [5, 5] })
+					? "Anthropic cache-preserving tool routing (#423)"
+					: "Model does not support forced tool_choice"
 				: undefined);
 		return {
 			...controlled,

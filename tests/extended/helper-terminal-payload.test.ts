@@ -139,7 +139,8 @@ for (const id of ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1", "c
 }
 test("Responses terminal handoff uses native function choice", async () => {
 	const body = await wire(catalog("openai", "gpt-5.6-luna"), [handoff]);
-	deepStrictEqual(declared(body), [name]);
+	// The named choice picks the tool out of the full list, so the cached tool declarations stay put (#423).
+	deepStrictEqual(declared(body), ["write", name]);
 	deepStrictEqual(body.tool_choice, { type: "function", name });
 	strictEqual(body.parallel_tool_calls, false);
 });
@@ -152,11 +153,11 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 	const rounds: Array<[string, ToolRound[], string[] | undefined, unknown]> = [
 		["ordinary", [], ["write", name], "auto"],
 		// The tester call that died in #426: the worker sends its terminal handoff ahead of the synthesis lock.
-		["handoff", [codexHandoff, lock], [name], "auto"],
+		// Codex now takes the named function choice over the full list, which keeps the cached prefix (#423).
+		["handoff", [codexHandoff, lock], ["write", name], { type: "function", name }],
 		// The worker synthesis lock strips the surface, so Codex sees no tools and no tool_choice.
 		["synthesis", [lock], undefined, undefined],
-		// Codex rejects a forced choice once Pi's WS delta omits tools; auto over the one narrowed tool is safe.
-		["required", [{ kind: "required", toolName: "write" }], ["write"], "auto"],
+		["required", [{ kind: "required", toolName: "write" }], ["write", name], { type: "function", name: "write" }],
 		["middleware text-only", [{ kind: "text-only" }], ["write", name], "none"],
 	];
 	const bodies = new Map<string, Record<string, unknown>>();
@@ -166,7 +167,7 @@ test("Codex sends only accepted tool_choice shapes and retries one rejected choi
 		deepStrictEqual(declared(body), tools, label);
 		// Pi's own default may be omitted on an ordinary round; any forced round must spell its choice.
 		if (label === "ordinary") ok(body.tool_choice === undefined || body.tool_choice === "auto", label);
-		else strictEqual(body.tool_choice, choice, label);
+		else deepStrictEqual(body.tool_choice, choice, label);
 	}
 	strictEqual(bodies.get("handoff")?.parallel_tool_calls, bodies.get("ordinary")?.parallel_tool_calls);
 	for (const [label, round, , choice] of rounds) {
