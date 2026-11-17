@@ -4024,10 +4024,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					loopGuardFailure = null;
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
+					// Only a step turn that ended on its own text, or that its step policy ended, leaves a state summary
+					// the next step can start from. A failed turn, a loop-guard stop or a real budget crossing stopped
+					// mid-step, so its continuation keeps the full history (WTF-P 0.8.3 C5).
 					stepStarts.settle(
 						state.currentTurnConstraints,
 						lastAssistantText(agentRuntime.agent.state.messages.slice(machineMessageStart)),
-						!canceled && !interviewDismissed && state.continuation.stop === null,
+						!canceled &&
+							!interviewDismissed &&
+							state.continuation.stop === null &&
+							!guardStopped &&
+							!state.synthesisToolLock &&
+							(!state.toolBudgetLock || stepStop !== null) &&
+							detectTerminalFailureFromState(agentRuntime.agent) === null,
 					);
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)

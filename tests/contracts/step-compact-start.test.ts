@@ -113,7 +113,11 @@ async function stepDrive(route: { model: string; tier: ModelTier; uncached?: boo
 						histories.push(JSON.stringify(state.messages));
 						texts.push(text);
 						prompts++;
-						state.messages.push({ role: "user", content: [{ type: "text", text }], timestamp: Date.now() } as unknown as AgentMessage);
+						state.messages.push({
+							role: "user",
+							content: [{ type: "text", text }],
+							timestamp: Date.now(),
+						} as unknown as AgentMessage);
 						await listener({ type: "agent_start" });
 						await listener({ type: "turn_start" });
 						let reply = "Step two ran: drafted methods; after=methods-done.";
