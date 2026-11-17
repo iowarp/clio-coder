@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
@@ -77,6 +77,13 @@ for (const outcome of ["recovered", "exhausted", "usable-prose", "cancelled"] as
 				match(serialized, /Current execution phase: final synthesis/);
 				match(serialized, /clio_synthesis_reprompt/);
 				match(serialized, /Do not invent missing evidence/);
+				// Astra r1-4a: the directive rides the tail; the system prompt and every earlier message keep the
+				// unlocked round's bytes.
+				const before = wire.requests[0]?.messages as unknown[];
+				const locked = wire.requests[1]?.messages as unknown[];
+				deepStrictEqual(locked.slice(0, before.length), before);
+				ok(!JSON.stringify(locked[0]).includes("final synthesis"));
+				match(JSON.stringify(locked.at(-1)), /\[middleware:warn\] Current execution phase: final synthesis/);
 			}
 			const last = handle?.agent.state.messages.at(-1);
 			ok(last?.role === "assistant");
