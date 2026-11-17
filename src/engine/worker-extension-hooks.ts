@@ -66,6 +66,7 @@ export function createWorkerExtensionHookRegistrations(
 				tool: input.toolName ?? "",
 				...(input.toolArgs !== undefined ? { args: { ...input.toolArgs } } : {}),
 				...(input.toolLanding !== undefined ? { landing: structuredClone({ ...input.toolLanding }) } : {}),
+				...(input.model !== undefined ? { model: { ...input.model } } : {}),
 				...(hook.point === "after_tool"
 					? {
 							outcome: input.metadata?.resultKind === "error" ? ("error" as const) : ("ok" as const),

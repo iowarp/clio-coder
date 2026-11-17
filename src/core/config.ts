@@ -36,6 +36,7 @@ import {
 	WORKSPACE_SNAPSHOT_MODES,
 } from "./defaults.js";
 import { writeDiagnostic } from "./diagnostics.js";
+import { MODEL_TIERS } from "./model-tier.js";
 import { safeResourceWrite } from "./safe-resource-write.js";
 import { SANDBOX_MODES, UNIX_SOCKET_MODES } from "./sandbox/types.js";
 import { readSettingsDocument } from "./settings-document.js";
@@ -1524,6 +1525,30 @@ function validatePrompts(issues: Issues, raw: unknown, settings: ClioSettings): 
 	}
 }
 
+function validateModels(issues: Issues, raw: unknown, settings: ClioSettings): void {
+	if (!isPlainObject(raw)) {
+		issues.add("models", `expected a map, got ${describe(raw)}`);
+		return;
+	}
+	const models: ClioSettings["models"] = {};
+	for (const [modelId, entry] of Object.entries(raw)) {
+		const path = `models.${modelId}`;
+		if (modelId.trim().length === 0) {
+			issues.add("models", "empty model id");
+			continue;
+		}
+		if (!isPlainObject(entry)) {
+			issues.add(path, `expected a map, got ${describe(entry)}`);
+			continue;
+		}
+		issues.unknownKeys(path, entry, ["tier"]);
+		if (!("tier" in entry)) continue;
+		const tier = expectEnum(issues, `${path}.tier`, entry.tier, MODEL_TIERS);
+		if (tier !== undefined) models[modelId] = { tier };
+	}
+	settings.models = models;
+}
+
 function validateReport(issues: Issues, raw: unknown, settings: ClioSettings): void {
 	if (!isPlainObject(raw)) {
 		issues.add("report", `expected a map, got ${describe(raw)}`);
@@ -1550,6 +1575,7 @@ const TOP_LEVEL_KEYS = [
 	"telemetry",
 	"report",
 	"prompts",
+	"models",
 	...V1_ONLY_ROOTS,
 ] as const;
 
@@ -2769,6 +2795,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 	if ("telemetry" in raw) validateTelemetry(issues, raw.telemetry, settings);
 	if ("report" in raw) validateReport(issues, raw.report, settings);
 	if ("prompts" in raw) validatePrompts(issues, raw.prompts, settings);
+	if ("models" in raw) validateModels(issues, raw.models, settings);
 
 	return { settings, issues: issues.list, coercions: issues.coercions, retired: issues.retired };
 }

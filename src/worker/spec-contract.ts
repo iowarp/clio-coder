@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { THINKING_LEVELS } from "../core/defaults.js";
+import { MODEL_TIERS } from "../core/model-tier.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import { WORKER_SANDBOX_SPEC_VERSION, type WorkerSandboxSpec } from "../core/sandbox/types.js";
@@ -747,6 +748,10 @@ function validateRuntimeResolution(value: unknown): void {
 	readString(thinking.notice, "WorkerSpec.runtimeResolution.thinking.notice", { allowEmpty: true });
 	readRecord(resolution.request, "WorkerSpec.runtimeResolution.request");
 	readRecord(resolution.response, "WorkerSpec.runtimeResolution.response");
+	if (resolution.modelTier !== undefined)
+		readEnum(resolution.modelTier, "WorkerSpec.runtimeResolution.modelTier", MODEL_TIERS);
+	if (resolution.promptCaching !== undefined && typeof resolution.promptCaching !== "boolean")
+		throw new Error("WorkerSpec.runtimeResolution.promptCaching must be a boolean");
 	if (!Array.isArray(resolution.diagnostics)) {
 		throw new Error("WorkerSpec.runtimeResolution.diagnostics must be an array");
 	}

@@ -1,3 +1,4 @@
+import type { ModelRunInfo } from "../../core/model-tier.js";
 import type { FactSum } from "../../core/telemetry/fact.js";
 import type { TurnOrigin } from "../../core/turn-origin.js";
 /**
@@ -183,7 +184,23 @@ export interface ExtensionToolHookLanding {
  */
 export type ExtensionTurnOrigin = TurnOrigin;
 
-export type ExtensionHookEvent =
+/**
+ * The model a hook's call or turn runs on, present on every hook event from
+ * Clio 0.8.4: `id` (wire model id), `target`, `contextWindow` (effective
+ * tokens, null when unknown), `thinkingLevel` (what requests carry),
+ * `promptCaching` (false only when the route turns caching off) and `tier`
+ * (`small`, `standard` or `frontier`; the operator's `models.<id>.tier` or
+ * Clio's heuristic). A dispatched worker's tool calls carry the worker's own
+ * model. Earlier hosts omit it, so read it as optional.
+ */
+export type ExtensionModel = Readonly<ModelRunInfo>;
+
+/** Present on every hook event when the host knows the model; see {@link ExtensionModel}. */
+export interface ExtensionHookModel {
+	model?: ExtensionModel;
+}
+
+export type ExtensionHookEvent = (
 	| ({
 			point: "prompt_submit";
 			/** access: prompt */
@@ -219,7 +236,9 @@ export type ExtensionHookEvent =
 			outcome: "completed" | "aborted" | "error";
 			/** access: assistant-text */
 			text?: string;
-	  } & Partial<ExtensionTurnOrigin>);
+	  } & Partial<ExtensionTurnOrigin>)
+) &
+	ExtensionHookModel;
 
 /**
  * Effects an awaited hook may return. Each applies only at the points the

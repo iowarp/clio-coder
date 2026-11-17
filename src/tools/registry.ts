@@ -5,6 +5,7 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { isWorkerToolCallCapExceededReason } from "../core/guardrails.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
+import type { ModelRunInfo } from "../core/model-tier.js";
 import { normalizePromptHint } from "../core/prompt-hint.js";
 import {
 	carriesHostFraming,
@@ -595,6 +596,8 @@ export interface ToolInvokeOptions {
 	supportsImages?: boolean;
 	/** Trusted effective context window in tokens; sizes the per-turn observation pool. */
 	contextWindow?: number;
+	/** Trusted model the call runs on, as tool hooks receive it; the worker's own model in a worker. */
+	model?: ModelRunInfo;
 	signal?: AbortSignal;
 	runId?: string;
 	sessionId?: string;
@@ -3581,6 +3584,10 @@ function buildToolHookInput(
 	if (options?.turnId !== undefined) input.turnId = options.turnId;
 	if (options?.toolCallId !== undefined) input.toolCallId = options.toolCallId;
 	if (options?.correlationId !== undefined) input.correlationId = options.correlationId;
+	if (options?.model !== undefined) {
+		input.model = options.model;
+		input.modelId = options.model.id;
+	}
 	return input;
 }
 

@@ -14,6 +14,8 @@ export function createResourcesBundle(
 		skills: () => ({
 			...skillOptions(config()?.get().integrations.projectResources.trustProjectImports === true, options),
 		}),
+		// Read at each expansion: the providers domain loads after this one.
+		modelTier: options.modelTier ?? (() => context.getContract("providers")?.chatModel?.()?.tier),
 	});
 	const extension: DomainExtension = {
 		start() {
@@ -39,8 +41,8 @@ export function createResourcesBundle(
 		promptsForDisplay(cwd) {
 			return loader.promptsForDisplay(cwd);
 		},
-		expandPromptTemplate(text, cwd) {
-			return loader.expandPromptTemplate(text, cwd);
+		expandPromptTemplate(text, cwd, expansionOptions) {
+			return loader.expandPromptTemplate(text, cwd, expansionOptions);
 		},
 		reload() {
 			return loader.reload();

@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, join, relative as relativePath, resolve, sep } from "node:path";
+import type { ModelRunInfo } from "../core/model-tier.js";
 import { type TurnOrigin, turnOriginFromMetadata } from "../core/turn-origin.js";
 import {
 	capabilityEnvelope,
@@ -141,6 +142,15 @@ function middlewareEffect(effect: ExtensionEffect, extensionId: string): Middlew
  * manifest declares, so consent to the envelope is consent to the content.
  */
 function hookEvent(
+	point: ToolOrTurnPoint,
+	input: MiddlewareHookInput,
+	access: ReadonlyArray<ExtensionContentAccess>,
+	workspace?: WorkerLandingWorkspace,
+): ExtensionHookEvent {
+	return { ...pointEvent(point, input, access, workspace), ...(input.model ? { model: { ...input.model } } : {}) };
+}
+
+function pointEvent(
 	point: ToolOrTurnPoint,
 	input: MiddlewareHookInput,
 	access: ReadonlyArray<ExtensionContentAccess>,
@@ -560,7 +570,12 @@ export interface ExtensionPromptGate {
 	 * model would receive exactly that line. A rewrite of a line a template
 	 * expanded is refused with a notice, since the body is not the line.
 	 */
-	run(typed: string, rewritable: boolean, origin?: TurnOrigin): Promise<ExtensionPromptGateVerdict>;
+	run(
+		typed: string,
+		rewritable: boolean,
+		origin?: TurnOrigin,
+		model?: ModelRunInfo | null,
+	): Promise<ExtensionPromptGateVerdict>;
 }
 
 /**
@@ -590,7 +605,7 @@ export function buildExtensionPromptGate(
 	});
 	return {
 		size: runners.length,
-		async run(typed, rewritable, origin = { origin: "operator" }) {
+		async run(typed, rewritable, origin = { origin: "operator" }, model = null) {
 			let text = typed;
 			const notices: string[] = [];
 			for (const { extensionId, access, runner } of runners) {
@@ -599,6 +614,7 @@ export function buildExtensionPromptGate(
 					point: "prompt_submit",
 					...(access.includes("prompt") ? { text } : {}),
 					...origin,
+					...(model ? { model: { ...model } } : {}),
 				});
 				if (verdict.kind === "failed") {
 					runner.settle(verdict, startedAt, verdict.policy === "block" ? ["block_prompt"] : []);
@@ -728,6 +744,8 @@ export async function evaluateWorkerHookRequest(
 			: {}),
 		...(run.sessionId !== null ? { sessionId: run.sessionId } : {}),
 		...(run.runId !== null ? { runId: run.runId } : {}),
+		// The worker's own model, as the worker reported it for this call.
+		...(request.model !== undefined ? { model: request.model, modelId: request.model.id } : {}),
 	};
 	const workspace: WorkerLandingWorkspace | undefined =
 		request.workspaceRoot !== undefined && run.sourceRoot !== undefined

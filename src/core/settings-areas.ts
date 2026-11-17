@@ -97,7 +97,7 @@ export function resolveSettingsArea(name: string): SettingsAreaId | undefined {
 /** Group labels in display order, per area. A row's group is the one its placement names. */
 export const SETTINGS_AREA_GROUPS: Readonly<Record<SettingsAreaId, readonly string[]>> = {
 	recent: ["Pinned", "Recent", "Suggested"],
-	models: ["Connections", "Chat model", "Reasoning & length", "Speed", "Quick switch"],
+	models: ["Connections", "Chat model", "Reasoning & length", "Speed", "Quick switch", "Model tiers"],
 	chat: ["Replies", "Alerts", "Recovery", "Transcript", "Guidance", "Updates", "Graphical app"],
 	workers: [
 		"Default worker",
@@ -271,6 +271,7 @@ export function settingsPlacementForRow(id: string, path: string): SettingsPlace
 		default:
 	}
 	if (under(path, "chat.modelPicker")) return place("models", "Quick switch");
+	if (under(path, "models")) return place("models", "Model tiers");
 	if (under(path, "chat.retry")) return place("advanced", "Retry timing");
 	if (under(path, "interface.panes.files")) return place("workspace", "Files pane");
 	if (under(path, "interface.panes")) return place("workspace", "Panes");

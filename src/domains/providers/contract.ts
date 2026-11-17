@@ -1,3 +1,4 @@
+import type { ModelRunInfo, ModelTier } from "../../core/model-tier.js";
 import type { OAuthLoginCallbacks } from "../../engine/oauth.js";
 import type { AuthOperationOptions } from "../../engine/types.js";
 import type { AuthCredential, AuthResolution, AuthStatus } from "./auth/index.js";
@@ -206,4 +207,18 @@ export interface ProvidersContract {
 	 * wireModelId, kb)`. Null when the bundled YAMLs are unreadable at boot.
 	 */
 	knowledgeBase: KnowledgeBase | null;
+
+	/**
+	 * The operator's `models.<id>.tier` for a wire model id, or null when the
+	 * settings leave it to the heuristic. Absent on a contract built without
+	 * settings, which reads the same as null (WTF-P 0.8.3 C1).
+	 */
+	modelTierOverride?(wireModelId: string): ModelTier | null;
+
+	/**
+	 * The session's chat model as its effective settings name it, or null when
+	 * no chat route resolves. Prompt templates pick their variant by its tier,
+	 * and prompt_submit hooks, which run before a turn exists, receive it.
+	 */
+	chatModel?(): ModelRunInfo | null;
 }

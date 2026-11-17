@@ -3246,7 +3246,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const gate = extensionReload.promptGate();
 			const verdict =
 				gate !== null && gate.size > 0
-					? await gate.run(typed, typed === text, origin)
+					? await gate.run(typed, typed === text, origin, providers.chatModel?.())
 					: { kind: "pass" as const, text: typed, notices: [] };
 			const executor = runtimeHooks.current();
 			for (const notice of verdict.notices) executor?.notify(notice);

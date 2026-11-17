@@ -19,6 +19,7 @@
 
 import { performance } from "node:perf_hooks";
 import type { TSchema } from "typebox";
+import { runtimeModelInfo } from "../core/model-tier.js";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { TelemetryContext } from "../core/telemetry/context.js";
 import { telemetryContext, withToolTelemetryContext } from "../core/telemetry/context.js";
@@ -803,6 +804,7 @@ export function resolveSessionTools(
 				vision: runtime.runtimeResolution.capabilityDecisions.vision,
 			}),
 			...(contextWindow !== undefined ? { contextWindow } : {}),
+			model: runtimeModelInfo(runtime.runtimeResolution),
 		};
 	};
 	if (telemetry) input.telemetry = telemetry;

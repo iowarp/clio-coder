@@ -1,7 +1,7 @@
 import type { DomainContract } from "../../core/domain-loader.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { ResourceDiagnostic } from "./collision.js";
-import type { PromptTemplate, PromptTemplateExpansion } from "./prompts/loader.js";
+import type { PromptTemplate, PromptTemplateExpansion, PromptTemplateExpansionOptions } from "./prompts/loader.js";
 import type { Skill, SkillExpansionOptions } from "./skills/loader.js";
 
 export interface ResourceList<T> {
@@ -38,6 +38,10 @@ export interface ResourcesContract extends DomainContract {
 	 * that {@link skills} produced earlier.
 	 */
 	skillsStillVerified(skills: ReadonlyArray<Skill>, cwd?: string): Skill[];
-	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
+	/**
+	 * Without `options.tier` a template's variant follows the session's chat
+	 * model, as the providers contract resolves it.
+	 */
+	expandPromptTemplate(text: string, cwd?: string, options?: PromptTemplateExpansionOptions): PromptTemplateExpansion;
 	reload(): Promise<void>;
 }
