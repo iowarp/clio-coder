@@ -78,7 +78,7 @@ export interface TurnMiddleware {
 		terminalToolResult?: { toolCallId: string; toolName: string },
 	): Promise<void>;
 	fireCompactionHook(
-		stage: "mask_observations" | "working_set_evict" | "working_set_recall" | "llm_summary",
+		stage: "mask_observations" | "working_set_evict" | "working_set_recall" | "llm_summary" | "step_checkpoint",
 		trigger: CompactionTrigger | EvictionTrigger | RecallTrigger,
 		tokensBefore?: number,
 	): void;

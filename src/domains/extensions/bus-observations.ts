@@ -47,6 +47,10 @@ export function subscribeExtensionObservations(
 		bus.subscribe("compaction.ended", (p) =>
 			send({
 				event: "compaction_end",
+				trigger:
+					p.trigger === "auto" || p.trigger === "force" || p.trigger === "overflow" || p.trigger === "step"
+						? p.trigger
+						: "unknown",
 				outcome:
 					p.outcome === "completed" || p.outcome === "unchanged"
 						? "ok"

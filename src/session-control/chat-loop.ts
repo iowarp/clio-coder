@@ -3380,7 +3380,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 				if (stepLead !== null && compactStepStartDue(agentRuntime.runtimeResolution)) {
 					try {
-						context.runStepCheckpoint(agentRuntime, stepLead);
+						context.runStepCheckpoint(agentRuntime, stepLead, pendingSkillPolicy);
 					} catch (err) {
 						emitNotice(
 							`[Clio Coder] step checkpoint failed: ${err instanceof Error ? err.message : String(err)}. This step turn keeps the full history.`,

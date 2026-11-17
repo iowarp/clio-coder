@@ -123,7 +123,12 @@ import {
 	effectiveCompactionThreshold,
 	shouldCompact,
 } from "../domains/session/compaction/auto.js";
-import { type CompactInput, type CompactResult, hostCheckpointSummary } from "../domains/session/compaction/compact.js";
+import {
+	type CompactInput,
+	type CompactResult,
+	checkpointSkillContext,
+	hostCheckpointSummary,
+} from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
@@ -147,6 +152,8 @@ import {
 	type PrewarmStats,
 	type PromptCacheStats,
 } from "../domains/session/context-ledger.js";
+import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
+import { resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import {
 	type CompactionSummaryEntry,
@@ -404,9 +411,10 @@ export interface TurnContext {
 	/**
 	 * Start a step turn from a compact state: write a step-boundary checkpoint
 	 * whose summary is `lead` and rebuild the messages from it, with no
-	 * summarizer call. False when nothing was cut (WTF-P 0.8.3 C5).
+	 * summarizer call. False when nothing was cut, or when a skill load it
+	 * cannot carry would be cut (WTF-P 0.8.3 C5).
 	 */
-	runStepCheckpoint(agentRuntime: AgentRuntime, lead: string): boolean;
+	runStepCheckpoint(agentRuntime: AgentRuntime, lead: string, pendingSkillPolicy?: PendingSkillToolPolicy): boolean;
 	/** The last reduction that ended in a stop or failure settled its own transcript card, which already says so. */
 	lastCompactionCardSettled(): boolean;
 	cancelCompaction(): void;
@@ -2481,9 +2489,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * A step-boundary checkpoint (WTF-P 0.8.3 C5): a compaction summary the host
 	 * writes from `lead` with no summarizer call, cutting every earlier message
 	 * from replay. The ledger keeps them, so resume, recall and token
-	 * attribution read the same history the next request starts from.
+	 * attribution read the same history the next request starts from. After the
+	 * write it does what a native checkpoint does: the on_compaction hook and
+	 * the compaction lifecycle carry trigger `step`, the entry carries the
+	 * verified skill context and the continuity payload, which replay puts
+	 * right after the summary, and the memory bridge learns of the commit, so
+	 * its restoration rides this turn's tail.
 	 */
-	const runStepCheckpoint = (agentRuntime: AgentRuntime, lead: string): boolean => {
+	const runStepCheckpoint: TurnContext["runStepCheckpoint"] = (agentRuntime, lead, pendingSkillPolicy) => {
 		if (reductionInFlight !== null || !deps.readSessionEntries || !deps.session?.current()) return false;
 		const sessionId = deps.session.current()?.id;
 		const active = filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined);
@@ -2491,15 +2504,29 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const messagesSummarized = visible.filter((entry) => entry.kind === "message").length;
 		const cutCursor = [...active].reverse().find((entry) => entry.kind === "message")?.turnId;
 		if (messagesSummarized === 0 || cutCursor === undefined) return false;
+		// Throws when a skill an earlier checkpoint carried no longer verifies, as native compaction does.
+		const skills = checkpointSkillContext(
+			active,
+			active,
+			mainSkillContextState(active, pendingSkillPolicy ?? state.currentPendingSkillPolicy ?? state.activeSkillSurface),
+		);
+		// A native checkpoint keeps a skill turn it cannot carry as raw messages; this one keeps none, so it does not cut.
+		if (skills.protectedStart !== null) return false;
+		const continuity = continuityContextFromSession(deps.session);
+		const fold = resolveContinuityProjection({ entries: active, ...continuity }).current;
+		const continuityCarry = fold === null ? null : continuityPayloadFromFold(fold);
 		deps.bus?.emit("compaction.started", { trigger: "step", at: Date.now() });
 		const threshold = deps.getSettings().context.compaction?.threshold ?? null;
 		const before = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
 		const tokensBefore = liveContextEstimate(agentRuntime).tokens;
+		middleware.fireCompactionHook("step_checkpoint", "step", tokensBefore);
 		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 			kind: "compactionSummary",
 			turnId: randomUUID(),
 			parentTurnId: cutCursor,
 			summary: hostCheckpointSummary(active, lead, process.cwd()),
+			...(skills.skillContext ? { skillContext: skills.skillContext } : {}),
+			...(continuityCarry === null ? {} : { continuity: continuityCarry }),
 			tokensBefore,
 			firstKeptTurnId: "",
 			messagesSummarized,
@@ -2511,7 +2538,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			undefined,
 			buildModelReplayAgentMessagesFromTurns([...active, { ...entry, timestamp: new Date().toISOString() }], {
 				activeLeafTurnId: cutCursor,
-				continuity: continuityContextFromSession(deps.session),
+				continuity,
 			}),
 		).tokens;
 		try {
@@ -2521,6 +2548,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
 			throw error;
 		}
+		// The entry carries no memory receipt, so nothing waits on a durable session checkpoint before memory hears of it.
+		if (deps.memoryCommitBridge) notifyMemoryCommit(entry.turnId, "summary", "summarized");
 		refreshAgentMessagesFromSession(agentRuntime);
 		reconciledAnchor = null;
 		const after = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
