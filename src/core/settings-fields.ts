@@ -242,6 +242,8 @@ export const SETTINGS_FIELD_NAMES = [
 	"target",
 	"targets",
 	"telemetry",
+	"templateObservationBytesPerTurnMax",
+	"templateToolCallsPerTurnMax",
 	"terminal",
 	"terminalProgress",
 	"theme",

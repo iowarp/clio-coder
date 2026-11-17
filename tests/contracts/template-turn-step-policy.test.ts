@@ -66,6 +66,8 @@ function fixture() {
 		},
 	});
 	const ran: string[] = [];
+	/** While set, a step call waits on it before answering, so a sibling call starts while it is in flight. */
+	const hold: { until: Promise<void> | null } = { until: null };
 	for (const name of [STEP, "extension_desk__status"]) {
 		registry.register({
 			name: name as ToolName,
@@ -74,11 +76,12 @@ function fixture() {
 			baseActionClass: "read",
 			run: async (args) => {
 				ran.push(`${name}:${String((args as { after?: string }).after ?? "")}`);
+				if (name === STEP && hold.until !== null) await hold.until;
 				return { kind: "ok", output: `${name} answered ${ran.length}` };
 			},
 		});
 	}
-	return { registry, events, effects, choice, ran };
+	return { registry, events, effects, choice, ran, hold };
 }
 
 describe("template turnPolicy step", () => {
@@ -151,6 +154,62 @@ describe("template turnPolicy step", () => {
 
 		// The continuation is a new turn: its first step runs.
 		strictEqual((await call(STEP, "plan-section intro", "t2")).kind, "ok");
+	});
+
+	it("refuses a second step-tool call in the same parallel batch while the first is in flight", async () => {
+		const { registry, ran, hold } = fixture();
+		const constraints = snapshotTurnConstraints({
+			turnPolicy: { mode: "step", stepTool: STEP, template: "desk:advance" },
+		});
+		let release = () => {};
+		hold.until = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const batch = (toolCallId: string, correlationId = "assistant-1") => ({
+			sessionId: "s1",
+			turnId: "t1",
+			toolCallId,
+			correlationId,
+			...(constraints ? { turnConstraints: constraints } : {}),
+		});
+		const first = registry.invoke({ tool: STEP, args: { after: "start" } }, batch("call-1"));
+		const sibling = registry.invoke({ tool: STEP, args: { after: "start" } }, batch("call-2"));
+		// Both calls are past admission or refused by now; the first is still waiting on its body.
+		await new Promise((resolve) => setImmediate(resolve));
+		release();
+		const [ran1, second] = await Promise.all([first, sibling]);
+		strictEqual(ran1.kind, "ok");
+		strictEqual(second.kind, "blocked");
+		ok(second.kind === "blocked" && second.reason.includes("is already running, so this call did not run"));
+		deepStrictEqual(ran, [`${STEP}:start`]);
+		hold.until = null;
+
+		// A step call that failed leaves the turn's step open for a retry in the next batch.
+		const failing = fixture();
+		failing.registry.register({
+			name: "extension_desk__broken_step" as ToolName,
+			description: "fails",
+			parameters: Type.Object({}),
+			baseActionClass: "read",
+			run: async () => ({ kind: "error", message: "desk offline" }),
+		});
+		const brokenConstraints = snapshotTurnConstraints({
+			turnPolicy: { mode: "step", stepTool: "extension_desk__broken_step", template: "desk:advance" },
+		});
+		const call = (toolCallId: string, correlationId: string) =>
+			failing.registry.invoke(
+				{ tool: "extension_desk__broken_step", args: {} },
+				{
+					sessionId: "s1",
+					turnId: "t1",
+					toolCallId,
+					correlationId,
+					...(brokenConstraints ? { turnConstraints: brokenConstraints } : {}),
+				},
+			);
+		const failed = await call("call-1", "assistant-1");
+		ok(failed.kind === "ok" && failed.result.kind === "error", JSON.stringify(failed));
+		strictEqual((await call("call-2", "assistant-2")).kind, "ok");
 	});
 
 	it("leaves chaining unchanged without a turn policy", async () => {

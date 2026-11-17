@@ -1,4 +1,9 @@
-import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
+import {
+	GUARDRAIL_DEFAULTS,
+	resolveGuardrail,
+	resolveTemplateCeiling,
+	templateBudgetLimit,
+} from "../core/guardrails.js";
 import { createSafetyPolicyEngine } from "../domains/safety/policy-engine.js";
 import type { ImageContent } from "../engine/types.js";
 import type { ToolInvokeOptions, ToolResult } from "./registry.js";
@@ -118,6 +123,8 @@ export interface ObservationReservation {
 	settled: boolean;
 	/** The prompt template whose `budget.observationBytes` set `limitBytes`, when one did. */
 	template?: string;
+	/** Which bound set `limitBytes` under a template budget, as notice text. */
+	boundNote?: string;
 }
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
@@ -152,18 +159,38 @@ function operatorObservationLimit(options?: ToolInvokeOptions): number {
 }
 
 /**
- * The turn's pool: the operator's, lowered by a prompt template's
- * `budget.observationBytes` when that is smaller, never raised by it. The
- * template is named when it is what bounds the pool (WTF-P 0.8.3 B4).
+ * The turn's pool under a prompt template's `budget.observationBytes`: the
+ * smaller of that value and the larger of the operator's pool and
+ * `safety.limits.templateObservationBytesPerTurnMax`, so a template lowers
+ * the pool always and raises it only up to that ceiling. `bound` names what
+ * set a template-bounded pool, for the budget notices (WTF-P 0.8.3 B4).
  */
-function observationTurnBudgetLimit(options?: ToolInvokeOptions): { limitBytes: number; template?: string } {
+function observationTurnBudgetLimit(options?: ToolInvokeOptions): {
+	limitBytes: number;
+	template?: string;
+	boundNote?: string;
+} {
 	const operator = operatorObservationLimit(options);
 	const budget = options?.turnConstraints?.budget;
 	const templateBytes = budget?.observationBytes;
-	if (templateBytes === undefined || templateBytes >= operator) return { limitBytes: operator };
+	if (templateBytes === undefined) return { limitBytes: operator };
+	const ceiling = resolveTemplateCeiling("templateObservationTurnCeilingBytes");
+	const { limit, bound } = templateBudgetLimit(templateBytes, operator, ceiling);
+	const template = budget?.template && budget.template.length > 0 ? budget.template : "unnamed";
+	if (bound === "operator")
+		return {
+			limitBytes: operator,
+			boundNote: `, safety.limits.observationBytesPerTurn; prompt template "${template}" asked for ${templateBytes} bytes and safety.limits.templateObservationBytesPerTurnMax is unset`,
+		};
 	return {
-		limitBytes: Math.max(MIN_BUDGET_SLICE_BYTES, templateBytes),
-		template: budget?.template && budget.template.length > 0 ? budget.template : "unnamed",
+		limitBytes: Math.max(MIN_BUDGET_SLICE_BYTES, limit),
+		template,
+		boundNote:
+			bound === "ceiling"
+				? `, safety.limits.templateObservationBytesPerTurnMax; prompt template "${template}" asked for ${templateBytes} bytes`
+				: limit > operator
+					? `, the budget.observationBytes of prompt template "${template}", raised within safety.limits.templateObservationBytesPerTurnMax`
+					: `, the budget.observationBytes of prompt template "${template}"`,
 	};
 }
 
@@ -195,8 +222,11 @@ function pruneBudgetMap(): void {
  */
 export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOptions): ObservationReservation {
 	const key = budgetKey(options);
-	const { limitBytes, template } = observationTurnBudgetLimit(options);
-	const bound = template === undefined ? {} : { template };
+	const { limitBytes, template, boundNote } = observationTurnBudgetLimit(options);
+	const bound = {
+		...(template === undefined ? {} : { template }),
+		...(boundNote === undefined ? {} : { boundNote }),
+	};
 	if (key === null) {
 		return {
 			key,
@@ -428,11 +458,9 @@ function noticeLine(
 	return `[${parts.join(" | ")}]`;
 }
 
-/** Names the prompt template whose budget bounds the pool, so the refusal says where the limit came from. */
+/** Names the bound that set the pool under a template budget, so the refusal says where the limit came from. */
 function templateBound(reservation: ObservationReservation): string {
-	return reservation.template === undefined
-		? ""
-		: `, the budget.observationBytes of prompt template "${reservation.template}"`;
+	return reservation.boundNote ?? "";
 }
 
 function limitedBudgetNote(reservation: ObservationReservation): string {

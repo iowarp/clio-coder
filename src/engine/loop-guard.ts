@@ -16,6 +16,8 @@
 
 import {
 	resolveGuardrail,
+	resolveTemplateCeiling,
+	templateBudgetLimit,
 	workerSynthesisReserveBlockReason,
 	workerSynthesisReserveDirective,
 	workerToolCallCapExceededReason,
@@ -558,6 +560,19 @@ function stepPolicyReason(stepTool: string, template: string | undefined): strin
 	);
 }
 
+/**
+ * The refusal a step-tool call gets while another call of it in the same turn
+ * is admitted and not yet finished, as a sibling in one parallel batch is:
+ * only one step runs per turn, and the first call's step is the one to run.
+ */
+function parallelStepReason(stepTool: string, template: string | undefined): string {
+	return (
+		`turn policy: ${template ? `prompt template "${template}"` : "this turn's template"} runs one step per turn, and ` +
+		`another ${stepTool} call in this turn is already running, so this call did not run. Run the step that call ` +
+		"returns, then end the turn with a compact state summary."
+	);
+}
+
 /** Soft/hard per-turn tool-call budget for the interactive orchestrator. */
 export interface OrchTurnToolCallBudget {
 	/** Distinct calls in a turn that trigger the re-plan nudge. */
@@ -742,6 +757,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const callsByToolByTurn = new Map<string, Map<string, number>>();
 	/** Per turn under a step policy: its step tool succeeded ("done"), then a second call locked the turn ("locked"). */
 	const stepByTurn = new Map<string, "done" | "locked">();
+	/**
+	 * Per turn under a step policy: the step-tool call the guard admitted and
+	 * whose result has not come back, by its batch and call id. Success is only
+	 * known after the call completes, so without this a second call in the same
+	 * parallel batch passed admission too and both steps ran (WTF-P 0.8.3 C5).
+	 */
+	const stepInFlightByTurn = new Map<string, { batch?: string; call?: string }>();
 	/**
 	 * Per-turn count of parent-workspace mutations, including sealed delegated
 	 * work. The identical-call key carries it, so a check rerun after a change
@@ -1207,24 +1229,44 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	/**
-	 * The turn's budget: the operator's, lowered by a prompt template's
-	 * `budget.toolCalls` when that is smaller. The hard ceiling keeps its margin
-	 * above the lowered soft budget, so a template budget ends the turn exactly
-	 * the way the operator's does, only sooner, and never later (WTF-P 0.8.3 B4).
+	 * The turn's budget under a prompt template's `budget.toolCalls`: the
+	 * smaller of that value and the larger of the operator's budget and
+	 * `safety.limits.templateToolCallsPerTurnMax`. Lowering always applies;
+	 * raising applies up to that ceiling, and not at all without one. The hard
+	 * ceiling keeps the operator's margin above the effective soft budget, so a
+	 * template budget ends the turn exactly the way the operator's does
+	 * (WTF-P 0.8.3 B4). `source` names the bound that applied, for refusal text.
 	 */
 	const resolveTurnBudget = (
 		input: MiddlewareHookInput,
-	): { budget: OrchTurnToolCallBudget; template?: string } | undefined => {
+	): { budget: OrchTurnToolCallBudget; template?: string; source: string } | undefined => {
 		const budgetSource = options.turnToolCallBudget;
 		const operator = typeof budgetSource === "function" ? budgetSource() : budgetSource;
 		if (operator === undefined) return undefined;
 		const templateCalls = input.metadata?.templateToolCalls;
-		if (typeof templateCalls !== "number" || !(templateCalls >= 1) || templateCalls >= operator.soft)
-			return { budget: operator };
-		const template = input.metadata?.templateName;
+		if (typeof templateCalls !== "number" || !(templateCalls >= 1)) return { budget: operator, source: "" };
+		const name = input.metadata?.templateName;
+		const template = typeof name === "string" && name.length > 0 ? name : "unnamed";
+		const ceiling = resolveTemplateCeiling("templateTurnToolCallCeiling");
+		const { limit, bound } = templateBudgetLimit(templateCalls, operator.soft, ceiling);
+		if (bound === "operator")
+			return {
+				budget: operator,
+				source:
+					templateCalls > operator.soft
+						? `, safety.limits.chatToolCallsPerTurn; prompt template "${template}" asked for ${templateCalls} and safety.limits.templateToolCallsPerTurnMax is unset`
+						: "",
+			};
+		const margin = operator.hard - operator.soft;
 		return {
-			budget: { soft: templateCalls, hard: Math.min(operator.hard, templateCalls + ORCH_TURN_TOOL_CALL_HARD_MARGIN) },
-			template: typeof template === "string" && template.length > 0 ? template : "unnamed",
+			budget: { soft: limit, hard: limit + margin },
+			template,
+			source:
+				bound === "ceiling"
+					? `, safety.limits.templateToolCallsPerTurnMax; prompt template "${template}" asked for ${templateCalls}`
+					: limit > operator.soft
+						? `, set by prompt template "${template}" budget.toolCalls, raised within safety.limits.templateToolCallsPerTurnMax ${ceiling}`
+						: `, set by prompt template "${template}" budget.toolCalls`,
 		};
 	};
 
@@ -1233,8 +1275,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (resolved === undefined) return null;
 		const turnBudget = resolved.budget;
 		const bound = resolved.template === undefined ? undefined : { template: resolved.template };
-		const source =
-			resolved.template === undefined ? "" : `, set by prompt template "${resolved.template}" budget.toolCalls`;
+		const source = resolved.source;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
 		let byTool = callsByToolByTurn.get(turnKey);
@@ -1304,9 +1345,18 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	): ReadonlyArray<MiddlewareEffect> | null => {
 		const stepTool = input.metadata?.templateStepTool;
 		const step = stepByTurn.get(turnKey);
+		const template = typeof input.metadata?.templateName === "string" ? input.metadata.templateName : undefined;
+		if (typeof stepTool === "string" && step === undefined && input.toolName === stepTool) {
+			// A call admitted in another batch whose result never came back was refused
+			// by a later guard; only a sibling of the same batch, or a call with no batch
+			// to tell them apart, is still running.
+			const admitted = stepInFlightByTurn.get(turnKey);
+			if (admitted !== undefined && (admitted.batch === undefined || admitted.batch === input.correlationId))
+				return [{ kind: "block_tool", reason: parallelStepReason(stepTool, template), severity: "hard-block" }];
+			return null;
+		}
 		if (typeof stepTool !== "string" || step === undefined || (step === "done" && input.toolName !== stepTool))
 			return null;
-		const template = typeof input.metadata?.templateName === "string" ? input.metadata.templateName : undefined;
 		const refusal: MiddlewareEffect = {
 			kind: "block_tool",
 			reason: stepPolicyReason(stepTool, template),
@@ -1645,6 +1695,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					}
 					stepByTurn.set(turnKey, "done");
 				}
+				const inFlight = stepInFlightByTurn.get(turnKey);
+				if (
+					inFlight !== undefined &&
+					input.toolName === input.metadata?.templateStepTool &&
+					inFlight.call === input.toolCallId
+				)
+					stepInFlightByTurn.delete(turnKey);
 				const judgement = input.toolResultDetails?.judgement as { execution?: unknown } | undefined;
 				if (
 					options.toolCallCap !== undefined &&
@@ -2018,7 +2075,25 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				}
 				return evaluateTurnBudget(input, now) ?? [];
 			};
-			return boundRunDenials(decide(), input);
+			const verdict = boundRunDenials(decide(), input);
+			const stepTool = input.metadata?.templateStepTool;
+			if (
+				typeof stepTool === "string" &&
+				input.toolName === stepTool &&
+				!stepByTurn.has(turnKey) &&
+				!verdict.some((effect) => effect.kind === "block_tool")
+			) {
+				while (!stepInFlightByTurn.has(turnKey) && stepInFlightByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+					const oldest = stepInFlightByTurn.keys().next().value;
+					if (typeof oldest !== "string") break;
+					stepInFlightByTurn.delete(oldest);
+				}
+				stepInFlightByTurn.set(turnKey, {
+					...(input.correlationId !== undefined ? { batch: input.correlationId } : {}),
+					...(input.toolCallId !== undefined ? { call: input.toolCallId } : {}),
+				});
+			}
+			return verdict;
 		},
 	};
 }

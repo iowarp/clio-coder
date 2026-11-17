@@ -869,6 +869,16 @@ function formatRecallableRefs(
 	return `\n\n<recallable-refs>\n${rows.join("\n")}\n</recallable-refs>`;
 }
 
+/**
+ * A checkpoint summary the host writes without a model call: `lead`, then the
+ * operator notes, file facts and recallable tool-result refs the entries
+ * carry, exactly as a native checkpoint appends them, so a later summary and
+ * `context(scope="recall")` still reach what the cut removed from replay.
+ */
+export function hostCheckpointSummary(entries: ReadonlyArray<SessionEntry>, lead: string, cwd?: string): string {
+	return `${lead}${formatOperatorNotes(extractOperatorNotes(entries))}${formatExactFacts(extractFileOps(entries), entries, cwd)}${formatRecallableRefs(entries, entries.length, foldWorkingSet(entries))}`;
+}
+
 function numberOrZero(value: unknown): number {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }

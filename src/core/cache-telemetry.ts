@@ -155,6 +155,8 @@ export function buildCacheCallObservation(
 		tool_surface_change: "tools_changed",
 		prompt_recompiled: "prompt_recompiled",
 		compaction: "compaction",
+		// A step-boundary checkpoint replaces the history like a compaction does (WTF-P 0.8.3 C5).
+		step_checkpoint: "compaction",
 		working_set_evict: "working_set_evict",
 		observation_aging: "observation_aging",
 	};

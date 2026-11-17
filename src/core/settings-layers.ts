@@ -328,11 +328,20 @@ function stripProjectTelemetry(
  * session cost ceiling and the autonomous caps), the operator's 0 leaves any
  * positive value tighter.
  */
-const PROJECT_LIMIT_KEYS: ReadonlyArray<{ block: "safety" | "fleet"; key: string; zeroIsOff: boolean }> = [
+const PROJECT_LIMIT_KEYS: ReadonlyArray<{
+	block: "safety" | "fleet";
+	key: string;
+	zeroIsOff: boolean;
+	/** Null is the tightest value: no raise at all. */
+	nullIsTightest?: true;
+}> = [
 	{ block: "safety", key: "sessionCostUsd", zeroIsOff: true },
 	{ block: "safety", key: "chatToolCallsPerTurn", zeroIsOff: false },
 	{ block: "safety", key: "readBytesPerCall", zeroIsOff: false },
 	{ block: "safety", key: "observationBytesPerTurn", zeroIsOff: false },
+	// A ceiling a template budget may raise a turn to; with no operator value a project cannot set one.
+	{ block: "safety", key: "templateToolCallsPerTurnMax", zeroIsOff: false, nullIsTightest: true },
+	{ block: "safety", key: "templateObservationBytesPerTurnMax", zeroIsOff: false, nullIsTightest: true },
 	{ block: "safety", key: "workerResponseSeconds", zeroIsOff: false },
 	{ block: "safety", key: "autonomousToolCalls", zeroIsOff: true },
 	{ block: "safety", key: "autonomousMinutes", zeroIsOff: true },
@@ -361,16 +370,17 @@ function stripProjectLimits(
 		const defaults = DEFAULT_SETTINGS[block].limits as unknown as Record<string, unknown>;
 		const limits: Record<string, unknown> = { ...section.limits };
 		let stripped = false;
-		for (const { key, zeroIsOff } of PROJECT_LIMIT_KEYS.filter((rule) => rule.block === block)) {
+		for (const { key, zeroIsOff, nullIsTightest } of PROJECT_LIMIT_KEYS.filter((rule) => rule.block === block)) {
 			if (!Object.hasOwn(limits, key)) continue;
 			const requested = limits[key];
 			const operatorValue = typeof operatorLimits[key] === "number" ? operatorLimits[key] : defaults[key];
 			const tighter =
-				typeof requested === "number" &&
-				Number.isFinite(requested) &&
-				requested > 0 &&
-				typeof operatorValue === "number" &&
-				((zeroIsOff && operatorValue === 0) || requested <= operatorValue);
+				(requested === null && nullIsTightest === true) ||
+				(typeof requested === "number" &&
+					Number.isFinite(requested) &&
+					requested > 0 &&
+					typeof operatorValue === "number" &&
+					((zeroIsOff && operatorValue === 0) || requested <= operatorValue));
 			if (tighter) continue;
 			issues.push({
 				origin,

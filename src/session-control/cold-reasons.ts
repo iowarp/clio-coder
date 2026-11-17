@@ -34,6 +34,8 @@ export function coldReasonText(reason: string): string {
 			return "a connection reset";
 		case "observation_aging":
 			return "stubbing superseded tool output";
+		case "step_checkpoint":
+			return "a step checkpoint";
 		default:
 			return reason.replace(/_/gu, " ");
 	}

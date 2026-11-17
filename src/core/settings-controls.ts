@@ -570,7 +570,10 @@ const STRUCTURED = new Set([
 	"integrations.externalAgents.entries",
 ]);
 const OPTIONAL_NUMBERS = new Set(["safety.review.cadenceToolCalls"]);
-const NULLABLE_NUMBERS = new Set<string>([]);
+const NULLABLE_NUMBERS = new Set<string>([
+	"safety.limits.templateToolCallsPerTurnMax",
+	"safety.limits.templateObservationBytesPerTurnMax",
+]);
 const OPTIONAL_STRINGS = new Set([
 	"fleet.default.node",
 	"safety.review.target",
@@ -585,6 +588,14 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 	"safety.limits.workerResponseSeconds": [
 		"Worker response time",
 		"Seconds one native worker model response may run, including locked synthesis rounds.",
+	],
+	"safety.limits.templateToolCallsPerTurnMax": [
+		"Template tool calls ceiling",
+		"How many tool calls a prompt template's budget may give its turn when it asks for more than Tools per chat turn. Empty lets a template only lower that limit.",
+	],
+	"safety.limits.templateObservationBytesPerTurnMax": [
+		"Template tool output ceiling",
+		"How many bytes of tool output a prompt template's budget may give its turn when it asks for more than Tool output per turn. Empty lets a template only lower that limit.",
 	],
 	"safety.limits.autonomousToolCalls": [
 		"Yolo stretch tool calls",

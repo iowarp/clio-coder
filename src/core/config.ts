@@ -2486,6 +2486,8 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"chatToolCallsPerTurn",
 						"readBytesPerCall",
 						"observationBytesPerTurn",
+						"templateToolCallsPerTurnMax",
+						"templateObservationBytesPerTurnMax",
 						"workerResponseSeconds",
 						"autonomousToolCalls",
 						"autonomousMinutes",
@@ -2508,6 +2510,15 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					for (const key of ["autonomousToolCalls", "autonomousMinutes", "autonomousTokens"] as const) {
 						if (!(key in limits)) continue;
 						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 0 });
+						if (parsed !== undefined) settings.safety.limits[key] = parsed;
+					}
+					for (const key of ["templateToolCallsPerTurnMax", "templateObservationBytesPerTurnMax"] as const) {
+						if (!(key in limits)) continue;
+						if (limits[key] === null) {
+							settings.safety.limits[key] = null;
+							continue;
+						}
+						const parsed = expectInteger(issues, `safety.limits.${key}`, limits[key], { min: 1 });
 						if (parsed !== undefined) settings.safety.limits[key] = parsed;
 					}
 				}

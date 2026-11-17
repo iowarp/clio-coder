@@ -113,8 +113,8 @@ describe("template budget", () => {
 
 		const capped = await firstRefusal(6, { budget: { toolCalls: 50, template: "desk:write" } });
 		strictEqual(capped.at, 6);
-		ok(capped.reason.includes("soft budget 6)"), capped.reason);
-		ok(!capped.reason.includes("desk:write"), capped.reason);
+		// No template ceiling is set, so the operator's limit applies and the refusal says so.
+		ok(capped.reason.includes("soft budget 6, safety.limits.chatToolCallsPerTurn;"), capped.reason);
 
 		strictEqual((await firstRefusal(6, undefined)).at, 6);
 	});

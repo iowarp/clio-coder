@@ -95,7 +95,7 @@ import { buildEvictionFields, planEviction } from "../domains/context/working-se
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart, protectionCutoffIndex } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
-import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
+import { compactionCut, selectVisibleEntries } from "../domains/context/working-set/visible.js";
 import { type PinnedContextBlock, pinnedContextDelta } from "../domains/extensions/pinned-context.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import {
@@ -123,7 +123,7 @@ import {
 	effectiveCompactionThreshold,
 	shouldCompact,
 } from "../domains/session/compaction/auto.js";
-import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
+import { type CompactInput, type CompactResult, hostCheckpointSummary } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { maskStaleObservations } from "../domains/session/compaction/mask-observations.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
@@ -149,6 +149,7 @@ import {
 } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import {
+	type CompactionSummaryEntry,
 	type CompactionTrigger,
 	mainSkillContextState,
 	type SessionEntry,
@@ -400,6 +401,12 @@ export interface TurnContext {
 		providerFallbackReason?: string,
 	): Promise<boolean>;
 	lastCompactionWasNoGain(): boolean;
+	/**
+	 * Start a step turn from a compact state: write a step-boundary checkpoint
+	 * whose summary is `lead` and rebuild the messages from it, with no
+	 * summarizer call. False when nothing was cut (WTF-P 0.8.3 C5).
+	 */
+	runStepCheckpoint(agentRuntime: AgentRuntime, lead: string): boolean;
 	/** The last reduction that ended in a stop or failure settled its own transcript card, which already says so. */
 	lastCompactionCardSettled(): boolean;
 	cancelCompaction(): void;
@@ -821,6 +828,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		"tool_choice_change",
 		"tool_surface_change",
 		"prompt_recompiled",
+		// The step checkpoint rewrites the history the prefix carried, on every tier.
+		"step_checkpoint",
 	]);
 	const stampsOnTier = (reason: ExpectedColdReason, runtimeId: string | undefined): boolean =>
 		TIER_INDEPENDENT_COLD_REASONS.has(reason) ||
@@ -853,8 +862,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		),
 		...(["compaction.started", "compaction.ended"] as const).map(
 			(channel) =>
-				deps.bus?.subscribe(channel, () => {
-					noteColdReason("compaction");
+				deps.bus?.subscribe(channel, (payload: CompactionPayload) => {
+					// A step checkpoint stamps its own reason, on every tier.
+					noteColdReason(payload?.trigger === "step" ? "step_checkpoint" : "compaction");
 				}) ?? null,
 		),
 		// A completed compaction rebuilds the context, so the next compile takes
@@ -2467,6 +2477,77 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return operation;
 	};
 
+	/**
+	 * A step-boundary checkpoint (WTF-P 0.8.3 C5): a compaction summary the host
+	 * writes from `lead` with no summarizer call, cutting every earlier message
+	 * from replay. The ledger keeps them, so resume, recall and token
+	 * attribution read the same history the next request starts from.
+	 */
+	const runStepCheckpoint = (agentRuntime: AgentRuntime, lead: string): boolean => {
+		if (reductionInFlight !== null || !deps.readSessionEntries || !deps.session?.current()) return false;
+		const sessionId = deps.session.current()?.id;
+		const active = filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined);
+		const visible = compactionCut(active).visible;
+		const messagesSummarized = visible.filter((entry) => entry.kind === "message").length;
+		const cutCursor = [...active].reverse().find((entry) => entry.kind === "message")?.turnId;
+		if (messagesSummarized === 0 || cutCursor === undefined) return false;
+		deps.bus?.emit("compaction.started", { trigger: "step", at: Date.now() });
+		const threshold = deps.getSettings().context.compaction?.threshold ?? null;
+		const before = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
+		const tokensBefore = liveContextEstimate(agentRuntime).tokens;
+		const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
+			kind: "compactionSummary",
+			turnId: randomUUID(),
+			parentTurnId: cutCursor,
+			summary: hostCheckpointSummary(active, lead, process.cwd()),
+			tokensBefore,
+			firstKeptTurnId: "",
+			messagesSummarized,
+			isSplitTurn: false,
+			trigger: "step",
+		};
+		entry.tokensAfter = liveContextEstimate(
+			agentRuntime,
+			undefined,
+			buildModelReplayAgentMessagesFromTurns([...active, { ...entry, timestamp: new Date().toISOString() }], {
+				activeLeafTurnId: cutCursor,
+				continuity: continuityContextFromSession(deps.session),
+			}),
+		).tokens;
+		try {
+			deps.session.appendEntry(entry);
+			deps.session.flushAppends?.();
+		} catch (error) {
+			deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
+			throw error;
+		}
+		refreshAgentMessagesFromSession(agentRuntime);
+		reconciledAnchor = null;
+		const after = captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
+		currentContextSnapshot = after;
+		persistContextSnapshot(before);
+		persistContextSnapshot(after);
+		const tokensAfter = liveContextEstimate(agentRuntime).tokens;
+		lastCompactionEvent = { stage: "step_checkpoint", tokensBefore, tokensAfter, trigger: "step" };
+		deps.bus?.emit(
+			"context.pruned",
+			{
+				stage: "step_checkpoint",
+				tokensBefore,
+				tokensAfter,
+				trigger: "step",
+				snapshotIdBefore: before.snapshotId,
+				snapshotIdAfter: after.snapshotId,
+				at: Date.now(),
+			} satisfies ContextPrunedPayload,
+			sessionTelemetryContext(sessionId),
+		);
+		// Ended last: its subscriber restarts the cache comparison for the new context generation.
+		deps.bus?.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
+		refreshLiveBudget();
+		return true;
+	};
+
 	const bindMemoryScope = () => {
 		const sessionId = deps.session?.current()?.id;
 		if (!sessionId) return null;
@@ -2674,6 +2755,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		refreshLiveBudget,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
+		runStepCheckpoint,
 		lastCompactionWasNoGain: () => lastCompactionNoGain,
 		lastCompactionCardSettled: () => lastCompactionCardSettled,
 		navigationRevision: () => navigationEpoch,
