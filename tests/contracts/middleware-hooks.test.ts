@@ -20,6 +20,7 @@ import {
 } from "../../src/domains/middleware/runtime.js";
 import { createMiddlewareHostFromSnapshot, createMiddlewareSnapshot } from "../../src/domains/middleware/snapshot.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareRule } from "../../src/domains/middleware/types.js";
+import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { capturedHookSourcesFor } from "../../src/entry/extension-hook-sources.js";
 import { createTurnOutcomeCollector } from "../../src/session-control/turn-outcome-collector.js";
@@ -135,6 +136,48 @@ describe("middleware hook boundary", () => {
 			);
 			for (const input of seen) strictEqual(input.metadata?.origin, options.origin);
 		}
+	});
+
+	it("records a check's pass only when the exit status is the check's own", async () => {
+		const seen: MiddlewareHookInput[] = [];
+		const recorder = registration(
+			"check-recorder",
+			(input) => {
+				seen.push(input);
+				return [];
+			},
+			{ hooks: ["after_tool"] },
+		);
+		const middleware = createMiddlewareBundle({ registrations: [recorder] }).contract;
+		const registry = createRegistry({ safety: createWorkerSafety(), middleware });
+		registry.register({
+			name: ToolNames.Bash,
+			description: "Bash fixture",
+			parameters: Type.Object({ command: Type.String() }),
+			baseActionClass: "execute",
+			run: async () => ({ kind: "ok", output: "finished" }),
+		});
+		const effects = createRunEffectsRecorder(process.cwd());
+		const outcomes: Array<[string | undefined, number | undefined, boolean, boolean | undefined]> = [];
+		for (const command of ["pytest; echo finished", "pytest && echo finished"]) {
+			seen.length = 0;
+			strictEqual((await registry.invoke({ tool: ToolNames.Bash, args: { command } })).kind, "ok");
+			effects.start(command, ToolNames.Bash, { command });
+			effects.checkOutcome(command, "ok");
+			effects.finish(command, false);
+			const snapshot = effects.snapshot();
+			outcomes.push([
+				seen[0]?.metadata?.validationCommand as string | undefined,
+				seen[0]?.metadata?.validationExitCode as number | undefined,
+				snapshot.validationCommands.has("pytest"),
+				snapshot.validationOutcomes.get(command),
+			]);
+		}
+		// A trailing `echo` exits 0 over a red suite: the check is named, its outcome unknown.
+		deepStrictEqual(outcomes, [
+			["pytest", undefined, false, undefined],
+			["pytest", 0, true, true],
+		]);
 	});
 
 	it("names the middleware rule that blocked a call on the guard block's policy", async () => {

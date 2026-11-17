@@ -2,6 +2,7 @@ import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isRefusalToolResultError } from "../../tools/result-disposition.js";
+import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { captureProofSnapshot, readObservedProof } from "../../tools/verify/proof.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
@@ -128,6 +129,8 @@ interface PendingEffects {
 	paths: ReadonlyArray<string>;
 	validationCommand: string | null;
 	validationName: string | null;
+	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
+	checkStatusAttributable: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
@@ -314,6 +317,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 					toolName === ToolNames.Bash && validationCommand !== null
 						? `${base === cwd ? "" : `cwd=${base}: `}${commandOf(args)?.trim() ?? ""}`
 						: null,
+				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
 				mutationRevision,
 				verificationCommand,
 				opaque,
@@ -346,8 +350,10 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			}
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
+			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
 			if (
 				effects.validationName !== null &&
+				effects.checkStatusAttributable &&
 				(failed
 					? effects.outcome === "error"
 					: effects.outcome !== "blocked" && effects.mutationRevision === mutationRevision)
@@ -371,7 +377,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null) validationCommands.add(effects.validationCommand);
+			if (effects.validationCommand !== null && effects.checkStatusAttributable)
+				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
 			if (effects.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
