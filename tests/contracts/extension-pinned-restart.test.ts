@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { clioStateDir } from "../../src/core/xdg.js";
@@ -137,4 +138,19 @@ test("a cleared or removed block stays cleared across a restart, and a session-l
 	]);
 	const firstAfterClear = await firstRequestAfterResume(restarted, "paper-1");
 	assert.ok(!firstAfterClear.includes("<pinned-context"), firstAfterClear);
+});
+
+test("an unwritable pin directory leaves the hook, the turn and a reload intact", async (t) => {
+	const env = await isolateClioEnv("clio-coder-pinned-restart-");
+	t.after(() => env.restore());
+	// A file where the directory belongs fails every write, as root too.
+	const pinnedDir = path.dirname(pinnedContextFile(clioStateDir(), "paper-1"));
+	mkdirSync(path.dirname(pinnedDir), { recursive: true });
+	writeFileSync(pinnedDir, "");
+	const live = processFor({ id: "paper-1" });
+	live.pin("desk", MILESTONE);
+	live.retainPinned(new Set(["desk"]));
+	assert.deepEqual(live.pinned(), [{ extensionId: "desk", text: MILESTONE }]);
+	const first = await firstRequestAfterResume(live, "paper-1");
+	assert.ok(first.includes(renderPinnedContext({ extensionId: "desk", text: MILESTONE })), first);
 });
