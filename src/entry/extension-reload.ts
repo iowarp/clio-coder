@@ -53,7 +53,11 @@ import {
 	type MiddlewareRegistrationConflict,
 	type UserHookCommandRunner,
 } from "../domains/middleware/index.js";
-import { buildExtensionRuntimeToolSpecs, promotedRuntimeTools } from "../tools/extension-runtime-tools.js";
+import {
+	buildExtensionRuntimeToolSpecs,
+	ensureDetailLedger,
+	promotedRuntimeTools,
+} from "../tools/extension-runtime-tools.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import {
 	WORKER_EXTENSION_HOOKS_MAX,
@@ -298,6 +302,7 @@ export function createExtensionReloadCoordinator(deps: ExtensionReloadCoordinato
 			toolRegistry.register(spec);
 			registeredTools.push(spec.name);
 		}
+		if (registeredTools.length > 0) ensureDetailLedger(toolRegistry);
 		for (const name of promotedRuntimeTools(publishedPackages).held)
 			lines.push(
 				`[clio-coder:extensions] promoted tool ${name} stays behind the gateway: a session attaches at most ${RUNTIME_V2_LIMITS.promotedToolsPerSession} promoted tools`,

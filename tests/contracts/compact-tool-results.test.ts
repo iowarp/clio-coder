@@ -1,16 +1,19 @@
-import { match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import type { ExtensionRuntimeHookExecutor } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
 import { parseExtensionToolResult } from "../../src/domains/extensions/runtime-output-v2.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
+import { storeToolDetail } from "../../src/domains/session/tool-details.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
-import { buildExtensionRuntimeToolSpecs } from "../../src/tools/extension-runtime-tools.js";
+import { buildExtensionRuntimeToolSpecs, ensureDetailLedger } from "../../src/tools/extension-runtime-tools.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { createLedgerTool } from "../../src/tools/ledger.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { createRegistry, type ToolResult } from "../../src/tools/registry.js";
@@ -113,6 +116,33 @@ it("an api 2 tool's summary reaches the model and ledger(ref) returns the stored
 		/refused/u,
 	);
 	strictEqual((await ledger.run({ action: "detail", ref: "../escape" }, { sessionId })).kind, "error");
+});
+
+it("a session without dispatch reads an extension result's detail_ref through the gateway (WTF-P 0.8.3 C3)", async () => {
+	const sessionId = "detail-reach-session";
+	sessionStore(sessionId);
+	const detail = "the whole outline, as the extension returned it";
+	const ref = storeToolDetail(sessionId, detail);
+
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: clioStateDir() }), autonomy: () => "default" });
+	registry.register(createGatewayTool({ registry }));
+	strictEqual(registry.get(ToolNames.Ledger), undefined, "a session without dispatch registers no ledger");
+	ensureDetailLedger(registry);
+	ensureDetailLedger(registry);
+	const ledger = registry.get(ToolNames.Ledger);
+	strictEqual(ledger?.placement, "gateway");
+	strictEqual(ledger?.metadata?.startupPrompt, false, "no prompt map entry, so the request bytes do not move");
+	deepStrictEqual(
+		registry.listGateway().map((spec) => spec.name),
+		[ToolNames.Ledger],
+	);
+
+	const verdict = await registry.invoke(
+		{ tool: ToolNames.Gateway, args: { op: "call", capability: ToolNames.Ledger, args: { ref } } },
+		{ sessionId },
+	);
+	ok(verdict.kind === "ok" && verdict.result.kind === "ok", JSON.stringify(verdict));
+	ok(verdict.result.output.endsWith(detail), verdict.result.output);
 });
 
 const REPORT_TAIL = "Closing note: the nonuniform path never measures boundary convergence.";
