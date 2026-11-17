@@ -2,7 +2,9 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.4-rc.1 - 2026-11-16
+
+This release candidate fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
 
 ### Added
 
