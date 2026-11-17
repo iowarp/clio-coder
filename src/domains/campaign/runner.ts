@@ -1,5 +1,5 @@
-import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeSync } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, writeSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { runCommandVector, type SafeCommandResult } from "../../core/safe-exec.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { type ArenaEnvPolicy, arenaContenderEnv } from "../arena/index.js";
@@ -37,7 +37,12 @@ export interface CampaignInput {
 	autonomy: "default" | "yolo";
 	/** An extension command whose `--json` result is recorded as the desk's final status after each run. */
 	probe: CampaignProbe | null;
-	/** The operator's Clio config root, copied into each entry's home so its targets and credentials are read only. */
+	/**
+	 * The operator's Clio config root. Every entry runs against it directly, as an arena contender does, so its
+	 * targets, installed extensions and credential store are the operator's own: no secret is copied under `out`,
+	 * and an OAuth refresh an entry makes lands in the operator's store under its lock instead of in a copy that
+	 * is thrown away, which would strand a rotated refresh token.
+	 */
 	operatorConfig: string;
 	/** How to start this same Clio Coder: the executable and the arguments before the subcommand. */
 	clio: { file: string; args: ReadonlyArray<string> };
@@ -121,19 +126,6 @@ function entryDirName(index: number, label: string): string {
 	return `${String(index + 1).padStart(2, "0")}-${label.replace(/[^A-Za-z0-9._-]+/gu, "-")}`;
 }
 
-/** The operator's config, minus backups and lock files; the copy is the entry's to read and write. */
-function copyOperatorConfig(source: string, target: string): void {
-	mkdirSync(target, { recursive: true, mode: 0o700 });
-	if (!existsSync(source)) return;
-	cpSync(source, target, {
-		recursive: true,
-		filter: (path) => {
-			const name = basename(path);
-			return !name.includes(".bak") && !name.endsWith(".lock");
-		},
-	});
-}
-
 function runArgs(input: CampaignInput, entry: RosterEntry, project: string): string[] {
 	return [
 		...input.clio.args,
@@ -212,7 +204,7 @@ async function probeDesk(
 async function runEntry(input: CampaignInput, entry: RosterEntry, index: number): Promise<CampaignEntryResult> {
 	const dir = join(input.out, entryDirName(index, entry.label));
 	const project = join(dir, "project");
-	const roots = entryRoots(join(dir, "home"));
+	const roots = entryRoots(join(dir, "home"), input.operatorConfig);
 	const result: CampaignEntryResult = {
 		schemaVersion: CAMPAIGN_SCHEMA_VERSION,
 		index,
@@ -238,10 +230,8 @@ async function runEntry(input: CampaignInput, entry: RosterEntry, index: number)
 		save();
 		return result;
 	}
-	const credentials = join(roots.config, "credentials.yaml");
 	try {
 		cpSync(input.fixture, project, { recursive: true });
-		copyOperatorConfig(input.operatorConfig, roots.config);
 		for (const root of [roots.data, roots.state, roots.cache]) mkdirSync(root, { recursive: true, mode: 0o700 });
 		const scoped = { ...arenaContenderEnv(input.env, input.envPolicy, entry.target), ...entryRootEnv(roots) };
 		const env = input.autonomy === "yolo" ? withContainedYoloPin(scoped) : scoped;
@@ -280,9 +270,6 @@ async function runEntry(input: CampaignInput, entry: RosterEntry, index: number)
 	} catch (error) {
 		result.status = "error";
 		result.error = errorText(error);
-	} finally {
-		// The entry's copy of the operator's credentials is not kept beside its results.
-		rmSync(credentials, { force: true });
 	}
 	save();
 	return result;
@@ -290,7 +277,7 @@ async function runEntry(input: CampaignInput, entry: RosterEntry, index: number)
 
 /**
  * Run one fixture across a roster, one entry at a time so wall times do not contend. Each entry gets a fresh copy
- * of the fixture and its own Clio home (a copy of the operator's config, empty data, state and cache), runs headless
+ * of the fixture and its own empty Clio data, state and cache roots beside the operator's config, runs headless
  * `clio-coder run --answers`, and is folded from what that run persisted. An entry that fails, times out or cannot
  * start is recorded and the campaign moves on; a stop signal cancels the running entry and the rest.
  */

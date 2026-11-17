@@ -162,7 +162,7 @@ describe("campaign run folds one fixture across a roster", { timeout: 240_000 },
 			const saved = JSON.parse(readFileSync(join(entry.dir, "entry.json"), "utf8")) as { label: string; status: string };
 			deepStrictEqual([saved.label, saved.status], [entry.label, entry.status]);
 			ok(existsSync(join(entry.dir, "project", "README.md")), "each entry works in its own fixture copy");
-			ok(!existsSync(join(entry.dir, "home", "config", "credentials.yaml")), "the copied credentials are removed");
+			ok(!existsSync(join(entry.dir, "home", "config")), "no copy of the operator's config is kept under --out");
 		}
 		deepStrictEqual(readdirSync(out).sort(), ["01-mock", "02-absent-target-nope-low"]);
 		deepStrictEqual(readdirSync(fixture).sort(), [".planning", "README.md"]);

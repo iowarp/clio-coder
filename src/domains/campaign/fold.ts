@@ -113,7 +113,7 @@ export function foldCampaignMetrics(
 	};
 }
 
-/** The four Clio roots one entry's run used; all live under the entry's home. */
+/** The Clio roots one entry's run used: the operator's config, and data, state and cache under the entry's home. */
 export interface EntryRoots {
 	home: string;
 	config: string;
@@ -122,10 +122,10 @@ export interface EntryRoots {
 	cache: string;
 }
 
-export function entryRoots(home: string): EntryRoots {
+export function entryRoots(home: string, operatorConfig: string): EntryRoots {
 	return {
 		home,
-		config: join(home, "config"),
+		config: operatorConfig,
 		data: join(home, "data"),
 		state: join(home, "state"),
 		cache: join(home, "cache"),

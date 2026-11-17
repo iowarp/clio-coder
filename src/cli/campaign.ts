@@ -29,10 +29,11 @@ target, model, an optional thinking level and an optional label (default
 \`clio-coder run --answers\` file and is validated before anything starts.
 
 Entries run one at a time. Each gets a fresh copy of the fixture and its own
-Clio home under --out: a copy of your config (targets, credentials, installed
-extensions), with empty data, state and cache, so entries share no sessions or
-memory and your own config is only read. The copied credentials are deleted
-when the entry ends. Each runs headless \`clio-coder run --answers\` in its copy.
+empty Clio data, state and cache under --out, so entries share no sessions or
+memory. Each uses your config directory as it is (targets, credentials,
+installed extensions), as your own \`clio-coder run\` would: nothing secret is
+copied under --out, and a login an entry refreshes is saved to your credential
+store. Each runs headless \`clio-coder run --answers\` in its fixture copy.
 
 Metrics come from what the run persisted: its session ledger (extension
 interviews and the checkpoint ids they asked, extension tool refusals), its
