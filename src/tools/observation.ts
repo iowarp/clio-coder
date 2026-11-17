@@ -116,6 +116,8 @@ export interface ObservationReservation {
 	committed: boolean;
 	/** True once the charge has been reconciled or refunded exactly once. */
 	settled: boolean;
+	/** The prompt template whose `budget.observationBytes` set `limitBytes`, when one did. */
+	template?: string;
 }
 
 // A `next` continuation is a compact call fragment (`limit=200`, `offset=451`).
@@ -139,7 +141,7 @@ function boundContinuation(next: string | undefined): string | undefined {
 const OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN = 1.5;
 const OBSERVATION_POOL_CEILING_BYTES = 1024 * 1024;
 
-function observationTurnBudgetLimit(options?: ToolInvokeOptions): number {
+function operatorObservationLimit(options?: ToolInvokeOptions): number {
 	const configured = Math.max(MIN_BUDGET_SLICE_BYTES, resolveGuardrail("observationTurnBudgetBytes"));
 	const window = options?.contextWindow;
 	if (configured !== GUARDRAIL_DEFAULTS.observationTurnBudgetBytes || window === undefined || !(window > 0)) {
@@ -147,6 +149,22 @@ function observationTurnBudgetLimit(options?: ToolInvokeOptions): number {
 	}
 	const scaled = Math.floor(window * OBSERVATION_POOL_BYTES_PER_WINDOW_TOKEN);
 	return Math.min(OBSERVATION_POOL_CEILING_BYTES, Math.max(configured, scaled));
+}
+
+/**
+ * The turn's pool: the operator's, lowered by a prompt template's
+ * `budget.observationBytes` when that is smaller, never raised by it. The
+ * template is named when it is what bounds the pool (WTF-P 0.8.3 B4).
+ */
+function observationTurnBudgetLimit(options?: ToolInvokeOptions): { limitBytes: number; template?: string } {
+	const operator = operatorObservationLimit(options);
+	const budget = options?.turnConstraints?.budget;
+	const templateBytes = budget?.observationBytes;
+	if (templateBytes === undefined || templateBytes >= operator) return { limitBytes: operator };
+	return {
+		limitBytes: Math.max(MIN_BUDGET_SLICE_BYTES, templateBytes),
+		template: budget?.template && budget.template.length > 0 ? budget.template : "unnamed",
+	};
 }
 
 function budgetKey(options: ToolInvokeOptions | undefined): string | null {
@@ -177,10 +195,12 @@ function pruneBudgetMap(): void {
  */
 export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOptions): ObservationReservation {
 	const key = budgetKey(options);
+	const { limitBytes, template } = observationTurnBudgetLimit(options);
+	const bound = template === undefined ? {} : { template };
 	if (key === null) {
 		return {
 			key,
-			limitBytes: observationTurnBudgetLimit(options),
+			limitBytes,
 			usedBeforeBytes: 0,
 			selfCapBytes,
 			callCapBytes: selfCapBytes,
@@ -188,9 +208,9 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			exhausted: false,
 			committed: false,
 			settled: false,
+			...bound,
 		};
 	}
-	const limitBytes = observationTurnBudgetLimit(options);
 	const state = turnBudgets.get(key) ?? { usedBytes: 0, lastSeenAt: Date.now(), exhaustedStreak: 0 };
 	state.lastSeenAt = Date.now();
 	turnBudgets.set(key, state);
@@ -207,6 +227,7 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 			exhausted: true,
 			committed: false,
 			settled: false,
+			...bound,
 		};
 	}
 	// A call that got a slice is progress, so the exhausted streak starts over.
@@ -223,6 +244,7 @@ export function reserveObservation(selfCapBytes: number, options?: ToolInvokeOpt
 		exhausted: false,
 		committed: false,
 		settled: false,
+		...bound,
 	};
 }
 
@@ -324,7 +346,7 @@ export function observationBudgetExhausted(input: {
 }): ToolResult {
 	const { tool, unit, reservation, subject, hint } = input;
 	const streak = bumpExhaustedStreak(reservation.key);
-	const spent = `${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(reservation.limitBytes)}`;
+	const spent = `${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(reservation.limitBytes)}${templateBound(reservation)}`;
 	if (streak > MAX_EXHAUSTED_NOTICES_PER_TURN) {
 		const message =
 			`observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ` +
@@ -406,10 +428,17 @@ function noticeLine(
 	return `[${parts.join(" | ")}]`;
 }
 
+/** Names the prompt template whose budget bounds the pool, so the refusal says where the limit came from. */
+function templateBound(reservation: ObservationReservation): string {
+	return reservation.template === undefined
+		? ""
+		: `, the budget.observationBytes of prompt template "${reservation.template}"`;
+}
+
 function limitedBudgetNote(reservation: ObservationReservation): string {
 	return `[Per-turn observation budget: ${formatSize(reservation.usedBeforeBytes)} already returned of ${formatSize(
 		reservation.limitBytes,
-	)} before this call. Use narrower arguments or continue in a follow-up turn for more content.]`;
+	)}${templateBound(reservation)} before this call. Use narrower arguments or continue in a follow-up turn for more content.]`;
 }
 
 /**

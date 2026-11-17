@@ -11,7 +11,7 @@ import { expandInlineFileReferencesAsync } from "../../core/file-references.js";
 import { PLUGIN_RESOURCE_USE, recordPackageActivity } from "../../core/package-activity.js";
 import type { PendingSkillRequest } from "../../core/skill-activation.js";
 import type { TurnConstraints } from "../../core/turn-constraints.js";
-import { templateToolConstraints } from "../../core/turn-constraints.js";
+import { templateTurnConstraints } from "../../core/turn-constraints.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ResourcesContract } from "./contract.js";
 import { pluginResourceComponents } from "./package-references.js";
@@ -31,7 +31,7 @@ export interface SubmitExpansion {
 	 * note names the attached files by their short paths.
 	 */
 	display?: { text: string; note?: string };
-	/** An expanded template's `allowed-tools` and `delegated-tools`, submitted as the turn's constraint. */
+	/** An expanded template's `allowed-tools`, `delegated-tools`, `budget` and `turnPolicy`, submitted as the turn's constraint. */
 	constraints?: TurnConstraints;
 	/** The prompt template `text` expanded from, when one did. */
 	template?: string;
@@ -174,8 +174,7 @@ export async function expandSubmitText(
 	const promptText = promptExpansion?.expanded
 		? withPluginResources(promptExpansion.text, promptExpansion.template)
 		: parsed.text;
-	const allowedTools = promptExpansion?.expanded ? promptExpansion.template.allowedTools : undefined;
-	const delegatedTools = promptExpansion?.expanded ? promptExpansion.template.delegatedTools : undefined;
+	const constraints = promptExpansion?.expanded ? templateTurnConstraints(promptExpansion.template) : undefined;
 	const fileExpansion = await expandInlineFileReferencesAsync(promptText, {
 		cwd,
 		includeImages: true,
@@ -203,14 +202,6 @@ export async function expandSubmitText(
 		...(promptExpansion?.expanded === false && promptExpansion.refusal
 			? { promptRefusal: promptExpansion.refusal.message }
 			: {}),
-		...(allowedTools || delegatedTools
-			? {
-					constraints: templateToolConstraints({
-						name: promptExpansion?.expanded ? promptExpansion.template.name : "",
-						...(allowedTools ? { allowedTools } : {}),
-						...(delegatedTools ? { delegatedTools } : {}),
-					}),
-				}
-			: {}),
+		...(constraints ? { constraints } : {}),
 	};
 }

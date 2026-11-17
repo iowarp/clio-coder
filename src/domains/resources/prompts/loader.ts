@@ -18,6 +18,7 @@ import {
 } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
 import { importedToolSurface, projectCompatTrusted, templateToolSurface } from "../skills/loader.js";
+import { type TemplateTurnBounds, templateTurnBounds } from "./turn-bounds.js";
 
 export interface PromptTemplate {
 	name: string;
@@ -57,6 +58,10 @@ export interface PromptTemplate {
 	 * `allowedTools` is the ceiling. It only narrows the session's ceiling.
 	 */
 	delegatedTools?: readonly string[];
+	/** Frontmatter `budget`: lowers the started turn's tool-call and observation limits (`turn-bounds.ts`). */
+	budget?: NonNullable<TemplateTurnBounds["budget"]>;
+	/** Frontmatter `turnPolicy`: one step of its step tool per started turn (`turn-bounds.ts`). */
+	turnPolicy?: NonNullable<TemplateTurnBounds["turnPolicy"]>;
 }
 
 export interface PromptTemplateRoot {
@@ -352,6 +357,11 @@ function loadPromptFile(
 		? importedToolSurface(frontmatter, `prompt template ${name}`, filePath, diagnostics, "delegated-tools")
 		: templateToolSurface(frontmatter, "delegated-tools", filePath, diagnostics);
 	if (delegatedTools) template.delegatedTools = delegatedTools;
+	const bounds = templateTurnBounds(frontmatter, allowedTools);
+	if ("error" in bounds)
+		return unavailableTemplate(name, filePath, root, bounds.error, diagnostics, declaredDescription ?? undefined);
+	if (bounds.budget) template.budget = bounds.budget;
+	if (bounds.turnPolicy) template.turnPolicy = bounds.turnPolicy;
 	return { name, value: template, source: sourceInfo };
 }
 

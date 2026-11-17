@@ -2069,9 +2069,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				loopGuardFailure = { tool: event.tool, failure: event.priorFailure };
 			}
 		}) ?? null;
+	/** The prompt template whose step policy ended this turn; read once as the turn settles. */
+	let stepPolicyStop: { template?: string } | null = null;
 	const unsubscribeToolBudgetLock =
-		deps.bus?.subscribe("safety.tool_budget_exceeded", () => {
+		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
+			if (typeof payload?.stepTool === "string")
+				stepPolicyStop = typeof payload.template === "string" ? { template: payload.template } : {};
 		}) ?? null;
 
 	// --- the state machine --------------------------------------------------
@@ -2099,6 +2103,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const yoloContinuationDue = (
 		guardInterrupted = false,
 		guardFailure: { tool: string; failure: string } | null = null,
+		stepStop: { template?: string } | null = null,
 	): { cause: TurnContinuationCause; reason: string; retryAfterMs?: number; detail?: string } | null => {
 		if ((deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) !== "yolo") return null;
 		const failed = state.continuation.stop;
@@ -2112,7 +2117,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				: state.synthesisToolLock
 					? { cause: "loop_guard" as const, reason: "the loop guard locked its tools" }
 					: state.toolBudgetLock
-						? { cause: "tool_budget" as const, reason: "it reached the per-turn tool budget" }
+						? {
+								cause: "tool_budget" as const,
+								reason:
+									stepStop !== null
+										? `it ran one step of ${stepStop.template ? `prompt template ${stepStop.template}` : "its template"}, which runs one step per turn`
+										: "it reached the per-turn tool budget",
+							}
 						: null);
 		if (stop === null) return null;
 		if (continuationCountsAgainstCap(stop.cause) && state.continuation.yoloContinuations >= TURN_CONTINUATION_CAP)
@@ -3976,9 +3987,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					state.activeUserTurnId = null;
 					const guardFailure = loopGuardFailure;
 					loopGuardFailure = null;
+					const stepStop = stepPolicyStop;
+					stepPolicyStop = null;
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
-							? yoloContinuationDue(guardStopped, guardFailure)
+							? yoloContinuationDue(guardStopped, guardFailure, stepStop)
 							: null;
 					if (
 						!disposed &&
