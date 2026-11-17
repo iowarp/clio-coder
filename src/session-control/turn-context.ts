@@ -35,6 +35,7 @@ import { contextOperationAwareness } from "./context-operation-awareness.js";
 import type { ContinuityReductionHooks } from "./continuity-controller.js";
 import type { MessageListDigests } from "./message-list-digest.js";
 import { createMessageListFold } from "./message-list-digest.js";
+import type { ObservationAgingTracker } from "./observation-aging.js";
 import {
 	effectivePosture,
 	POSTURE_GENERATION,
@@ -374,6 +375,8 @@ export interface TurnContext {
 	 */
 	promptSideTokens(): number;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
+	/** The session's observation-aging tracker, so every window check prices the request the provider receives. */
+	bindObservationAging(tracker: ObservationAgingTracker): void;
 	/**
 	 * Recompute and publish the live budget view.
 	 *
@@ -645,7 +648,46 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		wireModelId: string;
 		systemPromptTokens: number;
 		toolSchemaTokens: number;
+		/** Tool results the attested request carried as aging stubs. */
+		agedIds: ReadonlySet<string>;
 	} | null = null;
+	let observationAging: ObservationAgingTracker | null = null;
+	/**
+	 * The history as the next request carries it after observation aging, priced
+	 * without committing a batch. Null when the route does not age or nothing is
+	 * stubbed, so those estimates stay the history's own figures. `pending` is
+	 * each stub no request has sent yet, with the tokens it saves.
+	 */
+	const agedHistory = (
+		agentRuntime: AgentRuntime,
+		observed: MessageListDigests,
+	): {
+		messages: AgentMessage[];
+		messageTokens: number[];
+		saved: Array<{ index: number; id: string; tokens: number }>;
+		pending: Array<{ index: number; tokens: number }>;
+	} | null => {
+		const preview = observationAging?.preview(
+			observed.messages,
+			agentRuntime.runtimeResolution,
+			deps.session?.current()?.id,
+		);
+		if (!preview) return null;
+		let messageTokens: number[] | null = null;
+		const saved: Array<{ index: number; id: string; tokens: number }> = [];
+		const pending: Array<{ index: number; tokens: number }> = [];
+		preview.messages.forEach((message, index) => {
+			if (message === observed.messages[index]) return;
+			messageTokens ??= [...observed.messageTokens];
+			const tokens = estimateAgentMessageTokens(message);
+			const saving = { index, tokens: Math.max(0, (observed.messageTokens[index] ?? tokens) - tokens) };
+			const id = (message as { toolCallId?: string }).toolCallId ?? "";
+			messageTokens[index] = tokens;
+			saved.push({ ...saving, id });
+			if (!preview.sent.has(id)) pending.push(saving);
+		});
+		return messageTokens === null ? null : { messages: preview.messages, messageTokens, saved, pending };
+	};
 	let lastCompactionNoGain = false;
 	let lastCompactionEvent: { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null = null;
 	// Last settled run's provider cache usage plus whether the compiled system
@@ -1167,12 +1209,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const observed = replayMessages === undefined ? (history ?? observeHistory(agentRuntime)) : undefined;
+		const aged = observed ? agedHistory(agentRuntime, observed) : null;
 		const estimateInput = {
 			systemPrompt: engineInitialSystemPrompt(agentRuntime.agent),
 			messages:
+				aged?.messages ??
 				observed?.messages ??
 				(replayMessages ?? []).filter((message) => message.role !== "system" || isHostPolicyMessage(message)),
-			...(observed ? { messageTokens: observed.messageTokens } : {}),
+			...(observed ? { messageTokens: aged?.messageTokens ?? observed.messageTokens } : {}),
+			...(aged ? { attestedSavings: aged.pending } : {}),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
@@ -1181,8 +1226,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const pendingPolicyTokens =
 			policyText === null ? 0 : estimateAgentMessageTokens({ role: "system", content: policyText });
 		breakdown.pendingUserTokens += pendingPolicyTokens;
-		const historyTokens = observed ? reconciledHistoryTokens(agentRuntime, observed) : null;
+		const attestedHistory = observed ? reconciledHistoryTokens(agentRuntime, observed) : null;
 		const anchor = reconciledAnchor;
+		// The anchor's provider count already reflects the stubs its request carried;
+		// every other stub, and any in the estimated tail, comes off.
+		let agedSaving = 0;
+		if (attestedHistory !== null && aged && anchor)
+			for (const saving of aged.saved)
+				if (saving.index >= anchor.anchoredMessages.length || !anchor.agedIds.has(saving.id)) agedSaving += saving.tokens;
+		const historyTokens = attestedHistory === null ? null : Math.max(0, attestedHistory - agedSaving);
 		// Provider usage already includes the old system prompt and schemas.
 		// Price only positive growth, separately: shrinking one must not hide
 		// growth in the other when the measured prompt exceeds chars/4.
@@ -2781,6 +2833,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		captureRuntimeContextSnapshot,
 		persistContextSnapshot,
 		liveContextEstimate,
+
+		bindObservationAging(tracker: ObservationAgingTracker): void {
+			observationAging = tracker;
+		},
 		refreshLiveBudget,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
@@ -2852,6 +2908,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					wireModelId: runtime.wireModelId,
 					systemPromptTokens: breakdown.systemPromptTokens,
 					toolSchemaTokens: breakdown.toolSchemaTokens,
+					agedIds: observationAging?.sent(deps.session?.current()?.id) ?? new Set(),
 				};
 			}
 			if (!currentContextSnapshot) {

@@ -179,7 +179,14 @@ function transport() {
 		const encoder = new TextEncoder();
 		const chunk = (delta: Record<string, unknown>, finish_reason: string | null = null) =>
 			encoder.encode(
-				`data: ${JSON.stringify({ id: "fixture", object: "chat.completion.chunk", model: model.id, choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+				`data: ${JSON.stringify({
+					id: "fixture",
+					object: "chat.completion.chunk",
+					model: model.id,
+					choices: [{ index: 0, delta, finish_reason }],
+					// A provider count anchors the live budget, as a real route's usage does.
+					...(finish_reason ? { usage: { prompt_tokens: 3000 + 10_000 * call, completion_tokens: 20 } } : {}),
+				})}\n\n`,
 			);
 		const tool = call <= 2;
 		const stream = new ReadableStream<Uint8Array>({
@@ -215,6 +222,8 @@ async function drive(retention: "none" | undefined): Promise<{
 	requests: AgentMessage[][];
 	events: ChatLoopEvent[];
 	ledger: string;
+	/** The published next-request input at each send, after the post-tool guard and admission. */
+	published: Array<number | null>;
 }> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -242,6 +251,7 @@ async function drive(retention: "none" | undefined): Promise<{
 	});
 	const wire = transport();
 	const events: ChatLoopEvent[] = [];
+	const published: Array<number | null> = [];
 	const loop = createChatLoop({
 		getSettings: () => settings,
 		providers: context.getContract("providers") as ProvidersContract,
@@ -254,6 +264,7 @@ async function drive(retention: "none" | undefined): Promise<{
 				...options,
 				streamFn: (requestModel, requestContext, requestOptions) => {
 					wire.requests.push(structuredClone(requestContext.messages) as AgentMessage[]);
+					published.push(loop.contextUsage().tokens);
 					return openAICompletionsApiProvider.streamSimple(requestModel as Model<"openai-completions">, requestContext, {
 						...requestOptions,
 						apiKey: "fixture",
@@ -268,7 +279,7 @@ async function drive(retention: "none" | undefined): Promise<{
 	try {
 		await loop.submit("Read the record twice.");
 		await loop.whenSettled();
-		return { requests: wire.requests, events, ledger: JSON.stringify(session.readEntries()) };
+		return { requests: wire.requests, events, ledger: JSON.stringify(session.readEntries()), published };
 	} finally {
 		loop.dispose();
 		await loop.whenSettled();
@@ -306,4 +317,9 @@ it("an uncached route's request stubs the superseded read while the ledger keeps
 	const cached = await drive(undefined);
 	strictEqual(cached.requests.length, 3);
 	deepStrictEqual(toolResults(cached.requests[2]), [RECORD, RECORD]);
+	// Astra r1-5: the window checks price the request the provider receives. The aged route's third request is
+	// about one 40 KB read (10K tokens) smaller, and so is its published budget; the requests before it agree.
+	deepStrictEqual(uncached.published.slice(0, 2), cached.published.slice(0, 2));
+	const [agedTokens, wholeTokens] = [uncached.published[2] ?? 0, cached.published[2] ?? 0];
+	ok(wholeTokens - agedTokens > 9_000 && wholeTokens - agedTokens < 10_500, `${agedTokens} vs ${wholeTokens}`);
 });

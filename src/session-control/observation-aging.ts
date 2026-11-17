@@ -20,7 +20,10 @@
  * only small-tier routes and routes that do not cache prompts. Cached standard
  * and frontier routes never see it. Wired as the agent's `transformContext`
  * in turn-runtime.ts, the one point every outgoing main-session request
- * passes through, prewarm and provider-replay rebuilds included. The tracker
+ * passes through, prewarm and provider-replay rebuilds included; the window
+ * checks in turn-context.ts price the same request through `preview`, which
+ * commits nothing, so a superseded read never compacts or stops a request
+ * that fits once it is stubbed. The tracker
  * belongs to the session, not the agent: a model switch or reload that rebuilds
  * the agent keeps every stub, and only a different session starts over.
  */
@@ -271,6 +274,36 @@ export function ageObservations(
 	return { messages: out, stubbed: next, batch };
 }
 
+/** The request the next send would carry, priced without committing anything. */
+export interface ObservationAgingPreview {
+	messages: AgentMessage[];
+	/** Ids stubbed by requests already sent; the rest of the stubs are the batch the next request would form. */
+	sent: ReadonlySet<string>;
+}
+
+export interface ObservationAgingTracker {
+	/** Age one outgoing request and commit its batch; only the send path calls this. */
+	project(
+		messages: ReadonlyArray<AgentMessage>,
+		route: ObservationAgingRoute,
+		sessionId: string | undefined,
+	): { messages: AgentMessage[]; batch: ObservationAgingBatch | null };
+	/**
+	 * What `project` would return for the same input, with no state change: the
+	 * window checks price this so they agree with the request. Null on a route
+	 * the gate refuses, where the request is the history unchanged.
+	 */
+	preview(
+		messages: ReadonlyArray<AgentMessage>,
+		route: ObservationAgingRoute,
+		sessionId: string | undefined,
+	): ObservationAgingPreview | null;
+	/** Ids stubbed by requests already sent under `sessionId`. */
+	sent(sessionId: string | undefined): ReadonlySet<string>;
+}
+
+const NONE: ReadonlySet<string> = new Set();
+
 /**
  * The stateful half: remembers what earlier requests of one session stubbed so
  * a result, once stubbed, stays stubbed. One per chat loop, outliving every
@@ -282,15 +315,10 @@ export function ageObservations(
 export function createObservationAging(
 	declared: DeclaredToolEffects,
 	thresholdBytes: number = OBSERVATION_AGING_BATCH_BYTES,
-): {
-	project(
-		messages: ReadonlyArray<AgentMessage>,
-		route: ObservationAgingRoute,
-		sessionId: string | undefined,
-	): { messages: AgentMessage[]; batch: ObservationAgingBatch | null };
-} {
+): ObservationAgingTracker {
 	let stubbed: ReadonlySet<string> = new Set();
 	let owner: string | undefined;
+	const sent = (sessionId: string | undefined): ReadonlySet<string> => (sessionId === owner ? stubbed : NONE);
 	return {
 		project(messages, route, sessionId) {
 			if (sessionId !== owner) {
@@ -302,5 +330,11 @@ export function createObservationAging(
 			stubbed = aged.stubbed;
 			return { messages: aged.messages, batch: aged.batch };
 		},
+		preview(messages, route, sessionId) {
+			if (!observationAgingApplies(route)) return null;
+			const prior = sent(sessionId);
+			return { messages: ageObservations(messages, prior, declared, thresholdBytes).messages, sent: prior };
+		},
+		sent,
 	};
 }
