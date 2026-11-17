@@ -6,7 +6,7 @@ import { extensionToolName } from "../domains/extensions/command-schema.js";
 import type { ExtensionRuntimeHookBridge } from "../domains/extensions/runtime-hook-bridge.js";
 import { RUNTIME_V2_LIMITS } from "../domains/extensions/runtime-schema-v2.js";
 import { type InstalledExtension, isLoadableExtension } from "../domains/extensions/types.js";
-import { storeToolDetail } from "../domains/session/tool-details.js";
+import { sessionHoldsToolDetails, storeToolDetail } from "../domains/session/tool-details.js";
 import { builtin } from "./builtin-tool-catalog.js";
 import { createDetailLedgerTool } from "./ledger.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
@@ -60,6 +60,19 @@ export function ensureDetailLedger(registry: Pick<ToolRegistry, "get" | "registe
 		placement: "gateway",
 		...(ledger.metadata ? { metadata: { ...ledger.metadata, startupPrompt: false } } : {}),
 	});
+}
+
+/**
+ * A resumed session whose extensions are gone still carries `detail_ref`s in its transcript, so the session switch
+ * registers the detail-only ledger whenever the incoming session's detail store holds entries. The placement is the
+ * same gateway one, so the session's tool schema set does not change.
+ */
+export function ensureDetailLedgerForSession(
+	registry: Pick<ToolRegistry, "get" | "register">,
+	sessionId: string | null | undefined,
+): void {
+	if (sessionId === null || sessionId === undefined || registry.get(ToolNames.Ledger)) return;
+	if (sessionHoldsToolDetails(sessionId)) ensureDetailLedger(registry);
 }
 
 /**

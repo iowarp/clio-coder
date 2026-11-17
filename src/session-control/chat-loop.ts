@@ -154,6 +154,7 @@ import type { MainRequestRecord } from "../engine/in-prefix-summary.js";
 import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, ImageContent } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
+import { ensureDetailLedgerForSession } from "../tools/extension-runtime-tools.js";
 import { scopedCapabilityShapes } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
@@ -4367,6 +4368,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			recovery.cancelRetryCountdown();
 			cancelTriage();
 			const sessionId = api.getSessionId();
+			if (deps.toolRegistry) ensureDetailLedgerForSession(deps.toolRegistry, sessionId);
 			queues.reset({ keepOperator: sessionId !== null && sessionId === queueSessionId });
 			queueSessionId = sessionId;
 			middleware.clearPendingReminders();
