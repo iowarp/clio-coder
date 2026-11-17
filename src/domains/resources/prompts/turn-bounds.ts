@@ -3,7 +3,9 @@ import { ToolNames } from "../../../core/tool-names.js";
 
 /**
  * Frontmatter `budget` and `turnPolicy`: what bounds one turn a template
- * starts. Both only narrow. A value that does not parse is an error, never a
+ * starts. A budget lowers the operator's per-turn limits and raises them only
+ * up to the operator's template ceilings (`safety.limits.template*Max`); the
+ * turn policy only narrows. A value that does not parse is an error, never a
  * dropped key, because a dropped bound would let the turn run unbounded while
  * its author believed it was capped; the loader turns the error into an
  * unavailable template, which library validation reports as `ERR_PROMPT`.

@@ -646,6 +646,13 @@ export interface SafetySettings {
 		chatToolCallsPerTurn: number;
 		readBytesPerCall: number;
 		observationBytesPerTurn: number;
+		/**
+		 * How far a prompt template's `budget.toolCalls` may raise its turn above
+		 * `chatToolCallsPerTurn`. Null means a template can only lower the limit.
+		 */
+		templateToolCallsPerTurnMax: number | null;
+		/** The same ceiling for a template's `budget.observationBytes` over `observationBytesPerTurn`. */
+		templateObservationBytesPerTurnMax: number | null;
 		workerResponseSeconds: number;
 		/** Tool calls one yolo stretch runs before it pauses for the operator; 0 is off. */
 		autonomousToolCalls: number;
@@ -888,6 +895,8 @@ export const DEFAULT_SETTINGS = {
 			chatToolCallsPerTurn: GUARDRAIL_DEFAULTS.turnToolCallBudget,
 			readBytesPerCall: GUARDRAIL_DEFAULTS.readMaxBytes,
 			observationBytesPerTurn: GUARDRAIL_DEFAULTS.observationTurnBudgetBytes,
+			templateToolCallsPerTurnMax: null as number | null,
+			templateObservationBytesPerTurnMax: null as number | null,
 			workerResponseSeconds: 600,
 			autonomousToolCalls: 600,
 			autonomousMinutes: 120,
@@ -1113,6 +1122,10 @@ safety:
     chatToolCallsPerTurn: 60
     readBytesPerCall: 51200
     observationBytesPerTurn: 196608
+    # How far a prompt template's budget may raise its turn above the two
+    # limits above; null lets a template only lower them.
+    templateToolCallsPerTurnMax: null
+    templateObservationBytesPerTurnMax: null
     workerResponseSeconds: 600
     # One yolo stretch pauses for you after this many tool calls, minutes of
     # active turn time, or tokens; 0 turns a cap off.

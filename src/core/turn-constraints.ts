@@ -1,4 +1,5 @@
 import { COORDINATOR_DIRECT_TOOLS, toolPlacement } from "../tools/surface.js";
+import { resolveGuardrail, resolveTemplateCeiling, templateBudgetLimit } from "./guardrails.js";
 import { ToolNames } from "./tool-names.js";
 
 export interface ToolSurfaceSource {
@@ -116,9 +117,10 @@ export interface TurnConstraints {
 	 */
 	readonly readOnly?: true;
 	/**
-	 * A prompt template's per-turn budget. It only lowers the operator's
-	 * `safety.limits.chatToolCallsPerTurn` and `observationBytesPerTurn`; the
-	 * effective limit is the smaller of the two, so a template never raises one.
+	 * A prompt template's per-turn budget. It lowers the operator's
+	 * `safety.limits.chatToolCallsPerTurn` and `observationBytesPerTurn`, and
+	 * raises them only up to `templateToolCallsPerTurnMax` and
+	 * `templateObservationBytesPerTurnMax`; with no ceiling set it only lowers.
 	 */
 	readonly budget?: TurnBudget;
 	/** A prompt template's turn policy: one step of its step tool per turn. */
@@ -379,9 +381,26 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 	}
 	const budget = constraints.budget;
 	if (budget?.toolCalls !== undefined || budget?.observationBytes !== undefined) {
+		// The limits the turn actually gets: a value above the operator's applies only up to its template ceiling.
+		const calls =
+			budget.toolCalls === undefined
+				? undefined
+				: templateBudgetLimit(
+						budget.toolCalls,
+						resolveGuardrail("turnToolCallBudget"),
+						resolveTemplateCeiling("templateTurnToolCallCeiling"),
+					).limit;
+		const bytes =
+			budget.observationBytes === undefined
+				? undefined
+				: templateBudgetLimit(
+						budget.observationBytes,
+						resolveGuardrail("observationTurnBudgetBytes"),
+						resolveTemplateCeiling("templateObservationTurnCeilingBytes"),
+					).limit;
 		const bounds = [
-			...(budget.toolCalls === undefined ? [] : [`${budget.toolCalls} tool calls`]),
-			...(budget.observationBytes === undefined ? [] : [`${budget.observationBytes} bytes of tool output`]),
+			...(calls === undefined ? [] : [`${calls} tool calls`]),
+			...(bytes === undefined ? [] : [`${bytes} bytes of tool output`]),
 		];
 		lines.push(
 			`Budget for this turn${budget.template ? ` from prompt template "${budget.template}"` : ""}: at most ${bounds.join(" and ")}.`,

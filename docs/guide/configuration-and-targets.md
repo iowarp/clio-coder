@@ -304,6 +304,8 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `safety.limits.chatToolCallsPerTurn` | `60` | next turn; a project layer can only tighten it |
 | `safety.limits.readBytesPerCall` | `51200` | next turn; a project layer can only tighten it |
 | `safety.limits.observationBytesPerTurn` | `196608` | next turn; a project layer can only tighten it |
+| `safety.limits.templateToolCallsPerTurnMax` | `null` | next turn; a project layer can only lower it below the user value |
+| `safety.limits.templateObservationBytesPerTurnMax` | `null` | next turn; a project layer can only lower it below the user value |
 | `safety.limits.workerResponseSeconds` | `600` | next turn; a project layer can only tighten it |
 | `safety.limits.autonomousToolCalls` | `600` | immediately; a project layer can only tighten it |
 | `safety.limits.autonomousMinutes` | `120` | immediately; a project layer can only tighten it |

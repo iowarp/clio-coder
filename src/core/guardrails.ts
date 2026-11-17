@@ -49,7 +49,19 @@ export interface GuardrailValues {
 	 * not a routine ceiling.
 	 */
 	internalDispatchTimeoutMs: number;
+	/**
+	 * How far a prompt template's `budget.toolCalls` may raise a turn above
+	 * `turnToolCallBudget`; null lets a template only lower it (WTF-P 0.8.3 B4).
+	 */
+	templateTurnToolCallCeiling: number | null;
+	/** The same ceiling for `budget.observationBytes` over `observationTurnBudgetBytes`. */
+	templateObservationTurnCeilingBytes: number | null;
 }
+
+type NumericGuardrail = {
+	[K in keyof GuardrailValues]: GuardrailValues[K] extends number ? K : never;
+}[keyof GuardrailValues];
+type TemplateCeilingGuardrail = "templateTurnToolCallCeiling" | "templateObservationTurnCeilingBytes";
 
 export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 	turnToolCallBudget: 60,
@@ -58,6 +70,8 @@ export const GUARDRAIL_DEFAULTS: GuardrailValues = {
 	readMaxBytes: 50 * 1024,
 	observationTurnBudgetBytes: 192 * 1024,
 	internalDispatchTimeoutMs: 15 * 60 * 1000,
+	templateTurnToolCallCeiling: null,
+	templateObservationTurnCeilingBytes: null,
 };
 
 /** Project canonical v2 settings leaves onto the process-local guardrail registry. */
@@ -67,6 +81,8 @@ export function guardrailValuesFromSettings(settings: {
 			chatToolCallsPerTurn: number;
 			readBytesPerCall: number;
 			observationBytesPerTurn: number;
+			templateToolCallsPerTurnMax?: number | null;
+			templateObservationBytesPerTurnMax?: number | null;
 		};
 	};
 	fleet: {
@@ -81,7 +97,27 @@ export function guardrailValuesFromSettings(settings: {
 		readMaxBytes: settings.safety.limits.readBytesPerCall,
 		observationTurnBudgetBytes: settings.safety.limits.observationBytesPerTurn,
 		internalDispatchTimeoutMs: settings.fleet.limits.internalRunTimeoutMs,
+		templateTurnToolCallCeiling: settings.safety.limits.templateToolCallsPerTurnMax ?? null,
+		templateObservationTurnCeilingBytes: settings.safety.limits.templateObservationBytesPerTurnMax ?? null,
 	};
+}
+
+/**
+ * One turn limit under a prompt template's budget: the smaller of the
+ * template's value and the larger of the operator's limit and the operator's
+ * template ceiling. Lowering always applies; raising applies up to the
+ * ceiling, and with no ceiling not at all. `bound` names what set the result:
+ * the template's own value, the ceiling it was clamped to, or the operator's
+ * limit when the template asked for more and no ceiling allows any of it.
+ */
+export function templateBudgetLimit(
+	template: number,
+	operator: number,
+	ceiling: number | null,
+): { limit: number; bound: "template" | "ceiling" | "operator" } {
+	const allowed = Math.max(operator, ceiling ?? operator);
+	if (template <= allowed) return { limit: template, bound: "template" };
+	return { limit: allowed, bound: allowed > operator ? "ceiling" : "operator" };
 }
 
 /**
@@ -161,6 +197,12 @@ export function configureGuardrails(values: Partial<GuardrailValues> | undefined
 }
 
 /** Resolve one guardrail from the effective settings projection or its default. */
-export function resolveGuardrail(key: keyof GuardrailValues): number {
+export function resolveGuardrail(key: NumericGuardrail): number {
 	return configured[key] ?? GUARDRAIL_DEFAULTS[key];
+}
+
+/** A template budget ceiling from the effective settings projection; null when the operator set none. */
+export function resolveTemplateCeiling(key: TemplateCeilingGuardrail): number | null {
+	const value = configured[key];
+	return value === undefined ? GUARDRAIL_DEFAULTS[key] : value;
 }

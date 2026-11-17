@@ -16,6 +16,8 @@
 
 import {
 	resolveGuardrail,
+	resolveTemplateCeiling,
+	templateBudgetLimit,
 	workerSynthesisReserveBlockReason,
 	workerSynthesisReserveDirective,
 	workerToolCallCapExceededReason,
@@ -1197,24 +1199,44 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	};
 
 	/**
-	 * The turn's budget: the operator's, lowered by a prompt template's
-	 * `budget.toolCalls` when that is smaller. The hard ceiling keeps its margin
-	 * above the lowered soft budget, so a template budget ends the turn exactly
-	 * the way the operator's does, only sooner, and never later (WTF-P 0.8.3 B4).
+	 * The turn's budget under a prompt template's `budget.toolCalls`: the
+	 * smaller of that value and the larger of the operator's budget and
+	 * `safety.limits.templateToolCallsPerTurnMax`. Lowering always applies;
+	 * raising applies up to that ceiling, and not at all without one. The hard
+	 * ceiling keeps the operator's margin above the effective soft budget, so a
+	 * template budget ends the turn exactly the way the operator's does
+	 * (WTF-P 0.8.3 B4). `source` names the bound that applied, for refusal text.
 	 */
 	const resolveTurnBudget = (
 		input: MiddlewareHookInput,
-	): { budget: OrchTurnToolCallBudget; template?: string } | undefined => {
+	): { budget: OrchTurnToolCallBudget; template?: string; source: string } | undefined => {
 		const budgetSource = options.turnToolCallBudget;
 		const operator = typeof budgetSource === "function" ? budgetSource() : budgetSource;
 		if (operator === undefined) return undefined;
 		const templateCalls = input.metadata?.templateToolCalls;
-		if (typeof templateCalls !== "number" || !(templateCalls >= 1) || templateCalls >= operator.soft)
-			return { budget: operator };
-		const template = input.metadata?.templateName;
+		if (typeof templateCalls !== "number" || !(templateCalls >= 1)) return { budget: operator, source: "" };
+		const name = input.metadata?.templateName;
+		const template = typeof name === "string" && name.length > 0 ? name : "unnamed";
+		const ceiling = resolveTemplateCeiling("templateTurnToolCallCeiling");
+		const { limit, bound } = templateBudgetLimit(templateCalls, operator.soft, ceiling);
+		if (bound === "operator")
+			return {
+				budget: operator,
+				source:
+					templateCalls > operator.soft
+						? `, safety.limits.chatToolCallsPerTurn; prompt template "${template}" asked for ${templateCalls} and safety.limits.templateToolCallsPerTurnMax is unset`
+						: "",
+			};
+		const margin = operator.hard - operator.soft;
 		return {
-			budget: { soft: templateCalls, hard: Math.min(operator.hard, templateCalls + ORCH_TURN_TOOL_CALL_HARD_MARGIN) },
-			template: typeof template === "string" && template.length > 0 ? template : "unnamed",
+			budget: { soft: limit, hard: limit + margin },
+			template,
+			source:
+				bound === "ceiling"
+					? `, safety.limits.templateToolCallsPerTurnMax; prompt template "${template}" asked for ${templateCalls}`
+					: limit > operator.soft
+						? `, set by prompt template "${template}" budget.toolCalls, raised within safety.limits.templateToolCallsPerTurnMax ${ceiling}`
+						: `, set by prompt template "${template}" budget.toolCalls`,
 		};
 	};
 
@@ -1223,8 +1245,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (resolved === undefined) return null;
 		const turnBudget = resolved.budget;
 		const bound = resolved.template === undefined ? undefined : { template: resolved.template };
-		const source =
-			resolved.template === undefined ? "" : `, set by prompt template "${resolved.template}" budget.toolCalls`;
+		const source = resolved.source;
 		const turnKey = input.turnId ?? NO_TURN_BUCKET;
 		const callsThisTurn = bumpBoundedCounter(callsByTurn, turnKey);
 		let byTool = callsByToolByTurn.get(turnKey);
