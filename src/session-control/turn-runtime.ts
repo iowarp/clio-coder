@@ -98,6 +98,7 @@ import {
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import { createObservationAging } from "./observation-aging.js";
 import { assessRepetition, repetitionAbortReason, shouldAssessRepetition } from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
@@ -756,8 +757,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					context: Parameters<typeof requestStructure>[1];
 					compiled: Parameters<typeof requestStructure>[2];
 					coldReasons: ExpectedColdReason[];
+					agedBytes: number;
 			  }
 			| undefined;
+		// Observation aging (WTF-P 0.8.3 C3): what this agent's requests stubbed, and the bytes a batch saved that no
+		// sent request has journaled yet.
+		const observationAging = createObservationAging();
+		let unjournaledAgedBytes = 0;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
 		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
@@ -780,6 +786,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				]),
 			];
 			if (!sent) carriedColdReasons = [...new Set([...carriedColdReasons, ...reasons])];
+			if (!sent) unjournaledAgedBytes += request?.agedBytes ?? 0;
 			if (recovery === "auth_reset")
 				carriedColdReasons = [...new Set([...carriedColdReasons, "transport_reset" as const])];
 			const generation = context.cacheGeneration?.() ?? 0;
@@ -830,6 +837,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					...physics.cache,
 					...(timed ? { uncachedPrefillTokens: timed.input } : {}),
 					expectedColdReasons: sent ? reasons : [],
+					...(sent && request?.agedBytes ? { observationAgingBytes: request.agedBytes } : {}),
 					verdict,
 					...(journaled ? { structure: journaled } : {}),
 				},
@@ -1101,8 +1109,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								context: sent,
 								compiled: context.compiledSessionPrompt?.() ?? null,
 								coldReasons: [...new Set([...carriedColdReasons, ...(context.takeCallColdReasons?.() ?? [])])],
+								agedBytes: unjournaledAgedBytes,
 							};
 							carriedColdReasons = [];
+							unjournaledAgedBytes = 0;
 							// Research capture: the prefix exactly as this attempt sends it, hashed (#423, #434).
 							attempt.withContext(() => {
 								if (!telemetryCaptures("prompt.prefix_captured")) return;
@@ -1166,6 +1176,19 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			steeringMode: "all",
 			followUpMode: "all",
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
+			// Every outgoing request passes here, so a stubbed result stays stubbed in each one; the ledger is untouched.
+			transformContext: async (messages) => {
+				const aged = observationAging.project(messages, localRuntime.runtimeResolution);
+				if (aged.batch !== null) {
+					unjournaledAgedBytes += aged.batch.bytesSaved;
+					context.noteColdReason("observation_aging");
+					const word = aged.batch.results === 1 ? "result" : "results";
+					deps.emitNotice(
+						`[context engine] observation aging: ${aged.batch.results} superseded tool ${word} stubbed in the request, ${aged.batch.bytesSaved} bytes saved; the session ledger keeps them`,
+					);
+				}
+				return aged.messages;
+			},
 			beforeToolBatch: ({ assistantMessage }) => {
 				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
 				if (

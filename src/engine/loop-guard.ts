@@ -172,6 +172,16 @@ function callIdentity(tool: string, args: Record<string, unknown> | undefined): 
 	return hashToolCall(tool, git ?? args ?? {});
 }
 
+/**
+ * The repeat identity of a call as the model wrote it: a gateway `op=call` is
+ * judged as the capability it runs, the same unwrapping the hook applies, so
+ * observation aging and the loop guard agree on what counts as the same call.
+ */
+export function effectiveCallIdentity(toolName: string, args: unknown): string {
+	const unwrapped = effectiveToolCall(toolName, args);
+	return callIdentity(unwrapped.toolName, unwrapped.args);
+}
+
 /** Output to the null device or between descriptors writes no file. */
 const SHELL_NULL_REDIRECT = /\d?>>?\s*\/dev\/null|\d?>&\d/g;
 /** Signs a read-only-looking command still writes: redirection, in-place edits, file utilities, git verbs that move refs or the tree. */

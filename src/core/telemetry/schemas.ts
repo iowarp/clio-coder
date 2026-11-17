@@ -277,8 +277,11 @@ export const CallSettledSchema = Type.Object(
 						"transport_reset",
 						"input_changed",
 						"tool_choice_change",
+						"observation_aging",
 					]),
 				),
+				/** Superseded tool-result bytes an observation-aging batch took out of this request (WTF-P 0.8.3 C3). */
+				observationAgingBytes: Type.Optional(count),
 				rePrefilledTokens: factSchema(count),
 				uncachedPrefillTokens: factSchema(count),
 				/** rePrefilledTokens priced at the input rate less the cache-read rate, fixed at settle (#434). */
