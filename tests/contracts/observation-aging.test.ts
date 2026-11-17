@@ -59,23 +59,26 @@ const result = (id: string, name: string, text: string, isError = false): AgentM
 const text = (message: AgentMessage | undefined): string =>
 	((message as { content?: Array<{ text?: string }> } | undefined)?.content ?? []).map((block) => block.text).join("");
 const body = (bytes: number, tag: string): string => `${tag}\n${"r".repeat(bytes - tag.length - 1)}`;
+/** A desk read declared read-only, so a later identical call supersedes it (A1). */
+const RECORD_TOOL = "extension_wtfp__read_record";
+const declared = (tool: string) => (tool === RECORD_TOOL ? { readOnly: true } : undefined);
 
 it("superseded results wait below the threshold, stub in one batch past it, stay stubbed, and never reach a fresh result (WTF-P 0.8.3 C3)", () => {
 	const record = { path: "sections/intro.md" };
 	const small = 12_000;
 	const messages: AgentMessage[] = [
-		call("a", "read_record", record),
-		result("a", "read_record", body(small, "first")),
-		call("b", "read_record", record),
-		result("b", "read_record", body(small, "second")),
-		call("other", "read_record", { path: "sections/methods.md" }),
-		result("other", "read_record", body(small, "other")),
+		call("a", RECORD_TOOL, record),
+		result("a", RECORD_TOOL, body(small, "first")),
+		call("b", RECORD_TOOL, record),
+		result("b", RECORD_TOOL, body(small, "second")),
+		call("other", RECORD_TOOL, { path: "sections/methods.md" }),
+		result("other", RECORD_TOOL, body(small, "other")),
 		// A failed repeat supersedes nothing.
-		call("c", "read_record", { path: "sections/methods.md" }),
-		result("c", "read_record", "no such record", true),
+		call("c", RECORD_TOOL, { path: "sections/methods.md" }),
+		result("c", RECORD_TOOL, "no such record", true),
 	];
 	// One superseded copy, 12 KB, waits: below the batch the request is the ledger's bytes.
-	const below = ageObservations(messages, new Set());
+	const below = ageObservations(messages, new Set(), declared);
 	strictEqual(below.batch, null);
 	deepStrictEqual(below.messages, messages);
 	strictEqual(below.stubbed.size, 0);
@@ -83,19 +86,19 @@ it("superseded results wait below the threshold, stub in one batch past it, stay
 	// A gateway call unwraps to the capability it runs, so it supersedes both direct reads; 24 KB waiting still
 	// crosses nothing, and the next copy of the same record brings it to 36 KB, past 32 KiB.
 	messages.push(
-		call("d", "gateway", { op: "call", capability: "read_record", args: record }),
+		call("d", "gateway", { op: "call", capability: RECORD_TOOL, args: record }),
 		result("d", "gateway", body(small, "third")),
 	);
-	strictEqual(ageObservations(messages, new Set()).batch, null);
-	messages.push(call("e", "read_record", record), result("e", "read_record", body(small, "fourth")));
-	const crossed = ageObservations(messages, new Set());
+	strictEqual(ageObservations(messages, new Set(), declared).batch, null);
+	messages.push(call("e", RECORD_TOOL, record), result("e", RECORD_TOOL, body(small, "fourth")));
+	const crossed = ageObservations(messages, new Set(), declared);
 	ok(crossed.batch, "three superseded copies reach the batch");
 	strictEqual(crossed.batch.results, 3);
 	ok(OBSERVATION_AGING_BATCH_BYTES <= 3 * small);
 	ok(crossed.batch.bytesSaved > 3 * small - 3 * 512, JSON.stringify(crossed.batch));
 	for (const index of [1, 3, 9]) {
 		const stub = text(crossed.messages[index]);
-		ok(stub.startsWith("[observation aged] read_record "), stub);
+		ok(stub.startsWith(`[observation aged] ${RECORD_TOOL} `), stub);
 		ok(stub.includes('{"path":"sections/intro.md"}') && stub.includes("already in context"), stub);
 	}
 	// The newest copy, the unrelated record and the failed call are never stubbed, and the input is untouched.
@@ -105,8 +108,8 @@ it("superseded results wait below the threshold, stub in one batch past it, stay
 	strictEqual(text(messages[1]), body(small, "first"));
 
 	// A later request with a little more superseded keeps the batch stubbed byte for byte and forms no new batch.
-	messages.push(call("f", "read_record", record), result("f", "read_record", body(small, "fifth")));
-	const later = ageObservations(messages, crossed.stubbed);
+	messages.push(call("f", RECORD_TOOL, record), result("f", RECORD_TOOL, body(small, "fifth")));
+	const later = ageObservations(messages, crossed.stubbed, declared);
 	strictEqual(later.batch, null);
 	for (const index of [1, 3, 9]) strictEqual(text(later.messages[index]), text(crossed.messages[index]));
 	strictEqual(text(later.messages[11]), body(small, "fourth"), "a newly superseded copy waits for its own batch");
@@ -120,16 +123,16 @@ it("the gate admits small or uncached routes only; a cached frontier route is un
 	ok(!observationAgingApplies({ modelTier: "standard" }));
 	const big = body(OBSERVATION_AGING_BATCH_BYTES + 1024, "big");
 	const messages = [
-		call("a", "read_record", { id: 1 }),
-		result("a", "read_record", big),
-		call("b", "read_record", { id: 1 }),
-		result("b", "read_record", big),
+		call("a", RECORD_TOOL, { id: 1 }),
+		result("a", RECORD_TOOL, big),
+		call("b", RECORD_TOOL, { id: 1 }),
+		result("b", RECORD_TOOL, big),
 	];
-	const aging = createObservationAging();
-	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true });
+	const aging = createObservationAging(declared);
+	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true }, "s");
 	strictEqual(cached.batch, null);
 	deepStrictEqual(cached.messages, messages);
-	const small = aging.project(messages, { modelTier: "small", promptCaching: true });
+	const small = aging.project(messages, { modelTier: "small", promptCaching: true }, "s");
 	strictEqual(small.batch?.results, 1);
 	ok(text(small.messages[1]).startsWith("[observation aged]"));
 });

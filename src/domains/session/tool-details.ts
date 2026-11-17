@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { isSessionJsonlHeader, sessionCurrentPath } from "../../engine/session.js";
@@ -64,4 +64,18 @@ export function readToolDetail(sessionId: string, ref: string): string | null {
 		}
 	}
 	return null;
+}
+
+/** Whether the session, or a fork ancestor its refs resolve through, has stored any detail. */
+export function sessionHoldsToolDetails(sessionId: string): boolean {
+	let current: string | null = sessionId;
+	for (let depth = 0; current !== null && depth <= MAX_FORK_DEPTH; depth += 1) {
+		try {
+			if (readdirSync(detailsDirectory(current)).some((name) => isToolDetailRef(name.replace(/\.txt$/u, "")))) return true;
+		} catch {
+			// No store directory in this session; a fork's parent may have one.
+		}
+		current = parentSession(current);
+	}
+	return false;
 }
