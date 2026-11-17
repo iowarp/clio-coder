@@ -107,6 +107,28 @@ describe("loop guard resets identical-call counts on a mutation between them (WT
 		);
 	});
 
+	it("counts a typed git add as a mutation and alternating shell inspections as none (Astra r2-4)", () => {
+		const status: Call = { tool: "git", args: { op: "status" } };
+		const add = { op: "add", paths: ["a.txt"] };
+		for (const stage of [
+			{ tool: "git", args: add },
+			{ tool: "gateway", args: { op: "call", capability: "git", args: add } },
+		]) {
+			const { batch } = orchestratorGuard();
+			deepStrictEqual(
+				[status, status, stage, status].map((call, index) => batch(`r${index}`, [call])[0]),
+				[true, true, true, true],
+			);
+		}
+		const pwd: Call = { tool: "bash", args: { command: "pwd" } };
+		const whoami: Call = { tool: "bash", args: { command: "whoami" } };
+		const { batch } = orchestratorGuard();
+		deepStrictEqual(
+			[pwd, whoami, pwd, whoami, pwd].map((call, index) => batch(`r${index}`, [call])[0]),
+			[true, true, true, true, false],
+		);
+	});
+
 	it("never counts a tool declared neither read-only nor idempotent as a verbatim repeat", () => {
 		const nextStep: Call = {
 			tool: "extension_wtfp__next_step",

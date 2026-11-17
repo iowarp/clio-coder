@@ -186,20 +186,75 @@ export function effectiveCallIdentity(toolName: string, args: unknown): string {
 
 /** Output to the null device or between descriptors writes no file. */
 const SHELL_NULL_REDIRECT = /\d?>>?\s*\/dev\/null|\d?>&\d/g;
-/** Signs a read-only-looking command still writes: redirection, in-place edits, file utilities, git verbs that move refs or the tree. */
+/** Signs a read-only-looking command still writes: redirection, in-place edits, find actions, file utilities. */
 const SHELL_WRITE_SIGN =
-	/>|(?:^|\s)(?:-i\b|--in-place\b|-delete\b|-exec\b)|\b(?:tee|rm|mv|cp|mkdir|touch|chmod|chown|ln)\b|\bgit\s+(?:add|am|apply|branch\s+-[dDmM]|checkout|cherry-pick|clean|commit|fetch|init|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|tag)\b/;
+	/>|(?:^|\s)(?:-i\b|--in-place\b|-delete\b|-exec(?:dir)?\b|-ok(?:dir)?\b|-fprint\w*|-fls\b)|\b(?:tee|rm|mv|cp|mkdir|touch|chmod|chown|ln)\b/;
+/** Plain inspections outside the shared read list. `env` reads only bare; with words it runs a command (Astra r2-4). */
+const SHELL_INSPECTION_PATTERN =
+	/^\s*(?:(?:pwd|whoami|id|uname|date|which|stat|file|du|df|echo|printenv|test|\[|realpath|readlink|basename|dirname)(?:\s|$)|env\s*$)/;
+/** Git subcommands that only print, whatever their arguments, save `--output`. */
+const GIT_INSPECTIONS = new Set([
+	"status",
+	"log",
+	"diff",
+	"show",
+	"blame",
+	"grep",
+	"ls-files",
+	"ls-tree",
+	"rev-parse",
+	"rev-list",
+	"describe",
+	"shortlog",
+	"cat-file",
+	"merge-base",
+	"name-rev",
+	"for-each-ref",
+	"show-ref",
+	"count-objects",
+]);
+const GIT_BRANCH_LIST_FLAGS = new Set(["-a", "-r", "-v", "-vv", "--all", "--remotes", "--verbose", "--show-current"]);
+
+/**
+ * Whether a git segment only reads: its subcommand, past the global options,
+ * is an inspection or the list form of branch, tag, remote, stash or
+ * worktree. Every other subcommand, and a `-c` that can configure what runs,
+ * may change state. A first-word match once read `git -C . commit` and
+ * `git gc` as reads (Astra r2-4).
+ */
+function gitSegmentOnlyReads(words: ReadonlyArray<string>): boolean {
+	let index = 1;
+	while (index < words.length && words[index]?.startsWith("-")) {
+		const option = words[index] ?? "";
+		if (option.startsWith("-c") || option.startsWith("--config-env")) return false;
+		index += ["-C", "--git-dir", "--work-tree", "--namespace"].includes(option) ? 2 : 1;
+	}
+	const sub = words[index] ?? "";
+	const rest = words.slice(index + 1);
+	if (rest.some((word) => word.startsWith("--output"))) return false;
+	if (GIT_INSPECTIONS.has(sub)) return true;
+	if (sub === "branch") return rest.every((word) => GIT_BRANCH_LIST_FLAGS.has(word));
+	if (sub === "tag") return rest.length === 0 || rest[0] === "-l" || rest[0] === "--list";
+	if (sub === "remote") return rest.length === 0 || ["-v", "--verbose", "get-url", "show"].includes(rest[0] ?? "");
+	if (sub === "stash") return rest[0] === "list" || rest[0] === "show";
+	return sub === "worktree" && rest[0] === "list";
+}
 
 /**
  * Whether a bash command can only read: every `&&`, `||`, `;` or pipe segment
- * starts with a read-only command and nothing in it writes. Anything else may
- * have changed what a later identical read returns.
+ * starts with a read-only command or a plain inspection, a git segment is a
+ * git inspection, and nothing in it writes. Anything else may have changed
+ * what a later identical read returns.
  */
 function shellCommandOnlyReads(command: unknown): boolean {
 	if (typeof command !== "string" || command.trim().length === 0) return false;
 	const text = command.replace(SHELL_NULL_REDIRECT, " ");
 	if (SHELL_WRITE_SIGN.test(text) || /[`]|\$\(/.test(text) || text.includes("\n")) return false;
-	return text.split(/&&|\|\||;|\|/).every((segment) => READ_ONLY_SHELL_COMMAND_PATTERN.test(segment));
+	return text.split(/&&|\|\||;|\|/).every((segment) => {
+		const words = segment.trim().split(/\s+/);
+		if (/^git\b/.test(words[0] ?? "")) return words[0] === "git" && gitSegmentOnlyReads(words);
+		return READ_ONLY_SHELL_COMMAND_PATTERN.test(segment) || SHELL_INSPECTION_PATTERN.test(segment);
+	});
 }
 
 /** What an api 2 extension tool declared about its effect (A1); absent for every other tool. */
@@ -808,10 +863,11 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const mutationEpochByTurn = new Map<string, number>();
 	/**
 	 * Per turn: successful calls that may have changed state, the workspace
-	 * writes above plus bash commands that are not plain reads and extension
-	 * calls not declared read-only, and how many each call identity made. A
-	 * call's repeat key counts only the others', so a mutating call repeated
-	 * verbatim still loops while it resets every other call's count (F-C13).
+	 * writes above plus bash commands that are not plain reads, typed git add
+	 * and commit, and extension calls not declared read-only, and how many each
+	 * call identity made. A call's repeat key counts only the others', so a
+	 * mutating call repeated verbatim still loops while it resets every other
+	 * call's count (F-C13).
 	 */
 	const stateChangesByTurn = new Map<string, number>();
 	const stateChangesByIdentityByTurn = new Map<string, Map<string, number>>();
@@ -1018,13 +1074,15 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		// A desk read, a desk record write, a desk read: the third read answers
 		// from the new record, so it is not a repeat of the first two (F-C13).
 		// Any extension tool that did not declare itself read-only may have
-		// written, and so may any bash command that is not a plain read. These
-		// re-key repeats only; the workspace epoch the registry's denial memory
-		// and read coverage key on still moves for file writes alone.
+		// written, and so may any bash command that is not a plain read, and a
+		// typed git add or commit, direct or through the gateway (Astra r2-4).
+		// These re-key repeats only; the workspace epoch the registry's denial
+		// memory and read coverage key on still moves for file writes alone.
 		const stateChange =
 			ok &&
 			input.toolName !== undefined &&
 			((input.toolName === ToolNames.Bash && !shellCommandOnlyReads(input.toolArgs?.command)) ||
+				(input.toolName === ToolNames.Git && gitCallIdentity(input.toolArgs ?? {}) === null) ||
 				(isHarnessExtensionToolName(input.toolName) && input.metadata?.toolReadOnly !== true));
 		// A write that republished identical bytes changed nothing. Counting it
 		// as a mutation re-keys every later repeat, so a worker that rewrites a
