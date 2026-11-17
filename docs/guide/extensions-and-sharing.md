@@ -140,7 +140,7 @@ authority for its own budgets.
 
 ### Prompt template turn budget
 
-`budget` lowers two limits of each turn the template starts:
+`budget` sets two limits of each turn the template starts:
 
 ```yaml
 budget:
@@ -148,21 +148,36 @@ budget:
   observationBytes: 131072
 ```
 
-- `toolCalls` lowers the per-turn tool-call budget,
+- `toolCalls` sets the per-turn tool-call budget in place of
   `safety.limits.chatToolCallsPerTurn`. The call that reaches the budget is
   refused, so `toolCalls: 40` lets 39 calls run. The hard ceiling that stops
-  the turn stays 15 calls above the lowered budget, never above the operator's
-  own ceiling.
-- `observationBytes` lowers the turn's observation pool,
+  the turn stays 15 calls above the effective budget.
+- `observationBytes` sets the turn's observation pool in place of
   `safety.limits.observationBytesPerTurn`: the combined tool output the model
   may receive in the turn.
 
-Each bound is the smaller of the template's value and the operator's, so a
-template never raises a limit. The refusal and the operator notice name the
-template, for example `soft budget 40, set by prompt template "wtfp:advance"
-budget.toolCalls`, and the turn's scope reminder states the budget to the
-model. A yolo continuation keeps the template and its budget. Dispatched
-workers do not inherit it.
+A template always lowers a limit. It raises one only up to the operator's
+ceiling for templates, `safety.limits.templateToolCallsPerTurnMax` and
+`safety.limits.templateObservationBytesPerTurnMax`: each bound is the smaller
+of the template's value and the larger of the operator's limit and that
+ceiling. Both ceilings are unset by default, and then a template can only
+lower. A project settings layer can lower a ceiling the user set; it cannot
+raise one or set one the user left unset.
+
+```yaml
+safety:
+  limits:
+    templateToolCallsPerTurnMax: 120
+```
+
+With that ceiling and the default limit of 60, `toolCalls: 100` gives the turn
+100 calls and `toolCalls: 200` gives it 120. The refusal and the operator
+notice name the bound that applied: the template's own value (`soft budget 40,
+set by prompt template "wtfp:advance" budget.toolCalls`), a raise within the
+ceiling, the ceiling a larger value was clamped to, or the operator's limit
+when the template asked for more and no ceiling is set. The turn's scope
+reminder states the effective budget to the model. A yolo continuation keeps
+the template and its budget. Dispatched workers do not inherit it.
 
 `budget` takes only these two keys and needs at least one. `toolCalls` is a
 whole number of at least 1 and `observationBytes` a whole number of at least
@@ -196,12 +211,28 @@ summary and the operator starts the next step. A gateway call to the step tool
 counts as a call to it. A malformed policy, a bare `turnPolicy: step` included,
 makes the template unavailable.
 
+On a route whose model tier is `small`, or that does not cache prompts
+([model tiers](configuration-and-targets.md#model-tiers)), each step turn after
+the first starts from a compact state instead of the full history. Before the
+turn's request CLIO Coder writes a step checkpoint with no summarizer call, and
+the turn starts from the previous step turn's final text, the template body,
+and the operator notes, file facts and recallable refs a compaction keeps. The
+system prompt and tool schemas do not change, and an extension's pinned context
+block is sent again in the same request. The earlier turns stay in the session
+ledger, so resume and `context(scope="recall")` still reach them. The
+checkpoint carries no active skill text, so a skill a step needs is loaded in
+that step. A step turn that was cancelled, that failed, or that the loop guard
+or the tool budget stopped before its step ended leaves no state summary, and
+the turn after it keeps the full history. The checkpoint is recorded as a
+compaction with trigger `step` and as the `step_checkpoint` cold reason. Routes
+with a `standard` or `frontier` model that cache prompts keep the full history.
+
 Write the body so the model ends its turn with a state summary after the step
 instead of calling the step tool again; otherwise every turn spends one refused
 call before it stops. The refused calls count toward the turn budget, whose
-hard ceiling stays the backstop for a model that keeps calling. Two step-tool
-calls issued in one parallel batch both run when the second starts before the
-first finishes.
+hard ceiling stays the backstop for a model that keeps calling. A second
+step-tool call issued in the same parallel batch is refused while the first is
+still running, so only the first call's step runs.
 
 ### Variants per model tier
 

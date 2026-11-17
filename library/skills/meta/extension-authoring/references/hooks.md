@@ -35,8 +35,9 @@ wrong point or malformed output are refused when the handler returns.
   only when the context no longer carries its current value (a change, or a
   compaction that dropped it), and never reaches workers. Returning the same
   text every turn costs nothing; a value that changes on every write costs up
-  to 8 KB of history each time. Pins are in memory: set them again after a
-  restart.
+  to 8 KB of history each time. Pins persist with the session, so a resumed
+  or restarted session carries them; a cleared block stays cleared, and a
+  forked session starts without its parent's pins.
 - `notify_operator` takes `message` and a deduplication `key`.
 - `protect_path` takes `path` and `reason`; `request_continuation` takes `message`
   and optional `note`.

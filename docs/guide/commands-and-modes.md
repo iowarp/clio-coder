@@ -302,7 +302,7 @@ Known confusions, as found on recorded sessions:
 | `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its run record with outcome `timed_out`, and exits 124. A positive number of seconds no greater than 2,147,483 (the timer ceiling in `src/core/timers.ts`); anything else is a usage error. With `--agent`, expiry aborts the worker and waits for it to settle, so the run is recorded as canceled before exit 124. |
 | `--verify "<cmd>"` / `--verify-timeout <seconds>` | Declare a shell command as this run's acceptance check, named `run-acceptance` (repeat the flag for `run-acceptance-2` and on). Nothing is written to `.clio-coder/verifiers.yaml`. The finish gate treats it like a declared verifier: when the agent changes files and then runs the command through bash, whole, as part of a pure `&&` chain, after its last edit, that counts as a check. Once the turn settles, the run itself runs each check with bash in the run's cwd, up to `--verify-timeout` seconds each (default 300), and reports `{id, command, exitCode, passed, durationMs, timedOut, ranAfterLastEdit}` in the terminal `turn_end.verify` array, in a `{"type":"verify","checks":[...]}` frame under `--json-events full`, and as one stderr line per check in text mode. `ranAfterLastEdit` is true when the agent itself ran the check after its last edit. A failed check does not change the exit code; an interrupted run skips the checks. Main agent only; with `--agent` it is a usage error, and `--verify-timeout` without `--verify` is one too. |
 | `--max-cost-usd <n>` | Positive finite USD cap on priced spend during this main-agent run. Reaching it stops the run with exit 4 and `budget_ceiling`. CLIO Coder warns about unpriced routes the cap cannot bound. With `--agent`, exits 2 with `clio-coder run: --max-cost-usd applies to the main agent, not --agent dispatch`. |
-| `--answers <file.yaml>` | Answer the questions put to the author (`ask_user` rounds and extension interviews) from this file. A question the file does not script ends the run with exit 5. Main agent only. See [Script the author with --answers](#script-the-author-with---answers). |
+| `--answers <file.yaml>` | Answer the questions only the author may answer (extension interviews and `operator_only` `ask_user` questions) from this file. An author question the file does not script ends the run with exit 5. Main agent only. See [Script the author with --answers](#script-the-author-with---answers). |
 | `--agent <recipe-id>` | Dispatch a user-facing fleet agent instead of the main agent. Unknown ids and shadow agents (`oracle`, `provenance`, `researcher`, `scout`, `world-knowledge`) fail fast; for their read-only work use `--agent coder --read-only`. |
 | `--skill <path>` | Make one explicit skill file or skill directory available for this run. Repeatable; the model loads its instructions with `context(scope="skills", name=...)`. |
 | `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
@@ -324,17 +324,16 @@ The main agent, compaction and dispatched workers are admitted while below the c
 
 ### Script the author with --answers
 
-A headless run has no operator, so permission asks are denied and `ask_user` is not registered. `clio-coder run --answers <file.yaml>` scripts the author instead: with it, `ask_user` is registered and extension interviews are asked, and each question is answered from the file.
+A headless run has no operator, so permission asks are denied and `ask_user` is not registered. `clio-coder run --answers <file.yaml>` scripts the author instead. It answers only the questions the author alone may answer: an extension's interview steps (its gate questions) and the `ask_user` questions the model marks `operator_only`. With it, `ask_user` is registered and extension interviews are asked, and each author question is answered from the file.
 
 ```yaml
 answers:
   - id: plan-introduction          # an extension question's checkpoint id
     choice: Approve this plan as shown
-  - header: Which config?          # the question's header, exactly
-    choice: [Project file]
-    note: keep the user file as it is
-  - match: "^Carry out this plan"  # a regular expression over the question text
-    choice: Keep the plan (Recommended)
+  - header: Research question      # the question's header, exactly
+    note: Does tiered caching cut tail latency?
+  - match: "^Accept the"           # a regular expression over the question text
+    choice: Keep it pending
 ```
 
 The file is a mapping with one key, `answers`, a non-empty list. Each entry names exactly one rule:
@@ -343,11 +342,11 @@ The file is a mapping with one key, `answers`, a non-empty list. Each entry name
 - `header` matches the question's header exactly. An extension question's header is its label.
 - `match` is a regular expression over the question text.
 
-Each entry gives a `choice`, a `note`, or both. `choice` is an option label, or a list of labels for a multi-select question. `note` is typed text: beside the choice, or the whole answer to a question without options. The first entry in file order whose rule matches answers the question as the operator, and the answer is recorded as scripted, naming the file and the entry (`answers[0] id "plan-introduction"`), on the decision ledger and on an extension's `InterviewAnswer.scripted`. A scripted answer to an `operator_only` question keeps its `operator_choice` mark beside `scripted`.
+Each entry gives a `choice`, a `note`, or both. `choice` is an option label, or a list of labels for a multi-select question. `note` is typed text: beside the choice, or the whole answer to a question without options. The first entry in file order whose rule matches answers the author question as the operator, and the answer is recorded as scripted, naming the file and the entry (`answers[0] id "plan-introduction"`), on the decision ledger and on an extension's `InterviewAnswer.scripted`. A scripted answer to an `operator_only` question keeps its `operator_choice` mark beside `scripted`.
 
-A question no entry matches, or whose matching entry chooses an option the question does not offer or several options for a single-choice question, is never answered for you. Its round is cancelled as `unscripted`, the turn stops at the next tool boundary, and the run exits 5 with outcome `failed` and `outcomeDetail: "unscripted"`, naming the question by its header and checkpoint id, or by its first line when it has neither, so the file can be extended. Other calls already in that tool batch still run. Permission asks stay denied. A file that cannot be read or fails validation exits 2 before boot, naming the file and the offending entry.
+An author question no entry matches, or whose matching entry chooses an option the question does not offer or several options for a single-choice question, is never answered for you. Its round is cancelled as `unscripted`, the turn stops at the next tool boundary, and the run exits 5 with outcome `failed` and `outcomeDetail: "unscripted"`, naming the question by its header and checkpoint id, or by its first line when it has neither, so the file can be extended. Other calls already in that tool batch still run. Permission asks stay denied. A file that cannot be read or fails validation exits 2 before boot, naming the file and the offending entry.
 
-`header` and `match` rules also answer the model's own `ask_user` questions; only `id` is bound to an extension's gate. Whether a scripted answer counts as the author's is the extension's decision.
+Rules match author questions only. `id` is bound to an extension's gate, and `header` and `match` reach extension questions and `operator_only` questions alike. The model's ordinary `ask_user` call, one with no `operator_only` question, is never answered from the file, whatever its header or text: the call is refused with a tool error saying the run has no operator, no round is recorded, and the model goes on from the task prompt and its stated defaults, as in a run without the file. Whether a scripted answer counts as the author's is the extension's decision.
 
 ### Headless Prompt Assembly
 
