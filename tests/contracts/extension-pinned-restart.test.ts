@@ -3,15 +3,19 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import type { DomainContext } from "../../src/core/domain-loader.js";
 import { clioStateDir } from "../../src/core/xdg.js";
+import { extensionDockPaths } from "../../src/domains/extensions/dock-frame.js";
 import {
 	pinnedContextDelta,
 	pinnedContextFile,
 	renderPinnedContext,
 } from "../../src/domains/extensions/pinned-context.js";
 import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
+import { extensionDataPaths } from "../../src/domains/extensions/runtime-state.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -153,4 +157,39 @@ test("an unwritable pin directory leaves the hook, the turn and a reload intact"
 	assert.deepEqual(live.pinned(), [{ extensionId: "desk", text: MILESTONE }]);
 	const first = await firstRequestAfterResume(live, "paper-1");
 	assert.ok(first.includes(renderPinnedContext({ extensionId: "desk", text: MILESTONE })), first);
+});
+
+test("a fork's first request carries the parent's block, and deleting a session removes its extension state", async (t) => {
+	const env = await isolateClioEnv("clio-coder-pinned-restart-");
+	const session = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+	t.after(async () => {
+		await session.close();
+		env.restore();
+	});
+	session.create({ cwd: process.cwd() });
+	session.append({ id: "u1", parentId: null, kind: "user", payload: { text: "draft methods" } });
+	session.append({ id: "a1", parentId: "u1", kind: "assistant", payload: { text: "done" } });
+	const live = createExtensionRuntimeHookBridge({ sessionId: () => session.current()?.id ?? null });
+	live.pin("desk", MILESTONE);
+	const parent = session.current()?.id;
+	assert.ok(parent !== undefined);
+
+	const fork = session.fork("a1").id;
+	assert.notEqual(fork, parent);
+	assert.deepEqual(live.pinned(), [{ extensionId: "desk", text: MILESTONE }]);
+	const first = await firstRequestAfterResume(processFor({ id: fork }), fork);
+	assert.ok(first.includes(renderPinnedContext({ extensionId: "desk", text: MILESTONE })), first);
+
+	// The fork closed the parent, so it can be deleted, and with it what extensions kept for it.
+	const dock = extensionDockPaths(clioStateDir(), parent);
+	const kv = extensionDataPaths(clioStateDir(), "desk", parent).stateFile;
+	assert.ok(kv !== null);
+	for (const file of [dock.frameFile, dock.tapFile, kv]) {
+		mkdirSync(path.dirname(file), { recursive: true });
+		writeFileSync(file, "{}");
+	}
+	session.deleteSession(parent);
+	for (const file of [pinnedContextFile(clioStateDir(), parent), dock.frameFile, dock.tapFile, kv])
+		assert.equal(existsSync(file), false, file);
+	assert.ok(existsSync(pinnedContextFile(clioStateDir(), fork)));
 });
