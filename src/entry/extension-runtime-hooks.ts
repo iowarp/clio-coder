@@ -140,13 +140,16 @@ function middlewareEffect(effect: ExtensionEffect, extensionId: string): Middlew
 /**
  * Set the extension's pinned block from a hook answer; true when one was set.
  * The block is the session's: a dispatched worker's call runs in a tree that
- * may never merge, so a pin it returns is said and not applied.
+ * may never merge, so a pin it returns is not applied. The operator is told
+ * once per extension and generation (`said`): an after_tool hook that pins on
+ * every write answers every write a worker makes the same way.
  */
 function applyPin(
 	effects: ReadonlyArray<ExtensionEffect>,
 	extensionId: string,
 	origin: HookCallOrigin,
 	bridge: ExtensionRuntimeHookBridge,
+	said: Set<string>,
 ): boolean {
 	const pin = effects.find((effect) => effect.kind === "pin_context");
 	if (pin === undefined) return false;
@@ -154,6 +157,8 @@ function applyPin(
 		bridge.pin(extensionId, pin.text);
 		return true;
 	}
+	if (said.has(extensionId)) return false;
+	said.add(extensionId);
 	try {
 		bridge
 			.current()
@@ -527,6 +532,7 @@ export function buildExtensionRuntimeHooks(
 	const registrations: MiddlewareHookRegistration[] = [];
 	const workerEvaluators = new Map<string, WorkerHookEvaluator>();
 	const workerPermits = new Map<string, WorkerPermits>();
+	const workerPinSaid = new Set<string>();
 	eachRuntimeHook(packages, (entry, hook, index, digest) => {
 		if (hook.on === "prompt_submit") return;
 		const point: ToolOrTurnPoint = hook.on;
@@ -546,7 +552,7 @@ export function buildExtensionRuntimeHooks(
 		): Promise<MiddlewareEffect[]> => {
 			const startedAt = performance.now();
 			const verdict = await runner.run(hookEvent(point, input, access, workspace), origin, budgetMs);
-			const pinned = verdict.kind === "ok" ? applyPin(verdict.effects, entry.id, origin, bridge) : false;
+			const pinned = verdict.kind === "ok" ? applyPin(verdict.effects, entry.id, origin, bridge, workerPinSaid) : false;
 			const effects =
 				verdict.kind === "ok"
 					? verdict.effects.flatMap((effect) => {

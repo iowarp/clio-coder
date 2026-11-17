@@ -22,21 +22,21 @@ const declaration = { ui: [], access: [], workspaces: [] } as unknown as Extensi
 test("pin_context applies where extension state moves and refuses an oversize or doubled block", () => {
 	const pin = { effects: [{ kind: "pin_context", text: "milestone 2" }] };
 	for (const point of ["prompt_submit", "turn_start", "after_tool"] as const)
-		assert.deepEqual(parseExtensionHookResult(pin, declaration, point).effects, [
+		assert.deepEqual(parseExtensionHookResult(pin, declaration, point, "desk").effects, [
 			{ kind: "pin_context", text: "milestone 2" },
 		]);
 	for (const point of ["before_tool", "turn_end"] as const)
-		assert.throws(() => parseExtensionHookResult(pin, declaration, point), /does not apply at/);
+		assert.throws(() => parseExtensionHookResult(pin, declaration, point, "desk"), /does not apply at/);
 	// The limit is UTF-8 bytes: 4096 two-byte characters fit, one more does not.
 	const fits = { effects: [{ kind: "pin_context", text: "é".repeat(4096) }] };
-	assert.equal(parseExtensionHookResult(fits, declaration, "turn_start").effects?.length, 1);
+	assert.equal(parseExtensionHookResult(fits, declaration, "turn_start", "desk").effects?.length, 1);
 	const over = { effects: [{ kind: "pin_context", text: "é".repeat(4097) }] };
 	assert.throws(
-		() => parseExtensionHookResult(over, declaration, "turn_start"),
+		() => parseExtensionHookResult(over, declaration, "turn_start", "desk"),
 		/effects\[0\]\.text exceeds the 8192-byte pinned context limit/,
 	);
 	const twice = { effects: [pin.effects[0], { kind: "pin_context", text: "" }] };
-	assert.throws(() => parseExtensionHookResult(twice, declaration, "turn_start"), /pin_context at most once/);
+	assert.throws(() => parseExtensionHookResult(twice, declaration, "turn_start", "desk"), /pin_context at most once/);
 });
 
 /** A runtime for `desk` whose turn_start and after_tool answers the test sets, behind real hook registrations. */
