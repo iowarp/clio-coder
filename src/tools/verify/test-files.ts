@@ -15,6 +15,16 @@ export interface TestFileCheck {
 	detail?: string;
 }
 
+/** A changed test whose project runner discovery found but cannot start, such as a uv project without .venv. */
+export interface UnavailableTestFile {
+	/** The derived check id of the runner, such as `python-pytest`. */
+	runner: string;
+	/** Workspace-relative path of the changed test. */
+	file: string;
+	reason: string;
+	provisionCommand?: string[];
+}
+
 function isTestFile(filename: string): boolean {
 	return /(?:^|\/)test[^/]*\.py$|(?:^|\/)test_[^/]+\.[^/]+$|[._](?:test|spec)\.[^/]+$|(?:^|\/)__tests__\/.*\.[cm]?[jt]sx?$|(?:^|\/)tests\/.*\.rs$/u.test(
 		filename,
@@ -670,12 +680,14 @@ function declaredRunner(root: string, workspaceRoot: string, check: DeclaredChec
 export function resolveTestFileChecks(
 	workspaceRoot: string,
 	mutatedPaths: ReadonlyArray<string>,
-): { checks: TestFileCheck[]; notes: string[]; refusals: string[] } {
+): { checks: TestFileCheck[]; notes: string[]; refusals: string[]; unavailable: UnavailableTestFile[] } {
 	workspaceRoot = path.resolve(workspaceRoot);
 	const checks: TestFileCheck[] = [];
 	const notes: string[] = [];
 	// A changed test the declared runner cannot be made to run fails the check rather than passing silently.
 	const refusals: string[] = [];
+	// A runner that needs provisioning is known, so its changed test is an unrun check, not an unrecognized file.
+	const unavailable: UnavailableTestFile[] = [];
 	const seen = new Set<string>();
 	for (const filename of mutatedPaths) {
 		let absolute: string;
@@ -702,6 +714,7 @@ export function resolveTestFileChecks(
 		const declared = discovery.ok ? discovery.sources.flatMap((source) => source.checks) : [];
 		let resolved: TestFileCheck | undefined;
 		let refusal: string | undefined;
+		let missing: UnavailableTestFile | undefined;
 		let ignored = false;
 		for (const check of declared) {
 			if (/\.[cm]?[jt]sx?$/u.test(local)) {
@@ -731,6 +744,16 @@ export function resolveTestFileChecks(
 				else if (relative.endsWith(".rs") && check.id === "cargo-test") args = [];
 				else continue;
 				const resolution = resolveVerifyCall(root, { check: check.id, args });
+				if (resolution.kind === "unavailable") {
+					const availability = resolution.check.availability;
+					missing ??= {
+						runner: resolution.check.id,
+						file: relative,
+						reason: availability?.reason ?? "runner is unavailable",
+						...(availability?.provisionCommand ? { provisionCommand: [...availability.provisionCommand] } : {}),
+					};
+					continue;
+				}
 				const argv = verifyResolutionArgv(resolution, { args });
 				if (argv !== null) {
 					resolved = { check, argv };
@@ -739,6 +762,7 @@ export function resolveTestFileChecks(
 			}
 		}
 		if (resolved === undefined && refusal !== undefined) refusals.push(refusal);
+		else if (resolved === undefined && missing !== undefined) unavailable.push(missing);
 		else if (resolved === undefined && !ignored) {
 			notes.push(
 				`Changed test ${relative}: no recognizable project runner; retained the declared check only for this file.`,
@@ -751,5 +775,5 @@ export function resolveTestFileChecks(
 		if (!seen.has(identity)) checks.push(resolved);
 		seen.add(identity);
 	}
-	return { checks, notes, refusals };
+	return { checks, notes, refusals, unavailable };
 }

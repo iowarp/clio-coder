@@ -172,6 +172,8 @@ export interface CodeStepOutcome {
 	output: string;
 	/** Whether the command's process started: false when the step refused before launch or the spawn itself failed. */
 	launched: boolean;
+	/** Every failed check is a changed test whose runner needs provisioning, which no repair edit can change. */
+	unrepairable?: true;
 }
 
 /** Stable stringification of the report, so its digest is reproducible. */
@@ -720,10 +722,25 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const commandRuns = [{ argv: [...argv], cwd, exitCode: spawned.exitCode, durationMs: primaryDurationMs }];
 	const testFiles = input.mutatedPaths?.length
 		? (await import("../../tools/verify/test-files.js")).resolveTestFileChecks(input.workspaceRoot, input.mutatedPaths)
-		: { checks: [], notes: [], refusals: [] };
+		: { checks: [], notes: [], refusals: [], unavailable: [] };
 	// A changed test that cannot be run fails the step so the loop repairs or reports it, never a silent pass.
 	for (const refusal of testFiles.refusals) {
 		checks.push({ name: "changed tests", passed: false, evidence: refusal });
+		spawned = { ...spawned, exitCode: spawned.exitCode === 0 ? 1 : spawned.exitCode };
+	}
+	// A known runner that cannot start (DF-10: never provisioned silently) leaves its changed test unrun. The step
+	// fails, and since no edit to the workspace makes the runner start, the loop is told not to repair it.
+	const unavailableLines: string[] = [];
+	const unrun = new Set<(typeof checks)[number]>();
+	for (const missing of testFiles.unavailable) {
+		const provision = missing.provisionCommand
+			? `; operator provisioning command: ${missing.provisionCommand.join(" ")}`
+			: "";
+		const evidence = `Changed test ${missing.file} was not run: runner '${missing.runner}' is unavailable: ${missing.reason}${provision}. A repair edit cannot make it run; report the limitation.`;
+		const check = { name: `changed tests (${missing.runner})`, passed: false, evidence };
+		unavailableLines.push(evidence);
+		unrun.add(check);
+		checks.push(check);
 		spawned = { ...spawned, exitCode: spawned.exitCode === 0 ? 1 : spawned.exitCode };
 	}
 	for (const test of testFiles.checks) {
@@ -771,9 +788,9 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 	const capturedText =
 		spawned.captured.toString("utf8") +
 		(spawned.spawnError === null ? "" : `\n${spawned.spawnError}\n`) +
-		(testFiles.notes.length + testFiles.refusals.length === 0
+		(testFiles.notes.length + testFiles.refusals.length + unavailableLines.length === 0
 			? ""
-			: `\n${[...testFiles.refusals, ...testFiles.notes].join("\n")}\n`);
+			: `\n${[...testFiles.refusals, ...unavailableLines, ...testFiles.notes].join("\n")}\n`);
 	const printed = Buffer.from(capturedText, "utf8");
 	const excerpt = tailUtf8(printed, CODE_STEP_EXCERPT_MAX_BYTES, CODE_STEP_TRUNCATION_MARKER);
 	const rendered = argv.join(" ");
@@ -830,5 +847,13 @@ export async function runCodeStep(input: CodeStepRunInput): Promise<CodeStepOutc
 		artifactPaths,
 		reportDigest: codeReportDigest(report),
 	};
-	return { report, record, stdout: spawned.stdout.toString("utf8"), output: canonicalCodeReport(report), launched };
+	const unrepairable = unrun.size > 0 && checks.every((check) => check.passed || unrun.has(check));
+	return {
+		report,
+		record,
+		stdout: spawned.stdout.toString("utf8"),
+		output: canonicalCodeReport(report),
+		launched,
+		...(unrepairable ? { unrepairable: true as const } : {}),
+	};
 }

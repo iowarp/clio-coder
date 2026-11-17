@@ -412,6 +412,15 @@ describe("execution scheduler lifecycle", () => {
 		deepStrictEqual(log, ["build", "check-1", "repair", "check-2", "dependent"]);
 		strictEqual(outcome.loops[0]?.resolved, true);
 		strictEqual(outcome.loops[0]?.attempts, 2);
+		// A check no edit can turn green, such as a changed test whose runner needs provisioning, earns no repair.
+		log.length = 0;
+		f.adapter.runCode = async (step) => {
+			log.push(step.id);
+			return { ...result(step.id, false), unrepairable: true };
+		};
+		const unrepairable = await executePlan(p, f.adapter);
+		deepStrictEqual(log, ["build", "check-1"]);
+		strictEqual(unrepairable.loops[0]?.reason, "loop_step_failed");
 	});
 
 	it("hands a build-test repair both the failed check and the previous attempt's report", async () => {

@@ -176,6 +176,33 @@ it("fails the check when a newly reported test fails outside the declared suite"
 	match(fallback.report.outputExcerpt, /no recognizable project runner.*declared check only/u);
 });
 
+it("fails the check without a repair when a changed test's known runner needs provisioning", async () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-changed-test-uv-"));
+	roots.push(root);
+	writeFileSync(join(root, "pyproject.toml"), '[project]\nname = "api"\n\n[tool.pytest.ini_options]\n');
+	writeFileSync(join(root, "uv.lock"), "version = 1\n");
+	mkdirSync(join(root, "tests"));
+	writeFileSync(join(root, "tests", "test_api.py"), "def test_api():\n    assert True\n");
+	const outcome = await runCodeStep({
+		stepId: "check",
+		command: {
+			id: "lint",
+			argv: [process.execPath, "-e", ""],
+			cwd: "",
+			timeoutMs: 30_000,
+			env: [],
+			description: "Declared lint",
+		},
+		workspaceRoot: root,
+		mutatedPaths: ["tests/test_api.py"],
+	});
+	strictEqual(outcome.report.passed, false);
+	strictEqual(outcome.report.checks[0]?.passed, true);
+	strictEqual(outcome.report.checks[1]?.name, "changed tests (python-pytest)");
+	match(outcome.report.checks[1]?.evidence ?? "", /tests\/test_api\.py was not run.*\.venv is missing.*uv sync/u);
+	strictEqual(outcome.unrepairable, true);
+});
+
 it("commits neither a file that only stopped being ignored nor a rewrite behind a staged deletion", async () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-commit-ignored-"));
 	roots.push(root);
