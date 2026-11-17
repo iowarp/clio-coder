@@ -1590,7 +1590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	// Every main session hosts api 2 runtimes: the TUI itself, a headless run
 	// and ACP through `startExtensionHost`. Workers never do.
-	const runtimeHooks = createExtensionRuntimeHookBridge();
+	const runtimeHooks = createExtensionRuntimeHookBridge({ sessionId: () => session?.current()?.id ?? null });
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware: middlewareRegistrar,

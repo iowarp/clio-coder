@@ -1,5 +1,5 @@
 import type { ExtensionHookOutcome } from "./operator-runtime-v2.js";
-import { createPinnedContextStore, type PinnedContextStore } from "./pinned-context.js";
+import { createPinnedContextStore, type PinnedContextPersistence, type PinnedContextStore } from "./pinned-context.js";
 import type { ExtensionHookEvent, ExtensionToolResult, Interview } from "./public-api-v2.js";
 
 /** What the operator answered in an interview a tool call asked for, step by step. */
@@ -57,12 +57,13 @@ export interface ExtensionRuntimeHookBridge extends PinnedContextStore {
 /**
  * The bridge also holds the session's pinned context blocks: the hooks that
  * set them and the turn that sends them share it, and only a main session has
- * one, so a dispatched worker never sees a block.
+ * one, so a dispatched worker never sees a block. With `pinned` the blocks
+ * persist with the main session and come back when it is resumed.
  */
-export function createExtensionRuntimeHookBridge(): ExtensionRuntimeHookBridge {
+export function createExtensionRuntimeHookBridge(pinned?: PinnedContextPersistence): ExtensionRuntimeHookBridge {
 	let executor: ExtensionRuntimeHookExecutor | null = null;
 	return {
-		...createPinnedContextStore(),
+		...createPinnedContextStore(pinned),
 		bind(next) {
 			executor = next;
 		},
