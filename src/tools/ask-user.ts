@@ -126,7 +126,18 @@ export interface AskUserResult {
 	 * for the round, so nobody answered it and the run ends (WTF-P 0.8.3 B1).
 	 */
 	unscripted?: true;
+	/**
+	 * Set with `cancelled` when no operator answers this round: a headless run's
+	 * answers file answers only `operator_only` questions (WTF-P 0.8.3 B1). The
+	 * tool records no round and refuses the call, as a run without the file has
+	 * no ask_user to call.
+	 */
+	noOperator?: true;
 }
+
+/** The refusal of an ordinary round in a headless run whose answers file answers only the author's questions. */
+const NO_OPERATOR_MESSAGE =
+	"ask_user: this headless run has no operator to answer questions. Decide from the task prompt and the stated defaults, and continue without asking.";
 
 /** The answer to a free-text question nobody answered in time. */
 export const UNATTENDED_FREE_TEXT_ANSWER = "no answer: proceed with your best judgment";
@@ -1107,6 +1118,7 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 
 			const operatorOnly = questions.some((question) => question.operator_only === true);
 			const requestedAt = new Date().toISOString();
+			const prior = { status: policy.status, updatedAt: policy.updatedAt, summary: policy.summary };
 			policy.inFlight = true;
 			policy.status = "active";
 			policy.updatedAt = requestedAt;
@@ -1126,6 +1138,14 @@ export function createAskUserTool(deps: AskUserToolDeps = {}): ToolSpec {
 					decisionPresentation: classifyDecisionPresentation(decisionFactsForAnswer(exposure)),
 					unattendedFallback: true,
 				});
+				if (handled.noOperator === true) {
+					// Nobody was asked, so the interview stays as it was before the call.
+					policy.status = prior.status;
+					policy.updatedAt = prior.updatedAt;
+					if (prior.summary === undefined) delete policy.summary;
+					else policy.summary = prior.summary;
+					return { kind: "error", message: NO_OPERATOR_MESSAGE };
+				}
 				const normalized = normalizeAskUserResult(questions, restoreQuestions(handled, shown, questions));
 				const timedOut = normalized.timedOut;
 				if (operatorOnly && timedOut !== undefined && normalized.answers.length === 0) {

@@ -52,8 +52,8 @@ Flags:
                             configured one: chat, compaction, fleet default, fleet profiles (which recipe pins name),
                             roster members and every target at its default model. A model the main agent names for one
                             dispatch is not checked
-  --answers <file.yaml>     answer the questions put to the author (ask_user, extension interviews) from this file;
-                            an unanswered question ends the run with exit 5 (see below)
+  --answers <file.yaml>     answer the questions only the author may answer (extension interviews, operator_only
+                            ask_user questions) from this file; an unanswered one ends the run with exit 5 (see below)
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -92,21 +92,26 @@ There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
 their stated defaults; supply decisions in the task prompt instead.
 
---answers <file.yaml> scripts the author for this run. The file is a mapping
-with one key, answers: a list whose entries each name exactly one rule (id: an
-extension question's checkpoint id; header: the question's header, exactly;
-match: a regular expression over the question text) and give a choice (an
-option label, or a list of labels for a multi-select question), a note (typed
-text beside the choice, or the whole answer to a question without options), or
-both. With it, ask_user is registered and extension interviews are asked; the
-first entry in file order that matches answers each question as the operator,
-and the session records the answer as scripted, naming the file and the entry.
-A question no entry matches, or whose matching choice is not offered, is never
-answered for you: its round is cancelled as "unscripted", the turn stops, and
-the run exits 5 with outcome "failed" and outcomeDetail "unscripted", naming
-the question's header or id so the file can be extended. Permission asks stay
-denied. A file that cannot be read or fails validation is a usage error (exit 2)
-naming the file and the offending entry. Main agent only.
+--answers <file.yaml> scripts the author for this run. It answers only the
+questions the author alone may answer: an extension's interview steps (its gate
+questions) and ask_user questions the model marks operator_only. The file is a
+mapping with one key, answers: a list whose entries each name exactly one rule
+(id: an extension question's checkpoint id; header: the question's header,
+exactly; match: a regular expression over the question text) and give a choice
+(an option label, or a list of labels for a multi-select question), a note
+(typed text beside the choice, or the whole answer to a question without
+options), or both. With it, ask_user is registered and extension interviews are
+asked; the first entry in file order that matches answers each author question
+as the operator, and the session records the answer as scripted, naming the
+file and the entry. Rules never match the model's ordinary ask_user questions:
+such a call is refused as having no operator, as in a run without the file, and
+the model goes on from its stated defaults. An author question no entry
+matches, or whose matching choice is not offered, is never answered for you:
+its round is cancelled as "unscripted", the turn stops, and the run exits 5
+with outcome "failed" and outcomeDetail "unscripted", naming the question's
+header or id so the file can be extended. Permission asks stay denied. A file
+that cannot be read or fails validation is a usage error (exit 2) naming the
+file and the offending entry. Main agent only.
 
 The main agent's terminal frame records blocked calls under safety.blockedAttempts
 and a noop flag. A run is a no-op when a block remains unresolved and no write

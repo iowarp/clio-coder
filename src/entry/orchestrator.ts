@@ -1590,7 +1590,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	// Every main session hosts api 2 runtimes: the TUI itself, a headless run
 	// and ACP through `startExtensionHost`. Workers never do.
-	const runtimeHooks = createExtensionRuntimeHookBridge();
+	const runtimeHooks = createExtensionRuntimeHookBridge({ sessionId: () => session?.current()?.id ?? null });
 	const extensionReload = createExtensionReloadCoordinator({
 		extensions,
 		middleware: middlewareRegistrar,
@@ -2013,7 +2013,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			...(decision.policy?.reasonCode !== undefined ? { reasonCode: decision.policy.reasonCode } : {}),
 		});
 	});
-	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? options.headless?.answers?.ask ?? null;
+	let askUserHandler: AskUserHandler | null = acpInterviewChannel?.ask ?? options.headless?.answers?.askUser ?? null;
 	// The interactive surface installs this so the report tool can open an agent's draft for review (R-12).
 	let reportReviewOpener: ((draftId: string) => void) | null = null;
 	const reportSession = reportWiring({
@@ -2024,7 +2024,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	// ask_user is a human interview tool, so it is registered only where a person
 	// answers: the TUI, an ACP client that advertised interviews, or a run's --answers
-	// file. Headless and plain ACP surfaces have no operator, so it is absent there (documented
+	// file, which answers operator_only rounds and refuses the rest. Otherwise it is absent (documented
 	// in `clio-coder run --help`). Skills that interview fall back to their stated
 	// defaults when the tool is absent.
 	const askUserBridge: AskUserHandler = async (questions, invokeOptions) =>
@@ -4363,7 +4363,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// Started only for a run that reaches the model, so the early exits
 			// above spawn no runtime. Only a --answers file answers here; without
 			// one a tool's interview is cancelled with reason headless.
-			headlessExtensionHost = await startSessionExtensionHost("headless", options.headless.answers?.ask);
+			headlessExtensionHost = await startSessionExtensionHost("headless", options.headless.answers?.interview);
 			// The first turn's turn_start reaches a runtime only once the startup
 			// generation has committed. A run whose startup failed goes on without runtimes.
 			await headlessExtensionHost?.ready.catch(() => undefined);

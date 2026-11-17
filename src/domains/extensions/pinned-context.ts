@@ -12,9 +12,18 @@
  * an unchanged block costs nothing and a changed one re-reads nothing: the new
  * value is new tail text, never a rewrite of the cached prefix. Dispatched
  * workers never receive it; only the session's own turn reads the store.
+ *
+ * A main session's blocks persist with the session, so a resumed or restarted
+ * session has them on its first request without waiting for a hook to set
+ * them again. A cleared block stays cleared.
  */
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { neutralizeFraming } from "../../core/reminder-framing.js";
+import { safeResourceWrite } from "../../core/safe-resource-write.js";
+import { clioStateDir } from "../../core/xdg.js";
 
 /** UTF-8 bytes one extension's pinned block may hold. */
 export const PINNED_CONTEXT_MAX_BYTES = 8 * 1024;
@@ -71,17 +80,96 @@ export interface PinnedContextStore {
 	retainPinned(extensionIds: ReadonlySet<string>): void;
 }
 
-export function createPinnedContextStore(): PinnedContextStore {
+/** Where a main session's blocks persist. Without it the store holds them in memory only, as a worker's does. */
+export interface PinnedContextPersistence {
+	/** The session the blocks belong to; null before one exists. */
+	sessionId(): string | null;
+	/** Defaults to the Clio state directory. */
+	stateDir?: () => string;
+}
+
+/** One file per session; the id is hashed so it cannot escape the directory. */
+export function pinnedContextFile(stateDir: string, sessionId: string): string {
+	const stem = createHash("sha256").update(sessionId).digest("hex");
+	return path.join(stateDir, "extensions", ".pinned", `${stem}.json`);
+}
+
+function readPinnedBlocks(file: string): Map<string, string> {
 	const blocks = new Map<string, string>();
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(file, "utf8"));
+	} catch {
+		// Absent until the session's first pin; a corrupt file reads as no blocks.
+		return blocks;
+	}
+	const stored = (parsed as { blocks?: unknown } | null)?.blocks;
+	if (!Array.isArray(stored)) return blocks;
+	for (const block of stored) {
+		const { extensionId, text } = (block ?? {}) as { extensionId?: unknown; text?: unknown };
+		if (typeof extensionId !== "string" || extensionId.length === 0 || typeof text !== "string") continue;
+		if (Buffer.byteLength(text, "utf8") > PINNED_CONTEXT_MAX_BYTES) continue;
+		blocks.set(extensionId, text);
+	}
+	return blocks;
+}
+
+export function createPinnedContextStore(persistence?: PinnedContextPersistence): PinnedContextStore {
+	let blocks = new Map<string, string>();
+	// The session whose blocks `blocks` holds, and the extensions the last reload kept.
+	let owner: string | null = null;
+	let retained: ReadonlySet<string> | null = null;
+	const file = (sessionId: string): string => pinnedContextFile((persistence?.stateDir ?? clioStateDir)(), sessionId);
+	const save = (): void => {
+		if (owner === null) return;
+		const stored = [...blocks].map(([extensionId, text]) => ({ extensionId, text }));
+		safeResourceWrite(file(owner), `${JSON.stringify({ version: 1, blocks: stored })}\n`);
+	};
+	const clearRemoved = (): boolean => {
+		let changed = false;
+		for (const [extensionId, text] of blocks)
+			if (retained !== null && !retained.has(extensionId) && text.length > 0) {
+				blocks.set(extensionId, "");
+				changed = true;
+			}
+		return changed;
+	};
+	/** Follow the session: a resumed or switched-to session brings its own blocks back before anything reads them. */
+	const follow = (): void => {
+		if (persistence === undefined) return;
+		const current = persistence.sessionId();
+		if (current === owner) return;
+		if (current === null) {
+			// The session closed; whatever is pinned next belongs to the session that follows.
+			blocks = new Map();
+			owner = null;
+			return;
+		}
+		const loaded = readPinnedBlocks(file(current));
+		// Blocks pinned before any session existed belong to the session that adopts them.
+		const adopted = owner === null ? [...blocks] : [];
+		for (const [extensionId, text] of adopted) loaded.set(extensionId, text);
+		blocks = loaded;
+		owner = current;
+		if (clearRemoved() || adopted.length > 0) save();
+	};
 	return {
 		pin(extensionId, text) {
-			// A clear of a block never pinned leaves nothing to retract.
+			follow();
+			// A clear of a block never pinned leaves nothing to retract, and an unchanged value has nothing to record.
 			if (text.length === 0 && !blocks.has(extensionId)) return;
+			if (blocks.get(extensionId) === text) return;
 			blocks.set(extensionId, text);
+			save();
 		},
-		pinned: () => [...blocks].map(([extensionId, text]) => ({ extensionId, text })),
+		pinned: () => {
+			follow();
+			return [...blocks].map(([extensionId, text]) => ({ extensionId, text }));
+		},
 		retainPinned(extensionIds) {
-			for (const extensionId of blocks.keys()) if (!extensionIds.has(extensionId)) blocks.set(extensionId, "");
+			follow();
+			retained = extensionIds;
+			if (clearRemoved()) save();
 		},
 	};
 }

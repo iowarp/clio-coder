@@ -25,6 +25,8 @@ const ANSWERS = `answers:
     note: keep the user file as it is
   - match: "^Carry out this plan"
     choice: Proceed
+  - header: Research question
+    note: Does tiered caching cut tail latency?
 `;
 
 function scripted(dir: string, text = ANSWERS): ScriptedAnswers {
@@ -77,7 +79,7 @@ function policy(): AskUserToolPolicy {
 	};
 }
 
-test("an answers file answers by checkpoint id, header and regex, and the record says scripted", async (t) => {
+test("an answers file answers the author's questions only, and the record says scripted", async (t) => {
 	const env = await isolateClioEnv("clio-coder-run-answers-");
 	t.after(() => env.restore());
 	const answers = scripted(env.dir);
@@ -86,7 +88,7 @@ test("an answers file answers by checkpoint id, header and regex, and the record
 	// An extension gate interview, answered by its checkpoint id.
 	const heard: InterviewAnswer[] = [];
 	const parked = await runParkedInterview(
-		{ ask: answers.ask },
+		{ ask: answers.interview },
 		gate("plan-introduction", "Approve the introduction plan?"),
 		{ extensionId: "desk", title: "Desk" },
 		async (answer) => {
@@ -100,9 +102,11 @@ test("an answers file answers by checkpoint id, header and regex, and the record
 	deepStrictEqual(heard[0]?.scripted, { file, rules: { choice: rule } });
 	deepStrictEqual(parked.scripted, { "gate.one": { file, rules: { choice: rule } } });
 
-	// A model's ask_user round, answered by header and by regex, lands on the decision ledger as scripted.
+	// The model's ordinary ask_user round is not the author's: a matching header or regex rule does not answer it.
+	// The call is refused as having no operator, records no round, and leaves the run going.
 	const turnPolicy = policy();
-	const result = await createAskUserTool({ askUser: answers.ask }).run(
+	const ask = createAskUserTool({ askUser: answers.askUser });
+	const ordinary = await ask.run(
 		{
 			action: "ask",
 			questions: [
@@ -116,14 +120,27 @@ test("an answers file answers by checkpoint id, header and regex, and the record
 		},
 		{ sessionId: "session-1", turnId: "turn-1", askUserPolicy: turnPolicy },
 	);
-	strictEqual(result.kind, "ok");
+	ok(ordinary.kind === "error");
+	match(ordinary.message, /no operator to answer questions/u);
+	strictEqual(turnPolicy.status, "idle");
+	strictEqual(turnPolicy.rounds.length, 0);
+	strictEqual(answers.unscripted(), null);
+
+	// An operator_only question is the author's own, answered by its header and recorded as scripted.
+	const operatorOnly = await ask.run(
+		{
+			action: "ask",
+			questions: [
+				{ question: "What is the paper's research question?", header: "Research question", operator_only: true },
+			],
+		},
+		{ sessionId: "session-1", turnId: "turn-1", askUserPolicy: turnPolicy },
+	);
+	strictEqual(operatorOnly.kind, "ok");
 	const roundAnswers = turnPolicy.rounds[0]?.answers ?? [];
 	deepStrictEqual(
 		roundAnswers.map((answer) => [answer.answer, answer.scripted?.rule, answer.auto]),
-		[
-			["Project file; keep the user file as it is", 'answers[1] header "Which config?"', undefined],
-			["Proceed", 'answers[2] match "^Carry out this plan"', undefined],
-		],
+		[["Does tiered caching cut tail latency?", 'answers[3] header "Research question"', undefined]],
 	);
 	const entries: unknown[] = [];
 	const board = createDecisionBoardStore({ appendEntry: (entry) => entries.push(entry) });
@@ -132,13 +149,12 @@ test("an answers file answers by checkpoint id, header and regex, and the record
 	const decisions = (entries[0] as { decisions: unknown[] }).decisions;
 	ok(decisions.every(isDecisionRecord));
 	deepStrictEqual(
-		decisions.map((decision) => (decision as { scripted?: unknown; source?: unknown }).scripted),
-		[
-			{ file, rule: 'answers[1] header "Which config?"' },
-			{ file, rule: 'answers[2] match "^Carry out this plan"' },
-		],
+		decisions.map((decision) => {
+			const { scripted, operator_choice } = decision as { scripted?: unknown; operator_choice?: unknown };
+			return [scripted, operator_choice];
+		}),
+		[[{ file, rule: 'answers[3] header "Research question"' }, true]],
 	);
-	ok(decisions.every((decision) => (decision as { source?: unknown }).source === undefined));
 	strictEqual(answers.unscripted(), null);
 });
 
@@ -152,7 +168,7 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 	// The extension hears its step cancelled as unscripted; nothing is chosen for the author.
 	const heard: InterviewAnswer[] = [];
 	const parked = await runParkedInterview(
-		{ ask: answers.ask },
+		{ ask: answers.interview },
 		gate("results-acceptance", "Accept the results section?"),
 		{ extensionId: "desk", title: "Desk" },
 		async (answer) => {
@@ -172,9 +188,12 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 	);
 	match(unscriptedRunMessage(answers, question), /answers\.yaml and run again$/u);
 
-	// A later ask_user round is cancelled as unscripted too, and ends the turn.
-	const result = await createAskUserTool({ askUser: answers.ask }).run(
-		{ action: "ask", questions: [{ question: "Carry out this plan?", options: [{ label: "Proceed" }] }] },
+	// A later operator_only round is cancelled as unscripted too, and ends the turn.
+	const result = await createAskUserTool({ askUser: answers.askUser }).run(
+		{
+			action: "ask",
+			questions: [{ question: "Carry out this plan?", options: [{ label: "Proceed" }], operator_only: true }],
+		},
 		{ sessionId: "session-1", turnId: "turn-1", askUserPolicy: policy() },
 	);
 	ok(result.kind === "ok" && result.terminate === true);
@@ -193,7 +212,7 @@ test("an unscripted question cancels with reason unscripted and ends the run wit
 		cancel: (options: unknown) => cancels.push(options),
 		submit: async () => {
 			handler({ type: "agent_start" });
-			await fresh.ask([{ question: "Ship it?", header: "Release" }]);
+			await fresh.interview([{ question: "Ship it?", header: "Release" }]);
 			handler({ type: "agent_end", messages: [] });
 		},
 		whenSettled: async () => {},
