@@ -92,6 +92,7 @@ import type { TurnAbortSource } from "../core/telemetry/live-events.js";
 import type { RunSettled } from "../core/telemetry/schemas.js";
 import {
 	narrowTurnConstraints,
+	routeScopedTurnConstraints,
 	snapshotTurnConstraints,
 	type TurnConstraints,
 	toolSurfaceSources,
@@ -3135,6 +3136,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					emitAdmissionNotice(notConfiguredNotice(deps.getSettings().chat), nullRuntimeAdmissionReason(), "error");
 					return;
 				}
+				// A template step policy scoped by `when` applies only on a matching route, read at each turn's start (C5).
+				state.currentTurnConstraints = routeScopedTurnConstraints(
+					state.currentTurnConstraints,
+					agentRuntime.runtimeResolution,
+				);
 				if (options.machineTurn?.preparationToken === machinePreparation?.token && machinePreparation !== null)
 					machinePreparation.runtime = agentRuntime;
 				if (refuseSkillRequests(options.pendingSkillRequests ?? [], options.workingContextPaths ?? [])) return;

@@ -1,5 +1,6 @@
 import { isToolLimitName } from "../../../core/tool-limit-flags.js";
 import { ToolNames } from "../../../core/tool-names.js";
+import { STEP_POLICY_ROUTES, type StepPolicyRoute } from "../../../core/turn-constraints.js";
 
 /**
  * Frontmatter `budget` and `turnPolicy`: what bounds one turn a template
@@ -12,7 +13,7 @@ import { ToolNames } from "../../../core/tool-names.js";
  */
 export interface TemplateTurnBounds {
 	budget?: { toolCalls?: number; observationBytes?: number };
-	turnPolicy?: { mode: "step"; stepTool: string };
+	turnPolicy?: { mode: "step"; stepTool: string; when?: StepPolicyRoute[] };
 }
 
 const TOOL_NAMES_BY_LOWERCASE = new Map(Object.values(ToolNames).map((name) => [name.toLowerCase(), name]));
@@ -58,15 +59,31 @@ function parseTurnPolicy(
 	const policy = record(value);
 	if (policy === null)
 		return "turnPolicy must be a mapping that names its step tool, such as {mode: step, stepTool: extension_desk__next_step}";
-	const extra = unknownKeys(policy, ["mode", "stepTool"]);
-	if (extra.length > 0) return `turnPolicy has unknown keys ${extra.join(", ")}; it takes mode and stepTool`;
+	const extra = unknownKeys(policy, ["mode", "stepTool", "when"]);
+	if (extra.length > 0) return `turnPolicy has unknown keys ${extra.join(", ")}; it takes mode, stepTool and when`;
 	if (policy.mode !== "step") return "turnPolicy.mode must be step";
 	const declared = typeof policy.stepTool === "string" ? policy.stepTool.trim() : "";
 	const stepTool = TOOL_NAMES_BY_LOWERCASE.get(declared.toLowerCase()) ?? declared;
 	if (!isToolLimitName(stepTool)) return "turnPolicy.stepTool must name one tool";
 	if (allowedTools !== undefined && !allowedTools.includes(stepTool))
 		return `turnPolicy.stepTool ${stepTool} is not in this template's allowed-tools`;
-	return { mode: "step", stepTool };
+	if (policy.when === undefined) return { mode: "step", stepTool };
+	const when = parseWhen(policy.when);
+	return typeof when === "string" ? when : { mode: "step", stepTool, when };
+}
+
+/** `turnPolicy.when`: the routes the policy applies on, as a non-empty list of unique known tokens. */
+function parseWhen(value: unknown): StepPolicyRoute[] | string {
+	const known = STEP_POLICY_ROUTES.join(", ");
+	if (!Array.isArray(value) || value.length === 0) return `turnPolicy.when must be a non-empty list of ${known}`;
+	const when: StepPolicyRoute[] = [];
+	for (const token of value) {
+		if (!(STEP_POLICY_ROUTES as ReadonlyArray<unknown>).includes(token))
+			return `turnPolicy.when has unknown token ${String(token)}; it takes ${known}`;
+		if (when.includes(token as StepPolicyRoute)) return `turnPolicy.when names ${String(token)} twice`;
+		when.push(token as StepPolicyRoute);
+	}
+	return when;
 }
 
 /** The template's turn bounds, or the one sentence saying why they are invalid. */
