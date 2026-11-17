@@ -228,8 +228,9 @@ export function ageObservations(
  * The stateful half: remembers what earlier requests of one session stubbed so
  * a result, once stubbed, stays stubbed. One per chat loop, outliving every
  * agent it builds, so a rebuild neither repeats a batch nor reverts a stub.
- * A request under a different session id starts from nothing: a switch, a new
- * session and a fork each carry other tool call ids.
+ * A request under a different session id starts from nothing. After a switch or
+ * a new session the old ids never recur; a fork's copied transcript keeps its
+ * parent's ids, so its first request forms its own batch over them.
  */
 export function createObservationAging(
 	declared: DeclaredToolEffects,
