@@ -1,6 +1,7 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
+import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
@@ -574,6 +575,30 @@ it("a changed tool choice is a cold reason for the request that sends it, a #426
 		) as { observation: { cacheReadTokens: number | null; inclusiveInputTokens: number } }
 	).observation;
 	deepStrictEqual([observation.cacheReadTokens, observation.inclusiveInputTokens], [6_000, 10_000]);
+	context.dispose();
+});
+
+it("a step checkpoint is a cold reason only once its entry was appended", () => {
+	const state = createTurnState("off");
+	state.runtime = { targetId: "cloud", runtimeId: "fixture", wireModelId: "chat" } as unknown as AgentRuntime;
+	state.streaming = true;
+	const bus = createTelemetryHub();
+	const context = createTurnContext({
+		state,
+		bus,
+		getSettings: () => ({ safety: { autonomy: "default" }, context: { semantic: { enabled: false } } }) as never,
+		providers: { getRuntime: () => undefined } as unknown as ProvidersContract,
+		prompts: {} as PromptsContract,
+		middleware: {} as TurnMiddleware,
+		emitNotice: () => {},
+		emitCacheNotice: () => {},
+	});
+	bus.emit("compaction.started", { trigger: "step", at: Date.now() });
+	bus.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "failed" });
+	deepStrictEqual(context.takeCallColdReasons?.() ?? [], [], "a failed append committed nothing");
+	bus.emit("compaction.started", { trigger: "step", at: Date.now() });
+	bus.emit("compaction.ended", { trigger: "step", at: Date.now(), outcome: "completed" });
+	deepStrictEqual(context.takeCallColdReasons?.() ?? [], ["step_checkpoint"]);
 	context.dispose();
 });
 
