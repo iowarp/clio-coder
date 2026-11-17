@@ -1,5 +1,6 @@
 import { COORDINATOR_DIRECT_TOOLS, toolPlacement } from "../tools/surface.js";
 import { resolveGuardrail, resolveTemplateCeiling, templateBudgetLimit } from "./guardrails.js";
+import { MODEL_TIERS, type ModelTier } from "./model-tier.js";
 import { ToolNames } from "./tool-names.js";
 
 export interface ToolSurfaceSource {
@@ -22,7 +23,7 @@ interface TemplateConstraintSource {
 	allowedTools?: readonly string[];
 	delegatedTools?: readonly string[];
 	budget?: { toolCalls?: number; observationBytes?: number };
-	turnPolicy?: { mode: "step"; stepTool: string };
+	turnPolicy?: { mode: "step"; stepTool: string; when?: readonly StepPolicyRoute[] };
 }
 
 /**
@@ -64,7 +65,14 @@ export function templateToolConstraints(template: TemplateConstraintSource): Tur
 		...(template.budget === undefined ? {} : { budget: { ...template.budget, template: template.name } }),
 		...(template.turnPolicy === undefined
 			? {}
-			: { turnPolicy: { mode: "step" as const, stepTool: template.turnPolicy.stepTool, template: template.name } }),
+			: {
+					turnPolicy: {
+						mode: "step" as const,
+						stepTool: template.turnPolicy.stepTool,
+						...(template.turnPolicy.when === undefined ? {} : { when: template.turnPolicy.when }),
+						template: template.name,
+					},
+				}),
 	};
 }
 
@@ -125,6 +133,12 @@ export interface TurnConstraints {
 	readonly budget?: TurnBudget;
 	/** A prompt template's turn policy: one step of its step tool per turn. */
 	readonly turnPolicy?: TurnStepPolicy;
+	/**
+	 * A step policy whose `when` does not match this turn's route. Nothing
+	 * enforces it; it is kept so the scope reminder can say so and a request
+	 * continuation can scope it again against the route it then runs on.
+	 */
+	readonly dormantTurnPolicy?: TurnStepPolicy;
 }
 
 /** Template budget bounds; `template` names the prompt template that set them, for refusal text. */
@@ -142,7 +156,47 @@ export interface TurnBudget {
 export interface TurnStepPolicy {
 	readonly mode: "step";
 	readonly stepTool: string;
+	/** The routes the policy applies on; absent means every route. */
+	readonly when?: readonly StepPolicyRoute[];
 	readonly template?: string;
+}
+
+/** A `turnPolicy.when` token: a model tier, or `uncached` for a route that does not cache prompts. */
+export type StepPolicyRoute = ModelTier | "uncached";
+
+export const STEP_POLICY_ROUTES: ReadonlyArray<StepPolicyRoute> = [...MODEL_TIERS, "uncached"];
+
+/** The session chat route a turn starts on, as its runtime resolution reports it (WTF-P 0.8.3 C1). */
+export interface StepPolicyRouteFacts {
+	modelTier?: ModelTier;
+	promptCaching?: boolean;
+}
+
+/** Whether a step policy applies on a route: always without `when`, else when any token matches. */
+function stepPolicyApplies(policy: TurnStepPolicy, route: StepPolicyRouteFacts): boolean {
+	return (
+		policy.when === undefined ||
+		policy.when.some((token) => (token === "uncached" ? route.promptCaching === false : token === route.modelTier))
+	);
+}
+
+/**
+ * A turn's constraints on the route it starts on. A step policy whose `when`
+ * misses the route becomes dormant, so the turn runs with no step policy at
+ * all: no step-tool refusal, no text-only lock, no step continuation and no
+ * step checkpoint. Run at every turn start, so a model switch takes effect on
+ * the next turn (WTF-P 0.8.3 C5).
+ */
+export function routeScopedTurnConstraints(
+	constraints: TurnConstraints | undefined,
+	route: StepPolicyRouteFacts,
+): TurnConstraints | undefined {
+	const policy = constraints?.turnPolicy ?? constraints?.dormantTurnPolicy;
+	if (constraints === undefined || policy === undefined) return constraints;
+	const { turnPolicy: _active, dormantTurnPolicy: _dormant, ...rest } = constraints;
+	return Object.freeze(
+		stepPolicyApplies(policy, route) ? { ...rest, turnPolicy: policy } : { ...rest, dormantTurnPolicy: policy },
+	);
 }
 
 /** Snapshot caller-owned input before asynchronous admission or queuing. */
@@ -161,7 +215,8 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 		!isSurfaceSources(value.toolSurfaceSources) ||
 		!isSurfaceSources(value.delegatedToolSurfaceSources) ||
 		!isTurnBudget(value.budget) ||
-		!isTurnStepPolicy(value.turnPolicy)
+		!isTurnStepPolicy(value.turnPolicy) ||
+		!isTurnStepPolicy(value.dormantTurnPolicy)
 	) {
 		throw new Error("Invalid explicit turn constraints");
 	}
@@ -181,8 +236,13 @@ export function snapshotTurnConstraints(value: TurnConstraints | undefined): Tur
 			? {}
 			: { delegatedTools: Object.freeze([...new Set(value.delegatedTools)].sort()) }),
 		...(value.budget === undefined ? {} : { budget: Object.freeze({ ...value.budget }) }),
-		...(value.turnPolicy === undefined ? {} : { turnPolicy: Object.freeze({ ...value.turnPolicy }) }),
+		...(value.turnPolicy === undefined ? {} : { turnPolicy: snapshotStepPolicy(value.turnPolicy) }),
+		...(value.dormantTurnPolicy === undefined ? {} : { dormantTurnPolicy: snapshotStepPolicy(value.dormantTurnPolicy) }),
 	});
+}
+
+function snapshotStepPolicy(policy: TurnStepPolicy): TurnStepPolicy {
+	return Object.freeze({ ...policy, ...(policy.when === undefined ? {} : { when: Object.freeze([...policy.when]) }) });
 }
 
 function isTurnBudget(value: unknown): boolean {
@@ -204,8 +264,12 @@ function isTurnStepPolicy(value: unknown): boolean {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
 	const policy = value as Record<string, unknown>;
 	return (
-		Object.keys(policy).every((key) => key === "mode" || key === "stepTool" || key === "template") &&
+		Object.keys(policy).every((key) => ["mode", "stepTool", "when", "template"].includes(key)) &&
 		policy.mode === "step" &&
+		(policy.when === undefined ||
+			(Array.isArray(policy.when) &&
+				policy.when.length > 0 &&
+				policy.when.every((token) => (STEP_POLICY_ROUTES as ReadonlyArray<unknown>).includes(token)))) &&
 		typeof policy.stepTool === "string" &&
 		/^[a-zA-Z0-9_.-]+$/.test(policy.stepTool) &&
 		(policy.template === undefined || typeof policy.template === "string")
@@ -407,9 +471,16 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 		);
 	}
 	const policy = constraints.turnPolicy;
+	const scoped =
+		policy?.when === undefined ? "" : ` This step policy applies on this route (when: ${policy.when.join(", ")}).`;
 	if (policy !== undefined)
 		lines.push(
-			`One step per turn: once ${policy.stepTool} returns a step, run that step, then end the turn with a compact state summary (the step, its outcome, what changed, and the after value for the next ${policy.stepTool} call). Do not call ${policy.stepTool} again this turn; the next turn starts the next step.`,
+			`One step per turn: once ${policy.stepTool} returns a step, run that step, then end the turn with a compact state summary (the step, its outcome, what changed, and the after value for the next ${policy.stepTool} call). Do not call ${policy.stepTool} again this turn; the next turn starts the next step.${scoped}`,
+		);
+	const dormant = constraints.dormantTurnPolicy;
+	if (policy === undefined && dormant?.when !== undefined)
+		lines.push(
+			`The template's one-step-per-turn policy (when: ${dormant.when.join(", ")}) does not apply on this route, so ${dormant.stepTool} may run more than one step this turn.`,
 		);
 	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
 }
@@ -436,6 +507,7 @@ export function workerTurnConstraints(constraints: TurnConstraints): TurnConstra
 		delegatedToolSurfaceSources: _delegatedSources,
 		budget: _budget,
 		turnPolicy: _turnPolicy,
+		dormantTurnPolicy: _dormantTurnPolicy,
 		...rest
 	} = constraints;
 	return Object.freeze({
