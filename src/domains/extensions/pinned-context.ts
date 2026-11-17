@@ -123,7 +123,12 @@ export function createPinnedContextStore(persistence?: PinnedContextPersistence)
 	const save = (): void => {
 		if (owner === null) return;
 		const stored = [...blocks].map(([extensionId, text]) => ({ extensionId, text }));
-		safeResourceWrite(file(owner), `${JSON.stringify({ version: 1, blocks: stored })}\n`);
+		try {
+			safeResourceWrite(file(owner), `${JSON.stringify({ version: 1, blocks: stored })}\n`);
+		} catch {
+			// The file serves the next process; this one reads `blocks`. A state directory that cannot be written
+			// must not fail the hook, the request or the reload commit that set the block (WTF-P 0.8.3 B5).
+		}
 	};
 	const clearRemoved = (): boolean => {
 		let changed = false;
