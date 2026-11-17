@@ -2,6 +2,7 @@ import { renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { scheduleProviderCheckpointPrune } from "../../../core/provider-checkpoint.js";
 import { withStateFileLockSync } from "../../../core/state-file-lock.js";
+import { clioStateDir } from "../../../core/xdg.js";
 import {
 	appendSessionFileEntry,
 	openSession,
@@ -9,6 +10,7 @@ import {
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../../engine/session.js";
+import { forgetExtensionSessionState } from "../../extensions/session-state.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import type { SessionMeta } from "../contract.js";
 import type { SessionEntry, SessionInfoEntry } from "../entries.js";
@@ -106,13 +108,15 @@ export function appendEntryToSessionFile(sessionId: string, entry: SessionEntry)
 
 /**
  * Destructively remove the entire session directory (current.jsonl,
- * tree.json, meta.json, plus any sidecars the engine adds in future).
+ * tree.json, meta.json, plus any sidecars the engine adds in future) and
+ * what extensions kept for the session under the state directory.
  * Used by deleteSession when `keepFiles` is not requested.
  */
 export function removeSessionDirectory(sessionId: string): void {
 	const dir = tombstoneSession(sessionId);
 	// The record is already gone under the claim lock; removal needs no lock.
 	rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+	forgetExtensionSessionState(clioStateDir(), sessionId);
 	scheduleProviderCheckpointPrune();
 }
 

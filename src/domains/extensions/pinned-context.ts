@@ -15,7 +15,8 @@
  *
  * A main session's blocks persist with the session, so a resumed or restarted
  * session has them on its first request without waiting for a hook to set
- * them again. A cleared block stays cleared.
+ * them again. A cleared block stays cleared. A fork starts with its parent's
+ * blocks and a deleted session's go with it (`session-state.ts`).
  */
 
 import { createHash } from "node:crypto";

@@ -1,5 +1,6 @@
 import { clioStateDir } from "../../../core/xdg.js";
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
+import { inheritPinnedContext } from "../../extensions/session-state.js";
 import { seedForkCallJournal } from "../../telemetry/call-journal.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
 import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
@@ -202,6 +203,7 @@ export function forkFromState(input: ForkInput): ForkResult {
 		parentTurnId: input.parentTurnId,
 		parentTurnAt,
 	});
+	inheritPinnedContext(clioStateDir(), parentMeta.id, next.meta.id);
 	// Only now is the child known good: created, seeded, and stamped with its
 	// parent pointers. Close (and stamp endedAt on) the parent last, after the
 	// caller's hook, which is the parent's final chance to append.
