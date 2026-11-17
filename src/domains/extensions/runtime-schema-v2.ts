@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ManifestKeyPolicy } from "./ignorable.js";
 import type {
 	ExtensionCapabilityEnvelope,
 	ExtensionCommandDeclarationV2,
@@ -90,10 +91,17 @@ const ENTRYPOINT_SUFFIXES = [".mjs", ".ts", ".mts"];
 function fail(path: string, message: string): never {
 	throw new Error(`${path} ${message}`);
 }
-function record(value: unknown, path: string, allowed: readonly string[]): Record<string, unknown> {
+/** An unknown key fails unless the manifest lists its path under `ignorable` (ignorable.ts). */
+function record(
+	value: unknown,
+	path: string,
+	allowed: readonly string[],
+	policy: ManifestKeyPolicy,
+): Record<string, unknown> {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) fail(path, "must be an object");
 	const raw = value as Record<string, unknown>;
-	for (const key of Object.keys(raw)) if (!allowed.includes(key)) fail(`${path}.${key}`, "is not a known field");
+	const [unknown] = policy.unknown(raw, path, new Set(allowed));
+	if (unknown !== undefined) fail(`${path}.${unknown}`, "is not a known field");
 	return raw;
 }
 function list(value: unknown, path: string, max: number): unknown[] {
@@ -149,11 +157,11 @@ function duration(value: unknown, path: string): number {
 	return milliseconds(Number(match[1]) * scale, path, 0, RUNTIME_V2_LIMITS.tickMsMin, RUNTIME_V2_LIMITS.tickMsMax);
 }
 
-function parseCommands(value: unknown): ExtensionCommandDeclarationV2[] {
+function parseCommands(value: unknown, policy: ManifestKeyPolicy): ExtensionCommandDeclarationV2[] {
 	const names = new Set<string>();
 	return list(value, "runtime.commands", RUNTIME_V2_LIMITS.commands).map((item, index) => {
 		const path = `runtime.commands[${index}]`;
-		const raw = record(item, path, ["name", "description", "timeoutMs", "replaces"]);
+		const raw = record(item, path, ["name", "description", "timeoutMs", "replaces"], policy);
 		const name = named(raw.name, `${path}.name`, /^[a-z][a-z0-9_-]*$/, 40);
 		if (names.has(name)) fail(`${path}.name`, `repeats '${name}'`);
 		names.add(name);
@@ -167,7 +175,10 @@ function parseCommands(value: unknown): ExtensionCommandDeclarationV2[] {
 	});
 }
 
-function parseEvents(value: unknown): Pick<ExtensionRuntimeDeclarationV2, "events" | "tickMs"> {
+function parseEvents(
+	value: unknown,
+	policy: ManifestKeyPolicy,
+): Pick<ExtensionRuntimeDeclarationV2, "events" | "tickMs"> {
 	const events: Array<Exclude<ExtensionObservationEventV2, "tick">> = [];
 	let tickMs: number | undefined;
 	for (const [index, item] of list(value, "runtime.events", EVENTS.length + 1).entries()) {
@@ -178,17 +189,17 @@ function parseEvents(value: unknown): Pick<ExtensionRuntimeDeclarationV2, "event
 			events.push(event);
 			continue;
 		}
-		const raw = record(item, path, ["tick"]);
+		const raw = record(item, path, ["tick"], policy);
 		if (tickMs !== undefined) fail(path, "declares a second tick");
 		tickMs = duration(raw.tick, `${path}.tick`);
 	}
 	return tickMs === undefined ? { events } : { events, tickMs };
 }
 
-function parseHooks(value: unknown): ExtensionHookDeclaration[] {
+function parseHooks(value: unknown, policy: ManifestKeyPolicy): ExtensionHookDeclaration[] {
 	return list(value, "runtime.hooks", RUNTIME_V2_LIMITS.hooks).map((item, index) => {
 		const path = `runtime.hooks[${index}]`;
-		const raw = record(item, path, ["on", "tools", "timeoutMs", "onTimeout", "onError"]);
+		const raw = record(item, path, ["on", "tools", "timeoutMs", "onTimeout", "onError"], policy);
 		const on = choice(raw.on, `${path}.on`, HOOK_POINTS);
 		const hook: ExtensionHookDeclaration = {
 			on,
@@ -216,19 +227,16 @@ function parseHooks(value: unknown): ExtensionHookDeclaration[] {
 	});
 }
 
-function parseTools(value: unknown): ExtensionRuntimeToolDeclaration[] {
+function parseTools(value: unknown, policy: ManifestKeyPolicy): ExtensionRuntimeToolDeclaration[] {
 	const names = new Set<string>();
 	return list(value, "runtime.tools", RUNTIME_V2_LIMITS.tools).map((item, index) => {
 		const path = `runtime.tools[${index}]`;
-		const raw = record(item, path, [
-			"name",
-			"description",
-			"inputSchema",
-			"actionClass",
-			"readOnly",
-			"idempotent",
-			"timeoutMs",
-		]);
+		const raw = record(
+			item,
+			path,
+			["name", "description", "inputSchema", "actionClass", "readOnly", "idempotent", "timeoutMs"],
+			policy,
+		);
 		// Single underscores only: the qualified name joins the package id with a double one.
 		const name = named(raw.name, `${path}.name`, /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/, 40);
 		if (names.has(name)) fail(`${path}.name`, `repeats '${name}'`);
@@ -284,11 +292,11 @@ function parsePromote(value: unknown, tools: ReadonlyArray<ExtensionRuntimeToolD
 	return names;
 }
 
-function parseWorkspaces(value: unknown): ExtensionWorkspaceDeclaration[] {
+function parseWorkspaces(value: unknown, policy: ManifestKeyPolicy): ExtensionWorkspaceDeclaration[] {
 	const ids = new Set<string>();
 	return list(value, "runtime.workspaces", RUNTIME_V2_LIMITS.workspaces).map((item, index) => {
 		const path = `runtime.workspaces[${index}]`;
-		const raw = record(item, path, ["id", "title", "regions", "board", "skin", "keys"]);
+		const raw = record(item, path, ["id", "title", "regions", "board", "skin", "keys"], policy);
 		const id = named(raw.id, `${path}.id`, /^[a-z][a-z0-9-]*$/, 40);
 		if (ids.has(id)) fail(`${path}.id`, `repeats '${id}'`);
 		ids.add(id);
@@ -308,7 +316,7 @@ function parseWorkspaces(value: unknown): ExtensionWorkspaceDeclaration[] {
 			const taken = new Set<string>();
 			workspace.keys = list(raw.keys, `${path}.keys`, SURFACE_LIMITS.workspaceKeys).map((entry, at) => {
 				const keyPath = `${path}.keys[${at}]`;
-				const binding = record(entry, keyPath, ["key", "action", "label"]);
+				const binding = record(entry, keyPath, ["key", "action", "label"], policy);
 				const key = named(binding.key, `${keyPath}.key`, /^[a-z0-9]$/, 1);
 				if (taken.has(key)) fail(`${keyPath}.key`, `repeats '${key}'`);
 				taken.add(key);
@@ -323,9 +331,9 @@ function parseWorkspaces(value: unknown): ExtensionWorkspaceDeclaration[] {
 	});
 }
 
-function parsePermissions(value: unknown): ExtensionPermissionsDeclaration {
-	const raw = record(value ?? {}, "runtime.permissions", ["fs", "exec", "net"]);
-	const fs = record(raw.fs ?? {}, "runtime.permissions.fs", ["read", "write"]);
+function parsePermissions(value: unknown, policy: ManifestKeyPolicy): ExtensionPermissionsDeclaration {
+	const raw = record(value ?? {}, "runtime.permissions", ["fs", "exec", "net"], policy);
+	const fs = record(raw.fs ?? {}, "runtime.permissions.fs", ["read", "write"], policy);
 	const read = list(fs.read, "runtime.permissions.fs.read", RUNTIME_V2_LIMITS.fsEntries).map((entry, index) => {
 		const path = `runtime.permissions.fs.read[${index}]`;
 		if (entry === "workspace" || entry === "home") return entry;
@@ -354,11 +362,11 @@ function parsePermissions(value: unknown): ExtensionPermissionsDeclaration {
 	};
 }
 
-function parseConfig(value: unknown): ExtensionConfigField[] {
+function parseConfig(value: unknown, policy: ManifestKeyPolicy): ExtensionConfigField[] {
 	const keys = new Set<string>();
 	return list(value, "runtime.config", RUNTIME_V2_LIMITS.configFields).map((item, index) => {
 		const path = `runtime.config[${index}]`;
-		const raw = record(item, path, ["key", "type", "default", "description", "options"]);
+		const raw = record(item, path, ["key", "type", "default", "description", "options"], policy);
 		const key = named(raw.key, `${path}.key`, /^[a-zA-Z][a-zA-Z0-9]*$/, 40);
 		if (keys.has(key)) fail(`${path}.key`, `repeats '${key}'`);
 		keys.add(key);
@@ -385,24 +393,32 @@ function parseConfig(value: unknown): ExtensionConfigField[] {
 	});
 }
 
-export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclarationV2 {
-	const raw = record(value, "runtime", [
-		"api",
-		"entrypoint",
-		"commands",
-		"events",
-		"watch",
-		"hooks",
-		"tools",
-		"promote",
-		"ui",
-		"workspaces",
-		"access",
-		"permissions",
-		"state",
-		"services",
-		"config",
-	]);
+export function parseExtensionRuntimeV2(
+	value: unknown,
+	policy: ManifestKeyPolicy = new ManifestKeyPolicy(),
+): ExtensionRuntimeDeclarationV2 {
+	const raw = record(
+		value,
+		"runtime",
+		[
+			"api",
+			"entrypoint",
+			"commands",
+			"events",
+			"watch",
+			"hooks",
+			"tools",
+			"promote",
+			"ui",
+			"workspaces",
+			"access",
+			"permissions",
+			"state",
+			"services",
+			"config",
+		],
+		policy,
+	);
 	if (raw.api !== 2) fail("runtime.api", "must be 2");
 	const entrypoint = containedPath(raw.entrypoint, "runtime.entrypoint");
 	if (!ENTRYPOINT_SUFFIXES.some((suffix) => entrypoint.endsWith(suffix)))
@@ -411,29 +427,29 @@ export function parseExtensionRuntimeV2(value: unknown): ExtensionRuntimeDeclara
 		containedPath(glob, `runtime.watch[${index}]`),
 	);
 	if (new Set(watch).size !== watch.length) fail("runtime.watch", "lists a glob twice");
-	const state = record(raw.state ?? {}, "runtime.state", ["session", "store"]);
-	const services = record(raw.services ?? {}, "runtime.services", ["embedding"]);
-	const tools = parseTools(raw.tools);
+	const state = record(raw.state ?? {}, "runtime.state", ["session", "store"], policy);
+	const services = record(raw.services ?? {}, "runtime.services", ["embedding"], policy);
+	const tools = parseTools(raw.tools, policy);
 	const promote = parsePromote(raw.promote, tools);
 	const declaration: ExtensionRuntimeDeclarationV2 = {
 		api: 2,
 		entrypoint,
-		commands: parseCommands(raw.commands),
-		...parseEvents(raw.events),
+		commands: parseCommands(raw.commands, policy),
+		...parseEvents(raw.events, policy),
 		watch,
-		hooks: parseHooks(raw.hooks),
+		hooks: parseHooks(raw.hooks, policy),
 		tools,
 		...(promote.length > 0 ? { promote } : {}),
 		ui: choices(raw.ui, "runtime.ui", SLOTS),
-		workspaces: parseWorkspaces(raw.workspaces),
+		workspaces: parseWorkspaces(raw.workspaces, policy),
 		access: choices(raw.access, "runtime.access", ACCESS),
-		permissions: parsePermissions(raw.permissions),
+		permissions: parsePermissions(raw.permissions, policy),
 		state: {
 			session: flag(state.session, "runtime.state.session", false),
 			store: flag(state.store, "runtime.state.store", false),
 		},
 		services: { embedding: flag(services.embedding, "runtime.services.embedding", false) },
-		config: parseConfig(raw.config),
+		config: parseConfig(raw.config, policy),
 	};
 
 	// Cross-field rules: each one keeps a declared capability honest about what it needs.
