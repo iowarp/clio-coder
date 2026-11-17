@@ -32,6 +32,8 @@ export function coldReasonText(reason: string): string {
 			return "a tool choice change";
 		case "transport_reset":
 			return "a connection reset";
+		case "step_checkpoint":
+			return "a step checkpoint";
 		default:
 			return reason.replace(/_/gu, " ");
 	}

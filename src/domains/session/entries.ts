@@ -184,8 +184,11 @@ export interface BranchSummaryEntry extends BaseSessionEntry {
  *   - "auto"      : pre-submit context-pressure trigger via shouldCompact().
  *   - "force"     : explicit `/context compact` command or CLIO_CODER_FORCE_COMPACT=1.
  *   - "overflow"  : compact-and-retry path after a context overflow error.
+ *   - "step"      : a step-boundary checkpoint under a template turn policy on a
+ *                   small or uncached route; its summary is the previous step's
+ *                   final text, written by the host with no summarizer call.
  */
-export type CompactionTrigger = "auto" | "force" | "overflow";
+export type CompactionTrigger = "auto" | "force" | "overflow" | "step";
 
 /**
  * What the summarizer's provider reported for the one or two streams a compaction ran, kept beside the checkpoint as
@@ -785,7 +788,7 @@ function hasBaseSessionEntryFields(v: Record<string, unknown>): boolean {
 
 const MESSAGE_ROLES = ["user", "assistant", "tool_call", "tool_result", "system", "checkpoint"] as const;
 const FILE_OPERATIONS = ["read", "write", "edit", "create", "delete"] as const;
-const COMPACTION_TRIGGERS: readonly CompactionTrigger[] = ["auto", "force", "overflow"];
+const COMPACTION_TRIGGERS: readonly CompactionTrigger[] = ["auto", "force", "overflow", "step"];
 const PROTECTED_ARTIFACT_SOURCES: readonly ProtectedArtifactEntrySource[] = [
 	"validation",
 	"middleware",

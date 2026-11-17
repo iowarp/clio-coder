@@ -220,6 +220,7 @@ import {
 	triageSnapshotMatches,
 	triageUserText,
 } from "./steering-triage.js";
+import { compactStepStartDue, createStepStartTracker } from "./step-start.js";
 import type { LiveContextUsage, TurnContextDeps } from "./turn-context.js";
 import { createTurnContext } from "./turn-context.js";
 import { createTurnKeepalive } from "./turn-keepalive.js";
@@ -2078,6 +2079,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}) ?? null;
 	/** The prompt template whose step policy ended this turn; read once as the turn settles. */
 	let stepPolicyStop: { template?: string } | null = null;
+	/** Step turns after the first start from a compact state on small or uncached routes (WTF-P 0.8.3 C5). */
+	const stepStarts = createStepStartTracker();
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
@@ -3370,6 +3373,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					[reminderProjection(), turnControlBlock ?? "", skillPreamble, taskMemoryHandoffSource, text]
 						.filter((part) => part.length > 0)
 						.join("\n\n");
+				const stepLead = stepStarts.begin(
+					state.currentTurnConstraints,
+					text,
+					options.yoloContinuation === true || options.requestContinuation === true,
+				);
+				if (stepLead !== null && compactStepStartDue(agentRuntime.runtimeResolution)) {
+					try {
+						context.runStepCheckpoint(agentRuntime, stepLead);
+					} catch (err) {
+						emitNotice(
+							`[Clio Coder] step checkpoint failed: ${err instanceof Error ? err.message : String(err)}. This step turn keeps the full history.`,
+							"warning",
+						);
+					}
+				}
 				let submittedText = composeSubmittedText();
 
 				// 2. Pre-submit auto-compaction trigger
@@ -4006,6 +4024,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					loopGuardFailure = null;
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
+					stepStarts.settle(
+						state.currentTurnConstraints,
+						lastAssistantText(agentRuntime.agent.state.messages.slice(machineMessageStart)),
+						!canceled && !interviewDismissed && state.continuation.stop === null,
+					);
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
 							? yoloContinuationDue(guardStopped, guardFailure, stepStop)

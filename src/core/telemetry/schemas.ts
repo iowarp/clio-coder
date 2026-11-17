@@ -277,6 +277,7 @@ export const CallSettledSchema = Type.Object(
 						"transport_reset",
 						"input_changed",
 						"tool_choice_change",
+						"step_checkpoint",
 					]),
 				),
 				rePrefilledTokens: factSchema(count),
@@ -468,10 +469,10 @@ export const EmptySchema = Type.Object({}, closed);
 /** One context reduction: which stage ran, the tokens it moved, and what it removed (#434). */
 export const ContextPrunedSchema = Type.Object(
 	{
-		stage: vocabulary(["mask_observations", "working_set", "llm_summary"]),
+		stage: vocabulary(["mask_observations", "working_set", "llm_summary", "step_checkpoint"]),
 		tokensBefore: count,
 		tokensAfter: count,
-		trigger: vocabulary(["auto", "force", "overflow"]),
+		trigger: vocabulary(["auto", "force", "overflow", "step"]),
 		snapshotIdBefore: Type.Union([ExistingId, Type.Null()]),
 		snapshotIdAfter: ExistingId,
 		at: duration,
