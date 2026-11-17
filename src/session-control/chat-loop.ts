@@ -42,6 +42,7 @@ export { runOutOfTurnRound } from "./side-question.js";
 export { createTurnControlRunner } from "./turn-control-runner.js";
 
 import { isPlanOnlyRequest, stripPlanCloseOptions } from "../core/plan-request.js";
+import { hostFramedTexts } from "../core/reminder-framing.js";
 import type { RouteName, RouteSource } from "../core/route-provenance.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
@@ -156,7 +157,7 @@ import type { AgentEvent, AgentMessage, AnthropicMessagesCompat, EngineModel, Im
 import { resolveSessionTools } from "../tools/agent-tools.js";
 import { finalizeAskUserInterviewForHost } from "../tools/ask-user.js";
 import { ensureDetailLedgerForSession } from "../tools/extension-runtime-tools.js";
-import { scopedCapabilityShapes } from "../tools/gateway/scope-shapes.js";
+import { scopedCapabilityShapes, scopeShapesDelta } from "../tools/gateway/scope-shapes.js";
 import { isGatewayChain } from "../tools/gateway-display.js";
 import type { AskUserToolPolicy, ToolInvokeOptions, ToolRegistry } from "../tools/registry.js";
 import { effectiveToolCall } from "../tools/surface.js";
@@ -3351,19 +3352,19 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// The turn's scope is host-framed text in its own user message, kept
 				// verbatim in history, never a recompile of the system prompt (#422).
 				// Continuations repeat it so a mid-turn compaction cannot drop it.
-				const turnScope = [
-					turnScopeGuidance(state.currentTurnConstraints),
-					scopedCapabilityShapes(deps.toolRegistry, state.currentTurnConstraints?.allowedTools),
-				]
-					.filter((part) => part.length > 0)
-					.join("\n");
+				const turnScope = turnScopeGuidance(state.currentTurnConstraints);
+				const scopeShapes = scopedCapabilityShapes(deps.toolRegistry, state.currentTurnConstraints?.allowedTools);
 				// The prompt delta is read when the text is composed, after
 				// ensureSessionPrompt below has compared the live inputs (#423).
-				// Pinned extension blocks are read then too, after any compaction.
+				// Pinned extension blocks and the scope's argument shapes are read
+				// then too, after any compaction, and go only when the context lacks them.
 				const reminderProjection = middleware.takePendingReminderProjection(() =>
-					[turnScope, context.sessionPromptDelta(), ...context.pinnedContextDelta(agentRuntime)].filter(
-						(part) => part.length > 0,
-					),
+					[
+						turnScope,
+						scopeShapesDelta(scopeShapes, hostFramedTexts(agentRuntime.agent.state.messages)),
+						context.sessionPromptDelta(),
+						...context.pinnedContextDelta(agentRuntime),
+					].filter((part) => part.length > 0),
 				);
 				// Pending skill requests are plain visible text in the user message
 				// itself: persisted in the ledger, no hidden prompt machinery.

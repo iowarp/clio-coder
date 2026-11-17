@@ -1,10 +1,19 @@
+import { neutralizeFraming } from "../../core/reminder-framing.js";
 import type { ToolName } from "../../core/tool-names.js";
 import type { ToolRegistry, ToolSpec } from "../registry.js";
 import { gatewayCapabilityKind, surfaceSpecPlacement } from "../surface.js";
 
-/** Whole block budget; past it the rest are named for describe. */
-const SCOPE_SHAPES_MAX_BYTES = 1600;
+/** UTF-8 bytes the whole block may take, header and overflow line included; past it the rest are counted for describe. */
+export const SCOPE_SHAPES_MAX_BYTES = 1600;
 const SHAPE_LINE_MAX_BYTES = 280;
+
+const SHAPES_HEADER =
+	'Argument shapes for this turn\'s capabilities (call as gateway(op="call", capability="<name>", args={...}); `?` marks optional; describe only for nested fields):';
+
+/** The scope line beside the block names every admitted capability, so the overflow is a count, not a second list. */
+function overflowLine(omitted: number): string {
+	return `Describe for the shapes of the other ${omitted} allowed ${omitted === 1 ? "capability" : "capabilities"}.`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -51,25 +60,37 @@ export function scopedCapabilityShapes(
 ): string {
 	if (registry === undefined || allowedTools === undefined) return "";
 	const surface = new Set(allowedTools);
-	const lines: string[] = [];
-	const omitted: string[] = [];
-	let bytes = 0;
+	const candidates: string[] = [];
 	for (const name of [...surface].sort()) {
 		if (gatewayCapabilityKind(name) === "builtin") continue;
 		const spec = registry.get(name as ToolName);
 		if (spec === undefined || surfaceSpecPlacement(spec, surface) !== "gateway") continue;
-		const line = `- ${signature(spec)}`;
-		if (bytes + Buffer.byteLength(line) > SCOPE_SHAPES_MAX_BYTES) {
-			omitted.push(name);
-			continue;
-		}
-		bytes += Buffer.byteLength(line) + 1;
+		candidates.push(`- ${signature(spec)}`);
+	}
+	if (candidates.length === 0) return "";
+	const whole = [SHAPES_HEADER, ...candidates].join("\n");
+	if (Buffer.byteLength(whole) <= SCOPE_SHAPES_MAX_BYTES) return whole;
+	const reserve = 1 + Buffer.byteLength(overflowLine(candidates.length));
+	const lines = [SHAPES_HEADER];
+	let bytes = Buffer.byteLength(SHAPES_HEADER);
+	for (const line of candidates) {
+		const cost = 1 + Buffer.byteLength(line);
+		if (bytes + cost + reserve > SCOPE_SHAPES_MAX_BYTES) continue;
+		bytes += cost;
 		lines.push(line);
 	}
-	if (lines.length === 0) return "";
-	return [
-		'Argument shapes for this turn\'s capabilities (call as gateway(op="call", capability="<name>", args={...}); `?` marks optional; describe only for nested fields):',
-		...lines,
-		...(omitted.length > 0 ? [`Describe for the rest: ${omitted.join(", ")}.`] : []),
-	].join("\n");
+	const omitted = candidates.length - (lines.length - 1);
+	return lines.length === 1 ? "" : [...lines, overflowLine(omitted)].join("\n");
+}
+
+/**
+ * The shapes block a request sends: empty while the context still carries this
+ * exact block as one host-framed message, so an unchanged scope costs its bytes
+ * once, and the block again once a compaction or a step checkpoint dropped it.
+ * `framed` is the context's host-framed text, as `hostFramedTexts` reads it back.
+ */
+export function scopeShapesDelta(shapes: string, framed: ReadonlyArray<string>): string {
+	if (shapes.length === 0) return "";
+	const sent = neutralizeFraming(shapes);
+	return framed.some((body) => body.split("\n\n").includes(sent)) ? "" : shapes;
 }
