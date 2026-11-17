@@ -119,6 +119,20 @@ export function runtimeModelInfo(
 	return modelRunInfo(resolved, resolved.contextWindowDetails.effectiveContextWindow);
 }
 
+/**
+ * `runtimeModelInfo` as a hook-input field, empty for a runtime whose resolution carries no window details. The
+ * session reads those details optionally wherever else it uses them, because a runtime built by hand has none,
+ * and a hook that receives no model is better than a tool call or a turn that throws while building its input.
+ */
+export function runtimeModelField(
+	resolved: (ModelRunFacts & { contextWindowDetails?: { effectiveContextWindow: number } }) | undefined,
+): { model?: ModelRunInfo } {
+	const details = resolved?.contextWindowDetails;
+	return resolved === undefined || details === undefined
+		? {}
+		: { model: modelRunInfo(resolved, details.effectiveContextWindow) };
+}
+
 /** A worker's model, read from the runtime snapshot its spec carries. */
 export function snapshotModelInfo(snapshot: ModelRunFacts & { capabilities: { contextWindow: number } }): ModelRunInfo {
 	return modelRunInfo(snapshot, snapshot.capabilities.contextWindow);
