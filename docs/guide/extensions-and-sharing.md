@@ -99,7 +99,8 @@ Use in the TUI:
 Arguments follow Pi 1.0 semantics with Pi 1.3's empty-argument fix: bash-style quoting splits the text after the command into positional arguments, a quoted empty argument (`""` or `''`) keeps its position, and the placeholders `$1`, `$@`, `$ARGUMENTS`, `${N:-default}`, `${@:-default}`, `${ARGUMENTS:-default}`, `${@:N}`, and `${@:N:L}` expand in one pass. Bare `$ARGUMENTS` inserts the raw payload byte for byte. The placeholder contract is in [prompt-envelope-and-tools.md](../architecture/prompt-envelope-and-tools.md).
 
 Frontmatter fields are `description`, `argument-hint` (or `argumentHint`),
-`display-only` (or `displayOnly`), `allowed-tools` and `delegated-tools`.
+`display-only` (or `displayOnly`), `allowed-tools`, `delegated-tools`,
+`budget`, `turnPolicy` and `variants`.
 Templates without frontmatter are accepted; CLIO Coder derives a fallback
 description from the first non-empty line. Invalid frontmatter degrades to a
 warning rather than failing the whole load. A template whose package reference
@@ -120,6 +121,118 @@ names normalize to canonical spelling; MCP and extension capability names keep
 their qualified spelling. Imported prompts and skills retain their narrower
 translated tool lists. See `src/domains/resources/prompts/loader.ts` and
 `src/core/turn-constraints.ts`.
+
+A delegated worker that holds no `bash`, such as a section writer, can still
+measure its own output with the builtin `count` tool: it returns a file's words
+(whitespace-separated runs, as `wc -w` counts them), lines and bytes without
+reading the file into context. `count` is read class and held to the same
+workspace scope and information-flow rules as `read`. A surface without `bash`
+carries it as a direct tool; one with `bash` reaches it through the gateway.
+Name it in `delegated-tools` beside the worker's other tools so the delegation
+ceiling keeps it:
+
+```yaml
+delegated-tools: [read, write, edit, count]
+```
+
+An extension that counts by its own rule, such as excluding markup, stays the
+authority for its own budgets.
+
+### Prompt template turn budget
+
+`budget` lowers two limits of each turn the template starts:
+
+```yaml
+budget:
+  toolCalls: 40
+  observationBytes: 131072
+```
+
+- `toolCalls` lowers the per-turn tool-call budget,
+  `safety.limits.chatToolCallsPerTurn`. The call that reaches the budget is
+  refused, so `toolCalls: 40` lets 39 calls run. The hard ceiling that stops
+  the turn stays 15 calls above the lowered budget, never above the operator's
+  own ceiling.
+- `observationBytes` lowers the turn's observation pool,
+  `safety.limits.observationBytesPerTurn`: the combined tool output the model
+  may receive in the turn.
+
+Each bound is the smaller of the template's value and the operator's, so a
+template never raises a limit. The refusal and the operator notice name the
+template, for example `soft budget 40, set by prompt template "wtfp:advance"
+budget.toolCalls`, and the turn's scope reminder states the budget to the
+model. A yolo continuation keeps the template and its budget. Dispatched
+workers do not inherit it.
+
+`budget` takes only these two keys and needs at least one. `toolCalls` is a
+whole number of at least 1 and `observationBytes` a whole number of at least
+1024. An unknown key or an invalid value makes the template unavailable, and
+`clio-coder library validate` reports it as `ERR_PROMPT`, because a silently
+dropped bound would let the turn run unbounded while its author believed it
+capped.
+
+### One step per turn
+
+`turnPolicy` makes each turn the template starts run one step of a pipeline:
+
+```yaml
+allowed-tools: [read, write, edit, extension_wtfp__next_step]
+turnPolicy:
+  mode: step
+  stepTool: extension_wtfp__next_step
+```
+
+`mode` must be `step`, and `stepTool` names one tool, in the template's
+`allowed-tools` when the template sets that list. Builtin names match
+case-insensitively; extension and MCP capability names are kept as written.
+Once the step tool has succeeded in a turn, other tools still run, but the next
+call to the step tool is refused with text asking for a compact state summary,
+and so is every tool call after it. That first refusal also locks tools for the
+rest of the turn, so the next round is text only, with the prompt prefix and
+tool schemas unchanged. Under yolo the stopped turn then continues into a fresh
+turn that runs the next step, and that continuation does not count against the
+cap of 3 continuations per operator prompt. Without yolo the turn ends after its
+summary and the operator starts the next step. A gateway call to the step tool
+counts as a call to it. A malformed policy, a bare `turnPolicy: step` included,
+makes the template unavailable.
+
+Write the body so the model ends its turn with a state summary after the step
+instead of calling the step tool again; otherwise every turn spends one refused
+call before it stops. The refused calls count toward the turn budget, whose
+hard ceiling stays the backstop for a model that keeps calling. Two step-tool
+calls issued in one parallel batch both run when the second starts before the
+first finishes.
+
+### Variants per model tier
+
+`variants` gives a template a body per model tier, so a small model gets
+explicit steps and a frontier model terse intent:
+
+```yaml
+variants:
+  small: { file: ../variants/advance-small.txt }
+  frontier: |
+    Advance the desk one step and report the new state.
+```
+
+Keys are the tiers `small`, `standard` and `frontier`. A value is an inline
+body or `{file: <path>}`, a path relative to the template file that must stay
+inside the declaring package, or inside the discovery root for a template
+outside a package. A variant file's own frontmatter is dropped, and package
+references resolve as they do in the main body. Expansion uses the variant for
+the session chat model's tier, then the `standard` variant, then the main body.
+The tier is the `models.<id>.tier` setting or CLIO Coder's heuristic (see
+[Model tiers](configuration-and-targets.md#model-tiers)) and settles once per
+model in a process, so a template sends the same body on every turn of one
+model.
+
+A variant that is not a string or a single `file` key, an unknown tier and an
+empty body are warnings, and that entry is skipped. A variant file that cannot
+be read, is not a file, or lies outside its boundary makes the template
+unavailable. A `.md` variant file under a prompts root is also discovered as a
+template of its own, so keep variant files outside the prompts root or give
+them another extension. Dispatched workers never expand templates, so variants
+follow only the chat model.
 
 When a plugin's template expands, the turn lists the `resource` components that
 plugin declares, after the template body, as a `[Plugin resources]` block of id

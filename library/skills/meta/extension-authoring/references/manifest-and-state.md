@@ -45,7 +45,8 @@ not depend on repository-private imports or a bundler's import rewriting.
 | `events` | Observation names below, plus at most one `{tick: 5s}` (or integer milliseconds). Register `api.on("tick", ...)`. Tick range 5 s–1 h. | Background work and polling frequency; observations cannot gate calls. |
 | `watch` | Up to 8 contained workspace-relative globs; must accompany `fs_changed`, and vice versa. Host batches up to 64 paths after a 500 ms debounce. | Files observed and refresh work; watch Git metadata and use a tick for working-file changes. |
 | `hooks` | Up to 16 `{on, tools?, timeoutMs?, onTimeout?, onError?}`; tools filter applies only to before/after tool. | Awaited latency and possible refusal. See the hooks table. |
-| `tools` | Up to 32 `{name, description, inputSchema, actionClass?, timeoutMs?}`. Schema must be an object schema; names use single underscores. The public contract names them `extension_<id>__<name>`. Default action class `execute`, timeout 30 s. | Intended model-callable behavior and safety/approval; see the current admission limit below. A `read` declaration cannot accompany exec or workspace writes. |
+| `tools` | Up to 32 `{name, description, inputSchema, actionClass?, readOnly?, idempotent?, timeoutMs?}`. Schema must be an object schema; names use single underscores. The model calls `extension_<id>__<name>` through the gateway. Default action class `execute`, timeout 30 s. `readOnly` defaults to true for `read` and cannot be true for `write`; `idempotent` defaults false. | Intended model-callable behavior and safety/approval. A `read` declaration cannot accompany exec or workspace writes. `readOnly`/`idempotent` only change loop-guard counting (see below). |
+| `promote` | Up to 4 declared tool names whose schemas every request carries; each tool's description plus schema at most 2048 bytes. At most 8 attach per session, by package id order. | Token cost on every request. Required before a hook can `require_tool` its own tool. Adding one asks for consent again. |
 | `ui` | `status`, `band`, `card`, `toast`, `panel`, `dock`, `interview`; declare each returned slot. | Screen space and interaction. Plain `text` remains the headless fallback. |
 | `workspaces` | Up to 4 `{id, title, regions, board?, skin?, keys?}`; regions: `header`, `board`, `islands`, `rail`, `footer`. Board placement `band` or `island` needs the board region. Skin is a contained `.json` path. Up to 12 `{key, action, label}` bindings. | Taking the screen on an explicit command/action; placement, branding and key ownership. |
 | `access` | `prompt`, `tool-args`, `tool-results`, `assistant-text`; omitted content is stripped while metadata remains. | Exposure of typed prompts, tool input/output or assistant text. `turn_start` observations carry the typed line only with `prompt`. |
@@ -53,12 +54,22 @@ not depend on repository-private imports or a bundler's import rewriting.
 | `state` | `{session: boolean, store: boolean}`, both default false; enables the corresponding context API. | Retained session or machine-local extension data. |
 | `config` | Up to 24 `{key, type, default, description, options?}`; string/number/boolean. String-only options up to 16; default must match type and options. | Author-selected behavior and its costs. At this head live `ctx.options` uses manifest defaults; the test kit can override them. No settings UI is promised. |
 
-At this head the public API, child registration and test kit support
-`api.tool`, but the live operator facade and gateway registry do not connect
-`runtime.tools`. Existing command tools come from `capabilities.tools`; that is
-a separate contract. Do not promise a live model can discover/call an api 2
-runtime tool yet. Exercise its handler with `host.tool` and report the admission
-gap; use commands/actions for live operator interaction.
+A live runtime serves its `runtime.tools`: the model finds and calls one
+through the gateway, or directly when `promote` lists it, and a call with no
+running runtime fails instead of starting one. Command tools from
+`capabilities.tools` are a separate contract. Exercise handlers with
+`host.tool`.
+
+Loop guard: only a tool declared `readOnly` or `idempotent` counts toward
+identical-call repeats, and a successful call of a tool not declared read-only
+resets every other call's identical count, so read, write, read of one record
+is admitted.
+
+A tool result may add `summary` (non-empty, at most 2048 bytes). The model then
+sees the summary and a `detail_ref`; the full `text` and `data` are stored for
+the session and `ledger(action="detail", ref=...)` pages through them. Without a
+saved session the model gets the full result. Promoted tools never reach
+workers.
 
 Observation names: `session_open`, `session_close`, `turn_start`, `turn_end`,
 `tool_end`, `permission_requested`, `permission_resolved`, `dispatch_started`,
@@ -66,9 +77,11 @@ Observation names: `session_open`, `session_close`, `turn_start`, `turn_end`,
 `safety_blocked`, `fs_changed`, `workspace_enter`, `workspace_leave`, plus the
 separately declared tick. Ticks coalesce while the runtime is busy.
 
-The consent digest includes command names, events/tick, watch, hooks, tool
-names/action classes, UI, workspace IDs/regions/board/keys, access and permissions.
-It does not include entrypoint, descriptions, skin path, state flags or config.
+The consent digest includes command names, prompt takeovers, state flags when
+either is set, the embedding service, events/tick, watch, hooks, tool
+names/action classes, promoted tools, UI, workspace IDs/regions/board/keys,
+access and permissions. It does not include entrypoint, descriptions, skin
+path, `readOnly`/`idempotent` or config.
 Explain those costs too; do not mistake digest membership for complete review.
 The current growth comparison catches new timers but does not compare the
 frequency of an existing timer or changes to board placement. Ask the operator

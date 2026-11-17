@@ -79,16 +79,28 @@ Register the named action; declaring a key without its handler fails registratio
 
 Declare `ui: [interview]`, register `api.interview(id, handler)`, then return
 `interview: {id, title, total?, step: {key, title?, intro?, questions}}` from a
-command/action, or an `ExtensionToolResult` from a tool. The public tool contract
-specifies parking until the operator finishes and answers becoming the tool result. At this head api 2 tool admission is not wired
-into the live gateway; use commands/actions for live interviews and the public
-kit for tool handlers (see the manifest reference). The intro is display-only; actions inside it cannot be pressed.
+command/action, or an `ExtensionToolResult` from a tool. A tool call parks until
+the operator finishes or cancels, and the answers become the tool result. The
+intro is display-only; actions inside it cannot be pressed.
 
 Each step has up to 4 questions and each choice question up to 12 options.
-Questions have `{id,label,help?,kind,options?,initial?}`; kind `single|multi|text`,
+Questions have `{id,label,help?,kind,options?,initial?,checkpoint?}`; kind `single|multi|text`,
 options `{value,label,detail?}` with unique values and labels. `initial` is only a
 draft: the operator must submit it. The handler receives
 `{id,step,answers,nav,reason?}`; answers are strings or string arrays. Return the
 next `{step,total?}`, or `{done:true,text,...}`. Store drafts in `ctx.state`.
-Handle `nav: cancel` including reasons `operator`, `headless`, `preempted` without
-performing the intended operation. `back` is reserved; the host does not send it.
+Handle `nav: cancel` including reasons `operator`, `headless`, `preempted`,
+`unscripted` without performing the intended operation. `back` is reserved; the
+host does not send it.
+
+`checkpoint` (matching `^[a-z][a-z0-9_.-]{0,63}$`, never shown to the
+operator) names the gate a question settles. A headless
+`clio-coder run --answers <file>` answers by it (`id: <checkpoint>`), by
+`header` (the question label, exact) or by `match` (a regex over label and
+help); `choice` names option labels, not values. A scripted step arrives with
+`nav: next` and `scripted: {file, rules}` (question id to the matching file
+entry); a live answer has no `scripted`, so decide whether a scripted answer
+counts as the author's. A question the file does not script cancels the step
+with reason `unscripted` and ends the run. A parked tool result also carries
+`scripted` by step, and its details record the checkpoint ids asked, which
+`clio-coder campaign run` counts as gates reached.

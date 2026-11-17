@@ -8,10 +8,10 @@ inspect it; canonicalize file paths before comparing shared claims.
 
 | Hook point | Accepted effects |
 | --- | --- |
-| `prompt_submit` | `rewrite_prompt`, `block_prompt`, `notify_operator` |
+| `prompt_submit` | `rewrite_prompt`, `block_prompt`, `notify_operator`, `pin_context` |
 | `before_tool` | `block_tool`, `annotate_tool_result`, `protect_path`, `require_tool`, `lock_tools`, `rewrite_tool_input` |
-| `after_tool` | `annotate_tool_result`, `protect_path`, `require_tool`, `lock_tools` |
-| `turn_start` | `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator` |
+| `after_tool` | `annotate_tool_result`, `protect_path`, `require_tool`, `lock_tools`, `pin_context` |
+| `turn_start` | `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator`, `pin_context` |
 | `turn_end` | `inject_reminder`, `request_continuation`, `notify_operator` |
 
 Return `{effects: [...], ui?: {...}}`, or `{}` to pass. UI can update declared
@@ -23,7 +23,20 @@ wrong point or malformed output are refused when the handler returns.
 - `annotate_tool_result` takes `message`, optional severity `info|warn`.
 - `inject_reminder` takes `message`, optional severity `info|advisory|warn` and
   optional audience `model`; it cannot claim a hard-block severity.
-- `require_tool` takes `toolName`; `lock_tools` has no extra fields.
+- `require_tool` takes `toolName`, the name the model calls. For this
+  package's own tool that is `extension_<id>__<tool>`, and the manifest must
+  list the tool under `runtime.promote`; otherwise the effect is refused with
+  `... is not promoted, so no request can require it; list <tool> under
+  runtime.promote`. Builtin, MCP and other packages' tools are not checked.
+  `lock_tools` has no extra fields.
+- `pin_context` takes `text`, at most 8192 UTF-8 bytes, once per result. It
+  sets this extension's one pinned block; a new value replaces the old one and
+  empty text clears it. The block rides the message tail, is re-sent verbatim
+  only when the context no longer carries its current value (a change, or a
+  compaction that dropped it), and never reaches workers. Returning the same
+  text every turn costs nothing; a value that changes on every write costs up
+  to 8 KB of history each time. Pins are in memory: set them again after a
+  restart.
 - `notify_operator` takes `message` and a deduplication `key`.
 - `protect_path` takes `path` and `reason`; `request_continuation` takes `message`
   and optional `note`.
@@ -47,7 +60,27 @@ pending operation. At this head failure semantics depend on the point:
 
 Three consecutive timeouts disable that hook for the runtime generation; its
 failure policy still applies to later matching calls. Reload resets the generation.
-Hooks are wired into the interactive harness, not workers, ACP or headless turns.
+Hooks run in the terminal, headless `clio-coder run` and ACP hosts. Runtimes never
+start inside workers: a native worker sends each hooked tool call back to the
+dispatching process, which runs the hook. CLI runtimes and ACP delegations
+cannot carry a hook, so a blocking hook refuses those dispatches.
+
+## Event fields
+
+- `prompt_submit` always carries `origin`: `operator`, `continuation` (yolo
+  continuing a stopped turn, with `continuation: {index, cap}`), `job` or
+  `peer`; `template` names the prompt template bounding the turn. `turn_start`
+  and `turn_end` carry the same fields when known. End run state on a new
+  `operator` prompt, not on a `continuation`.
+- A continuation's `prompt_submit` carries `lastToolCall: {tool, outcome, args?}`
+  when the stopped turn made a tool call. `outcome` is `ok`, `error` or
+  `unfinished`; `args` are redacted and clipped and need `tool-args` access.
+  Operator, job and peer prompts never carry it.
+- Every event carries `model` when the host knows it: `id`, `target`,
+  `contextWindow` (or null), `thinkingLevel`, `promptCaching` and `tier`
+  (`small`, `standard`, `frontier`; the operator's `models.<id>.tier` or a
+  heuristic). A worker's hooked calls carry the worker's model. Hosts before
+  0.8.4 omit it, so treat it as optional.
 
 The host writes receipts for hook invocations and applied effects with extension
 ownership, outcome/duration, runtime generation, content and envelope digests.

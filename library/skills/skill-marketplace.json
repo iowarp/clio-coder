@@ -249,7 +249,7 @@
 				"debug extension reload"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/extension-authoring",
-			"version": "0.1.0",
+			"version": "0.1.1",
 			"audit": "pass",
 			"category": "meta"
 		},

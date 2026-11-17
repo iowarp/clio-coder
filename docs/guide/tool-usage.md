@@ -25,7 +25,7 @@ the tool:
 
 | Purpose | Tools |
 | --- | --- |
-| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codemap) |
+| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`count`](#count-words-lines-and-bytes-of-one-file), [`code_nav`](#codenav-navigate-the-codemap) |
 | Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk), [`store`](#store-keep-results-and-datasets-outside-the-working-tree) |
 | Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
 | Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-cancel-or-approve-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
@@ -177,6 +177,7 @@ Every name in `ToolNames` ([tool-names.ts](../../src/core/tool-names.ts)) has on
 | `grep` | direct | gateway | observe | read | parallel |
 | `find` | direct, or gateway with `bash` | gateway | observe | read | parallel |
 | `ls` | direct, or gateway with `bash` | gateway | observe | read | parallel |
+| `count` | direct, or gateway with `bash` | gateway | observe | read | parallel |
 | `code_nav` | direct | gateway | observe | read | parallel |
 | `self_compact` | direct | gateway | orchestrate | read | sequential |
 | `context` | direct | gateway | observe | read | parallel |
@@ -516,6 +517,20 @@ Use ls to orient in one directory, find for recursive matching.
 
 ```text
 ls(path="src/tools")
+```
+
+## count: words, lines and bytes of one file
+
+Counts a file without reading it into context. Source: [count.ts](../../src/tools/count.ts). Read class; parallel.
+
+| Argument | Contract |
+| --- | --- |
+| `path` | File to count. A directory is refused. |
+
+Returns `<path>: <words> words, <lines> lines, <bytes> bytes`. Words are runs of non-whitespace, as `wc -w` counts them, and a last line without a trailing newline still counts as a line. The file is streamed, so a large one is counted in bounded memory. `count` is held to the same workspace scope, path policy and information-flow rules as `read`. It exists for a delegated worker without `bash` that must check its length against a budget; a prompt template lists it in `delegated-tools` ([tool ceilings](extensions-and-sharing.md#prompt-template-tool-ceilings)).
+
+```text
+count(path="paper/sections/introduction.tex")
 ```
 
 ## credential_present: check environment or file for a credential key
@@ -1068,7 +1083,7 @@ capacity, and a repeated settlement does not duplicate it.
 
 Arguments:
 
-- `action` (required). `read` or `post`.
+- `action` (required). `read`, `post` or `detail`. A call with `ref` and no `action` is a `detail` call.
 - `kind` (post). `claim`, `finding`, `review`, or `message`.
 - `runId` (main agent). Select the board belonging to an owned dispatch run.
 - `to`, `text`, and optional `replyTo` (message). Intended recipient (`main`,
@@ -1081,6 +1096,8 @@ Arguments:
   verdict, and what was checked.
 - `kinds` and `since` (read). Optional entry-kind filter and exclusive sequence
   watermark.
+- `ref` and optional `offset` (detail). A tool result's `detail_ref`
+  (`xd_` and 16 hex digits) and the byte offset of the page to return.
 
 A claim requires nonempty scope and intent. A finding requires a claim. A
 review requires a target, boolean verdict, and evidence. Reads answer from the
@@ -1097,7 +1114,17 @@ ledger(action="post", kind="claim", scope=["src/tools"], intent="audit tool sche
 ledger(action="post", kind="finding", claim="panes is conditionally registered", path="src/tools/bootstrap.ts", line=98)
 ledger(action="read", kinds=["finding", "review"], since=4)
 ledger(action="post", kind="review", target="e3", passed=true, evidence="confirmed against bootstrap registration")
+ledger(action="detail", ref="xd_0123456789abcdef", offset=12000)
 ```
+
+`detail` reads the session's own store of full tool results, not a dispatch
+board, so it needs no `runId` and no active board. An extension tool that
+returns a `summary` gives the model that summary and a `detail_ref`
+([compact tool results](harness-extensions.md#compact-tool-results)), and
+`detail` returns the full result in pages of up to 12,000 bytes. Each page is
+headed `detail <ref>, bytes <from>-<to> of <total>` and, when more remains,
+names the next call with its `offset`. The store survives compaction and resume,
+and a forked session resolves its parent's refs.
 
 ## panes: manage terminal panes owned by CLIO Coder
 
@@ -1224,7 +1251,7 @@ What the operator sees is one box above the composer, sized to the round: the qu
 
 In the TUI a round nobody answers within `safety.unattendedAfterSeconds` (default 300 seconds, `0` waits forever) closes on its own: each open question takes its first, recommended option, a free-text question proceeds on best judgment, and an outward question is answered no. A round reaches the operator at `yolo` too; yolo removes approval cards, not questions. At `yolo` a `0` window reads as 300 seconds, and after a window lapses with no key pressed since, later rounds wait at most 30 seconds. A GUI or ACP client's round waits the shorter of the window and the client's request timeout, then resolves the same way. At `default` and at contained yolo an `exposure: "outward"` round shows no approval card before the question: the question is the operator's gate, and the outward call itself keeps its own. Either way the model is told which options CLIO Coder chose and to state them as assumptions, and the decision board records them as its decisions. List the recommended option first.
 
-An `operator_only` question is the exception. Nobody answers it for an absent operator: in the TUI the card shows no recommended pick and no countdown, so it waits for you however long `safety.unattendedAfterSeconds` is; at `yolo` it is never shown; over ACP an interview request that times out closes it the same way. In each case the tool returns `operator_choice_unanswered`, records no decision, and ends the turn. Only the operator's own answer becomes a decision, and the decision board marks it `operator_choice`. `decide` cannot set that mark, and an `action=complete` decision with the same key leaves the operator's answer unchanged. A headless run has no `ask_user`, so no such decision exists there.
+An `operator_only` question is the exception. Nobody answers it for an absent operator: in the TUI the card shows no recommended pick and no countdown, so it waits for you however long `safety.unattendedAfterSeconds` is; at `yolo` it is never shown; over ACP an interview request that times out closes it the same way. In each case the tool returns `operator_choice_unanswered`, records no decision, and ends the turn. Only the operator's own answer becomes a decision, and the decision board marks it `operator_choice`. `decide` cannot set that mark, and an `action=complete` decision with the same key leaves the operator's answer unchanged. A headless run has no `ask_user` unless `clio-coder run --answers` scripts the author; a scripted answer to such a question keeps the `operator_choice` mark and also records `scripted` with the file and the entry that answered it ([Script the author with --answers](commands-and-modes.md#script-the-author-with---answers)).
 
 Ask only when blocked on a decision the request does not answer. Never ask about anything the operator already stated: a request that names its own scope ("all tools", "read only") has answered the interview before it starts.
 

@@ -79,12 +79,12 @@ Hand-made worktrees do not inherit that approval. Source:
 
 ## Capability envelope
 
-The `runtime` block of an api 2 manifest is the capability envelope: the part of the declaration the operator consents to. Its canonical form covers commands, takeovers of a plugin's prompts (`takesOver`), kept host state (`state`), events and tick, watched paths, hooks with their timeouts and failure modes, tools with their action class, interface slots, workspaces with their regions and keys, content access, file roots, and whether it may run programs or use the network. CLIO Coder hashes that canonical form into the envelope digest. Reordering a list never changes the digest.
+The `runtime` block of an api 2 manifest is the capability envelope: the part of the declaration the operator consents to. Its canonical form covers commands, takeovers of a plugin's prompts (`takesOver`), kept host state (`state`), events and tick, watched paths, hooks with their timeouts and failure modes, tools with their action class, the tools it promotes (`promote`), interface slots, workspaces with their regions and keys, content access, file roots, and whether it may run programs or use the network. CLIO Coder hashes that canonical form into the envelope digest. Reordering a list never changes the digest.
 
 The operator reviews the envelope in words before an install and before an update:
 
 - `clio-coder extensions install <path>` prints what the package would be allowed to do, then installs and records the envelope digest it printed.
-- The Library review (`/library install extension:<name>`, `/library update extension:<name>`, or the `clio-coder library` CLI) shows the same lines. On an update it first lists what the new envelope reaches beyond the installed copy, such as new commands, new tools, a faster timer, wider file roots, or a gate that may now refuse calls.
+- The Library review (`/library install extension:<name>`, `/library update extension:<name>`, or the `clio-coder library` CLI) shows the same lines. On an update it first lists what the new envelope reaches beyond the installed copy, such as new commands, new tools, newly promoted tools, a faster timer, wider file roots, or a gate that may now refuse calls.
 - `clio-coder extensions validate <path>` prints the envelope and its digest for a package you are writing.
 
 The install applies only the envelope that was reviewed. If the manifest changes between review and apply, the install refuses with `extension capability envelope differs from the one reviewed; review a fresh plan`. The digest is recorded in the extension's `state.json` entry. CLIO Coder checks it again every time it loads the installed package: a manifest whose envelope no longer matches the recorded digest stays visible and inactive with the diagnostic `installed extension capability envelope differs from the one recorded at install`, and an install made before envelopes were recorded reads `has no recorded capability envelope; reinstall to review what it may do`.
@@ -100,7 +100,9 @@ headless `clio-coder run` and ACP hosts. The dispatching process also hosts
 extensions for `fleet run` and `run --agent`; native workers send their hooked
 tool calls back to that host. Extension runtimes do not start inside workers.
 Workspaces, skins and docks require the terminal. Without an interview channel,
-an interview cancels immediately with reason `headless`.
+an interview cancels immediately with reason `headless`. A headless
+`clio-coder run --answers <file>` answers interviews from that file instead; see
+[Checkpoints and scripted answers](#checkpoints-and-scripted-answers).
 
 ```yaml
 id: lab-guard
@@ -154,22 +156,29 @@ The entrypoint is a `.mjs`, `.ts` or `.mts` file inside the package. CLIO Coder 
 | `events` | Passive observations: `session_open`, `session_close`, `turn_start`, `turn_end`, `tool_end`, `permission_requested`, `permission_resolved`, `dispatch_started`, `dispatch_completed`, `dispatch_failed`, `compaction_end`, `budget_alert`, `safety_blocked`, `fs_changed`, `workspace_enter`, `workspace_leave`, plus one `{ tick: <duration> }` entry. A tick is at least 5 s and at most one hour. |
 | `watch` | Up to 8 workspace-relative globs behind `fs_changed`. `watch` and the `fs_changed` event are declared together. |
 | `hooks` | Up to 16 awaited gates at `prompt_submit`, `before_tool`, `after_tool`, `turn_start` or `turn_end`. Each declares `timeoutMs` (50 to 2000, default 250), `onTimeout` and `onError` as `pass` or `block`, and optionally the `tools` it matches at the two tool points. |
-| `tools` | Up to 32 runtime tools `{ name, description, inputSchema, actionClass, timeoutMs }`. The model reaches one as `extension_<id>__<name>` through the gateway, and a skill's `allowed-tools` may name it verbatim. `actionClass` is `execute` (default), `read` or `write`. `read` is refused in a package that may run programs or write beyond its store, and `write` is refused unless the package declares a workspace `fs.write` root and no `exec`. Admission decides the tool by its declared class. |
+| `tools` | Up to 32 runtime tools `{ name, description, inputSchema, actionClass, readOnly, idempotent, timeoutMs }`. The model reaches one as `extension_<id>__<name>` through the gateway unless `promote` lists it, and a skill's `allowed-tools` may name it verbatim. `actionClass` is `execute` (default), `read` or `write`. `read` is refused in a package that may run programs or write beyond its store, and `write` is refused unless the package declares a workspace `fs.write` root and no `exec`. Admission decides the tool by its declared class. `readOnly` and `idempotent` tell the loop guard how to count repeats; see [Tool annotations](#tool-annotations). |
+| `promote` | Up to 4 names of declared `tools` whose schemas every request of the session carries. See [Promoted tools](#promoted-tools). |
 | `ui` | Slots the extension may fill: `status`, `band`, `card`, `toast`, `panel`, `dock`, `interview`. |
 | `workspaces` | Up to 4 workspaces: `{ id, title, regions, board, skin, keys }`. See [Workspaces and skins](#workspaces-and-skins). |
 | `access` | Content that crosses the boundary: `prompt`, `tool-args`, `tool-results`, `assistant-text`. Without a class, the matching event field is absent. |
 | `services` | `{ embedding: true }` asks for the host embedding service. The envelope review shows it as `may request embeddings from the configured model`. |
-
-### Embeddings
-
-An approved extension that declares `runtime.services.embedding: true` gets `ctx.embed({ inputs, task, expectedProfileIdentity? })` on its handler context. The host embeds through the semantic index's configured embedding profile (`context.semantic`), in the foreground with a 25 s timeout, and returns the vectors with the profile they came from; the extension never sees the model's URL or credentials. A request whose `expectedProfileIdentity` differs from the live profile is rejected with `Embedding profile changed; re-embed saved vectors before comparing them`, so vectors from two profiles are never compared. Without the declaration, or before it is approved, `ctx.embed` is absent. See [Semantic Context](semantic-context.md) for the profile.
 | `permissions` | `fs.read` (`workspace`, `home`, or a path), `fs.write` (`store` or a workspace-relative directory), `exec`, `net`. All default to none. A write root cannot name the workspace root or anything under `.clio-coder/`. |
 | `state` | `session` and `store`, each default false. `ctx.state` survives a reload and a restart that resumes the session (256 KiB, 256 keys). `ctx.store` is kept per extension across sessions on this machine (1 MiB, 256 keys). Both are versioned key-value tables, and `set` takes `ifVersion` for a compare-and-set. |
 | `config` | Up to 24 typed fields `{ key, type, default, description, options }`, delivered as `ctx.options` with defaults filled in. |
 
-A hook handler returns `effects` (and optionally UI), never a decision it can force past the safety policy. The effects are `block_tool`, `annotate_tool_result`, `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator`, `protect_path`, `request_continuation`, `rewrite_tool_input` and, at `prompt_submit`, `rewrite_prompt` and `block_prompt`. An effect returned at a point that cannot apply it is refused at load. A rewritten tool input is validated against the tool's schema and classified again, so a hook can narrow or redirect a call and never widen its authority. A hook that misses its deadline or throws follows its declared `onTimeout` or `onError`, and a hook that misses three deadlines in a row is disabled for the rest of the generation. Declare `block` only for a real gate.
+A hook handler returns `effects` (and optionally UI), never a decision it can force past the safety policy. The effects are `block_tool`, `annotate_tool_result`, `inject_reminder`, `require_tool`, `lock_tools`, `notify_operator`, `protect_path`, `request_continuation`, `rewrite_tool_input`, `pin_context` (at `prompt_submit`, `after_tool` and `turn_start`; see [Pinned context](#pinned-context)) and, at `prompt_submit`, `rewrite_prompt` and `block_prompt`. An effect returned at a point that cannot apply it is refused at load. A rewritten tool input is validated against the tool's schema and classified again, so a hook can narrow or redirect a call and never widen its authority. A hook that misses its deadline or throws follows its declared `onTimeout` or `onError`, and a hook that misses three deadlines in a row is disabled for the rest of the generation. Declare `block` only for a real gate.
+
+`require_tool` names the tool as the model calls it. For the package's own tool that is the full `extension_<id>__<tool>`; a bare local name that is not also a builtin's is refused with `... is this package's tool extension_<id>__<tool>; name it in full`. The manifest must also list that tool under `runtime.promote`, because only a schema attached to the request can be the provider's tool choice. Otherwise the effect is refused with `effects[N].toolName extension_<id>__<tool> is not promoted, so no request can require it; list <tool> under runtime.promote`, which `extensions test` shows the author and the hook's failure notice shows the operator. A requirement naming a builtin, an MCP tool or another package's tool is not checked this way.
 
 The `prompt_submit`, `turn_start` and `turn_end` events say who started the turn. `origin` is `operator` for a prompt the operator submitted, `continuation` when CLIO Coder continues a turn that stopped under yolo autonomy (a loop-guard lock, a tool budget, a failure), `job` for a scheduled job's turn, and `peer` for a message another agent sent into the session. A continuation carries `continuation: { index, cap }`, its place against the continuation cap. `template` names the prompt template whose tool scope bounds the turn, and a continuation keeps it. Continuations fire these hooks like any other turn, so a gate still sees them. An extension that keeps run state across a template's turns ends that state on a new `operator` prompt, not on a `continuation`. `prompt_submit` always carries `origin`. A `turn_start` or `turn_end` that resumes a turn inside the host carries the origin of the turn it resumes.
+
+A continuation's `prompt_submit` event also carries `lastToolCall` when the stopped turn made a tool call: `{ tool, outcome, args }`. `tool` is the name `before_tool` would see, and `outcome` is `ok`, `error`, or `unfinished` when the turn stopped before the call returned. `args` crosses only under `access: tool-args`, redacted and clipped, with long strings and arrays cut and a note of what was cut. An operator, job or peer prompt never carries `lastToolCall`. An extension that drives a multistep run reads it to learn where the stopped turn left off.
+
+Every hook event carries `model`, the model the call or turn runs on: `id` (the wire model id), `target`, `contextWindow` (effective tokens, `null` when unknown), `thinkingLevel` (what the requests carry after the model's limits), `promptCaching` (false only when the route turns prompt caching off) and `tier`, one of `small`, `standard` or `frontier`. A dispatched worker's hooked tool calls carry the worker's own model. The tier is the operator's `models.<id>.tier` setting or CLIO Coder's heuristic over the context window, the size the model id names, the runtime and the model catalog; see [Model tiers](configuration-and-targets.md#model-tiers). It settles once per model in a process, so it never changes under a running session. Read `model` as optional: hosts before 0.8.4 omit it, and so does a runtime that resolved no context window details.
+
+### Embeddings
+
+An approved extension that declares `runtime.services.embedding: true` gets `ctx.embed({ inputs, task, expectedProfileIdentity? })` on its handler context. The host embeds through the semantic index's configured embedding profile (`context.semantic`), in the foreground with a 25 s timeout, and returns the vectors with the profile they came from; the extension never sees the model's URL or credentials. A request whose `expectedProfileIdentity` differs from the live profile is rejected with `Embedding profile changed; re-embed saved vectors before comparing them`, so vectors from two profiles are never compared. Without the declaration, or before it is approved, `ctx.embed` is absent. See [Semantic Context](semantic-context.md) for the profile.
 
 ### Tool hooks on dispatched workers
 
@@ -198,7 +207,58 @@ When that host cannot start and a blocking hook applies, dispatch is refused;
 
 A command receives the unexpanded argument string and a context with `snapshot`, `signal`, `requestId`, `options`, `state` and `store`. The snapshot carries `workspace`, `sessionId`, `generation`, `mode`, the active workspace of this extension, and `plugin` (see below). A command and an action may open a panel, take the screen, start an interview and fill or submit the prompt. A background handler (an observation or a hook) may only update ambient UI. Results render locally for the operator and never become a session transcript entry. The required `text` is the headless fallback.
 
-Runtime tools are served by the live runtime: registering one never runs package code, and a call with no running runtime fails instead of starting one. They sit behind the gateway, so the provider's tool schema set is the same before and after a reload. A tool that returns an `interview` parks until the operator finishes or cancels it, and the answers become the tool result.
+Runtime tools are served by the live runtime: registering one never runs package code, and a call with no running runtime fails instead of starting one. An unpromoted runtime tool sits behind the gateway, so it never changes the provider's tool schema set. A tool that returns an `interview` parks until the operator finishes or cancels it, and the answers become the tool result.
+
+#### Tool annotations
+
+A runtime tool may declare `readOnly: true` (a call changes no state) and `idempotent: true` (identical arguments have the same effect). A `read` tool is read-only unless it declares `readOnly: false`, and a `write` tool that claims `readOnly` fails validation. Neither key changes admission or approval, which follow `actionClass`. They tell the loop guard how to count. Only a tool declared read-only or idempotent counts toward the identical-call repeats the guard blocks, and a successful call of a tool not declared read-only is read as a possible change of state that resets the identical-call count of every other call. A desk that reads a record, writes it and reads it again is therefore admitted, while three identical reads with nothing between them are still blocked.
+
+#### Promoted tools
+
+`runtime.promote` lists up to 4 of the package's own `tools`. The session attaches a promoted tool's schema to every request under its usual name `extension_<id>__<tool>`, so the model calls it directly and a hook's `require_tool` naming it becomes the provider's tool choice. The gateway refuses a promoted name, which leaves one route to the tool. A promoted tool and its gateway form are built by the same code and differ only in placement, so admission, approval and the loop guard treat them alike.
+
+```yaml
+runtime:
+  api: 2
+  tools:
+    - { name: next_step, description: Advance the desk one step., inputSchema: { type: object, properties: {}, additionalProperties: false } }
+  promote: [next_step]
+```
+
+Every request pays for a promoted schema, so promotion is bounded:
+
+- A promoted tool's description and input schema together may hold at most 2048 bytes. A larger one fails validation with `'<tool>' would attach <n> bytes of description and input schema to every request; a promoted tool allows at most 2048`.
+- A session attaches at most 8 promoted tools, taking packages in id order and each manifest's list in its own order. A tool past that cap stays behind the gateway, where it still runs, and the operator is told.
+- The attached description ends `Served by the running <id>@<version> extension runtime.`, so a version bump changes the request bytes once.
+
+Promotion belongs to the installed extension, never to a turn or a template, so the attached schemas are the same bytes on every turn. A reload that leaves the promoted declarations alone leaves the tool list byte-identical; one that changes them is recorded as a tool list change (`tool_surface_change`) on the next turn, and a turn already running keeps its list. Promotion is part of the capability envelope, so promoting another tool asks the operator again (`attaches tool schemas to every request`). Dispatched workers never receive promoted tools, and a `require_tool` naming a package tool is dropped for a worker's calls. A session whose tool schema ceiling excludes a promoted tool leaves it unattached, and a requirement naming it then falls back to a reminder. On the Anthropic Messages API a required round changes only the tool choice; other provider APIs narrow that round's request to the one required tool, so that round misses the prompt cache.
+
+#### Pinned context
+
+A hook at `prompt_submit`, `after_tool` or `turn_start` may return `{ kind: "pin_context", text }` to set its extension's one pinned block: state the model keeps in view through compaction, such as a milestone and the next step. A new value replaces the old one, and empty text clears it. The text holds at most 8192 bytes of UTF-8 (`effects[N].text exceeds the 8192-byte pinned context limit`), and one hook result may set it once. `before_tool` cannot pin, because the call it describes may still be refused, and `turn_end` cannot, because the next `turn_start` can.
+
+```typescript
+api.hook("turn_start", async (_event, ctx) => {
+	const { value } = await ctx.state.get<{ milestone: string; next: string }>("desk");
+	return value ? { effects: [{ kind: "pin_context", text: `Milestone: ${value.milestone}\nNext: ${value.next}` }] } : {};
+});
+```
+
+The block never enters the system prompt. It rides host-framed text at the head of the next request's new messages, as `<pinned-context extension="<id>">` opening with `This replaces any earlier pinned context from <id>.` It is sent only when the context no longer carries its current value: after the value changed, including a change a tool hook made between tool batches, or after a compaction dropped the message that carried it, when it is sent again verbatim. Returning the same text every turn therefore costs nothing, and a changed value is new tail text that leaves the cached prefix alone. Clearing sends a one-time `Cleared:` notice, and only while an earlier value is still in view.
+
+Superseded values stay in older history until compaction, so a block that changes on every write costs up to 8 KB each time. Pins live in the session process's memory: after a restart the block returns once a hook sets it again, and a reload that removes the extension clears its block. Dispatched workers never receive the block; a pin returned for a worker's hooked call is reported to the operator once per extension and not applied.
+
+#### Compact tool results
+
+A runtime tool may return `summary` beside `text` and `data`: non-empty text of at most 2048 bytes. The model then sees the summary followed by `detail_ref: xd_<16 hex digits> (<n> bytes; read it with ledger action="detail" ref="xd_...")`, and the full result (`text`, then `data` as JSON) is stored in the session's own directory. `ledger(action="detail", ref=...)` returns it in pages of up to 12,000 bytes, each naming the `offset` of the next. The store survives compaction and resume, a forked session resolves its parent's refs, and the details go when the session is removed. Without a saved session to hold the detail, the model gets the full result as before. `ledger` is registered only where dispatch is available, and reaches the main agent through the gateway, so on a surface without it a `detail_ref` cannot be read.
+
+```typescript
+api.tool("status", async (_input, ctx) => {
+	const { value: sections = [] } = await ctx.store.get<Array<{ name: string; done: boolean }>>("sections");
+	const done = sections.filter((section) => section.done).length;
+	return { text: JSON.stringify(sections, null, 2), summary: `${done} of ${sections.length} sections drafted` };
+});
+```
 
 ### Interface
 
@@ -212,7 +272,7 @@ A skin is a JSON file inside the package, validated at discovery. It overrides p
 
 ### Interviews
 
-An interview is a multi-step form the host draws, started from a command, an action or a tool result. A step has up to 4 questions of kind `single`, `multi` or `text`, with up to 12 options each. The operator's answers return to the registered `api.interview(id, handler)` handler, which returns the next step or `{ done: true, ... }` with the final output. With no operator to answer, the interview cancels with reason `headless`. An `initial` value is a draft the operator still has to submit.
+An interview is a multi-step form the host draws, started from a command, an action or a tool result. A step has up to 4 questions of kind `single`, `multi` or `text`, with up to 12 options each. The operator's answers return to the registered `api.interview(id, handler)` handler, which returns the next step or `{ done: true, ... }` with the final output. With no operator to answer, the interview cancels with reason `headless`, unless a headless run's `--answers` file scripts it (see below). An `initial` value is a draft the operator still has to submit.
 
 Each answer the handler receives is `{ id, step, answers, notes?, other?, nav, reason? }`. `answers` maps a question id to the chosen option's `value`, an array of values for `multi`, or the typed text for a `text` question. When the operator chooses an option and attaches a note, `answers` keeps the option value and `notes` carries the text under the same question id. When the operator types free text instead of choosing ("Other"), `answers` carries the text and `other` marks the id with `true`. A tool that parks on an interview returns the same `notes` and `other` maps, keyed by step and then question id, beside its `answers`.
 
@@ -220,6 +280,37 @@ Each answer the handler receives is `{ id, step, answers, notes?, other?, nav, r
 { "id": "gate", "step": "confirm", "answers": { "choice": "revise" }, "notes": { "choice": "tighten Task 1" }, "nav": "next" }
 { "id": "gate", "step": "confirm", "answers": { "choice": "use five sources" }, "other": { "choice": true }, "nav": "next" }
 ```
+
+#### Checkpoints and scripted answers
+
+A question may carry `checkpoint`, an id matching `^[a-z][a-z0-9_.-]{0,63}$` that names the gate the question settles. The operator never sees it. A headless `clio-coder run --answers <file>` answers an extension question by it (`id: <checkpoint>`), by `header`, which matches the question's `label` exactly, or by `match`, a regular expression over the label and its help text. The file's `choice` names option labels, not values. The file format is in [Script the author with --answers](commands-and-modes.md#script-the-author-with---answers).
+
+```typescript
+return {
+	text: "Plan ready for review",
+	interview: {
+		id: "gate",
+		title: "Introduction plan",
+		step: {
+			key: "confirm",
+			questions: [
+				{
+					id: "choice",
+					label: "Approve the introduction plan?",
+					kind: "single",
+					checkpoint: "plan-introduction",
+					options: [
+						{ value: "approve", label: "Approve this plan as shown" },
+						{ value: "revise", label: "Revise it" },
+					],
+				},
+			],
+		},
+	},
+};
+```
+
+A scripted step reaches the handler as `nav: "next"` with `scripted: { file, rules }`, where `rules` maps each question id to the file entry that answered it, such as `answers[0] id "plan-introduction"`. A live answer has no `scripted`, so the extension decides whether a scripted answer counts as the author's. A question the file does not script cancels its step with `nav: "cancel"` and `reason: "unscripted"`, and the run ends. A tool that parks on an interview carries `scripted` in its result too, keyed by step. Its tool-result details record the checkpoint ids the interview put to the author, in order, even when the interview was cancelled; the session ledger keeps them, which is how `clio-coder campaign run` counts the gates a run reached.
 
 ## Confinement
 
@@ -407,7 +498,7 @@ The command reports the new generation, which packages were added (`+`), removed
 
 Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change.
 
-Model-visible command-tool schemas are frozen when a session registry is created. A reload never changes a live model's tool surface, and adding, modifying, or removing a command tool requires restarting CLIO Coder. Runtime tools sit behind the gateway and follow the live runtime. A new native worker builds its own verified registry, and external command-line worker runtimes do not gain CLIO Coder tools. Plugin resources have their own generation and their own `/reload library`.
+Model-visible command-tool schemas are frozen when a session registry is created. A reload never changes a live model's tool surface, and adding, modifying, or removing a command tool requires restarting CLIO Coder. Unpromoted runtime tools sit behind the gateway and follow the live runtime; a promoted one changes the tool list only when a reload changes the promotion (see [Promoted tools](#promoted-tools)). A new native worker builds its own verified registry, and external command-line worker runtimes do not gain CLIO Coder tools. Plugin resources have their own generation and their own `/reload library`.
 
 ## Running and managing runtimes
 

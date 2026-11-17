@@ -6,7 +6,7 @@ triggers:
   - add an extension hook
   - create an extension workspace
   - debug extension reload
-version: 0.1.0
+version: 0.1.1
 license: Apache-2.0
 allowed-tools:
   - read
@@ -29,7 +29,8 @@ package bytes. Use a draft or `.clio-coder/dev/extensions/<id>/`.
 
 1. **Choose the boundary.** Use a command for an explicit request, an observation
    for passive updates, an awaited hook for a gate, and a tool for a callable
-   handler. The current gateway does not yet admit api 2 `runtime.tools`.
+   handler. A tool sits behind the gateway unless `runtime.promote` attaches it
+   to every request; a hook can `require_tool` only a promoted own tool.
    Read [manifest and state](references/manifest-and-state.md) before declaring
    capabilities. Explain the read roots, executable authority, content access,
    update frequency and possible refusals the operator will be approving.
