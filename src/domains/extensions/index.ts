@@ -7,6 +7,7 @@ export const ExtensionsDomainModule: DomainModule<"extensions"> = {
 	createExtension: createExtensionsBundle,
 };
 
+export { extensionToolName } from "./command-schema.js";
 export type { ExtensionsContract } from "./contract.js";
 export {
 	DEV_EXTENSIONS_DIR,

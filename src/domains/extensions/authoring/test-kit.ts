@@ -32,8 +32,10 @@ export async function createExtensionTestHost(
 	const canonical = realpathSync(root);
 	const candidate = loadManifestFromRoot(canonical);
 	if (!candidate.valid) throw new Error(candidate.diagnostics.map((diagnostic) => diagnostic.message).join("; "));
-	const declaration = candidate.manifest?.runtimeV2;
-	if (!declaration) throw new Error("extension test host requires runtime.api: 2");
+	const manifest = candidate.manifest;
+	const declaration = manifest?.runtimeV2;
+	if (!manifest || !declaration) throw new Error("extension test host requires runtime.api: 2");
+	const extensionId = manifest.id;
 	const values = Object.fromEntries(declaration.config.map((field) => [field.key, field.default]));
 	for (const [key, value] of Object.entries(options.options ?? {})) {
 		const field = declaration.config.find((entry) => entry.key === key);
@@ -188,7 +190,7 @@ export async function createExtensionTestHost(
 				opts.timeoutMs ??
 					declaration.hooks.find((entry) => entry.on === event.point)?.timeoutMs ??
 					RUNTIME_V2_LIMITS.hookMs,
-				(value) => parseExtensionHookResult(value, declaration, event.point),
+				(value) => parseExtensionHookResult(value, declaration, event.point, extensionId),
 			);
 		},
 		tool(name, input) {

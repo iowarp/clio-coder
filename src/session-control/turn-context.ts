@@ -77,7 +77,7 @@ import type {
 	ResidencyMutationPayload,
 } from "../core/telemetry/live-events.js";
 import type { CallSettled } from "../core/telemetry/schemas.js";
-import { isBuiltinToolName, ToolNames } from "../core/tool-names.js";
+import { isBuiltinToolName, isHarnessExtensionToolName, ToolNames } from "../core/tool-names.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
@@ -2885,6 +2885,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				contextWindow === null ? null : windowDetails.contextWindowSource;
 			const guidance = modelState?.clioCoder?.quirks?.thinking?.guidance;
 			const toolNames = toolNamesFromAgentState(agentRuntime.agent.state.tools);
+			// An attached schema in the extension namespace is there only because its manifest promotes it (B2).
+			const promotedTools = toolNames.filter((name) => isHarnessExtensionToolName(name));
 			const attachedToolSchemas = attachedToolSchemasFromState(agentRuntime.agent.state.tools);
 			const builtinTools =
 				deps.toolRegistry
@@ -2940,6 +2942,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				providerSupportsTools: runtimeSupportsTools(agentRuntime),
 				semanticSearchAvailable: semanticUsable(settings.context.semantic),
 				toolNames,
+				...(promotedTools.length > 0 ? { promotedTools } : {}),
 				// Builtin presence gates prompt guidance. Learning an MCP schema
 				// mid-turn changes discovery results, not the immutable prefix.
 				coordinatorCapabilities: builtinTools.map((spec) => spec.name).sort(),

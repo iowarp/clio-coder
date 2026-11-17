@@ -93,6 +93,14 @@ export interface ExtensionRuntimeDeclarationV2 {
 	watch: string[];
 	hooks: ExtensionHookDeclaration[];
 	tools: ExtensionRuntimeToolDeclaration[];
+	/**
+	 * Declared tools whose schemas the session attaches to every request in
+	 * place of the gateway, so a hook's `require_tool` can pin the provider's
+	 * tool choice to one (B2). The set belongs to the extension generation and
+	 * never to a turn or a template: a per-turn set would move the provider
+	 * prefix each time it changed (#423). Absent when nothing is promoted.
+	 */
+	promote?: string[];
 	ui: ExtensionSlot[];
 	workspaces: ExtensionWorkspaceDeclaration[];
 	access: ExtensionContentAccess[];
@@ -122,5 +130,7 @@ export type ExtensionCapabilityEnvelope = Pick<
 	state?: ExtensionRuntimeDeclarationV2["state"];
 	services?: { embedding: boolean };
 	tools: Array<Pick<ExtensionRuntimeToolDeclaration, "name" | "actionClass">>;
+	/** Tools attached to every request; absent when none, which keeps existing digests stable. */
+	promote?: string[];
 	workspaces: Array<Pick<ExtensionWorkspaceDeclaration, "id" | "regions" | "board" | "keys">>;
 };

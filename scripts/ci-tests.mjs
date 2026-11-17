@@ -185,6 +185,7 @@ export const coreTests = [
 	"upgrade-command",
 	"extension-hook-turn-origin",
 	"extension-interview-answer",
+	"extension-promoted-tools",
 	"extension-test-tmpdir",
 	"extension-validate-workspace",
 	"gateway-scope-shapes",

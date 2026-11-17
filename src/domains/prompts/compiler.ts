@@ -77,6 +77,11 @@ export interface SessionPromptInputs {
 	thinkingGuidance?: string | null;
 	/** Canonical names on the frozen direct-tool surface, rendered as a compact harness inventory. */
 	toolNames?: ReadonlyArray<string>;
+	/**
+	 * Names in `toolNames` from a namespace that otherwise sits behind the gateway, attached because their
+	 * extension promotes them (B2). They stay on the Direct tools line; absent when the session attaches none.
+	 */
+	promotedTools?: ReadonlyArray<string>;
 	/** Registered builtin capabilities for coordinator guidance; schemas remain in toolNames. */
 	coordinatorCapabilities: ReadonlyArray<string>;
 	/** False for --no-skills; only explicitly supplied skills remain available. */
@@ -634,7 +639,7 @@ function sessionReach(inputs: SessionPromptInputs): SessionReach {
 	// A worker's admitted list names capabilities behind the gateway (git,
 	// web_fetch, an extension command); the attached schemas are their direct
 	// projection, with `gateway` standing in for every capability it reaches.
-	const names = directSurfaceNames(capabilityNames).sort();
+	const names = directSurfaceNames(capabilityNames, new Set(inputs.promotedTools ?? [])).sort();
 	// Asked twice in one session which tools it had, a live model gave two
 	// different answers and invented `web_find`. The authoritative list is one
 	// line above; pointing at it beats letting the model recall the schemas.

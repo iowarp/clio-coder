@@ -231,6 +231,12 @@ export type ExtensionEffect =
 	| { kind: "block_tool"; reason: string }
 	| { kind: "annotate_tool_result"; message: string; severity?: "info" | "warn" }
 	| { kind: "inject_reminder"; message: string; severity?: "info" | "advisory" | "warn"; audience?: "model" }
+	/**
+	 * `toolName` is the name the model calls. For this package's own tool that
+	 * is `extension_<id>__<name>`, and the manifest must list the tool under
+	 * `runtime.promote`: only a schema attached to the request can be the
+	 * provider's tool choice.
+	 */
 	| { kind: "require_tool"; toolName: string }
 	| { kind: "lock_tools" }
 	| { kind: "notify_operator"; message: string; key: string }

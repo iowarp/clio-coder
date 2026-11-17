@@ -555,7 +555,7 @@ export class ExtensionRuntimeProcessV2 {
 		return this.request(
 			{ kind: "hook", event },
 			timeoutMs,
-			(value) => parseExtensionHookResult(value, this.declaration, event.point),
+			(value) => parseExtensionHookResult(value, this.declaration, event.point, this.extension.id),
 			signal,
 		);
 	}

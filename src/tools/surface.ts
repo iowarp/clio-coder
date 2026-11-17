@@ -181,9 +181,11 @@ export function withGatewayForCapabilities(names: ReadonlyArray<ToolName>): Tool
  * The direct projection of a capability surface: the names that carry an
  * attached schema. Gateway-placed capabilities drop out and, when any was
  * present, `gateway` stands in for them. Used wherever a prompt or a display
- * lists "direct tools" from an admitted capability list.
+ * lists "direct tools" from an admitted capability list. `promoted` names the
+ * capabilities whose registered spec overrides the name rule with a direct
+ * placement (an extension's promoted tools), which only the registry knows.
  */
-export function directSurfaceNames(names: ReadonlyArray<string>): string[] {
+export function directSurfaceNames(names: ReadonlyArray<string>, promoted?: ReadonlySet<string>): string[] {
 	const surface = new Set(names);
 	const seen = new Set<string>();
 	const out: string[] = [];
@@ -191,7 +193,7 @@ export function directSurfaceNames(names: ReadonlyArray<string>): string[] {
 	for (const name of names) {
 		if (seen.has(name)) continue;
 		seen.add(name);
-		if (surfaceToolPlacement(name, surface) === "gateway") {
+		if (promoted?.has(name) !== true && surfaceToolPlacement(name, surface) === "gateway") {
 			reachesGateway = true;
 			continue;
 		}
