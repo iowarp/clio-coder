@@ -116,7 +116,7 @@ describe("ledger tool", () => {
 	it("refuses each malformed post by naming the field, and posts nothing", async () => {
 		const f = workerLedger();
 		const cases: Array<[Record<string, unknown>, RegExp]> = [
-			[{ action: "write" }, /action must be one of post, read; got 'write'/],
+			[{ action: "write" }, /action must be one of post, read, detail; got 'write'/],
 			[{ action: "post", kind: "note" }, /kind must be one of claim, finding, review, message; got 'note'/],
 			[{ action: "post", kind: "claim", scope: ["src"] }, /a claim requires intent/],
 			[{ action: "post", kind: "claim", intent: "x" }, /a claim requires scope/],
