@@ -4,29 +4,7 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 ## Unreleased
 
-Round 2 of the WTF-P 0.8.3 findings, built on the 0.8.4-rc.1 cut.
-
-### Added
-
-- B4: `safety.limits.templateToolCallsPerTurnMax` and `safety.limits.templateObservationBytesPerTurnMax` let a prompt template's `budget` raise its turn above the per-turn limits, up to that ceiling. Unset, the default, a template can only lower them. The limit message names the bound that applied, and a project settings layer can only lower a ceiling the user set.
-- C3: on small-tier routes and routes that do not cache prompts, a tool result that a later identical call (same effective tool and canonical arguments) superseded is replaced in the outgoing request by a one-line stub. Stubs land in one batch once 32 KiB of superseded bytes accumulate and stay stubbed afterwards. The session ledger keeps the full result, and the batch is journaled as the `observation_aging` cold reason with `observationAgingBytes`. Cached standard and frontier routes are untouched.
-- C5: under a template `turnPolicy: step`, each step turn after the first on a small-tier or uncached route starts from a step-boundary checkpoint (the previous step's final text, the template body and the pinned blocks) instead of the full history, with no summarizer call. It is recorded as the `step_checkpoint` cold reason. A step turn that failed, or that the loop guard or the tool budget stopped, is followed by a turn with the full history, and cached standard and frontier routes always keep it.
-
-### Changed
-
-- B1: `run --answers` answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. A model's ordinary `ask_user` call in a headless run is refused as having no operator, as without the file, and no `id`, `header` or `match` rule answers it.
-- Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.1) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), round 2 included.
-
-### Fixed
-
-- B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.
-- B5: a session's pinned context blocks persist with the session, so a resumed or restarted session carries them on its first request. A cleared block, or one whose extension was removed, stays cleared, and a state directory that cannot be written leaves the running session's blocks in place.
-- C3: `ledger(action="detail", ref=...)` is reachable through the gateway in a session without dispatch once an api 2 extension serves a runtime tool, so an extension result's `detail_ref` is always readable.
-- C5: two step-tool calls in one parallel batch no longer both run under a template `turnPolicy: step`. The second is refused while the first is in flight.
-
-## 0.8.4-rc.1 - 2026-11-16
-
-This release candidate fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
+This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
 
 ### Added
 
@@ -43,6 +21,9 @@ This release candidate fixes what a WTF-P 0.8.3 brownfield revision found on the
 - C3: an api 2 extension tool may return a `summary` of at most 2048 bytes beside its result. The model sees the summary with a `detail_ref`, and `ledger(action="detail", ref=...)` returns the full result in pages from a per-session store that survives compaction and resume.
 - C4: `clio-coder campaign run --fixture <dir> --roster <roster.yaml> --answers <answers.yaml> --prompt <text> --out <dir>` runs one seeded project across a roster of models, one entry at a time. Each entry gets a fresh copy of the fixture and its own empty data, state and cache, and uses the operator's config directory as it is, so no credential is copied under `--out`. It reports per entry the run status, extension gates reached, extension refusals, loop-guard blocks, fresh, cached and output tokens and wall time, as a table or `--json` plus one `entry.json` per entry; `--probe <ext>:<command>` records the desk's final status.
 - C5: a prompt template's frontmatter `turnPolicy: {mode: step, stepTool}` makes each turn it starts run one step. After the step tool succeeds once, a second call to it is refused, tools lock to a text-only summary with the prompt prefix and tool schemas unchanged, and a yolo continuation starts the next step without counting against the continuation cap.
+- B4: `safety.limits.templateToolCallsPerTurnMax` and `safety.limits.templateObservationBytesPerTurnMax` let a prompt template's `budget` raise its turn above the per-turn limits, up to that ceiling. Unset, the default, a template can only lower them. The limit message names the bound that applied, and a project settings layer can only lower a ceiling the user set.
+- C3: on small-tier routes and routes that do not cache prompts, a tool result that a later identical call (same effective tool and canonical arguments) superseded is replaced in the outgoing request by a one-line stub. Stubs land in one batch once 32 KiB of superseded bytes accumulate and stay stubbed afterwards. The session ledger keeps the full result, and the batch is journaled as the `observation_aging` cold reason with `observationAgingBytes`. Cached standard and frontier routes are untouched.
+- C5: under a template `turnPolicy: step`, each step turn after the first on a small-tier or uncached route starts from a step-boundary checkpoint (the previous step's final text, the template body and the pinned blocks) instead of the full history, with no summarizer call. It is recorded as the `step_checkpoint` cold reason. A step turn that failed, or that the loop guard or the tool budget stopped, is followed by a turn with the full history, and cached standard and frontier routes always keep it.
 
 ### Changed
 
@@ -50,11 +31,17 @@ This release candidate fixes what a WTF-P 0.8.3 brownfield revision found on the
 - B2: an extension hook's `require_tool` naming one of the package's own tools is refused unless the manifest promotes that tool, and the refusal names the `runtime.promote` entry to add. A requirement naming a builtin, an MCP tool or another package's tool behaves as before.
 - C3: dispatch and collect results are compact by default: each run keeps its facts, its trust or verdict line, its evidence notices and a 2000-byte answer excerpt that names `monitor(mode="record", run_id=...)`, which now leads with the whole answer. Setting `max_output_bytes` returns the full form.
 - C4: an extension tool's interview result records the checkpoint ids it put to the author in its details, kept on the session ledger even when the interview is cancelled.
+- B1: `run --answers` answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. A model's ordinary `ask_user` call in a headless run is refused as having no operator, as without the file, and no `id`, `header` or `match` rule answers it.
+- Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.1) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), round 2 included.
 
 ### Fixed
 
 - A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
 - A3: a verifier-report whose fail verdict no executed check produced is labelled `review verdict: fail (N findings)` in dispatch and collect results, not "validation failed; a check ran and did not pass". A check that ran and failed keeps the validation wording.
+- B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.
+- B5: a session's pinned context blocks persist with the session, so a resumed or restarted session carries them on its first request. A cleared block, or one whose extension was removed, stays cleared, and a state directory that cannot be written leaves the running session's blocks in place.
+- C3: `ledger(action="detail", ref=...)` is reachable through the gateway in a session without dispatch once an api 2 extension serves a runtime tool, so an extension result's `detail_ref` is always readable.
+- C5: two step-tool calls in one parallel batch no longer both run under a template `turnPolicy: step`. The second is refused while the first is in flight.
 
 ## 0.8.3 - 2026-11-16
 
