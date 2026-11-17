@@ -404,6 +404,30 @@ Inside a container, bubblewrap must be installed in the image, and the container
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `prompts.profile` | `v1` | restart |
+
+### Model tiers
+
+Each model gets a tier, `small`, `standard` or `frontier`, that says how much scaffolding a prompt should give it. Hooks read it as `model.tier` ([extension hooks](harness-extensions.md#runtime-api-2)) and prompt templates pick a body by it ([variants](extensions-and-sharing.md#variants-per-model-tier)). Nothing in the system prompt reads it, so a tier never changes a cached prefix.
+
+`models.<id>.tier` sets the tier for one model, keyed by the wire model id; `models` takes no other field. In `/settings` the map is under **Model tiers**.
+
+```yaml
+models:
+  qwen3-32b:
+    tier: small
+```
+
+An unlisted model gets its tier from the first of these rules that applies:
+
+1. A known context window under 32,768 tokens is `small`.
+2. A parameter count in the model id decides next: under 20B is `small`, 20B and up is `standard`. A size hint never makes a model `frontier`.
+3. A cloud or subscription model in the model catalog with a window of at least 128,000 tokens is `frontier`, unless its id names a reduced variant (`mini`, `nano`, `haiku`, `lite`, `small`, `tiny`), which stays `standard`.
+4. Everything else is `standard`, including a local or protocol route with no size hint and a model whose window is unknown.
+
+The tier settles once per model in a process, so it never changes under a running session, and a change to `models` applies after a restart. A model first resolved before its context window was known stays `standard` until then.
+
+| Key | Default | When it applies |
+| --- | --- | --- |
 | `models` | `{}` | restart |
 
 Renamed version-1 paths and retired keys, including the version-2 keys `fleet.decisionProfiles`, `turnControl.interpretation` and the per-agent `permissionTimeoutMs` and `labels`, are listed in the [version 1 to version 2 key map](configuration-reference.md#version-1-to-version-2-key-map) and [retired keys and values](configuration-reference.md#retired-keys-and-values). A renamed version-1 path, or a version-1-only root, in a user `settings.yaml` is refused with a message naming its version-2 replacement or `clio-coder upgrade`. A retired key never blocks loading. That covers the four keys above, `context.compaction.excludeLastTurns` and the retired System One, speculative dispatch and orientation keys. The file loads, the key is ignored, `clio-coder doctor` warns that it is retired and ignored, and `clio-coder doctor --fix` removes it from the user `settings.yaml`. The [System One guide](system-one.md#retired-settings) lists the System One keys.
