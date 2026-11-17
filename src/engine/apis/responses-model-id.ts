@@ -79,16 +79,18 @@ export function observeResponsesModelId<T extends StreamOptions>(
 			: reportedModelId === null
 				? { state: "not-reported" }
 				: { state: "reported", reportedModelId };
+	// A count Pi normalized above zero was sent, whatever event shape carried it past the capture above.
+	const fieldFor = (usage: { cacheRead: number }): CacheReadField => (usage.cacheRead > 0 ? "sent" : cacheReadField);
 	const output = createAssistantMessageEventStream();
 	void (async () => {
 		try {
 			for await (const event of source) {
 				if (event.type === "done") {
 					event.message.responseModelIdObservation = observation();
-					event.message.usage.cacheReadField = cacheReadField;
+					event.message.usage.cacheReadField = fieldFor(event.message.usage);
 				} else if (event.type === "error") {
 					event.error.responseModelIdObservation = observation();
-					event.error.usage.cacheReadField = cacheReadField;
+					event.error.usage.cacheReadField = fieldFor(event.error.usage);
 					if (event.error.errorMessage !== undefined)
 						event.error.errorMessage = withProxyConnectionNote(event.error.errorMessage, model.baseUrl);
 				}
