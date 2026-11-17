@@ -2655,13 +2655,18 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					filesystem: nodeResultContractFilesystem(),
 				}).conformance === "pass";
 			// #425: an idle loop after a tool result or aborted/empty response never delivered a final answer.
+			// A locked synthesis reply the sanitizer reduced to its fallback notice
+			// (after the one re-prompt) is text, but not an answer.
+			const fallbackOnly = isLockedSynthesisFallbackOnly(messages.at(-1));
 			if (
 				acceptedHelperResult === null &&
 				!hasTerminalArtifact &&
-				(!isTerminalAssistantMessage(messages.at(-1)) || !assistantMessageText(messages.at(-1)))
+				(fallbackOnly || !isTerminalAssistantMessage(messages.at(-1)) || !assistantMessageText(messages.at(-1)))
 			) {
 				const lastAssistant = [...messages].reverse().find(isAssistantMessage);
-				const detail = `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"})`;
+				const detail = fallbackOnly
+					? "worker synthesis reply held only tool-call markup after the tool-call lockout, so no final answer was delivered"
+					: `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"})`;
 				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_final_output_missing", detail } });
 				process.stderr.write(`[worker] ${detail}\n`);
 				return { messages, exitCode: 1 };

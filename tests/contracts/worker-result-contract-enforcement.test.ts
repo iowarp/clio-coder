@@ -25,7 +25,16 @@ const REPORT = JSON.stringify({
 });
 
 /** A WTF-P-shaped read-only reviewer: it reads, answers in Markdown, then is repaired. */
-async function runReviewer(replies: Reply[], structuredOutputs: "json-schema" | "none") {
+async function runReviewer(
+	replies: Reply[],
+	structuredOutputs: "json-schema" | "none",
+	bounds: { mode: "advisory" | "enforced"; toolCalls: number; hardCap: number; contract: boolean } = {
+		mode: "advisory",
+		toolCalls: 18,
+		hardCap: 150,
+		contract: true,
+	},
+) {
 	const env = await isolateClioEnv("clio-contract-enforcement-");
 	const previousCwd = process.cwd();
 	process.chdir(env.dir);
@@ -69,12 +78,18 @@ async function runReviewer(replies: Reply[], structuredOutputs: "json-schema" | 
 				thinkingLevel: "off",
 				modelCapabilities: { contextWindow: 131072, maxTokens: 8192, tools: true, structuredOutputs },
 				allowedTools: ["read"],
-				budget: { mode: "advisory", toolCalls: 18, readReserve: 0, synthesis: true, hardCap: 150 },
+				budget: {
+					mode: bounds.mode,
+					toolCalls: bounds.toolCalls,
+					readReserve: 0,
+					synthesis: true,
+					hardCap: bounds.hardCap,
+				},
 				product: "orientation",
 				noSkills: true,
 				readOnly: true,
 				cwd: env.dir,
-				resultContract: { kind: "verifier-report" },
+				...(bounds.contract ? { resultContract: { kind: "verifier-report" as const } } : {}),
 			},
 			(event) => events.push(event),
 		);
@@ -136,4 +151,22 @@ test("a server that refuses the schema gets the same round once without it", { t
 	strictEqual(bodies[2]?.response_format?.type, "json_schema");
 	strictEqual(bodies[3]?.response_format, undefined);
 	strictEqual((bodies[3]?.tools ?? []).length, 0);
+});
+
+test("a capped reporting worker whose locked replies are only tool-call markup fails as missing output", {
+	timeout: 15_000,
+}, async () => {
+	const markup = { text: '<tool_call>\n{"name":"read","arguments":{"path":"plan.md"}}\n</tool_call>' };
+	const { result, bodies, events } = await runReviewer([read, markup, markup], "none", {
+		mode: "enforced",
+		toolCalls: 1,
+		hardCap: 1,
+		contract: false,
+	});
+	const outcomes = events.filter((event) => event.type === "clio_coder_run_outcome");
+	strictEqual(result.exitCode, 1, JSON.stringify(outcomes));
+	strictEqual(bodies.length, 3, "the markup-only reply is re-prompted exactly once");
+	const outcome = outcomes.at(-1) as { payload?: { outcomeCode?: string; detail?: string } } | undefined;
+	strictEqual(outcome?.payload?.outcomeCode, "worker_final_output_missing");
+	ok(outcome?.payload?.detail?.includes("only tool-call markup"), outcome?.payload?.detail);
 });
