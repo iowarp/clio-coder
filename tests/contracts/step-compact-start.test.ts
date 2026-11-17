@@ -29,7 +29,15 @@ interface Run {
 	close(): Promise<void>;
 }
 
-async function stepDrive(route: { model: string; tier: ModelTier; uncached?: boolean }): Promise<Run> {
+interface Drive {
+	model: string;
+	tier: ModelTier;
+	uncached?: boolean;
+	/** How the first step turn stops: its step policy (the default), or a loop-guard tool lockout. */
+	firstStop?: "step" | "loop_guard";
+}
+
+async function stepDrive(route: Drive): Promise<Run> {
 	const scratch = await isolateClioEnv("clio-coder-step-compact-");
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -137,17 +145,29 @@ async function stepDrive(route: { model: string; tier: ModelTier; uncached?: boo
 								isError: false,
 								timestamp: Date.now(),
 							} as unknown as AgentMessage);
+							if (route.firstStop === "loop_guard")
+								// A repeated call locked the turn's tools mid-step.
+								context.bus.emit("safety.loop_blocked", {
+									tool: STEP,
+									repeatCount: 3,
+									blocksThisTurn: 3,
+									budget: 3,
+									interrupted: false,
+									disposition: "lockout",
+									at: Date.now(),
+								});
 							// A second step-tool call was refused: the step policy ended the turn.
-							context.bus.emit("safety.tool_budget_exceeded", {
-								tool: STEP,
-								callsThisTurn: 2,
-								softBudget: 2,
-								hardCeiling: 17,
-								interrupted: false,
-								at: Date.now(),
-								template: "wtfp:advance",
-								stepTool: STEP,
-							});
+							else
+								context.bus.emit("safety.tool_budget_exceeded", {
+									tool: STEP,
+									callsThisTurn: 2,
+									softBudget: 2,
+									hardCeiling: 17,
+									interrupted: false,
+									at: Date.now(),
+									template: "wtfp:advance",
+									stepTool: STEP,
+								});
 							reply = "Step one ran: drafted intro; after=intro-done.";
 						}
 						const message = {
@@ -228,6 +248,20 @@ describe("step turns start from a compact state on small or uncached routes", ()
 			ok(!second.includes("Step checkpoint."), second);
 			ok(run.texts[0]?.includes('<pinned-context extension="wtfp">'), run.texts[0]);
 			ok(!run.texts[1]?.includes("<pinned-context"), run.texts[1]);
+			ok(!run.entries.some((entry) => entry.kind === "compactionSummary"));
+		} finally {
+			await run.close();
+		}
+	});
+
+	it("a step turn the loop guard stopped is followed by the full history, not a checkpoint", async () => {
+		const run = await stepDrive({ model: "step-guarded-model", tier: "small", firstStop: "loop_guard" });
+		try {
+			strictEqual(run.histories.length, 2);
+			strictEqual(run.continued[0], "loop_guard");
+			const second = run.histories[1] ?? "";
+			ok(second.includes("TOOL-RESULT-MARKER"), second);
+			ok(!second.includes("Step checkpoint."), second);
 			ok(!run.entries.some((entry) => entry.kind === "compactionSummary"));
 		} finally {
 			await run.close();
