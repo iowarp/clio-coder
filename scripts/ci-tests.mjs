@@ -219,6 +219,8 @@ export const coreTests = [
 	"extension-pinned-restart",
 	"responses-pinned-round-tools",
 	"campaign-run",
+	"extension-ignorable-keys",
+	"template-step-when",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working
