@@ -6,7 +6,10 @@
  * effective tool and canonical arguments (the loop guard's call identity,
  * gateway calls unwrapped) completed ok later in the same request. Age alone
  * never ages anything, and the session ledger keeps every byte; only the copy
- * the provider is about to read changes.
+ * the provider is about to read changes. Only a call that repeats as a read
+ * qualifies (`callRepeatsAsRead`, the loop guard's A1 classes): a later
+ * `next_step` or state-changing bash returned a new state, not a fresh copy,
+ * so its earlier result is never stubbed.
  *
  * This is the maintainer-approved exception to the rule against eager
  * per-round eviction, which raised reprocessed cached bytes 59%. It holds
@@ -20,7 +23,7 @@
  */
 
 import type { ModelTier } from "../core/model-tier.js";
-import { effectiveCallIdentity } from "../engine/loop-guard.js";
+import { callRepeatsAsRead, type DeclaredToolEffect, effectiveCallIdentity } from "../engine/loop-guard.js";
 import type { AgentMessage } from "../engine/types.js";
 import { effectiveToolCall } from "../tools/surface.js";
 
@@ -63,10 +66,15 @@ export interface ObservationAgingResult {
 	batch: ObservationAgingBatch | null;
 }
 
+/** The effect an extension tool declared, by registry name; undefined for a tool no longer registered. */
+export type DeclaredToolEffects = (tool: string) => DeclaredToolEffect | undefined;
+
 interface ToolCallFacts {
 	identity: string;
 	tool: string;
 	args: string;
+	/** A repeat reads the same state (`callRepeatsAsRead`), so a later copy supersedes this one. */
+	read: boolean;
 }
 
 interface SupersededResult {
@@ -119,7 +127,7 @@ function renderArgs(args: Record<string, unknown> | undefined): string {
 	return text.length <= STUB_ARGS_CHARS ? text : `${text.slice(0, STUB_ARGS_CHARS - 3)}...`;
 }
 
-function callFacts(messages: ReadonlyArray<AgentMessage>): Map<string, ToolCallFacts> {
+function callFacts(messages: ReadonlyArray<AgentMessage>, declared: DeclaredToolEffects): Map<string, ToolCallFacts> {
 	const calls = new Map<string, ToolCallFacts>();
 	for (const message of messages) {
 		const record = message as unknown as Record<string, unknown>;
@@ -133,6 +141,7 @@ function callFacts(messages: ReadonlyArray<AgentMessage>): Map<string, ToolCallF
 				identity: effectiveCallIdentity(name, block.arguments),
 				tool: effective.toolName,
 				args: renderArgs(effective.args),
+				read: callRepeatsAsRead(name, block.arguments, declared),
 			});
 		}
 	}
@@ -149,8 +158,11 @@ function agingStub(call: ToolCallFacts, bytes: number): string {
 }
 
 /** Results a later identical call superseded, by tool call id, newest-first walk. */
-function supersededResults(messages: ReadonlyArray<AgentMessage>): Map<string, SupersededResult> {
-	const calls = callFacts(messages);
+function supersededResults(
+	messages: ReadonlyArray<AgentMessage>,
+	declared: DeclaredToolEffects,
+): Map<string, SupersededResult> {
+	const calls = callFacts(messages, declared);
 	const refreshed = new Set<string>();
 	const superseded = new Map<string, SupersededResult>();
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -158,7 +170,7 @@ function supersededResults(messages: ReadonlyArray<AgentMessage>): Map<string, S
 		const result = message ? asToolResult(message) : null;
 		if (result === null) continue;
 		const call = calls.get(result.toolCallId);
-		if (call === undefined) continue;
+		if (call === undefined || !call.read) continue;
 		if (refreshed.has(call.identity) && !isHostMarker(result)) {
 			const bytes = textBytes(result.content);
 			const stub = agingStub(call, bytes);
@@ -174,14 +186,16 @@ function supersededResults(messages: ReadonlyArray<AgentMessage>): Map<string, S
  * already stubbed, and the result names the new set. A batch forms only when
  * the superseded bytes not yet stubbed reach `thresholdBytes`; a result
  * stubbed earlier is stubbed again whenever it is still superseded, which on
- * one branch is every later request.
+ * one branch is every later request. `declared` names the extension tools
+ * declared read-only or idempotent; no other extension call is ever stubbed.
  */
 export function ageObservations(
 	messages: ReadonlyArray<AgentMessage>,
 	stubbed: ReadonlySet<string>,
+	declared: DeclaredToolEffects,
 	thresholdBytes: number = OBSERVATION_AGING_BATCH_BYTES,
 ): ObservationAgingResult {
-	const superseded = supersededResults(messages);
+	const superseded = supersededResults(messages, declared);
 	let pendingBytes = 0;
 	for (const [id, result] of superseded) if (!stubbed.has(id)) pendingBytes += result.bytes;
 	let batch: ObservationAgingBatch | null = null;
@@ -212,7 +226,10 @@ export function ageObservations(
  * The stateful half: remembers what earlier requests stubbed so a result,
  * once stubbed, stays stubbed. One per agent runtime.
  */
-export function createObservationAging(thresholdBytes: number = OBSERVATION_AGING_BATCH_BYTES): {
+export function createObservationAging(
+	declared: DeclaredToolEffects,
+	thresholdBytes: number = OBSERVATION_AGING_BATCH_BYTES,
+): {
 	project(
 		messages: ReadonlyArray<AgentMessage>,
 		route: ObservationAgingRoute,
@@ -222,7 +239,7 @@ export function createObservationAging(thresholdBytes: number = OBSERVATION_AGIN
 	return {
 		project(messages, route) {
 			if (!observationAgingApplies(route)) return { messages: [...messages], batch: null };
-			const aged = ageObservations(messages, stubbed, thresholdBytes);
+			const aged = ageObservations(messages, stubbed, declared, thresholdBytes);
 			stubbed = aged.stubbed;
 			return { messages: aged.messages, batch: aged.batch };
 		},

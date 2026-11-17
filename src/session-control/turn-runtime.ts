@@ -71,7 +71,11 @@ import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import type { CacheKeepaliveReply, CacheKeepaliveRequest } from "../engine/cache-keepalive.js";
-import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
+import {
+	type DeclaredToolEffect,
+	lockedSynthesisSystemPrompt,
+	sanitizeLockedSynthesisMessage,
+} from "../engine/loop-guard.js";
 import { applyToolRounds, streamToolRound } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
@@ -258,6 +262,8 @@ export interface TurnRuntimeDeps {
 	state: TurnRuntimeState;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
 	gatewayCapabilityNames?: (() => ReadonlyArray<string>) | undefined;
+	/** The read-only and idempotent flags a registered extension tool declared, for observation aging's gate. */
+	declaredToolEffect?: ((tool: string) => DeclaredToolEffect | undefined) | undefined;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
 	knownTargets: () => ReadonlySet<string>;
@@ -762,7 +768,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			| undefined;
 		// Observation aging (WTF-P 0.8.3 C3): what this agent's requests stubbed, and the bytes a batch saved that no
 		// sent request has journaled yet.
-		const observationAging = createObservationAging();
+		const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
 		let unjournaledAgedBytes = 0;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the

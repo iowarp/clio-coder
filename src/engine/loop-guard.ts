@@ -24,7 +24,7 @@ import {
 	workerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { markHostAuthored } from "../core/message-accounting.js";
-import { READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
+import { EXPLORATION_TOOL_NAMES, READ_ONLY_SHELL_COMMAND_PATTERN } from "../core/read-only-calls.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type {
 	LoopBlockedDisposition,
@@ -200,6 +200,35 @@ function shellCommandOnlyReads(command: unknown): boolean {
 	const text = command.replace(SHELL_NULL_REDIRECT, " ");
 	if (SHELL_WRITE_SIGN.test(text) || /[`]|\$\(/.test(text) || text.includes("\n")) return false;
 	return text.split(/&&|\|\||;|\|/).every((segment) => READ_ONLY_SHELL_COMMAND_PATTERN.test(segment));
+}
+
+/** What an api 2 extension tool declared about its effect (A1); absent for every other tool. */
+export interface DeclaredToolEffect {
+	readOnly?: boolean;
+	idempotent?: boolean;
+}
+
+/**
+ * Whether an identical repeat of this call answers from the same state the
+ * earlier copy read, by the classes A1 reads as making no change: a builtin
+ * read-class tool, a bash command that only reads, a typed git inspection, or
+ * an extension tool declared read-only or idempotent. A gateway call is judged
+ * as the capability it runs. Anything else, such as a desk's `next_step`, may
+ * answer the same arguments with a new state, so its later result is not a
+ * fresh copy of the earlier one; observation aging never stubs it.
+ */
+export function callRepeatsAsRead(
+	toolName: string,
+	args: unknown,
+	declared: (tool: string) => DeclaredToolEffect | undefined,
+): boolean {
+	const call = effectiveToolCall(toolName, args);
+	if (call.toolName === ToolNames.Git) return call.args !== undefined && gitCallIdentity(call.args) !== null;
+	if (EXPLORATION_TOOL_NAMES.has(call.toolName)) return true;
+	if (call.toolName === ToolNames.Bash) return shellCommandOnlyReads(call.args?.command);
+	if (!isHarnessExtensionToolName(call.toolName)) return false;
+	const effect = declared(call.toolName);
+	return effect?.readOnly === true || effect?.idempotent === true;
 }
 
 function stagnationFingerprint(tool: string, args: Record<string, unknown> | undefined): string {
