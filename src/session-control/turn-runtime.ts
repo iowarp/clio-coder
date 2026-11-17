@@ -361,6 +361,8 @@ export interface TurnRuntime {
 
 export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const { state, context, persistence, middleware, middlewareToolChoice } = deps;
+	/** What this session's requests stubbed; a rebuilt agent keeps it, another session id starts it over. */
+	const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
 
 	/**
 	 * Authoritative admission outcome per call, keyed by the engine's
@@ -766,9 +768,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					agedBytes: number;
 			  }
 			| undefined;
-		// Observation aging (WTF-P 0.8.3 C3): what this agent's requests stubbed, and the bytes a batch saved that no
-		// sent request has journaled yet.
-		const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
+		// Observation aging (WTF-P 0.8.3 C3): the bytes a batch saved that no sent request has journaled yet. What the
+		// session's requests stubbed lives in `observationAging`, which outlives this agent.
 		let unjournaledAgedBytes = 0;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
@@ -1184,7 +1185,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			// Every outgoing request passes here, so a stubbed result stays stubbed in each one; the ledger is untouched.
 			transformContext: async (messages) => {
-				const aged = observationAging.project(messages, localRuntime.runtimeResolution);
+				const aged = observationAging.project(messages, localRuntime.runtimeResolution, deps.sessionId?.());
 				if (aged.batch !== null) {
 					unjournaledAgedBytes += aged.batch.bytesSaved;
 					context.noteColdReason("observation_aging");

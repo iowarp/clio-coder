@@ -19,7 +19,9 @@
  * only small-tier routes and routes that do not cache prompts. Cached standard
  * and frontier routes never see it. Wired as the agent's `transformContext`
  * in turn-runtime.ts, the one point every outgoing main-session request
- * passes through, prewarm and provider-replay rebuilds included.
+ * passes through, prewarm and provider-replay rebuilds included. The tracker
+ * belongs to the session, not the agent: a model switch or reload that rebuilds
+ * the agent keeps every stub, and only a different session starts over.
  */
 
 import type { ModelTier } from "../core/model-tier.js";
@@ -223,8 +225,11 @@ export function ageObservations(
 }
 
 /**
- * The stateful half: remembers what earlier requests stubbed so a result,
- * once stubbed, stays stubbed. One per agent runtime.
+ * The stateful half: remembers what earlier requests of one session stubbed so
+ * a result, once stubbed, stays stubbed. One per chat loop, outliving every
+ * agent it builds, so a rebuild neither repeats a batch nor reverts a stub.
+ * A request under a different session id starts from nothing: a switch, a new
+ * session and a fork each carry other tool call ids.
  */
 export function createObservationAging(
 	declared: DeclaredToolEffects,
@@ -233,11 +238,17 @@ export function createObservationAging(
 	project(
 		messages: ReadonlyArray<AgentMessage>,
 		route: ObservationAgingRoute,
+		sessionId: string | undefined,
 	): { messages: AgentMessage[]; batch: ObservationAgingBatch | null };
 } {
 	let stubbed: ReadonlySet<string> = new Set();
+	let owner: string | undefined;
 	return {
-		project(messages, route) {
+		project(messages, route, sessionId) {
+			if (sessionId !== owner) {
+				owner = sessionId;
+				stubbed = new Set();
+			}
 			if (!observationAgingApplies(route)) return { messages: [...messages], batch: null };
 			const aged = ageObservations(messages, stubbed, declared, thresholdBytes);
 			stubbed = aged.stubbed;

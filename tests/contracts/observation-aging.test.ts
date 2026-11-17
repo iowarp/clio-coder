@@ -129,10 +129,10 @@ it("the gate admits small or uncached routes only; a cached frontier route is un
 		result("b", RECORD_TOOL, big),
 	];
 	const aging = createObservationAging(declared);
-	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true });
+	const cached = aging.project(messages, { modelTier: "frontier", promptCaching: true }, "s");
 	strictEqual(cached.batch, null);
 	deepStrictEqual(cached.messages, messages);
-	const small = aging.project(messages, { modelTier: "small", promptCaching: true });
+	const small = aging.project(messages, { modelTier: "small", promptCaching: true }, "s");
 	strictEqual(small.batch?.results, 1);
 	ok(text(small.messages[1]).startsWith("[observation aged]"));
 });
