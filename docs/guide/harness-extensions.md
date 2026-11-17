@@ -12,7 +12,7 @@ Source: `src/domains/extensions/`, [harness-extensions.ts](../../src/tools/harne
 
 ## Package manifest
 
-An extension root contains one manifest, found in the order `clio-coder-extension.yaml`, `clio-coder-extension.yml`, `clio-coder-extension.json`. Any other top-level key is an error.
+An extension root contains one manifest, found in the order `clio-coder-extension.yaml`, `clio-coder-extension.yml`, `clio-coder-extension.json`. Any other top-level key is an error unless the manifest lists it under `ignorable`.
 
 | Key | Required | Rule |
 | --- | --- | --- |
@@ -24,10 +24,35 @@ An extension root contains one manifest, found in the order `clio-coder-extensio
 | `plugin` | no | The one plugin this extension serves, as a plugin id. See [Pairing with a plugin](#pairing-with-a-plugin). |
 | `runtime` | no | The extension's code and everything it may do. `runtime.api: 2` is the current contract; `runtime.api: 1` still loads. |
 | `capabilities.tools` | no | 1 to 32 command tool declarations. See [Command tools](#command-tools). |
+| `ignorable` | no | Up to 32 field paths a host that does not know them may skip. See [Ignorable fields](#ignorable-fields). |
 
 `capabilities` and `runtime` are optional, so a package whose only contribution is a root `hooks.yaml` is a valid extension with no tools. A manifest naming `resources`, `prompts`, `skills`, `agents`, or `fleets` is invalid, and the diagnostic points at `clio-coder library install <path>` because those belong in a plugin.
 
 Installation refuses a package whose `compatibility.clio` range excludes the running CLIO Coder version, naming the extension, its range, and the running version. The check repeats whenever installed extensions load, so a package that becomes incompatible after an upgrade stays visible in `extensions list` with its diagnostic and contributes nothing. An incompatible project package does not hide a compatible user package with the same ID. A manifest without `compatibility.clio` is unrestricted.
+
+### Ignorable fields
+
+Every manifest object is closed: a key the host does not know fails discovery, as `runtime.<path> is not a known field` inside `runtime`, `unknown manifest key` at the root and `unknown compatibility key` under `compatibility`, because the manifest is what the operator consents to and a host never drops a field on its own judgment. `ignorable` lets the author make that judgment ahead of time. Each entry is a field path dotted from the manifest root with list elements unindexed, so `runtime.tools.readOnly` covers that key on every declared tool and `runtime.workspaces.keys.hint` covers it on every key binding. Entries are unique, at most 32, at most 160 characters and 8 segments each; a malformed entry fails as `ignorable[<n>] ...`.
+
+A host that meets a key it does not know skips it when the key's path is listed and adds one warning per path, `extension <id> ignores <path>: this Clio does not know the field and the manifest lists it under ignorable`, which `extensions validate`, `discover`, `install` and `list` print. An unlisted unknown key still fails. A key the host knows is parsed and enforced whether or not it is listed, so listing a key never weakens a host that understands it. A skipped key is never read: it adds nothing to the capability envelope, and the `ignorable` list itself stays out of the envelope because it grants nothing, so adding it to an installed manifest does not ask the operator again. Plugin-owned keys such as `skills` are refused even when listed.
+
+List only keys whose absence leaves the package safe and correct, such as a hint. WTF-P declares loop-guard hints on its tools and promotes its step tool:
+
+```yaml
+compatibility: { clio: ">=0.8.4-0" }
+ignorable:
+  - runtime.tools.readOnly
+runtime:
+  api: 2
+  tools:
+    - name: status
+      actionClass: execute
+      readOnly: true
+    # description, inputSchema and the other tools elided
+  promote: [next_step]
+```
+
+A future host without `readOnly` would run the package with a weaker repeat count in the loop guard, which is acceptable, so the path is listed. `runtime.promote` is not listed: a step gate that pins the tool choice needs the promoted tool, so a host that cannot promote should refuse the package rather than load it without that guarantee. Hosts before 0.8.4 do not know `ignorable` itself and refuse it as an unknown manifest key, so a package that uses it keeps `compatibility.clio` at `>=0.8.4-0`. From 0.8.4 on, a new optional field needs an `ignorable` entry rather than a new floor.
 
 ### Install locations and precedence
 
@@ -79,7 +104,7 @@ Hand-made worktrees do not inherit that approval. Source:
 
 ## Capability envelope
 
-The `runtime` block of an api 2 manifest is the capability envelope: the part of the declaration the operator consents to. Its canonical form covers commands, takeovers of a plugin's prompts (`takesOver`), kept host state (`state`), events and tick, watched paths, hooks with their timeouts and failure modes, tools with their action class, the tools it promotes (`promote`), interface slots, workspaces with their regions and keys, content access, file roots, and whether it may run programs or use the network. CLIO Coder hashes that canonical form into the envelope digest. Reordering a list never changes the digest.
+The `runtime` block of an api 2 manifest is the capability envelope: the part of the declaration the operator consents to. Its canonical form covers commands, takeovers of a plugin's prompts (`takesOver`), kept host state (`state`), events and tick, watched paths, hooks with their timeouts and failure modes, tools with their action class, the tools it promotes (`promote`), interface slots, workspaces with their regions and keys, content access, file roots, and whether it may run programs or use the network. CLIO Coder hashes that canonical form into the envelope digest. Reordering a list never changes the digest. Keys skipped under [`ignorable`](#ignorable-fields) and the `ignorable` list itself never enter it.
 
 The operator reviews the envelope in words before an install and before an update:
 

@@ -2,7 +2,8 @@
 
 The standalone root has `clio-coder-extension.yaml` with `id`, `version`,
 `description`, an optional `name` (defaults to the ID), and `runtime`.
-Runtime keys are closed: unknown fields fail validation. A minimal package declaring one command and its card:
+Manifest keys are closed: unknown fields fail validation unless the manifest
+lists them under `ignorable` (below). A minimal package declaring one command and its card:
 
 ```yaml
 id: sample
@@ -93,6 +94,37 @@ Explain those costs too; do not mistake digest membership for complete review.
 The current growth comparison catches new timers but does not compare the
 frequency of an existing timer or changes to board placement. Ask the operator
 to review such behavior changes explicitly; do not rely on a fresh consent card.
+
+## Ignorable fields
+
+A top-level `ignorable` lists field paths a host that does not know them may
+skip: dotted from the manifest root, list elements unindexed
+(`runtime.tools.readOnly` covers every tool), unique, at most 32. A host skips
+an unknown key only when its path is listed, and warns once per path naming
+the extension (`extensions validate`, `discover`, `install` and `list` print
+it); an unlisted unknown key still fails. A known key is parsed and enforced
+whether or not it is listed. Skipped keys and the list itself stay out of the
+consent digest, so adding `ignorable` never asks the operator again.
+
+List only keys whose absence leaves the package safe and correct, such as a
+hint. WTF-P lists its loop-guard hint and keeps promotion strict, because its
+step gate needs the promoted tool:
+
+```yaml
+compatibility: { clio: ">=0.8.4-0" }
+ignorable:
+  - runtime.tools.readOnly
+runtime:
+  api: 2
+  tools:
+    - { name: status, actionClass: execute, readOnly: true }
+    # description, inputSchema and the other tools elided
+  promote: [next_step]
+```
+
+Hosts before 0.8.4 do not know `ignorable` itself and refuse it as an unknown
+manifest key, so keep `compatibility.clio` at `>=0.8.4-0` when you use it. From
+0.8.4 on, a new optional field needs an `ignorable` entry, not a new floor.
 
 `exec: true` is a boolean, not a Git-only allowlist. An example may use only
 `execFile("git", explicitArgv, ...)`, but the granted child-process authority is

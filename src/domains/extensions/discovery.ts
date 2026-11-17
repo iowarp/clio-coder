@@ -4,6 +4,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { isPluginId } from "../plugins/index.js";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
+import { ManifestKeyPolicy, parseIgnorable } from "./ignorable.js";
 import { parseExtensionRuntime } from "./runtime-schema.js";
 import { parseExtensionRuntimeV2 } from "./runtime-schema-v2.js";
 import { validateSkin } from "./skin-schema.js";
@@ -19,6 +20,7 @@ const MANIFEST_KEYS = new Set([
 	"capabilities",
 	"runtime",
 	"plugin",
+	"ignorable",
 ]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
 /**
@@ -62,21 +64,22 @@ function rejectUnknownKeys(
 	label: string,
 	manifestPath: string,
 	diagnostics: ExtensionDiagnostic[],
+	policy: ManifestKeyPolicy,
 ): void {
-	for (const key of Object.keys(value).sort()) {
-		if (!allowed.has(key)) {
-			diagnostics.push({ type: "error", message: `unknown ${label} key '${key}'`, path: manifestPath });
-		}
-	}
+	for (const key of policy.unknown(value, label, allowed).sort())
+		diagnostics.push({ type: "error", message: `unknown ${label} key '${key}'`, path: manifestPath });
 }
 
+/** A plugin-owned key is known, as a refusal, so listing it under `ignorable` never skips it. */
 function rejectManifestKeys(
 	value: Record<string, unknown>,
 	manifestPath: string,
 	diagnostics: ExtensionDiagnostic[],
+	policy: ManifestKeyPolicy,
 ): void {
-	for (const key of Object.keys(value).sort()) {
-		if (MANIFEST_KEYS.has(key)) continue;
+	const known = { has: (key: string) => MANIFEST_KEYS.has(key) || PLUGIN_OWNED_KEYS.has(key) };
+	const owned = Object.keys(value).filter((key) => PLUGIN_OWNED_KEYS.has(key));
+	for (const key of [...owned, ...policy.unknown(value, "", known)].sort()) {
 		diagnostics.push({
 			type: "error",
 			message: PLUGIN_OWNED_KEYS.has(key)
@@ -98,7 +101,18 @@ export function parseExtensionManifest(
 	if (!isRecord(value)) {
 		return { diagnostics: [{ type: "error", message: "extension manifest must be an object", path: manifestPath }] };
 	}
-	rejectManifestKeys(value, manifestPath, diagnostics);
+	let ignorable: string[] = [];
+	try {
+		ignorable = parseIgnorable(value.ignorable);
+	} catch (error) {
+		diagnostics.push({
+			type: "error",
+			message: error instanceof Error ? error.message : String(error),
+			path: manifestPath,
+		});
+	}
+	const policy = new ManifestKeyPolicy(ignorable);
+	rejectManifestKeys(value, manifestPath, diagnostics, policy);
 	const id = trimString(value.id);
 	const name = trimString(value.name) ?? id;
 	const version = trimString(value.version);
@@ -122,7 +136,8 @@ export function parseExtensionManifest(
 	let runtimeV2: ClioExtensionManifest["runtimeV2"];
 	if (value.runtime !== undefined) {
 		try {
-			if ((value.runtime as { api?: unknown } | null)?.api === 2) runtimeV2 = parseExtensionRuntimeV2(value.runtime);
+			if ((value.runtime as { api?: unknown } | null)?.api === 2)
+				runtimeV2 = parseExtensionRuntimeV2(value.runtime, policy);
 			else runtime = parseExtensionRuntime(value.runtime);
 		} catch (error) {
 			diagnostics.push({
@@ -148,7 +163,7 @@ export function parseExtensionManifest(
 		if (!isRecord(value.compatibility)) {
 			diagnostics.push({ type: "error", message: "compatibility must be an object", path: manifestPath });
 		} else {
-			rejectUnknownKeys(value.compatibility, COMPATIBILITY_KEYS, "compatibility", manifestPath, diagnostics);
+			rejectUnknownKeys(value.compatibility, COMPATIBILITY_KEYS, "compatibility", manifestPath, diagnostics, policy);
 			if (!("clio" in value.compatibility)) {
 				compatibility = {};
 			} else {
@@ -174,6 +189,7 @@ export function parseExtensionManifest(
 			}
 		}
 	}
+	diagnostics.push(...policy.warnings(id, manifestPath));
 	if (!id || !name || !version || !description || diagnostics.some((diag) => diag.type === "error")) {
 		return { diagnostics };
 	}
