@@ -2,6 +2,28 @@
 
 Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Round 2 of the WTF-P 0.8.3 findings, built on the 0.8.4-rc.1 cut.
+
+### Added
+
+- B4: `safety.limits.templateToolCallsPerTurnMax` and `safety.limits.templateObservationBytesPerTurnMax` let a prompt template's `budget` raise its turn above the per-turn limits, up to that ceiling. Unset, the default, a template can only lower them. The limit message names the bound that applied, and a project settings layer can only lower a ceiling the user set.
+- C3: on small-tier routes and routes that do not cache prompts, a tool result that a later identical call (same effective tool and canonical arguments) superseded is replaced in the outgoing request by a one-line stub. Stubs land in one batch once 32 KiB of superseded bytes accumulate and stay stubbed afterwards. The session ledger keeps the full result, and the batch is journaled as the `observation_aging` cold reason with `observationAgingBytes`. Cached standard and frontier routes are untouched.
+- C5: under a template `turnPolicy: step`, each step turn after the first on a small-tier or uncached route starts from a step-boundary checkpoint (the previous step's final text, the template body and the pinned blocks) instead of the full history, with no summarizer call. It is recorded as the `step_checkpoint` cold reason. A step turn that failed, or that the loop guard or the tool budget stopped, is followed by a turn with the full history, and cached standard and frontier routes always keep it.
+
+### Changed
+
+- B1: `run --answers` answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. A model's ordinary `ask_user` call in a headless run is refused as having no operator, as without the file, and no `id`, `header` or `match` rule answers it.
+- Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.1) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), round 2 included.
+
+### Fixed
+
+- B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.
+- B5: a session's pinned context blocks persist with the session, so a resumed or restarted session carries them on its first request. A cleared block, or one whose extension was removed, stays cleared, and a state directory that cannot be written leaves the running session's blocks in place.
+- C3: `ledger(action="detail", ref=...)` is reachable through the gateway in a session without dispatch once an api 2 extension serves a runtime tool, so an extension result's `detail_ref` is always readable.
+- C5: two step-tool calls in one parallel batch no longer both run under a template `turnPolicy: step`. The second is refused while the first is in flight.
+
 ## 0.8.4-rc.1 - 2026-11-16
 
 This release candidate fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.

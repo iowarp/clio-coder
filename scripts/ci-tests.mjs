@@ -210,6 +210,11 @@ export const coreTests = [
 	"continuation-last-tool-call",
 	"telemetry-token-sources",
 	"compact-tool-results",
+	"observation-aging",
+	"template-budget-ceiling",
+	"step-compact-start",
+	"extension-pinned-restart",
+	"responses-pinned-round-tools",
 	"campaign-run",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
