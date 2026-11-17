@@ -4,7 +4,8 @@
  *
  * A result is aged only when it is superseded: a later call with the same
  * effective tool and canonical arguments (the loop guard's call identity,
- * gateway calls unwrapped) completed ok later in the same request. Age alone
+ * gateway calls unwrapped) completed ok later in the same request and
+ * delivered at least what the earlier result showed. Age alone
  * never ages anything, and the session ledger keeps every byte; only the copy
  * the provider is about to read changes. Only a call that repeats as a read
  * qualifies (`callRepeatsAsRead`, the loop guard's A1 classes): a later
@@ -119,6 +120,51 @@ function isHostMarker(result: ToolResultView): boolean {
 	return isRecord(details?.workingSet) && details.workingSet.evicted === true;
 }
 
+/** What a result delivered, read from the shared `details.observation` envelope; null when it carries none. */
+interface Delivery {
+	truncated: boolean;
+	shownCount: number;
+	shownBytes: number;
+}
+
+function delivery(result: ToolResultView): Delivery | null {
+	const observation = isRecord(result.details) ? result.details.observation : undefined;
+	if (!isRecord(observation)) return null;
+	const { truncated, shownCount, shownBytes } = observation;
+	if (typeof truncated !== "boolean" || typeof shownCount !== "number" || typeof shownBytes !== "number") return null;
+	return { truncated, shownCount, shownBytes };
+}
+
+/**
+ * The most a later result of one identity delivered. `complete` is a result
+ * that was not truncated, or one with no observation envelope (bash, extension
+ * tools), which keeps the rule that any ok repeat is a fresh copy. Otherwise
+ * `shownBytes` is the largest truncated slice that showed anything.
+ */
+interface Refresh {
+	complete: boolean;
+	shownBytes: number;
+}
+
+function refreshFrom(result: ToolResultView, prior: Refresh | undefined): Refresh {
+	const delivered = delivery(result);
+	const complete = delivered === null || !delivered.truncated;
+	const shownBytes = delivered !== null && delivered.shownCount > 0 ? delivered.shownBytes : 0;
+	return { complete: complete || prior?.complete === true, shownBytes: Math.max(shownBytes, prior?.shownBytes ?? 0) };
+}
+
+/**
+ * A later copy replaces an earlier one only when it delivered at least as much:
+ * a budget-exhausted notice (`shownCount: 0`) or a clipped repeat that showed
+ * fewer bytes than the earlier result would leave the model without that data.
+ */
+function covers(refresh: Refresh, earlier: ToolResultView): boolean {
+	if (refresh.complete) return true;
+	if (refresh.shownBytes === 0) return false;
+	const delivered = delivery(earlier);
+	return refresh.shownBytes >= (delivered !== null ? delivered.shownBytes : textBytes(earlier.content));
+}
+
 function renderArgs(args: Record<string, unknown> | undefined): string {
 	let text: string;
 	try {
@@ -165,20 +211,21 @@ function supersededResults(
 	declared: DeclaredToolEffects,
 ): Map<string, SupersededResult> {
 	const calls = callFacts(messages, declared);
-	const refreshed = new Set<string>();
+	const refreshed = new Map<string, Refresh>();
 	const superseded = new Map<string, SupersededResult>();
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index];
 		const result = message ? asToolResult(message) : null;
 		if (result === null) continue;
 		const call = calls.get(result.toolCallId);
-		if (call === undefined || !call.read) continue;
-		if (refreshed.has(call.identity) && !isHostMarker(result)) {
+		if (call === undefined || !call.read || isHostMarker(result)) continue;
+		const refresh = refreshed.get(call.identity);
+		if (refresh !== undefined && covers(refresh, result)) {
 			const bytes = textBytes(result.content);
 			const stub = agingStub(call, bytes);
 			if (bytes > Buffer.byteLength(stub, "utf8")) superseded.set(result.toolCallId, { index, bytes, stub });
 		}
-		if (result.isError !== true && !isHostMarker(result)) refreshed.add(call.identity);
+		if (result.isError !== true) refreshed.set(call.identity, refreshFrom(result, refresh));
 	}
 	return superseded;
 }

@@ -116,6 +116,36 @@ it("superseded results wait below the threshold, stub in one batch past it, stay
 	strictEqual(text(later.messages[13]), body(small, "fifth"));
 });
 
+it("a repeat that delivered less than the earlier read supersedes nothing (Astra r1-3)", () => {
+	const read = (id: string, output: string, shownCount: number, truncated: boolean): AgentMessage =>
+		({
+			...(result(id, "read", output) as object),
+			details: { observation: { tool: "read", unit: "lines", shownCount, shownBytes: output.length, truncated } },
+		}) as unknown as AgentMessage;
+	const args = { path: "big.ts" };
+	const whole = body(40_000, "whole");
+	const messages: AgentMessage[] = [
+		call("a", "read", args),
+		read("a", whole, 800, false),
+		// The pool is exhausted: an ok notice that shows nothing.
+		call("b", "read", args),
+		read("b", "[observation budget exhausted for this turn before read reading big.ts]", 0, true),
+		// A budget-clipped repeat shows fewer bytes than the first read did.
+		call("c", "read", args),
+		read("c", body(10_000, "clipped"), 200, true),
+	];
+	const kept = ageObservations(messages, new Set(), declared, 1);
+	strictEqual(kept.batch, null);
+	deepStrictEqual(kept.messages, messages);
+	// A complete repeat supersedes all three; the notice is shorter than a stub and stays.
+	messages.push(call("d", "read", args), read("d", whole, 800, false));
+	const aged = ageObservations(messages, new Set(), declared, 1);
+	strictEqual(aged.batch?.results, 2);
+	ok(text(aged.messages[1]).startsWith("[observation aged] read "));
+	ok(text(aged.messages[5]).startsWith("[observation aged] read "));
+	strictEqual(text(aged.messages[7]), whole);
+});
+
 it("the gate admits small or uncached routes only; a cached frontier route is untouched", () => {
 	ok(observationAgingApplies({ modelTier: "small", promptCaching: true }));
 	ok(observationAgingApplies({ modelTier: "frontier", promptCaching: false }));
