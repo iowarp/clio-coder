@@ -5,23 +5,27 @@ import type { AskUserAnswer, AskUserHandler, AskUserQuestion, AskUserResult } fr
 
 /**
  * `clio-coder run --answers <file.yaml>`: the author's answers, written ahead,
- * to the questions a headless run puts to them (WTF-P 0.8.3 B1). The file is
+ * to the questions only the author may answer in a headless run (WTF-P 0.8.3
+ * B1). Those are an extension's interview steps (its gate questions) and the
+ * model's `operator_only` ask_user questions. The file is
  *
  *   answers:
  *     - id: plan-introduction        # an extension question's checkpoint id
  *       choice: Approve this plan as shown
- *     - header: Which config?        # the question's header, exactly
- *       choice: [Project file]
- *       note: keep the user file as it is
- *     - match: "^Carry out this plan"  # a regex over the question text
- *       choice: Keep the plan (Recommended)
+ *     - header: Research question    # the question's header, exactly
+ *       note: Does tiered caching cut tail latency?
+ *     - match: "^Accept the"         # a regex over the question text
+ *       choice: Keep it pending
  *
  * Each entry names exactly one rule and gives a `choice` (option labels, one
  * or a list), a `note` (typed text: beside the choice, or the whole answer to
  * a question without options), or both. The first entry in file order whose
- * rule matches answers the question. A question no entry matches is never
- * answered for the author: the round is cancelled as unscripted and the run
- * ends, naming the question so the script can be extended.
+ * rule matches answers the question. Rules match author questions only: the
+ * model's ordinary ask_user round is never answered from the file, and goes
+ * as it does in a run without one, with no operator to answer it. An author
+ * question no entry matches is never answered for the author: the round is
+ * cancelled as unscripted and the run ends, naming the question so the script
+ * can be extended.
  */
 
 const RULE_KINDS = ["id", "header", "match"] as const;
@@ -50,8 +54,14 @@ export interface UnscriptedQuestion {
 export interface ScriptedAnswers {
 	/** The answers file as the operator named it, resolved to an absolute path. */
 	readonly file: string;
-	/** Answers ask_user rounds and extension interview steps from the file. */
-	readonly ask: AskUserHandler;
+	/**
+	 * The ask_user tool's handler. It answers an `operator_only` round from the
+	 * file and returns `noOperator` for any other round, which nobody answers in
+	 * a headless run.
+	 */
+	readonly askUser: AskUserHandler;
+	/** The headless extension host's handler: answers each extension interview step from the file. */
+	readonly interview: AskUserHandler;
 	/** The first question the file could not answer; null while every question matched. */
 	unscripted(): UnscriptedQuestion | null;
 	/** Told once, synchronously, when the first unscripted question cancels its round. */
@@ -77,7 +87,11 @@ function parseEntry(raw: unknown, index: number): AnswerRule {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) fail(where, "expected a mapping");
 	const entry = raw as Record<string, unknown>;
 	for (const key of Object.keys(entry)) {
-		if (!ENTRY_KEYS.has(key)) fail(`${where}.${key}`, "unknown key; an entry takes id, header or match, choice and note");
+		if (!ENTRY_KEYS.has(key))
+			fail(
+				`${where}.${key}`,
+				"unknown key; an entry takes one of id, header or match to name an author question, then choice and note",
+			);
 	}
 	const kinds = RULE_KINDS.filter((kind) => Object.hasOwn(entry, kind));
 	const kind = kinds[0];
@@ -200,7 +214,7 @@ function createScriptedAnswers(file: string, rules: ReadonlyArray<AnswerRule>): 
 		}
 		return { answers: [], cancelled: true, unscripted: true };
 	};
-	const ask: AskUserHandler = async (questions) => {
+	const interview: AskUserHandler = async (questions) => {
 		// Once one question went unanswered the run is ending; nothing later is answered either.
 		const ended = first;
 		if (ended !== null) return { answers: [], cancelled: true, unscripted: true };
@@ -216,7 +230,12 @@ function createScriptedAnswers(file: string, rules: ReadonlyArray<AnswerRule>): 
 	};
 	return {
 		file,
-		ask,
+		// operator_only is asked alone, so a round is either wholly the author's or wholly the model's ordinary ask.
+		askUser: (questions, options) =>
+			questions.some((question) => question.operator_only === true)
+				? interview(questions, options)
+				: Promise.resolve({ answers: [], cancelled: true, noOperator: true }),
+		interview,
 		unscripted: () => first,
 		onUnscripted(listener) {
 			listeners.add(listener);
