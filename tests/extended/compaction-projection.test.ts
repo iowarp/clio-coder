@@ -741,6 +741,30 @@ describe("compaction working-set provider boundary", () => {
 		deepStrictEqual(entries, original);
 	});
 
+	it("renders a persisted write call once and clips its arguments to fit a small summarizer", async () => {
+		// Astra r1-2: the assistant block and the tool_call row carried the same 40 KiB body into the summary.
+		const body = "WRITE_BODY_LINE\n".repeat(2560);
+		const args = { path: "src/big.ts", content: body };
+		const entries = chain([
+			message("ask", "user", { text: "Write the file" }),
+			message("call", "assistant", {
+				text: "",
+				content: [{ type: "toolCall", id: "w1", name: "write", arguments: args }],
+			}),
+			message("row", "tool_call", { toolCallId: "w1", name: "write", args }),
+			message("legacy", "tool_call", { toolCallId: "w0", name: "read", args: { path: "src/old.ts" } }),
+			message("result", "tool_result", { toolCallId: "w1", toolName: "write", result: "wrote src/big.ts" }),
+			message("new", "user", { text: "Continue" }),
+		]);
+		await compact({ entries, model: model(16_000, 4096), keepRecentTokens: 100 });
+		strictEqual(calls.length, 1);
+		const text = calls[0]?.text ?? "";
+		strictEqual(text.split("write(").length - 1, 1, "one rendering of the write call");
+		match(text, /read\(\{\\"path\\":\\"src\/old\.ts\\"\}\)/, "a row with no assistant block still renders");
+		match(text, /characters omitted from this message/);
+		ok((calls[0]?.inputTokens ?? Number.POSITIVE_INFINITY) <= 16_000 - 4096, JSON.stringify(calls[0]?.inputTokens));
+	});
+
 	for (const oversized of ["system", "instructions", "previous"] as const) {
 		it(`rejects an oversized ${oversized} before invoking or accounting for a provider`, async () => {
 			const huge = "PRESERVE_EXACT_CONSTRAINT ".repeat(10000);

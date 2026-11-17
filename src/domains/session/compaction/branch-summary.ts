@@ -77,37 +77,57 @@ function assistantThinkingText(entry: MessageEntry): string {
 		.join("\n");
 }
 
-function assistantToolCallsText(entry: MessageEntry): string {
-	const calls = contentBlocks(entry.payload)
-		.filter((block) => block.type === "toolCall")
-		.map((block) => {
-			const name = typeof block.name === "string" && block.name.length > 0 ? block.name : "tool";
-			return displayCallText(name, block.arguments ?? block.args ?? block.input);
-		});
+function assistantToolCalls(entry: MessageEntry): ReadonlyArray<Record<string, unknown>> {
+	return contentBlocks(entry.payload).filter((block) => block.type === "toolCall");
+}
+
+function assistantToolCallsText(entry: MessageEntry, messageMax: number | undefined): string {
+	const calls = assistantToolCalls(entry).map((block) => {
+		const name = typeof block.name === "string" && block.name.length > 0 ? block.name : "tool";
+		return displayCallText(name, block.arguments ?? block.args ?? block.input, messageMax);
+	});
 	return calls.join("; ");
 }
 
-function toolCallText(entry: MessageEntry): string {
+function toolCallText(entry: MessageEntry, messageMax: number | undefined): string {
 	const obj = payloadObject(entry.payload);
 	if (!obj) return messageText(entry);
 	const name = typeof obj.name === "string" ? obj.name : typeof obj.toolName === "string" ? obj.toolName : "tool";
 	const args = toolCallArguments(obj);
-	if (args !== undefined) return displayCallText(name, args);
+	if (args !== undefined) return displayCallText(name, args, messageMax);
 	return messageText(entry) || name;
+}
+
+/**
+ * Chat persists one call twice: as a toolCall block in the assistant message
+ * and as the tool_call row written when it starts. The assistant block comes
+ * first and renders the call, so a row whose id one of them carries is
+ * skipped. A row with no such block in the slice, as in legacy ledgers or a
+ * slice cut between the two, still renders.
+ */
+function assistantCallIds(entries: ReadonlyArray<SessionEntry>): ReadonlySet<string> {
+	const ids = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind !== "message" || entry.role !== "assistant") continue;
+		for (const block of assistantToolCalls(entry)) if (typeof block.id === "string") ids.add(block.id);
+	}
+	return ids;
 }
 
 /**
  * A summary names the capability that ran, as the transcript and /tree do: the
  * coordinator reaches most capabilities through gateway op=call or a chain.
  */
-function displayCallText(name: string, args: unknown): string {
+function displayCallText(name: string, args: unknown, messageMax: number | undefined): string {
 	if (isGatewayChain(name, args)) {
 		const steps = gatewayChainPlan(name, args).map((step) => step.capability);
 		return `gateway chain(${steps.join(", ")})`;
 	}
 	const call = displayToolCall(name, args);
 	if (args === undefined) return call.toolName;
-	return `${call.toolName}(${stringifyPreview(call.viaGateway ? (call.args ?? {}) : args)})${call.viaGateway ? " via gateway" : ""}`;
+	// Arguments take the message clip, so a large write body cannot hold a slice over budget.
+	const shown = clipMessage(stringifyPreview(call.viaGateway ? (call.args ?? {}) : args), messageMax);
+	return `${call.toolName}(${shown})${call.viaGateway ? " via gateway" : ""}`;
 }
 
 function toolResultText(entry: MessageEntry): string {
@@ -142,6 +162,7 @@ export function serializeConversation(
 ): string {
 	const bodyMax = options.toolResultMaxChars ?? TOOL_RESULT_MAX_CHARS;
 	const messageMax = options.messageMaxChars;
+	const renderedCalls = assistantCallIds(entries);
 	const parts: string[] = [];
 	for (const entry of entries) {
 		if (entry.kind === "message") {
@@ -153,15 +174,18 @@ export function serializeConversation(
 					break;
 				case "assistant": {
 					const thinking = assistantThinkingText(entry).trim();
-					const calls = assistantToolCallsText(entry).trim();
+					const calls = assistantToolCallsText(entry, messageMax).trim();
 					if (thinking.length > 0) parts.push(`[Assistant thinking]: ${clipMessage(thinking, messageMax)}`);
 					if (text.length > 0) parts.push(`[Assistant]: ${clipMessage(text, messageMax)}`);
 					if (calls.length > 0) parts.push(`[Assistant tool calls]: ${calls}`);
 					break;
 				}
-				case "tool_call":
-					parts.push(`[Assistant tool calls]: ${toolCallText(entry).trim()}`);
+				case "tool_call": {
+					const id = payloadObject(entry.payload)?.toolCallId;
+					if (typeof id === "string" && renderedCalls.has(id)) break;
+					parts.push(`[Assistant tool calls]: ${toolCallText(entry, messageMax).trim()}`);
 					break;
+				}
 				case "tool_result":
 					parts.push(`[Tool result]: ${truncate(toolResultText(entry).trim(), bodyMax)}`);
 					break;
