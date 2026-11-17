@@ -1,4 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
+import { ManifestKeyPolicy } from "./ignorable.js";
 import type { ExtensionOutput, ExtensionPanel, ExtensionStatus } from "./public-api.js";
 import type { ExtensionRuntimeDeclaration } from "./types.js";
 
@@ -18,8 +19,11 @@ function record(value: unknown): Record<string, unknown> {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("expected an object");
 	return value as Record<string, unknown>;
 }
-function keys(value: Record<string, unknown>, allowed: string[]): void {
-	for (const key of Object.keys(value)) if (!allowed.includes(key)) throw new Error(`unknown runtime field '${key}'`);
+const STRICT = new ManifestKeyPolicy();
+/** Runtime output is always closed; a manifest object passes its path and the manifest's `ignorable` policy. */
+function keys(value: Record<string, unknown>, allowed: string[], path = "", policy = STRICT): void {
+	const [unknown] = policy.unknown(value, path, new Set(allowed));
+	if (unknown !== undefined) throw new Error(`unknown runtime field '${unknown}'`);
 }
 function string(value: unknown, max: number): string {
 	if (typeof value !== "string" || value.length === 0 || value.length > max)
@@ -38,16 +42,16 @@ function choices<T extends string>(value: unknown, allowed: readonly T[]): T[] {
 	if (new Set(entries).size !== entries.length) throw new Error("duplicate runtime capability");
 	return entries;
 }
-export function parseExtensionRuntime(value: unknown): ExtensionRuntimeDeclaration {
+export function parseExtensionRuntime(value: unknown, policy: ManifestKeyPolicy = STRICT): ExtensionRuntimeDeclaration {
 	const raw = record(value);
-	keys(raw, ["api", "entrypoint", "commands", "events", "ui"]);
+	keys(raw, ["api", "entrypoint", "commands", "events", "ui"], "runtime", policy);
 	if (raw.api !== 1) throw new Error("runtime.api must be 1");
 	const entrypoint = string(raw.entrypoint, 240);
 	if (!entrypoint.endsWith(".mjs")) throw new Error("runtime.entrypoint must be a shipped .mjs file");
 	const names = new Set<string>();
-	const commands = array(raw.commands ?? [], 32).map((value) => {
+	const commands = array(raw.commands ?? [], 32).map((value, index) => {
 		const command = record(value);
-		keys(command, ["name", "description", "timeoutMs"]);
+		keys(command, ["name", "description", "timeoutMs"], `runtime.commands[${index}]`, policy);
 		const name = string(command.name, 40);
 		if (!/^[a-z][a-z0-9_]*$/.test(name) || names.has(name))
 			throw new Error(`invalid or duplicate runtime command '${name}'`);

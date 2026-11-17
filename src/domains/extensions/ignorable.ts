@@ -38,8 +38,10 @@ export class ManifestKeyPolicy {
 		const refused: string[] = [];
 		for (const key of Object.keys(raw)) {
 			if (allowed.has(key)) continue;
-			const field = unindexedPath(path ? `${path}.${key}` : key);
-			if (this.listed.has(field)) this.skipped.add(field);
+			const parent = unindexedPath(path);
+			const field = parent ? `${parent}.${key}` : key;
+			// A key that is not one plain segment (`tools.readOnly`, `hint[0]`) would read as another field's path.
+			if (SEGMENT.test(key) && this.listed.has(field)) this.skipped.add(field);
 			else refused.push(key);
 		}
 		return refused;

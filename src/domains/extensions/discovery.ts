@@ -138,7 +138,7 @@ export function parseExtensionManifest(
 		try {
 			if ((value.runtime as { api?: unknown } | null)?.api === 2)
 				runtimeV2 = parseExtensionRuntimeV2(value.runtime, policy);
-			else runtime = parseExtensionRuntime(value.runtime);
+			else runtime = parseExtensionRuntime(value.runtime, policy);
 		} catch (error) {
 			diagnostics.push({
 				type: "error",
@@ -149,7 +149,7 @@ export function parseExtensionManifest(
 	}
 	if (value.capabilities !== undefined) {
 		try {
-			capabilities = parseExtensionCapabilities(value.capabilities, id ?? "");
+			capabilities = parseExtensionCapabilities(value.capabilities, id ?? "", policy);
 		} catch (error) {
 			diagnostics.push({
 				type: "error",

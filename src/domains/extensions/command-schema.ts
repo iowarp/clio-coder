@@ -1,6 +1,9 @@
 import { lstatSync, realpathSync } from "node:fs";
 import path from "node:path";
+import { ManifestKeyPolicy } from "./ignorable.js";
 import type { ExtensionCapabilities, ExtensionCommandTool } from "./types.js";
+
+const CAPABILITY_KEYS = new Set(["tools"]);
 
 const TOOL_KEYS = new Set([
 	"name",
@@ -77,10 +80,15 @@ function validateSchema(value: unknown, depth = 0): asserts value is Record<stri
 	}
 }
 
-export function parseExtensionCapabilities(value: unknown, id: string): ExtensionCapabilities {
+/** An unknown key fails unless the manifest lists its path under `ignorable` (ignorable.ts). */
+export function parseExtensionCapabilities(
+	value: unknown,
+	id: string,
+	policy: ManifestKeyPolicy = new ManifestKeyPolicy(),
+): ExtensionCapabilities {
 	if (
 		!record(value) ||
-		Object.keys(value).some((key) => key !== "tools") ||
+		policy.unknown(value, "capabilities", CAPABILITY_KEYS).length > 0 ||
 		!Array.isArray(value.tools) ||
 		value.tools.length === 0 ||
 		value.tools.length > 32
@@ -89,9 +97,10 @@ export function parseExtensionCapabilities(value: unknown, id: string): Extensio
 	}
 	if (id.includes("__")) throw new Error("v2 extension id cannot contain double underscores");
 	const names = new Set<string>();
-	const tools: ExtensionCommandTool[] = value.tools.map((tool) => {
+	const tools: ExtensionCommandTool[] = value.tools.map((tool, index) => {
 		if (!record(tool)) throw new Error("capabilities.tools entries must be objects");
-		for (const key of Object.keys(tool)) if (!TOOL_KEYS.has(key)) throw new Error(`unknown command tool key '${key}'`);
+		const [unknown] = policy.unknown(tool, `capabilities.tools[${index}]`, TOOL_KEYS);
+		if (unknown !== undefined) throw new Error(`unknown command tool key '${unknown}'`);
 		if (typeof tool.name !== "string" || !/^[a-z][a-z0-9_]*$/.test(tool.name) || tool.name.includes("__"))
 			throw new Error("command tool name must use lowercase letters, digits, and single underscores");
 		const name = extensionToolName(id, tool.name);
@@ -121,7 +130,9 @@ export function parseExtensionCapabilities(value: unknown, id: string): Extensio
 			if (limit !== undefined && (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > maximum))
 				throw new Error(`command tool ${key} must be between 1 and ${maximum}`);
 		}
-		return structuredClone(tool) as unknown as ExtensionCommandTool;
+		// A skipped key is never read, so the declared tool carries only the fields this host knows.
+		const known = Object.fromEntries(Object.entries(tool).filter(([key]) => TOOL_KEYS.has(key)));
+		return structuredClone(known) as unknown as ExtensionCommandTool;
 	});
 	return { tools };
 }
