@@ -365,8 +365,6 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const observationAging = createObservationAging((tool) => deps.declaredToolEffect?.(tool));
 	// The window checks price the same aged request; only `transformContext` below commits a batch.
 	context.bindObservationAging(observationAging);
-	/** A text-only round: the synthesis lock, or a middleware tool lock until the next submitted turn. */
-	const lockedRound = (): boolean => Boolean(state.synthesisToolLock) || middlewareToolChoice.current().kind === "none";
 
 	/**
 	 * Authoritative admission outcome per call, keyed by the engine's
@@ -1109,8 +1107,13 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								await request.options?.onResponse?.(...args);
 							},
 						};
-						// Every attempt of a locked round carries the same tail directive; the prompt prefix never changes.
-						const sent = lockedRound() ? withLockedSynthesisDirective(request.context) : request.context;
+						// The directive rides the tail, so the prompt prefix never changes. A middleware text lock sent as
+						// "none" needs no words and keeps its tail too: a note there would cost the next turn the cached copy
+						// of the last tool batch on a block-cached route. Only the "auto" form of that lock carries it.
+						const sent =
+							state.synthesisToolLock || (middlewareChoice.kind === "none" && request.options?.toolChoice === "auto")
+								? withLockedSynthesisDirective(request.context)
+								: request.context;
 						if (attempt) {
 							attemptRequest = {
 								model: currentModel,
@@ -1232,7 +1235,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				const view = context.refreshLiveBudget();
 				const resolved = resolvedRequestContext(request);
-				const actual = lockedRound() ? withLockedSynthesisDirective(request) : request;
+				const actual = state.synthesisToolLock ? withLockedSynthesisDirective(request) : request;
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
