@@ -871,8 +871,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		...(["compaction.started", "compaction.ended"] as const).map(
 			(channel) =>
 				deps.bus?.subscribe(channel, (payload: CompactionPayload) => {
-					// A step checkpoint stamps its own reason, on every tier.
-					noteColdReason(payload?.trigger === "step" ? "step_checkpoint" : "compaction");
+					// A step checkpoint makes no provider call, so its own reason, on every tier, is true only once its entry
+					// was appended: a checkpoint whose append failed left the context as it was.
+					if (payload?.trigger !== "step") noteColdReason("compaction");
+					else if (channel === "compaction.ended" && payload.outcome === "completed") noteColdReason("step_checkpoint");
 				}) ?? null,
 		),
 		// A completed compaction rebuilds the context, so the next compile takes
