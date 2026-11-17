@@ -196,9 +196,12 @@ function observeProviderChunk(payload: unknown, capture: ResponseModelIdCapture)
 	if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
 	const usage = isPlainRecord(payload.usage) ? payload.usage : {};
 	const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+	// The aliases mirror Pi's parseChunkUsage (pi-ai 1.5.2) and move with a Pi
+	// upgrade: a count Pi reads is "sent", and a field it ignores is not.
 	if (
 		nonnegativeFiniteNumber(details.cached_tokens) !== null ||
-		nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
+		nonnegativeFiniteNumber(usage.prompt_cache_hit_tokens) !== null ||
+		nonnegativeFiniteNumber(usage.cached_tokens) !== null
 	) {
 		capture.cacheReadField = "sent";
 	}

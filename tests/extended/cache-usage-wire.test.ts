@@ -11,9 +11,10 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 	test(`${api}: normalize on the wire once and preserve cache buckets through usage stores`, async () => {
 		const env = await isolateClioEnv("clio-cache-usage-");
 		const server = createServer(async (request, response) => {
-			for await (const _chunk of request) {
-				/* consume request before responding */
-			}
+			let body = "";
+			for await (const chunk of request) body += String(chunk);
+			// Astra r1-6: a Responses usage without input_tokens_details is an omitted count, not a cold read.
+			const omitCache = body.includes("Omit the cache count.");
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			const send = (value: { type: string; [key: string]: unknown }) =>
 				response.write(`event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`);
@@ -29,7 +30,7 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 							input_tokens: 10000,
 							output_tokens: 100,
 							total_tokens: 10100,
-							input_tokens_details: { cached_tokens: 6000, cache_write_tokens: 2000 },
+							...(omitCache ? {} : { input_tokens_details: { cached_tokens: 6000, cache_write_tokens: 2000 } }),
 						},
 					},
 				});
@@ -89,6 +90,7 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 				[usage.input, usage.cacheRead, usage.cacheWrite, usage.output, usage.totalTokens],
 				[2000, 6000, 2000, 100, 10100],
 			);
+			strictEqual(usage.cacheReadField, api === "openai-responses" ? "sent" : undefined);
 			const long = api === "anthropic-messages" ? 500 : undefined;
 			strictEqual(usage.cacheWrite1h, long);
 			const expectedCost = (2000 * 3 + 6000 * 0.3 + (2000 - (long ?? 0)) * 3.75 + (long ?? 0) * 6 + 100 * 15) / 1e6;
@@ -109,6 +111,14 @@ for (const api of ["openai-responses", "anthropic-messages"] as const) {
 			ok(side);
 			strictEqual(side.cacheWrite1h, long);
 			strictEqual(side.totalTokens, 10100);
+			if (api === "openai-responses") {
+				const omitted = await streamSimple(
+					model,
+					{ messages: [{ role: "user", content: "Omit the cache count.", timestamp: 0 }] },
+					{ apiKey: "fixture", maxTokens: 100 },
+				).result();
+				deepStrictEqual([omitted.usage.cacheRead, omitted.usage.cacheReadField], [0, "omitted"]);
+			}
 		} finally {
 			server.closeAllConnections();
 			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
