@@ -17,7 +17,6 @@ import {
 	composeTrustStatus,
 	type GateDecisionFacts,
 	inspectRunTrustStatus,
-	normalizeTrustStatus,
 	type RunIntegrity,
 } from "./trust-status.js";
 import type { EvidenceSeverity, EvidenceTag, EvidenceVerdict } from "./types.js";
@@ -86,13 +85,7 @@ export function readRunTrust(record: RunTelemetryV1 | null, gates: ReadonlyArray
 	const inspection = inspectRunTrustStatus(record);
 	const verified = inspection.integrity.state === "verified";
 	const assessment = verified ? (record?.assessment ?? null) : null;
-	// The seal now vouches for the record the producer assessed, so its verdict replaces the producer's.
-	let trust =
-		assessment === null
-			? inspection.status
-			: composeTrustStatus(normalizeTrustStatus(assessment.trust), {
-					artifactIntegrity: inspection.status.artifactIntegrity,
-				});
+	let trust = inspection.status;
 	const content = assessment?.content?.state === "resolved" ? assessment.content.value : null;
 	const messages = new Map((content?.findings ?? []).map((entry) => [entry.id, entry.message]));
 	let findings: RunTrustFinding[] = (assessment?.findings ?? []).map((entry) => ({
