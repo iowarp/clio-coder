@@ -354,10 +354,11 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 	const workersWithReceiptPaths = new Set<string>();
 	const failures = new Map<string, number>();
 	/**
-	 * Tool calls the visit's parked sessions made. The footer's tally is one session's, so after /fork or /resume the
-	 * card read `Tools: bash 0 · verify 0` beside turns and files that kept counting (bt-11).
+	 * Tool calls each parked session made this visit, by session. The footer's tally restarts with every session, so a
+	 * session resumed back keeps the calls it made before it was parked (bt-11), and the card counts only the current
+	 * session's own: a fork never shows its parent's `dispatch 1` (bt-11 h).
 	 */
-	const priorTools = new Map<string, number>();
+	const parkedTools = new Map<string, Map<string, number>>();
 	/** A settled run's entry names its run, so its words are read from the run's record when the snapshot is taken. */
 	const timeline: Array<{ elapsedMs: number; text: string; runId?: string }> = [];
 	let timelineOmitted = 0;
@@ -469,7 +470,9 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			priorTurns += Math.max(0, (deps.getTurns() ?? 0) - baseTurns);
 			baseTurns = deps.getTurns() ?? 0;
 			// The footer's tally restarts with the next session, so the visit keeps the parked one's here.
-			for (const [tool, count] of deps.getToolCounts()) priorTools.set(tool, (priorTools.get(tool) ?? 0) + count);
+			const parked = parkedTools.get(sessionId) ?? new Map<string, number>();
+			for (const [tool, count] of deps.getToolCounts()) parked.set(tool, (parked.get(tool) ?? 0) + count);
+			parkedTools.set(sessionId, parked);
 		}),
 		deps.bus.subscribe("context.pruned", () => {
 			compactions += 1;
@@ -624,7 +627,7 @@ export function createExitSummaryCollector(deps: CollectorDeps) {
 			} catch {
 				// The guard reads the filesystem; an unreadable tree leaves the line out rather than the summary.
 			}
-			const tools = new Map(priorTools);
+			const tools = new Map(parkedTools.get(session.id));
 			for (const [tool, count] of deps.getToolCounts()) tools.set(tool, (tools.get(tool) ?? 0) + count);
 			for (const stats of workerTools.values()) {
 				for (const { tool, count } of stats) tools.set(tool, (tools.get(tool) ?? 0) + count);
