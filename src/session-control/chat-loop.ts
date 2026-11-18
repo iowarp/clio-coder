@@ -141,7 +141,7 @@ import { readPromptCompileRecords } from "../domains/session/prompt-manifest.js"
 import { protectedArtifactStateFromSessionEntries } from "../domains/session/protected-artifacts.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { activePath, findLastEntry } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
@@ -1343,7 +1343,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				(policy?.loadedSkillNames.size ?? 0) > 0 ||
 				(policy?.requests.length ?? 0) > 0)
 		) {
-			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			const entries = activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
 			// A loaded skill that declares no tool narrowing arms no surface, yet its
 			// instructions are in context. Record it from the loading policy: an
 			// unknown selection would block every later compaction of this session.
@@ -1546,13 +1546,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 	/**
 	 * The continuity fold both live-budget fields read. A publication asks for both at once, so they share one
-	 * resolution at one clock reading, and the active branch is reselected only when the frozen ledger snapshot or
-	 * the explicit leaf changes: a tree switch moves the leaf without appending (Astra r8-5).
+	 * resolution at one clock reading. `activePath` returns the same frozen branch until the ledger snapshot or the
+	 * explicit leaf changes: a tree switch moves the leaf without appending (Astra r8-5).
 	 */
-	let budgetBranch: { entries: ReadonlyArray<SessionEntry>; leaf: string | undefined; path: SessionEntry[] } | null =
-		null;
 	let budgetFold: {
-		path: SessionEntry[];
+		path: ReadonlyArray<SessionEntry>;
 		sessionId: string;
 		nowMs: number;
 		current: ReturnType<typeof resolveContinuityProjection>["current"];
@@ -1560,11 +1558,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const budgetContinuity = (): ReturnType<typeof resolveContinuityProjection>["current"] => {
 		const sessionId = deps.session?.current()?.id;
 		if (!sessionId) return null;
-		const entries = deps.readSessionEntries?.() ?? [];
-		const leaf = state.lastTurnId ?? undefined;
-		if (!Object.isFrozen(entries) || budgetBranch?.entries !== entries || budgetBranch.leaf !== leaf)
-			budgetBranch = { entries, leaf, path: filterEntriesToActivePath(entries, leaf) };
-		const path = budgetBranch.path;
+		const path = activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
 		const nowMs = Date.now();
 		if (budgetFold?.path !== path || budgetFold.sessionId !== sessionId || budgetFold.nowMs !== nowMs)
 			budgetFold = {
@@ -1668,7 +1662,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}),
 			};
 		},
-		entries: () => filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+		entries: () => activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
 		leaf: () => state.lastTurnId,
 		admitNote: (accepted) => {
 			const view = context.refreshLiveBudget();
@@ -3047,9 +3041,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				if (previousThinkingLevel === undefined || previousModel === undefined) {
 					// #423: resume can append the newly requested dial before this loop boots.
 					// Recover what the last call used, ignoring changes after that call.
-					const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
-					const entry = [...entries].reverse().find((row) => row.kind === "message" && row.role === "assistant");
-					const lastCall = entry ? entries.indexOf(entry) : -1;
+					const entries = activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+					const entry = findLastEntry(entries, (row) => row.kind === "message" && row.role === "assistant");
+					const lastCall = entry ? entries.lastIndexOf(entry) : -1;
 					if (entry?.kind === "message") {
 						const payload = entry.payload as {
 							promptCache?: {
@@ -4605,9 +4599,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (!runtime) throw new Error("No native runtime is configured.");
 			state.activeInterruptReason = null;
 			if (!state.activeUserTurnId) {
-				const operator = [...filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined)]
-					.reverse()
-					.find((entry) => entry.kind === "message" && entry.role === "user");
+				const operator = findLastEntry(
+					activePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+					(entry) => entry.kind === "message" && entry.role === "user",
+				);
 				state.activeUserTurnId = operator?.turnId ?? null;
 			}
 			const operationSession = deps.session?.current()?.id ?? null;

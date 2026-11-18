@@ -2,7 +2,7 @@
  * Fold the working-set ledger records on the active path into a view.
  *
  * Pure over entries. The active path is selected here, through
- * `filterEntriesToActivePath`, so every consumer (live projection, recall,
+ * `activePath`, so every consumer (live projection, recall,
  * overlay, replay-lite) shares the same #94 discipline: after a `/tree` switch
  * the raw file still holds abandoned turns, and an eviction recorded on an
  * abandoned branch must not project onto the live one. Forks inherit the view
@@ -10,7 +10,7 @@
  */
 
 import type { SessionEntry } from "../../session/entries.js";
-import { filterEntriesToActivePath } from "../../session/tree/active-path.js";
+import { activePath } from "../../session/tree/active-path.js";
 import type { EvictedState, WorkingSetRef, WorkingSetView } from "./contract.js";
 import { recalledRef } from "./payload.js";
 
@@ -38,7 +38,7 @@ export function foldWorkingSet(entries: ReadonlyArray<SessionEntry>, activeLeafT
 				if (Number.isSafeInteger(ordinal)) recallAliasSequence = Math.max(recallAliasSequence, ordinal);
 			}
 		}
-	const active = filterEntriesToActivePath(entries, activeLeafTurnId);
+	const active = activePath(entries, activeLeafTurnId);
 	const evicted = new Map<string, EvictedState>();
 	const recallsByRef = new Map<string, number>();
 	const recallRoots = new Map<string, string>();

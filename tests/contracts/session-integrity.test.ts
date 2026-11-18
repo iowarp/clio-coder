@@ -13,6 +13,7 @@ import { loadClioTraces } from "../../src/domains/context/working-set/replay/loa
 import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { activePath, filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import {
 	appendSessionFileEntry,
 	CURRENT_SESSION_FORMAT_VERSION,
@@ -457,6 +458,36 @@ describe("session integrity", () => {
 				reader.tree().map((node) => node.id),
 				["root", "tip", "alternate"],
 			);
+		} finally {
+			await current.close();
+		}
+	});
+
+	it("shares one frozen active path per ledger snapshot and leaf, extended on append and rebuilt on a branch switch", async () => {
+		const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		const meta = current.create({ cwd: scratch.dir });
+		const ids = (rows: ReadonlyArray<SessionEntry>) => rows.map((row) => row.turnId);
+		const path = () => activePath(current.readEntries(), current.leafId(meta.id) ?? undefined);
+		try {
+			current.append(turn("root"));
+			current.append(turn("a", "root"));
+			current.append(turn("b", "a"));
+			const linear = path();
+			ok(Object.isFrozen(linear));
+			strictEqual(path(), linear, "an unchanged snapshot and leaf return the same array");
+			strictEqual(linear, current.readEntries(), "a linear session is its own active path");
+			current.switchTurn("a");
+			deepStrictEqual(ids(path()), ["root", "a"], "navigation re-selects without an append");
+			current.append(turn("c", "a"));
+			current.append(turn("d", "c"));
+			const branched = path();
+			ok(Object.isFrozen(branched));
+			deepStrictEqual(ids(branched), ["root", "a", "c", "d"]);
+			current.append(turn("e", "d"));
+			deepStrictEqual(ids(path()), ["root", "a", "c", "d", "e"]);
+			deepStrictEqual(path(), filterEntriesToActivePath(current.readEntries(), "e"));
+			current.switchTurn("b");
+			deepStrictEqual(ids(path()), ["root", "a", "b"]);
 		} finally {
 			await current.close();
 		}

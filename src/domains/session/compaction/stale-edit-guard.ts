@@ -15,11 +15,17 @@
 import { expandPath } from "../../../tools/path-utils.js";
 import { effectiveToolCall } from "../../../tools/surface.js";
 import { foldWorkingSet } from "../../context/working-set/fold.js";
-import { buildPathIndex, canonicalize, type PathObservation } from "../../context/working-set/path-index.js";
+import {
+	canonicalize,
+	createPathIndexBuilder,
+	type PathIndexBuilder,
+	type PathObservation,
+} from "../../context/working-set/path-index.js";
 import { hasLegacyCompactionMarker, recalledRef } from "../../context/working-set/payload.js";
 import { compactionCut } from "../../context/working-set/visible.js";
 import type { MiddlewareEffect, MiddlewareHookRegistration } from "../../middleware/index.js";
-import type { SessionEntry } from "../entries.js";
+import type { CompactionSummaryEntry, SessionEntry } from "../entries.js";
+import { activePath, extendsSnapshot, findLastEntry } from "../tree/active-path.js";
 import { recordPriorFileOperations } from "./exact-facts.js";
 
 export const STALE_EDIT_GUARD_REGISTRATION_ID = "guard.stale-file-edit";
@@ -47,9 +53,83 @@ function resolvePath(path: string, cwd: string): string {
 	return canonicalize(expandPath(path), cwd);
 }
 
+/**
+ * What the guard reads of one active path: its path index, the refs the working
+ * set evicted, and what the latest compaction left in sight. A frozen path that
+ * only grew since the last edit folds just the appended entries; a branch
+ * switch or navigation hands over a path that does not extend the last one, and
+ * the view is rebuilt.
+ */
+interface GuardView {
+	entries: ReadonlyArray<SessionEntry>;
+	cwd: string;
+	paths: PathIndexBuilder;
+	evicted: Set<string>;
+	/** True when `evicted` folds every entry of `entries`, which then is its own active path. */
+	evictedWholeSlice: boolean;
+	visible: Set<string>;
+	/** Visible tool results that recall a ref, with that ref. */
+	recalls: Array<{ turnId: string; ref: string; legacy: boolean }>;
+}
+
+function buildGuardView(entries: ReadonlyArray<SessionEntry>, cwd: string): GuardView {
+	const paths = createPathIndexBuilder({ cwd });
+	paths.append(entries, 0);
+	const view: GuardView = {
+		entries,
+		cwd,
+		paths,
+		evicted: new Set(),
+		evictedWholeSlice: false,
+		visible: new Set(),
+		recalls: [],
+	};
+	foldEvictions(view, entries, 0);
+	cutVisible(view, compactionCut(entries).visible);
+	return view;
+}
+
+function extendGuardView(view: GuardView, entries: ReadonlyArray<SessionEntry>): boolean {
+	const from = view.entries.length;
+	if (!view.paths.append(entries, from)) return false;
+	view.entries = entries;
+	foldEvictions(view, entries, view.evictedWholeSlice ? from : 0);
+	const suffix = entries.slice(from);
+	if (suffix.some((entry) => entry.kind === "compactionSummary")) {
+		view.visible.clear();
+		view.recalls.length = 0;
+		cutVisible(view, compactionCut(entries).visible);
+	} else cutVisible(view, suffix);
+	return true;
+}
+
+/** `foldWorkingSet(entries).evicted`, folding only from `from` while `entries` is its own active path. */
+function foldEvictions(view: GuardView, entries: ReadonlyArray<SessionEntry>, from: number): void {
+	view.evictedWholeSlice = activePath(entries) === entries;
+	if (!view.evictedWholeSlice) {
+		view.evicted = new Set(foldWorkingSet(entries).evicted.keys());
+		return;
+	}
+	if (from === 0) view.evicted = new Set();
+	for (let index = from; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (entry?.kind === "contextEviction") for (const item of entry.evicted) view.evicted.add(item.ref.entry);
+	}
+}
+
+function cutVisible(view: GuardView, visible: ReadonlyArray<SessionEntry>): void {
+	for (const entry of visible) {
+		view.visible.add(entry.turnId);
+		if (entry.kind !== "message" || entry.role !== "tool_result") continue;
+		const ref = recalledRef(entry.payload);
+		if (ref !== null) view.recalls.push({ turnId: entry.turnId, ref, legacy: hasLegacyCompactionMarker(entry.payload) });
+	}
+}
+
 /** Why this edit must wait for a fresh look at its file, or null when it may run. */
 function staleEditBlockReason(
 	entries: ReadonlyArray<SessionEntry>,
+	view: (cwd: string) => GuardView,
 	toolName: string,
 	toolArgs: unknown,
 	cwd: string,
@@ -59,18 +139,19 @@ function staleEditBlockReason(
 	const requested = pathArgument(call.args);
 	if (requested === null) return null;
 	const target = resolvePath(requested, cwd);
-	const cut = compactionCut(entries);
-	const checkpoint = entries[cut.compactionIndex];
-	if (checkpoint?.kind !== "compactionSummary") return null;
+	const checkpoint = findLastEntry(
+		entries,
+		(entry): entry is CompactionSummaryEntry => entry.kind === "compactionSummary",
+	);
+	if (checkpoint === undefined) return null;
 	let stale = false;
 	recordPriorFileOperations(checkpoint.summary, (_operation, path) => {
 		if (path.trim().length > 0 && resolvePath(path, cwd) === target) stale = true;
 	});
 	if (!stale) return null;
 
-	const visible = new Set(cut.visible.map((entry) => entry.turnId));
-	const index = buildPathIndex(entries, { cwd });
-	const evicted = foldWorkingSet(entries).evicted;
+	const { paths, evicted, visible, recalls } = view(cwd);
+	const index = paths.index;
 	const inSight = (observation: PathObservation): boolean => {
 		if (observation.isError || observation.isBlocked) return false;
 		if (!visible.has(observation.ref.entry) || evicted.has(observation.ref.entry)) return false;
@@ -89,15 +170,14 @@ function staleEditBlockReason(
 	const readsOfTarget = new Set(
 		(index.byPath.get(target) ?? []).filter((item) => item.op === "read" && !item.isError).map((item) => item.ref.entry),
 	);
-	for (const entry of cut.visible) {
-		if (entry.kind !== "message" || entry.role !== "tool_result" || evicted.has(entry.turnId)) continue;
-		const ref = recalledRef(entry.payload);
-		if (ref !== null && readsOfTarget.has(ref) && !hasLegacyCompactionMarker(entry.payload)) return null;
+	for (const recall of recalls) {
+		if (!evicted.has(recall.turnId) && readsOfTarget.has(recall.ref) && !recall.legacy) return null;
 	}
 	return `re-read ${requested} before editing it: its content left context at the compaction of ${checkpoint.timestamp} and only a summary remains, so old_text written now comes from memory. Read the region you will change, then retry the edit.`;
 }
 
 export function createStaleEditGuardRegistration(options: StaleEditGuardOptions): MiddlewareHookRegistration {
+	let cached: GuardView | null = null;
 	return {
 		id: STALE_EDIT_GUARD_REGISTRATION_ID,
 		description: "blocks edits of files a compaction summarized until they are observed again",
@@ -106,7 +186,19 @@ export function createStaleEditGuardRegistration(options: StaleEditGuardOptions)
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "before_tool" || input.toolName === undefined) return [];
 			if (effectiveToolCall(input.toolName, input.toolArgs).toolName !== "edit") return [];
-			const reason = staleEditBlockReason(options.readEntries(), input.toolName, input.toolArgs, options.cwd());
+			const entries = options.readEntries();
+			// Only a frozen path is known not to change behind the cache.
+			const view = (cwd: string): GuardView => {
+				if (!Object.isFrozen(entries)) return buildGuardView(entries, cwd);
+				if (
+					cached?.cwd === cwd &&
+					(cached.entries === entries || (extendsSnapshot(cached.entries, entries) && extendGuardView(cached, entries)))
+				)
+					return cached;
+				cached = buildGuardView(entries, cwd);
+				return cached;
+			};
+			const reason = staleEditBlockReason(entries, view, input.toolName, input.toolArgs, options.cwd());
 			return reason === null ? [] : [{ kind: "block_tool", reason, severity: "hard-block" }];
 		},
 	};

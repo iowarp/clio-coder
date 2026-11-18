@@ -23,7 +23,7 @@ import {
 import type { SessionContract } from "../domains/session/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { isOperatorTypedUserPayload, operatorTextOfUserPayload } from "../domains/session/history.js";
-import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { activePath, extendsSnapshot, findLastEntry } from "../domains/session/tree/active-path.js";
 import type { EngineDestination, SystemOne } from "../domains/system-one/index.js";
 import type { JudgeScreenResult } from "../domains/system-one/points/index.js";
 import { JUDGE_SCREEN_POINT, judgeScreenResults } from "../domains/system-one/points/index.js";
@@ -54,14 +54,29 @@ export function operatorMessagesForJudge(
 	leafTurnId?: string,
 	currentTurnId?: string,
 ): string[] {
-	let path = filterEntriesToActivePath(entries, leafTurnId);
-	if (
-		currentTurnId !== undefined &&
-		!path.some((entry) => entry.turnId === currentTurnId) &&
-		entries.some((entry) => entry.turnId === currentTurnId)
-	) {
-		path = filterEntriesToActivePath(entries, currentTurnId);
-	}
+	let path = activePath(entries, leafTurnId);
+	const holds = (rows: ReadonlyArray<SessionEntry>) =>
+		findLastEntry(rows, (entry) => entry.turnId === currentTurnId) !== undefined;
+	if (currentTurnId !== undefined && !holds(path) && holds(entries)) path = activePath(entries, currentTurnId);
+	if (!Object.isFrozen(entries)) return operatorTextsOf(path);
+	const prior = judgeFold;
+	let texts: string[];
+	if (prior?.path === path) texts = prior.texts;
+	else if (prior !== null && extendsSnapshot(prior.path, path))
+		texts = prior.texts.concat(operatorTextsOf(path.slice(prior.path.length)));
+	else texts = operatorTextsOf(path);
+	judgeFold = { path, texts };
+	return [...texts];
+}
+
+/**
+ * The last fold, so a judged call on a path that only grew reads just the
+ * appended entries. Each entry contributes on its own, so the fold of a path
+ * is the fold of its prefix followed by the fold of the rest.
+ */
+let judgeFold: { path: ReadonlyArray<SessionEntry>; texts: string[] } | null = null;
+
+function operatorTextsOf(path: ReadonlyArray<SessionEntry>): string[] {
 	const texts: string[] = [];
 	for (const entry of expandChainMessages(path)) {
 		if (entry.kind !== "message") continue;
