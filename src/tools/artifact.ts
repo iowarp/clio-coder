@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Type } from "typebox";
 import { artifactDefaultPath, CLIO_ARTIFACT_DIR, CLIO_PROJECT_DIR } from "../core/artifact-paths.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { ensureProjectIgnore } from "../core/project-root.js";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
@@ -47,7 +48,7 @@ function cwdFromDeps(deps?: ArtifactToolDeps): string {
 
 function insideWorkspace(target: string, cwd: string): boolean {
 	const rel = path.relative(path.resolve(cwd), target);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return !relativePathEscapes(rel);
 }
 
 async function writeTerminalArtifact(

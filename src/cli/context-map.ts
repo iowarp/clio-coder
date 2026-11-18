@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { internalGitArgv } from "../core/internal-git.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { codemapPath, legacyCodewikiPath } from "../domains/context/codewiki/artifact.js";
 import { type CodewikiCoordinatedResult, coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
@@ -62,7 +63,7 @@ function workingTreeChanges(cwd: string, generated: ReadonlyArray<string>): stri
 	const own = new Set(
 		generated.flatMap((file) => {
 			const inside = path.relative(top, file);
-			return inside === "" || inside.startsWith("..") || path.isAbsolute(inside) ? [] : [inside.split(path.sep).join("/")];
+			return inside === "" || relativePathEscapes(inside) ? [] : [inside.split(path.sep).join("/")];
 		}),
 	);
 	const changes: string[] = [];

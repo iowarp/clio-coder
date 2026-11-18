@@ -17,6 +17,7 @@
 import os from "node:os";
 import path from "node:path";
 import { normalizeGatewayArguments } from "../core/gateway-envelope.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { ToolNames } from "../core/tool-names.js";
 
 export type ToolFoldDefault = "expanded" | "folded";
@@ -389,7 +390,7 @@ export function workspaceRelative(dir: string, cwd: string | undefined): string 
 	if (cwd === undefined || cwd.length === 0) return null;
 	const expanded = dir.startsWith("~") ? path.join(os.homedir(), dir.slice(1)) : dir;
 	const relative = path.relative(cwd, path.resolve(cwd, expanded));
-	if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+	if (relativePathEscapes(relative)) return null;
 	return relative;
 }
 
