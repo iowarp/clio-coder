@@ -16,6 +16,7 @@ import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import { LOCAL_CONTEXT_OVERFLOW_PREFIX } from "../../src/engine/apis/output-budget.js";
 import { sessionCurrentPath } from "../../src/engine/session.js";
 import type { Model } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
@@ -663,7 +664,17 @@ for (const count of [8, 12]) {
 				`Read ${reads.join(", ")} in order, one read per round, each in full, then say done.\n\n${"Read guidance for the design notes. ".repeat(M3A_PAD)}`,
 			);
 			await live.loop.whenSettled();
-			ok(live.summaries() <= 1, `${live.summaries()} paid summaries in one turn`);
+			// cf-x6 r2's m3a residual: an unpinned request admitted at 20310 met Pi's anchor clamp at 20575, whose answer
+			// room fell below the usable floor; the local refusal's reactive retry paid one summary per row. Admission now
+			// hands Pi's clamp its own figure on every main request (CF-6 r2 item 2).
+			const refusals = live.events.filter(
+				(event) =>
+					event.type === "message_end" &&
+					event.message.role === "assistant" &&
+					(event.message.errorMessage ?? "").startsWith(LOCAL_CONTEXT_OVERFLOW_PREFIX),
+			);
+			strictEqual(refusals.length, 0, "no local context-window refusal");
+			strictEqual(live.summaries(), 0, "no reactive-retry summary");
 			const cuts = live.notices().filter((text) => /protected reads? cut to fit the window/.test(text));
 			ok(cuts.length >= 3, `${cuts.length} overflow cuts`);
 			ok(!live.notices().some((text) => text.includes("post-tool context guard")), "no guard stop");

@@ -407,11 +407,11 @@ export interface TurnContext {
 	 */
 	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
 	/**
-	 * Whether the published view carries the A4 pin an overflow fold that fit
-	 * armed: its `inputTokens` is then the count the next main request pins.
-	 * The call that reads it disarms it.
+	 * Disarm the A4 pin an overflow fold that fit armed. While armed, the
+	 * published view's `inputTokens` is the A4 count; the main request that
+	 * carries it disarms it.
 	 */
-	takeOverflowInputPin?(): boolean;
+	takeOverflowInputPin?(): void;
 	/**
 	 * The A4 count of the request these messages and the pending ask make: the
 	 * larger of Clio's estimate and Pi's chars/3.5 count. Window-fit gates that
@@ -3148,10 +3148,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		liveContextEstimate,
 
 		refreshLiveBudget,
-		takeOverflowInputPin(): boolean {
-			const armed = overflowPinArmed();
+		takeOverflowInputPin(): void {
 			overflowInputPin = null;
-			return armed;
 		},
 		overflowFitTokens,
 		oversizedResult: (runtime: AgentRuntime, pendingUserText?: string) =>
