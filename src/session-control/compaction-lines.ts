@@ -67,7 +67,6 @@ export interface EvictionSkipLineInput {
  * stage did not run (smoke pass 2, G1).
  */
 export function renderEvictionSkipLine(input: EvictionSkipLineInput): string {
-	const turnWord = input.turns === 1 ? "turn" : "turns";
 	const window = `protectLastTurns ${input.protectLastTurns}, protectLastSteps ${input.protectLastSteps}`;
 	const cause =
 		input.reason === "disabled"
@@ -75,7 +74,7 @@ export function renderEvictionSkipLine(input: EvictionSkipLineInput): string {
 			: input.reason === "all-protected"
 				? input.turns === 0
 					? `nothing evictable, the visible context starts inside a turn and all of its steps are inside the protected window (${window})`
-					: `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (${window})`
+					: `nothing evictable, ${input.turns === 1 ? "the 1 turn is" : `all ${input.turns} turns are`} inside the protected window (${window})`
 				: `nothing evictable by ${input.policyId} above the protected window (${window})`;
 	return `[context engine] working set: ${cause}; llm_summary runs instead`;
 }
