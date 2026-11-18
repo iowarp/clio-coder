@@ -17,8 +17,8 @@
  * because it is superseded-only, batched and gated: stubs land in one batch
  * once enough superseded bytes accumulate, a stubbed result stays stubbed in
  * every later request so the prefix breaks once per batch, and the gate admits
- * only small-tier routes and routes that do not cache prompts. Cached standard
- * and frontier routes never see it. Wired as the agent's `transformContext`
+ * only routes that do not cache prompts (`supersededStageApplies`, the S0
+ * gate). A cached route of any tier never sees it, a small one included. Wired as the agent's `transformContext`
  * in turn-runtime.ts, the one point every outgoing main-session request
  * passes through, prewarm and provider-replay rebuilds included; the window
  * checks in turn-context.ts price the same request through `preview`, which
@@ -33,6 +33,7 @@
  */
 
 import type { ModelTier } from "../core/model-tier.js";
+import { supersededStageApplies } from "../domains/context/fold/contract.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { callRepeatsAsRead, type DeclaredToolEffect, effectiveCallIdentity } from "../engine/loop-guard.js";
 import type { AgentMessage } from "../engine/types.js";
@@ -87,9 +88,9 @@ export interface ObservationAgingRoute {
 	promptCaching?: boolean;
 }
 
-/** Aging runs only for a small model or a route that does not cache prompts. */
+/** Aging runs only where the route does not cache prompts; the tier never admits a cached route. */
 export function observationAgingApplies(route: ObservationAgingRoute): boolean {
-	return route.modelTier === "small" || route.promptCaching === false;
+	return supersededStageApplies(route);
 }
 
 export interface ObservationAgingBatch {
