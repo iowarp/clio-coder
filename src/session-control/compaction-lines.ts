@@ -52,7 +52,7 @@ export type EvictionSkipReason = "all-protected" | "nothing-evictable" | "disabl
 
 export interface EvictionSkipLineInput {
 	reason: EvictionSkipReason;
-	/** Turn starts in the visible slice the policy was offered. */
+	/** Turn starts in the visible slice the policy was offered; 0 when a cut left it starting inside a turn. */
 	turns: number;
 	protectLastTurns: number;
 	protectLastSteps: number;
@@ -73,7 +73,9 @@ export function renderEvictionSkipLine(input: EvictionSkipLineInput): string {
 		input.reason === "disabled"
 			? "eviction is off (context.workingSet.enabled false)"
 			: input.reason === "all-protected"
-				? `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (${window})`
+				? input.turns === 0
+					? `nothing evictable, the visible context starts inside a turn and all of its steps are inside the protected window (${window})`
+					: `nothing evictable, all ${input.turns} ${turnWord} are inside the protected window (${window})`
 				: `nothing evictable by ${input.policyId} above the protected window (${window})`;
 	return `[context engine] working set: ${cause}; llm_summary runs instead`;
 }
