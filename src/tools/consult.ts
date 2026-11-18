@@ -92,6 +92,8 @@ const GLOB_EXCLUDED = new Set([".git", "node_modules"]);
 const OUTPUT_READ_BYTES = 32 * 1024 * 1024;
 
 const SOURCES = ["items", "files", "output", "capabilities"] as const;
+/** Keys only a filter takes; `paths` is not one, because questions take it too. */
+const FILTER_ONLY_KEYS = ["criterion", "source", "items", "path", "chunkLines", "limit"] as const;
 type FilterSource = (typeof SOURCES)[number];
 
 /** One capability a filter may score: its name is the id that comes back. */
@@ -193,7 +195,7 @@ export const consultParameters: TSchema = Type.Object({
 	),
 	paths: Type.Optional(
 		Type.Array(Type.String(), {
-			description: `questions: up to ${CONSULT_LIMITS.files} workspace files whose head (${CONSULT_LIMITS.fileChars} characters each, secrets redacted) is sent as evidence beside state.`,
+			description: `questions: up to ${CONSULT_LIMITS.files} workspace files or globs whose head (${CONSULT_LIMITS.fileChars} characters each, secrets redacted) is sent as evidence beside state.`,
 		}),
 	),
 });
@@ -497,6 +499,24 @@ async function readEvidenceFiles(
 	cwd: string,
 	options: ToolInvokeOptions | undefined,
 ): Promise<EvidenceFiles | ToolResult> {
+	const skipped: Array<{ path: string; reason: string }> = [];
+	const candidates: unknown[] = [];
+	for (const raw of paths) {
+		// As a filter's files: a literal name wins, so `pages/[id].tsx` is not read as a character class (bt-35).
+		if (typeof raw === "string" && /[*?[{]/u.test(raw) && !(await existingPath(raw, cwd))) {
+			const matches = await expandGlob(raw.trim(), cwd, options?.signal);
+			const path = raw.slice(0, 200);
+			if (matches === null) skipped.push({ path, reason: `pattern matched over ${GLOB_MATCHES} paths; narrow it` });
+			else if (matches.length === 0) skipped.push({ path, reason: "pattern matched no files" });
+			for (const match of matches ?? []) candidates.push(toPosixPath(relative(cwd, match)));
+			continue;
+		}
+		candidates.push(raw);
+	}
+	for (const raw of candidates.splice(CONSULT_LIMITS.files)) {
+		skipped.push({ path: String(raw).slice(0, 200), reason: `over the ${CONSULT_LIMITS.files}-file limit` });
+	}
+	if (candidates.length === 0) return { files: {}, skipped, realPaths: [] };
 	const reservation = reserveObservation(CONSULT_LIMITS.files * CONSULT_LIMITS.fileChars, options);
 	if (reservation.exhausted)
 		return evidenceExhausted(reservation, "Ask again without paths, or continue in a follow-up turn.");
@@ -506,10 +526,9 @@ async function readEvidenceFiles(
 	try {
 		const files: Record<string, string> = {};
 		const realPaths: string[] = [];
-		const skipped: Array<{ path: string; reason: string }> = [];
 		const read = await workspaceReader(cwd, options);
 		let spent = 0;
-		for (const raw of paths) {
+		for (const raw of candidates) {
 			const skip = (reason: string): void => {
 				skipped.push({ path: (typeof raw === "string" ? raw : String(raw)).slice(0, 200), reason });
 			};
@@ -992,6 +1011,12 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 				};
 				return runFilter(filter, deps, options, spendCall, remainingCalls);
 			}
+			const misplaced = FILTER_ONLY_KEYS.filter((key) => args[key] !== undefined);
+			if (misplaced.length > 0) {
+				return refuse(
+					`${misplaced.join(", ")} belong inside filter, as {"filter": {"criterion": "...", "source": "items", "items": {"id": "text"}}}; nothing was sent`,
+				);
+			}
 			const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
 			if (rawQuestions.length === 0) return refuse("a call needs questions or one filter");
 			if (rawQuestions.length > CONSULT_LIMITS.questionsPerCall) {
@@ -1020,6 +1045,15 @@ export function createConsultTool(deps: ConsultDeps): ToolSpec {
 				const read = await readEvidenceFiles(rawPaths, deps.cwd?.() ?? process.cwd(), options);
 				if ("kind" in read) return read;
 				evidence = fitEvidenceFiles(read, state, parsed, requestWindow(deps));
+			}
+			if (Object.keys(state).length === 0 && Object.keys(evidence.files).length === 0) {
+				// Nothing to judge is the caller's mistake, not the model's failure, so it spends no call (bt-35).
+				const unread = evidence.skipped.map((entry) => `${entry.path}: ${entry.reason}`).join("; ");
+				return refuse(
+					rawPaths.length === 0
+						? "questions need evidence: give state or paths; nothing was sent and no call was spent"
+						: `no evidence: no path could be read (${unread}); give state or readable paths. Nothing was sent and no call was spent`,
+				);
 			}
 			let flow: unknown;
 			if (deps.flowFor !== undefined) {

@@ -4,7 +4,9 @@
  * in `postSystemOne`; this converts what it returns into contract answers.
  */
 
-import type { DecisionAnswer, DecisionQuestion } from "../../providers/types/inference.js";
+import { classifyCallFailure } from "../../../core/call-failure.js";
+import { telemetryCallInContext } from "../../../core/telemetry/producer.js";
+import type { DecideResult, DecisionAnswer, DecisionQuestion } from "../../providers/types/inference.js";
 import type { ProbeContext, RuntimeDescriptor } from "../../providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../providers/types/target-descriptor.js";
 import type { ProfileId } from "../profiles.js";
@@ -67,27 +69,63 @@ export function createSystemOneEngine(input: SystemOneEngineInput): DecisionEngi
 			...(target.url !== undefined ? { url: target.url } : {}),
 		},
 		async decide(request: EngineRequest): Promise<EngineReply> {
-			const authToken = await resolveToken(host, target, runtime, request.signal);
-			request.signal.throwIfAborted();
-			const ctx: ProbeContext = {
-				// The runtimes read this set only to find an env key when no token
-				// resolved, and building it reparses the auth store, which a question
-				// asked on every tool call must not pay for.
-				credentialsPresent: authToken !== undefined ? NO_CREDENTIALS : host.credentialsPresent(),
-				httpTimeoutMs: HTTP_CEILING_MS,
+			// The same admission an LLM engine passes opens this round trip's journal call, so its tokens reach
+			// telemetry, cost and usage readers and the decided event cites it (bt-33, #429).
+			const recordUsage = await host.admitLlmRequest?.({
+				engine: name,
+				targetId: target.id,
+				model: asked ?? "default",
 				signal: request.signal,
-				...(authToken !== undefined ? { authToken } : {}),
-			};
-			const result = await decide.call(
-				runtime,
-				target,
-				{
-					state: request.state,
-					questions: request.questions as Record<string, DecisionQuestion>,
-					...(model !== null ? { model } : {}),
+			});
+			let sent = false;
+			const send = async (): Promise<DecideResult> => {
+				const call = telemetryCallInContext();
+				call?.stage("auth", "start");
+				const authToken = await resolveToken(host, target, runtime, request.signal);
+				call?.stage("auth", "end");
+				request.signal.throwIfAborted();
+				const ctx: ProbeContext = {
+					// The runtimes read this set only to find an env key when no token
+					// resolved, and building it reparses the auth store, which a question
+					// asked on every tool call must not pay for.
+					credentialsPresent: authToken !== undefined ? NO_CREDENTIALS : host.credentialsPresent(),
+					httpTimeoutMs: HTTP_CEILING_MS,
 					signal: request.signal,
-				},
-				ctx,
+					...(authToken !== undefined ? { authToken } : {}),
+				};
+				sent = true;
+				call?.stage("send", "start");
+				return decide.call(
+					runtime,
+					target,
+					{
+						state: request.state,
+						questions: request.questions as Record<string, DecisionQuestion>,
+						...(model !== null ? { model } : {}),
+						signal: request.signal,
+					},
+					ctx,
+				);
+			};
+			let result: DecideResult;
+			try {
+				result = await (recordUsage?.withContext ? recordUsage.withContext(send) : send());
+			} catch (error) {
+				const aborted = request.signal.aborted;
+				recordUsage?.(null, {
+					callOutcome: aborted ? "aborted" : "error",
+					failure: classifyCallFailure(error, { invoked: sent, aborted }),
+				});
+				throw error;
+			}
+			// The wire's input count is the whole prompt; it has no cache split, so no provider-reported mark, which
+			// would read a missing cache split as an unknown input.
+			const tokens = result.tokensUsed;
+			recordUsage?.(
+				tokens === undefined
+					? null
+					: { input: tokens.input, output: tokens.output, totalTokens: tokens.input + tokens.output },
+				{ callOutcome: "success" },
 			);
 			const answers: Record<string, EngineReply["answers"][string]> = {};
 			for (const [id, raw] of Object.entries(result.answers)) {

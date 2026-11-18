@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 import { factKnownValue } from "../../src/core/telemetry/known.js";
 import { foregroundStreamUsage } from "../../src/domains/providers/endpoint-capacity.js";
+import typesafeJevRuntime from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import llamacppRuntime from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SchedulingContract } from "../../src/domains/scheduling/contract.js";
 import { usageCallsFromJournal } from "../../src/domains/session/journal-usage.js";
 import { createLlmEngine } from "../../src/domains/system-one/engines/llm.js";
+import { createSystemOneEngine } from "../../src/domains/system-one/engines/systemone.js";
 import { yesNo } from "../../src/domains/system-one/questions.js";
 import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
 import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
@@ -219,6 +221,37 @@ describe("System One paid requests: admission and accounting", () => {
 		strictEqual(settled.filter((row) => row.data.disposition === "settled_no_usage").length, 1);
 		strictEqual(settled.filter((row) => row.data.disposition === "settled").length, 1);
 		ok(settled.every((row) => row.ctx.sessionId === "session-1" && row.ctx.agent.role === "system-one"));
+	});
+
+	it("journals a typed-wire round trip as a system-one call carrying the wire's usage (bt-33)", async () => {
+		const target = paidTarget("typesafe-jev", "http://jev.test/v1");
+		const { admit, charges: journaled, admitted, calls } = ledger(target);
+		fakeFetch(async () =>
+			json(200, {
+				model: "jev-1.14.0",
+				answers: { urgent: { type: "noul", noul: 0.9 } },
+				usage: { input_tokens: 568, output_tokens: 21 },
+			}),
+		);
+		const engine = createSystemOneEngine({
+			name: "jev",
+			target,
+			runtime: typesafeJevRuntime,
+			model: null,
+			host: { ...host, admitLlmRequest: admit },
+		});
+		const reply = await engine.decide({ state: { task: "t" }, questions: urgent, signal: new AbortController().signal });
+		strictEqual(reply.build, "jev-1.14.0");
+		strictEqual(admitted(), 1);
+		const [charge] = await journaled();
+		ok(charge);
+		strictEqual(factKnownValue(charge.facts.usage.input), 568);
+		strictEqual(factKnownValue(charge.facts.usage.output), 21);
+		strictEqual(charge.pricedBy, "target-rates");
+		const settled = await calls();
+		strictEqual(settled.length, 1);
+		strictEqual(settled[0]?.ctx.agent.role, "system-one");
+		strictEqual(settled[0]?.ctx.agent.id, "jev");
 	});
 
 	it("admits each one-shot attempt, the schema retry included, and charges the answer's usage", async () => {

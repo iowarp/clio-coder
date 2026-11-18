@@ -1,5 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { RunnerRoute } from "../../src/domains/system-one/runner.js";
 import { createRunner } from "../../src/domains/system-one/runner.js";
 import type {
@@ -9,6 +12,8 @@ import type {
 	EngineRequest,
 	SystemOne,
 } from "../../src/domains/system-one/types.js";
+import type { AgentMessage } from "../../src/engine/types.js";
+import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import type { TriageEntry, TriageVerdict } from "../../src/session-control/steering-triage.js";
 import {
 	runTriageRound,
@@ -18,6 +23,7 @@ import {
 	triageLabelsFor,
 	triageMayInterrupt,
 } from "../../src/session-control/steering-triage.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const MASS: EngineCapabilities = {
 	semantics: new Set(["boolean", "exclusive", "ordinal", "independent"]),
@@ -220,4 +226,62 @@ test("a queue with no entry answered by both picks reads as null and falls back"
 	const ran = await round({ systemOne: over(partial), asked: [ENTRY, { ...ENTRY, id: "q2" }] });
 	strictEqual(ran.applied, null);
 	strictEqual(ran.side, 1);
+});
+
+test("a steer through the chat api, as the headless steer channel and ACP send it, is triaged (bt-36)", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	settings.chat.steering.triage.enabled = true;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	let release!: () => void;
+	const turnHeld = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const points: string[] = [];
+	const stop = telemetryHub().subscribe("system_one.decided", (payload) => {
+		points.push(payload.point);
+	});
+	const typed = engine(MASS, "newTask", 0.9);
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		systemOne: over(typed),
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			agent: {
+				state: options?.initialState as { messages: AgentMessage[] },
+				subscribe: () => () => {},
+				abort() {},
+				steer() {},
+				followUp() {},
+				clearAllQueues() {},
+				async prompt() {
+					await turnHeld;
+				},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	try {
+		const turn = loop.submit("fix the cache");
+		for (let i = 0; i < 1000 && !loop.isStreaming(); i++) await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(loop.isStreaming(), true);
+		strictEqual(loop.steer("also add docs"), true);
+		for (let i = 0; i < 100 && loop.queueEntries()[0]?.labels === undefined; i++) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		strictEqual(typed.asked.length, 1);
+		deepStrictEqual(points, ["triage"]);
+		strictEqual(loop.queueEntries()[0]?.labels?.producer, "triage");
+		release();
+		await turn;
+	} finally {
+		stop();
+		release();
+		loop.dispose();
+		await loop.whenSettled();
+	}
 });

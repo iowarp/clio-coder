@@ -300,6 +300,41 @@ describe("contracts/consult tool", () => {
 		}
 	});
 
+	it("refuses an ask with no evidence or a flat filter before spending a call, and expands question globs (bt-35)", async () => {
+		writeFileSync(join(workspace, "src", "median.ts"), "export const median = 1;\n");
+		const engine = typed();
+		const registry = bound([engine]);
+		const empty = await invoke(
+			registry,
+			ToolNames.Consult,
+			{ questions: [QUESTIONS[0]], paths: ["**/*nothing*"] },
+			{ turnId: "t1" },
+		);
+		strictEqual(empty.kind, "error");
+		match(empty.text, /\*\*\/\*nothing\*: pattern matched no files.*Nothing was sent and no call was spent/);
+		const flat = await invoke(
+			registry,
+			ToolNames.Consult,
+			{ criterion: "names the cache", source: "items", items: { a: "the cache" } },
+			{ turnId: "t1" },
+		);
+		strictEqual(flat.kind, "error");
+		match(flat.text, /criterion, source, items belong inside filter, as \{"filter": /);
+		strictEqual(engine.asked.length, 0);
+
+		const globbed = await invoke(
+			registry,
+			ToolNames.Consult,
+			{ questions: [QUESTIONS[0]], paths: ["**/*median*"] },
+			{ turnId: "t1" },
+		);
+		strictEqual(globbed.kind, "ok", globbed.text);
+		const payload = JSON.parse(globbed.text) as { filesRead: string[]; remainingCalls: number };
+		deepStrictEqual(payload.filesRead, ["src/median.ts"]);
+		strictEqual(payload.remainingCalls, 2, "only the ask that was sent spent a call");
+		strictEqual(engine.asked.length, 1);
+	});
+
 	it("filters items to ids and scores at the yes boundary, never echoing their text, three calls a turn", async () => {
 		const secretWord = "uniquely-worded-item-text";
 		const engine = typed();
