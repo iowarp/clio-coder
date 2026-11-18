@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Tests pin gated prompt sections in one condition matrix, and the worker prompt goldens compile from the shipped recipes, so a recipe edit fails its golden (P4-1).
 - Launch no longer prints "terminal panes are not installed"; `/panes`, `/files` and Alt+E name `clio-coder panes install`, and doctor still warns (bt-11).
 - Alt+W opens or shows the workers dock without moving the keyboard out of CLIO Coder (bt-11).
 - The workers board builds cards only for live runs and the newest 24 finished runs, and folds a finished run's telemetry once per journal change, so a long run history no longer makes each poll slower than the poll period (P3).
