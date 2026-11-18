@@ -495,6 +495,38 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	);
 	const ended = whyStopped({ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd] } }, now);
 	ok(ended.findings.includes("The last turn ended normally (stop)."), ended.findings.join("\n"));
+	// cf1h-D3: the worker that turn dispatched settles in its own run journal; why-stopped names its stop too.
+	const turnCtx = {
+		sessionId: source.sessionId,
+		turnId: "turn-worker",
+		agent: { role: "main" as const, id: source.sessionId },
+	};
+	const [workerStarted, workerSettled] = telemetryCall(source.sessionId, {
+		role: "worker",
+		at: "2026-10-28T00:00:01.000Z",
+	});
+	if (workerSettled?.k !== "call.settled" || !workerStarted) throw new Error("fixture call missing");
+	const workerCut = {
+		...workerSettled,
+		data: { ...workerSettled.data, stop: { reason: "aborted", failure: "turn_timeout" } },
+	};
+	const withWorker = whyStopped(
+		{
+			...source,
+			journal: {
+				...source.journal,
+				records: [
+					...imported.records,
+					makeTelemetryRecord("run.linked", { runId: "run-cut" }, turnCtx, { t: "2026-10-28T00:00:00.000Z", mono: 0 }),
+					{ ...turnEnd, ctx: turnCtx },
+				],
+			},
+			runs: new Map([["run-cut", { ...source.journal, records: [workerStarted, workerCut as TelemetryRecord] }]]),
+		},
+		now,
+	);
+	ok(withWorker.findings.includes("The last turn ended normally (stop)."), withWorker.findings.join("\n"));
+	ok(withWorker.findings.includes("Worker run run-cut stopped: turn_timeout."), withWorker.findings.join("\n"));
 	// bt-26 N2a, N2b: a shutdown that cut off a streaming reply reads as a stop while streaming, never as a failure.
 	const [cutStarted, cutSettled] = telemetryCall(source.sessionId, { at: "2026-10-29T00:00:01.000Z" });
 	if (cutSettled?.k !== "call.settled" || !cutStarted) throw new Error("fixture call missing");

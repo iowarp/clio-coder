@@ -27,6 +27,7 @@ import {
 import type { Terminal } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { assistantOutputChars } from "../../src/core/assistant-output.js";
+import { classifyCallFailure } from "../../src/core/call-failure.js";
 import { CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { createEngineAgent, type EngineStreamFn as StreamFn } from "../../src/engine/agent.js";
@@ -353,6 +354,16 @@ describe("tool argument generation bounds", () => {
 			callSettlementFromMessage({ ...cutOff, failure: { stage: "harness", errorClass: "loop_guard" } }, "none").stop,
 			{ reason: "aborted", failure: "loop_guard" },
 		);
+		// A bound's own abort fails the fetch as a transport error; the bound still names the stop, and a drop with no
+		// bound behind it stays a transport drop.
+		const timeout = "worker_turn_timeout: round 1 exceeded the 20 second response limit";
+		const dropped = classifyCallFailure(timeout, { invoked: true, aborted: true, transportFailed: true });
+		const timedOut = { ...cutOff, clioCoderAbortReason: "worker_turn_timeout", errorMessage: timeout, failure: dropped };
+		deepStrictEqual(callSettlementFromMessage(timedOut, "none").stop, { reason: "aborted", failure: "turn_timeout" });
+		deepStrictEqual(callSettlementFromMessage({ ...timedOut, clioCoderAbortReason: undefined }, "none").stop, {
+			reason: "aborted",
+			failure: "transport_dropped",
+		});
 		const delegated = turns(true);
 		await delegated.worker.prompt("go");
 		deepStrictEqual(delegated.ran, ["tool:bignotes/pump-1.md limit=30"]);
