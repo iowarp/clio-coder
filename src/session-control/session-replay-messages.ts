@@ -337,13 +337,15 @@ function recordToolCallsFromMessage(message: AgentMessage, seen: Set<string>): v
  */
 function createOrderedReplaySink(): {
 	messages: AgentMessage[];
-	push(message: AgentMessage): void;
-	stageToolResult(message: AgentMessage): void;
+	sourceIds: Array<string | null>;
+	push(message: AgentMessage, sourceId: string | null): void;
+	stageToolResult(message: AgentMessage, sourceId: string): void;
 	flush(): void;
 } {
 	const messages: AgentMessage[] = [];
+	const sourceIds: Array<string | null> = [];
 	let callOrder: string[] = [];
-	let staged: AgentMessage[] = [];
+	let staged: Array<{ message: AgentMessage; sourceId: string }> = [];
 	const rank = (message: AgentMessage): number => {
 		const id = (message as { toolCallId?: unknown }).toolCallId;
 		const index = typeof id === "string" ? callOrder.indexOf(id) : -1;
@@ -351,24 +353,29 @@ function createOrderedReplaySink(): {
 	};
 	const flush = (): void => {
 		if (staged.length === 0) return;
-		staged.sort((a, b) => rank(a) - rank(b));
-		messages.push(...staged);
+		staged.sort((a, b) => rank(a.message) - rank(b.message));
+		for (const item of staged) {
+			messages.push(item.message);
+			sourceIds.push(item.sourceId);
+		}
 		staged = [];
 		callOrder = [];
 	};
 	return {
 		messages,
+		sourceIds,
 		flush,
-		push(message) {
+		push(message, sourceId) {
 			flush();
 			messages.push(message);
+			sourceIds.push(sourceId);
 			// Consecutive assistant messages (one legacy standalone tool_call entry
 			// per call) share one batch; anything else starts a new one.
 			if (message.role === "assistant") callOrder.push(...toolCallIdsFromMessage(message));
 			else callOrder = [];
 		},
-		stageToolResult(message) {
-			staged.push(message);
+		stageToolResult(message, sourceId) {
+			staged.push({ message, sourceId });
 		},
 	};
 }
@@ -816,14 +823,14 @@ function bashContextText(entry: BashExecutionEntry): string {
 }
 
 function appendContextMessage(
-	out: { push(message: AgentMessage): void },
+	out: { push(message: AgentMessage, sourceId: string | null): void },
 	role: "user" | "assistant",
 	text: string,
-	timestamp: string,
+	entry: SessionEntry,
 ): void {
 	const trimmed = text.trim();
 	if (trimmed.length === 0) return;
-	out.push(makeTextMessage(role, truncateReplayText(trimmed), timestamp));
+	out.push(makeTextMessage(role, truncateReplayText(trimmed), entry.timestamp), entry.turnId);
 }
 
 const UNVERIFIED_SKILL_CHECKPOINT_TEXT =
@@ -856,10 +863,27 @@ export function createReplayMessageConverter(
 	return replayMessageFromEntry;
 }
 
+/**
+ * Replay elements and, in parallel, the ledger row each came from (SPEC §1.1). A tool result, a message, a summary
+ * and every block a summary expands into carry their row's turn id; a continuity block carries null, because it is
+ * resolved from the owner's whole record chain rather than read from one row.
+ */
+export interface ReplayRender {
+	messages: AgentMessage[];
+	sourceIds: Array<string | null>;
+}
+
 export function buildReplayAgentMessagesFromTurns(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): AgentMessage[] {
+	return renderReplayElements(turns, options).messages;
+}
+
+export function renderReplayElements(
+	turns: ReadonlyArray<SessionEntry>,
+	options: RehydrateChatPanelOptions = {},
+): ReplayRender {
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
 	const failedToolCalls = new Set<string>();
@@ -884,7 +908,7 @@ export function buildReplayAgentMessagesFromTurns(
 		// Verbatim. The accepted note is agent-authored handoff text and is
 		// carried as data; it is never presented as an operator turn and never
 		// passes through the trimming/truncating context helper.
-		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp));
+		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp), null);
 	};
 	const replayEntries = selectReplayEntries(turns, options);
 	const refusedPrompts = refusedPromptTurns(replayEntries);
@@ -899,7 +923,10 @@ export function buildReplayAgentMessagesFromTurns(
 	for (const entry of replayEntries) {
 		const policy = postureUpdates.get(entry.turnId);
 		if (entry.kind === "message" && entry.role === "user" && policy)
-			out.push(createHostPolicyMessage(policy.entry.turnId, policy.text, timestampMillis(policy.entry.timestamp)));
+			out.push(
+				createHostPolicyMessage(policy.entry.turnId, policy.text, timestampMillis(policy.entry.timestamp)),
+				policy.entry.turnId,
+			);
 		switch (entry.kind) {
 			case "message": {
 				const text = textBlockFromEntry(entry);
@@ -913,7 +940,7 @@ export function buildReplayAgentMessagesFromTurns(
 						? richMessageFromEntry(entry, MAX_REPLAY_TEXT_CHARS)
 						: replayMessageFromEntry(entry);
 					if (message) {
-						out.push(message);
+						out.push(message, entry.turnId);
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}
 				} else if (entry.role === "tool_call") {
@@ -921,49 +948,51 @@ export function buildReplayAgentMessagesFromTurns(
 					if (!seenToolCalls.has(call.id) && !failedToolCalls.has(call.id)) {
 						const message = replayMessageFromEntry(entry);
 						if (!message) break;
-						out.push(message);
+						out.push(message, entry.turnId);
 						recordToolCallsFromMessage(message, seenToolCalls);
 					}
 				} else if (entry.role === "tool_result") {
 					const result = extractToolResult(entry);
 					if (seenToolCalls.has(result.id ?? entry.turnId)) {
-						out.stageToolResult(toolResultMessageFromEntry(entry));
+						out.stageToolResult(toolResultMessageFromEntry(entry), entry.turnId);
 					}
 				} else if (entry.role === "system") {
-					appendContextMessage(out, "user", `System note: ${text}`, entry.timestamp);
+					appendContextMessage(out, "user", `System note: ${text}`, entry);
 				}
 				break;
 			}
 			case "bashExecution":
-				if (!entry.excludeFromContext) appendContextMessage(out, "user", bashContextText(entry), entry.timestamp);
+				if (!entry.excludeFromContext) appendContextMessage(out, "user", bashContextText(entry), entry);
 				break;
 			case "branchSummary":
-				appendContextMessage(out, "user", branchContextText(entry), entry.timestamp);
+				appendContextMessage(out, "user", branchContextText(entry), entry);
 				break;
 			case "compactionSummary": {
 				const message = makeTextMessage("user", compactionContextText(entry), entry.timestamp);
 				if (entry.providerCheckpoint) {
 					Object.assign(message, { clioProviderCheckpoint: entry.providerCheckpoint });
-					out.push(message);
+					out.push(message, entry.turnId);
 					// Constraints and recall refs remain inspectable host data after the opaque splice (#423).
-					out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp));
-				} else out.push(message);
+					out.push(makeTextMessage("user", compactionContextText(entry), entry.timestamp), entry.turnId);
+				} else out.push(message, entry.turnId);
 				const checkpointIndex = activeEntries.findIndex((candidate) => candidate.turnId === entry.turnId);
 				const board = checkpointIndex < 0 ? null : foldTaskBoard(activeEntries.slice(0, checkpointIndex));
 				if (board) {
 					const rows = board.tasks.map((task) => `${task.id} ${task.status} ${task.title}`);
 					out.push(
 						makeTextMessage("user", [`[Task board as of checkpoint] ${board.title}`, ...rows].join("\n"), entry.timestamp),
+						entry.turnId,
 					);
 				}
 				const decisions = checkpointIndex < 0 ? null : decisionsAsOfCheckpoint(activeEntries.slice(0, checkpointIndex));
-				if (decisions) out.push(makeTextMessage("user", decisions, entry.timestamp));
+				if (decisions) out.push(makeTextMessage("user", decisions, entry.timestamp), entry.turnId);
 				if (
 					entry.userContext &&
 					(!latestOperator || latestOperator.turnId === entry.userContext.turnId || userContextSent(activeEntries, entry))
 				)
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
+						entry.turnId,
 					);
 				if (entry.skillContext !== undefined) {
 					const retainedSkills = entry.skillContext.skills.length;
@@ -971,7 +1000,7 @@ export function buildReplayAgentMessagesFromTurns(
 						// The raw pairs behind a tampered checkpoint are already outside the
 						// replay window. Say so rather than dropping the skill without a trace.
 						if (retainedSkills > 0) {
-							out.push(makeTextMessage("user", UNVERIFIED_SKILL_CHECKPOINT_TEXT, entry.timestamp));
+							out.push(makeTextMessage("user", UNVERIFIED_SKILL_CHECKPOINT_TEXT, entry.timestamp), entry.turnId);
 						}
 						break;
 					}
@@ -984,14 +1013,20 @@ export function buildReplayAgentMessagesFromTurns(
 							// Still selected, but its original receipt cannot be re-verified
 							// (masked, rewritten, or unknown state). Never inject unverified
 							// bytes, and never lose the skill silently either.
-							out.push(makeTextMessage("user", unverifiedSkillContextText(skill), entry.timestamp));
+							out.push(makeTextMessage("user", unverifiedSkillContextText(skill), entry.timestamp), entry.turnId);
 							continue;
 						}
 						// This is historical instruction context, not a generated summary or a tool result.
 						// Keep the exact captured blocks outside summary replay's text cap.
-						out.push(makeTextMessage("user", `Preserved skill request (verbatim):\n${skill.requestText}`, entry.timestamp));
-						out.push(makeTextMessage("user", `Verified loaded skill: ${JSON.stringify(skill.activation)}`, entry.timestamp));
-						for (const block of skill.content) out.push(makeTextMessage("user", block.text, entry.timestamp));
+						out.push(
+							makeTextMessage("user", `Preserved skill request (verbatim):\n${skill.requestText}`, entry.timestamp),
+							entry.turnId,
+						);
+						out.push(
+							makeTextMessage("user", `Verified loaded skill: ${JSON.stringify(skill.activation)}`, entry.timestamp),
+							entry.turnId,
+						);
+						for (const block of skill.content) out.push(makeTextMessage("user", block.text, entry.timestamp), entry.turnId);
 					}
 				}
 				// The reduction boundary is where the handoff happened, so the note
@@ -1006,7 +1041,7 @@ export function buildReplayAgentMessagesFromTurns(
 				if (entry.activation.triggeredBy === "tool") break;
 				if (entry.activation.runId !== undefined || (skillState && !skillState.activationRefs.includes(entry.turnId)))
 					break;
-				appendContextMessage(out, "user", skillActivationContextText(entry), entry.timestamp);
+				appendContextMessage(out, "user", skillActivationContextText(entry), entry);
 				break;
 			// The one custom entry that becomes a model message. `/handoff` seeds a
 			// new session with a reviewed document, and the seed is the first thing
@@ -1014,7 +1049,7 @@ export function buildReplayAgentMessagesFromTurns(
 			// carried as data, never as a user turn the operator did not write.
 			case "custom":
 				if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
-					appendContextMessage(out, "user", handoffSeedContextText(entry.data), entry.timestamp);
+					appendContextMessage(out, "user", handoffSeedContextText(entry.data), entry);
 				}
 				break;
 			case "modelChange":
@@ -1049,5 +1084,5 @@ export function buildReplayAgentMessagesFromTurns(
 	// of the replayed history rather than being dropped.
 	emitContinuity(activeEntries[activeEntries.length - 1]?.timestamp ?? new Date(0).toISOString());
 	out.flush();
-	return out.messages;
+	return { messages: out.messages, sourceIds: out.sourceIds };
 }

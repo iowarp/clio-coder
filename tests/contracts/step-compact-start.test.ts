@@ -194,6 +194,13 @@ async function stepDrive(route: Drive): Promise<Run> {
 		createAgent: ((agentOptions: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 			let listener: (event: AgentEvent) => unknown = () => {};
 			const state = { ...agentOptions?.initialState, messages: [] as AgentMessage[] };
+			// The engine appends a message and then emits its message_end, which the run evidence log records.
+			const settle = async (...messages: AgentMessage[]) => {
+				for (const message of messages) {
+					state.messages.push(message);
+					await listener({ type: "message_end", message });
+				}
+			};
 			return {
 				requestCorrelationId: () => undefined,
 				agent: {
@@ -221,13 +228,13 @@ async function stepDrive(route: Drive): Promise<Run> {
 						let reply = "Step two ran: drafted methods; after=methods-done.";
 						if (prompts === 1) {
 							// The step's tool round lives only in this turn's context.
-							state.messages.push({
+							await settle({
 								role: "assistant",
 								content: [{ type: "toolCall", id: "call-1", name: STEP, arguments: { after: "start" } }],
 								stopReason: "toolUse",
 								timestamp: Date.now(),
 							} as unknown as AgentMessage);
-							state.messages.push({
+							await settle({
 								role: "toolResult",
 								toolCallId: "call-1",
 								toolName: STEP,
@@ -261,7 +268,7 @@ async function stepDrive(route: Drive): Promise<Run> {
 							reply = "Step one ran: drafted intro; after=intro-done.";
 						} else {
 							// The second step is the pipeline's last, so the chain ends after it.
-							state.messages.push(
+							await settle(
 								{
 									role: "assistant",
 									content: [{ type: "toolCall", id: `call-${prompts}`, name: STEP, arguments: { after: "intro-done" } }],

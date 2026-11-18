@@ -494,6 +494,55 @@ export const ContextPrunedSchema = Type.Object(
 	},
 	closed,
 );
+/**
+ * One fold checkpoint's decision (ContextFold CF-1): where it ran, what the route reports, and each stage it
+ * reached with its outcome and the ledger record a commit wrote. A checkpoint under the trigger writes none.
+ */
+export const ContextFoldSchema = Type.Object(
+	{
+		checkpoint: vocabulary(["submit", "tool_batch", "overflow", "operator", "step"]),
+		route: Type.Object(
+			{
+				modelTier: Type.Optional(vocabulary(["small", "standard", "frontier"])),
+				promptCaching: Type.Optional(Type.Boolean()),
+			},
+			closed,
+		),
+		stages: Type.Array(
+			Type.Object(
+				{
+					stage: vocabulary(["superseded", "working_set", "step_checkpoint", "llm_summary", "stop"]),
+					outcome: vocabulary(["committed", "held", "none", "failed"]),
+					reason: vocabulary([
+						"evicted",
+						"summarized",
+						"step_boundary",
+						"rearm_band",
+						"paused",
+						"disabled",
+						"no_candidates",
+						"unavailable",
+						"no_gain",
+						"protected_recent",
+						"protected_skill",
+						"repeat_no_gain",
+						"nothing_to_summarize",
+						"error",
+					]),
+					/** The turn id of the `contextEviction` or `compactionSummary` record a commit wrote. */
+					recordId: Type.Optional(ExistingId),
+				},
+				closed,
+			),
+			{ minItems: 1, maxItems: 8 },
+		),
+		tokensBefore: count,
+		tokensAfter: count,
+		/** The expected cold-cache reason of the last stage that committed. */
+		cause: Type.Optional(vocabulary(["working_set_evict", "compaction", "step_checkpoint"])),
+	},
+	closed,
+);
 /** One working-set unit readmitted to context, by its unit ref (#434). */
 export const ContextRecalledSchema = Type.Object(
 	{

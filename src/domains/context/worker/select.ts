@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentMessage } from "../../../engine/types.js";
-import { WORKER_CONTEXT_MAX_BYTES } from "../../../worker/context-seed.js";
+import { carriedMarkers, WORKER_CONTEXT_MAX_BYTES } from "../../../worker/context-seed.js";
 import { canonicalJson } from "../../../worker/protocol.js";
 import { estimateAgentMessageTokens } from "../../session/context-accounting.js";
 import {
@@ -159,6 +159,13 @@ export function selectWorkerContext(
 		excludedTailMessages: snapshot.excludedTailMessages,
 		excludedInterruptedMessages: snapshot.excludedInterruptedMessages,
 		selectedRefs,
+		// Inside the hashed identity: the worker's aliases start above the floor, and the markers it keeps name parent history.
+		...(snapshot.recall === undefined
+			? {}
+			: {
+					recallAliasFloor: snapshot.recall.aliasFloor,
+					inheritedMarkers: carriedMarkers(snapshot.recall.markers, messages),
+				}),
 	};
 	return { provenance: { ...identity, contentHash: contextHash({ ...identity, messages }) }, messages };
 }

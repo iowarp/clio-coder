@@ -17,6 +17,7 @@ import type { ContextOperation } from "../context-operation.js";
 import type { TurnContinuationCause } from "../job-types.js";
 import type { SkillActivation } from "../skill-activation.js";
 import type {
+	ContextFoldSchema,
 	ContextPrunedSchema,
 	ContextRecalledSchema,
 	DomainLoadedSchema,
@@ -394,6 +395,8 @@ export interface TurnAbortedPayload {
 	reason?: string;
 }
 
+/** Payload published on `context.fold` once per fold checkpoint that reached a stage (ContextFold CF-1). */
+export type ContextFoldPayload = Static<typeof ContextFoldSchema>;
 /** Payload published on `context.pruned` after projected or summarized context shrinks. */
 export type ContextPrunedPayload = Static<typeof ContextPrunedSchema>;
 

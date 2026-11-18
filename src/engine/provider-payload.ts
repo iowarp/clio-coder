@@ -418,6 +418,22 @@ function noteCacheRead(key: string, message: AssistantMessage, choice: unknown):
 }
 
 /**
+ * The request `streamToolRound` invokes first: on a route where "none" re-renders, a text-only round asks with "auto"
+ * beside the lockout directive. Admission prices this same request (F15).
+ */
+export function firstToolRoundAttempt(
+	model: EngineModel,
+	controlled: ControlledRequest,
+	targetId = model.provider,
+): ControlledRequest {
+	return controlled.toolRounds?.[0]?.kind === "text-only" &&
+		controlled.options?.toolChoice === "none" &&
+		noneRerenders.has(choiceKey(model, targetId, "none"))
+		? { ...controlled, options: { ...controlled.options, toolChoice: "auto" } }
+		: controlled;
+}
+
+/**
  * Retry only a rejected routing parameter before output, with one auto attempt (#426). On a route where "none" is
  * known to re-render, a text-only round first asks with "auto" beside the lockout directive, which keeps the cached
  * prefix; a reply that calls a tool anyway is discarded and the round is sent again with "none".
@@ -442,8 +458,8 @@ export function streamToolRound(
 	const initial = controlled.toolRounds?.[0];
 	if (!initial) return observed(controlled);
 	const output = createAssistantMessageEventStream();
-	const complianceFirst =
-		initial.kind === "text-only" && controlled.options?.toolChoice === "none" && noneRerenders.has(routeKey);
+	const first = firstToolRoundAttempt(model, controlled, targetId);
+	const complianceFirst = first !== controlled;
 	const records = [complianceFirst ? { ...initial, choice: "auto" as const, downgradeReason: NONE_RERENDERS } : initial];
 	const annotate = (event: AssistantMessageEvent): AssistantMessageEvent => {
 		if ("partial" in event) Object.assign(event.partial, { toolRounds: records });
@@ -456,7 +472,7 @@ export function streamToolRound(
 		try {
 			if (complianceFirst) {
 				// Held whole: a reply that calls a tool is thrown away, so none of it may reach the transcript.
-				source = observed({ ...controlled, options: { ...controlled.options, toolChoice: "auto" } });
+				source = observed(first);
 				const held: AssistantMessageEvent[] = [];
 				for await (const event of source) held.push(event);
 				const reply = await source.result();

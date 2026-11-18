@@ -218,6 +218,8 @@ export const coreTests = [
 	"campaign-run",
 	"extension-ignorable-keys",
 	"template-step-when",
+	"context-fold-pins",
+	"context-fold-witnesses",
 ]
 	.map((name) => `tests/contracts/${name}.test.ts`)
 	// Signature features whose guards live in the extended suite: the working

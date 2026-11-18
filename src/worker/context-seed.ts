@@ -1,11 +1,19 @@
 /** Pure Pi message seed contract shared by the host and subprocess. No domain runtime or protected engine graph is loaded. */
 
 import { createHash } from "node:crypto";
-import type { WorkerContextProvenance, WorkerContextSeed } from "../domains/context/worker/contract.js";
+import type {
+	WorkerContextProvenance,
+	WorkerContextSeed,
+	WorkerRecallLineage,
+} from "../domains/context/worker/contract.js";
 import type { AgentMessage } from "../engine/types.js";
 import { canonicalJson } from "./protocol.js";
 
 export const WORKER_CONTEXT_MAX_BYTES = 512 * 1024;
+
+const RECALL_ALIAS = /^r[1-9]\d*$/u;
+/** The fixed opening of a working-set marker (`src/domains/context/working-set/marker.ts`), aliased form only. */
+const MARKER_OPENING = /\[evicted ref=(r[1-9]\d*) /gu;
 
 function record(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -30,6 +38,8 @@ export function parseWorkerContextProvenance(value: unknown): WorkerContextProve
 		"excludedTailMessages",
 		"excludedInterruptedMessages",
 		"selectedRefs",
+		"recallAliasFloor",
+		"inheritedMarkers",
 	];
 	if (Object.keys(p).some((key) => !fields.includes(key))) fail();
 	if (p.version !== 1 || (p.mode !== "fork" && p.mode !== "splice") || !record(p.source)) fail();
@@ -60,6 +70,31 @@ export function parseWorkerContextProvenance(value: unknown): WorkerContextProve
 		new Set(p.selectedRefs).size !== p.selectedRefs.length
 	)
 		fail();
+	if (
+		p.recallAliasFloor !== undefined &&
+		(!Number.isSafeInteger(p.recallAliasFloor) || (p.recallAliasFloor as number) < 0)
+	)
+		fail();
+	if (p.inheritedMarkers !== undefined) {
+		const floor = p.recallAliasFloor;
+		if (
+			typeof floor !== "number" ||
+			!Array.isArray(p.inheritedMarkers) ||
+			p.inheritedMarkers.some(
+				(marker) =>
+					!record(marker) ||
+					Object.keys(marker).some((key) => key !== "alias" && key !== "ref") ||
+					typeof marker.alias !== "string" ||
+					!RECALL_ALIAS.test(marker.alias) ||
+					Number(marker.alias.slice(1)) > floor ||
+					typeof marker.ref !== "string" ||
+					!marker.ref ||
+					marker.ref.length > 512,
+			) ||
+			new Set(p.inheritedMarkers.map((marker) => (marker as { alias: string }).alias)).size !== p.inheritedMarkers.length
+		)
+			fail();
+	}
 	return structuredClone(p) as unknown as WorkerContextProvenance;
 }
 
@@ -142,6 +177,34 @@ export function parseWorkerContextSeed(value: unknown): WorkerContextSeed {
 	)
 		fail();
 	return structuredClone(seed);
+}
+
+/** The markers whose rendered opening the messages still carry. */
+export function carriedMarkers<T extends { alias: string }>(
+	markers: ReadonlyArray<T>,
+	messages: ReadonlyArray<AgentMessage>,
+): T[] {
+	if (markers.length === 0) return [];
+	const text = JSON.stringify(messages);
+	return markers.filter((marker) => text.includes(`[evicted ref=${marker.alias} `));
+}
+
+/**
+ * The seed's recall aliases as the worker reads them. A seed from before the provenance fields names neither: the
+ * floor is then the largest alias its text carries in a marker opening, and those markers are the inherited ones.
+ */
+export function seedRecallLineage(seed: WorkerContextSeed | undefined): WorkerRecallLineage {
+	if (seed === undefined) return { aliasFloor: 0, inheritedMarkers: [] };
+	const { provenance, messages } = parseWorkerContextSeed(seed);
+	if (provenance.recallAliasFloor !== undefined)
+		return { aliasFloor: provenance.recallAliasFloor, inheritedMarkers: provenance.inheritedMarkers ?? [] };
+	const aliases = [
+		...new Set([...JSON.stringify(messages).matchAll(MARKER_OPENING)].map((match) => match[1] as string)),
+	];
+	return {
+		aliasFloor: aliases.reduce((max, alias) => Math.max(max, Number(alias.slice(1))), 0),
+		inheritedMarkers: aliases.map((alias) => ({ alias })),
+	};
 }
 
 export function seededWorkerMessages(seed: WorkerContextSeed | undefined): AgentMessage[] {

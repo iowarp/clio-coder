@@ -1,5 +1,6 @@
 import type { ModelTier } from "../core/model-tier.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
+import { stepCheckpointApplies } from "../domains/context/fold/contract.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 
 /**
@@ -21,7 +22,7 @@ export interface StepStartRoute {
 
 /** A small model, or a route that does not cache prompts, starts each later step turn from a compact state. */
 export function compactStepStartDue(route: StepStartRoute): boolean {
-	return route.modelTier === "small" || route.promptCaching === false;
+	return stepCheckpointApplies(route);
 }
 
 /** Where the session stands: its id and the leaf turn of its active branch. */
