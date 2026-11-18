@@ -1761,6 +1761,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					"clio_policy",
 					allowedBy,
 					policy?.ruleId ?? policy?.reasonCode,
+					policy?.floorBasis,
 				),
 			};
 		}
@@ -1823,6 +1824,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		layer: DenialLayer,
 		allowedBy: string,
 		code?: string,
+		basis?: string,
 	): Extract<RegistryVerdict, { kind: "blocked" }> =>
 		deps.principal === "worker"
 			? verdict
@@ -1834,6 +1836,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 						retryable: false,
 						allowedBy,
 						...(code !== undefined ? { code } : {}),
+						...(basis !== undefined ? { basis } : {}),
 					},
 				};
 

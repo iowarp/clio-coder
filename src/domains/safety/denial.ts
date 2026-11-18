@@ -38,6 +38,8 @@ export interface ToolDenial {
 	serverHint?: "read-only" | "destructive";
 	/** Set when the registry refuses an identical call later in this turn without running it. */
 	repeatRefused?: true;
+	/** Why the refusing rule fired when the action class was not the reason; stated in place of the class. */
+	basis?: string;
 }
 
 const LAYER_LABEL: Readonly<Record<DenialLayer, string>> = {
@@ -64,7 +66,7 @@ export function denialLines(denial: ToolDenial): [refusal: string, remedy: strin
 				? "an identical call asks the operator again"
 				: "an identical call meets the same refusal";
 	return [
-		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; Clio classifies this call as ${denial.actionClass}${hint}. Not retryable: ${repeat}.`,
+		`Refused by ${LAYER_LABEL[denial.layer]}${source !== undefined ? ` (${source})` : ""}; ${denial.basis ?? `Clio classifies this call as ${denial.actionClass}${hint}`}. Not retryable: ${repeat}.`,
 		`To allow it: ${denial.allowedBy}`,
 	];
 }

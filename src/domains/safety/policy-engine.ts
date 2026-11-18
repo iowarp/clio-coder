@@ -150,6 +150,7 @@ import {
 } from "./skill-authority.js";
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 import {
+	MAX_RAW_TEXT_BYTES,
 	YOLO_FLOOR_PACK_RULE_IDS,
 	YOLO_FLOOR_REASON_PREFIX,
 	YOLO_FLOOR_RULE_IDS,
@@ -195,6 +196,11 @@ export interface SafetyPolicyDecision {
 	projectPolicyPath?: string;
 	match?: DamageControlMatch;
 	rejection?: RejectionMessage;
+	/**
+	 * Why a yolo floor rule blocked a call when the call's action class played no part, as with the raw-text
+	 * reading. The model's refusal line states it in place of the class (bt-12 #1).
+	 */
+	floorBasis?: string;
 	/**
 	 * Execute-class passes only: whether the command is in the no-prompt set
 	 * (built-in allowlist, project policy command, typed execution tool). The
@@ -1189,12 +1195,17 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		"kind" | "classification" | "tool" | "actionClass" | "cwd" | "posture" | "command"
 	> | null => {
 		const trees = clioOwnedTrees();
-		const held = (hit: { match: DamageControlMatch; source: SafetyPolicySource }, reasons: string[] = []) => ({
+		const held = (
+			hit: { match: DamageControlMatch; source: SafetyPolicySource },
+			reasons: string[] = [],
+			floorBasis?: string,
+		) => ({
 			ruleId: hit.match.ruleId,
 			reasonCode: `${YOLO_FLOOR_REASON_PREFIX}${hit.match.ruleId}`,
 			reasons: [...reasons, hit.match.reason, "the yolo floor holds at every autonomy level"],
 			match: hit.match,
 			policySource: hit.source,
+			...(floorBasis !== undefined ? { floorBasis } : {}),
 		});
 		if (command !== null) {
 			const decoded = [decodedAnsiCCommand(command), decodedLocaleQuoting(command)].filter(
@@ -1220,6 +1231,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					ruleId: YOLO_FLOOR_RULE_IDS.rawText,
 					reason: `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}, and this one is too large to read that way; split it, or write its text to a file with the write tool and pass the file`,
 				}),
+				[],
+				`a line holding a command substitution is also read as raw text, and this one's reading passes the floor's ${MAX_RAW_TEXT_BYTES}-byte raw-text budget`,
 			);
 		}
 		for (const candidate of raw?.candidates ?? []) {
@@ -1228,9 +1241,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				commandFloorHit([candidate], [candidate], callCwd, trees) ?? (read === null ? null : floorMatch(read, "read"));
 			if (hit !== null) {
 				const reason = `matched ${YOLO_FLOOR_RULE_IDS.rawText}: ${RAW_TEXT_REASON}: "${candidate.slice(0, 200)}" is a floor command even if it is only quoted data (fail-closed); write that text to a file with the write tool and pass the file`;
-				return held({ match: { ...hit.match, ruleId: YOLO_FLOOR_RULE_IDS.rawText, reason }, source: hit.source }, [
-					hit.match.reason,
-				]);
+				return held(
+					{ match: { ...hit.match, ruleId: YOLO_FLOOR_RULE_IDS.rawText, reason }, source: hit.source },
+					[hit.match.reason],
+					`a line holding a command substitution is also read as raw text, and that reading holds the floor command ${hit.match.ruleId}`,
+				);
 			}
 		}
 		const line = floorLine(trees);
