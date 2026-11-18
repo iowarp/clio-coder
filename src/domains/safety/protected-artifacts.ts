@@ -1710,6 +1710,19 @@ const CHECK_DIRECTORY_OPTIONS: ReadonlySet<string> = new Set([
 /** Runners whose positional operands are the paths they collect tests from. */
 const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "jest", "vitest", "mocha", "go"]);
 
+const GO_VALUE_OPTIONS = ["-run", "-bench", "-skip", "-tags", "-timeout", "-count", "-cpu", "-parallel", "-p"];
+const JEST_VALUE_OPTIONS = ["-t", "--testNamePattern"];
+const PYTEST_VALUE_OPTIONS = ["-k", "-m", "-p", "-o", "-W"];
+
+/** Each runner's options whose separate next argument is a value (a test name, a regex), not a path operand (x5-3). */
+const RUNNER_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["go", new Set([...GO_VALUE_OPTIONS, "-coverprofile", "-covermode", "-o"])],
+	["jest", new Set(JEST_VALUE_OPTIONS)],
+	["vitest", new Set(JEST_VALUE_OPTIONS)],
+	["pytest", new Set(PYTEST_VALUE_OPTIONS)],
+	["py.test", new Set(PYTEST_VALUE_OPTIONS)],
+]);
+
 /**
  * Whether a check step's own directory options (`npm test --prefix ../x`, `make -C ../x`, `cargo test --manifest-path
  * ../x/Cargo.toml`) or a test runner's path operands (`pytest ../x`) reach outside `root` from `directory` (x4-4). The
@@ -1719,7 +1732,9 @@ const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", 
 function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, root: string): boolean {
 	const [executable, ...args] = argv;
 	const module = args.indexOf("-m");
-	const operands = PATH_OPERAND_RUNNERS.has(basenameToken(executable)) || (module >= 0 && args[module + 1] === "pytest");
+	const runner = module >= 0 && args[module + 1] === "pytest" ? "pytest" : basenameToken(executable);
+	const operands = PATH_OPERAND_RUNNERS.has(runner);
+	const values = RUNNER_VALUE_OPTIONS.get(runner);
 	const targets: string[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index] ?? "";
@@ -1731,6 +1746,7 @@ function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, roo
 			if (equals < 0) index += 1;
 			if (option === "--manifest-path" && target !== undefined) target = path.dirname(target);
 		} else if (/^-C[^-]/u.test(arg)) target = arg.slice(2);
+		else if (values?.has(arg)) index += 1;
 		else if (operands && !arg.startsWith("-") && equals < 0) target = arg.split("::")[0];
 		if (target !== undefined) targets.push(target);
 	}
