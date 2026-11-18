@@ -2042,6 +2042,13 @@ function renderProseThinkingRail(
 		"",
 	);
 	if (text.length === 0) return [];
+	// One row before an action costs what the bare marker did, so it carries the last paragraph's opening, where
+	// reasoning says the step it takes next.
+	if (!unbounded && limit === 1) {
+		const last = (text.split(/\n\s*\n/u).at(-1) ?? text).replace(/\s+/gu, " ").trim();
+		const row = truncateToWidth(`${THINKING_LEAD}${last}`, Math.max(1, width - PROSE_GUTTER_WIDTH), GLYPH.ellipsis);
+		return [styleThinkingRow(row, 0)];
+	}
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
 	// that says what it is, because the rail alone is the same mark a tool's output wears.
 	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
@@ -2771,7 +2778,7 @@ function renderEntryLines(
 			const key = `${width}|${limit}|${unboundedToolBodies}`;
 			let lines = cached.layouts.get(key);
 			if (lines === undefined) {
-				if (reasoningOpen && !unboundedToolBodies) {
+				if (reasoningOpen && !unboundedToolBodies && limit > 1) {
 					cached.stream ??= {
 						prose: new AssistantProseProjection(),
 						layout: "",
