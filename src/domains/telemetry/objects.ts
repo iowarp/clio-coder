@@ -87,7 +87,8 @@ export const PromptStructureObjectSchema = Type.Object(
 					version: Type.Integer({ minimum: 1 }),
 					/** Written by builds before the timestamp moved to the `prompt.compiled` record. */
 					at: Type.Optional(Type.String()),
-					previousHash: Type.Union([hash, Type.Null()]),
+					/** Written by builds before the predecessor hash moved to the `prompt.compiled` record. */
+					previousHash: Type.Optional(Type.Union([hash, Type.Null()])),
 					systemPromptHash: hash,
 					tokenEstimate: Type.Integer({ minimum: 0 }),
 					thinkingLevel: Type.Union([Type.String(), Type.Null()]),
@@ -148,8 +149,8 @@ function reference(subject: ObjectRef["subject"], bytes: string, label: ObjectRe
 
 /**
  * Select structure explicitly: passing a compiled prompt must never persist its text in standard mode (#434). The
- * compile's timestamp stays out: the object id is a content hash, and a byte-stable recompile must keep its id. The
- * `prompt.compiled` record carries the time as `compiledAt`.
+ * compile's timestamp and predecessor hash stay out: the object id is a content hash, and a byte-stable recompile must
+ * keep its id. The `prompt.compiled` record carries them as `compiledAt` and `previousHash`.
  */
 export function telemetryPromptStructure(prompt: {
 	sections: ReadonlyArray<{ id: string; tokenEstimate: number; contentHash?: string }>;
@@ -172,7 +173,6 @@ export function telemetryPromptStructure(prompt: {
 			? {
 					compile: {
 						version: prompt.compile.version,
-						previousHash: prompt.compile.previousHash,
 						systemPromptHash: prompt.compile.systemPromptHash,
 						tokenEstimate: prompt.compile.tokenEstimate,
 						thinkingLevel: prompt.compile.thinkingLevel,
