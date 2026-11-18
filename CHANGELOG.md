@@ -124,6 +124,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Telemetry insights counts a fork's own verified outcomes after its own check, so the verified share moves with it. (c16-D, bt-fork-verified, drv-n3)
 - `telemetry why-stopped` names a dispatched worker's stop on the parent session, in text and in `--json` `workerStops`. (D3-b, drv-n2a)
 - A dispatched architect task that forbids writing files no longer carries the plan/artifact recipe, the artifact tool or an artifact-write permit; it returns its plan in the reply. (D-C residue, drv-n5)
 - Read-only inline python (`python -c`, heredoc) and jq no longer retire a standing check; a body that may write still reads as a change. (c17-a, verify3)
