@@ -104,6 +104,18 @@ const runOwner = (runId: string) => `run:${runId}`;
 type LocalView = TelemetryView & { references(runId: string): boolean };
 type VerifiedRun = { source: JournalSource; telemetry: RunTelemetryV1 };
 
+/**
+ * A run this session or a fork ancestor links. A fork keeps its parent's transcript, so a worker card the parent
+ * dispatched reads the run's own journal in the fork too, not an unmeasured clock (bt-11 g).
+ */
+function lineageRun(source: SessionSource, runId: string): JournalSource | undefined {
+	for (let node: SessionSource | null = source; node !== null; node = node.parent?.source ?? null) {
+		const run = node.runs.get(runId);
+		if (run) return run;
+	}
+	return undefined;
+}
+
 export function telemetryView(
 	source: SessionSource,
 	scope: (runId: string) => TelemetryScopeFiles | null = () => null,
@@ -129,7 +141,7 @@ export function telemetryView(
 		runs: () => runsReport(source),
 		run: (runId) => {
 			// Reuse verification across unchanged frames, not a cold reread or a reopened run's new journal snapshot.
-			const run = source.runs.get(runId);
+			const run = lineageRun(source, runId);
 			if (!run) return null;
 			const verified = verifiedRuns.get(runId);
 			if (verified?.source === run) return verified.telemetry;
