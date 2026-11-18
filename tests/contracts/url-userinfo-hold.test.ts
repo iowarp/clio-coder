@@ -538,6 +538,37 @@ test("/view holds open thinking the way the rail does", async () => {
 	strictEqual((await open?.load())?.lines.join("\n"), "clone https://user:");
 });
 
+test("a long open thinking stream hides a secret a line break parts from its name in every frame", () => {
+	const prose = "The parser reads each token and checks the cache before it wraps a row.\n";
+	const leads = [
+		"pass --token\nZQXJZQXJ more",
+		"Authorization:\nBearer ZQXJ1ZQXJ next",
+		"the cookie:\nZQXJZQXJZQXJ next",
+		"curl -s https://h\n-u alice:ZQXJZQXJ next",
+		"sshpass\n-p ZQXJZQXJ x",
+	];
+	const text = leads.map((lead) => `${prose.repeat(30)}${lead}\n`).join("");
+	const open = (delta: string) => {
+		const panel = createChatPanel({ now: () => 1_000 });
+		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+		panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta, partialThinking: "x" });
+		return panel;
+	};
+	const streamed = open("");
+	for (let at = 0; at < text.length; at += 13) {
+		streamed.applyEvent({
+			type: "thinking_delta",
+			contentIndex: 0,
+			delta: text.slice(at, at + 13),
+			partialThinking: "x",
+		});
+		const rows = streamed.render(120);
+		strictEqual(rows.map(stripTerminalSequences).join("\n").match(SECRET_LETTERS), null, `at ${at}`);
+		// The rail reuses rows from earlier deltas, so it must match one drawn from the whole text at once.
+		deepStrictEqual(rows, open(text.slice(0, at + 13)).render(120), `at ${at}`);
+	}
+});
+
 test("a settled result's cuts leave no piece of a secret, in the model context or the display tail", () => {
 	const cases = [
 		"https://user:ZQXJZQXJ@host/repo.git",

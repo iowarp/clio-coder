@@ -539,7 +539,14 @@ type ThinkingSegment = {
 	/** The stretch was streamed live and its target's history did not keep the text, so only the fact can be shown. */
 	notRetained?: true;
 };
-type ThinkingRender = { source: string; open: boolean; epoch: number; layouts: Map<string, string[]> };
+type ThinkingRender = {
+	source: string;
+	open: boolean;
+	epoch: number;
+	layouts: Map<string, string[]>;
+	/** An open segment's incremental rail, carried across its deltas (Astra r10-1). */
+	stream?: ThinkingStream;
+};
 type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegment;
 /**
  * A caller-rendered block receives the frame's transcript detail policy so a
@@ -2005,21 +2012,29 @@ function renderThinkingRail(
 	unbounded: boolean,
 	open: boolean,
 ): string[] {
+	return renderProseThinkingRail(sanitizeAssistantProse(thinking), width, limit, unbounded, open);
+}
+
+/** {@link renderThinkingRail} for reasoning already through {@link sanitizeAssistantProse}. */
+function renderProseThinkingRail(
+	prose: string,
+	width: number,
+	limit: number,
+	unbounded: boolean,
+	open: boolean,
+): string[] {
 	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
 	// Presentation only: the provider's signed reasoning stays untouched.
-	const text = stripThinkingEmphasis(
-		redactStreamingSecretString(escapeTerminalControls(sanitizeAssistantProse(thinking)), !open),
-	).replace(/^\s*\n|\s+$/gu, "");
+	const text = stripThinkingEmphasis(redactStreamingSecretString(escapeTerminalControls(prose), !open)).replace(
+		/^\s*\n|\s+$/gu,
+		"",
+	);
 	if (text.length === 0) return [];
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
 	// that says what it is, because the rail alone is the same mark a tool's output wears.
 	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
 	const kept = unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0);
-	const rows = kept.map((row, index) => {
-		const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
-		const body = row.slice(lead.length);
-		return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
-	});
+	const rows = kept.map((row, index) => styleThinkingRow(row, index));
 	if (unbounded) return rows;
 	return previewRows(
 		rows,
@@ -2028,6 +2043,110 @@ function renderThinkingRail(
 		true,
 		REASON_RAIL(),
 		PROSE_GUTTER_WIDTH,
+	);
+}
+
+function styleThinkingRow(row: string, index: number): string {
+	const lead = index === 0 && row.startsWith(THINKING_LEAD) ? THINKING_LEAD : "";
+	const body = row.slice(lead.length);
+	return `${REASON_RAIL()}${lead ? clioTheme().fg("annotation", lead) : ""}${SGR_ITALIC}${clioTheme().fg("reasoningExcerpt", body)}${RESET}`;
+}
+
+/**
+ * An open, bounded rail that streams: the reasoning up to a certified line break is wrapped once and only its last rows
+ * are kept, so a delta redacts and wraps the text after that break rather than the whole stretch (Astra r10-1).
+ */
+interface ThinkingStream {
+	prose: AssistantProseProjection;
+	layout: string;
+	/** Sanitized reasoning through the certified break, ending in its `\n`; empty before the first. */
+	head: string;
+	headRows: number;
+	/** The head's last kept rows, unstyled, enough for the excerpt and the row its hint replaces. */
+	headTail: string[];
+	retryAt: number;
+}
+
+/** How far text runs past the head before a break is looked for, and again after a look finds none. */
+const THINKING_STREAM_STEP = 2048;
+const THINKING_STREAM_TRIES = 16;
+// A redaction pattern crosses a line break only after a name, flag, `:`, `=`, quote or scheme word leads into a value, or
+// from a curl or docker command into the flag on the next line. A break after none of those, ahead of a token that holds no
+// `:`, `=` or quote, splits no secret and no match, so the text on each side redacts as it would whole.
+const STREAM_LEAD_TOKEN_RE =
+	/^-|[:="'`]|pass|pwd|secret|token|key|auth|credential|bearer|basic|cookie|login|sshpass|docker|curl/iu;
+const STREAM_LEAD_LINE_RE = /curl|docker/iu;
+const STREAM_HEAD_TOKEN_RE = /[:="']/u;
+
+function certifiedThinkingBreak(before: string, after: string): boolean {
+	const body = before.trimEnd();
+	if (body.length === 0) return false;
+	const line = body.slice(body.lastIndexOf("\n") + 1);
+	const token = escapeTerminalControls(line.slice(line.search(/\S+$/u)));
+	if (STREAM_LEAD_TOKEN_RE.test(token) || STREAM_LEAD_LINE_RE.test(escapeTerminalControls(line))) return false;
+	// The next token must be whole, since one still growing may yet gain a `:`.
+	const next = /^\s*(\S+)\s/u.exec(after);
+	return next?.[1] !== undefined && !STREAM_HEAD_TOKEN_RE.test(escapeTerminalControls(next[1]));
+}
+
+function thinkingStreamRows(text: string, width: number): string[] {
+	return wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH)).filter((row) => row.trim().length > 0);
+}
+
+/** Move the head to the latest certified break in `tail`, the sanitized text after it. */
+function advanceThinkingStream(stream: ThinkingStream, tail: string, width: number, limit: number): void {
+	let at = tail.length;
+	for (let tries = 0; tries < THINKING_STREAM_TRIES; tries += 1) {
+		at = tail.lastIndexOf("\n", at - 1);
+		if (at < 0) return;
+		const chunk = tail.slice(0, at + 1);
+		if (tail.charAt(at - 1) === "\r" || !/\S/u.test(chunk) || !certifiedThinkingBreak(chunk, tail.slice(at + 1)))
+			continue;
+		let text = stripThinkingEmphasis(redactStreamingSecretString(escapeTerminalControls(chunk), false));
+		if (stream.head.length === 0) text = `${THINKING_LEAD}${text.replace(/^\s*\n/u, "")}`;
+		if (!text.endsWith("\n") || text.endsWith("\r\n")) continue;
+		const rows = thinkingStreamRows(text.slice(0, -1), width);
+		stream.head += chunk;
+		stream.headRows += rows.length;
+		stream.headTail = [...stream.headTail, ...rows].slice(-(limit + 1));
+		return;
+	}
+}
+
+/** The rail {@link renderThinkingRail} draws for open, bounded reasoning, reusing what earlier deltas certified. */
+function streamThinkingRail(stream: ThinkingStream, thinking: string, width: number, limit: number): string[] {
+	const prose = stream.prose.project(thinking, false, true);
+	const layout = `${width}|${limit}`;
+	if (stream.layout !== layout || !prose.startsWith(stream.head)) {
+		stream.layout = layout;
+		stream.head = "";
+		stream.headRows = 0;
+		stream.headTail = [];
+		stream.retryAt = 0;
+	}
+	if (prose.length - stream.head.length >= THINKING_STREAM_STEP && prose.length >= stream.retryAt) {
+		const before = stream.head.length;
+		advanceThinkingStream(stream, prose.slice(before), width, limit);
+		stream.retryAt = stream.head.length === before ? prose.length + THINKING_STREAM_STEP : 0;
+	}
+	if (stream.head.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
+	const tail = stripThinkingEmphasis(
+		redactStreamingSecretString(escapeTerminalControls(prose.slice(stream.head.length)), false),
+	).replace(/\s+$/u, "");
+	// A held value can leave the tail blank, and then the whole text's trim reaches back into the head.
+	if (tail.length === 0) return renderProseThinkingRail(prose, width, limit, false, true);
+	const tailRows = thinkingStreamRows(tail, width);
+	const total = stream.headRows + tailRows.length;
+	const shown = [...stream.headTail, ...tailRows].slice(-(limit + 1));
+	const first = total - shown.length;
+	return previewRows(
+		shown.map((row, index) => styleThinkingRow(row, first + index)),
+		limit,
+		width,
+		true,
+		REASON_RAIL(),
+		PROSE_GUTTER_WIDTH,
+		() => `${total - (limit - 1)} rows`,
 	);
 }
 
@@ -2582,14 +2701,26 @@ function renderEntryLines(
 			entry.reasoningRenders ??= new Map();
 			let cached = entry.reasoningRenders.get(index);
 			if (cached?.source !== text || cached.open !== reasoningOpen || cached.epoch !== skinEpoch()) {
+				const stream = reasoningOpen ? cached?.stream : undefined;
 				cached = { source: text, open: reasoningOpen, epoch: skinEpoch(), layouts: new Map() };
+				if (stream !== undefined) cached.stream = stream;
 				entry.reasoningRenders.set(index, cached);
 			}
 			const limit = previewBudget(rows, terminalRows);
 			const key = `${width}|${limit}|${unboundedToolBodies}`;
 			let lines = cached.layouts.get(key);
 			if (lines === undefined) {
-				lines = renderThinkingRail(text, width, limit, unboundedToolBodies, reasoningOpen);
+				if (reasoningOpen && !unboundedToolBodies) {
+					cached.stream ??= {
+						prose: new AssistantProseProjection(),
+						layout: "",
+						head: "",
+						headRows: 0,
+						headTail: [],
+						retryAt: 0,
+					};
+					lines = streamThinkingRail(cached.stream, text, width, limit);
+				} else lines = renderThinkingRail(text, width, limit, unboundedToolBodies, reasoningOpen);
 				cached.layouts.set(key, lines);
 				if (cached.layouts.size > 3) {
 					const oldest = cached.layouts.keys().next().value;
