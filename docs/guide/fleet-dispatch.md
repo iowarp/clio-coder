@@ -2077,8 +2077,8 @@ hard block.
   arguments never cross the worker stdout seam), and the worker's context figure.
   It also lists finished runs. After a restart, the board also shows up to 12 of this
   project's newest settled worker runs from the run ledger, leaving out internal helper
-  runs; startup reads them one run at a time before the board's first read, so keys typed
-  at the boot prompt are not held behind those reads
+  runs. They load one run per loop turn after the session first paints, so neither keys nor
+  a prompt submitted at launch wait for those reads, and the board shows them as they arrive
   ([fleet-run-history.ts](../../src/interactive/fleet-run-history.ts)). `Up` and `Down` (or `k` and `j`) move the cursor, `s`
   steers the selected run, and `x` cancels it.
 - `w` on a live run takes the [workers dock](#workers-dock-and-dashboard)

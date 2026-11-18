@@ -1,6 +1,5 @@
 import { createInteractiveApplication, type InteractiveDeps } from "./interactive-application.js";
 
-export { primeDurableWorkerRuns } from "./fleet-run-history.js";
 export * from "./interactive-application.js";
 
 /**
