@@ -356,6 +356,12 @@ export interface ChatNoticeEvent {
 	 */
 	operatorCancel?: true;
 	/**
+	 * Present only on the transcript notice that closes a turn an interrupt cut
+	 * short to deliver a new message: a run follows, so the turn was redirected
+	 * and a headless or protocol host waits for that run instead of ending (bt-41).
+	 */
+	redirect?: true;
+	/**
 	 * Present only on an advisory, text addressed to the operator. The TUI
 	 * transcript frames it under the source's title; every other surface renders
 	 * the text. A notice without a source is an event and keeps its gutter row.
@@ -481,6 +487,8 @@ export interface ChatSubmitOptions {
 	 * for the two states in which it degrades to `next-slot` instead.
 	 */
 	steering?: SteeringMode;
+	/** The interrupt is triage's, not the operator's: the run it cuts short is redirected, not cancelled (bt-41). */
+	triageInterrupt?: boolean;
 	/** This prompt is an entry taken off the queue: it returns to the head if the prompt never starts (#447). */
 	queued?: QueuedChatMessage;
 	/** This prompt is a message taken off the queue by a path that does not return it; its recorded path continues. */
@@ -535,6 +543,11 @@ const LOCAL_SIDE_QUESTION_API_KEY = "clio-coder-local-target";
 
 /** Closing notice an operator interrupt leaves in the transcript and the ledger. */
 const INTERRUPT_CANCEL_REASON = "[Clio Coder] run interrupted by operator; delivering the new message now.";
+/** The same redirect when triage read a queued message as a stop; no operator cancelled anything. */
+const TRIAGE_INTERRUPT_REASON =
+	"[Clio Coder] run interrupted because triage read the new message as a stop; delivering it now.";
+const isRedirectReason = (reason: string | null | undefined): boolean =>
+	reason === INTERRUPT_CANCEL_REASON || reason === TRIAGE_INTERRUPT_REASON;
 const ENGINE_ACTIVE_PROMPT_ERROR =
 	"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.";
 const ACTIVE_PROMPT_NOTICE =
@@ -2808,6 +2821,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitNotice(`[Clio Coder] triage read "${preview}" as a stop; interrupting the run to deliver it now.`, "warning");
 				void submitTracked(taken.text, {
 					steering: "interrupt",
+					triageInterrupt: true,
 					continuesMessage: { id: taken.id, enqueuedAt: taken.enqueuedAt },
 					...(taken.display ? { display: taken.display } : {}),
 					...(taken.referencedPaths && taken.referencedPaths.length > 0
@@ -2928,10 +2942,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						// fresh-prompt path below. `priorSubmit` is the run being cancelled;
 						// `activeSubmit` already points at this call.
 						const prior = priorSubmit;
-						api.cancel({
-							reason: INTERRUPT_CANCEL_REASON,
-							auditReason: "operator interrupted the run with a message",
-						});
+						api.cancel(
+							options.triageInterrupt === true
+								? {
+										reason: TRIAGE_INTERRUPT_REASON,
+										source: "triage",
+										auditReason: "triage read a queued message as a stop",
+									}
+								: { reason: INTERRUPT_CANCEL_REASON, auditReason: "operator interrupted the run with a message" },
+						);
 						await prior;
 						if (!admissionCurrent()) {
 							returnUnstarted();
@@ -3950,6 +3969,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								text: reason,
 								key: "turn.interrupted",
 								...(state.activeInterruptByOperator ? { operatorCancel: true as const } : {}),
+								...(isRedirectReason(reason) ? { redirect: true as const } : {}),
 							});
 						}
 						state.interruptedAssistantMessage = null;
@@ -4192,7 +4212,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// operator's choice, and a job cancellation has successors to protect
 			// (#411), so both leave the entries to the ordinary settlement path.
 			queues.onRunCancelled({
-				hold: options?.reason === INTERRUPT_CANCEL_REASON,
+				hold: isRedirectReason(options?.reason),
 				preserve: preserveQueue,
 				settle: options?.source === "loop_guard" || options?.source === "autonomy",
 			});
@@ -4205,6 +4225,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.activeInterruptReason =
 					requestedReason && requestedReason.length > 0 ? requestedReason : OPERATOR_CANCEL_REASON;
 				state.activeInterruptByOperator = (options?.source ?? "stream_cancel") === "stream_cancel";
+				state.activeInterruptByTriage = options?.source === "triage";
 				// An Esc is reported once, by the turn's Cancelled outcome. The footer
 				// carries only an interruption the operator did not ask for.
 				if (!isOperatorCancelReason(state.activeInterruptReason))

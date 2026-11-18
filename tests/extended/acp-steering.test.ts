@@ -267,6 +267,51 @@ describe("contracts/acp exposes the engine steering queues without a second prom
 		strictEqual(await served, 0);
 	});
 
+	it("answers a steer triage read as a stop with the run it redirected to, not as cancelled (bt-41)", async () => {
+		const peer = fakeTransport();
+		const listeners = new Set<(event: never) => void>();
+		const emit = (message: Record<string, unknown>) => {
+			for (const listener of listeners) listener({ type: "message_end", message } as never);
+		};
+		let streaming = false;
+		let delivered: Promise<void> = Promise.resolve();
+		let releaseRun: () => void = () => {};
+		const loop = fakeChat({
+			submit: async () => {
+				streaming = true;
+				await new Promise<void>((resolve) => {
+					releaseRun = resolve;
+				});
+			},
+			onEvent: (handler) => {
+				listeners.add(handler);
+				return () => listeners.delete(handler);
+			},
+			isStreaming: () => streaming,
+			// The chat loop's triage reads the steer as a stop: the run ends aborted and its own run delivers the steer.
+			steer: (text) => {
+				emit({ role: "assistant", content: [], stopReason: "aborted" });
+				releaseRun();
+				delivered = tick().then(() => {
+					emit({ role: "assistant", content: [{ type: "text", text: `stopped: ${text}` }], stopReason: "stop" });
+					streaming = false;
+				});
+				return true;
+			},
+			whenSettled: () => delivered,
+		});
+		const served = serveClioAcpAgent({ transport: peer.transport, chat: loop.chat, cwd: process.cwd() });
+		const sessionId = await openSession(peer);
+		const { prompt } = await startPrompt(peer, sessionId);
+
+		await peer.call("_clio-coder/session/steer", { sessionId, text: "Stop now and report" });
+		strictEqual(((await prompt) as { stopReason: string }).stopReason, "end_turn");
+		strictEqual(streaming, false);
+
+		peer.transport.close();
+		strictEqual(await served, 0);
+	});
+
 	it("reports the engine's refusal instead of cancelling, and reports an idle session", async () => {
 		const peer = fakeTransport();
 		const loop = fakeChat();

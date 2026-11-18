@@ -7951,6 +7951,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				active.continuation = null;
 				await next;
 			}
+			// A triage stop interrupts the run the same way and starts its delivery itself; this request carries it too (bt-41).
+			await options.chat.whenSettled?.();
 		} catch (err) {
 			if (err instanceof AcpRequestError) throw err;
 			active.errored = true;
