@@ -1,6 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import { type MiddlewareEffect, metadataNumber, turnCanCallTool } from "./types.js";
+import { type MiddlewareEffect, metadataNumber, metadataString, turnCanCallTool } from "./types.js";
 
 /**
  * Task-board reminder for explicitly enumerated multi-step requests. The
@@ -15,11 +15,18 @@ import { type MiddlewareEffect, metadataNumber, turnCanCallTool } from "./types.
 
 export const TASK_BOARD_REMINDER_REGISTRATION_ID = "observer.task-board-reminder";
 
-export function taskBoardReminderMessage(steps: number): string {
+export function taskBoardReminderMessage(steps: number, placement: "direct" | "gateway" = "direct"): string {
+	// A gateway-only tasks has no attached schema, and a model told to call
+	// tasks concluded the tool did not exist (bt-22), so name the call it can make.
+	const plan =
+		placement === "gateway"
+			? 'gateway(op="call", capability="tasks", args={action:"plan", title:"<board>", tasks:["<one per authorized step>"]}) ' +
+				"(tasks has no attached schema; every tasks action below goes through gateway this way), then "
+			: 'tasks action="plan" with a title and one task per authorized step, then ';
 	return (
-		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ` +
-		'tasks action="plan" with a title and one task per authorized step, then work them one at a time ' +
-		'("start", then "done" with an evidence note for observed work and check results, disclosing failed or unrun checks). ' +
+		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ${plan}` +
+		"work them one at a time " +
+		'("start", then "done" with note="<observed work and check results>", disclosing failed or unrun checks). ' +
 		"Bookkeeping is not a reason to end a model response: when IDs and arguments are known, use gateway op=chain for " +
 		"done -> start -> next read/work, or decide -> authorized implementation, with each dependent step's after naming its predecessor's step id. " +
 		"Never predict results or prewrite done for work/checks in that chain. Successful returned board and operator-task state is authoritative; " +
@@ -85,6 +92,10 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			// A step template's turn runs one step per turn, so its enumerated steps are the pipeline's,
 			// not a task list for this turn; the shot is kept for a later turn.
 			if (input.metadata?.turnStepPolicy === true) return NO_EFFECTS;
+			// A request the host scoped to an answer, a proposal or read-only work changes nothing, so a board
+			// for its enumerated questions is ceremony (bt-22: 13 tasks calls on a read-only explanation).
+			const mode = input.metadata?.turnMode;
+			if (mode === "answer" || mode === "proposal" || input.metadata?.turnReadOnly === true) return NO_EFFECTS;
 			const steps = countEnumeratedSteps(input.text);
 			if (steps < 3) return NO_EFFECTS;
 			// The reminder names tasks and gateway op=chain; a turn that cannot call
@@ -97,7 +108,10 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			// skill's own workflow; do not compete with it.
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
-			return [{ kind: "inject_reminder", severity: "info", message: taskBoardReminderMessage(steps) }];
+			const attached = metadataString(input, "activeToolNames");
+			const placement =
+				attached !== null && !attached.split(",").some((name) => name.trim() === ToolNames.Tasks) ? "gateway" : "direct";
+			return [{ kind: "inject_reminder", severity: "info", message: taskBoardReminderMessage(steps, placement) }];
 		},
 	};
 }

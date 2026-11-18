@@ -440,12 +440,14 @@ function applyMutation(
 		mutation.initialStatus === "blocked" &&
 		!mutation.reason?.trim()
 	) {
-		return { error: "blocked tasks require a reason naming the pending decision or dependency" };
+		return {
+			error: 'initialStatus="blocked" requires note="<the pending operator decision or dependency>"',
+		};
 	}
 	if (mutation.op === "plan") {
 		const titles = normalizeTitles(mutation.tasks);
-		if (mutation.title.trim().length === 0) return { error: "plan requires a non-empty title" };
-		if (titles.length === 0) return { error: "plan requires at least one task" };
+		if (mutation.title.trim().length === 0) return { error: 'plan requires title="<board name>"' };
+		if (titles.length === 0) return { error: 'plan requires tasks=["<first task>", "<second task>"]' };
 		const retained = board?.tasks.filter(isOpenUserTask) ?? [];
 		const notes: string[] = [];
 		const replacedOpen = board ? taskBoardCounts(board).open - retained.length : 0;
@@ -521,7 +523,7 @@ function applyMutation(
 	if (board === null) return { error: 'no task board yet; declare one with action="plan" first' };
 	if (mutation.op === "add") {
 		const titles = normalizeTitles(mutation.tasks);
-		if (titles.length === 0) return { error: "add requires at least one task" };
+		if (titles.length === 0) return { error: 'add requires tasks=["<task title>"]' };
 		const start = nextTaskId(board.tasks);
 		const added = titles.map((title, index) => ({
 			id: `t${start + index}`,
@@ -535,7 +537,7 @@ function applyMutation(
 	const target = board.tasks.find((task) => task.id === mutation.id);
 	if (!target) return { error: `task ${mutation.id} not found on the board` };
 	if (mutation.op === "block" && mutation.reason.trim().length === 0) {
-		return { error: "block requires a reason so the ledger records why work stopped" };
+		return { error: 'block requires note="<why work stopped>" so the ledger records the reason' };
 	}
 	// Completion needs a note describing the work, but that note does not
 	// establish whether validation ran or passed. Work that did not happen is
@@ -544,7 +546,7 @@ function applyMutation(
 		if (mutation.evidence.trim().length === 0) {
 			return {
 				error:
-					"done requires a completion note describing the work and any validation outcome. If the work did not happen, use block with a reason or drop it.",
+					'done requires note="<what was done and what checks showed>". If the work did not happen, use action="block" with note="<why>" or action="drop".',
 			};
 		}
 	}

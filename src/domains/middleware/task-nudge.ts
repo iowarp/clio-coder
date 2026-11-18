@@ -42,7 +42,7 @@ export function buildOpenTasksMessage(board: TaskBoardSnapshot): string {
 		`use tasks action="block" with a note naming that pending operator decision, or action="drop". ` +
 		`Wait for an explicit operator go-ahead only on those tasks, and continue other authorized work. ` +
 		`A skill-install choice does not authorize implementation. Otherwise record the honest state on the board: ` +
-		`tasks action="done" with an evidence note, action="block" with a reason, or action="drop". ` +
+		`tasks action="done" with note="<observed work and check results>", action="block" with note="<reason>", or action="drop". ` +
 		`Do not end the turn with a stale board.`
 	);
 }

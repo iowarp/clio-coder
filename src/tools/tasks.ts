@@ -123,6 +123,38 @@ function boardDetails(action: TasksAction, board: TaskBoardSnapshot | null): Rec
 	};
 }
 
+const TASKS_KEYS: ReadonlySet<string> = new Set(["action", "title", "tasks", "initialStatus", "id", "note"]);
+
+// Keys small models guessed in place of the real ones (bt-22). Dropping them
+// silently left `done` without its note and `start` without its id, behind
+// errors that never named the right key; the tool layer accepts no key
+// aliases, so an unknown key is refused with the key to use instead.
+const TASKS_KEY_HINTS: Readonly<Record<string, string>> = {
+	task_id: "id",
+	taskId: "id",
+	task: "id",
+	evidence: "note",
+	summary: "note",
+	reason: "note",
+	notes: "note",
+	comment: "note",
+	result: "note",
+	name: "title",
+	steps: "tasks",
+	items: "tasks",
+	status: "initialStatus",
+	initial_status: "initialStatus",
+};
+
+function unknownKeyError(args: Record<string, unknown>): string | null {
+	const unknown = Object.keys(args).find((key) => !TASKS_KEYS.has(key));
+	if (unknown === undefined) return null;
+	const hint = TASKS_KEY_HINTS[unknown];
+	return hint
+		? `tasks: unknown key "${unknown}"; use ${hint}`
+		: `tasks: unknown key "${unknown}"; tasks takes only action, title, tasks, initialStatus, id and note`;
+}
+
 function stringArg(args: Record<string, unknown>, key: string): string | null {
 	const value = args[key];
 	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -138,10 +170,10 @@ function taskTitlesArg(args: Record<string, unknown>): string[] {
 function mutationFromArgs(action: TasksAction, args: Record<string, unknown>): TaskBoardMutation | { error: string } {
 	const initialStatus = args.initialStatus;
 	if (initialStatus !== undefined && initialStatus !== "pending" && initialStatus !== "blocked") {
-		return { error: "tasks: initialStatus must be pending or blocked" };
+		return { error: 'tasks: initialStatus must be pending or blocked, e.g. initialStatus="blocked"' };
 	}
 	if (initialStatus !== undefined && action !== "plan" && action !== "add") {
-		return { error: "tasks: initialStatus applies only to plan and add" };
+		return { error: `tasks: initialStatus applies only to plan and add; omit it for action="${action}"` };
 	}
 	const initial: { initialStatus?: "pending" | "blocked"; reason?: string } = {
 		...(initialStatus ? { initialStatus } : {}),
@@ -270,6 +302,8 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 					message: `tasks: unknown action '${action}'; to create a board use action="plan" with title="..." and tasks=["first task", "second task"]`,
 				};
 			}
+			const keyError = unknownKeyError(args);
+			if (keyError) return { kind: "error", message: keyError };
 			const typedAction = action as TasksAction;
 			let userTasks: ReadonlyArray<UserTask>;
 			try {

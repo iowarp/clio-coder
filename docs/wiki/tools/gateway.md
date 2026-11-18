@@ -58,7 +58,7 @@ The placement table in `src/tools/surface.ts` decides which capabilities sit beh
 
 ## Argument normalization
 
-`prepareGatewayArguments` accepts the weak-model shapes before validation. It maps `name` or `tool` to `capability` when `capability` is absent, parses a JSON string in `args`, and infers `op` when it is missing: `call` if `args` is present, `describe` if only `capability` is present, otherwise `find`. The inference for `call` is deliberate. The source comment says that reading an arguments-only request as `find` once answered a mis-wrapped call with a discovery listing, which the model took as a successful call. `envelopeHint` returns the corrective message for a call whose `op` or `capability` was nested inside `args`.
+`prepareGatewayArguments` accepts the weak-model shapes before validation. It maps `name` or `tool` to `capability` when `capability` is absent, parses a JSON string in `args`, and infers `op` when it is missing: `call` if `args` is present, `describe` if only `capability` is present, otherwise `find`. The inference for `call` is deliberate. The source comment says that reading an arguments-only request as `find` once answered a mis-wrapped call with a discovery listing, which the model took as a successful call. `envelopeHint` returns the corrective message for a call whose `op` or `capability` was nested inside `args`. No op reads a `parameters` envelope: every op refuses one with that same message, so `op="find"` no longer ignores it and lists the whole catalog.
 
 ## The four operations
 

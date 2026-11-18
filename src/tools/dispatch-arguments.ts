@@ -229,8 +229,9 @@ function dispatchRequestFromArgs(
 	request.requiredCapabilities = routing.intent.requiredCapabilities;
 	let cwd = stringArg(args, "cwd");
 	if (cwd) request.cwd = cwd;
-	if (args.worktree !== undefined) {
-		if (args.worktree !== true) return { ok: false, message: "worktree must be true when present" };
+	// false is the same as omitted (bt-23).
+	if (args.worktree !== undefined && args.worktree !== false) {
+		if (args.worktree !== true) return { ok: false, message: "worktree must be true or false; omit it to work in place" };
 		request.worktree = true;
 	}
 	if (args.tags !== undefined) {

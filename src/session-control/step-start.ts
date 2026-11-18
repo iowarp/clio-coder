@@ -1,6 +1,6 @@
 import type { ModelTier } from "../core/model-tier.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
-import { effectiveToolCall } from "../tools/surface.js";
+import { effectiveToolCall, gatewayChainReceipts } from "../tools/surface.js";
 
 /**
  * Compact start for step turns (WTF-P 0.8.3 C5). Under a template's
@@ -111,7 +111,8 @@ export function createStepStartTracker(): StepStartTracker {
 
 /**
  * Whether a step turn ran its step: a call to `stepTool`, a gateway call to it
- * included, whose result came back without an error. `pipelineDone` is the
+ * included, whose result came back without an error, or a gateway chain step
+ * that called it and settled ok (bt-15). `pipelineDone` is the
  * terminal signal, `details.pipelineDone: true` on that result, which says the
  * pipeline has no step left. Null when the turn ran no step. `messages` are
  * the settled turn's own (bt-6).
@@ -136,7 +137,18 @@ export function stepTurnOutcome(messages: ReadonlyArray<unknown>, stepTool: stri
 						(entry as { role?: unknown; toolCallId?: unknown })?.role === "toolResult" &&
 						(entry as { toolCallId?: unknown }).toolCallId === block.id,
 				) as { isError?: unknown; details?: unknown } | undefined;
-			if (result === undefined || result.isError === true) continue;
+			if (result === undefined) continue;
+			// A chain is credited by its own settled steps, whatever its siblings did.
+			const chained = gatewayChainReceipts(block.name, result).filter(
+				(step) => step.capability === stepTool && step.admission.outcome === "ok",
+			);
+			if (chained.length > 0) {
+				ran = true;
+				if (chained.some((step) => (step.result.details as { pipelineDone?: unknown }).pipelineDone === true))
+					pipelineDone = true;
+				continue;
+			}
+			if (result.isError === true) continue;
 			if (effectiveToolCall(block.name, block.arguments, result.details).toolName !== stepTool) continue;
 			const details = result.details as { pipelineDone?: unknown } | null | undefined;
 			ran = true;

@@ -170,9 +170,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The correction for a call whose op or capability went inside `args`. */
+/** The correction for a call whose op or capability went inside `args` or a `parameters` envelope. */
 function envelopeHint(args: Record<string, unknown>): string {
-	const nested = isRecord(args.args) ? args.args : null;
+	const nested = isRecord(args.args) ? args.args : isRecord(args.parameters) ? args.parameters : null;
 	const named = nested?.capability ?? nested?.name ?? nested?.tool;
 	const capability = typeof named === "string" && named.trim().length > 0 ? named.trim() : "<name>";
 	return `op and capability belong at the top level and args holds only the capability's own arguments: {"op":"call","capability":"${capability}","args":{...}}. No capability was invoked.`;
@@ -926,6 +926,14 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// Discovery scope belongs to find alone. Accepting it elsewhere would
 			// read as a way to launch a server from describe or call, which is
 			// exactly what those two paths no longer do on their own.
+			// No op reads a `parameters` envelope. Find ignored it and listed the whole catalog, so every op
+			// refuses it with the hint call already gave (bt-23).
+			if (args.parameters !== undefined) {
+				return {
+					kind: "error",
+					message: `gateway: op="${op}" does not read a parameters envelope; ${envelopeHint(args)}`,
+				};
+			}
 			if (op !== "find" && (args.server !== undefined || args.refresh !== undefined)) {
 				return { kind: "error", message: `gateway: server and refresh apply to op="find", not op="${op}"` };
 			}

@@ -33,10 +33,22 @@ describe("reminders gate on the turn's callable tools", () => {
 		// A step template's turn runs one step, not the enumerated list (bt-12 #4).
 		const step = turn(surface(ToolNames.Tasks));
 		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnStepPolicy: true } }), []);
+		// Nor does a turn the host scoped to an answer or to read-only work (bt-22).
+		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnMode: "answer" } }), []);
+		deepStrictEqual(reminder.evaluate({ ...step, metadata: { ...step.metadata, turnReadOnly: true } }), []);
 		// The skipped turn did not spend the session's one reminder.
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);
 		ok(effects[0]?.kind === "inject_reminder" && effects[0].message.startsWith("[Tasks]"));
+		ok(effects[0].message.includes('tasks action="plan"'));
+		// A tasks reachable only through gateway is named as the gateway call (bt-22).
+		const hidden = createTaskBoardReminderRegistration().evaluate({
+			...turn(surface(ToolNames.Tasks)),
+			metadata: { activeCapabilityNames: surface(ToolNames.Tasks), activeToolNames: ToolNames.Gateway },
+		});
+		ok(hidden[0]?.kind === "inject_reminder");
+		ok(hidden[0].message.includes('gateway(op="call", capability="tasks", args={action:"plan"'));
+		ok(!hidden[0].message.includes('tasks action="plan"'));
 	});
 
 	it("plan close never teaches ask_user to a turn that cannot call it", () => {
