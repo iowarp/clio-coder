@@ -3911,12 +3911,14 @@ export function promptCompiles(
 		const structure = resolve(record.data.structure);
 		if (!structure?.compile) return [];
 		seen.add(record.data.structure.id);
-		// Objects written by earlier builds still hash their compile time.
+		// Objects written by earlier builds still hash their compile time and predecessor hash.
 		const legacyAt = (structure.compile as { at?: unknown }).at;
+		const legacyPrevious = (structure.compile as { previousHash?: unknown }).previousHash;
 		return [
 			{
 				...structure.compile,
 				at: record.data.compiledAt ?? (typeof legacyAt === "string" ? legacyAt : record.t),
+				previousHash: record.data.previousHash ?? (typeof legacyPrevious === "string" ? legacyPrevious : null),
 				sections: structure.sections,
 				fragments: structure.fragments.map((fragment) => {
 					if (fragment.relPath === undefined) throw new Error("prompt fragment path is unavailable");

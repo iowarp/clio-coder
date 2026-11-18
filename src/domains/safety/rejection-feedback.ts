@@ -173,13 +173,18 @@ export function formatModelRejection(
 			lines.push(trimmed);
 		}
 	};
-	for (const line of foldQuotedLineBreaks(reason).split("\n")) push(line);
+	// Every source folds its quoted line breaks before it splits: a detail that restates the reason (a parked call's
+	// answer does) then bounds to the same lines and deduplicates, instead of a raw second copy cut mid-sentence.
+	const pushText = (text: string): void => {
+		for (const line of foldQuotedLineBreaks(text).split("\n")) push(line);
+	};
+	pushText(reason);
 	// The structured refusal account (`denialLines`) follows the reason so the
 	// line budget below never elides who refused and what would allow it.
-	for (const line of account ?? []) push(line);
+	for (const line of account ?? []) pushText(line);
 	if (rejection) {
-		for (const line of rejection.detail.split("\n")) push(line);
-		for (const hint of rejection.hints) push(hint);
+		pushText(rejection.detail);
+		for (const hint of rejection.hints) pushText(hint);
 	}
 	// Bound the body and close with the standing pivot instruction, always
 	// last: recovery guidance must be the final thing the model reads even

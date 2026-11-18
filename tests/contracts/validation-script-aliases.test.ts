@@ -197,6 +197,26 @@ it("grounds a verify-only run's claim by its check id or resolved command, and n
 		for (const never of ["verify lint", "pytest -q", "verify python-unittest-integration"])
 			strictEqual(ground(never, passed)?.grounded, 0, never);
 		strictEqual(ground(claim, run("error"))?.grounded, 0);
+		// bt-9: the claim names the command inside a parenthetical and the evidence names the check id. A fresh verify
+		// run grounds it either way; a later edit leaves that run stale, and a stale run grounds nothing (bt-27c).
+		const effects = createRunEffectsRecorder(root);
+		effects.start("verify-2", "verify", { check: "python-unittest" });
+		effects.checkOutcome("verify-2", "ok");
+		effects.finish("verify-2", false);
+		const bt9 = (name: string, evidence: string) =>
+			groundClaimedValidations({
+				contractKind: "mutation-report",
+				output: JSON.stringify({ validations: [{ name, passed: true, evidence }] }),
+				executedCommands: new Set(["tool:verify"]),
+				verifyRuns: effects.checkFreshness().verifyRuns,
+				executedCheckingCalls: 1,
+			})?.grounded;
+		strictEqual(bt9("test check (python3 -m unittest, after change)", "exit 0"), 1);
+		strictEqual(bt9("unit tests, after change", "verify check 'python-unittest'"), 1);
+		strictEqual(bt9("test check (pytest -q, after change)", "exit 0"), 0);
+		effects.start("write-1", "write", { path: "later.py", content: "" });
+		effects.finish("write-1", false);
+		strictEqual(bt9("test check (python3 -m unittest, after change)", "verify check 'python-unittest'"), 0);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
