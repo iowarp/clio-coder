@@ -3230,10 +3230,21 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				// Like the skill preamble below, the block is plain visible text in
 				// the user message: persisted in the ledger, no hidden prompt
 				// machinery.
-				middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
+				middleware.fireTurnStart(
+					agentRuntime,
+					text,
+					pendingSkillRequests.length,
+					options.requestContinuation === true,
+					reservedUserTurnId,
+				);
 				if (options.requestContinuation !== true) {
 					markPreparationStep("turn-start");
-					const refusal = await middleware.awaitTurnStart(agentRuntime, text, pendingSkillRequests.length);
+					const refusal = await middleware.awaitTurnStart(
+						agentRuntime,
+						text,
+						pendingSkillRequests.length,
+						reservedUserTurnId,
+					);
 					if (!admissionCurrent()) return;
 					// A blocking turn_start hook that failed refuses the turn before its first model request.
 					if (refusal !== null) {
