@@ -27,10 +27,12 @@ const CLOCK_OPTIONS: Intl.DateTimeFormatOptions = {
 	second: "2-digit",
 };
 const DATE_OPTIONS: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
+const DAY_OPTIONS: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
 
 let builtForZone = process.env.TZ;
 let clockFormatter = new Intl.DateTimeFormat("en-GB", CLOCK_OPTIONS);
 let dateFormatter = new Intl.DateTimeFormat("en-CA", DATE_OPTIONS);
+let dayFormatter = new Intl.DateTimeFormat("en-US", DAY_OPTIONS);
 
 function syncZone(): void {
 	if (process.env.TZ === builtForZone) return;
@@ -49,6 +51,7 @@ function syncZone(): void {
 	const zone = builtForZone === undefined ? undefined : { timeZone: builtForZone };
 	clockFormatter = new Intl.DateTimeFormat("en-GB", { ...CLOCK_OPTIONS, ...zone });
 	dateFormatter = new Intl.DateTimeFormat("en-CA", { ...DATE_OPTIONS, ...zone });
+	dayFormatter = new Intl.DateTimeFormat("en-US", { ...DAY_OPTIONS, ...zone });
 }
 
 function toEpochMs(instant: Instant): number | null {
@@ -83,6 +86,22 @@ export function stampLocal(instant: Instant, now: number = Date.now()): string {
 	if (ms === null) return MISSING;
 	const date = dateLocal(ms);
 	return date === dateLocal(now) ? clockLocal(ms) : `${date} ${clockLocal(ms)}`;
+}
+
+/**
+ * Operator-local wall clock to the minute: `HH:MM` when the instant falls on
+ * today's local date, `Nov 16 HH:MM` on another day of this year, and
+ * `Nov 16 2025 HH:MM` in another year. A turn receipt reads it at a glance.
+ */
+export function wallClockLocal(instant: Instant, now: number = Date.now()): string {
+	const ms = toEpochMs(instant);
+	if (ms === null) return MISSING;
+	const date = dateLocal(ms);
+	const today = dateLocal(now);
+	const clock = clockFormatter.format(ms).slice(0, 5);
+	if (date === today) return clock;
+	const year = date.slice(0, 4) === today.slice(0, 4) ? "" : ` ${date.slice(0, 4)}`;
+	return `${dayFormatter.format(ms)}${year} ${clock}`;
 }
 
 /**

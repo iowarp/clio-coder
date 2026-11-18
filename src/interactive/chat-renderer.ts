@@ -923,6 +923,7 @@ function replayEntries(
 									: undefined;
 							const replayed: ReplayedRunFacts = {
 								...(elapsedMs === undefined ? {} : { elapsedMs }),
+								...(Number.isFinite(endedAt) ? { endedAtMs: endedAt } : {}),
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
 							const humanWaitMs = runTurnId === undefined ? undefined : turnHumanWaits.get(runTurnId);
