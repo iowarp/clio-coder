@@ -91,6 +91,13 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- The tasks reminder names the gateway call when tasks is reachable only through gateway, and is skipped on answer, proposal and read-only turns (bt-22).
+- The tasks tool refuses unknown keys with the key to use, and every task error names its key (bt-22).
+- dispatch accepts worktree:false as the same as omitted (bt-23).
+- Dispatch results flag worker verification that was limited by calls denied for want of an operator (bt-23).
+- Gateway refuses a parameters envelope on every op instead of find ignoring it (bt-23).
+- A worker's gateway chain counts its steps once in the receipt, without the wrapper (bt-14).
+- A step tool called inside a gateway chain counts as the turn's step (bt-15).
 - The exit summary and run receipts now count files a worker on an HTTP or SDK runtime changed in the current checkout (bt-11 #3).
 - The exit summary keeps the visit's turns, files, workers and time across /resume, /fork, /tree, /handoff and /new, and names how many sessions it spans (bt-11 #3).
 - The workers dock reads a finished run's record again until its seal is checked, so a verified run no longer shows "seal unchecked" (bt-11).
