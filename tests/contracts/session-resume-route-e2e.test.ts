@@ -128,6 +128,12 @@ describe("resuming a session keeps the route it ran on", { timeout: 180_000 }, (
 			const changed = chat.requests.length;
 			await client.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "new model?" }] }, 60_000);
 			strictEqual(chat.requests[changed]?.model, "other-model");
+			// The listing names the model the session switched to, not the one it started on.
+			const relisted = await client.request<{
+				sessions: Array<{ sessionId: string; _meta: Record<string, { model?: string }> }>;
+			}>("session/list", {});
+			const row = relisted.sessions.find((candidate) => candidate.sessionId === sessionId);
+			strictEqual(row?._meta["clio-coder/session"]?.model, "other-model");
 			await client.request("session/close", { sessionId });
 		} finally {
 			client.close();

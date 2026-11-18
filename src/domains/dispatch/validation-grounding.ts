@@ -60,8 +60,9 @@ export interface ValidationGrounding {
 	 * ran nothing that could have checked anything, which is the only basis that
 	 * takes a quality label away. `unmatched-command` means it ran something the
 	 * canonical detector does not enumerate, which is reported and nothing more.
+	 * `grounded` means every claim matched an executed command.
 	 */
-	basis: "no-command-executed" | "unmatched-command";
+	basis: "grounded" | "no-command-executed" | "unmatched-command";
 }
 
 export interface ValidationGroundingInput {
@@ -215,7 +216,8 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 		claimed: claims.length,
 		grounded,
 		ungrounded: ungrounded.slice(0, UNGROUNDED_NAME_LIMIT),
-		basis: input.executedCheckingCalls > 0 ? "unmatched-command" : "no-command-executed",
+		basis:
+			ungrounded.length === 0 ? "grounded" : input.executedCheckingCalls > 0 ? "unmatched-command" : "no-command-executed",
 	};
 }
 

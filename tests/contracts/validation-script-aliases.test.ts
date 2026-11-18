@@ -191,7 +191,7 @@ it("grounds a verify-only run's claim by its check id or resolved command, and n
 			});
 		const passed = run("ok");
 		const claim = "verify python-unittest (python3 -m unittest discover -s tests)";
-		deepStrictEqual(ground(claim, passed), { claimed: 1, grounded: 1, ungrounded: [], basis: "unmatched-command" });
+		deepStrictEqual(ground(claim, passed), { claimed: 1, grounded: 1, ungrounded: [], basis: "grounded" });
 		for (const named of ["verify python-unittest", "python3 -m unittest discover -s tests"])
 			strictEqual(ground(named, passed)?.grounded, 1, named);
 		for (const never of ["verify lint", "pytest -q", "verify python-unittest-integration"])

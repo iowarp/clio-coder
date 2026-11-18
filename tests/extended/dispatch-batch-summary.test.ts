@@ -120,7 +120,11 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 								scopeSource: "none" as const,
 							},
 						};
-						const receipt = finishRunResult(fixtureReceiptDraft(run), run, {
+						const draft = fixtureReceiptDraft(run);
+						draft.runtimeResolution = { wireModelId: `wire-${index}`, diagnostics: [] } as unknown as NonNullable<
+							typeof draft.runtimeResolution
+						>;
+						const receipt = finishRunResult(draft, run, {
 							terminal: { terminalReason: "completed" },
 							processExitCode: run.exitCode,
 							frameType: null,
@@ -167,7 +171,38 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 		const result = await runDispatchTool({ dispatch, getAgentSpecs: () => [], getAutonomy: () => "yolo" }, state, args);
 		ok(result.kind === "ok", JSON.stringify(result));
 		match(String(result.details?.agentLedgerBoard), /Assignments:[\s\S]*Inspect entry points[\s\S]*Inspect boundaries/u);
+		const detailRuns = result.details?.runs as ReadonlyArray<{ runtimeResolution?: { wireModelId?: string } }>;
+		deepStrictEqual(
+			detailRuns.map((entry) => entry.runtimeResolution?.wireModelId),
+			["wire-0", "wire-1"],
+		);
 	} finally {
 		env.restore();
 	}
+});
+
+test("a worker route warning reaches the dispatching model once, ahead of the run lines", () => {
+	const envelope = fixtureEnvelope("run-thinking");
+	const draft = fixtureReceiptDraft(envelope);
+	const message = "thinking off resolved to low for copilot-sdk/claude-opus-5.5; the model profile supports low, medium";
+	draft.runtimeResolution = {
+		diagnostics: [
+			{ severity: "warning", code: "thinking-coerced", message },
+			{ severity: "info", code: "context-window-source", message: "not a warning" },
+		],
+	} as unknown as NonNullable<typeof draft.runtimeResolution>;
+	const receipt = finishRunResult(draft, envelope, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+	const output = formatDispatchOutput("parallel", [{ ...run("run-thinking", 0, "target-rates", 1), receipt }], 16384);
+	const lines = output.split("\n");
+	deepStrictEqual(
+		lines.filter((line) => line.includes("route_warning")),
+		[`route_warning run-thinking: ${message}`],
+	);
+	ok(lines.indexOf(`route_warning run-thinking: ${message}`) < lines.findIndex((line) => line.startsWith("- ")));
+	ok(!output.includes("not a warning"));
 });

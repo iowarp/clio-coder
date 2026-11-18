@@ -926,7 +926,7 @@ export const RunSettledSchema = Type.Object(
 					claimed: count,
 					grounded: count,
 					ungrounded: Type.Array(text, { maxItems: 64 }),
-					basis: vocabulary(["no-command-executed", "unmatched-command"]),
+					basis: vocabulary(["grounded", "no-command-executed", "unmatched-command"]),
 				},
 				closed,
 			),

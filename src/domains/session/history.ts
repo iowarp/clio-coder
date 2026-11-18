@@ -14,6 +14,7 @@ import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionMeta } from "./contract.js";
 import { isSessionHeader, type LabelEntry, type SessionInfoEntry } from "./entries.js";
 import { liveSessionOwner } from "./live-owner.js";
+import { resumedSessionRoute } from "./resumed-route.js";
 
 /**
  * Walks `clioStateDir()/sessions/<cwdHash>/` and returns every session meta
@@ -404,6 +405,8 @@ interface ScanResult {
 	labels: Map<string, { label: string; timestamp: string }>;
 	flowRestricted: boolean;
 	memoryOff: boolean;
+	/** The newest recorded `modelChange` route; null fields when the session never switched. */
+	route: { target: string | null; model: string | null };
 }
 
 function hasAssistantContent(payload: unknown): boolean {
@@ -424,10 +427,13 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 		labels: new Map(),
 		flowRestricted: false,
 		memoryOff: false,
+		route: { target: null, model: null },
 	};
 	if (!existsSync(currentPath)) return result;
 	const records = readSessionFileEntries(currentPath).filter((entry) => !isSessionHeader(entry));
-	for (const parsed of collectSessionEntries(records, currentPath)) {
+	const entries = collectSessionEntries(records, currentPath);
+	result.route = resumedSessionRoute({ target: null, model: null }, entries);
+	for (const parsed of entries) {
 		if (parsed.kind === "custom" && parsed.customType === FLOW_RESTRICTION_ENTRY_TYPE) result.flowRestricted = true;
 		if (parsed.kind === "custom" && parsed.customType === MEMORY_OFF_ENTRY_TYPE) result.memoryOff = true;
 		if (
@@ -477,6 +483,10 @@ function scanCurrentJsonl(currentPath: string): ScanResult {
 function enrichMetaForListing(meta: SessionMeta, currentPath: string): void {
 	const scan = scanCurrentJsonl(currentPath);
 	meta.hasModelTurn = scan.hasModelTurn;
+	if (scan.route.target !== null && scan.route.model !== null) {
+		meta.currentTarget = scan.route.target;
+		meta.currentModel = scan.route.model;
+	}
 	if (scan.name) meta.name = scan.name;
 	const labelValues = [...scan.labels.values()].map((entry) => entry.label.trim()).filter((label) => label.length > 0);
 	if (labelValues.length > 0) meta.labels = labelValues;
