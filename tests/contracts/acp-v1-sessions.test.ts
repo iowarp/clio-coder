@@ -379,28 +379,40 @@ test("ACP reports a turn the loop guard stopped as max_turn_requests, not cancel
 	}
 });
 
-test("ACP separates two assistant messages' text on a blank line without touching their content (bt-41)", async () => {
-	const peer = fixture([], (emit) => {
-		emit({ type: "agent_start", turnId: "turn-1" });
-		for (const text of ["The build is unfixed.", "It's Wednesday."]) {
-			emit({ type: "text_delta", text });
-			emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
+for (const [second, streamed] of [
+	["It's Wednesday.", true],
+	// A later message whose text arrives only on message_end opens at its own offset, not the prompt's (x7-6).
+	["Done.", false],
+	["Fixed it; tests pass now.", false],
+] as const) {
+	test(`ACP separates two assistant messages' text on a blank line without touching their content (bt-41): ${second}`, async () => {
+		const first = "Let me look at the file.";
+		const peer = fixture([], (emit) => {
+			emit({ type: "agent_start", turnId: "turn-1" });
+			for (const [text, delta] of [
+				[first, true],
+				[second, streamed],
+			] as const) {
+				// No message_start: the assistant message_end alone resets the offset.
+				if (delta) emit({ type: "text_delta", text });
+				emit({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }] } });
+			}
+			emit({ type: "agent_end", turnId: "turn-1", messages: [] });
+		});
+		try {
+			await peer.call("initialize", { protocolVersion: 1 });
+			const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
+			await peer.call("session/prompt", { sessionId: opened.sessionId, prompt: [{ type: "text", text: "status?" }] });
+			const text = peer.updates
+				.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
+				.map((params) => (params.update as { content: { text: string } }).content.text)
+				.join("");
+			strictEqual(text, `${first}\n\n${second}`);
+		} finally {
+			await peer.stop();
 		}
-		emit({ type: "agent_end", turnId: "turn-1", messages: [] });
 	});
-	try {
-		await peer.call("initialize", { protocolVersion: 1 });
-		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
-		await peer.call("session/prompt", { sessionId: opened.sessionId, prompt: [{ type: "text", text: "status?" }] });
-		const text = peer.updates
-			.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
-			.map((params) => (params.update as { content: { text: string } }).content.text)
-			.join("");
-		strictEqual(text, "The build is unfixed.\n\nIt's Wednesday.");
-	} finally {
-		await peer.stop();
-	}
-});
+}
 
 test("ACP load streams the complete active history beyond the former 64 turn limit", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";

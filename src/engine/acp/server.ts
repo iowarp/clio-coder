@@ -710,9 +710,13 @@ interface ActivePrompt {
 	errorMessage?: string;
 	/** Machine-readable reason from the first admission notice of this turn. */
 	admissionReason?: string;
+	/** Agent text sent across the whole prompt; only says whether any text went out. */
 	sentAssistantChars: number;
+	/** Agent text sent for the current assistant message, the offset its `message_end` tail starts from (x7-6). */
+	messageAssistantChars: number;
 	/** An assistant message ended after text went out, so the next message's text opens on a blank line (bt-41). */
 	textBreakPending: boolean;
+	/** Thinking sent for the current assistant message, reset at its boundaries like `messageAssistantChars`. */
 	sentThinkingChars: number;
 	/** Chunks only append, so URL credentials are settled before they are sent (#446). */
 	textCredentials: UrlCredentialStreamFilter;
@@ -1478,6 +1482,7 @@ function createActivePromptState(toolProgress?: { enabled: boolean; now: () => n
 		toolCallLimitReached: false,
 		errored: false,
 		sentAssistantChars: 0,
+		messageAssistantChars: 0,
 		textBreakPending: false,
 		sentThinkingChars: 0,
 		textCredentials: new UrlCredentialStreamFilter(),
@@ -1921,6 +1926,7 @@ function handleChatEvent(
 		const text = eventTextDelta(event);
 		if (text.length === 0) return;
 		active.sentAssistantChars += text.length;
+		active.messageAssistantChars += text.length;
 		sendAssistantText(transport, sessionId, active, text);
 		return;
 	}
@@ -2048,6 +2054,11 @@ function handleChatEvent(
 		);
 		return;
 	}
+	if (event.type === "message_start") {
+		active.messageAssistantChars = 0;
+		active.sentThinkingChars = 0;
+		return;
+	}
 	if (event.type === "message_end") {
 		const message = event.message;
 		if (isRecord(message) && message.role === "assistant") {
@@ -2083,9 +2094,9 @@ function handleChatEvent(
 			sendSafeChunks(transport, sessionId, active, "agent_thought_chunk", active.thinkingCredentials.push(tail));
 		}
 		const text = assistantText(message);
-		if (text.length > active.sentAssistantChars) {
-			const tail = text.slice(active.sentAssistantChars);
-			active.sentAssistantChars = text.length;
+		if (text.length > active.messageAssistantChars) {
+			const tail = text.slice(active.messageAssistantChars);
+			active.sentAssistantChars += tail.length;
 			sendAssistantText(transport, sessionId, active, tail);
 		}
 		flushChunkCredentials(
@@ -2094,8 +2105,12 @@ function handleChatEvent(
 			active,
 			messageStopCompleted((message as { stopReason?: unknown })?.stopReason),
 		);
-		if (isRecord(message) && message.role === "assistant" && active.sentAssistantChars > 0)
-			active.textBreakPending = true;
+		if (isRecord(message) && message.role === "assistant") {
+			// A runtime that emits no message_start still opens the next message at offset zero.
+			active.messageAssistantChars = 0;
+			active.sentThinkingChars = 0;
+			if (active.sentAssistantChars > 0) active.textBreakPending = true;
+		}
 		return;
 	}
 	if (event.type === "agent_start" || event.type === "agent_end") {
