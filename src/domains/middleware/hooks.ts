@@ -383,7 +383,8 @@ export function loadUserHooks(
 
 // --- receipts --------------------------------------------------------------
 
-export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped";
+/** `skipped` is the trust gate holding a hook back; `failed` is a hook that threw while it ran. */
+export type UserHookOutcome = "emitted" | "command-ok" | "command-failed" | "command-timeout" | "skipped" | "failed";
 
 /** Bounded extension attribution carried on every receipt of an extension hook. */
 export interface HookReceiptExtension {
@@ -459,8 +460,9 @@ function commandEffect(hook: NormalizedCommandHook, output: string): MiddlewareE
 /**
  * Turn one normalized hook into a coded registration that plugs into the
  * existing ordered evaluation path. The registration filters by hook event and
- * tool names exactly like every other registration, emits a receipt on each
- * execution, and never throws into a turn.
+ * tool names exactly like every other registration and emits a receipt on each
+ * execution. A throw is receipted as `failed` and rethrown for the middleware
+ * runtime to isolate, which reports its message and lets the turn continue.
  */
 export function userHookToRegistration(
 	hook: NormalizedUserHook,
@@ -505,13 +507,19 @@ export function userHookToRegistration(
 					return [];
 				}
 				return evaluateHook(hook, deps, baseReceipt(input));
-			} catch {
-				// A hook must never throw into a turn; report a skipped receipt.
-				deps.recordReceipt({ ...baseReceipt(input), outcome: "skipped" });
-				return [];
+			} catch (err) {
+				try {
+					deps.recordReceipt({ ...baseReceipt(input), outcome: "failed" });
+				} catch {
+					// The receipt sink may be what threw; the runtime still reports the error.
+				}
+				// The middleware runtime isolates the throw and reports its message as hook_failed, so the turn continues.
+				throw err;
 			}
 		},
 	};
+	// A command's first run is its costly one (a cold spawn), not in-process warmup.
+	if (hook.spec.kind === "command") registration.spawnsProcess = true;
 	if (hook.tools !== undefined) registration.toolNames = [...hook.tools];
 	return registration;
 }

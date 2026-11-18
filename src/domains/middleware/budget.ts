@@ -68,7 +68,8 @@ export interface HookBudgetOutcome {
 
 export interface HookBudgetTracker {
 	budgetFor(hook: MiddlewareHook): number;
-	record(registrationId: string, hook: MiddlewareHook, elapsedMs: number): HookBudgetOutcome;
+	/** `warmupGrace: false` counts the first calls like any other, for a registration with no in-process warmup. */
+	record(registrationId: string, hook: MiddlewareHook, elapsedMs: number, warmupGrace?: boolean): HookBudgetOutcome;
 }
 
 export interface HookBudgetTrackerOptions {
@@ -181,7 +182,7 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 		budgetFor(hook: MiddlewareHook): number {
 			return budgets[hook];
 		},
-		record(registrationId: string, hook: MiddlewareHook, elapsedMs: number): HookBudgetOutcome {
+		record(registrationId: string, hook: MiddlewareHook, elapsedMs: number, warmupGrace = true): HookBudgetOutcome {
 			const budgetMs = budgets[hook];
 			const exceeded = elapsedMs > budgetMs;
 			const key = `${registrationId}\u0000${hook}`;
@@ -191,7 +192,7 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 				states.set(key, state);
 			}
 			state.calls += 1;
-			if (state.calls <= warmupCalls) {
+			if (warmupGrace && state.calls <= warmupCalls) {
 				return {
 					budgetMs,
 					exceeded,

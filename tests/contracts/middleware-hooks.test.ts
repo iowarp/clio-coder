@@ -8,7 +8,12 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import { type HookReceipt, normalizeUserHook, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
+import {
+	type HookReceipt,
+	normalizeUserHook,
+	type UserHookCommandRunner,
+	userHookToRegistration,
+} from "../../src/domains/middleware/hooks.js";
 import { buildUserHookRegistrations, readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import { BUILTIN_MIDDLEWARE_RULE_IDS } from "../../src/domains/middleware/rules.js";
 import {
@@ -767,6 +772,44 @@ describe("user hook applicability", () => {
 		strictEqual(receipt.timeoutMs, 1500);
 		ok(typeof receipt.durationMs === "number" && receipt.durationMs >= 0);
 		deepStrictEqual(receipt.effectKinds, ["annotate_tool_result"]);
+	});
+
+	it("surfaces a command hook's first-run stall and receipts a thrown hook as failed, not skipped (D2-3)", () => {
+		const hook = normalizeUserHook(
+			{ id: "cold", on: "turn_start", kind: "command", argv: ["npx", "x"], as: "reminder" },
+			source,
+			options,
+		).hook;
+		ok(hook);
+		const receipts: HookReceipt[] = [];
+		let run: UserHookCommandRunner = () => ({ code: 0, timedOut: false, stdout: "", stderr: "" });
+		const cold = userHookToRegistration(hook, {
+			recordReceipt: (receipt) => receipts.push(receipt),
+			runCommand: (argv, runOptions) => run(argv, runOptions),
+		});
+		const inProcess = registration("in-process", () => [], { hooks: ["turn_start"] });
+		const clock = [0, 5000, 5000, 10_000];
+		const diagnostics: MiddlewareDiagnostic[] = [];
+		// Both overrun on their first call; only the subprocess is denied the warmup grace.
+		runMiddlewareRegistrations({ hook: "turn_start" }, [cold, inProcess], {
+			onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+			now: () => clock.shift() ?? 0,
+		});
+		deepStrictEqual(
+			diagnostics.map((diagnostic) => [diagnostic.kind, diagnostic.registrationId]),
+			[["budget_exceeded", "cold"]],
+		);
+		run = () => {
+			throw new Error("spawn exploded");
+		};
+		diagnostics.length = 0;
+		runMiddlewareRegistrations({ hook: "turn_start" }, [cold], {
+			onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+		});
+		strictEqual(receipts.at(-1)?.outcome, "failed");
+		deepStrictEqual(diagnostics, [
+			{ kind: "hook_failed", registrationId: "cold", hook: "turn_start", message: "spawn exploded" },
+		]);
 	});
 
 	it("strips operator-notification rules from the snapshot workers receive", () => {

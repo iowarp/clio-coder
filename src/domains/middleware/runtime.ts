@@ -86,6 +86,8 @@ export interface MiddlewareHookRegistration {
 	 * these matches.
 	 */
 	awaited?: true;
+	/** `evaluate` runs a subprocess, so its first run gets no budget warmup grace. Only command hooks set it. */
+	spawnsProcess?: true;
 }
 
 /**
@@ -277,9 +279,9 @@ export function runMiddlewareRegistrations(
 		const elapsedMs = now() - startedAt;
 		// Record every evaluation so the rolling window has an accurate
 		// denominator, but never surface warmup overruns (one-time JIT/module
-		// warmup is not misbehavior). Post-warmup overruns ride the bus for
+		// warmup is not misbehavior; a subprocess has none, so it gets no grace). Post-warmup overruns ride the bus for
 		// telemetry; only steady-state slowness carries steadyStateWarn.
-		const outcome = budgetTracker.record(registration.id, input.hook, elapsedMs);
+		const outcome = budgetTracker.record(registration.id, input.hook, elapsedMs, registration.spawnsProcess !== true);
 		if (outcome.exceeded && !outcome.warmup) {
 			emitDiagnostic(
 				onDiagnostic,

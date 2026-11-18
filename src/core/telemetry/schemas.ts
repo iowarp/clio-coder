@@ -519,6 +519,7 @@ export const HookRanSchema = Type.Object(
 			"command-failed",
 			"command-timeout",
 			"skipped",
+			"failed",
 			"runtime-ok",
 			"runtime-failed",
 			"runtime-timeout",
