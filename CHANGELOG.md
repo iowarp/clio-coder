@@ -96,6 +96,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A run stopped by the repetition guard now fails on the guard's reason instead of blaming the model route with "Request was aborted", and its turn settles with cause `repetition` (bt-26).
+- A model call that hits the output cap while still thinking is retried once with a reminder and one thinking level lower; a second such stop ends the turn naming the cause and the fix (bt-25).
 - A red check observed before the run's last edit no longer seals a finished run `unverified` with quality `fail`. A later pass of the same check counts even when the two runs piped output differently (`2>&1`, `| tail`, `| head`), and a reported baseline excuses its own observed red only when no edit was observed (bt-27).
 - On small context windows the compaction summary request now states the room the checkpoint may use, so repeated cuts hold near 60% of history instead of creeping toward the trigger as the cumulative checkpoint grows (bt-18).
 - The gateway accepts an empty `parameters` object on a call and names the exact `args` rewrite for a non-empty one (bt-23).
