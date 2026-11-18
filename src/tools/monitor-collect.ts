@@ -225,7 +225,11 @@ export async function collectRuns(
 		}
 		ledgerId = record.ledgerId ?? null;
 		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId, entry.agentId));
-		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
+		const firstCollector =
+			record.collectedBy !== undefined && record.collectedBy !== ownership.owner.sessionId
+				? ` by session ${record.collectedBy}`
+				: "";
+		scope = `batch ${batchId}${record.collectedAt !== null ? ` (already collected${firstCollector})` : ""}`;
 	} else {
 		rows = runIds.map((runId) => resolveCollectRow(deps, runId, "unknown"));
 		const foreign = rows.find((row) => row.run !== null && !ownership.readsRun(row.run));
@@ -295,7 +299,7 @@ export async function collectRuns(
 	let collected = false;
 	if (batchId.length > 0) {
 		try {
-			const marked = await deps.dispatch.detached?.markCollected(batchId);
+			const marked = await deps.dispatch.detached?.markCollected(batchId, ownership.owner.sessionId);
 			collected = marked !== null && marked !== undefined;
 		} catch {
 			collected = false;

@@ -183,17 +183,20 @@ export interface WorkerApprovalWindowFacts {
 	fallback: "deny" | "fail";
 	/** Who the ask waits on now, because a brokered ask reaches the person only if it is passed on. */
 	decider: WorkerApprovalDecider;
+	/** The session that dispatched the run, when it is not the current one: only it may answer the ask (bt-11 f). */
+	owner?: string;
 }
 
 function approvalWindowFacts(payload: unknown): WorkerApprovalWindowFacts | null {
 	if (typeof payload !== "object" || payload === null) return null;
-	const { expiresAt, held, fallback, decider } = payload as Record<string, unknown>;
+	const { expiresAt, held, fallback, decider, owner } = payload as Record<string, unknown>;
 	if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
 	return {
 		expiresAt,
 		held: held === true,
 		fallback: fallback === "fail" ? "fail" : "deny",
 		decider: decider === "main" || decider === "judge" ? decider : "operator",
+		...(typeof owner === "string" && owner.length > 0 ? { owner } : {}),
 	};
 }
 

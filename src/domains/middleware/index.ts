@@ -14,11 +14,14 @@ export {
 } from "./budget.js";
 export type { MiddlewareContract, MiddlewareHost, MiddlewareRegistrar } from "./contract.js";
 export {
+	batchesCollectedElsewhere,
 	buildDetachedBatchesMessage,
 	buildReadOnlyExplorationMessage,
 	buildUnbackedWorkerClaimMessage,
+	type CollectedElsewhereView,
 	type CreateDetachedDispatchNudgeRegistrationOptions,
 	claimsWorkerResults,
+	collectedElsewhereLine,
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
