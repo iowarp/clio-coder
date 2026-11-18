@@ -276,6 +276,44 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 	});
 });
 
+it("keeps compaction failure lines in the reply, where context status does not go (c2b-3)", async () => {
+	// The failure lines as the compaction paths word them, at the levels they emit.
+	const failures: ReadonlyArray<{ level: "info" | "warning" | "error"; text: string }> = [
+		{
+			level: "warning",
+			text:
+				"[Clio Coder] auto-compaction failed; context at 28.6K tokens. 401 invalid api key. This turn goes on without it; /context compact tries again; /model picks another route to summarize on.",
+		},
+		{
+			level: "info",
+			text: "[Clio Coder] automatic compaction failed: the summary came back empty. This turn goes on without it.",
+		},
+		{ level: "info", text: "[Clio Coder] compact-on-overflow failed: compaction stream failed: 429" },
+		{
+			level: "error",
+			text:
+				"[/context compact] failed; context unchanged at 30.1K tokens. 401 invalid api key. /context compact tries again; /model picks another route to summarize on.",
+		},
+		{ level: "info", text: "Portable compaction failed; continuing from the original session history." },
+		// Only an info status line leaves the reply: a context engine line raised to a warning stays visible.
+		{ level: "warning", text: "[context engine] compaction failed: summary stream aborted" },
+	];
+	const turn = await runTurn({
+		optIn: false,
+		script: ({ emit }) => {
+			for (const notice of failures) emit({ type: "notice", surface: "transcript", ...notice });
+			emit({ type: "notice", surface: "transcript", level: "info", text: "Clio compacted 36.2K → 28.6K tokens" });
+		},
+	});
+	deepStrictEqual(
+		turn.updates
+			.filter((update) => update.sessionUpdate === "agent_message_chunk")
+			.map((update) => (update.content as { text: string }).text),
+		failures.map((notice) => `${notice.text}\n`),
+	);
+	strictEqual(turn.updates.filter((update) => update.sessionUpdate === "session_info_update").length, 1);
+});
+
 it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {
 	const status = [
 		"[context engine] working set: nothing evictable, all 1 turn are inside the protected window; llm_summary runs instead",
