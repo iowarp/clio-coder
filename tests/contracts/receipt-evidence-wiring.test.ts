@@ -103,7 +103,21 @@ describe("a call refused before it reached a tool", () => {
 	beforeEach(() => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
 
-	it("counts a schema-rejected call in the receipt's tool stats as an error (bt-23 #5)", async () => {
+	const readCall = [
+		{ type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: { path: "a" } },
+		{
+			type: "clio_coder_tool_start",
+			payload: { tool: "read", toolCallId: "read-1", posture: "operating", startedAt: Date.now() },
+		},
+		{
+			type: "clio_coder_tool_finish",
+			payload: { tool: "read", toolCallId: "read-1", posture: "operating", durationMs: 1, outcome: "ok" },
+		},
+		{ type: "tool_execution_end", toolCallId: "read-1", toolName: "read", isError: false, result: {} },
+		{ type: "message_end", message: { role: "assistant", stopReason: "stop", content: "Read a." } },
+	];
+
+	async function receiptFor(events: unknown[]) {
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
 		const bundle = makeDispatchBundle(dispatchStubContext({ settings }), {
@@ -116,28 +130,7 @@ describe("a call refused before it reached a tool", () => {
 					abort: () => {},
 					send: () => true,
 					events: (async function* () {
-						yield { type: "tool_execution_start", toolCallId: "bad-edit", toolName: "edit", args: { path: 1 } };
-						yield {
-							type: "tool_execution_end",
-							toolCallId: "bad-edit",
-							toolName: "edit",
-							isError: true,
-							result: { content: [{ type: "text", text: 'Validation failed for tool "edit"' }], details: {} },
-						};
-						yield { type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: { path: "a" } };
-						yield {
-							type: "clio_coder_tool_start",
-							payload: { tool: "read", toolCallId: "read-1", posture: "operating", startedAt: Date.now() },
-						};
-						yield {
-							type: "clio_coder_tool_finish",
-							payload: { tool: "read", toolCallId: "read-1", posture: "operating", durationMs: 1, outcome: "ok" },
-						};
-						yield { type: "tool_execution_end", toolCallId: "read-1", toolName: "read", isError: false, result: {} };
-						yield {
-							type: "message_end",
-							message: { role: "assistant", stopReason: "stop", content: "Read a." },
-						};
+						yield* events;
 					})(),
 				};
 				return worker;
@@ -151,14 +144,64 @@ describe("a call refused before it reached a tool", () => {
 				task: "Fix the typo in a.",
 				requestOrigin: "internal",
 			});
-			const receipt = await run.finalPromise;
-			const edit = receipt.toolStats.find((stat) => stat.tool === "edit");
-			equal(edit?.count, 1);
-			equal(edit?.errors, 1);
-			equal(receipt.toolStats.find((stat) => stat.tool === "read")?.count, 1);
-			equal(receipt.toolCalls, 2);
+			return await run.finalPromise;
 		} finally {
 			await bundle.extension.stop?.();
 		}
+	}
+
+	it("counts a schema-rejected call in the receipt's tool stats as an error (bt-23 #5)", async () => {
+		const receipt = await receiptFor([
+			{ type: "tool_execution_start", toolCallId: "bad-edit", toolName: "edit", args: { path: 1 } },
+			{
+				type: "tool_execution_end",
+				toolCallId: "bad-edit",
+				toolName: "edit",
+				isError: true,
+				result: { content: [{ type: "text", text: 'Validation failed for tool "edit"' }], details: {} },
+			},
+			...readCall,
+		]);
+		const edit = receipt.toolStats.find((stat) => stat.tool === "edit");
+		equal(edit?.count, 1);
+		equal(edit?.errors, 1);
+		equal(receipt.toolStats.find((stat) => stat.tool === "read")?.count, 1);
+		equal(receipt.toolCalls, 2);
+	});
+
+	it("leaves a call the output token limit cut off out of the tool stats (bt-23 #5)", async () => {
+		const receipt = await receiptFor([
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					stopReason: "length",
+					content: [{ type: "toolCall", id: "cut-write", name: "write", arguments: { path: "a" } }],
+				},
+			},
+			{ type: "tool_execution_start", toolCallId: "cut-write", toolName: "write", args: { path: "a" } },
+			{
+				type: "tool_execution_end",
+				toolCallId: "cut-write",
+				toolName: "write",
+				isError: true,
+				result: {
+					content: [
+						{
+							type: "text",
+							text:
+								'Tool call "write" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.',
+						},
+					],
+					details: {},
+				},
+			},
+			...readCall,
+		]);
+		equal(
+			receipt.toolStats.find((stat) => stat.tool === "write"),
+			undefined,
+		);
+		equal(receipt.toolCalls, 1);
 	});
 });

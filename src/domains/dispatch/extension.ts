@@ -8410,6 +8410,9 @@ export function createDispatchBundle(
 		const reachedTool = new Set<string>();
 		// A producer without call ids cannot tie a start to its end, so such a stream counts only its CLIO finishes.
 		let startsCarryIds = true;
+		// The calls of a reply the output token limit cut off. The engine fails each without running it, so they are
+		// neither refused nor errored and toolStats leaves them out.
+		const outputLimitCalls = new Set<string>();
 		// A gateway wrapper's finish waits for its result: a chain's settled steps count as the calls they are, so the
 		// wrapper counts only when none settled. Counting both made an N-step chain N + 1 calls (bt-14).
 		const gatewayFinishes = new Map<string, ToolFinishPayload>();
@@ -8534,6 +8537,7 @@ export function createDispatchBundle(
 					responseId?: unknown;
 					stopReason?: unknown;
 					errorMessage?: unknown;
+					content?: unknown;
 				};
 				payload?: {
 					callIndex?: number;
@@ -8577,6 +8581,16 @@ export function createDispatchBundle(
 				recordToolStart(inFlightTools, event.payload);
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
+			}
+			if (
+				event.type === "message_end" &&
+				event.message?.role === "assistant" &&
+				event.message.stopReason === "length" &&
+				Array.isArray(event.message.content)
+			) {
+				for (const block of event.message.content) {
+					if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") outputLimitCalls.add(block.id);
+				}
 			}
 			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
@@ -8638,6 +8652,7 @@ export function createDispatchBundle(
 					event.isError === true &&
 					event.toolCallId &&
 					!reachedTool.has(event.toolCallId) &&
+					!outputLimitCalls.has(event.toolCallId) &&
 					event.toolName !== INTERNAL_HELPER_RESULT_TOOL
 				) {
 					recordToolFinish(toolStats, {
