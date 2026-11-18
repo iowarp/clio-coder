@@ -315,6 +315,7 @@ test("the bypass rows: a step short of output room and a rejected later send eac
 	const archived: string[] = [];
 	const guard = createWorkerContextGuard((alias) => void archived.push(alias));
 	// Under the trigger and the window, but the reserve does not fit: the protected step's read leaves, the refusal stays.
+	// The closing answer means the model has seen the read, so it leaves as step_overflow with the advice.
 	const tight = { systemPrompt: "worker", tools: [], contextWindow: 10_000, outputReserve: () => 4000 };
 	guard({ ...tight, messages: [user("task")] });
 	const step = [
@@ -325,6 +326,7 @@ test("the bypass rows: a step short of output room and a rejected later send eac
 		]),
 		result("big", "data ".repeat(5000)),
 		refusal("gw", "GATEWAY_REFUSAL ".repeat(250)),
+		assistant(),
 	];
 	const text = JSON.stringify(guard({ ...tight, messages: step }));
 	match(text, /\[evicted ref=r1 reason=step_overflow tool=read path=src\/big\.ts /);
@@ -361,6 +363,107 @@ test("the bypass rows: a step short of output room and a rejected later send eac
 	stuck({ ...unknown, messages: refused });
 	equal(stuck.recover({ ...unknown, messages: refused }), null, "no retry unless the target is reached");
 	equal(stuck.records.length, 0);
+});
+
+function pump(n: number, lines: number): AgentMessage[] {
+	return [
+		assistant(`p${n}`, `pumps/pump-${n}.c`),
+		result(`p${n}`, `PUMP-${n} ${"line of pump output\n".repeat(lines)}`),
+	];
+}
+
+test("drv-cf1h: short of headroom under the trigger, older reads leave before the read the model has not seen (A2a)", () => {
+	const decisions: ContextFoldPayload[] = [];
+	const archived: string[] = [];
+	const guard = createWorkerContextGuard((alias) => void archived.push(alias), {
+		onDecision: (decision) => void decisions.push(decision),
+	});
+	// 26,030 tokens under a 26,214 trigger (0.8 of 32,768); the 8,192 reserve leaves room for 24,576.
+	const input = { systemPrompt: "w".repeat(81_088), tools: [], contextWindow: 32_768, outputReserve: () => 8192 };
+	guard({ ...input, messages: [user("task")] });
+	// pump-1..3 sit before the last two steps, pump-4 was seen by the last answer, pump-5 just landed.
+	const messages = [user("task"), ...[1, 2, 3, 4].flatMap((n) => pump(n, 200)), ...pump(5, 300)];
+	const projected = guard({ ...input, messages });
+	equal(decisions.at(-1)?.tokensBefore, 26_030);
+	ok((decisions.at(-1)?.tokensAfter ?? Number.POSITIVE_INFINITY) + 8192 <= 32_768, JSON.stringify(decisions.at(-1)));
+	deepStrictEqual(
+		guard.records[0]?.evicted.map(({ ref, reason }) => [ref.entry, reason]),
+		[
+			["2", "age_horizon"],
+			["4", "age_horizon"],
+		],
+	);
+	equal(guard.records[0]?.policyId, "working_set");
+	deepStrictEqual(archived, ["r1", "r2"]);
+	const text = JSON.stringify(projected);
+	ok(text.includes("PUMP-3") && text.includes("PUMP-4") && text.includes("PUMP-5"), "pump-3..5 keep their bodies");
+	ok(
+		!/path=pumps\/pump-5\.c|Read only the part you need|step_overflow/.test(text),
+		"no re-read prompt for the fresh read",
+	);
+	// The next round keeps the fresh read the model has now seen, with no advice anywhere.
+	const next = JSON.stringify(guard({ ...input, messages: [...messages, assistant()] }));
+	ok(next.includes("PUMP-5") && !/Read only the part you need/.test(next));
+});
+
+test("only unseen reads can make room: the largest leaves first as unseen_overflow, after every seen read (A2b)", () => {
+	const decisions: ContextFoldPayload[] = [];
+	const guard = createWorkerContextGuard(() => {}, { onDecision: (decision) => void decisions.push(decision) });
+	const tight = { systemPrompt: "worker", tools: [], contextWindow: 10_000, outputReserve: () => 4000 };
+	guard({ ...tight, messages: [user("task")] });
+	const batch = call("batch", [
+		["small", "read", { path: "src/small.ts" }],
+		["large", "read", { path: "src/large.ts" }],
+		["mid", "read", { path: "src/mid.ts" }],
+	]);
+	const unseen = [
+		batch,
+		result("small", "SMALL ".repeat(1000)),
+		result("large", "LARGE ".repeat(3000)),
+		result("mid", "MID ".repeat(2000)),
+	];
+	const text = JSON.stringify(guard({ ...tight, messages: [user("task"), ...unseen] }));
+	deepStrictEqual(
+		guard.records[0]?.evicted.map(({ ref, reason }) => [ref.entry, reason]),
+		[["3", "unseen_overflow"]],
+	);
+	match(text, /\[evicted ref=r1 reason=unseen_overflow tool=read path=src\/large\.ts /);
+	ok(!/Read only the part you need/.test(text), "the model never saw the body; it needs the recall pointer only");
+	ok(text.includes("SMALL") && text.includes("MID "));
+	equal(guard.records[0]?.policyId, "step_overflow");
+	deepStrictEqual(decisions.at(-1)?.stages, [
+		{ stage: "working_set", outcome: "committed", reason: "evicted", recordId: "eviction-1" },
+	]);
+
+	// A seen protected read leaves first on the headroom path and on the server's rejection alike.
+	const seen = [
+		user("task"),
+		call("old", [["old", "read", { path: "src/old.ts" }]]),
+		result("old", "OLD ".repeat(3000)),
+	];
+	const ordered = createWorkerContextGuard(() => {});
+	ordered({ ...tight, messages: [user("task")] });
+	const fitted = JSON.stringify(ordered({ ...tight, messages: [...seen, ...unseen] }));
+	deepStrictEqual(
+		ordered.records[0]?.evicted.map(({ ref, reason }) => [ref.entry, reason]),
+		[
+			["2", "step_overflow"],
+			["5", "unseen_overflow"],
+		],
+	);
+	ok(fitted.includes("SMALL") && fitted.includes("MID "));
+	const unknown = { ...tight, contextWindow: 0 };
+	const rejected = createWorkerContextGuard(() => {});
+	rejected({ ...unknown, messages: [user("task")] });
+	rejected({ ...unknown, messages: [...seen, ...unseen] });
+	ok(rejected.recover({ ...unknown, messages: [...seen, ...unseen] }));
+	deepStrictEqual(
+		rejected.records[0]?.evicted.map(({ ref, reason }) => [ref.entry, reason]),
+		[
+			["2", "step_overflow"],
+			["5", "unseen_overflow"],
+		],
+	);
 });
 
 test("capture follows the active branch and preserves existing eviction projection", () => {

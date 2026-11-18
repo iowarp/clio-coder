@@ -29,8 +29,12 @@ import type { EvictionReason, WorkingSetRef } from "./contract.js";
 /** Characters of the original body the marker keeps as a preview. */
 const PREVIEW_LIMIT = 120;
 
-/** A worker's `step_overflow` cut renders through the same marker as the session's reasons. */
-export type MarkerReason = EvictionReason | "step_overflow";
+/**
+ * A worker's fit cuts render through the same marker as the session's reasons:
+ * `step_overflow` for a protected read the model has seen, `unseen_overflow`
+ * for one it has not. Neither joins the session ledger's reasons.
+ */
+export type MarkerReason = EvictionReason | "step_overflow" | "unseen_overflow";
 
 export interface MarkerInput {
 	alias?: string;
