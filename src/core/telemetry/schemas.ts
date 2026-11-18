@@ -598,6 +598,8 @@ export const CompactionSettledSchema = Type.Object(
 		callIds: Type.Array(CallIdSchema, { minItems: 1, uniqueItems: true }),
 		outcome: vocabulary(["committed", "discarded", "failed", "unresolved"]),
 		checkpointTurnId: Type.Union([ExistingId, Type.Null()]),
+		/** Tokens the committed context sits below the automatic trigger; negative when the cut stayed above it. */
+		headroomTokens: Type.Optional(Type.Integer()),
 	},
 	closed,
 );

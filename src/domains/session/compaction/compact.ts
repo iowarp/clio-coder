@@ -152,6 +152,8 @@ export interface CompactInput extends SideCallAuth {
 	checkpointTokenFigures?: (entry: Readonly<Omit<CompactionSummaryEntry, "timestamp">>) => {
 		tokensBefore: number;
 		tokensAfter: number;
+		/** Tokens `tokensAfter` sits below the automatic trigger; journaled on `compaction.settled`. */
+		headroomTokens?: number;
 	};
 	checkpointForSummary?:
 		| ((summaryRef: string, tokensBefore: number, tokensAfter: number) => ContinuityCheckpointPayload)

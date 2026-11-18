@@ -144,7 +144,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		stop: { reason: "keep", failure: "keep", detail: "withhold" },
 	},
 	"call.linked": { runId: "id", callId: "id" },
-	"compaction.settled": { ...keep("outcome"), callIds: "id", checkpointTurnId: "id" },
+	"compaction.settled": { ...keep("outcome", "headroomTokens"), callIds: "id", checkpointTurnId: "id" },
 	"journal.gap": { ...keep("reason", "count"), sink: "token" },
 	"session.opened": {},
 	"session.resumed": keep("via"),
