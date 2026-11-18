@@ -22,6 +22,8 @@ export interface ParkedInterviewResult {
 	scripted?: Record<string, { file: string; rules: Record<string, string> }>;
 	/** The checkpoint ids the interview's questions declared, in the order they were put to the author. */
 	checkpoints?: string[];
+	/** The handler finished the interview with `pipelineDone: true`: the step it gated was the pipeline's last. */
+	pipelineDone?: true;
 }
 
 /** What the surface that owns api 2 runtimes offers the middleware registrations of their hooks. */

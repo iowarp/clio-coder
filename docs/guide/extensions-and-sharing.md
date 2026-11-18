@@ -211,8 +211,10 @@ continuations per operator prompt. Once a step has run, a continuation turn
 that does the step's work without calling the step tool continues the chain
 too, and each continuation is a new turn that starts with the next step call.
 The chain stops at a step result that sets `pipelineDone`, or at the cap. An api 2
-step tool marks its last step by returning `pipelineDone: true` beside `text`
-(any other tool sets `pipelineDone: true` in its result details); an error result
+step tool marks its last step by returning `pipelineDone: true` beside `text`,
+or, when the step asks for an approval interview, in the `{ done: true }` that
+completes the interview (any other tool sets `pipelineDone: true` in its result
+details); an error result, such as a cancelled interview,
 never ends the chain this way. A step tool that never sets it continues to the
 cap, and a headless run reports a pipeline that ended without `pipelineDone` in
 the `stepPipeline` field of its `run_end` frame. While the policy is active, no
