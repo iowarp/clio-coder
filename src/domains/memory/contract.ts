@@ -13,6 +13,8 @@ export interface ObservationSourceUnit {
 	readonly exact: readonly { ref: string; text: string }[];
 	readonly toolCallIds: readonly string[];
 	readonly successfulResultRefs: readonly string[];
+	/** Refs of the operator's own messages; only these ground a constraint or decision. Absent in older artifacts. */
+	readonly operatorRefs?: readonly string[];
 	readonly complete: boolean;
 	/** Estimated tokens of the unit's ordinary compaction representation; an observation must beat it. */
 	readonly ordinaryTokens?: number;

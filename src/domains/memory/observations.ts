@@ -179,6 +179,16 @@ export function prepareObservation(input: {
 	const rawNotes = envelope.notes;
 	const refs = new Set(input.units.flatMap((unit) => [...unit.refs, ...(unit.parts?.map((part) => part.ref) ?? [])]));
 	const verified = new Set(input.units.flatMap((unit) => unit.successfulResultRefs));
+	// Only the operator's own words are a constraint or decision. A note first
+	// prepared from source that claims either without assertion status or an
+	// operator message among its refs keeps its text as context. A reflection
+	// inherits its inputs' categories and a stored artifact keeps its notes as
+	// written, so neither is reclassified here.
+	const operator = input.stored || input.inputs ? null : new Set(input.units.flatMap((unit) => unit.operatorRefs ?? []));
+	const authored = (note: { category: ObservationNote["category"]; status: string; refs: readonly string[] }) =>
+		operator === null ||
+		(note.category !== "constraint" && note.category !== "decision") ||
+		(note.status === "assertion" && note.refs.some((ref) => operator.has(ref)));
 	const ids = new Set<string>();
 	const previousIds = new Set([
 		...(input.inputs?.flatMap((batch) => batch.notes.map((note) => note.id)) ?? []),
@@ -214,12 +224,17 @@ export function prepareObservation(input: {
 		)
 			continue;
 		ids.add(raw.id);
-		accepted.push({
-			id: stableId(raw.id),
+		const note = {
 			category: raw.category as ObservationNote["category"],
 			status: raw.status as ObservationNote["status"],
-			text: raw.text,
 			refs: [...new Set(raw.refs as string[])],
+		};
+		accepted.push({
+			id: stableId(raw.id),
+			category: authored(note) ? note.category : "context",
+			status: note.status,
+			text: raw.text,
+			refs: note.refs,
 			...(raw.supersedes ? { supersedes: (raw.supersedes as string[]).map(stableId) } : {}),
 		});
 	}
@@ -451,7 +466,8 @@ export function isSessionObservation(value: unknown): value is SessionObservatio
 					observationDigest(unit.text) === unit.digest &&
 					Array.isArray(unit.exact) &&
 					Array.isArray(unit.toolCallIds) &&
-					Array.isArray(unit.successfulResultRefs),
+					Array.isArray(unit.successfulResultRefs) &&
+					(unit.operatorRefs === undefined || (Array.isArray(unit.operatorRefs) && unit.operatorRefs.every(id))),
 			) ||
 			sourceCoverageDigest(value.coverage as ObservationSourceUnit[]) !== value.sourceDigest ||
 			!Array.isArray(value.notes) ||

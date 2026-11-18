@@ -3,6 +3,7 @@ import { gatewayChainReceipts } from "../../tools/surface.js";
 import type { ObservationSourceUnit } from "../memory/index.js";
 import { serializeConversation } from "./compaction/branch-summary.js";
 import type { SessionEntry } from "./entries.js";
+import { isOperatorTypedUserPayload } from "./history.js";
 import { payloadObject, projectMessage } from "./message-projection.js";
 
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -20,6 +21,7 @@ export function observationSourceUnits(entries: readonly SessionEntry[]): Observ
 	let pending = new Set<string>();
 	let calls = new Set<string>();
 	let successes: string[] = [];
+	let operator: string[] = [];
 	let parts: { ref: string; toolCallId: string }[] = [];
 	let complete = true;
 	const flush = () => {
@@ -40,6 +42,7 @@ export function observationSourceUnits(entries: readonly SessionEntry[]): Observ
 			toolCallIds: [...calls],
 			...(parts.length ? { parts } : {}),
 			successfulResultRefs: successes,
+			...(operator.length ? { operatorRefs: operator } : {}),
 			complete: complete && pending.size === 0,
 			// What ordinary compaction would spend on the same entries; a prepared
 			// observation is worth requesting only if it can be smaller than this.
@@ -49,6 +52,7 @@ export function observationSourceUnits(entries: readonly SessionEntry[]): Observ
 		pending = new Set();
 		calls = new Set();
 		successes = [];
+		operator = [];
 		parts = [];
 		complete = true;
 	};
@@ -125,6 +129,9 @@ export function observationSourceUnits(entries: readonly SessionEntry[]): Observ
 			// holds that text: the unit is complete as the actor saw it. Coverage
 			// means the source was supplied, not that the tool showed a whole file.
 		}
+		// The operator's own message: a synthesized nudge or a machine turn is not.
+		if (entry.role === "user" && projection.exact !== null && isOperatorTypedUserPayload(entry.payload))
+			operator.push(entry.turnId);
 		captured.push({ entry, material, exact: projection.exact });
 		if (pending.size === 0) flush();
 	}

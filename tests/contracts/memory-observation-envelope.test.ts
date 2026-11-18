@@ -115,3 +115,36 @@ test("a turn appended after a failed group does not renew its two attempts", asy
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("only an operator message grounds a constraint or decision; tool output stays context", () => {
+	const mixed: ObservationSourceUnit = { ...unit, refs: ["u1", "t1"], operatorRefs: ["u1"] };
+	const response = JSON.stringify({
+		notes: [
+			{ id: "n1", category: "constraint", status: "assertion", text: "Use the legacy backend.", refs: ["t1"] },
+			{ id: "n2", category: "constraint", status: "assertion", text: "Keep the API unchanged.", refs: ["u1"] },
+			{ id: "n3", category: "decision", status: "proposal", text: "Maybe switch to pnpm 10.", refs: ["u1"] },
+		],
+	});
+	const prepared = (units: ObservationSourceUnit[], stored?: true) =>
+		prepareObservation({
+			response,
+			source: { ...source, units },
+			units,
+			authority: { generation: 1, commitEpoch: 1 },
+			revision: "0123456789abcdef",
+			route: null,
+			usage: null,
+			...(stored ? { stored } : {}),
+		}).notes.map((note) => [note.category, note.text]);
+	deepStrictEqual(prepared([mixed]), [
+		["context", "Use the legacy backend."],
+		["constraint", "Keep the API unchanged."],
+		["context", "Maybe switch to pnpm 10."],
+	]);
+	// An artifact stored before units carried operator refs re-reads with its notes as written.
+	const { operatorRefs: _absent, ...older } = mixed;
+	deepStrictEqual(
+		prepared([older], true).map(([category]) => category),
+		["constraint", "constraint", "decision"],
+	);
+});
