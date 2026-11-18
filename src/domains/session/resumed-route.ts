@@ -15,6 +15,7 @@ import type { SessionEntry } from "./entries.js";
  * runtime, which cannot say which target the model belonged to; it is skipped
  * rather than paired with a guess. Legacy sessions without a thinking row leave
  * that field unset so the caller can use the configured default (AUD-3 finding 2).
+ * A row whose selection the route clamped (bt-37) also yields that selection.
  */
 export function resumedSessionRoute(
 	meta: { target: string | null; model: string | null },
@@ -23,6 +24,7 @@ export function resumedSessionRoute(
 	let target = meta.target ?? null;
 	let model = meta.model ?? null;
 	let thinkingLevel: ThinkingLevel | undefined;
+	let thinkingSelection: ThinkingLevel | undefined;
 	for (const entry of entries) {
 		if (entry.kind === "modelChange") {
 			if (typeof entry.target !== "string" || entry.target.length === 0) continue;
@@ -33,10 +35,15 @@ export function resumedSessionRoute(
 		}
 		if (entry.kind === "thinkingLevelChange") {
 			const level = THINKING_LEVELS.find((candidate) => candidate === entry.thinkingLevel);
-			if (level !== undefined) thinkingLevel = level;
+			if (level === undefined) continue;
+			thinkingLevel = level;
+			thinkingSelection = THINKING_LEVELS.find((candidate) => candidate === entry.requestedThinkingLevel);
 		}
 	}
-	return thinkingLevel === undefined ? { target, model } : { target, model, thinkingLevel };
+	if (thinkingLevel === undefined) return { target, model };
+	return thinkingSelection === undefined
+		? { target, model, thinkingLevel }
+		: { target, model, thinkingLevel, thinkingSelection };
 }
 
 /** What restoring a resumed session's route reads and writes; the composition root supplies each. */

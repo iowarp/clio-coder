@@ -164,6 +164,29 @@ test("resume plans a session-only route change and names a target that is gone",
 	});
 	assert.deepEqual(planResumedRouting({ target: null, model: null }, settings), { patch: null, notice: null });
 
+	// A first row the route clamped (bt-37) carries the selection; when the live selection is that one, the same
+	// route clamps it the same way, so nothing moves and the route keeps its saved source.
+	const clamped = resumedSessionRoute({ target: "alpha", model: "alpha-default" }, [
+		entry({ kind: "thinkingLevelChange", thinkingLevel: "off", requestedThinkingLevel: "low" }),
+	]);
+	assert.deepEqual(clamped, { target: "alpha", model: "alpha-default", thinkingLevel: "off", thinkingSelection: "low" });
+	const lowSettings = twoTargetSettings();
+	lowSettings.chat.thinkingLevel = "low";
+	assert.deepEqual(planResumedRouting(clamped, lowSettings), { patch: null, notice: null });
+	lowSettings.chat.thinkingLevel = "high";
+	assert.deepEqual(planResumedRouting(clamped, lowSettings), {
+		patch: { orchestrator: { thinkingLevel: "off" } },
+		notice: null,
+	});
+	// A later explicit row replaces the clamped one and its selection.
+	assert.deepEqual(
+		resumedSessionRoute({ target: "alpha", model: "alpha-default" }, [
+			entry({ kind: "thinkingLevelChange", thinkingLevel: "off", requestedThinkingLevel: "low" }),
+			entry({ kind: "thinkingLevelChange", thinkingLevel: "medium" }),
+		]),
+		{ target: "alpha", model: "alpha-default", thinkingLevel: "medium" },
+	);
+
 	const gone = planResumedRouting({ target: "gamma", model: "gamma-model", thinkingLevel: "low" }, settings);
 	assert.deepEqual(gone.patch, { orchestrator: { thinkingLevel: "low" } });
 	assert.match(gone.notice ?? "", /gamma\/gamma-model/);

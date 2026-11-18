@@ -852,6 +852,11 @@ export interface ChatLoop {
 	 * turn path waits on a pre-warm.
 	 */
 	whenPrewarmSettled(): Promise<PrewarmOutcome | null>;
+	/**
+	 * Resolves once the last navigation has built the route, tools and session prompt its next request would carry
+	 * and republished the context view from them, so a reopen reports what live would (SPEC §0). Makes no call.
+	 */
+	nextRequestReady(): Promise<void>;
 	/** Abort the live agent and release pi-ai session-scoped resources before shutdown. */
 	dispose(): void;
 	/**
@@ -2297,6 +2302,45 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				inFlight: boolean;
 		  }
 		| { ok: false; reason: string };
+
+	let nextRequestPrepared: Promise<void> = Promise.resolve();
+	let nextRequestNavigation = 0;
+	/**
+	 * Build what the next request would carry after a navigation: the runtime over the replayed history, the session
+	 * tools and the session prompt, then republish the view. The figure a reopen shows is then the one live would
+	 * show, never the persisted snapshot. No provider call: the portable fallback is skipped like the pre-warm's.
+	 */
+	const prepareNextRequest = async (navigation: number): Promise<void> => {
+		await Promise.resolve();
+		const sessionId = api.getSessionId();
+		const current = () =>
+			!disposed &&
+			navigation === nextRequestNavigation &&
+			api.getSessionId() === sessionId &&
+			!state.streaming &&
+			!turnActive;
+		if (!current()) return;
+		let runtime: AgentRuntime | null;
+		try {
+			runtime = turnRuntime.ensureRuntime({ silent: true });
+		} catch {
+			return;
+		}
+		if (!runtime || !current()) return;
+		runtime.agent.state.tools = resolveSessionTools(
+			runtime,
+			deps.toolRegistry,
+			currentToolInvokeOptions,
+			turnRuntime.toolTelemetry,
+			sessionToolLimits,
+		);
+		try {
+			await context.ensureSessionPrompt(runtime, false, undefined, true);
+		} catch {
+			// The view below still prices the route's tools and the replayed history.
+		}
+		if (current()) context.refreshLiveBudget();
+	};
 
 	const prepareOutOfTurnRound = async (
 		inFlightRefusal: string | null,
@@ -4476,6 +4520,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		refreshLiveBudget: () => context.refreshLiveBudget(),
 		whenSettled: () => activeSubmit,
 		whenPrewarmSettled: () => prewarm.settled(),
+		nextRequestReady: () => nextRequestPrepared,
 		onSessionReset(handler): () => void {
 			sessionResetListeners.add(handler);
 			return () => {
@@ -4534,6 +4579,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// Ordinary appends advance `state.lastTurnId` from here without re-arming
 			// an advisory; arriving here at all is the navigation that does.
 			context.resetForSession(leafTurnId);
+			nextRequestNavigation += 1;
+			nextRequestPrepared =
+				replayMessages && replayMessages.length > 0 ? prepareNextRequest(nextRequestNavigation) : Promise.resolve();
 			// The resumed ledger renders before the first new turn (issue #189),
 			// and the window it renders against should be the probed one rather
 			// than the catalog's, so the live capability probe the first submit
