@@ -450,6 +450,86 @@ it("a killed worker whose retry is suppressed says why it was not retried (D3-c)
 	}
 });
 
+function killedWorker(onSpawn: () => void): SpawnedWorker {
+	onSpawn();
+	return {
+		pid: null,
+		promise: Promise.resolve({
+			exitCode: null,
+			signal: "SIGKILL",
+			evidenceIncomplete: "the worker was killed before its event stream ended",
+		}),
+		heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+		abort() {},
+		events: (async function* () {})(),
+	};
+}
+
+for (const path of ["review", "pipeline"] as const) {
+	it(`a ${path === "review" ? "review gate" : "pipeline halt"} says why its failed run was not retried (D3-c)`, {
+		timeout: 15_000,
+	}, async () => {
+		let spawns = 0;
+		const f = await fixture(true, () => killedWorker(() => spawns++));
+		try {
+			const result = await withTelemetryContext(
+				{ sessionId: "not-retried-test", agent: { role: "main", id: "not-retried-test" } },
+				() =>
+					f.tool.run({
+						agent: "coder",
+						cwd: process.cwd(),
+						...(path === "review"
+							? { task: "Fix input.txt", review: { reviewer: "verifier", maxCycles: 1 } }
+							: { mode: "pipeline", tasks: ["Fix input.txt", "Check input.txt"] }),
+					}),
+			);
+			ok(result.kind === "error");
+			ok(
+				result.message.includes(path === "review" ? "review gate needs an operator decision" : "pipeline dispatch halted"),
+				result.message.slice(0, 800),
+			);
+			strictEqual(spawns, 1, "the retry is suppressed and nothing runs after the failure");
+			const runId = (result.details as { runs?: Array<{ runId?: string }> } | undefined)?.runs?.[0]?.runId;
+			ok(typeof runId === "string", JSON.stringify(result.details).slice(0, 400));
+			ok(
+				result.message.includes(
+					`not_retried ${runId}: automatic retry suppressed because incomplete tool telemetry cannot prove`,
+				),
+				result.message.slice(0, 1500),
+			);
+		} finally {
+			await f.bundle.extension.stop?.();
+		}
+	});
+}
+
+it("a failure the host never retries still says why it was not retried (D3-c)", { timeout: 15_000 }, async () => {
+	let spawns = 0;
+	const f = await fixture(true, () => {
+		spawns++;
+		return {
+			pid: null,
+			promise: Promise.resolve({ exitCode: 1, signal: null, stderrTail: "[worker] fatal: workerspec rejected" }),
+			heartbeatAt: { current: Date.now(), monotonic: performance.now() },
+			abort() {},
+			events: (async function* () {})(),
+		};
+	});
+	try {
+		const result = await f.tool.run({ agent: "scout", task: "Inspect input.txt", cwd: process.cwd() });
+		ok(result.kind === "error");
+		strictEqual(spawns, 1, "a deterministic failure is not retried");
+		const runId = (result.details as { runs?: Array<{ runId?: string }> } | undefined)?.runs?.[0]?.runId;
+		ok(typeof runId === "string");
+		ok(
+			result.message.includes(`not_retried ${runId}: the host does not retry this failed run automatically`),
+			result.message.slice(0, 1500),
+		);
+	} finally {
+		await f.bundle.extension.stop?.();
+	}
+});
+
 function controlledWorker() {
 	let finish!: (result: SpawnedWorkerResult) => void;
 	let aborts = 0;

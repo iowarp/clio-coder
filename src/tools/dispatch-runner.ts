@@ -607,17 +607,28 @@ function earlierFailedAttempts(deps: DispatchToolDeps, start: RunEnvelope["linea
 
 /**
  * A failed run's assignment states why no further attempt ran; the sealed receipt cannot, since that decision follows
- * it. Settlement lands with the durable writes, so they are flushed first (D3-c).
+ * it. Settlement lands with the durable writes, so they are flushed first (D3-c). A settlement with no detail is a
+ * policy decision, so the line names the policy: retries off, the budget spent, or an outcome not retried.
  */
-async function withNotRetried(deps: DispatchToolDeps, runs: CompletedRun[]): Promise<CompletedRun[]> {
-	if (!runs.some((run) => run.receipt.exitCode !== 0)) return runs;
+async function withNotRetried(deps: DispatchToolDeps, runs: readonly CompletedRun[]): Promise<CompletedRun[]> {
+	if (!runs.some((run) => run.receipt.exitCode !== 0)) return [...runs];
 	await deps.dispatch.assignments?.flushWrites?.();
 	return runs.map((run) => {
 		if (run.receipt.exitCode === 0) return run;
-		const assignment = deps.dispatch.assignments?.get(run.receipt.runId);
-		const detail = assignment?.status === "failed" ? assignment.outcomeDetail : null;
-		if (!detail) return run;
-		return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
+		const rootRunId = deps.dispatch.getRun(run.receipt.runId)?.lineage?.rootRunId ?? run.receipt.runId;
+		const assignment = deps.dispatch.assignments?.get(rootRunId);
+		if (assignment?.status !== "failed") return run;
+		const detail = assignment.outcomeDetail;
+		if (detail) return { ...run, notRetried: detail.length > 240 ? `${detail.slice(0, 239)}…` : detail };
+		const { maxRetries } = assignment.policy;
+		const used = Math.max(0, assignment.attempts.length - 1);
+		const policy =
+			maxRetries === 0
+				? "retries are off (maxRetries 0)"
+				: used >= maxRetries
+					? `the retry budget is spent (${used} of maxRetries ${maxRetries})`
+					: `the host does not retry this ${run.receipt.outcome} run automatically${run.receipt.outcomeCode ? ` (${run.receipt.outcomeCode})` : ""}`;
+		return { ...run, notRetried: policy };
 	});
 }
 
@@ -2211,12 +2222,13 @@ async function runApplyWinner(
 	};
 }
 
-function reviewGateResult(
+async function reviewGateResult(
 	deps: DispatchToolDeps,
-	outcome: GateRunOutcome,
+	gated: GateRunOutcome,
 	maxOutputBytes: number,
 	form: DispatchResultForm,
-): ToolResult {
+): Promise<ToolResult> {
+	const outcome = { ...gated, runs: await withNotRetried(deps, gated.runs) };
 	const body = formatDispatchOutput("review", outcome.runs, maxOutputBytes, null, form);
 	const details: ToolResultDetails = {
 		...dispatchDetails(deps, "review", outcome.runs),
@@ -3029,7 +3041,7 @@ export async function runDispatchTool(
 			}
 			try {
 				const outcome = await runReviewGated(deps, requests[0], review, timeoutMs, options?.signal, gateTelemetry);
-				return reviewGateResult(deps, outcome, maxOutputBytes, resultForm);
+				return await reviewGateResult(deps, outcome, maxOutputBytes, resultForm);
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}
@@ -3070,11 +3082,12 @@ export async function runDispatchTool(
 			}
 			if (err instanceof PipelineHaltError) {
 				const haltMessage = `dispatch: ${err.message}`;
-				const output = formatDispatchOutput("pipeline", err.runs, maxOutputBytes, null, resultForm);
+				const haltRuns = await withNotRetried(deps, err.runs);
+				const output = formatDispatchOutput("pipeline", haltRuns, maxOutputBytes, null, resultForm);
 				return {
 					kind: "error",
 					message: `${haltMessage}\n\n${output}`,
-					details: dispatchDetails(deps, "pipeline", err.runs),
+					details: dispatchDetails(deps, "pipeline", haltRuns),
 				};
 			}
 			return { kind: "error", message: dispatchErrorMessage(err) };
