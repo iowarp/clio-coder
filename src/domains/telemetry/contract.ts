@@ -81,6 +81,8 @@ export interface TelemetryRunSummary {
 	progress?: WorkerProgressSnapshot;
 	/** Existing validator identity/conformance, admitted with the verified run-result answer. */
 	resultContract?: { kind: string; conformance: string };
+	/** Where the settled run's proposed commit lands, from its run result: a worktree branch, or none when nothing commits it. */
+	commitPlacement?: { branch?: string };
 	runRecordId?: string;
 	retry?: { attempt: number; dueAtMs: number; reason: string };
 	steerAcknowledgement?: { receivedAtMs: number; chars: number };
@@ -117,6 +119,8 @@ export interface TelemetryRunReaders {
 		toolCalls?: number;
 		refusedCalls?: number;
 		guardedCalls?: number;
+		placement?: { mode: string; branch?: string };
+		taskWorktree?: { branch: string };
 	} | null;
 }
 

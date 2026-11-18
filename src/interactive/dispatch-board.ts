@@ -46,6 +46,7 @@ import { confirmOnceRail } from "./overlays/confirm-once.js";
 import type { QuotaProviders } from "./quota-view.js";
 import { routeWeeklyQuota } from "./quota-view.js";
 import {
+	type CommitPlacement,
 	councilAnswerGist,
 	councilCollectedWords,
 	councilSynthesisLines,
@@ -182,6 +183,8 @@ export interface DispatchBoardRow {
 	 */
 	progress?: WorkerProgressSnapshot;
 	resultContract?: TelemetryRunSummary["resultContract"];
+	/** Where a settled run's proposed commit lands; absent when the board has not read the run's result. */
+	commitPlacement?: CommitPlacement;
 	/**
 	 * Id of the run record sealed for this run (the id `clio-coder fleet view`
 	 * takes). Set only once a terminal dispatch event has
@@ -614,7 +617,7 @@ function progressAnswerLines(
 	progress: WorkerProgressSnapshot,
 	runId: string,
 	contentWidth: number,
-	run: Pick<DispatchBoardRow, "resultContract" | "trust">,
+	run: Pick<DispatchBoardRow, "resultContract" | "trust" | "commitPlacement">,
 	maxRows = WORKER_PROGRESS_CARD_ROWS,
 ): string[] {
 	if (progress.tailText.length === 0) return [];
@@ -627,6 +630,7 @@ function progressAnswerLines(
 				run.resultContract,
 				run.trust?.axes.artifactIntegrity === "verified",
 				complete,
+				run.commitPlacement,
 			)
 		: null;
 	const source = presented
@@ -2688,6 +2692,7 @@ function toRow(
 	return {
 		...(progress !== undefined ? { progress } : {}),
 		...(entry.resultContract !== undefined ? { resultContract: entry.resultContract } : {}),
+		...(entry.commitPlacement !== undefined ? { commitPlacement: { ...entry.commitPlacement } } : {}),
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),
