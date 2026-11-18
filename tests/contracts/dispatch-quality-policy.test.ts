@@ -1,6 +1,6 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 import { stringify } from "yaml";
@@ -64,7 +64,7 @@ function auditedContext(settings: typeof DEFAULT_SETTINGS, audits: CompletionEva
 }
 
 /** Use the production worker admission and AgentToolResult projection, retaining details. */
-async function nativeEvents(root: string, requiredCheck: boolean): Promise<unknown[]> {
+async function nativeEvents(root: string, requiredCheck: boolean, editAfterCheck = false): Promise<unknown[]> {
 	const previousCwd = process.cwd();
 	try {
 		process.chdir(root);
@@ -82,6 +82,9 @@ async function nativeEvents(root: string, requiredCheck: boolean): Promise<unkno
 			requiredCheck
 				? { name: ToolNames.Verify, args: { check: "test:solver" } }
 				: { name: ToolNames.Bash, args: { command: "npm run lint" } },
+			...(editAfterCheck
+				? [{ name: ToolNames.Write, args: { path: "src/solver.ts", content: "export const solver = 3;\n" } }]
+				: []),
 		];
 		const events: unknown[] = [];
 		for (const [index, call] of calls.entries()) {
@@ -115,11 +118,16 @@ async function nativeEvents(root: string, requiredCheck: boolean): Promise<unkno
 	}
 }
 
-for (const mode of ["missing", "passed", "normal"] as const) {
+// "stale": no quality policy, and the worker edits after its passing lint, which retires that pass (x8-1).
+for (const mode of ["missing", "passed", "normal", "stale"] as const) {
 	it(`native dispatch assesses the worker workspace and audits ${mode} project requirements`, async () =>
 		project(async (root) => {
 			if (mode === "normal") process.env.CLIO_CODER_RIGOR = "normal";
-			const events = await nativeEvents(root, mode === "passed");
+			if (mode === "stale") {
+				rmSync(join(root, ".clio-coder/quality.yaml"));
+				process.env.CLIO_CODER_RIGOR = "high";
+			}
+			const events = await nativeEvents(root, mode === "passed", mode === "stale");
 			ok(process.cwd() !== root, "the parent must not accidentally supply the worker's cwd");
 			const settings = structuredClone(DEFAULT_SETTINGS);
 			settings.fleet.retry.maxRetries = 0;
@@ -158,13 +166,14 @@ for (const mode of ["missing", "passed", "normal"] as const) {
 					...(mode !== "passed" ? { denyTools: [ToolNames.Verify] } : {}),
 				});
 				const receipt = await run.finalPromise;
-				strictEqual(receipt.outcome, mode === "missing" ? "failed" : "succeeded", receipt.failureMessage ?? "");
-				if (mode === "missing") match(receipt.outcomeDetail ?? "", /high-rigor finish gate/u);
+				const gated = mode === "missing" || mode === "stale";
+				strictEqual(receipt.outcome, gated ? "failed" : "succeeded", receipt.failureMessage ?? "");
+				if (gated) match(receipt.outcomeDetail ?? "", /high-rigor finish gate/u);
 				const audit = audits.find((row) => row.runId === run.runId);
 				ok(audit);
 				strictEqual(audit.rigor, mode === "normal" ? "normal" : "high");
 				strictEqual(audit.decision, mode === "passed" ? "ok" : "engage");
-				strictEqual(audit.quality?.[0]?.state, mode === "passed" ? "passed" : "missing");
+				strictEqual(audit.quality?.[0]?.state, mode === "stale" ? undefined : mode === "passed" ? "passed" : "missing");
 				strictEqual(launches, 1);
 				deepStrictEqual(controls, [], "the completion gate must not issue tool execution or recovery authority");
 				const stored = bundle.contract.getRun(run.runId);

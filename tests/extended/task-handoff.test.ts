@@ -74,18 +74,19 @@ async function fixture(sessionId: string) {
 		append({ kind: "message", role: "tool_result", payload: { toolName: tool.name, toolCallId, result } });
 		return result;
 	}
+	// The report is written before the checks: a write after them retires their passes (x8-1).
 	async function work() {
+		strictEqual(
+			(await execute(writeTool, { path: "battletest-output/validation.txt", content: "Controlled checks passed.\n" }))
+				.kind,
+			"ok",
+		);
 		for (const check of ["grid-numeric", "grid-perf"]) {
 			const result = await execute(verifyTool, { check });
 			strictEqual(result.kind, "ok");
 			strictEqual(result.details?.exitCode, 0);
 			strictEqual(result.details?.cwd, scratch.dir);
 		}
-		strictEqual(
-			(await execute(writeTool, { path: "battletest-output/validation.txt", content: "Controlled checks passed.\n" }))
-				.kind,
-			"ok",
-		);
 	}
 	return {
 		scratch,

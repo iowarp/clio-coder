@@ -234,16 +234,17 @@ for (const outcome of ["passed", "failed", "absent"] as const) {
 			}
 			strictEqual((await execute(tasks, { action: "pick", id: "u1" })).kind, "ok");
 			strictEqual((await execute(tasks, { action: "start", id: "t1" })).kind, "ok");
+			// The report is written before the checks: a write after them retires their passes (x8-1).
+			strictEqual(
+				(await execute(writeTool, { path: "battletest-output/validation.txt", content: "Both checks passed." })).kind,
+				"ok",
+			);
 			strictEqual((await execute(verifyTool, { check: "grid-numeric" })).kind, "ok");
 			if (outcome !== "absent") {
 				const verified = await execute(verifyTool, { check: "grid-perf" });
 				strictEqual(verified.kind, outcome === "passed" ? "ok" : "error");
 				strictEqual(verified.details?.exitCode, outcome === "passed" ? 0 : 1);
 			}
-			strictEqual(
-				(await execute(writeTool, { path: "battletest-output/validation.txt", content: "Both checks passed." })).kind,
-				"ok",
-			);
 			const done = await execute(tasks, { action: "done", id: "t1", note: "Both checks passed." });
 			ok(done.kind === "ok");
 			strictEqual(userTasks.get("u1")?.status, "done");
