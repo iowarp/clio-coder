@@ -2,6 +2,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { isHostAuthored, rememberMessageCalls } from "../core/message-accounting.js";
 import { applyModelAdmission, type ModelAdmissionEvent } from "../core/model-admission.js";
 import { mainAgent } from "../core/telemetry/context.js";
+import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
 import { factKnownValue } from "../core/telemetry/known.js";
 import { pricesCalls, unreportedUsageNotice } from "../core/telemetry/pricing.js";
@@ -889,6 +890,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
 			if (!currentRun()) return;
 		};
+		// Who stopped an aborted reply when the route did not: its message and its call settlement name the same cause.
+		const harnessAbortCause = (): FailureCause | undefined =>
+			state.routeMove !== null
+				? "route_moved"
+				: state.activeInterruptByOperator
+					? "operator_cancel"
+					: state.repetitionAbortReason !== null
+						? "repetition"
+						: disposed
+							? "shutdown"
+							: undefined;
 		const settleModelCall = async (
 			message: AgentMessage,
 			unreported: InterruptedUsageEstimate | null = null,
@@ -913,17 +925,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					callSettlementFromMessage(
 						message,
 						localRuntime.runtimeResolution,
-						message.role === "assistant" && message.stopReason === "aborted"
-							? state.routeMove !== null
-								? "route_moved"
-								: state.activeInterruptByOperator
-									? "operator_cancel"
-									: state.repetitionAbortReason !== null
-										? "repetition"
-										: disposed
-											? "shutdown"
-											: undefined
-							: undefined,
+						message.role === "assistant" && message.stopReason === "aborted" ? harnessAbortCause() : undefined,
 						interrupted,
 					),
 					message,
@@ -1821,11 +1823,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						aborted: terminal.stopReason === "aborted" && state.streamStallReason === null,
 						transportFailed: tracked?.stage === "transport",
 					});
+					// A harness stop is no transport failure: the record keeps its shape and names the harness's cause (bt-26 N2a).
+					const harnessCause =
+						terminal.stopReason === "aborted" && state.streamStallReason === null ? harnessAbortCause() : undefined;
 					Object.assign(message, {
 						failure:
 							!failure.invoked && preInvocationStage === "budget admission"
 								? { ...failure, stage: "budget", errorClass: "budget_wait" }
-								: failure,
+								: harnessCause !== undefined
+									? { ...failure, stage: "harness", errorClass: harnessCause }
+									: failure,
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
 					// The harness, not the route, stopped this reply: it carries the harness's reason and names no route.

@@ -3715,7 +3715,10 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const findings: string[] = [];
 	if (state === "no-turns") findings.push("No turn has settled in this session's journal.");
 	else if (terminal) {
-		const stage = terminal.terminal.stage ? ` at ${terminal.terminal.stage}` : "";
+		const reached = terminal.terminal.stage;
+		// A call that produced output was cut off mid-stream, not at a gate; older journals wrote that as firstToken.
+		const stage =
+			reached === "streaming" || reached === "firstToken" ? " while streaming" : reached ? ` at ${reached}` : "";
 		const retries =
 			terminal.terminal.retries > 0
 				? ` after ${renderCount(terminal.terminal.retries)} ${terminal.terminal.retries === 1 ? "retry" : "retries"}`
