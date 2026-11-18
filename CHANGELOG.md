@@ -12,6 +12,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- Extension tools (api 2) can return `pipelineDone: true` to end a yolo step-template pipeline.
 - D3-3: a run's sealed result keeps each judged host check's bounded report (rule, tolerance, reference and payload digests, worst deviation per key) and the tree it judged.
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
 - A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
@@ -80,6 +81,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-6: under yolo, a step-mode template whose model runs one step and then summarizes now continues to the next step. It stops at a turn without a step call, a `pipelineDone` result, or the continuation cap (at most 4 step turns per operator prompt, the refusal path included).
+- bt-12: the high-rigor finish gate no longer re-prompts a step-template turn for validation; the summary reports the change as unverified instead.
 - bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
 - D2-2: command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` the output became, so a slow tool or an unexplained annotation traces back to its hook.
 - D2-3: a command hook's first-run stall is journaled (a subprocess gets no budget warmup grace), and a hook that throws is receipted as `failed`, not `skipped`, with its message reported as `hook_failed`.
