@@ -21,6 +21,8 @@ export interface BriefingPart {
 	readonly lead: string;
 	/** Abbreviated head and tail when the cap is short. */
 	readonly body?: string;
+	/** This body's own notice, such as one naming where the recipient can read the omitted bytes. */
+	readonly notice?: BriefingNotice;
 }
 
 /** One part the cap shortened, by its position in the briefing. */
@@ -145,7 +147,7 @@ export function buildBriefing(
 		const text =
 			limit < lead || part.body === undefined
 				? clipHead(full, limit)
-				: `${part.lead}${abbreviateHeadTail(part.body, limit - lead, notice)}`;
+				: `${part.lead}${abbreviateHeadTail(part.body, limit - lead, part.notice ?? notice)}`;
 		clips.push({ kind: part.kind, index, bytesBefore: sizes[index] ?? 0, bytesAfter: utf8Bytes(text) });
 		return text;
 	});

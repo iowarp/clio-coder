@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { parseJsonObjectPayload } from "../core/json-payload.js";
 import { workerMcpNoNetworkNotice } from "../core/sandbox/worker-policy.js";
 import { evaluateSkillToolSurface } from "../core/skill-activation.js";
@@ -12,7 +13,7 @@ import { ToolNames } from "../core/tool-names.js";
 import { turnAllowsTool } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { CouncilReport, CouncilReportMember } from "../domains/agents/result-contract.js";
-import type { BriefingPart, BuiltBriefing } from "../domains/context/index.js";
+import type { BriefingNotice, BriefingPart, BuiltBriefing } from "../domains/context/index.js";
 import { buildBriefing } from "../domains/context/index.js";
 import { projectLedgerAssignments, projectReceiptFindings } from "../domains/dispatch/agent-ledger.js";
 import {
@@ -2240,12 +2241,40 @@ function competeResult(
 }
 
 const COUNCIL_BRIEFING_MAX_BYTES = 8 * 1024;
-/**
- * A council seat or judge holds read-only tools and no `monitor`, so nothing it can call reaches a peer's run output:
- * the notice says what was omitted and points nowhere.
- */
+/** The notice for an excerpt whose whole answer the recipient cannot reach: it says what was omitted. */
 const councilBriefingNotice = (omitted: number, total: number): string =>
 	`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt]\n`;
+const COUNCIL_FAILURE_CAUSE_MAX_CHARS = 300;
+
+/**
+ * A seat's excerpt notice. The council profile's `read` reaches run scopes (readScopeExemptRoots), so when the peer's
+ * result object exists the notice names it; otherwise it states only what was omitted.
+ */
+function councilExcerptNotice(receipt: RunResult): BriefingNotice {
+	let path: string | null = null;
+	try {
+		const candidate = runResultPath(receipt);
+		if (existsSync(candidate)) path = candidate;
+	} catch {
+		// A receipt the settlement cannot read has no result object to name.
+	}
+	return path === null
+		? councilBriefingNotice
+		: (omitted, total) =>
+				`\n[clio: ${omitted} of ${total} bytes omitted from this excerpt; read output.text in ${path} for the whole answer]\n`;
+}
+
+/** Why a seat failed, on one bounded line: the receipt's detail (the provider's cause) after its outcome. */
+function councilFailureCause(receipt: RunResult): string {
+	const outcome = pipelineFailureReason(receipt);
+	const detail = Array.from((receipt.outcomeDetail ?? "").replace(/\s+/gu, " ").trim());
+	if (detail.length === 0) return outcome;
+	const line =
+		detail.length > COUNCIL_FAILURE_CAUSE_MAX_CHARS
+			? `${detail.slice(0, COUNCIL_FAILURE_CAUSE_MAX_CHARS - 1).join("")}…`
+			: detail.join("");
+	return `${outcome}: ${line}`;
+}
 
 /**
  * The verdict a council answer casts, lower-cased.
@@ -2284,7 +2313,7 @@ async function runCouncil(
 	council: DispatchCouncilSettings,
 	timeoutMs: number | undefined,
 	signal: AbortSignal | undefined,
-	gateTelemetry: TelemetryContext | undefined,
+	clipTelemetry: TelemetryContext | undefined,
 ): Promise<{ report: CouncilReport; runs: CompletedRun[]; group: string }> {
 	const group = newGateGroupId("council");
 	const runs: CompletedRun[] = [];
@@ -2305,7 +2334,7 @@ async function runCouncil(
 					bytes: briefing.bytes,
 					parts: briefing.clips.map((clip) => ({ ...clip })),
 				},
-				gateTelemetry,
+				clipTelemetry,
 			);
 		}
 		let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2346,24 +2375,33 @@ async function runCouncil(
 				// A seated coder or architect argues from its perspective; it must not try to edit and fail.
 				// The original briefing counts against the seat's cap; each peer keeps its label or failure status.
 				const peerParts: BriefingPart[] = [{ kind: "framing", lead: COUNCIL_MEMBER_FRAMING }];
+				// Round 1 has no peers to tell the original briefing from, so its text stays what it always was.
 				if (base.briefing !== undefined)
-					peerParts.push({ kind: "task", lead: "[original briefing] ", body: base.briefing });
+					peerParts.push({ kind: "task", lead: round > 1 ? "[original briefing] " : "", body: base.briefing });
 				if (round > 1) {
 					for (const peer of council.members) {
 						if (peer.label === member.label) continue;
 						const previous = prior.get(peer.label);
-						if (previous === undefined || isPipelineStepFailure(previous.receipt)) {
+						if (previous === undefined) {
 							peerParts.push({ kind: "evidence", lead: `[${peer.label}] failed in prior round; no answer contributed.` });
+						} else if (isPipelineStepFailure(previous.receipt)) {
+							peerParts.push({
+								kind: "evidence",
+								lead: `[${peer.label}] failed in prior round; no answer contributed. Reason: `,
+								body: councilFailureCause(previous.receipt),
+							});
 						} else {
 							peerParts.push({
 								kind: "evidence",
 								lead: `[${peer.label}] `,
 								body: normalizedAssistantText(previous.summary),
+								notice: councilExcerptNotice(previous.receipt),
 							});
 						}
 					}
 				}
-				const peerBriefing = round > 1 ? boundedCouncilBriefing(peerParts) : undefined;
+				// Round 1 is bounded by the same builder and cap as later rounds; it simply has no peers yet.
+				const peerBriefing = boundedCouncilBriefing(peerParts);
 				const position = (round - 1) * council.members.length + index + 1;
 				const pinned = council.resolvedTasks?.find((task) => task.role === "member" && task.position === position);
 				let voteTask = base.task;
@@ -2416,9 +2454,7 @@ async function runCouncil(
 							: {}),
 					},
 					council: { group, label: member.label, ...(member.color ? { color: member.color } : {}), round },
-					briefing:
-						peerBriefing?.text ??
-						[COUNCIL_MEMBER_FRAMING, ...(base.briefing !== undefined ? [base.briefing] : [])].join("\n\n"),
+					briefing: peerBriefing.text,
 				};
 				return [
 					member.label,
@@ -2463,16 +2499,21 @@ async function runCouncil(
 		const finalRuns = [...prior.values()];
 		// The task travels in the judge's own task field, so only the seats' answers count against the cap.
 		const judgeBriefing = boundedCouncilBriefing(
-			finalReports.map(
-				(member): BriefingPart =>
-					member.failed === undefined
-						? { kind: "evidence", lead: `[${member.label}] `, body: member.answer }
-						: {
-								kind: "evidence",
-								lead: `[${member.label}] failed; no final answer contributed. Reason: `,
-								body: member.failed.reason,
-							},
-			),
+			finalReports.map((member): BriefingPart => {
+				const receipt = runs.find((run) => run.receipt.runId === member.runId)?.receipt;
+				return member.failed === undefined
+					? {
+							kind: "evidence",
+							lead: `[${member.label}] `,
+							body: member.answer,
+							...(receipt === undefined ? {} : { notice: councilExcerptNotice(receipt) }),
+						}
+					: {
+							kind: "evidence",
+							lead: `[${member.label}] failed; no final answer contributed. Reason: `,
+							body: receipt === undefined ? member.failed.reason : councilFailureCause(receipt),
+						};
+			}),
 		);
 		const judgeRequest: DispatchRequest = {
 			agentId: councilJudgeAgentId(council.judge?.agent, base.agentId),
@@ -3000,7 +3041,13 @@ export async function runDispatchTool(
 				return { kind: "error", message: "dispatch: trusted council settings are unavailable" };
 			}
 			try {
-				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal, gateTelemetry));
+				// A clip belongs to the journal of the call that convened the council: the session's (or a worker's own
+				// run), open now. The gate's host run journal opens only at its seal, so a clip there was dropped unowned.
+				const clipTelemetry = withToolTelemetryContext(
+					{ ...options, ...(sessionId == null ? {} : { sessionId }) },
+					telemetryContext,
+				);
+				return councilResult(deps, await runCouncil(deps, requests[0], council, timeoutMs, options?.signal, clipTelemetry));
 			} catch (err) {
 				return { kind: "error", message: dispatchErrorMessage(err) };
 			}

@@ -104,6 +104,19 @@ describe("fleet briefing builder (ContextFold CF-10)", () => {
 		);
 	});
 
+	it("bounds a round-1 briefing of framing and task alone, under the part's own notice", () => {
+		const body = `HEAD${"t".repeat(20_000)}TAIL`;
+		const own = (omitted: number, total: number): string => `\n[own: ${omitted} of ${total}]\n`;
+		const parts: BriefingPart[] = [framing, { kind: "task", lead: "", body, notice: own }];
+		const built = buildBriefing(parts, 4_096, notice);
+		ok(built.bytes <= 4_096 && built.bytes >= 4_096 - 8, `${built.bytes} fills the cap`);
+		const piece = built.text.slice(`${framing.lead}${BRIEFING_SEPARATOR}`.length);
+		ok(piece.startsWith("HEAD") && piece.endsWith("TAIL"), "the task keeps head and tail");
+		const match = /\n\[own: (\d+) of (\d+)\]\n/u.exec(piece);
+		ok(match && !piece.includes("[clio:"), "the part's notice replaces the default");
+		strictEqual(bytes(piece) - bytes(match[0]) + Number(match[1]), bytes(body));
+	});
+
 	it("abbreviates head and tail with a notice that accounts for every byte", () => {
 		const body = `HEAD${"m".repeat(6_000)}TAIL`;
 		const parts = [framing, seat("a", body), seat("b", body)];
