@@ -10,6 +10,7 @@ import { createSessionCodeConsent } from "../../src/domains/safety/session-code-
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import { createRegistry, type PermissionRequiredMeta } from "../../src/tools/registry.js";
+import { resolveVerifyCall } from "../../src/tools/verify/resolve.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
@@ -275,6 +276,48 @@ it("asks once for a multi-task dispatch that needs the session's test-runner con
 		match(asks[0]?.detail ?? "", /Approving also gives this session's test-runner consent/);
 		strictEqual(dispatched, 1, "the approved plan reached dispatch");
 		strictEqual(consent.pending(), false, "the one approval gives the session's consent");
+	} finally {
+		process.chdir(previousCwd);
+	}
+});
+
+it("admits a toolchain check verify lists in a Python project and seals the argv verify runs", async () => {
+	const stateDir = process.env.CLIO_CODER_STATE_DIR;
+	ok(stateDir);
+	const root = join(dirname(stateDir), "python-project");
+	mkdirSync(join(root, "tests"), { recursive: true });
+	writeFileSync(join(root, "tests", "test_greet.py"), "import unittest\n");
+	const previousCwd = process.cwd();
+	process.chdir(root);
+	try {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "yolo" });
+		const requests: Array<Record<string, unknown>> = [];
+		const contract = {
+			dispatch: async (request: Record<string, unknown>) => {
+				requests.push(request);
+				throw new Error("dispatched");
+			},
+		} as unknown as DispatchContract;
+		registry.register(
+			createDispatchTool({
+				dispatch: contract,
+				getAgentSpecs: () => [{ id: "coder", capabilityClass: "workspace-edit" }] as never,
+			}),
+		);
+		const verdict = await registry.invoke({
+			tool: "dispatch",
+			args: {
+				agent: "coder",
+				task: "Edit greet.py.",
+				intent: { version: 2, write_roots: ["greet.py"], verification: [{ check: "python-unittest" }] },
+			},
+		});
+		strictEqual(verdict.kind, "ok", JSON.stringify(verdict));
+		const resolution = resolveVerifyCall(root, { check: "python-unittest" });
+		ok(resolution.kind === "toolchain", JSON.stringify(resolution));
+		deepStrictEqual(requests[0]?.resolvedVerification, [
+			{ check: "python-unittest", argv: resolution.argv, cwd: root, timeoutMs: resolution.check.timeoutMs },
+		]);
 	} finally {
 		process.chdir(previousCwd);
 	}
