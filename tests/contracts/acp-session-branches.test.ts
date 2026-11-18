@@ -324,6 +324,11 @@ test("standard ACP session/fork forks the whole active branch without replaying 
 		ok(result.modes !== undefined && Array.isArray(result.configOptions));
 		strictEqual(agent.contract.current()?.id, childId);
 		strictEqual(agent.contract.tree(childId).meta.parentTurnId, "a3", "the fork point is the active leaf");
+		strictEqual(
+			agent.contract.history().find((meta) => meta.id === parentId)?.lastCheckpointReason,
+			"fork",
+			"the parent is checkpointed before its ledger closes",
+		);
 		deepStrictEqual(agent.resets, [{ leaf: "a3", messages: 4 }]);
 		strictEqual(
 			agent.updates.filter((frame) => frame._meta?.["clio-coder/replay"] !== undefined).length,

@@ -5736,6 +5736,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				replay = replayToClient ? prepareAcpReplay(restored.entries, restored.leafTurnId, id, stored.target) : undefined;
 			} catch {
 				await options.mcpCapabilities?.detachClientServers();
+				// The session never loaded: nothing was bound or appended, so there is no boundary to checkpoint.
 				if (options.session.current()?.id === id) {
 					try {
 						await options.session.close();
@@ -5946,6 +5947,26 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			throw new AcpRequestError(-32602, `cannot ${action} during an active prompt`, { code: "prompt_active" });
 		}
 	};
+	/**
+	 * A path that stops hosting a live, loaded session checkpoints it first, so meta.json records why its ledger
+	 * closed, as shutdown records its own. A failed checkpoint is reported and the close goes on.
+	 */
+	const checkpointBeforeClose = async (sessionId: string, reason: "close" | "fork" | "handoff"): Promise<void> => {
+		const durable = options.session;
+		if (durable?.current()?.id !== sessionId) return;
+		await durable.checkpoint(reason).catch((err: unknown) => {
+			process.stderr.write(
+				`[clio-coder:acp] ${reason} checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
+			);
+		});
+	};
+	/** The checkpoint yields, so a request that arrived meanwhile may have closed or started work on the session. */
+	const requireStillIdle = (session: AcpServerSession, action: string): void => {
+		if (sessions.get(session.id) !== session || closingSessions.has(session.id)) {
+			throw new AcpRequestError(-32002, "unknown ACP session", { code: "session_unknown" });
+		}
+		requireIdle(session, action);
+	};
 	const selectableTurn = (contract: SessionContract, sessionId: string, value: unknown): string => {
 		const turnId = requireBoundedClientString(value, "turnId", ACP_MAX_SESSION_ID_BYTES);
 		let kind: string | undefined;
@@ -6148,7 +6169,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	 * Forks the bound session at `turnId` and hosts the child in its place. The extension method replays the child's
 	 * branch to the client; standard session/fork does not, since the client already holds that conversation.
 	 */
-	const forkBoundSession = (
+	const forkBoundSession = async (
 		request: Record<string, unknown>,
 		chooseTurn: "request" | "leaf",
 		replayToClient: boolean,
@@ -6161,6 +6182,9 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (requested === null)
 			throw new AcpRequestError(-32602, "the session has no turn to fork from", { code: "turn_unknown" });
 		const turnId = selectableTurn(session, bound.id, requested);
+		// The fork closes the parent's ledger.
+		await checkpointBeforeClose(bound.id, "fork");
+		requireStillIdle(bound, "fork");
 		let meta: SessionMeta;
 		try {
 			meta = session.fork(turnId);
@@ -6322,7 +6346,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	// /handoff, second half: seed the successor with the reviewed document and
 	// move the process binding to it, the same way a fork does.
-	options.transport.onRequest(ACP_HANDOFF_COMMIT_METHOD, (params): AcpHandoffCommitResult => {
+	options.transport.onRequest(ACP_HANDOFF_COMMIT_METHOD, async (params): Promise<AcpHandoffCommitResult> => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "handoffId", "document"]));
@@ -6334,6 +6358,18 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		const document = handoffDocument(request.document);
 		const pending = pendingHandoff;
 		if (pending === null || pending.handoffId !== handoffId || pending.sessionId !== bound.id) {
+			return handoffRefusal(
+				"warn",
+				"stale",
+				"this document no longer describes the conversation; draw it up again. Nothing was written",
+			);
+		}
+		// The successor replaces the bound session, whose ledger closes. An empty review changes nothing.
+		if (document.trim().length > 0) {
+			await checkpointBeforeClose(bound.id, "handoff");
+			requireStillIdle(bound, "hand off");
+		}
+		if (pendingHandoff !== pending) {
 			return handoffRefusal(
 				"warn",
 				"stale",
@@ -7766,12 +7802,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			if (activeShell?.sessionId === session.id) await activeShell.settled;
 			if (aside !== null) await settleAcpWork([aside.settled]);
 			if (options.session?.current()?.id === session.id) {
-				// A client's close is a durable boundary: meta.json records it, as shutdown records its own.
-				await options.session.checkpoint("close").catch((err: unknown) => {
-					process.stderr.write(
-						`[clio-coder:acp] close checkpoint failed: ${err instanceof Error ? err.message : String(err)}\n`,
-					);
-				});
+				await checkpointBeforeClose(session.id, "close");
 				await options.session.close();
 			}
 			await options.mcpCapabilities?.detachClientServers();
