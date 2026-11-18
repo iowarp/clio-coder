@@ -1,52 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
-import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import {
 	ACP_MAX_CHUNK_BYTES,
 	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
 	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
 } from "../../src/engine/acp/types.js";
-
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
-
-/** An in-memory peer: the test plays the client and calls the server's handlers directly. */
-function fakeTransport() {
-	const handlers = new Map<string, RequestHandler>();
-	const notifications: Array<{ method: string; params: unknown }> = [];
-	const closeHandlers: Array<() => void> = [];
-	let closed = false;
-	const transport: AcpJsonRpcPeerTransport = {
-		get closed() {
-			return closed;
-		},
-		request: async () => {
-			throw new Error("the server sends no client requests in this test");
-		},
-		notify: (method, params) => {
-			notifications.push({ method, params });
-		},
-		onNotification: () => () => {},
-		onRequest: (method, handler) => {
-			handlers.set(method, handler);
-			return () => handlers.delete(method);
-		},
-		onClose: (handler) => {
-			closeHandlers.push(handler);
-			return () => {};
-		},
-		close: () => {
-			closed = true;
-			for (const handler of closeHandlers) handler();
-		},
-	};
-	const call = async (method: string, params: unknown): Promise<unknown> => {
-		const handler = handlers.get(method);
-		if (!handler) throw new Error(`no handler registered for ${method}`);
-		return await handler(params);
-	};
-	return { transport, notifications, call };
-}
+import { fakeTransport } from "../harness/acp-fake-transport.js";
 
 interface TurnScript {
 	emit(event: unknown): void;
@@ -189,15 +149,15 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 	// A near-miss opt-in is the dangerous case: a client that sent one believes it
 	// asked for nothing, so honouring it would leak an unrequested stream to a
 	// strict client. Only the exact `{version: 1}` record turns the stream on.
-	for (const [label, capability] of [
-		["a version this build does not speak", { version: 2 }],
-		["a version that is a string", { version: "1" }],
-		["a record with no version at all", {}],
-		["a bare true", true],
-		["an array", [{ version: 1 }]],
-		["an explicit null", null],
-	] as Array<[string, unknown]>) {
-		it(`sends no in-progress frames when the opt-in is ${label}`, async () => {
+	it("sends no in-progress frames when the opt-in is a near miss", async () => {
+		for (const [label, capability] of [
+			["a version this build does not speak", { version: 2 }],
+			["a version that is a string", { version: "1" }],
+			["a record with no version at all", {}],
+			["a bare true", true],
+			["an array", [{ version: 1 }]],
+			["an explicit null", null],
+		] as Array<[string, unknown]>) {
 			const turn = await runTurn({
 				optIn: { capability },
 				script: ({ emit, advance }) => {
@@ -209,10 +169,11 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 					emit(TOOL_END);
 				},
 			});
-			strictEqual(turn.progress.length, 0);
-			strictEqual(turn.terminal.length, 1);
-		});
-	}
+			const name = `sends no in-progress frames when the opt-in is ${label}`;
+			strictEqual(turn.progress.length, 0, name);
+			strictEqual(turn.terminal.length, 1, name);
+		}
+	});
 
 	it("announces its bounds and forwards each distinct snapshot as a non-terminal tool_call_update", async () => {
 		const turn = await runTurn({

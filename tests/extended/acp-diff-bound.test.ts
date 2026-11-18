@@ -1,49 +1,9 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
-import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
 import { ACP_MAX_RAW_DIFF_BYTES, ACP_MAX_RAW_RECORD_BYTES, ACP_MAX_STRING_BYTES } from "../../src/engine/acp/types.js";
 import { generateDiffString } from "../../src/tools/edit-diff.js";
-
-type RequestHandler = (params: unknown) => Promise<unknown> | unknown;
-
-/** An in-memory peer: the test plays the client and calls the server's handlers directly. */
-function fakeTransport() {
-	const handlers = new Map<string, RequestHandler>();
-	const notifications: Array<{ method: string; params: unknown }> = [];
-	const closeHandlers: Array<() => void> = [];
-	let closed = false;
-	const transport: AcpJsonRpcPeerTransport = {
-		get closed() {
-			return closed;
-		},
-		request: async () => {
-			throw new Error("the server sends no client requests in this test");
-		},
-		notify: (method, params) => {
-			notifications.push({ method, params });
-		},
-		onNotification: () => () => {},
-		onRequest: (method, handler) => {
-			handlers.set(method, handler);
-			return () => handlers.delete(method);
-		},
-		onClose: (handler) => {
-			closeHandlers.push(handler);
-			return () => {};
-		},
-		close: () => {
-			closed = true;
-			for (const handler of closeHandlers) handler();
-		},
-	};
-	const call = async (method: string, params: unknown): Promise<unknown> => {
-		const handler = handlers.get(method);
-		if (!handler) throw new Error(`no handler registered for ${method}`);
-		return await handler(params);
-	};
-	return { transport, notifications, call };
-}
+import { fakeTransport } from "../harness/acp-fake-transport.js";
 
 function scriptedChat(script: (emit: (event: unknown) => void) => void): AcpServerChat {
 	let emit: (event: unknown) => void = () => {};
@@ -116,46 +76,58 @@ async function terminalRawOutput(result: Record<string, unknown>): Promise<Recor
 	return terminal.rawOutput as Record<string, unknown>;
 }
 
-function diffOf(rawOutput: Record<string, unknown>): string {
-	const result = rawOutput.result as { details: { diff: string } };
-	return result.details.diff;
+interface DiffRow {
+	name: string;
+	result: Record<string, unknown>;
+	/** Strings under rawOutput.result: the exact text, or the byte length and whether it ends in the marker. */
+	fields: Array<{ path: string[]; equals?: string; bytes?: number; truncated: boolean }>;
 }
 
 describe("contracts/acp keeps a whole multi-hunk diff on the wire", () => {
-	it("carries a realistic diff past the generic string cap and still holds the record bound", async () => {
+	it("bounds details.diff by its own cap and every other string by the generic one, inside the record bound", async () => {
 		const diff = multiHunkDiff();
 		ok(
 			Buffer.byteLength(diff, "utf8") > ACP_MAX_STRING_BYTES,
 			"the fixture diff must exceed the generic string cap or it proves nothing",
 		);
-		const rawOutput = await terminalRawOutput(editResult(diff));
-		strictEqual(diffOf(rawOutput), diff);
-		ok(!diffOf(rawOutput).includes("…[truncated]"));
-		ok(Buffer.byteLength(JSON.stringify(rawOutput), "utf8") <= ACP_MAX_RAW_RECORD_BYTES);
-	});
-
-	it("caps a diff that is wider than its own bound, leaving the record intact rather than eliding it", async () => {
-		// Wider than any diff the engine can produce: `MAX_DIFF_BYTES` caps it at
-		// 32 KiB upstream, so this stands in for a future tool that does not.
-		const diff = `${"- a line that was removed from the file\n".repeat(2000)}`;
-		const rawOutput = await terminalRawOutput(editResult(diff));
-		const wire = diffOf(rawOutput);
-		ok(wire.endsWith("…[truncated]"));
-		strictEqual(Buffer.byteLength(wire, "utf8"), ACP_MAX_RAW_DIFF_BYTES);
-		// The record survived: the whole thing was not replaced by the elision
-		// marker, which is what the reserve under the record cap buys.
-		strictEqual(rawOutput.truncated, undefined);
-		ok(Buffer.byteLength(JSON.stringify(rawOutput), "utf8") <= ACP_MAX_RAW_RECORD_BYTES);
-	});
-
-	it("widens only details.diff, so a sibling string and a same-named field elsewhere stay at the generic cap", async () => {
 		const long = "x".repeat(ACP_MAX_STRING_BYTES * 2);
-		const rawOutput = await terminalRawOutput({
-			...editResult(multiHunkDiff(), { notes: long }),
-			diff: long,
-		});
-		const result = rawOutput.result as { diff: string; details: { notes: string } };
-		strictEqual(Buffer.byteLength(result.details.notes, "utf8"), ACP_MAX_STRING_BYTES);
-		strictEqual(Buffer.byteLength(result.diff, "utf8"), ACP_MAX_STRING_BYTES);
+		const rows: DiffRow[] = [
+			{
+				name: "carries a realistic diff past the generic string cap and still holds the record bound",
+				result: editResult(diff),
+				fields: [{ path: ["details", "diff"], equals: diff, truncated: false }],
+			},
+			{
+				// Wider than any diff the engine can produce: `MAX_DIFF_BYTES` caps it at
+				// 32 KiB upstream, so this stands in for a future tool that does not.
+				name: "caps a diff that is wider than its own bound, leaving the record intact rather than eliding it",
+				result: editResult("- a line that was removed from the file\n".repeat(2000)),
+				fields: [{ path: ["details", "diff"], bytes: ACP_MAX_RAW_DIFF_BYTES, truncated: true }],
+			},
+			{
+				name: "widens only details.diff, so a sibling string and a same-named field elsewhere stay at the generic cap",
+				result: { ...editResult(diff, { notes: long }), diff: long },
+				fields: [
+					{ path: ["details", "notes"], bytes: ACP_MAX_STRING_BYTES, truncated: true },
+					{ path: ["diff"], bytes: ACP_MAX_STRING_BYTES, truncated: true },
+				],
+			},
+		];
+		for (const row of rows) {
+			const rawOutput = await terminalRawOutput(row.result);
+			for (const field of row.fields) {
+				const label = `${row.name}: ${field.path.join(".")}`;
+				let value: unknown = rawOutput.result;
+				for (const key of field.path) value = (value as Record<string, unknown>)[key];
+				ok(typeof value === "string", label);
+				if (field.equals !== undefined) strictEqual(value, field.equals, label);
+				if (field.bytes !== undefined) strictEqual(Buffer.byteLength(value, "utf8"), field.bytes, label);
+				strictEqual(value.endsWith("…[truncated]"), field.truncated, label);
+			}
+			// The record survived: the whole thing was not replaced by the elision
+			// marker, which is what the reserve under the record cap buys.
+			strictEqual(rawOutput.truncated, undefined, row.name);
+			ok(Buffer.byteLength(JSON.stringify(rawOutput), "utf8") <= ACP_MAX_RAW_RECORD_BYTES, row.name);
+		}
 	});
 });

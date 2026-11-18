@@ -23,30 +23,7 @@ import {
 	invokeAcpCommand,
 } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
-
-/**
- * The three required host members belong to commands this file never invokes
- * (`/run` and friends dispatch; `providers` is reached by no allowlisted
- * command at all). Reaching one of them through a stub is a test failure, not a
- * crash to interpret, so they throw.
- */
-function host(overrides: Partial<AcpCommandHost> = {}): AcpCommandHost {
-	const refuse = (member: string) =>
-		new Proxy(
-			{},
-			{
-				get() {
-					throw new Error(`test host: ${member} was reached`);
-				},
-			},
-		);
-	return {
-		dispatch: refuse("dispatch") as AcpCommandHost["dispatch"],
-		bus: refuse("bus") as AcpCommandHost["bus"],
-		providers: refuse("providers") as AcpCommandHost["providers"],
-		...overrides,
-	};
-}
+import { acpCommandHost as host } from "../harness/acp-fake-transport.js";
 
 function descriptor(name: string): AcpCommandDescriptor {
 	const found = acpCommandCatalog().commands.find((command) => command.name === name);
