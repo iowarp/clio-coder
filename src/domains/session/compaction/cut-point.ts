@@ -12,7 +12,7 @@
  * the replayed context shows a result with no originating call.
  */
 
-import type { SessionEntry } from "../entries.js";
+import { HOST_INSERT_CUSTOM_TYPE, type SessionEntry } from "../entries.js";
 import { estimateTokens } from "./tokens.js";
 
 export interface CutPointResult {
@@ -74,8 +74,10 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 	switch (entry.kind) {
 		case "message":
 			return entry.role !== "tool_result" && entry.role !== "tool_call";
-		case "bashExecution":
+		// A host insert renders beside its anchor, so a cut that starts at one would drop the anchor it needs.
 		case "custom":
+			return entry.customType !== HOST_INSERT_CUSTOM_TYPE;
+		case "bashExecution":
 		case "skillActivation":
 		case "branchSummary":
 		case "compactionSummary":

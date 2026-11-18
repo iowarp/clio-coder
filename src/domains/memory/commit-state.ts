@@ -91,18 +91,30 @@ export class MemoryCommitState {
 		return this.#issued;
 	}
 
+	/** Read-only: whether `acknowledgeRestoration` would accept this offer now. Clears nothing. */
+	canAcknowledgeRestoration(offer: MemoryRestorationOffer, scope: MemoryCommitScope, generation: number): boolean {
+		return (
+			!this.#disposed &&
+			offer === this.#issued &&
+			this.#matches(scope, generation) &&
+			this.isCurrent(offer.authority, offer.scope)
+		);
+	}
+
 	/** Host calls only after installing the exact offered bytes into its admitted context. */
 	acknowledgeRestoration(offer: MemoryRestorationOffer, scope: MemoryCommitScope, generation: number): boolean {
-		if (
-			this.#disposed ||
-			offer !== this.#issued ||
-			!this.#matches(scope, generation) ||
-			!this.isCurrent(offer.authority, offer.scope)
-		)
-			return false;
+		if (!this.canAcknowledgeRestoration(offer, scope, generation)) return false;
 		this.#pending = null;
 		this.#issued = null;
 		return true;
+	}
+
+	/**
+	 * The model already holds restoration text for this commit from an earlier install, so this offer is never
+	 * delivered: clear it as acknowledgement would, without the delivery that acknowledgement records.
+	 */
+	releaseRestoration(offer: MemoryRestorationOffer, scope: MemoryCommitScope, generation: number): boolean {
+		return this.acknowledgeRestoration(offer, scope, generation);
 	}
 
 	/** Caller supplies a strictly newer generation; no bank reset and no new commit epoch. */

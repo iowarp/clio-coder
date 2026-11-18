@@ -37,6 +37,7 @@ import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domai
 import type { AgentMessage } from "../engine/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./chat-loop-messages.js";
+import type { HostInserts } from "./host-inserts.js";
 import type { NoticeSource } from "./notice-source.js";
 import type { AgentRuntime, TurnMiddlewareState } from "./turn-state.js";
 
@@ -46,6 +47,8 @@ export interface TurnMiddlewareDeps {
 	middleware?: MiddlewareContract | undefined;
 	toolRegistry?: ToolRegistry | undefined;
 	session?: SessionContract | undefined;
+	/** Writes the deferred reminder tail durably before it joins the live history. */
+	hostInserts?: HostInserts | undefined;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	emitNotice: (text: string, level?: "info" | "warning" | "error", source?: NoticeSource) => void;
 	emitFooterNotice: (level: "info" | "success" | "warning" | "error", text: string, key: string) => void;
@@ -451,7 +454,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// injectDeferredReminder already persisted a middleware receipt. Update
 			// context directly: message events would invent a new operator turn and
 			// reset task/tool authority in appendQueuedUserTurn.
-			agentRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
+			const reminder: AgentMessage = { role: "user", content, timestamp: Date.now() };
+			if (deps.hostInserts) deps.hostInserts.insert(agentRuntime, "reminder", [reminder]);
+			else agentRuntime.agent.state.messages.push(reminder);
 			for (let index = pendingReminders.length - 1; index >= 0; index--) {
 				if (pendingReminders[index]?.deferred) pendingReminders.splice(index, 1);
 			}

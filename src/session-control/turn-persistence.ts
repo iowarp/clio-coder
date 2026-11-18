@@ -43,6 +43,7 @@ import {
 	terminalFailureFromAssistantMessage,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import type { HostInserts } from "./host-inserts.js";
 import { retireActiveUserContextForNextOperator } from "./session-replay-messages.js";
 import type { RetryStatusPayload } from "./turn-recovery.js";
 import type { AgentRuntime, ChatLoopTarget, TurnPersistenceState } from "./turn-state.js";
@@ -53,6 +54,8 @@ export interface TurnPersistenceDeps {
 	getToolOwner?: (name: string) => PackageIdentity | undefined;
 	state: TurnPersistenceState;
 	session?: SessionContract | undefined;
+	/** Names the row ids recovery records reserved for the host-authored assistants they hold. */
+	hostInserts?: Pick<HostInserts, "reservedRowId"> | undefined;
 	readSessionEntries?: (() => ReadonlyArray<SessionEntry>) | undefined;
 	getSettings: () => Readonly<ClioSettings>;
 	middlewareToolChoice: MiddlewareToolChoiceControl;
@@ -80,6 +83,8 @@ export interface TurnPersistence {
 	turnUsage(userTurnId: string): TurnTokens | null;
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
+	/** The ledger row this exact assistant message object was written as. */
+	rowIdOf(message: unknown): string | undefined;
 	appendAssistantTurn(
 		message: AgentMessage,
 		timing?: AssistantCallTiming | null,
@@ -133,6 +138,7 @@ export interface TurnPersistence {
 export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistence {
 	const { state } = deps;
 	const persistedAssistantMessages = new WeakSet<object>();
+	const assistantRowIds = new WeakMap<object, string>();
 	const toolOwners = new Map<string, PackageIdentity>();
 
 	// --- ledger appends -------------------------------------------------------
@@ -267,10 +273,14 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			payload.promptCache = deps.promptCachePayloadForAssistant(usage, backendTimings, anthropicResponse, cacheTransport);
 		}
 		if (message && typeof message === "object") persistedAssistantMessages.add(message as object);
+		// A recovery exchange's record already holds this message and names the row it reserved for it.
+		const reserved = deps.hostInserts?.reservedRowId(message);
 		const turn = appendTurn(deps.session, {
 			kind: "assistant",
 			payload,
+			...(reserved !== undefined ? { id: reserved } : {}),
 		});
+		assistantRowIds.set(message as object, turn.id);
 		state.lastTurnId = turn.id;
 		return turn.id;
 	};
@@ -280,6 +290,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			if (usageTurnId !== userTurnId) return null;
 			const empty = sumFacts([]);
 			return turnUsage ?? { input: empty, output: empty, cacheRead: empty, total: empty };
+		},
+		rowIdOf(message: unknown): string | undefined {
+			return message !== null && typeof message === "object" ? assistantRowIds.get(message) : undefined;
 		},
 		wasPersisted(message: unknown): boolean {
 			return !!message && typeof message === "object" && persistedAssistantMessages.has(message as object);

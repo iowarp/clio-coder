@@ -98,18 +98,24 @@ function currentOwner(): ClioSessionOwner {
  * records: four eviction reasons (`search_narrowed`, `diff_applied`,
  * `offloaded_body`, `dispatch_run_record_settled`), the `reread` recall trigger,
  * and the optional `contentHash` on an evicted item that the read tool
- * compares against a fresh read of the same path.
+ * compares against a fresh read of the same path. Version 7 records what the
+ * host put into the model's history itself: `clio-coder.host-insert` custom
+ * records carry the exact reminder, continuation, pinned, restoration and
+ * recovery messages with their place on the path, `clio-coder.step-chain`
+ * records the step chain's state, and an eviction gains the `step_overflow`
+ * reason, the `superseded` trigger and its optional route and anchor.
  *
  * Each bump exists for the same reason: an older reader would parse the new
  * records as unknown kinds and replay the session as if the state they record
  * had never happened. A v4 build reading a v5 ledger would show no accepted
  * handoff note and no paused transaction, and a v5 build reading a v6 ledger
  * would drop every eviction event carrying a new reason and replay the bodies
- * it evicted, so each refuses the file instead of misreading it. Every step is
+ * it evicted. A v6 build reading a v7 ledger would rebuild a request without
+ * the host messages the live one carried, so each refuses the file instead of misreading it. Every step is
  * additive to the ledger, so no historical entry is rewritten; only the
  * metadata stamp moves.
  */
-export const CURRENT_SESSION_FORMAT_VERSION = 6;
+export const CURRENT_SESSION_FORMAT_VERSION = 7;
 
 export interface ClioSessionJsonlHeader {
 	type: "session";

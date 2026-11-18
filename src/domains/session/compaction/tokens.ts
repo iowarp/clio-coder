@@ -21,6 +21,7 @@ import type {
 	MessageEntry,
 	SessionEntry,
 } from "../entries.js";
+import { HOST_INSERT_CUSTOM_TYPE, isHostInsertData } from "../entries.js";
 import { HANDOFF_SEED_CUSTOM_TYPE, handoffSeedContextText, isHandoffSeedData } from "../handoff.js";
 
 /** Contract future alternate estimators must satisfy. */
@@ -129,7 +130,13 @@ function estimateBashExecution(entry: BashExecutionEntry): number {
 function estimateCustom(entry: CustomEntry): number {
 	// Keep this in step with buildReplayAgentMessagesFromTurns: a handoff seed
 	// becomes one model-facing context message; all other custom entries are
-	// presentation or control records, even when their data is large.
+	// presentation or control records, even when their data is large. A host
+	// insert renders its elements, so it carries their structural price.
+	if (entry.customType === HOST_INSERT_CUSTOM_TYPE && isHostInsertData(entry.data) && !("retract" in entry.data)) {
+		let tokens = 0;
+		for (const element of entry.data.elements) tokens += estimateAgentMessageTokens(element);
+		return tokens;
+	}
 	return entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)
 		? ceilChars(handoffSeedContextText(entry.data).length)
 		: 0;

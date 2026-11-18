@@ -64,6 +64,7 @@ import {
 	suggestedSessionCostCeilingUsd,
 } from "../domains/scheduling/budget.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
+import type { HostInsertSource } from "../domains/session/entries.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { createEngineAgent } from "../engine/agent.js";
@@ -110,6 +111,7 @@ import {
 	toolNamesFromAgentState,
 	toolResultSummary,
 } from "./chat-loop-messages.js";
+import type { HostInserts } from "./host-inserts.js";
 import { createObservationAging } from "./observation-aging.js";
 import {
 	assessRepetition,
@@ -301,6 +303,8 @@ export interface TurnRuntimeDeps {
 	turnIdentity?: () => unknown;
 	interactiveGuidance?: boolean;
 	state: TurnRuntimeState;
+	/** Host tails (required-tool, continuation) are written durably before they join the live history. */
+	hostInserts?: HostInserts | undefined;
 	/** Capabilities behind the attached gateway, for the streaming tool-prose cutoff. */
 	gatewayCapabilityNames?: (() => ReadonlyArray<string>) | undefined;
 	/** The read-only and idempotent flags a registered extension tool declared, for observation aging's gate. */
@@ -1198,6 +1202,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								if (blocks) telemetryHub().emit("prompt.prefix_captured", blocks);
 							});
 						}
+						// This attempt carries every host insert written so far; none needs re-issuing after a later cut.
+						deps.hostInserts?.dispatched();
 						// The provider stream runs inside the attempt's context, so the engine seam and every observer below it
 						// find this call; the seam's marks agree with the ones taken here because each keeps its first (#434).
 						const stream = attempt
@@ -1596,7 +1602,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const requirementChanged = requiredToolReminder !== null;
 				if (requiredToolReminder !== null) {
 					// Context-only host tails preserve task authority and the cached prefix (#423).
-					localRuntime.agent.state.messages.push({ role: "user", content: requiredToolReminder, timestamp: Date.now() });
+					pushHostInsert("required-tool", { role: "user", content: requiredToolReminder, timestamp: Date.now() });
 					requiredToolReminder = null;
 				}
 				const contextChanged =
@@ -1698,6 +1704,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// a fresh per-turn tool count, the turn controller's collection, a
 		// turn_start marked as a continuation, and the buffered continuation
 		// reminders as model-only context.
+		const pushHostInsert = (source: HostInsertSource, message: AgentMessage): void => {
+			if (deps.hostInserts) deps.hostInserts.insert(localRuntime, source, [message]);
+			else localRuntime.agent.state.messages.push(message);
+		};
 		const deliverInRunContinuation = async (signal?: AbortSignal): Promise<boolean> => {
 			if (!state.continuation.takeInRun()) return false;
 			state.turnToolCalls = 0;
@@ -1720,7 +1730,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				.filter((part): part is string => part !== null && part.length > 0)
 				.join("\n\n");
 			if (content.length === 0) return false;
-			localRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
+			pushHostInsert("continuation", { role: "user", content, timestamp: Date.now() });
 			persistence.appendInRunContinuation();
 			return true;
 		};
