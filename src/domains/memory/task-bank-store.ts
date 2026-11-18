@@ -18,6 +18,7 @@ import {
 	type TaskMemoryEntry,
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
+import { isRecord } from "./util.js";
 
 /** Newest snapshots kept; a session older than these resumes with an empty bank. */
 export const TASK_BANK_SNAPSHOT_RETAIN = 64;
@@ -129,8 +130,4 @@ function pruneSnapshots(dir: string): void {
 	} catch {
 		// Retention is best effort; an unpruned directory only costs disk.
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
 }

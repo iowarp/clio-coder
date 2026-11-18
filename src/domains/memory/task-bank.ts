@@ -1,4 +1,5 @@
 import { ceilChars } from "../session/context-accounting.js";
+import { positiveInteger } from "./util.js";
 
 export const TASK_MEMORY_VERSION = 1;
 export const TASK_MEMORY_DEFAULT_KNOWLEDGE_CAP = 20;
@@ -289,10 +290,6 @@ function normalizeContent(content: string): string {
 	const normalized = content.replace(/\s+/gu, " ").trim();
 	if (normalized.length === 0) throw new Error("task memory content must not be empty");
 	return normalized.slice(0, TASK_MEMORY_CONTENT_MAX_CHARS).trimEnd();
-}
-
-function positiveInteger(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function cloneEntry(entry: TaskMemoryEntry): TaskMemoryEntry {

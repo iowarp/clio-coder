@@ -11,6 +11,7 @@ import type {
 	MemoryRepositoryIdentity,
 	MemoryRuntimeIdentity,
 } from "./types.js";
+import { compareCodeUnits } from "./util.js";
 import { assertValidMemoryRecord, validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export type MemoryScopeSelection =
@@ -150,7 +151,7 @@ export function memoryRecordFromPromotion(
 			redaction: {
 				appliedBeforePersistence: true,
 				replacementCount,
-				sourceFields: [...sourceFields].sort(compareStrings),
+				sourceFields: [...sourceFields].sort(compareCodeUnits),
 			},
 		},
 	};
@@ -238,11 +239,7 @@ function promotedMemoryId(value: {
 }
 
 function uniqueStrings(values: ReadonlyArray<string>): string[] {
-	return [...new Set(values)].sort(compareStrings);
-}
-
-function compareStrings(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
+	return [...new Set(values)].sort(compareCodeUnits);
 }
 
 /**

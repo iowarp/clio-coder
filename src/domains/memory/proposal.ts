@@ -53,8 +53,10 @@ export async function proposeMemoryFromEvidence(
 	return insertMemoryRecordIfAbsent(dataDir, memoryRecordFromEvidence(evidence, context, selection));
 }
 
-function memoryIdFromEvidence(runId: string): string {
-	const digest = createHash("sha256").update(runId, "utf8").digest("hex").slice(0, 16);
+/** A proposal with a chosen scope hashes the scope in, so each scope keeps its own record. */
+function memoryIdFromEvidence(runId: string, scopeKey?: string): string {
+	const input = scopeKey === undefined ? runId : `${runId}\n${scopeKey}`;
+	const digest = createHash("sha256").update(input, "utf8").digest("hex").slice(0, 16);
 	return `mem-${digest}`;
 }
 
@@ -77,7 +79,7 @@ function memoryRecordFromEvidence(
 		id:
 			validatedSelection === undefined
 				? memoryIdFromEvidence(evidence.runId)
-				: memoryIdFromEvidenceScope(evidence.runId, memoryScopeIdentityKey(validatedSelection)),
+				: memoryIdFromEvidence(evidence.runId, memoryScopeIdentityKey(validatedSelection)),
 		scope,
 		key: `evidence:${evidence.runId}`,
 		lesson: truncateText(buildLesson(evidence, context, primaryTag), LESSON_MAX_CHARS),
@@ -101,11 +103,6 @@ function memoryRecordFromEvidence(
 	else if (scope === "runtime" && runtimeIds[0] !== undefined) record.runtime = { kind: "runtime", key: runtimeIds[0] };
 	else if (scope === "agent" && agentIds[0] !== undefined) record.agent = { kind: "agent", key: agentIds[0] };
 	return assertValidMemoryRecord(record, "evidence");
-}
-
-function memoryIdFromEvidenceScope(evidenceId: string, scopeKey: string): string {
-	const digest = createHash("sha256").update(`${evidenceId}\n${scopeKey}`, "utf8").digest("hex").slice(0, 16);
-	return `mem-${digest}`;
 }
 
 function primaryEvidenceTag(tags: ReadonlyArray<EvidenceTag>): EvidenceTag | null {

@@ -9,6 +9,7 @@ import {
 	type TaskMemoryEntry,
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
+import { compareCodeUnits, hasExactKeys, isRecord, nonEmptyString } from "./util.js";
 import { validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export const TASK_MEMORY_HANDOFF_VERSION = 2;
@@ -115,7 +116,7 @@ export function renderTaskMemoryHandoffSnapshot(snapshot: TaskMemoryHandoffSnaps
 					source: cloneSource(snapshot.source),
 					redaction: {
 						replacementCount: snapshot.redaction.replacementCount + tally.count,
-						sourceFields: [...sourceFields].sort(compareStrings),
+						sourceFields: [...sourceFields].sort(compareCodeUnits),
 					},
 					knowledge,
 					procedural,
@@ -304,13 +305,13 @@ function parseRedaction(value: unknown): TaskMemoryHandoffRedaction | null {
 function parseSourceValues(value: unknown, allowEmpty: boolean): string[] | null {
 	if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) return null;
 	if (value.some((item) => !validSourceValue(item))) return null;
-	return [...new Set(value as string[])].sort(compareStrings);
+	return [...new Set(value as string[])].sort(compareCodeUnits);
 }
 
 function parseNamedIdentities(value: unknown): string[] | null {
 	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !validNamedIdentityKey(item)))
 		return null;
-	return [...new Set(value as string[])].sort(compareStrings);
+	return [...new Set(value as string[])].sort(compareCodeUnits);
 }
 
 function redactHandoffEntry(
@@ -333,20 +334,6 @@ function cloneSource(source: TaskMemoryHandoffSourceProvenance): TaskMemoryHando
 	};
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
-	const actual = Object.keys(value).sort();
-	const expected = [...keys].sort();
-	return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
-}
-
-function nonEmptyString(value: unknown): value is string {
-	return typeof value === "string" && value.trim().length > 0;
-}
-
 function isIsoTimestamp(value: unknown): value is string {
 	if (typeof value !== "string") return false;
 	const timestamp = Date.parse(value);
@@ -355,8 +342,4 @@ function isIsoTimestamp(value: unknown): value is string {
 
 function handoffSourceName(path: string): string {
 	return path.split(/[\\/]/u).pop() ?? path;
-}
-
-function compareStrings(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -57,6 +57,7 @@ import {
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "./task-memory-status.js";
+import { positiveInteger, shortText } from "./util.js";
 
 const noTokens: Fact<number> = { kind: "absent", reason: "not-applicable" };
 
@@ -2387,15 +2388,6 @@ function boundedReminder(message: string, maxTokens: number): string {
 	if (maxChars <= 0) return "";
 	const normalized = message.replace(/[^\S\n]+/gu, " ").trim();
 	return normalized.length <= maxChars ? normalized : normalized.slice(0, maxChars).trimEnd();
-}
-
-function shortText(value: string, maxChars: number): string {
-	const normalized = value.replace(/\s+/gu, " ").trim();
-	return normalized.length <= maxChars ? normalized : `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-function positiveInteger(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function countBankWrites(delta: TaskMemoryBankDelta): number {

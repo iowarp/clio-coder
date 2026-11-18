@@ -17,6 +17,7 @@ import {
 	OPERATOR_STATED_KINDS,
 	type OperatorStatedKind,
 } from "./types.js";
+import { isRecord } from "./util.js";
 
 const ID_PATTERN = /^mem-[a-f0-9]{16}$/;
 
@@ -554,10 +555,6 @@ function readField(record: Record<string, unknown>, path: string, issues: Memory
 function fieldName(path: string): string {
 	const parts = path.split(".");
 	return parts[parts.length - 1] ?? path;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isValidIsoTimestamp(value: string): boolean {
