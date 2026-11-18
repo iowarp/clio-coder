@@ -13,7 +13,10 @@ import {
 	type EditorSubmitExpansion,
 } from "../../src/interactive/editor-submit.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
-import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
+import {
+	createSlashCommandAutocompleteProvider,
+	emptyCompletionSources,
+} from "../../src/interactive/slash-autocomplete.js";
 import {
 	dispatchSlashCommand,
 	parseSlashCommand,
@@ -347,4 +350,49 @@ it("Enter sends an unknown /tools as typed instead of the /skill its description
 	editor.handleInput("\r");
 	assert.equal(editor.getText(), "/skill ");
 	assert.deepEqual(submitted, ["/tools"]);
+});
+
+it("Enter sends a typed /thinking level as typed, never the sibling its letters matched (bt-11 thinking-completion)", async () => {
+	const previous = getKeybindings();
+	createKeybindingManager(DEFAULT_SETTINGS, {});
+	cleanups.push(() => setKeybindings(previous));
+	const terminal = new Proxy({ columns: 80, rows: 24 }, { get: (target, key) => Reflect.get(target, key) ?? noop });
+	const editor = new ClioEditor(new TuiMainScreen(terminal as unknown as Terminal), {
+		getModelLabel: () => "fixture",
+		getThinkingLabel: () => "off",
+	});
+	const submitted: string[] = [];
+	editor.onSubmit = (text) => {
+		submitted.push(text);
+		editor.setText("");
+	};
+	let levels = ["low", "off", "medium", "xhigh"];
+	editor.setAutocompleteProvider(
+		createSlashCommandAutocompleteProvider({
+			fdPath: null,
+			completionSources: {
+				...emptyCompletionSources(),
+				"thinking-levels": async () =>
+					levels.map((level) => ({ id: level, value: level, label: level, description: level })),
+			},
+		}),
+	);
+	const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+	const type = async (text: string) => {
+		for (const key of text) editor.handleInput(key);
+		await settle();
+		assert.equal(editor.isShowingAutocomplete(), true, text);
+	};
+
+	// `high` only spells `xhigh` by its letters: Enter sends `high` for the command to refuse, and the next line starts clean.
+	await type("/thinking high");
+	editor.handleInput("\r");
+	assert.deepEqual(submitted, ["/thinking high"]);
+	assert.equal(editor.getText(), "");
+
+	// A level typed in full is submitted as typed, ahead of a longer sibling.
+	levels = ["xhigh", "high", "off"];
+	await type("/thinking high");
+	editor.handleInput("\r");
+	assert.deepEqual(submitted, ["/thinking high", "/thinking high"]);
 });

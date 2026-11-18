@@ -90,6 +90,8 @@ export interface RunResultSummary {
 /** A run's projection: the summary plus the answer it delivered. */
 export interface RunResultFacts extends RunResultSummary {
 	text?: string;
+	/** The host-validated report `text` is the JSON of, so a surface can word its fields instead of showing the JSON. */
+	structured?: { kind: string; data: Record<string, unknown> };
 	/**
 	 * The run's folded token quantity as the read model words it. Unlike `tokens`, it keeps the measured subtotal
 	 * beside unknown call coverage, so a partly counted run reads as a lower bound rather than unknown (#434).
@@ -156,6 +158,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 	const durationMs = Math.max(0, Date.parse(settled.endedAt) - Date.parse(settled.startedAt));
 	const failureMessage = result?.failureMessage ?? settled.failureMessage;
 	const text = result?.output?.text;
+	const structured = result?.output?.structured;
 	const refusedCalls = settled.tools.reduce((sum, entry) => sum + entry.blocked, 0);
 	// The attempt list is capped at 64, so it can undercount guards but never claim more than the tools refused.
 	const guardedCalls = Math.min(
@@ -192,6 +195,7 @@ function runResultFactsOf(record: RunTelemetryV1 | null, gates: ReadonlyArray<Ga
 		...(contract !== undefined ? { contract } : {}),
 		...(contractKind !== undefined ? { contractKind } : {}),
 		...(text ? { text } : {}),
+		...(text && structured !== undefined ? { structured } : {}),
 	};
 }
 

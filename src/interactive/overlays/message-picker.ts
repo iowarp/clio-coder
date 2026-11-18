@@ -1,6 +1,6 @@
 import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
-import type { MessageEntry } from "../../domains/session/entries.js";
+import type { MessageEntry, SessionEntry } from "../../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../domains/session/tree/active-path.js";
 import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
@@ -14,8 +14,8 @@ export const MESSAGE_PICKER_OVERLAY_WIDTH = 88;
 const PREVIEW_WIDTH = 60;
 
 /**
- * /fork picker. Lists the current session's assistant turns, most-recent first,
- * with a structured assistant preview as the row label. Selecting a row
+ * /fork picker. Lists the current session's prompts, most-recent first, each
+ * forking after the last assistant reply of its turn. Selecting a row
  * calls onFork(parentTurnId); the caller wires that through
  * SessionContract.fork(parentTurnId).
  *
@@ -37,27 +37,53 @@ export interface MessagePickerRow {
 }
 
 /**
- * Pure transformer: given the persisted JSONL records of a session, return one
- * row per assistant turn in reverse-chronological order. Exposed for unit
- * tests so the overlay layer stays render-only.
+ * Pure transformer: given the persisted messages of a session, return one row
+ * per operator prompt in reverse-chronological order. A prompt's turn can hold
+ * many assistant replies (one per tool round), and listing each repeated the
+ * same `after "…"` label; the row forks after the turn's last reply instead.
+ * Where /tree left several reply chains under one prompt, the chain on the
+ * active path wins, so the row the picker opens on is the active leaf. A
+ * ledger whose parent links have gaps falls back to the prompt before the
+ * reply in the file.
  */
-function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePickerRow[] {
-	const rows: MessagePickerRow[] = [];
-	let asked: string | undefined;
-	for (const turn of turns) {
-		if (turn.role === "user") {
-			asked = buildTurnPreview({ kind: "user", payload: turn.payload }, PREVIEW_WIDTH);
-			continue;
+export function buildMessagePickerRows(
+	entries: ReadonlyArray<SessionEntry>,
+	activeTurnIds: ReadonlySet<string> = new Set(),
+): MessagePickerRow[] {
+	const byId = new Map(entries.map((entry) => [entry.turnId, entry]));
+	const promptOf = (turn: MessageEntry): MessageEntry | undefined => {
+		const seen = new Set<string>();
+		let parentId = turn.parentTurnId;
+		while (parentId && !seen.has(parentId)) {
+			seen.add(parentId);
+			const parent = byId.get(parentId);
+			if (!parent) return undefined;
+			if (parent.kind === "message" && parent.role === "user") return parent;
+			parentId = parent.parentTurnId;
 		}
+		return undefined;
+	};
+	const forkPoints = new Map<string, { reply: MessageEntry; prompt?: MessageEntry }>();
+	let previousPrompt: MessageEntry | undefined;
+	for (const turn of entries) {
+		if (turn.kind !== "message") continue;
+		if (turn.role === "user") previousPrompt = turn;
 		if (turn.role !== "assistant") continue;
-		rows.push({
-			turnId: turn.turnId,
-			at: turn.timestamp,
-			preview: buildTurnPreview({ kind: "assistant", payload: turn.payload }, PREVIEW_WIDTH),
-			...(asked !== undefined ? { asked } : {}),
-		});
+		const prompt = promptOf(turn) ?? previousPrompt;
+		const key = prompt?.turnId ?? turn.turnId;
+		const held = forkPoints.get(key);
+		if (held && activeTurnIds.has(held.reply.turnId) && !activeTurnIds.has(turn.turnId)) continue;
+		forkPoints.set(key, { reply: turn, ...(prompt ? { prompt } : {}) });
 	}
-	return rows.reverse();
+	const order = new Map(entries.map((entry, index) => [entry.turnId, index]));
+	return [...forkPoints.values()]
+		.sort((a, b) => (order.get(b.reply.turnId) ?? 0) - (order.get(a.reply.turnId) ?? 0))
+		.map(({ reply, prompt }) => ({
+			turnId: reply.turnId,
+			at: reply.timestamp,
+			preview: buildTurnPreview({ kind: "assistant", payload: reply.payload }, PREVIEW_WIDTH),
+			...(prompt ? { asked: buildTurnPreview({ kind: "user", payload: prompt.payload }, PREVIEW_WIDTH) } : {}),
+		}));
 }
 
 /** The one local time format: the clock alone for today, the date as well for any other day. */
@@ -123,13 +149,11 @@ export function openMessagePickerOverlay(tui: TUI, deps: OpenMessagePickerOverla
 	// resilient if the session closes between /fork and handler dispatch.
 	const reader = current ? openSession(current.id) : null;
 	const entries = reader ? collectSessionEntries(reader.turns(), sessionPaths(reader.meta()).current) : [];
-	const messages = entries.filter((entry): entry is MessageEntry => entry.kind === "message");
-	const rows = buildMessagePickerRows(messages);
+	const activePath = filterEntriesToActivePath(entries, deps.session.leafId() ?? undefined);
+	const rows = buildMessagePickerRows(entries, new Set(activePath.map((entry) => entry.turnId)));
 	// Enter on open forks after the newest reply on the active /tree path, not a
 	// newer abandoned sibling, as the retired /branch did (#444).
-	const newest = filterEntriesToActivePath(entries, deps.session.leafId() ?? undefined)
-		.reverse()
-		.find((entry) => entry.kind === "message" && entry.role === "assistant");
+	const newest = activePath.reverse().find((entry) => entry.kind === "message" && entry.role === "assistant");
 	const box = createMessagePickerContent(
 		rows,
 		(parentTurnId) => deps.onFork(parentTurnId),

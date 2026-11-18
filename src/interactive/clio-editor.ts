@@ -567,7 +567,7 @@ export class ClioEditor extends Editor {
 			const items = (list as { items?: ReadonlyArray<SlashCompletionItem> }).items ?? [];
 			const unchosen =
 				items.length > 0 &&
-				(items.every((item) => item.describedOnly === true) ||
+				(items.every((item) => item.describedOnly === true || item.lettersOnly === true) ||
 					(this.autoOpenPending && items.every((item) => item.required === false)));
 			this.suggestionArmed = !unchosen;
 			this.autoOpenPending = false;
