@@ -104,6 +104,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A /fork session is now nudged about and can collect its ancestors' uncollected detached batches; the first collector wins and cancel stays with the dispatching session (D1-4).
 - `go test -run '^TestX$' ./pkg` and other runner option values (jest/vitest `-t`, pytest `-k`) no longer read as a check run outside the workspace, so their green verifies and clears an earlier red (x5-3).
 - A check logged to `$TMPDIR/…`, `~/…`, a `safety.scratchRoots` directory, or a new untracked file through its own tee or redirect is output, not a change; its green verifies and no longer wipes earlier passes (x5-4).
 - A read-only `sed -n` script with a bracket expression (`/^[[:space:]]*x/p`) stays a read and no longer erases standing check outcomes (x5-5).
