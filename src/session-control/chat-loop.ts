@@ -20,12 +20,11 @@ import {
 } from "../core/telemetry/context.js";
 import type { FailureCause } from "../core/telemetry/enums.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
-import { pricesCalls, pricingBasisFields, sumFacts } from "../core/telemetry/pricing.js";
+import { pricesCalls, pricingBasisFields } from "../core/telemetry/pricing.js";
 import { resolveSideCallAuth } from "../domains/providers/side-call-auth.js";
 import { createConversationEggs } from "../domains/session/easter-eggs.js";
 import { turnSettlementFromCalls } from "../domains/telemetry/call-facts.js";
 import type { AdmissionHold, CallJournalOptions } from "../domains/telemetry/call-scope.js";
-import { readSettledRun } from "../domains/telemetry/run-record.js";
 import type { TelemetrySessionLease } from "../domains/telemetry/session-journals.js";
 import type { TurnControlRecord } from "../domains/turn-control/index.js";
 import type { TurnFailureRecord } from "../domains/turn-control/outcome.js";
@@ -87,10 +86,8 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
-import type { Fact } from "../core/telemetry/fact.js";
 import type { TelemetryHub } from "../core/telemetry/hub.js";
 import type { TurnAbortSource } from "../core/telemetry/live-events.js";
-import type { RunSettled } from "../core/telemetry/schemas.js";
 import {
 	narrowTurnConstraints,
 	routeScopedTurnConstraints,
@@ -101,7 +98,6 @@ import {
 	turnTemplateName,
 } from "../core/turn-constraints.js";
 import type { TurnOrigin, TurnToolCall } from "../core/turn-origin.js";
-import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import type { DispatchContract } from "../domains/dispatch/index.js";
@@ -147,7 +143,7 @@ import type { RetrySettings } from "../domains/session/retry.js";
 import { classifyRecoveryFailure, isRetryableRecoveryFailure } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
-import type { TurnTokens } from "../domains/turn-control/index.js";
+import type { TurnOutcomeRecord } from "../domains/turn-control/index.js";
 import { reduceTurnOutcome } from "../domains/turn-control/index.js";
 import { createEngineAgent } from "../engine/agent.js";
 import { cacheKeepalivePromptTokens } from "../engine/cache-keepalive.js";
@@ -260,6 +256,7 @@ import {
 	type TurnPreparationStep,
 	takeInterruptedCall,
 } from "./turn-state.js";
+import { createWorkerReceipts, noOutcomeUsage } from "./worker-receipts.js";
 import { isWorkerShareNote } from "./worker-share.js";
 
 export type {
@@ -395,102 +392,6 @@ export type ToolApprovalStateEvent =
 			 */
 			state: "judging" | "resumed";
 	  };
-
-function noOutcomeUsage(): TurnTokens {
-	return { input: sumFacts([]), output: sumFacts([]), cacheRead: sumFacts([]), total: sumFacts([]) };
-}
-
-/** A worker run's settled record once its journal holds run.settled; null while it has not settled (#434). */
-function readWorkerSettlement(
-	runId: string,
-	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): Pick<RunSettled, "usage" | "totalTokens"> | null {
-	try {
-		if (!dispatch?.getRun(runId)) return null;
-		return readSettledRun(clioStateDir(), runId)?.settled ?? null;
-	} catch {
-		// A run that has not settled yet reads as absent; the caller marks it partial.
-		return null;
-	}
-}
-
-const WORKER_RECEIPT_SEAL_WAIT_MS = 2000;
-const WORKER_RECEIPT_SEAL_POLL_MS = 25;
-/** How long the detached watcher keeps looking for a receipt the settle wait gave up on. */
-const WORKER_RECEIPT_LATE_WATCH_MS = 30_000;
-const WORKER_RECEIPT_LATE_POLL_MS = 250;
-/** Session ledger entry that amends a cancelled turn's outcome with worker tokens that sealed after it. */
-const TURN_OUTCOME_TOKENS_CUSTOM_TYPE = "turnOutcomeTokens";
-
-/**
- * A cancelled turn records its outcome as soon as the abort lands, while an
- * aborted worker seals its receipt a few tens of milliseconds later. The ledger
- * knows a run from admission, so only runs it knows are worth waiting for; the
- * wait is bounded. Returns the runs still unsealed, whose tokens the outcome
- * then reports as partial.
- */
-async function awaitWorkerRunResults(
-	runIds: ReadonlyArray<string>,
-	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): Promise<string[]> {
-	if (!dispatch) return [];
-	const pending = new Set(
-		runIds.filter((runId) => dispatch.getRun(runId) !== null && readWorkerSettlement(runId, dispatch) === null),
-	);
-	const deadline = Date.now() + WORKER_RECEIPT_SEAL_WAIT_MS;
-	while (pending.size > 0 && Date.now() < deadline) {
-		await new Promise<void>((resolve) => setTimeout(resolve, WORKER_RECEIPT_SEAL_POLL_MS));
-		for (const runId of [...pending]) if (readWorkerSettlement(runId, dispatch) !== null) pending.delete(runId);
-	}
-	return [...pending];
-}
-
-/**
- * Follows receipts the settle wait gave up on. Detached and unref'd: it must not
- * hold the process open, and a process that exits first loses the amend, which
- * is only a better count of tokens the outcome already reported as partial.
- * `onDone` runs once: with the elapsed milliseconds when every watched run has
- * sealed, or null when the cap passed first, and the runs still open stay
- * partial. Returns a stop function for dispose.
- */
-function watchLateWorkerRunResults(input: {
-	missing: ReadonlyArray<string>;
-	dispatch: Pick<DispatchContract, "getRun"> | undefined;
-	onDone: (sealedAfterMs: number | null) => void;
-}): () => void {
-	const pending = new Set(input.missing);
-	const started = performance.now();
-	const timer = setInterval(() => {
-		for (const runId of [...pending]) if (readWorkerSettlement(runId, input.dispatch) !== null) pending.delete(runId);
-		const elapsed = performance.now() - started;
-		if (pending.size > 0 && elapsed < WORKER_RECEIPT_LATE_WATCH_MS) return;
-		clearInterval(timer);
-		try {
-			input.onDone(pending.size === 0 ? Math.round(elapsed) : null);
-		} catch {
-			// Measurement must not surface as an error from a timer.
-		}
-	}, WORKER_RECEIPT_LATE_POLL_MS);
-	timer.unref();
-	return () => clearInterval(timer);
-}
-
-/** The workers' tokens, each run one contribution; a run that has not settled counts as unknown, never zero (#434). */
-function workerOutcomeUsage(
-	runIds: ReadonlyArray<string>,
-	dispatch: Pick<DispatchContract, "getRun"> | undefined,
-): TurnTokens {
-	const notSettled: Fact<number> = { kind: "unknown", reason: "not-observed" };
-	const runs = [...new Set(runIds)].map((runId) => readWorkerSettlement(runId, dispatch));
-	const read = (pick: (settled: Pick<RunSettled, "usage" | "totalTokens">) => Fact<number>) =>
-		sumFacts(runs.map((settled) => (settled === null ? notSettled : pick(settled))));
-	return {
-		input: read((settled) => settled.usage.input),
-		output: read((settled) => settled.usage.output),
-		cacheRead: read((settled) => settled.usage.cacheRead),
-		total: read((settled) => settled.totalTokens),
-	};
-}
 
 export type ChatLoopEvent = (
 	| AgentEvent
@@ -2424,45 +2325,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return operatorTurnsBefore;
 	};
 
-	const lateReceiptWatchers = new Set<() => void>();
-	/**
-	 * A cancelled turn's outcome was written with worker receipts still unsealed. When
-	 * they seal, a `turnOutcomeTokens` entry amends the ledger and a `turn-tokens` row
-	 * the dataset, both keyed by turn id and ref. The ledger entry needs the session
-	 * that owns the turn, so after /new or /resume only the dataset row is written.
-	 */
-	const amendLateWorkerTokens = (input: {
-		turnId: string;
-		parentTurnId: string | null;
-		runIds: ReadonlyArray<string>;
-		missing: ReadonlyArray<string>;
-	}): void => {
-		if (input.missing.length === 0 || !deps.outcomeDispatch) return;
-		const sessionId = deps.session?.current()?.id ?? null;
-		const stop = watchLateWorkerRunResults({
-			missing: input.missing,
-			dispatch: deps.outcomeDispatch,
-			onDone: (afterMs) => {
-				lateReceiptWatchers.delete(stop);
-				if (afterMs === null) return;
-				const workers = workerOutcomeUsage(input.runIds, deps.outcomeDispatch);
-				if (sessionId !== null && deps.session?.current()?.id === sessionId) {
-					try {
-						deps.session.appendEntry({
-							kind: "custom",
-							customType: TURN_OUTCOME_TOKENS_CUSTOM_TYPE,
-							parentTurnId: input.parentTurnId,
-							display: false,
-							data: { turnId: input.turnId, workers, sealedAfterMs: afterMs },
-						});
-					} catch {
-						// The ledger closed under the watcher, so the late count is lost with it.
-					}
-				}
-			},
-		});
-		lateReceiptWatchers.add(stop);
-	};
+	const workerReceipts = createWorkerReceipts(deps.outcomeDispatch, deps.session);
 
 	/** One turn.settled per settled user turn, from the turn's own call facts (#430, #434). */
 	const recordTurnSettled = async (
@@ -2491,6 +2354,24 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		}
 	};
 
+	/** Append the outcome row, settle the turn, then follow the worker receipts the row reported as partial. */
+	const writeTurnOutcome = async (
+		record: TurnOutcomeRecord,
+		settle: {
+			stopReason: unknown;
+			retries: number;
+			cause: FailureCause | undefined;
+			runIds: ReadonlyArray<string>;
+			missing: ReadonlyArray<string>;
+		},
+	): Promise<void> => {
+		const parentTurnId = state.lastTurnId;
+		deps.session?.appendEntry({ kind: "custom", customType: "turnOutcome", parentTurnId, display: false, data: record });
+		outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
+		await recordTurnSettled(record.turnId, settle.stopReason, settle.retries, settle.cause);
+		workerReceipts.amendLate({ turnId: record.turnId, parentTurnId, runIds: settle.runIds, missing: settle.missing });
+	};
+
 	/**
 	 * A turn the operator cancelled before admission (the pre-turn reads, the
 	 * orientation act or pre-submit compaction) leaves no user turn, so the settle
@@ -2508,7 +2389,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		try {
 			if (input.control) outcomeCollector.recordControl(input.control);
 			const collected = outcomeCollector.take(input.userTurnId);
-			const missingReceipts = await awaitWorkerRunResults(collected.harness.runIds, deps.outcomeDispatch);
+			const missingReceipts = await workerReceipts.awaitSeal(collected.harness.runIds);
 			const record = reduceTurnOutcome({
 				...collected,
 				turnId: input.userTurnId,
@@ -2519,25 +2400,16 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				canceled: true,
 				tokens: {
 					coordinator: noOutcomeUsage(),
-					workers: workerOutcomeUsage(collected.harness.runIds, deps.outcomeDispatch),
+					workers: workerReceipts.usage(collected.harness.runIds),
 				},
 				failure: classifyCallFailure("Cancelled before admission", { invoked: false, aborted: true, retryAttempts: 0 }),
 				stopReason: "aborted",
 				durationMs: Math.max(0, performance.now() - input.submittedAt),
 			});
-			const outcomeParent = state.lastTurnId;
-			deps.session.appendEntry({
-				kind: "custom",
-				customType: "turnOutcome",
-				parentTurnId: outcomeParent,
-				display: false,
-				data: record,
-			});
-			outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
-			await recordTurnSettled(input.userTurnId, "aborted", 0, "operator_cancel");
-			amendLateWorkerTokens({
-				turnId: input.userTurnId,
-				parentTurnId: outcomeParent,
+			await writeTurnOutcome(record, {
+				stopReason: "aborted",
+				retries: 0,
+				cause: "operator_cancel",
 				runIds: collected.harness.runIds,
 				missing: missingReceipts,
 			});
@@ -3929,7 +3801,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							const finalAssistantText =
 								typeof finalPayload?.text === "string" ? finalPayload.text : finalMessage ? extractText(finalMessage) : "";
 							const workerRunIds = [...collected.dispatches.flatMap((item) => item.runIds), ...collected.harness.runIds];
-							const missingReceipts = canceled ? await awaitWorkerRunResults(workerRunIds, deps.outcomeDispatch) : [];
+							const missingReceipts = canceled ? await workerReceipts.awaitSeal(workerRunIds) : [];
 							// biome-ignore lint/correctness/noUnsafeFinally: a superseded submit must not settle into the new generation; its error belongs to a turn nobody owns now.
 							if (generation !== submitGeneration) return;
 							const failure = terminalFailureFromAssistantMessage(finalMessage)?.failure ?? currentTurnFailure();
@@ -3945,7 +3817,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								...(failure ? { failure: { ...failure, retryAttempts: turnRetryAttempts + providerRetryAttempts } } : {}),
 								tokens: {
 									coordinator: persistence.turnUsage(userTurnId) ?? noOutcomeUsage(),
-									workers: workerOutcomeUsage(workerRunIds, deps.outcomeDispatch),
+									workers: workerReceipts.usage(workerRunIds),
 								},
 								stopReason:
 									typeof finalPayload?.stopReason === "string"
@@ -3957,24 +3829,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 												: "error",
 								durationMs: Math.max(0, performance.now() - submittedAt),
 							});
-							const outcomeParent = state.lastTurnId;
-							deps.session.appendEntry({
-								kind: "custom",
-								customType: "turnOutcome",
-								parentTurnId: outcomeParent,
-								display: false,
-								data: record,
-							});
-							outcomeCollector.seedClarificationStreak(record.conversation.clarificationStreak);
-							await recordTurnSettled(
-								userTurnId,
-								record.stopReason,
-								turnRetryAttempts + providerRetryAttempts,
-								canceled ? "operator_cancel" : undefined,
-							);
-							amendLateWorkerTokens({
-								turnId: userTurnId,
-								parentTurnId: outcomeParent,
+							await writeTurnOutcome(record, {
+								stopReason: record.stopReason,
+								retries: turnRetryAttempts + providerRetryAttempts,
+								cause: canceled ? "operator_cancel" : undefined,
 								runIds: workerRunIds,
 								missing: missingReceipts,
 							});
@@ -4422,8 +4280,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			pendingVisionSidecar?.abort();
 			pendingCompactionPaint?.abort();
 			turnRuntime.dispose();
-			for (const stop of lateReceiptWatchers) stop();
-			lateReceiptWatchers.clear();
+			workerReceipts.dispose();
 			unsubscribeConfigReload?.();
 			unsubscribeConfigNextTurn?.();
 			unsubscribePluginsReload?.();
