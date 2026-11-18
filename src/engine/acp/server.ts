@@ -4093,6 +4093,7 @@ export function createAcpHandshake(features: AcpHandshakeFeatures): AcpHandshake
 						close: {},
 						...(features.session ? { list: {}, delete: {} } : {}),
 						...(canLoadSession ? { resume: {} } : {}),
+						...(features.branches ? { fork: {} } : {}),
 					},
 					auth: { logout: {} },
 					// Clio mediates every tool through its own safety policy. Extensions
@@ -6111,15 +6112,23 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 	// /fork: a new session carrying the branch up to the chosen turn. The
 	// process follows the new session, as the terminal does, and the parent is
 	// closed on disk. Workspace files are never rewound.
-	options.transport.onRequest(ACP_SESSION_FORK_METHOD, (params) => {
-		requireInitialized();
-		requireAuthenticated();
-		const request = assertParamKeys(params, new Set(["sessionId", "turnId"]));
+	/**
+	 * Forks the bound session at `turnId` and hosts the child in its place. The extension method replays the child's
+	 * branch to the client; standard session/fork does not, since the client already holds that conversation.
+	 */
+	const forkBoundSession = (
+		request: Record<string, unknown>,
+		chooseTurn: "request" | "leaf",
+		replayToClient: boolean,
+	) => {
 		const { session, resetForSession, readEntries, buildMessages } = requireBranches();
 		const bound = getSession(request);
 		requireIdle(bound, "fork");
 		const ceiling = successorCeiling(bound, request);
-		const turnId = selectableTurn(session, bound.id, request.turnId);
+		const requested = chooseTurn === "request" ? request.turnId : session.leafId(bound.id);
+		if (requested === null)
+			throw new AcpRequestError(-32602, "the session has no turn to fork from", { code: "turn_unknown" });
+		const turnId = selectableTurn(session, bound.id, requested);
 		let meta: SessionMeta;
 		try {
 			meta = session.fork(turnId);
@@ -6162,7 +6171,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				turnId,
 			);
 			forkLeaf = restored.leafTurnId;
-			replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
+			if (replayToClient) replay = prepareAcpReplay(restored.entries, restored.leafTurnId, meta.id, meta.target);
 		} catch (error) {
 			options.diagnostics?.(`fork replay failed: ${acpErrorMessage(error)}`);
 			resetForSession(forkLeaf, []);
@@ -6187,6 +6196,21 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				},
 			},
 		};
+	};
+	options.transport.onRequest(ACP_SESSION_FORK_METHOD, (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		return forkBoundSession(assertParamKeys(params, new Set(["sessionId", "turnId"])), "request", true);
+	});
+	// Standard ACP fork: the whole active branch, at its leaf. Client MCP servers the parent attached stay attached.
+	options.transport.onRequest("session/fork", (params) => {
+		requireInitialized();
+		requireAuthenticated();
+		const request = assertParamKeys(params, new Set(["sessionId", "cwd", "mcpServers", "additionalDirectories"]));
+		assertNoAdditionalDirectories(request.additionalDirectories);
+		canonicalSessionCwd(request.cwd);
+		parseClientMcpServers(request.mcpServers, false);
+		return forkBoundSession(request, "leaf", false);
 	});
 
 	const handoffRefusal = (level: "warn" | "error", code: string, reason: string) => ({

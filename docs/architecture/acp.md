@@ -56,7 +56,7 @@ Framing rules:
 | `loadSession` | `true` |
 | `promptCapabilities` | `{audio: false, embeddedContext: true, image: true}` |
 | `mcpCapabilities` | `{http: false, sse: false}` |
-| `sessionCapabilities` | `{close: {}, list: {}, delete: {}, resume: {}}` |
+| `sessionCapabilities` | `{close: {}, list: {}, delete: {}, resume: {}, fork: {}}`; `fork` only when session branching is wired |
 | `auth` | `{logout: {}}` |
 
 Every CLIO Coder extension is namespaced under `agentCapabilities._meta`, so a strict generic ACP v1 client can use session discovery, modes, and configuration options without reading CLIO Coder metadata. The shipped composition (`src/cli/acp.ts`) wires every dependency, so it advertises all of the keys below. A narrower embedded or test composition omits the key whose dependency is absent, and a flag never claims a method the composition cannot serve.
@@ -137,6 +137,7 @@ Anything not listed returns `-32601` `method_not_found`. Methods answer after `i
 | `session/set_mode` | client to server | Sets autonomy to `default` or `yolo` while idle. |
 | `session/set_config_option` | client to server | Sets autonomy, target, model, or thinking level while idle; returns the full option list. |
 | `session/set_model` | client to server | Sets the model while idle, as the `model` config option does; returns `{}`. |
+| `session/fork` | client to server | Forks the hosted session at its active leaf and hosts the child in its place, without replaying the branch. Takes `{sessionId, cwd, mcpServers?}`; client MCP servers the parent attached stay attached. Returns `sessionId`, `modes`, `models`, `configOptions`, `_meta`. Idle only. |
 | `session/prompt` | client to server | Submits a user prompt. |
 | `session/cancel` | client to server | Cancels the in-flight prompt, running tools, and any outstanding permission request. Accepted as a request (returns `{}`) and as a notification. |
 | `session/close` | client to server | Cancels an active prompt, waits for its writer to settle, and closes the durable session. Idempotent. |

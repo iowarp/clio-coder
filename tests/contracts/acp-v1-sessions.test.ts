@@ -261,6 +261,7 @@ test("ACP stable session list pages SessionInfo and filters cwd", async () => {
 		deepStrictEqual(Object.keys(init.agentCapabilities.sessionCapabilities).sort(), [
 			"close",
 			"delete",
+			"fork",
 			"list",
 			"resume",
 		]);

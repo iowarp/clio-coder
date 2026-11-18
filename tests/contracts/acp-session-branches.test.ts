@@ -136,8 +136,9 @@ test("ACP announces branches only when the replay readers are wired", async () =
 		const agent = await peer({ wired });
 		try {
 			const init = (await agent.call("initialize", { protocolVersion: 1 })) as {
-				agentCapabilities: { _meta: Record<string, unknown> };
+				agentCapabilities: { _meta: Record<string, unknown>; sessionCapabilities: Record<string, unknown> };
 			};
+			strictEqual(init.agentCapabilities.sessionCapabilities.fork !== undefined, wired, "standard fork is advertised");
 			const announced = init.agentCapabilities._meta["clio-coder/branches"];
 			if (wired)
 				deepStrictEqual(announced, {
@@ -297,6 +298,44 @@ test("ACP fork follows the new session, replays its branch, keeps the parent and
 		);
 		strictEqual(childView.parentSessionId, parentId);
 		strictEqual(Object.keys(agent.contract.tree(parentId).nodesById).length, 6);
+	} finally {
+		await agent.stop();
+	}
+});
+
+test("standard ACP session/fork forks the whole active branch without replaying it", async () => {
+	const agent = await peer();
+	try {
+		await agent.call("initialize", { protocolVersion: 1 });
+		const opened = (await agent.call("session/new", { cwd: agent.cwd, mcpServers: [] })) as { sessionId: string };
+		await refusal(agent.call("session/fork", { sessionId: opened.sessionId, cwd: agent.cwd }), "turn_unknown");
+		seed(agent.contract);
+		const parentId = agent.contract.current()?.id as string;
+		await refusal(agent.call("session/fork", { sessionId: parentId, cwd: "/elsewhere" }), "session_cwd_mismatch");
+		agent.updates.length = 0;
+		agent.resets.length = 0;
+		const result = (await agent.call("session/fork", { sessionId: parentId, cwd: agent.cwd, mcpServers: [] })) as {
+			sessionId: string;
+			modes: unknown;
+			configOptions: unknown[];
+		};
+		const childId = result.sessionId;
+		ok(childId !== parentId);
+		ok(result.modes !== undefined && Array.isArray(result.configOptions));
+		strictEqual(agent.contract.current()?.id, childId);
+		strictEqual(agent.contract.tree(childId).meta.parentTurnId, "a3", "the fork point is the active leaf");
+		deepStrictEqual(agent.resets, [{ leaf: "a3", messages: 4 }]);
+		strictEqual(
+			agent.updates.filter((frame) => frame._meta?.["clio-coder/replay"] !== undefined).length,
+			0,
+			"the client already holds the conversation",
+		);
+		deepStrictEqual(
+			(
+				(await agent.call("_clio-coder/session/tree", { sessionId: childId })) as ReturnType<typeof projectSessionTree>
+			).nodes.map((node) => node.id),
+			["u1", "a1", "u3", "a3"],
+		);
 	} finally {
 		await agent.stop();
 	}
