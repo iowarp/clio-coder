@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` array of names (bt-20 P-C).
 - Repetitive test files are consolidated into tables with shared harnesses: loop-guard and template-budget scenarios, one fake ACP transport, both quota providers' error paths, and the damage-control shell segments; constant pins that behaviour already covers are removed (P4-2, P4-5, P4-6, P4-9, P4-10; 214 to 167 tests).
 - The slowest test files run faster with the same coverage: state-file-lock no longer waits on a leaked namespace peer, cli-leaf-help keeps one --help row per router, dispatch-admission judges an empty scratch cwd, upgrade-command runs its plan checks in process, and run-timeout waits out one stalled run instead of two (P4-3, P4-4, P4-7, P4-8).
 - Tests pin gated prompt sections in one condition matrix, and the worker prompt goldens compile from the shipped recipes, so a recipe edit fails its golden (P4-1).
@@ -101,6 +102,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A step checkpoint on a small or uncached route now keeps the previous checkpoint's goal, constraints and decisions, held to the summary room, and its preserved operator request, instead of replacing them with the step lead (D1-2).
+- Checkpoint replay now restores the active decisions recorded before the cut as `[Decisions as of checkpoint]`, beside the task board, up to 12 lines (D1-3).
+- Socket drops (ECONNRESET, EPIPE, ETIMEDOUT and similar), "Connection closed.", "connection reset by peer" and the Codex WebSocket connection limit now retry instead of failing the turn (PI-1).
+- Written-out tool call and empty-reply re-prompts are capped at three in a row instead of three per operator turn; a real call resets the count, so long local-model turns that keep recovering no longer end with no answer (bt-30).
 - A check that passed before the run's last edit no longer marks the run verified or its mutation report quality pass, and read-only shell inspection (`git diff`, `git status`, `cat`, `grep`, ...) no longer counts as a workspace change, so it neither clears a real red check nor stales a final pass; the latter fixes a regression from bt-27 (bt-27b).
 - A worker that hits its refusal limit now gets one reply, with tools refused, to report its work; dispatch judges that report, long refusal reasons keep their remedy, and the failure names untracked files the run left behind (bt-28).
 - The prompt structure id stays the same when an unchanged prompt is recompiled, so telemetry no longer records a new structure per compile (bt-10).
