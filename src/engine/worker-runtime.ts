@@ -12,6 +12,7 @@ import { classifyCallFailure, trackCallFetch } from "../core/call-failure.js";
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
 import { snapshotModelInfo } from "../core/model-tier.js";
 import { isProviderAuthRejection } from "../core/provider-auth-error.js";
+import { systemReminderBlock } from "../core/reminder-framing.js";
 import type { WorkerTelemetryContext } from "../core/telemetry/context.js";
 import { observedToolCallOrigin, withTelemetryContext } from "../core/telemetry/context.js";
 import { telemetryHub } from "../core/telemetry/hub.js";
@@ -589,23 +590,29 @@ function workerResponseFormatFor(input: WorkerRunInput): Record<string, unknown>
 }
 
 /**
- * Append the result-contract reminder to the last tool result of every work
- * round. It is a function of history alone, so a round's reminder is
- * byte-identical on every later request and the provider prefix cache holds;
- * stored history, grounding and eviction never see it. A repair round's own
- * result already quotes the exact shape and is left alone.
+ * Carry the result-contract reminder on the request tail after a work round's
+ * tool results, as a host `<system-reminder>` user message, never inside a
+ * tool result, where the model reads it as text a tool returned. Request-only:
+ * stored history, grounding and eviction never see it, and a later round's
+ * prefix keeps every earlier byte. A repair round's own result already quotes
+ * the exact shape, so it gets none.
  */
-function withResultContractReminders<M extends { role: string }>(messages: M[], reminder: string | null): M[] {
-	if (reminder === null) return messages;
-	let changed = false;
-	const projected = messages.map((message, index) => {
-		if (message.role !== "toolResult" || messages[index + 1]?.role === "toolResult") return message;
-		const result = message as unknown as { toolName?: unknown; content?: unknown };
-		if (result.toolName === RESULT_CONTRACT_REPAIR_TOOL || !Array.isArray(result.content)) return message;
-		changed = true;
-		return { ...message, content: [...result.content, { type: "text", text: reminder }] };
-	});
-	return changed ? projected : messages;
+function withResultContractReminder<M extends { role: string }>(
+	messages: M[],
+	reminder: string | null,
+): { messages: M[]; tail: M | null } {
+	if (reminder === null) return { messages, tail: null };
+	let index = messages.length - 1;
+	let results = 0;
+	for (; index >= 0 && messages[index]?.role !== "assistant"; index--) {
+		const message = messages[index] as unknown as { role: string; toolName?: unknown };
+		if (message.role !== "toolResult") continue;
+		if (message.toolName === RESULT_CONTRACT_REPAIR_TOOL) return { messages, tail: null };
+		results += 1;
+	}
+	if (results === 0) return { messages, tail: null };
+	const tail = { role: "user", content: systemReminderBlock([reminder]), timestamp: Date.now() } as unknown as M;
+	return { messages: [...messages, tail], tail };
 }
 
 /**
@@ -1441,18 +1448,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					? { requiredResult: input.resultContract ? resultContractShape(input.resultContract) : undefined }
 					: undefined;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
-			const reminded = withResultContractReminders(currentContext.messages, contractReminder);
+			const reminded = withResultContractReminder(currentContext.messages, contractReminder).tail;
 			const pressure = {
 				messages: currentContext.messages,
-				overheadTokens: reminded.reduce(
-					(sum, message, index) =>
-						message === currentContext.messages[index]
-							? sum
-							: sum +
-								estimateAgentMessageTokens(message as AgentMessage) -
-								estimateAgentMessageTokens(currentContext.messages[index] as AgentMessage),
-					0,
-				),
+				overheadTokens: reminded === null ? 0 : estimateAgentMessageTokens(reminded as AgentMessage),
 				// Priced with the tail directive the round will carry; only the estimate sees it here.
 				systemPrompt:
 					synthesisDirective === undefined
@@ -1516,7 +1515,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			let roundApiKey: string | undefined;
 			// `inputTokens` is the count the guard admitted `history` at; admission and the clamp size it from that.
 			const request = (history: AgentMessage[], inputTokens: number) => {
-				const projected = withResultContractReminders(history, contractReminder);
+				const projected = withResultContractReminder(history, contractReminder).messages;
 				const middlewareChoice = middlewareToolChoice.current();
 				// Codex retains the work phase's parallel setting for WS deltas;
 				// beforeToolCall still rejects mixed or duplicate handoffs (#423).
