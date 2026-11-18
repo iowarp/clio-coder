@@ -5,6 +5,8 @@
 
 import { createHash } from "node:crypto";
 import { isVerifyListing } from "../../tools/verify/surface.js";
+import { createRedactionTally, redactSecretsText } from "../evidence/redact.js";
+import { sanitizeCallTargetText } from "../safety/call-target.js";
 import type { CheckFreshness, RunEffects } from "../safety/run-effects.js";
 import type {
 	RunHostVerification,
@@ -12,6 +14,7 @@ import type {
 	RunResultDraft,
 	RunResultQuality,
 	RunResultTypedValidationFact,
+	RunResultUnclassifiedCommands,
 	RunResultVerification,
 } from "./types.js";
 
@@ -280,6 +283,29 @@ export function typedValidationFactsFromObservedEffects(
 		validatorDigest: createHash("sha256").update(canonicalJson({ command, passed }), "utf8").digest("hex"),
 		passed,
 	}));
+}
+
+const UNCLASSIFIED_SHOWN = 5;
+const UNCLASSIFIED_CHARS = 160;
+
+/**
+ * The calls the check classifier could not read that ran after the run's latest check outcome, as the receipt
+ * discloses them: the count, and the first few commands redacted and cut to one bounded line. They neither settled nor
+ * cleared that outcome, so the disclosure sits beside the verdict and never changes it. Null when none ran.
+ */
+export function unclassifiedAfterLastCheck(
+	effects: Pick<RunEffects, "unclassifiedAfterLastCheck">,
+): RunResultUnclassifiedCommands | null {
+	const commands = effects.unclassifiedAfterLastCheck ?? [];
+	if (commands.length === 0) return null;
+	const tally = createRedactionTally();
+	return {
+		count: commands.length,
+		commands: commands.slice(0, UNCLASSIFIED_SHOWN).map((command) => {
+			const clean = sanitizeCallTargetText(redactSecretsText(command, tally));
+			return clean.length > UNCLASSIFIED_CHARS ? `${clean.slice(0, UNCLASSIFIED_CHARS - 1)}…` : clean;
+		}),
+	};
 }
 
 function isValidationTool(tool: string): boolean {

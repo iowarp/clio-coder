@@ -21,8 +21,8 @@ import {
 } from "../../src/domains/dispatch/run-findings.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
-import { isReadOnlyInspectionCommand } from "../../src/domains/safety/protected-artifacts.js";
-import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
+import { type CallVerdict, classifyCall } from "../../src/domains/safety/check-classifier.js";
+import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
 /** A run with no workspace mutation, where every check ran on the final tree. */
@@ -871,38 +871,91 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	}
 });
 
-it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {
-	for (const command of [
-		"file -C -m mymagic",
-		"rg --hostname-bin=./x.sh foo",
-		"git diff --ext-diff",
-		"git show --textconv",
-		"sed -i s/a/b/ a.ts",
-		"sed 's/a/b/w out' a.ts",
-		"awk '{system(\"sh\")}' a.ts",
-		"sort -o out a.ts",
-		// Long-option abbreviations and a delimiter inside a bracket expression (x4-3).
-		"sort --out=src/a.ts src/a.ts",
-		"sort --out src/a.ts",
-		"sort --compress-prog=sh a.ts",
-		"sed -n 's/[/]/p/w out1' a.ts",
-	])
-		strictEqual(isReadOnlyInspectionCommand(command, false), false, command);
-	for (const command of [
-		"git status",
-		"git diff",
-		"git log -p",
-		"sed -n 1,80p a.ts",
+it("one classifier reads every call as a check, an inspection, a mutation or unknown (x5-1, x5-2, x1-3)", () => {
+	const cwd = process.cwd();
+	const verdict = (tool: string, args: Record<string, unknown>, gitHelpers = false): CallVerdict =>
+		classifyCall(tool, args, { cwd, gitHelpers, outputTarget: checkOutputReader(cwd) }).verdict;
+	const bash = (command: string, gitHelpers = false) => verdict("bash", { command }, gitHelpers);
+	const table: ReadonlyArray<readonly [string, CallVerdict]> = [
+		["npm test", "check"],
+		["npm test -- --runInBand", "check"],
+		["pnpm exec vitest run", "check"],
+		["npx tsc --noEmit", "check"],
+		["node --test tests/a.test.ts", "check"],
+		["pytest -q", "check"],
+		["cd lib && make test", "check"],
+		["npm test && node codemod.mjs", "check"],
+		["git status", "inspection"],
+		["git diff", "inspection"],
+		["git log -p", "inspection"],
+		["sed -n 1,80p a.ts", "inspection"],
 		// A bracket expression with no write behind it reads (x5-5).
-		"sed -n '/^[[:space:]]*export/p' a.ts",
-		"awk '{print $1}' a.ts",
-		"sort --reverse --key=2 a.ts",
-	])
-		strictEqual(isReadOnlyInspectionCommand(command, false), true, command);
-	// Where git config names a helper program, only log and show with both helpers switched off still count.
+		["sed -n '/^[[:space:]]*export/p' a.ts", "inspection"],
+		["awk '{print $1}' a.ts", "inspection"],
+		["sort --reverse --key=2 a.ts", "inspection"],
+		["cd src && ls", "inspection"],
+		["diff a.ts b.ts", "inspection"],
+		["echo $(cat a.ts)", "inspection"],
+		// Helpers that write the tree or run another program (x1-3, x4-3).
+		["file -C -m mymagic", "mutation"],
+		["rg --hostname-bin=./x.sh foo", "mutation"],
+		["git diff --ext-diff", "mutation"],
+		["git show --textconv", "mutation"],
+		["sed -i s/a/b/ a.ts", "mutation"],
+		["sed 's/a/b/w out' a.ts", "mutation"],
+		["awk '{system(\"sh\")}' a.ts", "mutation"],
+		["sort -o out a.ts", "mutation"],
+		["sort --out=src/a.ts src/a.ts", "mutation"],
+		["sort --out src/a.ts", "mutation"],
+		["sort --compress-prog=sh a.ts", "mutation"],
+		["sed -n 's/[/]/p/w out1' a.ts", "mutation"],
+		["echo x > src/a.ts", "mutation"],
+		["rm -rf dist", "mutation"],
+		["npm install", "mutation"],
+		["npx jest -u", "mutation"],
+		['node -e \'require("fs").writeFileSync("a","")\'', "mutation"],
+		["tsc", "mutation"],
+		["black src", "mutation"],
+		["ls && git stash pop", "mutation"],
+		// Neither a known check, reader nor writer: it neither settles nor clears.
+		["node codemod.mjs", "unknown"],
+		["python script.py", "unknown"],
+		["make build", "unknown"],
+		["npm test -- --import ./loader.mjs", "unknown"],
+		["source env.sh", "unknown"],
+		["echo $(npm test)", "unknown"],
+		["black --check src", "unknown"],
+	];
+	for (const [command, expected] of table) strictEqual(bash(command), expected, command);
+	strictEqual(verdict("read", { path: "a.ts" }), "inspection");
+	strictEqual(verdict("edit", { path: "src/a.ts" }), "mutation");
+	strictEqual(verdict("verify", { check: "test" }), "check");
+	strictEqual(verdict("verify", {}), "inspection");
+	strictEqual(verdict("run_script", { script: "x" }), "mutation");
+	strictEqual(verdict("mcp__server__tool", {}), "unknown");
+	// Where git config names a helper program, only log and show with both helpers switched off still read.
 	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
-		strictEqual(isReadOnlyInspectionCommand(command, true), false, command);
-	strictEqual(isReadOnlyInspectionCommand("git log -p --no-ext-diff --no-textconv", true), true);
+		strictEqual(bash(command, true), "mutation", command);
+	strictEqual(bash("git log -p --no-ext-diff --no-textconv", true), "inspection");
+	// An unknown call after a pass keeps it and is listed beside it; an inspection is not, and a new outcome resets it.
+	const recorder = createRunEffectsRecorder(cwd);
+	for (const [id, tool, args] of [
+		["early", "bash", { command: "node before.mjs" }],
+		["test", "bash", { command: "npm test" }],
+		["look", "bash", { command: "git status" }],
+		["codemod", "bash", { command: "node codemod.mjs" }],
+		["mcp", "mcp__server__tool", {}],
+	] as const) {
+		recorder.start(id, tool, args);
+		recorder.checkOutcome(id, "ok");
+		recorder.finish(id, false);
+	}
+	deepStrictEqual([...recorder.snapshot().validationCommands], ["npm test"]);
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, ["node codemod.mjs", "mcp__server__tool"]);
+	recorder.start("again", "bash", { command: "npm test" });
+	recorder.checkOutcome("again", "ok");
+	recorder.finish("again", false);
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
 	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
 	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
 	const env: NodeJS.ProcessEnv = {

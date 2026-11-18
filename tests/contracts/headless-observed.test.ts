@@ -46,6 +46,24 @@ test("the observed line omits a run with no tool calls and names a write with no
 		formatHeadlessObservedLine({ toolCalls: 2, refused: 1, writes: 1, checks: [] }),
 		"clio-coder run: observed: 2 tool calls, 1 refused · 1 write · no check observed after the last write",
 	);
+	// An unclassified call after the last check is named beside the standing check, which it leaves in place.
+	const after = observeHeadlessRun({
+		entries: [...edit, ...failingCheck],
+		start: 0,
+		effects: {
+			validationOutcomes: new Map([["pytest", false]]),
+			checkOutcomes: new Map([["pytest", false]]),
+			unclassifiedAfterLastCheck: ["node codemod.mjs"],
+		},
+		toolCalls: 3,
+		refused: 0,
+		writes: 1,
+	});
+	strictEqual(after.unclassifiedAfterLastCheck, 1);
+	match(
+		formatHeadlessObservedLine(after) ?? "",
+		/ · check failed: pytest · 1 unclassified command ran after the last check$/,
+	);
 });
 
 test("a run whose verify call found no check in the workspace is observed as no checks declared", () => {

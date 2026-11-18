@@ -479,6 +479,7 @@ import {
 	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
+	unclassifiedAfterLastCheck,
 	verificationWithHostVerdict,
 	verifyCallStart,
 } from "./run-findings.js";
@@ -9172,6 +9173,7 @@ export function createDispatchBundle(
 				...typedValidationFactsFromVerifyCalls(finalToolStats, verifyCalls.calls, checkFreshness),
 				...typedValidationFactsFromObservedEffects(runEffects.snapshot()),
 			];
+			const unclassified = unclassifiedAfterLastCheck(runEffects.snapshot());
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
 			const telemetryIngestionErrors = telemetryIngestionErrorsOf(result);
 			const workspaceMutationPossible =
@@ -9214,6 +9216,7 @@ export function createDispatchBundle(
 				rulesApplied: lifecycle.rulesApplied,
 				operatorProfileApplied: lifecycle.operatorProfileApplied,
 				...(validationGrounding !== null ? { validationGrounding } : {}),
+				...(unclassified !== null ? { unclassifiedAfterLastCheck: unclassified } : {}),
 				...(lifecycle.capabilityMismatch !== null
 					? {
 							capabilityMismatch: {

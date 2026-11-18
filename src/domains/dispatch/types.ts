@@ -854,6 +854,12 @@ export interface RunResultOutput {
  */
 export type ReceiptVerificationState = "verified" | "unverified" | "not_applicable" | "unknown";
 
+export interface RunResultUnclassifiedCommands {
+	count: number;
+	/** The first few, redacted and bounded to one line each. */
+	commands: string[];
+}
+
 export interface RunResultVerification {
 	state: ReceiptVerificationState;
 	basis:
@@ -1147,6 +1153,12 @@ export interface RunResult {
 	delegation?: RunResultDelegation;
 	/** Passing validation claims measured against executed commands; absent when none were claimed. */
 	validationGrounding?: RunValidationGrounding;
+	/**
+	 * Calls the check classifier could not read (neither check, inspection nor mutation) that ran after the run's
+	 * latest check outcome. They neither settled nor cleared it, so `verification` stands as observed; this only
+	 * discloses them. Absent when none ran, and on receipts written before the field existed.
+	 */
+	unclassifiedAfterLastCheck?: RunResultUnclassifiedCommands;
 	/** Read-only recipe admitted against a mutating task; absent when the pairing was sound. */
 	capabilityMismatch?: RunCapabilityMismatch;
 	/**
