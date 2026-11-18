@@ -764,14 +764,11 @@ describe("W10 (F10 -> CF-10): the council peer briefing", () => {
 	/**
 	 * The seed assertion (SPEC §3.3 "Seeds", F1: a worker seed carries bodies the parent's request stubs). The parent
 	 * sends c1, an older 33 KB read that an identical newer read supersedes, as a stub; a forked seat's seed must carry
-	 * c1 as the parent's request did. Today the stub lives only in the outgoing request and the seed copies the body;
-	 * CF-5's S0 rewrites the history the seed is captured from. S0 acts only on an uncached route, so the setup pins the
-	 * parent's route to `promptCaching: false`; on a cached route the parent keeps c1's body and so must the seed.
+	 * c1 as the parent's request did. S0 rewrites the agent history the seed is captured from, so the stub reaches the
+	 * seed. S0 acts only on an uncached route, so the setup pins the parent's route to `promptCaching: false`; on a
+	 * cached route the parent keeps c1's body and so must the seed.
 	 */
-	it("a forked seat's seed carries c1 as the parent's request sent it", {
-		todo: "CF-10 seed, needs CF-5",
-		timeout: 30_000,
-	}, async (t) => {
+	it("a forked seat's seed carries c1 as the parent's request sent it", { timeout: 30_000 }, async (t) => {
 		const SIZE = 33 * 1024;
 		const OLDER = body("OLDER", SIZE);
 		const server = await startCaptureServer(() => ({ text: "answered" }));
