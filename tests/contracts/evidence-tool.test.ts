@@ -174,7 +174,7 @@ describe("evidence tool", () => {
 			failedValidations: ["unit tests before implementation"],
 			baselines: [{ name: "red baseline", passed: false }],
 		});
-		deepStrictEqual((await evidenceDetailSnapshot("fixture")).quality, { verdict: "fail", failedValidations: 1 });
+		deepStrictEqual((await evidenceDetailSnapshot("fixture")).quality, { verdict: "fail", failedValidationCount: 1 });
 	});
 
 	it("reports agent-managed delegation from a verified run", async () => {
