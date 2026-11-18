@@ -12,7 +12,7 @@ import type {
 	RerankResult,
 } from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
-import type { TargetDescriptor } from "./target-descriptor.js";
+import type { CopilotContextTier, TargetDescriptor } from "./target-descriptor.js";
 
 export type RuntimeKind = "http" | "sdk" | "subprocess";
 export type RuntimeTier = "protocol" | "cloud" | "local-native" | "subscription";
@@ -128,6 +128,8 @@ export interface ProbeResult {
 	discoveredCapabilities?: Partial<CapabilityFlags>;
 	/** Probe-only capabilities keyed by wire model id when a runtime can list model metadata. */
 	modelCapabilities?: Record<string, Partial<CapabilityFlags>>;
+	/** Each listed model's window on every context tier, for a runtime whose window depends on the target's tier. */
+	modelContextWindows?: Record<string, Partial<Record<CopilotContextTier, number>>>;
 	/** Wire model id those discovered capabilities describe, when known. */
 	capabilityModelId?: string;
 	/**

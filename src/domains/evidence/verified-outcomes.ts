@@ -128,28 +128,49 @@ export function runHostVerified(record: RunTelemetryV1 | null): boolean {
 }
 
 /**
+ * Where a fork's own entries start: at the first message after the rows of the turn it branched at. Rows between them
+ * may be copied ones parented to that turn, so they are not known to be its own and count nothing. A ledger that does
+ * not hold the turn shows no boundary, so nothing in it is known to be the fork's own.
+ */
+function forkOwnStart(entries: ReadonlyArray<unknown>, forkTurnId: string): number {
+	let forkPoint = -1;
+	for (const [index, entry] of entries.entries()) if (isRecord(entry) && entry.turnId === forkTurnId) forkPoint = index;
+	if (forkPoint < 0) return entries.length;
+	for (let index = forkPoint + 1; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (isRecord(entry) && entry.kind === "message") return index;
+	}
+	return entries.length;
+}
+
+/**
  * Count a session's verified outcomes. `entries` is the session's whole ledger, every branch included, as its token
  * and cost totals cover every branch; gateway chain children must already be expanded. `verified` names the worker
- * runs the session's telemetry references whose sealed record passes `runHostVerified`. `forkedAt` is a fork's own
- * start: the entries it copied from its parent were all recorded before it, so a pass they hold is the parent's and
- * counts nothing here, as the fork's totals hold only its own spend. They still feed the task board fold, because a
- * task the fork marks done may have been opened before it.
+ * runs the session's telemetry references whose sealed record passes `runHostVerified`. `forkTurnId` is the parent
+ * turn a fork branched at. The entries a fork copied from its parent lead its ledger and end at that turn's rows, so a
+ * pass they hold is the parent's and counts nothing here, as the fork's totals hold only its own spend. The cut is by
+ * position, not by time, so a skewed clock cannot move a pass across it. Copied rows still feed the task board fold,
+ * because a task the fork marks done may have been opened before it.
  */
 export function countVerifiedOutcomes(
 	entries: ReadonlyArray<unknown>,
 	verified: ReadonlySet<string>,
-	forkedAt: string | null = null,
+	forkTurnId: string | null = null,
 ): VerifiedOutcomeCount {
-	const fromMs = forkedAt === null ? Number.NaN : Date.parse(forkedAt);
-	// In a fork, an entry with no readable time is not known to be its own, so it counts nothing.
-	const own = (at: string): boolean => Number.isNaN(fromMs) || Date.parse(at) >= fromMs;
+	const ownFrom = forkTurnId === null ? 0 : forkOwnStart(entries, forkTurnId);
+	// A task's pass carries the time of the entry that recorded it; in a fork it is its own only when that entry is.
+	const ownTimes = new Set<string>();
+	const copiedTimes = new Set<string>();
+	for (const [index, entry] of entries.entries())
+		if (isRecord(entry)) (index >= ownFrom ? ownTimes : copiedTimes).add(str(entry.timestamp));
+	const ownPass = (at: string): boolean => forkTurnId === null || (ownTimes.has(at) && !copiedTimes.has(at));
 	const checks = new Set<string>();
 	const hostKeys = new Map<string, Array<string | null>>();
 	/** Ledger times of the entries that recorded a counted pass or a host-verified run, counted or folded. */
 	const counted = new Set<string>();
-	for (const entry of entries) {
+	for (const [index, entry] of entries.entries()) {
 		const result = toolResult(entry);
-		if (result === null || !own(result.at)) continue;
+		if (result === null || index < ownFrom) continue;
 		const key = passedCheckKey(result.details);
 		if (key !== null) checks.add(key);
 		const dispatched = result.tool === "dispatch";
@@ -168,7 +189,7 @@ export function countVerifiedOutcomes(
 	for (const board of foldSessionTaskHistory(entries))
 		for (const task of board.tasks) {
 			if (taskCompletionStanding(task) !== "checked") continue;
-			if (observedTaskChecks(task).passed.some((pass) => own(pass.observedAt) && !counted.has(pass.observedAt)))
+			if (observedTaskChecks(task).passed.some((pass) => ownPass(pass.observedAt) && !counted.has(pass.observedAt)))
 				tasks += 1;
 		}
 	return { total: checks.size + workers.size + tasks, checks: checks.size, workers: workers.size, tasks };

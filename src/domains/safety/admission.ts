@@ -9,7 +9,12 @@ import type { ActionClass, ClassifierCall } from "./action-classifier.js";
 import type { AutonomyExposure, AutonomyLevel } from "./autonomy.js";
 import { autonomyAskRejection, DEFAULT_AUTONOMY_LEVEL, mapAutonomy } from "./autonomy.js";
 import { autonomyCallInputs } from "./autonomy-inputs.js";
-import { GIT_CONTROL_FILE_RULE_ID, gitControlFileReason, SNAPSHOT_RECOVERABLE_REASON_CODE } from "./containment.js";
+import {
+	GIT_CONTROL_FILE_RULE_ID,
+	gitControlFileReason,
+	SCRATCH_DISPOSABLE_REASON_CODE,
+	SNAPSHOT_RECOVERABLE_REASON_CODE,
+} from "./containment.js";
 import type { SafetyContract, SafetyDecision } from "./contract.js";
 import { CONFIRMED_POSTURE, MAIN_GRANT_POSTURE } from "./contract.js";
 import { classifyBashGit } from "./git-policy.js";
@@ -635,9 +640,11 @@ function admit(input: AdmissionInput): AdmissionDisposition {
 		// The operator's default: a contained call runs in the main-session
 		// sandbox, which bounds what it writes and hides credentials, so neither
 		// its recognition nor a test runner's consent asks; a lone discard or
-		// delete the snapshot taken right before it undoes runs.
+		// delete the snapshot taken right before it undoes runs, as does a lone
+		// delete confined to scratch roots, whose contents are disposable.
 		if (operatorDefault !== undefined) {
-			if (effectDecision.policy?.reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE) continue;
+			const reasonCode = effectDecision.policy?.reasonCode;
+			if (reasonCode === SNAPSHOT_RECOVERABLE_REASON_CODE || reasonCode === SCRATCH_DISPOSABLE_REASON_CODE) continue;
 			const actionClass = effectDecision.classification.actionClass;
 			if (effectDecision.policy?.shellSandbox !== undefined && CONTAINED_CLASSES.has(actionClass)) continue;
 		}

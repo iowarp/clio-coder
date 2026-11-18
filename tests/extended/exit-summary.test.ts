@@ -401,7 +401,14 @@ test("the exit card divides the session's spend over its distinct verified outco
 	deepStrictEqual(countVerifiedOutcomes(entries, new Set(["run-hidden"])).workers, 0);
 	deepStrictEqual(countVerifiedOutcomes([], new Set(["run-hidden"])).workers, 1);
 	// A fork's ledger copied its parent's passes and done tasks; it counts only what it recorded after it forked (D3b).
-	const copied = [...entries.map((entry, i) => ({ ...entry, timestamp: `2026-11-06T00:0${i}:00.000Z` })), ledger];
+	// The copied rows end at the turn it branched at, and position decides, so a parent clock running ahead and a fork
+	// clock running behind cannot move a pass across the cut (bt-fork-verified limit).
+	const forkPoint = { kind: "message", role: "user", turnId: "turn-1", parentTurnId: null, payload: { content: "go" } };
+	const copied = [
+		...entries.map((entry, i) => ({ ...entry, turnId: `parent-${i}`, timestamp: `2026-11-06T00:0${i + 6}:00.000Z` })),
+		{ ...ledger, turnId: "parent-board" },
+		{ ...forkPoint, timestamp: "2026-11-06T00:04:00.000Z" },
+	];
 	const forkedAt = "2026-11-06T00:05:00.000Z";
 	const forkedRow = makeTelemetryRecord(
 		"session.forked",
@@ -417,7 +424,10 @@ test("the exit card divides the session's spend over its distinct verified outco
 		return spend.verified;
 	};
 	strictEqual(forkCard(copied).kind, "none");
-	const own = forkCard([...copied, { ...passed("reproduce", "repro", "e"), timestamp: "2026-11-06T00:06:00.000Z" }]);
+	const own = forkCard([
+		...copied,
+		{ ...passed("reproduce", "repro", "e"), turnId: "fork-1", timestamp: "2026-11-06T00:03:00.000Z" },
+	]);
 	ok(own.kind === "counted");
 	deepStrictEqual([own.count, own.parts], ["1", ["1 reproduce or numeric-compare pass"]]);
 });

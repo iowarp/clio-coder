@@ -258,18 +258,17 @@ export type VerifiedOutcomeWords =
 /**
  * The session's verified outcomes from its whole ledger and the worker runs its telemetry references. A run's record
  * is read and its seal checked here, so a caller reads this once per render, not per row. A fork counts only what it
- * recorded itself: its journal opens with its `session.forked` row, so its first record is where its own ledger starts.
+ * recorded itself: its `session.forked` row names the parent turn its ledger's copied entries end at.
  */
 export function sessionVerifiedOutcomes(view: TelemetryView, entries: ReadonlyArray<unknown>): VerifiedOutcomeCount {
-	const session = view.session();
-	const forkedAt = session.lineage.parent === null ? null : session.lifetime.firstRecordAt;
+	const forkTurnId = view.session().lineage.parent?.turnId ?? null;
 	const verified = new Set<string>();
 	try {
 		for (const row of view.runs()) if (runHostVerified(view.run(row.runId))) verified.add(row.runId);
 	} catch {
 		// A read model that cannot list runs leaves the runs out; the ledger's own outcomes still count.
 	}
-	return countVerifiedOutcomes(expandChainMessages(entries), verified, forkedAt);
+	return countVerifiedOutcomes(expandChainMessages(entries), verified, forkTurnId);
 }
 
 /** Command checks such as unit tests are not judged outcomes, and the words say so rather than read as nothing verified. */

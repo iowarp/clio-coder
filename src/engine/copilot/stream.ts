@@ -1203,6 +1203,13 @@ async function runStep(
 	signal?.addEventListener("abort", onAbort, { once: true });
 	void stream.result().finally(() => signal?.removeEventListener("abort", onAbort));
 	const key = options?.sessionId ?? "default";
+	// Clio builds no HTTP body here: each request it hands the runtime is the payload, so CLIO_CODER_PROVIDER_DUMP_PATH
+	// can audit it (c2b-1). A replacement has no body to patch and is ignored. False once the step has ended.
+	const onPayload = options?.onPayload;
+	const request = async (payload: Record<string, unknown>): Promise<boolean> => {
+		if (onPayload !== undefined) await onPayload(payload, model);
+		return !step.isFinished;
+	};
 	// A host policy update (#423) is a posture change, not system text: the SDK fixes a session's system
 	// message at creation, so folding the update into it would discard the session and re-send the whole
 	// transcript. It is delivered as one host turn instead and the session is kept.
@@ -1240,8 +1247,10 @@ async function runStep(
 		if (!conversation) {
 			evictFor(key);
 			const base = { key, model, systemPrompt, tools, reasoningEffort, contextTier };
+			const session = { model: model.id, systemMessage: systemPrompt, tools, reasoningEffort, contextTier };
 			let opened: Conversation | null = null;
 			if (stored) {
+				if (!(await request({ request: "resumeSession", sessionId: stored.sessionId, ...session }))) return;
 				opened = await openConversation({ ...base, resume: stored }, signal).catch((error: unknown) => {
 					if (error instanceof CopilotOpenCancelled) throw error;
 					// A session the runtime cannot resume is stale: the transcript is seeded into a new one.
@@ -1255,6 +1264,7 @@ async function runStep(
 					persistedByKey.set(key, opened);
 				}
 			}
+			if (!opened && !(await request({ request: "createSession", ...session }))) return;
 			opened ??= await openConversation(base, signal);
 			if (step.isFinished) {
 				// Ended another way while the session was being created: it never carries a message.
@@ -1323,6 +1333,7 @@ async function runStep(
 				...(reasoningEffort !== undefined ? { reasoningEffort: reasoningEffort as ReasoningEffort } : {}),
 				...tierOption,
 			};
+			if (!(await request({ request: "setModel", model: model.id, ...switchOptions }))) return;
 			await active.session.setModel(model.id, Object.keys(switchOptions).length > 0 ? switchOptions : undefined);
 			if (step.isFinished) return;
 			active.model = model.id;
@@ -1341,6 +1352,7 @@ async function runStep(
 			.join("\n\n");
 		const toolsHash = toolsSignature(tools);
 		if (reused && active.toolsHash !== toolsHash) {
+			if (!(await request({ request: "setTools", tools }))) return;
 			await active.session.setTools(declareTools(() => active, tools));
 			if (step.isFinished) return;
 			active.toolsHash = toolsHash;
@@ -1365,22 +1377,31 @@ async function runStep(
 			const steerImages = after.flatMap((message) => imagesOf(message.content));
 			const immediate = [policyText, steer].filter((text) => text.length > 0).join("\n\n");
 			if (immediate.length > 0 || steerImages.length > 0) {
-				await active.session.send({
+				const steerSend = {
 					prompt: immediate,
-					mode: "immediate",
+					mode: "immediate" as const,
 					...(steerImages.length > 0 ? { attachments: blobAttachments(steerImages) } : {}),
-				});
+				};
+				if (!(await request({ request: "send", ...steerSend }))) return;
+				await active.session.send(steerSend);
 				if (step.isFinished) return;
 			}
 			const answered = new Set(results.map((message) => message.toolCallId));
-			for (const [index, message] of results.entries()) {
-				active.deliver(message.toolCallId, toolResultObject(message, index === results.length - 1 ? extra : ""));
-			}
+			const delivered: Array<ToolResultObject & { toolCallId: string }> = results.map((message, index) => ({
+				toolCallId: message.toolCallId,
+				...toolResultObject(message, index === results.length - 1 ? extra : ""),
+			}));
 			// Every requested call settles even when Clio's loop produced no result for it.
 			for (const id of active.pendingToolCallIds) {
 				if (!answered.has(id))
-					active.deliver(id, { textResultForLlm: "The host returned no result for this call.", resultType: "failure" });
+					delivered.push({
+						toolCallId: id,
+						textResultForLlm: "The host returned no result for this call.",
+						resultType: "failure",
+					});
 			}
+			if (!(await request({ request: "toolResults", results: delivered }))) return;
+			for (const { toolCallId, ...result } of delivered) active.deliver(toolCallId, result);
 		} else {
 			const framingText = tailFraming
 				.map((message) => textOf(message.content))
@@ -1401,10 +1422,12 @@ async function runStep(
 							images: seeded.images,
 						};
 					})();
-			await active.session.send({
+			const send = {
 				prompt: [policyText, seed.prompt].filter((text) => text.length > 0).join("\n\n"),
 				...(seed.images.length > 0 ? { attachments: blobAttachments(seed.images) } : {}),
-			});
+			};
+			if (!(await request({ request: "send", ...send }))) return;
+			await active.session.send(send);
 		}
 		for (const id of policyIds) active.policiesSent.add(id);
 	} catch (error) {

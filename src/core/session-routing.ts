@@ -174,6 +174,8 @@ export interface ResumedRoute {
 	model: string | null;
 	/** Present when the session recorded its initial thinking level or a change. */
 	thinkingLevel?: SessionThinkingLevel;
+	/** The selection the route clamped to `thinkingLevel`, when the newest thinking row recorded one (bt-37). */
+	thinkingSelection?: SessionThinkingLevel;
 }
 
 export interface ResumedRoutingPlan {
@@ -213,7 +215,10 @@ export function planResumedRouting(
 	// Legacy ledgers cannot recover their initial intent; use the configured default,
 	// never the thinking level of the conversation being left (AUD-3 finding 2).
 	const thinkingLevel = route.thinkingLevel ?? defaultThinkingLevel;
-	if (pinned.thinking !== true && thinkingLevel !== (settings.chat.thinkingLevel ?? "off")) {
+	const liveThinking = settings.chat.thinkingLevel ?? "off";
+	// The live selection is the one the route clamped last time: the same route clamps it the same way, so the
+	// session keeps the source live named and its next request rebuilds byte-identical.
+	if (pinned.thinking !== true && thinkingLevel !== liveThinking && route.thinkingSelection !== liveThinking) {
 		orchestrator.thinkingLevel = thinkingLevel;
 	}
 	return { patch: Object.keys(orchestrator).length > 0 ? { orchestrator } : null, notice };
