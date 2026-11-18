@@ -19,7 +19,7 @@ const HELP = `Usage:
   clio-coder context index [--json]
   clio-coder context map [--out <path>] [--json]
   clio-coder context replay (--sessions <path>... | --synthetic <corpus>...) [options]
-  clio-coder context working-set --session <id|path>
+  clio-coder context working-set (--session | --verify) <id|path>
 
 Project context commands:
   clio-coder context              show project context status (CLIO-CODER.md, preload, codemap)
@@ -30,7 +30,7 @@ Project context commands:
   clio-coder context index        build the codemap index without model calls
   clio-coder context map          create a native interactive HTML codebase map
   clio-coder context replay       compare working-set policies over Clio ledgers
-  clio-coder context working-set  inspect one session's working-set fold and path index
+  clio-coder context working-set  inspect one session's working-set fold and path index, or verify its attempt receipts
 `;
 
 function wikiRecoveryLines(meta: WikiMeta | null): string[] {

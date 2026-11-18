@@ -1,9 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import {
 	type CapturedRequest,
 	contextElements,
@@ -258,4 +259,76 @@ describe("surface capture", () => {
 			deepStrictEqual(tapped, requests, "the adapter payloads are the captured requests");
 		});
 	}
+
+	it("headless run: `context working-set --verify` matches every main attempt to its receipt across an eviction and a checkpoint (ContextFold CF-9, F14)", {
+		timeout: 300_000,
+	}, async (t) => {
+		const turns: Record<string, string[]> = {
+			"read the first notes": ["a.txt", "b.txt", "c.txt", "d.txt"],
+			"read the later notes": ["e.txt", "f.txt"],
+		};
+		// A request without tools is the summary call; a turn reads its files one call at a time.
+		const server = await startCaptureServer((request) => {
+			if (!Array.isArray(request.body.tools)) return { text: syntheticCompactionSummary("read the notes") };
+			const elements = wireElements(request);
+			const opened = elements.findLastIndex(
+				(element) => element.startsWith("user:") && Object.keys(turns).some((prompt) => element.includes(prompt)),
+			);
+			const files = Object.entries(turns).find(([prompt]) => elements[opened]?.includes(prompt))?.[1] ?? [];
+			const reads = elements.slice(opened + 1).filter((element) => element.startsWith("result:")).length;
+			const next = files[reads];
+			return next ? { calls: [{ id: `call_${next}`, name: "read", arguments: { path: next } }] } : { text: "done" };
+		});
+		const scratch = headlessScratch("cf-verify-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		const line = `${"n".repeat(67)}\n`;
+		for (const file of Object.values(turns).flat())
+			writeFileSync(path.join(project, file), line.repeat(Math.ceil((22 * 1024) / line.length)));
+		// The first run evicts under a short protected tail; the second, without the working set, checkpoints.
+		const settingsFile = path.join(scratch.configDir, "settings.yaml");
+		const settings = [
+			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 2"),
+			(yaml: string) => yaml.replace(/(\n {2}workingSet:\n(?: {4}.*\n)*?) {4}enabled: true\n/, "$1    enabled: false\n"),
+		];
+		for (const [index, prompt] of Object.keys(turns).entries()) {
+			const yaml = readFileSync(settingsFile, "utf8");
+			const changed = settings[index]?.(yaml) ?? yaml;
+			ok(changed !== yaml, "the settings edit applied");
+			writeFileSync(settingsFile, changed);
+			const result = await runCli(
+				["--no-context-files", "--no-skills", "run", ...(index > 0 ? ["--continue"] : []), prompt],
+				{ env: scratch.env, cwd: project, timeoutMs: 240_000 },
+			);
+			strictEqual(result.code, 0, result.stderr);
+		}
+		const sessionsRoot = path.join(scratch.stateDir, "sessions");
+		const [cwdHash = ""] = readdirSync(sessionsRoot);
+		const [id = ""] = readdirSync(path.join(sessionsRoot, cwdHash));
+		const kinds = readFileSync(path.join(sessionsRoot, cwdHash, id, "current.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((entry) => (JSON.parse(entry) as { kind?: string }).kind);
+		ok(kinds.includes("contextEviction") && kinds.includes("compactionSummary"), "the session folded both ways");
+		const verify = await runCli(["context", "working-set", "--verify", id], { env: scratch.env, cwd: project });
+		strictEqual(verify.code, 0, verify.stdout + verify.stderr);
+		const attempts = verify.stdout.split("\n").filter((row) => / attempt \d+: /u.test(row));
+		const main = attempts.filter((row) => row.includes(" main attempt "));
+		ok(main.length >= 8, verify.stdout);
+		deepStrictEqual(
+			main.filter((row) => !row.endsWith(": verified")),
+			[],
+			"every main attempt is verified",
+		);
+		ok(
+			attempts.some((row) => row.endsWith(": not-verifiable (summary call)")),
+			verify.stdout,
+		);
+		ok(verify.stdout.includes("fold decisions: 0 missing, 0 duplicate, 0 orphan"), verify.stdout);
+	});
 });
