@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { parsePackagedYaml, preparsePackagedYaml } from "../../src/core/packaged-yaml.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { compile, compileWorker, type SessionPromptInputs } from "../../src/domains/prompts/compiler.js";
 import { type FragmentTable, type LoadedFragment, loadFragments } from "../../src/domains/prompts/fragment-loader.js";
@@ -50,6 +51,19 @@ describe("fragment preconditions in frontmatter", () => {
 				throws(() => loadFragments(root), pattern);
 			});
 		}
+	});
+
+	it("records each frontmatter parse for the build and keeps a value JSON cannot carry on the parser (Astra r8-3)", () => {
+		withFragments({ "a.md": `${header("test.a", "requires: [job]\n")}body\n` }, (root) => {
+			const asset = JSON.parse(preparsePackagedYaml(() => loadFragments(root))) as { entries: Record<string, string> };
+			deepStrictEqual(
+				Object.values(asset.entries).map((json) => JSON.parse(json)),
+				[{ id: "test.a", version: 1, description: "test fragment", requires: ["job"] }],
+			);
+		});
+		const nan = "limit: .nan\n";
+		deepStrictEqual(JSON.parse(preparsePackagedYaml(() => parsePackagedYaml(nan))).entries, {});
+		ok(Number.isNaN((parsePackagedYaml(nan) as { limit: number }).limit));
 	});
 });
 

@@ -97,7 +97,7 @@ export function resolveProviderKnowledgeBaseRoots(
 ): KnowledgeBaseRoot[] {
 	const dirs = resolveProviderModelCatalogDirs(importMetaUrl, options);
 	return [
-		...(dirs.bundled ? [{ dir: dirs.bundled, label: "bundled" }] : []),
+		...(dirs.bundled ? [{ dir: dirs.bundled, label: "bundled", packaged: true }] : []),
 		...dirs.overlays.map((dir) => ({ dir, label: `overlay:${dir}` })),
 	];
 }

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import yaml from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { parsePackagedYaml } from "../../core/packaged-yaml.js";
 import { sha256 } from "./hash.js";
 import {
 	type FragmentPreconditions,
@@ -77,7 +77,7 @@ function parseFragment(filePath: string, rootDir: string): LoadedFragment {
 
 	let parsed: unknown;
 	try {
-		parsed = yaml.parse(frontmatterText);
+		parsed = parsePackagedYaml(frontmatterText);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
 		throw new Error(`fragment-loader: ${relPath}: invalid YAML frontmatter (${reason})`);
