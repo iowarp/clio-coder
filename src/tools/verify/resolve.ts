@@ -4,7 +4,7 @@ import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
 import { type DeclaredCheckDiscoveryResult, discoverDeclaredChecksAtRoot } from "./discovery.js";
-import { prepareVerifyArguments } from "./surface.js";
+import { isVerifyListing, prepareVerifyArguments } from "./surface.js";
 import {
 	findTaskGate,
 	taskGateCheck,
@@ -243,8 +243,8 @@ function resolveWithDiscovery(
 	cache?: VerifyDiscoveryCache,
 ): VerifyResolution {
 	args = prepareVerifyArguments(args);
+	if (isVerifyListing(args)) return { kind: "list" };
 	const check = typeof args.check === "string" ? args.check.trim() : "";
-	if (check.length === 0) return { kind: "list" };
 	if (check === "frontend") return { kind: "frontend" };
 	const cwdArg = typeof args.cwd === "string" && args.cwd.length > 0 ? args.cwd : undefined;
 	const discovery = cache?.discovery ?? discoverDeclaredChecksAtRoot(workspaceRoot, cwdArg);

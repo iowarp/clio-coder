@@ -21,9 +21,11 @@ import { type RunCallUsage, runUsageFromCalls } from "../../domains/dispatch/run
 import {
 	createRunResultQuality,
 	deriveRunVerification,
+	settledVerifyCall,
 	typedValidationFactsFromVerifyCalls,
 	type VerifyCallOutcome,
-	verifyCheckIdentity,
+	type VerifyCallStart,
+	verifyCallStart,
 } from "../../domains/dispatch/run-findings.js";
 import { finishRunResult } from "../../domains/dispatch/run-settlement.js";
 import { openRunTelemetry } from "../../domains/dispatch/run-telemetry.js";
@@ -228,7 +230,7 @@ interface HeadlessMainAgentRunStats {
 	toolRounds: ToolRoundRecord[];
 	toolStats: Map<string, ToolCallStat>;
 	pendingCapabilities: Map<string, string>;
-	pendingVerifyCalls: Map<string, string | null>;
+	pendingVerifyCalls: Map<string, VerifyCallStart>;
 	/** Bash calls in flight whose command names a write target. */
 	pendingShellWrites: Set<string>;
 	verifyCalls: VerifyCallOutcome[];
@@ -463,8 +465,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	if (event.type === "tool_execution_start") {
 		const call = effectiveToolCall(event.toolName, event.args);
 		stats.pendingCapabilities.set(event.toolCallId, call.toolName);
-		if (call.toolName === ToolNames.Verify)
-			stats.pendingVerifyCalls.set(event.toolCallId, verifyCheckIdentity(call.args));
+		if (call.toolName === ToolNames.Verify) stats.pendingVerifyCalls.set(event.toolCallId, verifyCallStart(call.args));
 		const command = call.toolName === ToolNames.Bash ? call.args?.command : undefined;
 		if (typeof command === "string" && extractCommandWriteTargets(command).length > 0)
 			stats.pendingShellWrites.add(event.toolCallId);
@@ -478,7 +479,7 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// session history retain the real aggregate call/result pair.
 	for (const child of gatewayChainReceipts(event.toolName, event.result)) {
 		const toolCallId = `${event.toolCallId}:${child.id}`;
-		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCheckIdentity(child.args));
+		if (child.capability === ToolNames.Verify) stats.pendingVerifyCalls.set(toolCallId, verifyCallStart(child.args));
 		recordToolEnd(stats, {
 			type: "tool_execution_end",
 			toolCallId,
@@ -495,10 +496,10 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 	// Registry settlement is authoritative; legacy producers only expose isError.
 	const outcome = (event as { outcome?: unknown }).outcome;
 	if (tool === ToolNames.Verify) {
-		stats.verifyCalls.push({
-			check: stats.pendingVerifyCalls.get(event.toolCallId) ?? null,
-			// A check name that resolved to nothing ran nothing, as in a worker's receipt, so it seals no failed validation.
-			outcome:
+		stats.verifyCalls.push(
+			settledVerifyCall(
+				stats.pendingVerifyCalls.get(event.toolCallId),
+				// A check name that resolved to nothing ran nothing, as in a worker's receipt, so it seals no failed validation.
 				outcome === "error" && (event as { unresolved?: unknown }).unresolved === true
 					? "unresolved"
 					: outcome === "ok" || outcome === "error" || outcome === "blocked"
@@ -508,7 +509,8 @@ function recordToolEnd(stats: HeadlessMainAgentRunStats, event: ChatLoopEvent): 
 								? "error"
 								: "ok"
 							: null,
-		});
+			),
+		);
 		stats.pendingVerifyCalls.delete(event.toolCallId);
 	}
 	if (outcome === "blocked") stat.blocked += 1;

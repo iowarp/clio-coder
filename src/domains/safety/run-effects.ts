@@ -6,6 +6,7 @@ import { shellExitSpeaksForCommand } from "../../tools/shell-exit-scope.js";
 import { effectiveToolCall, gatewayChainReceipts } from "../../tools/surface.js";
 import { captureProofSnapshot, readObservedProof } from "../../tools/verify/proof.js";
 import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/resolve.js";
+import { isVerifyListing } from "../../tools/verify/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
 import {
@@ -303,7 +304,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const validationCommand = receiptValidationCommand(toolName, args, base);
 			const verificationCommand = validationCommandOf(toolName, args, "grounding");
 			const opaque = toolWritesOpaquely(toolName);
-			if (toolName === ToolNames.Verify || verificationCommand !== null) checkingCalls.set(toolCallId, null);
+			// A listing names no check and runs none, so it is not a checking call (bt-19).
+			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
+				checkingCalls.set(toolCallId, null);
 			// An opaque call is tracked even when it exposed no path and no
 			// command, because the fact that it ran at all is the finding.
 			const chain = toolName === "gateway" && args?.op === "chain";

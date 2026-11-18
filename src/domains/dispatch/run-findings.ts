@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isVerifyListing } from "../../tools/verify/surface.js";
 import type { RunEffects } from "../safety/run-effects.js";
 import type {
 	RunResultContractFact,
@@ -68,11 +69,32 @@ function typedValidationFactsFromToolStats(
  * the call's {@link verifyCheckIdentity}, or null when the finish could not be
  * tied to the arguments of its start. `outcome` is null when the finish named
  * no outcome this build recognizes. `unresolved` is a call whose check name
- * resolved to nothing, so like `blocked` it ran no check.
+ * resolved to nothing, so like `blocked` it ran no check. `listing` marks a call
+ * that only listed the declared checks: whatever its outcome, it ran no check.
  */
 export interface VerifyCallOutcome {
 	check: string | null;
 	outcome: "ok" | "error" | "blocked" | "unresolved" | null;
+	listing?: true;
+}
+
+/** What a started `verify` call's own arguments name, kept until its finish arrives. */
+export interface VerifyCallStart {
+	check: string | null;
+	/** The call names no check, so the tool only lists the declared checks ({@link isVerifyListing}). */
+	listing: boolean;
+}
+
+export function verifyCallStart(args: unknown): VerifyCallStart {
+	return { check: verifyCheckIdentity(args), listing: isVerifyListing(args) };
+}
+
+/** One finished `verify` call, tied to what its start named. */
+export function settledVerifyCall(
+	start: VerifyCallStart | undefined,
+	outcome: VerifyCallOutcome["outcome"],
+): VerifyCallOutcome {
+	return { check: start?.check ?? null, outcome, ...(start?.listing === true ? { listing: true as const } : {}) };
 }
 
 /**
@@ -142,7 +164,8 @@ function typedVerifyFact(
  * re-ran clean seals as passed, and a pass the run later broke seals as failed
  *. A blocked attempt never ran the check, so it supersedes nothing,
  * and a check with only blocked calls seals no validation fact. A call naming a
- * check that does not exist ran nothing either, and is treated the same way.
+ * check that does not exist ran nothing either, and is treated the same way, as
+ * is a call that only listed the declared checks.
  *
  * Calls that cannot be tied to a check share one fact that passes only when
  * every such call passed. When no call can be tied to a check, the result is
@@ -158,7 +181,7 @@ export function typedValidationFactsFromVerifyCalls(
 	const byCheck = new Map<string, Array<"ok" | "error">>();
 	const unattributed: Array<string | null> = [];
 	for (const call of calls) {
-		if (call.outcome === "blocked" || call.outcome === "unresolved") continue;
+		if (call.listing === true || call.outcome === "blocked" || call.outcome === "unresolved") continue;
 		if (call.check === null || call.outcome === null) {
 			unattributed.push(call.outcome);
 			continue;
@@ -241,16 +264,28 @@ function isValidationTool(tool: string): boolean {
 	return VALIDATION_TOOL_NEEDLES.some((needle) => name.includes(needle));
 }
 
-/** A validation tool the run was observed to call, whatever it answered. */
-function ranValidationTool(draft: Pick<RunResultDraft, "toolStats">): boolean {
-	return draft.toolStats.some((stat) => stat.count > 0 && isValidationTool(stat.tool));
+/**
+ * A validation tool the run was observed to call, whatever it answered. With
+ * typed facts supplied, `verify` ran a check only when it sealed one: a call that
+ * listed the checks or named none that exists ran nothing.
+ */
+function ranValidationTool(
+	draft: Pick<RunResultDraft, "toolStats"> & { typedValidations?: ReadonlyArray<RunResultTypedValidationFact> },
+): boolean {
+	const verifyRan =
+		draft.typedValidations === undefined || draft.typedValidations.some((fact) => fact.sourceId === "tool:verify");
+	return draft.toolStats.some(
+		(stat) => stat.count > 0 && isValidationTool(stat.tool) && (stat.tool !== "verify" || verifyRan),
+	);
 }
 
 /**
  * Whether some validation tool passed. `verify` answers through its typed
  * facts when the receipt has them, because the per-tool aggregate cannot tell
- * a check the run fixed and re-ran from one it left failing. Other
- * validation tools carry no check identity, so their aggregate still decides.
+ * a check the run fixed and re-ran from one it left failing, nor a check from a
+ * call that only listed the checks. Supplied typed facts are therefore the only
+ * word for `verify`: none means no check passed. Other validation tools carry no
+ * check identity, so their aggregate still decides.
  */
 function hasPassingValidation(
 	toolStats: RunResultDraft["toolStats"],
@@ -259,7 +294,8 @@ function hasPassingValidation(
 	const verifyFacts = (typedValidations ?? []).filter((fact) => fact.sourceId === "tool:verify");
 	return toolStats.some((stat) => {
 		if (!isValidationTool(stat.tool)) return false;
-		if (stat.tool === "verify" && verifyFacts.length > 0) return verifyFacts.every((fact) => fact.passed);
+		if (stat.tool === "verify" && typedValidations !== undefined)
+			return verifyFacts.length > 0 && verifyFacts.every((fact) => fact.passed);
 		return stat.ok > 0 && stat.errors === 0;
 	});
 }
