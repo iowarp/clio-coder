@@ -97,7 +97,10 @@ export type ReproduceOutcome =
 	 * and `completed` holds the runs before it, each launched and completed cleanly: the check ran when either holds.
 	 */
 	| { kind: "run-failed"; run: number; facts: ReproduceRunFacts; completed: ReproduceRunFacts[]; message: string }
-	/** The command completed but its output or the reference could not be judged. */
+	/**
+	 * The command completed but its output or the reference could not be judged; `facts` is empty when the sealed
+	 * reference changed since admission, which fails the check before any run.
+	 */
 	| { kind: "unjudgeable"; message: string; facts: ReproduceRunFacts[] }
 	| { kind: "judged"; report: ReproduceReport; facts: ReproduceRunFacts[] };
 
@@ -119,6 +122,11 @@ export interface ReproduceRunInput {
 	 * write, because Clio's state directory is read-only inside it.
 	 */
 	shellSandbox?: MainSandboxPolicy;
+	/**
+	 * The reference digest dispatch admission sealed (null: absent then). When
+	 * given, a reference whose text now differs fails the check before any run.
+	 */
+	referenceSha256?: string | null;
 }
 
 async function sha256File(filePath: string): Promise<{ sha256: string; sizeBytes: number }> {
@@ -475,17 +483,33 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 	let referenceProvenance: NumericReferenceProvenance | undefined;
 	if (spec.compare.mode === "reference") {
 		const reference = spec.compare.reference;
+		let unreadable: unknown;
 		try {
 			const read = readRegularFileText(resolveSafeCwd(reference, workspaceRoot), REPRODUCE_MAX_OUTPUT_BYTES);
 			if (!read.ok)
 				throw new Error(read.reason === "not-regular" ? "not a regular file" : `${read.size} bytes exceeds the cap`);
 			referenceText = read.text;
 		} catch (error) {
+			unreadable = error;
+		}
+		// A sealed digest is checked before a missing file is refused, so a reference removed since admission reads
+		// as the change it is, the same rule host verification applies to a numeric-compare reference.
+		if (input.referenceSha256 !== undefined) {
+			const now = referenceText === undefined ? null : createHash("sha256").update(referenceText).digest("hex");
+			if (now !== input.referenceSha256) {
+				return {
+					kind: "unjudgeable",
+					message: `reference '${reference}' changed since admission (${input.referenceSha256 ?? "absent"}→${now ?? "absent"})`,
+					facts: [],
+				};
+			}
+		}
+		if (referenceText === undefined) {
 			return {
 				kind: "refused",
 				refusal: {
 					reason: "reference-unreadable",
-					message: `reference '${reference}' cannot be read (${errorText(error)}); nothing ran`,
+					message: `reference '${reference}' cannot be read (${errorText(unreadable)}); nothing ran`,
 				},
 			};
 		}

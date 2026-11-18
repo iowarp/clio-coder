@@ -141,6 +141,38 @@ describe("reproduce runner", () => {
 		deepStrictEqual(readdirSync(join(root, "envs")), []);
 	});
 
+	it("fails a reference that changed since admission before any run, and judges one that still matches", async () => {
+		const root = scratch();
+		const script = "require('fs').writeFileSync('ran','1');console.log(JSON.stringify({x:1}))\n";
+		const sealed = JSON.stringify({ x: 1 });
+		writeFileSync(join(root, "a.js"), script);
+		writeFileSync(join(root, "ref.json"), JSON.stringify({ x: 9 }));
+		const input = {
+			command: ["node", "a.js"],
+			cwd: ".",
+			timeoutMs: 10_000,
+			spec: {
+				inputs: [{ path: "a.js", sha256: sha256(script) }],
+				environment: "copy" as const,
+				compare: { mode: "reference" as const, reference: "ref.json" },
+				tolerance: { absolute: 0 },
+			},
+			workspaceRoot: root,
+			scratchRoot: join(root, "envs"),
+			referenceSha256: sha256(sealed),
+		};
+		const drifted = await runReproduce(input);
+		deepStrictEqual(drifted, {
+			kind: "unjudgeable",
+			message: `reference 'ref.json' changed since admission (${sha256(sealed)}→${sha256(JSON.stringify({ x: 9 }))})`,
+			facts: [],
+		});
+		ok(!existsSync(join(root, "envs")), "nothing ran");
+		writeFileSync(join(root, "ref.json"), sealed);
+		const judged = await runReproduce(input);
+		strictEqual(judged.kind === "judged" && judged.report.passed, true);
+	});
+
 	// A contained verify call: the check runs in the main-session sandbox, where Clio's state is read-only.
 	it("runs a sandboxed check in a clean environment it can write, outside Clio's state, and removes it", async (t) => {
 		const availability = sandboxAvailability();

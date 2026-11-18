@@ -683,7 +683,8 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 					(check.kind !== "reproduce" ||
 						(isRecord(check.reproduce) &&
 							isRecord(check.reproduce.spec) &&
-							typeof check.reproduce.declaredCwd === "string")) &&
+							typeof check.reproduce.declaredCwd === "string" &&
+							isOptionalDigest(check.reproduce.referenceSha256))) &&
 					(check.numeric === undefined ||
 						(isRecord(check.numeric) &&
 							typeof check.numeric.reference === "string" &&

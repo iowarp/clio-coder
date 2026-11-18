@@ -449,7 +449,19 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 									}
 								: {}),
 							...(check.reproduce !== undefined
-								? { reproduce: { spec: structuredClone(check.reproduce), declaredCwd: check.cwd } }
+								? {
+										reproduce: {
+											spec: structuredClone(check.reproduce),
+											declaredCwd: check.cwd,
+											...(check.reproduce.compare.mode === "reference"
+												? {
+														referenceSha256: judgedFileSha256(
+															readJudgedFile(resolve(workspaceRoot, check.reproduce.compare.reference)),
+														),
+													}
+												: {}),
+										},
+									}
 								: {}),
 						};
 					}),

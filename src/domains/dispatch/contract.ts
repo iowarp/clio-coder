@@ -57,9 +57,11 @@ export interface ResolvedVerificationCheck {
 	/**
 	 * Sealed at admission with paths kept repository-relative and the declared
 	 * cwd beside them, so host verification derives the root from `cwd` and
-	 * judges the inputs, digests and reference the catalog declared.
+	 * judges the inputs, digests and reference the catalog declared. A
+	 * `compare: {reference}` check also seals the reference's digest, as
+	 * `numeric` does; absent on older requests and for `compare: twice`.
 	 */
-	reproduce?: { spec: DeclaredReproduce; declaredCwd: string };
+	reproduce?: { spec: DeclaredReproduce; declaredCwd: string; referenceSha256?: string | null };
 }
 
 export interface DispatchRequest extends JobSpec {

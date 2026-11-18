@@ -901,6 +901,7 @@ async function runSealedReproduce(
 		timeoutMs: resolvedCheck.timeoutMs,
 		spec: sealed.spec,
 		workspaceRoot: root,
+		...(sealed.referenceSha256 !== undefined ? { referenceSha256: sealed.referenceSha256 } : {}),
 		...(shellSandbox !== undefined ? { shellSandbox } : {}),
 	});
 	const base = { check: resolvedCheck.check, argv, cwd: resolvedCheck.cwd, memo: false };
