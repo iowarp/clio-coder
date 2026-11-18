@@ -4,8 +4,8 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
-import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import { ACP_CONTEXT_LEDGER_METHOD } from "../../src/engine/acp/types.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import {
 	type CapturedRequest,
 	contextElements,
@@ -272,9 +272,12 @@ describe("surface capture", () => {
 		const server = await startCaptureServer((request) => {
 			if (!Array.isArray(request.body.tools)) return { text: syntheticCompactionSummary("read the notes") };
 			const elements = wireElements(request);
-			const opened = elements.findLastIndex(
-				(element) => element.startsWith("user:") && Object.keys(turns).some((prompt) => element.includes(prompt)),
-			);
+			let opened = elements.length - 1;
+			while (
+				opened >= 0 &&
+				!(elements[opened]?.startsWith("user:") && Object.keys(turns).some((prompt) => elements[opened]?.includes(prompt)))
+			)
+				opened -= 1;
 			const files = Object.entries(turns).find(([prompt]) => elements[opened]?.includes(prompt))?.[1] ?? [];
 			const reads = elements.slice(opened + 1).filter((element) => element.startsWith("result:")).length;
 			const next = files[reads];

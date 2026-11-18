@@ -205,7 +205,7 @@ async function journaledSession(
 	drive: (harness: ReturnType<typeof chatHarness>) => Promise<void>,
 	options: Omit<Parameters<typeof chatHarness>[0], "server" | "telemetry"> = {},
 	bind?: (harness: ReturnType<typeof chatHarness>) => void,
-): Promise<{ entries: SessionEntry[]; records: ReceiptJournalRecord[] }> {
+): Promise<{ entries: ReadonlyArray<SessionEntry>; records: ReceiptJournalRecord[] }> {
 	const env = await isolateClioEnv("attempt-receipt-");
 	const server = await startCaptureServer(script);
 	const journals = createSessionJournals(clioStateDir(), () => {});
@@ -319,7 +319,8 @@ test("the receipt verifier reports each attempt kind and reconciles fold decisio
 	ok(fold);
 	const calls = settledCalls(records);
 	const last = calls.at(-1);
-	ok(last?.cache.receipt?.records.includes(checkpoint.turnId), "the post-checkpoint attempt's view names the record");
+	ok(last, "the post-checkpoint attempt settled");
+	ok(last.cache.receipt?.records.includes(checkpoint.turnId), "the post-checkpoint attempt's view names the record");
 	const statuses = (input: Partial<Parameters<typeof verifyAttemptReceipts>[0]>) =>
 		verifyAttemptReceipts({ entries, records, ...input }).attempts.map((verdict) =>
 			verdict.reason ? `${verdict.status} (${verdict.reason})` : verdict.status,
