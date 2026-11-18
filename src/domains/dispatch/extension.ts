@@ -1275,7 +1275,7 @@ function recordWorkerRunEffect(recorder: RunEffectsRecorder, event: Record<strin
 		const id = readStringOrNull(event.payload.toolCallId);
 		const outcome = event.payload.outcome;
 		if (id !== null && (outcome === "ok" || outcome === "error" || outcome === "blocked"))
-			recorder.checkOutcome(id, outcome);
+			recorder.checkOutcome(id, outcome, event.payload.unresolved === true);
 		return;
 	}
 	if (typeof event.type === "string") recordToolExecutionEffects(recorder, { ...event, type: event.type });

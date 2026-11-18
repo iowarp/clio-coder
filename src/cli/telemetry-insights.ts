@@ -131,13 +131,12 @@ function readProjectInsights(stateDir: string, bucket: string): ProjectInsights 
 			[...source.runs.values()].map((run) => run.records),
 			autonomyReader(stateDir, source.sessionId),
 		);
-		// A fork's ledger copied its parent's entries; its own start is the `session.forked` row its journal opens with.
-		const forked = source.journal.records.find((record) => record.k === "session.forked");
+		// A fork's ledger copied its parent's entries; the window keeps its own start after it drops the parent.
 		const outcomes = verifiedOutcomes(
 			stateDir,
 			join(bucketDir, source.sessionId, "current.jsonl"),
 			source.runs.keys(),
-			source.parent === null ? null : (forked?.t ?? null),
+			source.forkedAt ?? null,
 		);
 		signals.verifiedChecks = outcomes?.checks ?? 0;
 		rows.push({

@@ -170,7 +170,8 @@ export interface RunEffectsRecorder {
 	start(toolCallId: string, toolName: string, args: Record<string, unknown> | undefined): void;
 	/** Commit a call's effects, or drop them when the call did not succeed. */
 	finish(toolCallId: string, failed: boolean, result?: unknown): void;
-	checkOutcome(toolCallId: string, outcome: "ok" | "error" | "blocked"): void;
+	/** A check name that resolved to no check ran nothing, so `unresolved` settles and clears nothing, as a refusal (c16-C). */
+	checkOutcome(toolCallId: string, outcome: "ok" | "error" | "blocked", unresolved?: boolean): void;
 	snapshot(): RunEffects;
 	checkFreshness(): CheckFreshness;
 }
@@ -532,7 +533,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (reading.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
 				executedShellCommands.push(reading.shellCommand);
 		},
-		checkOutcome(toolCallId, outcome) {
+		checkOutcome(toolCallId, reported, unresolved) {
+			const outcome = reported === "error" && unresolved === true ? "blocked" : reported;
 			const effects = pending.get(toolCallId);
 			if (effects !== undefined) effects.outcome = outcome;
 			const call = inFlight.get(toolCallId);
@@ -618,7 +620,7 @@ export function recordToolExecutionEffects(recorder: RunEffectsRecorder, event: 
 	for (const child of recorder.started(toolCallId) ? gatewayChainReceipts(String(event.toolName), event.result) : []) {
 		const id = `${toolCallId}:${child.id}`;
 		recorder.start(id, child.capability, child.args);
-		recorder.checkOutcome(id, child.admission.outcome);
+		recorder.checkOutcome(id, child.admission.outcome, child.admission.unresolved);
 		recorder.finish(id, child.admission.outcome !== "ok", child.result);
 	}
 	// A structured refusal comes back as an error result with an "error" outcome,

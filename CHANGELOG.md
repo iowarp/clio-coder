@@ -112,12 +112,13 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
-- A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a cut-off worker call names its stop cause in telemetry and `why stopped`, and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
+- A `verify` naming an undeclared check ran nothing, so it no longer fails a worker's result quality after the declared check passes (bt-45 c16-C).
+- A worker past its window before eviction no longer loses a tool call to a 32-byte argument ceiling; a worker call cut off by its turn timeout, output cap or tool-argument bound settles with that cause instead of `transport_dropped`; `why stopped` names the stop of each worker run the last turn dispatched; and a dispatch that recovered on a retry reports `recovered=N` and the failed attempt (bt-47 cf1h-D3).
 - The worker context guard evicts older reads before a read the model has not yet seen; such a read leaves last, largest first, and is journaled as `unseen_overflow` (ContextFold A2, bt-47 cf1h-D1).
 - A worker request the context guard fitted after an eviction is no longer refused at admission as leaving too few output tokens; the guard, admission and the output clamp size it by one count (ContextFold A2, bt-47 cf1h-D2).
 - The [Collected elsewhere] notice names a forked collection's refused tool calls in the worker card's words (e.g. "succeeded · 1 tool call · 1 call refused"), so the parent model no longer reports a run whose only action was refused as a clean success (bt-11 o).
 - A fork or splice `context` sent JSON-encoded by a grammar-constrained route (llama.cpp) is accepted by dispatch instead of refused as "expected object, got string" (bt-47 cf1h-D4).
-- A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent (bt-47 D3b).
+- A fork's Verified row on the exit card, `/usage` and `telemetry insights` counts only the verified outcomes the fork recorded itself, not the passes and done tasks it copied from its parent; the insights share counts a fork as verified only when it verified something itself (bt-47 D3b, c16-D).
 - A fork's exit card counts only the compactions the fork ran, not its parent's (bt-47 D3).
 - Over ACP, context engine status lines (working set, observation aging, compaction rows) cross as `session_info_update` notices (`_meta["clio-coder/notice"] = {level, text}`), not as assistant reply text (bt-47 cf1j-d).
 - `isort --check-only`/`-c` (also `python -m isort`) no longer reads as a writer that retires passes, and `black --check`, `ruff format --check`, `cargo fmt --check` (also `-- --check`) and `rustfmt --check` now read as checks (x10-2).
