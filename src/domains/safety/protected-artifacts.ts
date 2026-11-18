@@ -1620,6 +1620,22 @@ export function checkFailureAttributable(command: string): boolean {
 }
 
 /**
+ * Whether a step of the command bends a pipeline's exit status away from its commands' own (x4-5): a `!` that inverts
+ * a pipeline, a `set` that switches an option off with `+o` (`set +o "pipefail"`), or a `shopt -u` naming pipefail or
+ * an expansion. Quoting is read the way the shell reads it, so a quoted option name still counts.
+ */
+export function shellStatusMasked(command: string): boolean {
+	return shellSteps(scanShellLike(command)).some((step) => {
+		if (step.argv.slice(0, step.index ?? step.argv.length).includes("!")) return true;
+		if (step.index === null) return false;
+		const [executable, ...args] = step.argv.slice(step.index);
+		if (executable === "set") return args.some((arg) => /^\+[A-Za-z]*o/u.test(arg));
+		if (executable !== "shopt") return false;
+		return args.some((arg) => /^-[A-Za-z]*u/u.test(arg)) && args.some((arg) => arg === "pipefail" || /[$`]/u.test(arg));
+	});
+}
+
+/**
  * Whether a recognized check in the command runs outside `root` (x3-5). Its directory starts at `base` and follows
  * each `cd` before it; a `cd` this cannot resolve (home, `-`, a variable) leaves the directory unknown, which counts
  * as outside, so a sibling checkout's green never stands for this workspace.
