@@ -14,6 +14,7 @@ import {
 	type CheckCommandShape,
 	checkCommandShape,
 	checkFailureAttributable,
+	checkRunsOutside,
 	checkWritesTree,
 	commandArgumentSegments,
 	detectValidationCommand,
@@ -170,6 +171,8 @@ interface PendingEffects {
 	checkStatusAttributable: boolean;
 	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
 	checkFailureAttributable: boolean;
+	/** The check ran outside the run's cwd ({@link checkRunsOutside}), so its pass is not this workspace's. */
+	checkOutsideCwd: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
@@ -409,6 +412,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 						: null,
 				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
 				checkFailureAttributable: command === null || checkFailureAttributable(command),
+				checkOutsideCwd: command !== null && checkRunsOutside(command, base, cwd),
 				mutationRevision,
 				verificationCommand,
 				opaque,
@@ -505,7 +509,12 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				if (recordWasComplete) options.onWriteRecordDowngraded?.({ ...downgrade });
 			}
 			for (const target of effects.paths) mutatedPaths.add(target);
-			if (effects.validationCommand !== null && effects.checkStatusAttributable && checkedRevision === mutationRevision)
+			if (
+				effects.validationCommand !== null &&
+				effects.checkStatusAttributable &&
+				checkedRevision === mutationRevision &&
+				!effects.checkOutsideCwd
+			)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
 			if (effects.tool === ToolNames.Verify) {

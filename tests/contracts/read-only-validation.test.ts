@@ -748,6 +748,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | head -30"), green);
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | grep FAIL"), green);
 	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified"]);
+	// A check run in another directory is not this workspace's check (x3-5).
+	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
+	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
 });
 
 it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {

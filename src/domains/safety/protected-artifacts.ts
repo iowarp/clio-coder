@@ -1619,6 +1619,25 @@ export function checkFailureAttributable(command: string): boolean {
 }
 
 /**
+ * Whether a recognized check in the command runs outside `root` (x3-5). Its directory starts at `base` and follows
+ * each `cd` before it; a `cd` this cannot resolve (home, `-`, a variable) leaves the directory unknown, which counts
+ * as outside, so a sibling checkout's green never stands for this workspace.
+ */
+export function checkRunsOutside(command: string, base: string, root: string): boolean {
+	let directory: string | null = base;
+	for (const step of shellSteps(scanShellLike(command))) {
+		if (isCheckStep(step)) {
+			if (directory === null || !isSameOrDescendant(directory, root)) return true;
+			continue;
+		}
+		const target = cdTarget(step.argv);
+		if (target !== null)
+			directory = directory === null || /^~|[$`]/u.test(target) ? null : path.resolve(directory, target);
+	}
+	return false;
+}
+
+/**
  * Roots of the `find -delete` calls in a command whose expression filters
  * what goes. The operator's yolo judges such a root by what lies under it, so
  * the authority rails treat it as a write there rather than a delete of the
