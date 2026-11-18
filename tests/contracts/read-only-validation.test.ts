@@ -785,6 +785,10 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A check run in another directory is not this workspace's check (x3-5).
 	deepStrictEqual(seal("cd /elsewhere && npm test"), stale);
 	deepStrictEqual(seal("cd pkg/.. && npm test"), green);
+	// A check's own directory option or test path operand can leave the workspace too; root containment decides (x4-4).
+	for (const outside of ["npm test --prefix ../other", "make test -C ../other", "pytest ../other"])
+		deepStrictEqual(seal(outside), stale, outside);
+	deepStrictEqual(seal("npm test --prefix packages/a"), green);
 	// A subshell or pushd cd ends at its `)` or popd, and `) &&` hands its status on, so a red there stands (x4-7).
 	deepStrictEqual(seal("(cd ../lib && make) && npm test"), green);
 	deepStrictEqual(seal("pushd ../lib && make && popd && npm test"), green);

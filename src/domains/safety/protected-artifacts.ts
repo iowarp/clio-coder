@@ -1664,6 +1664,7 @@ export function checkRunsOutside(command: string, base: string, root: string): b
 		const target = cdTarget(step.argv);
 		if (isCheckStep(step)) {
 			if (directory === null || !isSameOrDescendant(directory, root)) return true;
+			if (checkReachesOutside(step.argv.slice(step.index ?? 0), directory, root)) return true;
 		} else if (executable === "popd")
 			directory = step.argv.length > (step.index ?? 0) + 1 ? null : (pushed.pop() ?? null);
 		else if (target !== null) {
@@ -1677,6 +1678,51 @@ export function checkRunsOutside(command: string, base: string, root: string): b
 		}
 	}
 	return false;
+}
+
+/** A check's own options that run it in, or read its project from, another directory; `--manifest-path` names a file. */
+const CHECK_DIRECTORY_OPTIONS: ReadonlySet<string> = new Set([
+	"--prefix",
+	"-C",
+	"--dir",
+	"--cwd",
+	"--directory",
+	"--working-directory",
+	"--manifest-path",
+	"--test-dir",
+	"--rootdir",
+	"--rootDir",
+	"--root",
+]);
+
+/** Runners whose positional operands are the paths they collect tests from. */
+const PATH_OPERAND_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "jest", "vitest", "mocha", "go"]);
+
+/**
+ * Whether a check step's own directory options (`npm test --prefix ../x`, `make -C ../x`, `cargo test --manifest-path
+ * ../x/Cargo.toml`) or a test runner's path operands (`pytest ../x`) reach outside `root` from `directory` (x4-4). The
+ * test is root containment, so `npm test --prefix packages/a` stays this workspace's check. An operand this cannot
+ * resolve (home, a variable) counts as outside.
+ */
+function checkReachesOutside(argv: ReadonlyArray<string>, directory: string, root: string): boolean {
+	const [executable, ...args] = argv;
+	const module = args.indexOf("-m");
+	const operands = PATH_OPERAND_RUNNERS.has(basenameToken(executable)) || (module >= 0 && args[module + 1] === "pytest");
+	const targets: string[] = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		const equals = arg.indexOf("=");
+		const option = equals > 0 ? arg.slice(0, equals) : arg;
+		let target: string | undefined;
+		if (CHECK_DIRECTORY_OPTIONS.has(option)) {
+			target = equals > 0 ? arg.slice(equals + 1) : args[index + 1];
+			if (equals < 0) index += 1;
+			if (option === "--manifest-path" && target !== undefined) target = path.dirname(target);
+		} else if (/^-C[^-]/u.test(arg)) target = arg.slice(2);
+		else if (operands && !arg.startsWith("-") && equals < 0) target = arg.split("::")[0];
+		if (target !== undefined) targets.push(target);
+	}
+	return targets.some((target) => /^~|[$`]/u.test(target) || !isSameOrDescendant(path.resolve(directory, target), root));
 }
 
 /**
