@@ -243,7 +243,12 @@ export function callVerdict(
  * A bash command's {@link ShellCheckReading}, each facet read from the command on first use: only a check, or a call a
  * vocabulary names, ever asks, so a large write never pays for them (x6-7).
  */
-function shellCheckReading(command: string, base: string, cwd: string): ShellCheckReading {
+function shellCheckReading(
+	command: string,
+	base: string,
+	cwd: string,
+	declaredSteps: ReadonlySet<number>,
+): ShellCheckReading {
 	let statusAttributable: boolean | undefined;
 	let failureAttributable: boolean | undefined;
 	let outsideCwd: boolean | undefined;
@@ -253,7 +258,7 @@ function shellCheckReading(command: string, base: string, cwd: string): ShellChe
 			return statusAttributable;
 		},
 		get failureAttributable() {
-			failureAttributable ??= checkFailureAttributable(command);
+			failureAttributable ??= checkFailureAttributable(command, declaredSteps);
 			return failureAttributable;
 		},
 		get outsideCwd() {
@@ -315,7 +320,8 @@ export function classifyCall(
 	const declaredSteps = new Set(declaredRuns.flatMap((run) => run.steps));
 	const verdict = declaredSteps.size > 0 ? "check" : callVerdict(toolName, args, gitHelpers);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
-	const isOutput = command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command)) : () => false;
+	const isOutput =
+		command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command, declaredSteps)) : () => false;
 	const shape =
 		command !== null
 			? verdict === "check"
@@ -346,7 +352,7 @@ export function classifyCall(
 		paths,
 		changedPaths,
 		shellCommand,
-		shell: command === null ? null : shellCheckReading(command, base, cwd),
+		shell: command === null ? null : shellCheckReading(command, base, cwd, declaredSteps),
 		opaque: toolWritesOpaquely(toolName),
 		shape,
 		check,

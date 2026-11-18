@@ -660,8 +660,14 @@ describe("job continuation at yolo (#445)", () => {
 		Object.assign(process.env, { GH_TOKEN: "gh-fixture", GITHUB_TOKEN: "github-fixture", SOME_OTHER_SECRET: "no" });
 		try {
 			const run = async (autonomy: "yolo" | "default"): Promise<Record<string, string>> => {
+				// Only the asserted names: the whole environment can pass the job's output cap, since pnpm copies a
+				// long test:file argument list into npm_lifecycle_script, and a capped poll carries no json.
 				const runner = prepareJobCommand(
-					[process.execPath, "-e", "process.stdout.write(JSON.stringify(process.env))"],
+					[
+						process.execPath,
+						"-e",
+						'const n = ["GH_TOKEN", "GITHUB_TOKEN", "SOME_OTHER_SECRET"]; process.stdout.write(JSON.stringify(Object.fromEntries(n.map((k) => [k, process.env[k]]))))',
+					],
 					scratch.dir,
 				);
 				const result = await executeJobCommand(
@@ -676,6 +682,7 @@ describe("job continuation at yolo (#445)", () => {
 					},
 					autonomy,
 				);
+				strictEqual(result.outcome, "succeeded", result.summary);
 				return result.json as Record<string, string>;
 			};
 			const atYolo = await run("yolo");
