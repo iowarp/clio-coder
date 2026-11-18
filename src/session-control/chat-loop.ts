@@ -1503,6 +1503,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		emitNotice: (text, level, source) => emitNotice(text, level, undefined, undefined, source),
 		emitFooterNotice,
 		bus: deps.bus,
+		stepTurnEnd: () => stepTurnEnd(),
 	});
 
 	try {
@@ -2034,6 +2035,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const stepStarts = createStepStartTracker();
 	const stepPipeline = createStepPipeline();
 	let lastStepPipeline: StepPipelineEnd | null = null;
+	/** The running submit's runtime, where its own messages start, and whether it is a yolo continuation. */
+	let stepTurnScope: { runtime: AgentRuntime; messageStart: number; continuation: boolean } | null = null;
 	const unsubscribeToolBudgetLock =
 		deps.bus?.subscribe("safety.tool_budget_exceeded", (payload) => {
 			state.toolBudgetLock = true;
@@ -2114,6 +2117,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			...(stop.cause === "loop_guard" && guardFailure !== null ? [loopGuardContinuationDetail(guardFailure)] : []),
 		];
 		return detail.length === 0 ? stop : { ...stop, detail: detail.join("\n") };
+	};
+
+	/**
+	 * A step turn runs one pipeline step by contract, so the finish contract waits while a step continuation follows
+	 * it and assesses the whole pipeline at the turn that ends it (bt-12 #4). Read at turn_end, before the turn settles.
+	 */
+	const stepTurnEnd = (): { continues: boolean; startTurnId?: string } | null => {
+		const stepTool = state.currentTurnConstraints?.turnPolicy?.stepTool;
+		const scope = stepTurnScope;
+		if (stepTool === undefined || scope === null) return null;
+		const ran = stepTurnOutcome(scope.runtime.agent.state.messages.slice(scope.messageStart), stepTool);
+		const { run, startTurnId } = stepPipeline.peek(stepTool, ran, scope.continuation);
+		const continues = run !== null && yoloContinuationDue(false, null, stepPolicyStop, run)?.step === true;
+		return { continues, ...(startTurnId === undefined ? {} : { startTurnId }) };
 	};
 
 	/**
@@ -3638,6 +3655,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				turnRetryAttempts = 0;
 				providerRetryAttempts = 0;
 				const machineMessageStart = agentRuntime.agent.state.messages.length;
+				stepTurnScope = {
+					runtime: agentRuntime,
+					messageStart: machineMessageStart,
+					continuation: options.yoloContinuation === true,
+				};
 				recovery.noteAttemptStart(machineMessageStart);
 				const priorPendingSkillPolicy = state.currentPendingSkillPolicy;
 				const priorAskUserPolicy = state.currentAskUserPolicy;
@@ -3970,12 +3992,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					const stepStop = stepPolicyStop;
 					stepPolicyStop = null;
 					const stepPolicy = state.currentTurnConstraints?.turnPolicy;
+					stepTurnScope = null;
 					const stepRun = stepPipeline.settle(
 						stepPolicy?.stepTool,
 						stepPolicy
 							? stepTurnOutcome(agentRuntime.agent.state.messages.slice(machineMessageStart), stepPolicy.stepTool)
 							: null,
 						options.yoloContinuation === true,
+						userTurnId,
 					);
 					// Only a step turn that ended on its own text, or that its step policy ended, leaves a state summary
 					// the next step can start from. A failed turn, a loop-guard stop or a real budget crossing stopped
