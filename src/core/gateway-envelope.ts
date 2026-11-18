@@ -11,7 +11,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Accept the weak-model shapes: `args` as a JSON string, `name`/`tool` for
- * `capability`, and a missing `op` inferred from what else was given.
+ * `capability`, an empty `parameters` object, and a missing `op` inferred from
+ * what else was given.
  */
 export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>>): Record<string, unknown> {
 	const out: Record<string, unknown> = { ...args };
@@ -27,6 +28,9 @@ export function normalizeGatewayArguments(args: Readonly<Record<string, unknown>
 			// The body reports the unparseable string.
 		}
 	}
+	// An empty `parameters` object carries nothing; refusing it blamed a correctly
+	// shaped call for an envelope it never used (bt-23 N3).
+	if (isRecord(out.parameters) && Object.keys(out.parameters).length === 0) delete out.parameters;
 	// Arguments only ever belong to a call. A request carrying them without a
 	// capability is a call whose envelope was nested inside `args`; reading it
 	// as find answered a mis-wrapped call with a successful discovery listing,

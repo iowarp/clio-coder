@@ -178,6 +178,21 @@ function envelopeHint(args: Record<string, unknown>): string {
 	return `op and capability belong at the top level and args holds only the capability's own arguments: {"op":"call","capability":"${capability}","args":{...}}. No capability was invoked.`;
 }
 
+const chainShapeHint =
+	'steps belongs at the top level beside op: {"op":"chain","steps":[{"capability":"<name>","args":{...}}]}. No step ran.';
+
+/** The correction for a non-empty `parameters` envelope, naming the shape the request meant. */
+function parametersHint(args: Record<string, unknown>): string {
+	const params = args.parameters;
+	if (isRecord(params) && params.steps !== undefined) return chainShapeHint;
+	const capability = typeof args.capability === "string" ? args.capability.trim() : "";
+	const nested = isRecord(params) && ["op", "capability", "name", "tool"].some((key) => params[key] !== undefined);
+	if (args.op !== "call" || capability.length === 0 || nested) return envelopeHint(args);
+	const shown = JSON.stringify(params);
+	const body = shown !== undefined && shown.length <= 200 ? shown : "{...}";
+	return `drop the parameters key and pass the capability's own arguments as args: {"op":"call","capability":"${capability}","args":${body}}. No capability was invoked.`;
+}
+
 function firstSentence(text: string): string {
 	const line = text.split("\n")[0]?.trim() ?? "";
 	const match = /^(.*?[.!?])(?:\s|$)/u.exec(line);
@@ -927,11 +942,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// read as a way to launch a server from describe or call, which is
 			// exactly what those two paths no longer do on their own.
 			// No op reads a `parameters` envelope. Find ignored it and listed the whole catalog, so every op
-			// refuses it with the hint call already gave (bt-23).
+			// refuses a non-empty one with the shape it meant; an empty one was dropped on normalize (bt-23).
 			if (args.parameters !== undefined) {
 				return {
 					kind: "error",
-					message: `gateway: op="${op}" does not read a parameters envelope; ${envelopeHint(args)}`,
+					message: `gateway: op="${op}" does not read a parameters envelope; ${parametersHint(args)}`,
 				};
 			}
 			if (op !== "find" && (args.server !== undefined || args.refresh !== undefined)) {
