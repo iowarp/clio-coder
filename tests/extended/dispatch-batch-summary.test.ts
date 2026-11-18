@@ -254,13 +254,12 @@ test("a worker call denied for want of an operator tells the dispatching model i
 	ok(lines.indexOf(limited[0] ?? "") < lines.findIndex((line) => line.startsWith("- ")));
 });
 
-test("a worker's account of a failed attempt is answered with the host feed's counts (bt-23 #3)", () => {
-	const lines = (text: string) => {
+test("a run with errored or refused calls carries the host feed's counts (bt-23 #3)", () => {
+	const lines = (errors: number) => {
 		const envelope = fixtureEnvelope("run-claims");
 		const draft = fixtureReceiptDraft(envelope);
-		draft.toolCalls = 1;
-		draft.toolStats = [{ tool: "edit", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 }];
-		draft.output = { state: "final", text, truncated: false, bytes: Buffer.byteLength(text) };
+		draft.toolCalls = 2;
+		draft.toolStats = [{ tool: "edit", count: 2, ok: 2 - errors, errors, blocked: 0, totalDurationMs: 1 }];
 		const receipt = finishRunResult(draft, envelope, {
 			terminal: { terminalReason: draft.terminalReason ?? "completed" },
 			processExitCode: envelope.exitCode,
@@ -271,11 +270,8 @@ test("a worker's account of a failed attempt is answered with the host feed's co
 			.split("\n")
 			.filter((line) => line.startsWith("attempts "));
 	};
-	deepStrictEqual(
-		lines("The first edit attempt had malformed arguments and changed nothing. The second edit applied the fix."),
-		[
-			"attempts run-claims: the worker's answer describes failed or refused calls; the host feed recorded 1 call, 0 errored and 0 refused. Report these counts, not the worker's account of its attempts.",
-		],
-	);
-	deepStrictEqual(lines("Fixed the off-by-one in lib/math.js."), []);
+	deepStrictEqual(lines(1), [
+		"attempts run-claims: the host feed recorded 2 calls, 1 errored and 0 refused (edit). Report these counts, not the worker's account of its attempts.",
+	]);
+	deepStrictEqual(lines(0), []);
 });

@@ -57,6 +57,7 @@ import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
+import { outputLimitCutOffToolCallIds } from "../../core/assistant-output.js";
 import { bashShellPath } from "../../core/bash-shell.js";
 import { DEFAULT_SETTINGS } from "../../core/defaults.js";
 import { devRootOwnerForWorkers } from "../../core/dev-roots.js";
@@ -8632,15 +8633,8 @@ export function createDispatchBundle(
 				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
 				else startsCarryIds = false;
 			}
-			if (
-				event.type === "message_end" &&
-				event.message?.role === "assistant" &&
-				event.message.stopReason === "length" &&
-				Array.isArray(event.message.content)
-			) {
-				for (const block of event.message.content) {
-					if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") outputLimitCalls.add(block.id);
-				}
+			if (event.type === "message_end" && event.message?.role === "assistant") {
+				for (const id of outputLimitCutOffToolCallIds(event.message)) outputLimitCalls.add(id);
 			}
 			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);

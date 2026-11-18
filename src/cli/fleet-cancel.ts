@@ -14,9 +14,9 @@ import { hostname } from "node:os";
 import { processAlive, processStartedAtMs } from "../core/process-identity.js";
 import {
 	assignmentProcessOwnerAlive,
-	cancelStoredAssignment,
 	type DurableAssignmentRecord,
 	listStoredAssignments,
+	settleStoredAssignment,
 } from "../domains/dispatch/assignment-store.js";
 import {
 	cancelDetail,
@@ -194,7 +194,7 @@ async function cancelOrphan(
 		});
 	}
 	await ledger.persist();
-	if (record !== null) await cancelStoredAssignment(record.assignmentId);
+	if (record !== null) await settleStoredAssignment(record.assignmentId, row.id, "canceled");
 	const sealed = ledger.get(row.id);
 	return {
 		runId: row.id,
