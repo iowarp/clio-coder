@@ -490,7 +490,7 @@ for (const scenario of [
 						.find((event) => event.type === "turn_end");
 					deepStrictEqual(end.safety.decisions, scenario.decisions);
 					// bt-15 c12b, c13a: guard blocks and refused asks list apart from the safety refusals, as the decisions count them.
-					if ("attempts" in scenario)
+					if ("attempts" in scenario) {
 						deepStrictEqual(
 							{
 								blocked: end.safety.blockedAttempts.map((attempt: { tool: string }) => attempt.tool),
@@ -499,6 +499,12 @@ for (const scenario of [
 							},
 							scenario.attempts,
 						);
+						// bt-15 c14a: the sealed tools row counts the refused ask as decisions does, never as a blocked call.
+						deepStrictEqual(
+							journal.runs[0]?.settled.tools.find((row) => row.tool === "bash"),
+							{ tool: "bash", calls: 2, ok: 0, errors: 0, blocked: 1 },
+						);
+					}
 				}
 				if (errored) strictEqual(envelope.spend.pricing.usd.kind, "unknown");
 				else strictEqual(factKnownValue(envelope.spend.pricing.usd), scenario.calls * 0.25);

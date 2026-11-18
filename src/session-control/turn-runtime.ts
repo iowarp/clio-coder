@@ -436,6 +436,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const announcedResolutionWarnings = new Set<string>();
 	const turnCalls = new Map<string, CallSettled[]>();
+	// A turn id a delivered steer moved a run to, mapped to the turn the run settles under (bt-26 N2h).
+	const steeredTurns = new Map<string, string>();
 	// The last request sent on each cache key, kept across runtime rebuilds and dropped whenever turn-context restarts
 	// cache comparison, so the journal compares within one context generation as #423 does (#434).
 	const cacheBaselines = new Map<string, CacheBaseline>();
@@ -887,7 +889,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (!facts || !deps.telemetry || owner?.sessionId !== deps.sessionOrigin?.()?.id) return;
 			// A call belongs to the turn its lease was taken for, never to whichever turn is active when it settles,
 			// including a stream that settles after its run ended (#434).
-			if (owner?.turnId) turnCalls.set(owner.turnId, [...(turnCalls.get(owner.turnId) ?? []), facts]);
+			const turnId = owner?.turnId && (steeredTurns.get(owner.turnId) ?? owner.turnId);
+			if (turnId) turnCalls.set(turnId, [...(turnCalls.get(turnId) ?? []), facts]);
 			if (!currentRun()) return;
 		};
 		// Who stopped an aborted reply when the route did not: its message and its call settlement name the same cause.
@@ -989,11 +992,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const openModelCall = async (): Promise<void> => {
 			const origin = deps.sessionOrigin?.();
 			if (!origin || !deps.telemetry?.acquireTelemetrySession) return;
-			journalLease = await deps.telemetry.acquireTelemetrySession(
-				origin,
-				mainAgent(origin.id),
-				state.activeUserTurnId ?? undefined,
-			);
+			const leaseTurnId = state.activeUserTurnId;
+			if (runTurnId !== null && leaseTurnId !== null && leaseTurnId !== runTurnId)
+				steeredTurns.set(leaseTurnId, steeredTurns.get(runTurnId) ?? runTurnId);
+			journalLease = await deps.telemetry.acquireTelemetrySession(origin, mainAgent(origin.id), leaseTurnId ?? undefined);
 			const compiled = context.compiledSessionPrompt?.();
 			const compile = context.promptCompileRecord?.();
 			const objects = await journalLease.storeRequestObjects?.({
@@ -1048,6 +1050,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let requiredToolReminder: string | null = null;
 		clearCurrentWatchdog();
 		let runIdentity = deps.turnIdentity?.();
+		// The user turn the run started under, so a call a steer moved to its own entry settles with it (bt-26 N2h).
+		let runTurnId: string | null = null;
 		const currentRun = (): boolean => runIdentity === deps.turnIdentity?.();
 		// One span covers Pi's whole pre-invocation gate; `waitedOn` names the ceiling that held it, so a
 		// budget wait reads as admission and never as a stall (#424, #434).
@@ -1706,6 +1710,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const onAgentEvent = async (event: AgentEvent): Promise<void> => {
 			if (event.type === "agent_start") {
 				runIdentity = deps.turnIdentity?.();
+				runTurnId = state.activeUserTurnId;
 				// The last run's request says nothing about this one until this one is sent.
 				state.modelRequest = null;
 			}
@@ -2222,6 +2227,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		takeSettledCalls(userTurnId) {
 			const calls = turnCalls.get(userTurnId) ?? [];
 			turnCalls.delete(userTurnId);
+			steeredTurns.clear();
 			// Any other turn's calls but the running one's settled after their own turn.settled was written. Each still
 			// carries its turn id in the journal, so releasing them here only bounds this map (#434).
 			for (const turnId of turnCalls.keys()) if (turnId !== state.activeUserTurnId) turnCalls.delete(turnId);
