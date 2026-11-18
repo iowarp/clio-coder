@@ -643,21 +643,29 @@ test("a later process reads each context tier's window from the cached listing, 
 			strictEqual(cached.modelCapabilities?.tiered?.contextWindow, windows[reader], `${writer} -> ${reader}`);
 			strictEqual(later.synthesizeModel(target, "tiered", null).contextWindow, windows[reader]);
 		}
-		// A snapshot written before per-tier windows were kept serves the default tier and re-lists for long context.
+		// The status fallback reads the snapshot itself, and sees the reader's tier, not the writer's.
+		const readBack = (tier: "default" | "long_context") =>
+			readTargetModelSnapshot({ id: "copilot-tier-long_context", runtime: "copilot-sdk", contextTier: tier })
+				?.modelCapabilities?.tiered?.contextWindow;
+		deepStrictEqual([readBack("default"), readBack("long_context")], [200_000, 1_000_000]);
+		// A snapshot written before per-tier windows were kept does not say which tier wrote its one window: here a
+		// long-context writer's. No tier trusts it: the first reader lists afresh and rewrites it with both tiers.
 		const id = "copilot-tier-legacy";
 		recordTargetModelSnapshot({ id, runtime: "copilot-sdk" }, ["tiered"], {
-			modelCapabilities: { tiered: { contextWindow: 200_000 } },
+			modelCapabilities: { tiered: { contextWindow: 1_000_000 } },
 		});
 		strictEqual(
-			(await (await newProcess()).probe({ id, runtime: "copilot-sdk" }, {} as ProbeContext)).modelsSource,
-			"cache",
+			readTargetModelSnapshot({ id, runtime: "copilot-sdk" })?.modelCapabilities?.tiered?.contextWindow,
+			undefined,
 		);
-		const relisted = await (await newProcess()).probe(
-			{ id, runtime: "copilot-sdk", contextTier: "long_context" },
-			{} as ProbeContext,
-		);
-		strictEqual(relisted.modelsSource, undefined);
-		strictEqual(relisted.modelCapabilities?.tiered?.contextWindow, 1_000_000);
+		for (const [tier, source] of [
+			["default", undefined],
+			["long_context", "cache"],
+		] as const) {
+			const read = await (await newProcess()).probe({ id, runtime: "copilot-sdk", contextTier: tier }, {} as ProbeContext);
+			strictEqual(read.modelsSource, source, tier);
+			strictEqual(read.modelCapabilities?.tiered?.contextWindow, windows[tier], tier);
+		}
 	} finally {
 		models.splice(0, models.length, ...original);
 	}
