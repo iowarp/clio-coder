@@ -234,8 +234,10 @@ const inceptionRuntime: RuntimeDescriptor = {
 			},
 			// /v1/chat/completions SSE probe, 2026-10-20: Mercury 3 answered "4" with stop
 			// at omitted, instant and medium effort (128-token cap), without a
-			// think_end token. Only legacy Mercury needs the empty-answer workaround.
-			...(wireModelId === "mercury-3" ? {} : { samplingParams: { reasoning_effort: "instant" } }),
+			// think_end token. Omitted effort reasons at the backend default, and the
+			// completions adapter strips that reasoning, so Clio's only level, off,
+			// pins the minimum effort every chat model accepts.
+			samplingParams: { reasoning_effort: "instant" },
 		});
 	},
 	decide(target: TargetDescriptor, opts: DecideOptions, ctx: ProbeContext): Promise<DecideResult> {

@@ -6,14 +6,19 @@ import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-compl
 import type { Model } from "../../src/engine/types.js";
 
 it("Mercury retains instant in probe and chat payloads with discovered nonreasoning capabilities", async () => {
-	const model = inceptionRuntime.synthesizeModel(
-		{ id: "inception", runtime: "inception" },
-		"mercury-2.5",
-		null,
-	) as Model<"openai-completions">;
-	model.reasoning = false;
-	strictEqual(resolveModelRuntimeCapabilitiesForModel(model).thinking.mechanism, "none");
-	for (const maxTokens of [256, 65536]) {
+	// mercury-3 offers only thinking off, so off must reach the wire as the minimum effort (bt-34).
+	for (const [wireModelId, maxTokens] of [
+		["mercury-2.5", 256],
+		["mercury-2.5", 65536],
+		["mercury-3", 256],
+	] as const) {
+		const model = inceptionRuntime.synthesizeModel(
+			{ id: "inception", runtime: "inception" },
+			wireModelId,
+			null,
+		) as Model<"openai-completions">;
+		model.reasoning = false;
+		strictEqual(resolveModelRuntimeCapabilitiesForModel(model).thinking.mechanism, "none");
 		let body: Record<string, unknown> = {};
 		const context: Parameters<typeof openAICompletionsApiProvider.streamSimple>[1] = {
 			messages: [{ role: "user", content: "hello", timestamp: 0 }],

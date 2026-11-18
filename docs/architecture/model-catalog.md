@@ -190,7 +190,7 @@ Subscription models are registered and managed as standard HTTP/cloud targets, e
 
 The `inception` runtime ([inception.ts](../../src/domains/providers/runtimes/cloud/inception.ts)) lists models live from `/v1/models` and offers `mercury-3`, `mercury-2.5`, `mercury-2` and `mercury-edit-2` as known models, with `mercury-3` as its curated default.
 
-- Chat goes through `/v1/chat/completions`. The runtime declares no reasoning capability, and only the legacy Mercury models get `reasoning_effort: "instant"` pinned on every request, because their reasoning is not observable over the API; `mercury-3` takes no pin.
+- Chat goes through `/v1/chat/completions`. The runtime declares no reasoning capability, and every Mercury chat model gets `reasoning_effort: "instant"` pinned on every request, because Mercury reasoning is not observable over the API; `mercury-3` would otherwise reason at the backend default and Clio would strip it.
 - Fill-in-the-middle goes through `/v1/fim/completions` on the target's `defaultModel`, or `mercury-edit-2` when none is set.
 - `mercury-decide` answers typed decisions at `/v1/decisions` through the runtime's `decide` verb, the backend System One uses. A row that serves only decisions is left out of the chat model list and carries `decisions: true` with chat, tools and FIM off, and selecting `mercury-decide` for chat fails with `mercury-decide supports typed decisions only; use mercury-3 for chat`.
 
