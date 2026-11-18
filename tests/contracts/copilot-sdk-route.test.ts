@@ -30,7 +30,7 @@ import { createProvidersBundle } from "../../src/domains/providers/extension.js"
 import { resolveModelRuntimeCapabilitiesForModel } from "../../src/domains/providers/model-runtime-capabilities.js";
 import { resolveRuntimeTarget } from "../../src/domains/providers/runtime-resolution.js";
 import copilotSdkRuntime from "../../src/domains/providers/runtimes/copilot/copilot-sdk.js";
-import { readTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
+import { readTargetModelSnapshot, recordTargetModelSnapshot } from "../../src/domains/providers/target-model-cache.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
@@ -569,6 +569,57 @@ test("the default tier's billed prompt budget bounds the window when the limits 
 	try {
 		const rows = await listCopilotSdkModels();
 		strictEqual(rows.find((row) => row.id === "long-context")?.contextWindow, 200_000);
+	} finally {
+		models.splice(0, models.length, ...original);
+	}
+});
+
+test("a later process reads each context tier's window from the cached listing, whichever tier wrote it", async () => {
+	const models = (fake() as unknown as { models: Array<Record<string, unknown>> }).models;
+	const original = [...models];
+	models.push({
+		...original[0],
+		id: "tiered",
+		capabilities: {
+			supports: { vision: false, reasoningEffort: false },
+			limits: { max_context_window_tokens: 1_000_000 },
+		},
+		billing: { tokenPrices: { maxPromptTokens: 200_000, longContext: { maxPromptTokens: 1_000_000 } } },
+	});
+	// A fresh module instance stands in for a new Clio process: nothing listed in memory, only the snapshot on disk.
+	let processes = 0;
+	const newProcess = async (): Promise<typeof copilotSdkRuntime> =>
+		(await import(`../../src/domains/providers/runtimes/copilot/copilot-sdk.js?process=${++processes}`)).default;
+	const windows = { default: 200_000, long_context: 1_000_000 } as const;
+	try {
+		for (const [writer, reader] of [
+			["default", "long_context"],
+			["long_context", "default"],
+		] as const) {
+			const id = `copilot-tier-${writer}`;
+			ok((await (await newProcess()).probe({ id, runtime: "copilot-sdk", contextTier: writer }, {} as ProbeContext)).ok);
+			const later = await newProcess();
+			const target = { id, runtime: "copilot-sdk", contextTier: reader } as TargetDescriptor;
+			const cached = await later.probe(target, {} as ProbeContext);
+			strictEqual(cached.modelsSource, "cache");
+			strictEqual(cached.modelCapabilities?.tiered?.contextWindow, windows[reader], `${writer} -> ${reader}`);
+			strictEqual(later.synthesizeModel(target, "tiered", null).contextWindow, windows[reader]);
+		}
+		// A snapshot written before per-tier windows were kept serves the default tier and re-lists for long context.
+		const id = "copilot-tier-legacy";
+		recordTargetModelSnapshot({ id, runtime: "copilot-sdk" }, ["tiered"], {
+			modelCapabilities: { tiered: { contextWindow: 200_000 } },
+		});
+		strictEqual(
+			(await (await newProcess()).probe({ id, runtime: "copilot-sdk" }, {} as ProbeContext)).modelsSource,
+			"cache",
+		);
+		const relisted = await (await newProcess()).probe(
+			{ id, runtime: "copilot-sdk", contextTier: "long_context" },
+			{} as ProbeContext,
+		);
+		strictEqual(relisted.modelsSource, undefined);
+		strictEqual(relisted.modelCapabilities?.tiered?.contextWindow, 1_000_000);
 	} finally {
 		models.splice(0, models.length, ...original);
 	}
