@@ -107,6 +107,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- An autonomy cap or judge halt now settles its turn with the named harness cause `autonomy_stop` instead of null (bt-26 N2d).
+- A side call (memory, compaction, side question) cut off by shutdown now settles with the shutdown cause main calls get (bt-26 N2c).
+- ACP `agent_message_chunk` text from consecutive assistant messages is now separated by a blank line (bt-41).
 - The sealed run.settled record and `evidence inspect` now carry a run's `unclassifiedAfterLastCheck` (count plus up to 5 redacted commands), for main-agent headless runs as well as dispatched ones (bt-15 c12a).
 - A check that fails outside the receipt vocabulary, such as `npx tsc --noEmit` or `npx eslint .`, now fails the sealed receipt and the headless line as it already did on the task board, instead of the run sealing verified (x6-1).
 - The receipt and the headless line keep disclosing unclassified commands while a check that ran before them still stands, even after a later check (x6-3).
