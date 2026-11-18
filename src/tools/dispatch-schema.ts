@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type { FleetSettings } from "../core/defaults.js";
 import { RESULT_SUMMARY_MAX_BYTES_CEILING } from "../domains/agents/result-contract.js";
 import { WORKER_CONTEXT_SPLICE_TOKENS } from "../domains/context/worker/contract.js";
@@ -53,6 +54,9 @@ export const COORDINATOR_DISPATCH_ARGUMENTS = {
 		Object.hasOwn(args, "task") ? args : { ...args, task: "" },
 	restore(args: Record<string, unknown>): Record<string, unknown> {
 		const { task, tasks, ...rest } = args;
+		// context is described on demand, not attached, so a grammar parser types it as a string (bt-47 cf1h-D4).
+		const context = typeof rest.context === "string" ? parseWorkerContext(rest.context) : undefined;
+		if (context !== undefined) rest.context = context;
 		// A grammar requires task first, so a model reaching for the batch field repeats its assignment there. A one-item
 		// batch is the form the tool normalizes every call into, so the copy loses nothing and the call means one run.
 		const only = Array.isArray(tasks) && tasks.length === 1 ? (tasks[0] as unknown) : undefined;
@@ -257,6 +261,17 @@ const WorkerContextSchema = Type.Union(
 		description: `Parent history: isolated (default), fork (native only, full transcript), splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<id> or message:<index>. Per-task overrides allowed.`,
 	},
 );
+
+/** A JSON-encoded context that decodes to a valid worker context; anything else stays for canonical refusal. */
+function parseWorkerContext(text: string): Record<string, unknown> | undefined {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	return Value.Check(WorkerContextSchema, parsed) ? (parsed as Record<string, unknown>) : undefined;
+}
 
 /**
  * `judge` serves both compete and council synthesis, and their defaults
