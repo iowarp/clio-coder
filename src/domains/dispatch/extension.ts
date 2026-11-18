@@ -323,6 +323,7 @@ import {
 	getDetachedBatch,
 	listDetachedBatches,
 	markDetachedBatchCollected,
+	markDetachedBatchOwnerTold,
 	registerDetachedBatch,
 } from "./batch-store.js";
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
@@ -12306,6 +12307,7 @@ export function createDispatchBundle(
 			get: getDetachedBatch,
 			list: listDetachedBatches,
 			markCollected: markDetachedBatchCollected,
+			markOwnerTold: markDetachedBatchOwnerTold,
 		},
 		snapshot,
 		routeBreakers: () =>
