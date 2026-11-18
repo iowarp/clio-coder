@@ -63,6 +63,7 @@ export interface FinishedRun {
 		| "blockedAttempts"
 		| "guardBlockedAttempts"
 		| "permissionRequestedAttempts"
+		| "escalations"
 		| "worktree"
 	>;
 	delivered: RunResultObject | null;
@@ -258,6 +259,13 @@ function activityLabels(run: FinishedRun, status: CanonicalTrustStatus): string[
 		// The case this whole label set exists for: the task was to change
 		// something and nothing changed, under an exit code that says success.
 		if (!activity.mutatingSucceeded && isMutationClassRun(run, status)) labels.push("mutation_effect=none");
+	}
+	// A timed-out ask is always denied. Without its cause, a refused call read as a policy or routing refusal (bt-11 t).
+	const timedOut = run.facts.escalations?.timedOut ?? 0;
+	if (timedOut > 0) {
+		labels.push(
+			`refused_cause=approval_timeout:${timedOut} (${timedOut === 1 ? "a call waited" : "calls waited"} for approval and no one answered in time)`,
+		);
 	}
 	const assessment = run.assessment;
 	if (assessment !== null) {
