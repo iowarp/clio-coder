@@ -37,6 +37,12 @@ function unknownNodeError(requested: string, settings: Readonly<ClioSettings> | 
 				"The dispatch node field takes 'local' or a fleet.nodes id. Select the profile target/model in dispatch, or use --agent-profile in the CLI.",
 		);
 	}
+	if (settings?.targets.some((entry) => entry.id === requested)) {
+		return admissionError(
+			`unknown fleet node '${requested}'; '${requested}' is a target id. ` +
+				`The dispatch node field takes 'local' or a fleet.nodes id. Put '${requested}' in target and omit node.`,
+		);
+	}
 	return admissionError(`unknown fleet node '${requested}'`);
 }
 
