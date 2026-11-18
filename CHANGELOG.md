@@ -96,6 +96,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- On small context windows the compaction summary request now states the room the checkpoint may use, so repeated cuts hold near 60% of history instead of creeping toward the trigger as the cumulative checkpoint grows (bt-18).
 - The gateway accepts an empty `parameters` object on a call and names the exact `args` rewrite for a non-empty one (bt-23).
 - A gateway chain whose `steps` sit inside `args` is refused with the top-level shape instead of a generic error (bt-23).
 - A step-template pipeline that stopped at the continuation cap or without `pipelineDone` is journaled (`step_pipeline.settled`, `run.settled.stepPipeline`), so `telemetry why-stopped`, `usage` and `evidence inspect` report it instead of a plain success (bt-20).
