@@ -256,6 +256,8 @@ export interface AcpLiveTelemetry {
 export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelemetry {
 	let usageSignature: string | null = null;
 	let accountingSignature: string | null = null;
+	/** The read model's stamp when `accountingSignature` was taken; unset when the view gives none. */
+	let accountingRevision: string | undefined;
 	let planSignature: string | null = EMPTY_PLAN_SIGNATURE;
 	let turn: AcpPromptTurn | null = null;
 	/** The turn and session blocks the newest meter frame computed. */
@@ -290,6 +292,7 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		framedSession = session;
 		const sessionView = view?.session() ?? null;
 		accountingSignature = usageSignatureOf(sessionView);
+		accountingRevision = view?.revision?.();
 		// ACP `cost` is a plain amount, so an unknown or partly unpriced spend stays absent rather than reading as zero.
 		const amount = plainCost(session);
 		return {
@@ -414,7 +417,14 @@ export function createAcpLiveTelemetry(deps: AcpLiveTelemetryDeps): AcpLiveTelem
 		for (const waiter of [...foldWaiters]) waiter.check();
 		if (disposed || !deps.sessionTelemetry || deps.sessionId() === null || pendingUsage !== null) return;
 		const view = deps.sessionTelemetry();
-		if (view === null || usageSignatureOf(view.session()) === accountingSignature) return;
+		if (view === null) return;
+		// The stamp is cheap; only a batch that moved it builds and stringifies the projection to compare.
+		const revision = view.revision?.();
+		if (revision !== undefined && revision === accountingRevision) return;
+		if (usageSignatureOf(view.session()) === accountingSignature) {
+			accountingRevision = revision;
+			return;
+		}
 		pendingUsage = setImmediate(() => {
 			pendingUsage = null;
 			flushUsage(true);

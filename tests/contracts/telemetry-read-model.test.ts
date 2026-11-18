@@ -965,6 +965,14 @@ test("a cause's re-prefill counts only its breaks, not the calls that fell short
 	deepStrictEqual([report.engineFloor?.[0]?.calls, report.breaks.length], [3, 1]);
 	deepStrictEqual(causes(report), [["unattributed", 1, "9,000"]]);
 	deepStrictEqual(causes(cacheReport(sourceOf([...early, ...cold, ...later]), now)), causes(report));
+	// A break that lands while the floor holds joins the cause without refiltering the session.
+	const again = call(0, 9_000, "cold", 9_000);
+	const regrown = sourceOf([...early, ...cold, ...later, ...again]);
+	continueSource(regrown, grown);
+	deepStrictEqual(causes(cacheReport(regrown, now)), [["unattributed", 2, "18,000"]]);
+	deepStrictEqual(causes(cacheReport(sourceOf([...early, ...cold, ...later, ...again]), now)), [
+		["unattributed", 2, "18,000"],
+	]);
 });
 
 test("a resumed request that departs from the last journaled one mid-transcript is a replay mismatch", () => {
