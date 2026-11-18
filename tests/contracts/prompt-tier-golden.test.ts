@@ -1,10 +1,12 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { resolveClioDirs } from "../../src/core/xdg.js";
+import { parseFrontmatter } from "../../src/domains/agents/frontmatter.js";
 import {
 	type CompileInputs,
 	compile,
@@ -19,7 +21,9 @@ import { type FragmentTable, loadFragments } from "../../src/domains/prompts/fra
  * and scout workers) compiled from inputs captured off live sessions. The
  * expected text was produced by the compiler before fragment preconditions
  * existed; a change that moves a byte of any tier fails here.
- * `CLIO_PROMPT_GOLDEN=update` rewrites the expected files.
+ * `CLIO_PROMPT_GOLDEN=update` rewrites the expected files. A worker persona
+ * is read from its shipped recipe, so an edit to coder.md or scout.md moves
+ * the golden; the fixture keeps only the bound-skill block dispatch appends.
  */
 const dir = fileURLToPath(new URL("../fixtures/prompt-tiers/", import.meta.url));
 const tiers = readdirSync(dir)
@@ -35,6 +39,22 @@ const homeEnv = {
 const saved: Record<string, string | undefined> = {};
 
 type Tier = { kind: "session"; inputs: CompileInputs } | { kind: "worker"; inputs: WorkerPromptInputs };
+type PersonaFixture = Omit<NonNullable<WorkerPromptInputs["persona"]>, "body" | "contentHash"> & {
+	boundSkillBlock?: string;
+};
+
+function loadTier(name: string): Tier {
+	const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as
+		| { kind: "session"; inputs: CompileInputs }
+		| { kind: "worker"; inputs: Omit<WorkerPromptInputs, "persona"> & { persona: PersonaFixture } };
+	if (tier.kind === "session") return tier;
+	const { boundSkillBlock = "", ...persona } = tier.inputs.persona;
+	const source = join(resolvePackageRoot(), persona.relPath.replace(/^\/clio-coder\//u, ""));
+	const recipe = parseFrontmatter(readFileSync(source, "utf8"), source).body;
+	const body = [recipe, boundSkillBlock].filter((part) => part.trim().length > 0).join("\n\n");
+	const contentHash = createHash("sha256").update(body).digest("hex");
+	return { kind: "worker", inputs: { ...tier.inputs, persona: { ...persona, body, contentHash } } };
+}
 
 describe("prompt tiers", () => {
 	before(() => {
@@ -59,7 +79,7 @@ describe("prompt tiers", () => {
 
 	for (const name of tiers) {
 		it(`compiles ${name} byte-identical to its golden prompt`, () => {
-			const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as Tier;
+			const tier = loadTier(name);
 			const table = loadFragments();
 			const compiled = tier.kind === "session" ? compile(table, tier.inputs) : compileWorker(table, tier.inputs);
 			const actual = compiled.systemPrompt.split(resolvePackageRoot()).join("<package-root>");
@@ -72,7 +92,7 @@ describe("prompt tiers", () => {
 
 describe("prompts.profile v2 (S-82)", () => {
 	const session = (name: string, extra: Record<string, unknown> = {}) => {
-		const tier = JSON.parse(readFileSync(join(dir, `${name}.inputs.json`), "utf8")) as Tier;
+		const tier = loadTier(name);
 		if (tier.kind !== "session") throw new Error(`${name} is not a session tier`);
 		const inputs = { ...tier.inputs, sessionInputs: { ...tier.inputs.sessionInputs, promptProfile: "v2", ...extra } };
 		return compile(loadFragments(), inputs as CompileInputs);
@@ -108,9 +128,7 @@ describe("prompts.profile v2 (S-82)", () => {
 		["worker-scout", PROMPT_BUDGET_CHARS.worker],
 	] as const;
 	const budgetCompile = (table: FragmentTable, name: string) => {
-		const tier = JSON.parse(
-			readFileSync(join(dir, `${name === "acp" ? "attended-default" : name}.inputs.json`), "utf8"),
-		) as Tier;
+		const tier = loadTier(name === "acp" ? "attended-default" : name);
 		if (tier.kind === "worker") return compileWorker(table, { ...tier.inputs, promptProfile: "v2" });
 		const {
 			operatorInterviews: _interviews,
@@ -220,7 +238,7 @@ describe("prompts.profile v2 (S-82)", () => {
 			read: "`read` the region with `line_numbers: true` if",
 		};
 		for (const [tool, text] of Object.entries(rows)) {
-			const tier = JSON.parse(readFileSync(join(dir, "attended-default.inputs.json"), "utf8")) as Tier;
+			const tier = loadTier("attended-default");
 			if (tier.kind !== "session") throw new Error("not a session tier");
 			const without = session("attended-default", {
 				toolNames: (tier.inputs.sessionInputs.toolNames ?? []).filter((name) => name !== tool),
