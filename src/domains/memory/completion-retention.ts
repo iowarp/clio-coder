@@ -27,6 +27,8 @@ export interface RetentionStatus {
 	readonly revision: string | null;
 	readonly candidateIds?: readonly string[];
 }
+/** Settled without a model call: the task left no receipt or read a lesson could be held to. */
+export const NO_GROUNDING_EVIDENCE = "no-grounding-evidence";
 export const EMPTY_RETENTION: RetentionStatus = {
 	phase: "idle",
 	reason: null,
@@ -157,6 +159,27 @@ async function retainWithinDeadline(
 				const gated: RetentionStatus = { ...previous, phase: "gated", reason: "candidate-evidence-changed" };
 				write(gated);
 				return { claimed: false, status: gated };
+			}
+			// A held lesson needs a successful command receipt or a read excerpt from
+			// this task, and with neither no answer could be held (Astra r9-4). The
+			// task settles without inference; its calls stay unreviewed, so history
+			// review can still file a provisional proposal from them off the exit path.
+			if (!savedCandidates.length && input.source.succeededCommands.size === 0 && input.source.observedReads.size === 0) {
+				const ungrounded: RetentionStatus = {
+					...EMPTY_RETENTION,
+					phase: "abstained",
+					reason: NO_GROUNDING_EVIDENCE,
+					extracted: previous?.extracted ?? 0,
+					attempts: previous?.attempts ?? 0,
+					revision: input.source.revision,
+				};
+				write(ungrounded);
+				observationEvent(
+					"lesson-extraction-skipped",
+					{ reason: NO_GROUNDING_EVIDENCE, revision: input.source.revision },
+					input.scope.sessionId,
+				);
+				return { claimed: false, status: ungrounded };
 			}
 			const status: RetentionStatus = {
 				phase: "extracting",

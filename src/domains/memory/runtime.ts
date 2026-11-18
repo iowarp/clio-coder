@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { MemoryCommitScope } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
-import { EMPTY_RETENTION, readRetention, retainCompletedTask, retentionPath } from "./completion-retention.js";
+import {
+	EMPTY_RETENTION,
+	NO_GROUNDING_EVIDENCE,
+	readRetention,
+	retainCompletedTask,
+	retentionPath,
+} from "./completion-retention.js";
 import type {
 	MemoryConsumptionReceipt,
 	MemoryContract,
@@ -1054,7 +1060,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			});
 			if (isCurrent() || orphan) publish(retained);
 			// A settled review covers this task: history review need not pay for it again.
-			if (retentionSettled(retained))
+			// One settled without a model call reviewed nothing, so history keeps it.
+			if (retentionSettled(retained) && retained.reason !== NO_GROUNDING_EVIDENCE)
 				recordReviewedHistoryCalls(infra.stateDir(), infra.cwd?.() ?? "", source.callIds ?? []);
 			if (orphan && this.#orphan === orphan && retentionSettled(retained)) this.#orphan = null;
 		} catch (error) {
