@@ -171,3 +171,29 @@ test("parallel dispatch returns scheduler assignments on a board with no worker 
 		env.restore();
 	}
 });
+
+test("a worker route warning reaches the dispatching model once, ahead of the run lines", () => {
+	const envelope = fixtureEnvelope("run-thinking");
+	const draft = fixtureReceiptDraft(envelope);
+	const message = "thinking off resolved to low for copilot-sdk/claude-opus-5.5; the model profile supports low, medium";
+	draft.runtimeResolution = {
+		diagnostics: [
+			{ severity: "warning", code: "thinking-coerced", message },
+			{ severity: "info", code: "context-window-source", message: "not a warning" },
+		],
+	} as unknown as NonNullable<typeof draft.runtimeResolution>;
+	const receipt = finishRunResult(draft, envelope, {
+		terminal: { terminalReason: draft.terminalReason ?? "completed" },
+		processExitCode: envelope.exitCode,
+		frameType: null,
+		usage: undefined,
+	}).result;
+	const output = formatDispatchOutput("parallel", [{ ...run("run-thinking", 0, "target-rates", 1), receipt }], 16384);
+	const lines = output.split("\n");
+	deepStrictEqual(
+		lines.filter((line) => line.includes("route_warning")),
+		[`route_warning run-thinking: ${message}`],
+	);
+	ok(lines.indexOf(`route_warning run-thinking: ${message}`) < lines.findIndex((line) => line.startsWith("- ")));
+	ok(!output.includes("not a warning"));
+});

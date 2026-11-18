@@ -70,6 +70,7 @@ import type {
 import { normalizeYoloGateOutcome } from "../domains/dispatch/yolo-ids.js";
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
+import { runtimeResolutionWarnings } from "../domains/providers/runtime-resolution.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { FlowRestrictionSet } from "../domains/safety/information-flow.js";
 import { mergeFlowRestrictions } from "../domains/safety/information-flow.js";
@@ -490,6 +491,16 @@ function successNote(receipt: RunResult): string | null {
 	);
 }
 
+/**
+ * The warnings the dispatch side resolved the worker's route with, such as a thinking level the model could not
+ * run. The worker feed carries them as `route_warning` events; this hands the same words to the dispatching model.
+ */
+function routeWarningLines(receipt: RunResult): string[] {
+	return runtimeResolutionWarnings(receipt.runtimeResolution?.diagnostics ?? []).map(
+		(message) => `route_warning ${receipt.runId}: ${message}`,
+	);
+}
+
 interface CompletedRun {
 	recording?: import("../domains/dispatch/index.js").RecordingReference;
 	readOnly?: boolean;
@@ -646,6 +657,7 @@ export function formatDispatchOutput(
 					nextHostValidationAction(run.receipt, run.readOnly === true),
 					withheldMergeNotice(run.receipt),
 					mcpSandboxNoNetworkNotice(run.receipt),
+					...routeWarningLines(run.receipt),
 				])
 				.filter((action): action is string => action !== null),
 		),
