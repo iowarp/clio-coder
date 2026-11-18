@@ -457,6 +457,15 @@ test("a session's lifetime tells a clean close, an open owner, an abnormal end a
 	const closed = why({ endedAt: "2099-01-01T00:00:00.000Z", owner }, true);
 	strictEqual(closed.state, "closed");
 	ok(closed.findings.includes("The session closed at 2099-01-01T00:00:00.000Z."));
+	// bt-20: a model's normal stop reads as a normal end, not as a stage where something failed.
+	const turnEnd = makeTelemetryRecord(
+		"turn.settled",
+		{ stopReason: "stop", terminal: { cause: null, stage: "firstToken", retries: 0, callIds: [] } },
+		{ sessionId: source.sessionId, agent: { role: "main", id: source.sessionId } },
+		{ t: "2026-10-29T00:00:00.000Z", mono: 0 },
+	);
+	const ended = whyStopped({ ...source, journal: { ...source.journal, records: [...imported.records, turnEnd] } }, now);
+	ok(ended.findings.includes("The last turn ended normally (stop)."), ended.findings.join("\n"));
 	const crashed = why({ endedAt: null, owner }, false);
 	notStrictEqual(crashed.state, "closed");
 	ok(crashed.findings.includes("The session's process ended without closing it."));
