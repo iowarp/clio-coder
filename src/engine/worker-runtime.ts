@@ -1020,8 +1020,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		return merged;
 	};
 	// The write-side equivalent: what this run changed and what it validated,
-	// so a mutation report is judged against the run instead of believed.
-	const runEffects = createRunEffectsRecorder(contractCwd);
+	// so a mutation report is judged against the run instead of believed. Scratch roots read as the orchestrator's copy
+	// reads them, so a check logged under one is output in both recorders (x6-8).
+	const runEffects = createRunEffectsRecorder(contractCwd, { scratchRoots: workerSettings.safety.scratchRoots });
 	const acceptHelperResult = (data: unknown): string | null => {
 		if (!input.resultContract) return "missing helper result contract";
 		const validationInput = {

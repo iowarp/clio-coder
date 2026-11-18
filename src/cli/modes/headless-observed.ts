@@ -1,3 +1,4 @@
+import { unclassifiedAfterLastCheck } from "../../domains/dispatch/run-findings.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { validationCommandOf } from "../../domains/safety/check-classifier.js";
 import { capabilityEntries, verifyFoundNoChecks } from "../../domains/safety/finish-contract.js";
@@ -9,8 +10,8 @@ import type { RunEffects } from "../../domains/safety/run-effects.js";
  * recorder's own outcomes, the ones the sealed receipt reads, so this line never reports a pass the receipt refuses
  * (x4-1). A check the recorder does not recognise or could not attribute is absent, never invented.
  * `noChecksDeclared` is set when no check stands and a `verify` call found none declared or derivable in the workspace.
- * `unclassifiedAfterLastCheck` counts the calls the check classifier could not read that ran after the latest check
- * outcome while one stands: they neither settled nor cleared it, so the line names them beside it.
+ * `unclassifiedAfterLastCheck` counts the calls the check classifier could not read that ran after the oldest check
+ * outcome still standing: they neither settled nor cleared it, so the line names them beside it.
  */
 export interface HeadlessObserved {
 	toolCalls: number;
@@ -59,7 +60,8 @@ export function observeHeadlessRun(input: {
 				)
 			: [];
 	const noChecksDeclared = input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(own);
-	const unclassified = checks.length > 0 ? (input.effects.unclassifiedAfterLastCheck?.length ?? 0) : 0;
+	// The receipt's own rule: the recorder lists a call only while an outcome stands, so both surfaces count one list (x6-6).
+	const unclassified = unclassifiedAfterLastCheck(input.effects)?.count ?? 0;
 	return {
 		toolCalls: input.toolCalls,
 		refused: input.refused,
@@ -90,7 +92,7 @@ export function formatHeadlessObservedLine(observed: HeadlessObserved): string |
 	if (failed.length > 0) parts.push(`check${failed.length === 1 ? "" : "s"} failed: ${names(failed)}`);
 	const unclassified = observed.unclassifiedAfterLastCheck ?? 0;
 	if (unclassified > 0)
-		parts.push(`${unclassified} unclassified command${unclassified === 1 ? "" : "s"} ran after the last check`);
+		parts.push(`${unclassified} unclassified command${unclassified === 1 ? "" : "s"} ran after a standing check`);
 	if (observed.writes > 0 && observed.checks.length === 0)
 		parts.push(
 			observed.noChecksDeclared ? "no checks declared in the workspace" : "no check observed after the last write",

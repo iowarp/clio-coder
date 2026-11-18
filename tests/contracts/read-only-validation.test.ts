@@ -779,6 +779,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	for (const change of [`node -e "fs.writeFileSync('src/a.ts', '')"`, "tsc", "npx jest -u", "npm test -- -u"])
 		deepStrictEqual(seal("npm test", change), stale, change);
 	deepStrictEqual(seal("!npm test", "npx tsc --noEmit"), red);
+	// A red from a check no receipt vocabulary names still settles under the classifier's name (x6-1).
+	for (const check of ["npx tsc --noEmit", "npx eslint ."])
+		deepStrictEqual(seal("npm test", `!${check}`), [["npm test"], "unverified", [check]], check);
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);
@@ -1006,6 +1009,21 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	recorder.start("again", "bash", { command: "npm test" });
 	recorder.checkOutcome("again", "ok");
 	recorder.finish("again", false);
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
+	// A later outcome keeps the disclosure while an earlier pass that predates the unknown call still stands (x6-3).
+	for (const [id, command] of [
+		["gen", "python scripts/gen.py"],
+		["lint", "npm run lint"],
+	] as const) {
+		recorder.start(id, "bash", { command });
+		recorder.checkOutcome(id, "ok");
+		recorder.finish(id, false);
+	}
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, ["python scripts/gen.py"]);
+	// A change retires every outcome, so no disclosure is left pointing at a check that no longer stands (x6-6).
+	recorder.start("fix", "edit", { path: "src/a.ts" });
+	recorder.checkOutcome("fix", "ok");
+	recorder.finish("fix", false);
 	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
 	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
 	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
