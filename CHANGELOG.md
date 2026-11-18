@@ -64,6 +64,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - Astra r10-4: restoring a session reads each telemetry view's run list once instead of once per receipt.
 - Astra r10-5: a terminal height change that leaves every preview budget unchanged keeps the settled transcript rows instead of re-rendering every entry.
 - P2D-1: ACP delegation and native worker runs settle through one shared finalizer with byte-identical receipts, ledger rows and events.
+- D2-1: live telemetry keeps cache floors, cache breaks and the session projection incremental across batches instead of re-folding every call (12k calls: about 380 ms to 1.4 ms per batch), and ACP skips unchanged session snapshots.
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
@@ -76,6 +77,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- D2-4: the cached share comes from one fold everywhere, shown as a lower bound (`≥`) when a cache read went unreported and as an estimate (`~`) when derived from a timed prefill; `telemetry cost` and GUI operator metrics now show it.
 - bt-1: Copilot targets launch the SDK's bundled runtime even from inside a Copilot CLI shell, and a protocol mismatch names the foreign runtime.
 - bt-2: Copilot models offer exactly the reasoning efforts their listing publishes (medium is no longer sent as low), with a notice when a level is clamped.
 - bt-5: ACP sessions and agent workers on Copilot list live models on a cold cache, resolve the same thinking levels, context window and output budget as the main agent, and keep their thinking level across model switches.
