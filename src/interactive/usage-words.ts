@@ -269,7 +269,8 @@ export function sessionVerifiedOutcomes(view: TelemetryView, entries: ReadonlyAr
 	return countVerifiedOutcomes(expandChainMessages(entries), verified);
 }
 
-export const NO_VERIFIED_OUTCOME = "none this session, so no per-outcome figure";
+/** Command checks such as unit tests are not judged outcomes, and the words say so rather than read as nothing verified. */
+export const NO_VERIFIED_OUTCOME = "no judged outcome this session; command checks such as unit tests are not counted";
 
 /**
  * The session's tokens and cost per verified outcome. The shares divide the read model's own session totals and are

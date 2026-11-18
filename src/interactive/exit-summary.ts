@@ -310,11 +310,13 @@ export function renderExitSummary(
 		if (autonomy !== null) add("Autonomy", autonomy);
 	} else {
 		// A turn is one operator prompt; a model call is one request sent, so a turn that used tools or retried makes
-		// several. Workers' calls count here as /usage counts them, and `workers` counts their runs.
-		add("Activity", [
+		// several. Workers' calls count here as /usage counts them, their observed writes count as files, and the key
+		// says so; a worker whose writes went unrecorded is named rather than read as one that changed nothing.
+		const unrecorded = snapshot.unrecordedWorkerFiles;
+		add(snapshot.workers.length > 0 ? "This visit, workers included" : "This visit", [
 			countLabel(snapshot.turns, "turn"),
 			...(spend.kind === "ready" ? [countLabel(spend.visitCalls, "model call")] : []),
-			`${countLabel(snapshot.files.length, "file")} changed`,
+			`${countLabel(snapshot.files.length, "file")} changed${unrecorded > 0 ? ` (${countLabel(unrecorded, "worker")} kept no write record)` : ""}`,
 			countLabel(snapshot.workers.length, "worker"),
 		]);
 		add("Time", [
