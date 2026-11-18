@@ -228,10 +228,12 @@ describe("contracts/state-file-lock", () => {
 
 // An Apptainer `--pid` or `--containall` instance keeps the host's hostname and boot but runs in its own pid
 // namespace. `unshare --user --pid --fork --mount-proc` reproduces that without privilege where user namespaces are
-// allowed; elsewhere these tests skip.
+// allowed; elsewhere these tests skip. `--kill-child` takes the namespace down with unshare, so no peer outlives
+// its test.
 const NAMESPACES =
 	process.platform === "linux" &&
-	spawnSync("unshare", ["-Urpf", "--mount-proc", "true"], { stdio: "ignore", timeout: 10_000 }).status === 0;
+	spawnSync("unshare", ["-Urpf", "--kill-child", "--mount-proc", "true"], { stdio: "ignore", timeout: 10_000 })
+		.status === 0;
 
 describe("contracts/state-file-lock across pid namespaces", {
 	skip: !NAMESPACES && "no unprivileged pid namespaces",
@@ -275,7 +277,7 @@ if (mode === "hold") {
 	});
 
 	function inNamespace(command: string): ChildProcess {
-		const child = spawn("unshare", ["-Urpf", "--mount-proc", "sh", "-c", command], {
+		const child = spawn("unshare", ["-Urpf", "--kill-child", "--mount-proc", "sh", "-c", command], {
 			cwd: process.cwd(),
 			stdio: ["pipe", "pipe", "inherit"],
 		});

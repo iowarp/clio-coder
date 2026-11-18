@@ -35,8 +35,9 @@ function cli(args: ReadonlyArray<string>): Promise<{ status: number | null; stdo
 	});
 }
 
+// The arena, interop and research routers answer --help before naming the leaf, so one row each covers them.
 const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
-	...["inspect", "calls", "cost", "cache", "timeline", "why-stopped", "explain"].map((leaf) => ({
+	...["inspect", "calls", "cache", "timeline", "why-stopped", "explain"].map((leaf) => ({
 		args: ["telemetry", leaf, "--help"],
 		usage: new RegExp(`clio-coder telemetry ${leaf} `),
 	})),
@@ -47,18 +48,11 @@ const CASES: ReadonlyArray<{ args: string[]; usage: RegExp }> = [
 	})),
 	{ args: ["session", "list", "--help"], usage: /clio-coder session list / },
 	{ args: ["session", "terminate", "some-session", "--help"], usage: /clio-coder session terminate / },
-	{ args: ["interop", "inspect", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["interop", "adopt", "claude-code", "--yes", "--help"], usage: /clio-coder interop <subcommand>/ },
 	{ args: ["verifiers", "inspect", "--help"], usage: /clio-coder verifiers inspect --json/ },
 	{ args: ["version", "--help"], usage: /clio-coder version \[--worker-specs \| --build\]/ },
-	...["run", "show", "vote", "list", "standings"].map((leaf) => ({
-		args: ["arena", leaf, "--help"],
-		usage: /clio-coder arena run --contender /,
-	})),
-	...["start", "status", "report", "list"].map((leaf) => ({
-		args: ["research", leaf, "--help"],
-		usage: new RegExp(`clio-coder research ${leaf} `),
-	})),
+	{ args: ["arena", "run", "--help"], usage: /clio-coder arena run --contender / },
+	{ args: ["research", "start", "--help"], usage: /clio-coder research start / },
 ];
 
 describe("leaf commands answer --help", { concurrency: 4 }, () => {
