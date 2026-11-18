@@ -1,7 +1,13 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { LoadSkillsInput } from "../../domains/resources/index.js";
 import { runDocsScope } from "../context/index.js";
-import { OBSERVE_SELF_CAPS, observationBudgetExhausted, reserveObservation } from "../observation.js";
+import {
+	commitObservationReservation,
+	OBSERVE_SELF_CAPS,
+	observationBudgetExhausted,
+	releaseObservation,
+	reserveObservation,
+} from "../observation.js";
 import type { ToolResult, ToolSpec } from "../registry.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./clio-context-surface.js";
 
@@ -60,18 +66,25 @@ export function createClioLibraryTool(deps: ClioLibraryToolDeps = {}): ToolSpec 
 					hint: "Continue in a follow-up turn.",
 				});
 			}
-			const { runLibraryScope } = await import("../context/library.js");
-			return runLibraryScope(
-				{
-					getCwd: () => deps.getCwd?.() ?? process.cwd(),
-					...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
-					...(deps.getSkillLoaderOptions ? { skillLoaderOptions: deps.getSkillLoaderOptions() } : {}),
-				},
-				args,
-				reservation,
-				options,
-				ToolNames.ClioLibrary,
-			);
+			// The import and the inventory walk await, so parallel siblings must see this
+			// spend now; finalize reconciles it and the finally block refunds an early exit.
+			commitObservationReservation(reservation);
+			try {
+				const { runLibraryScope } = await import("../context/library.js");
+				return await runLibraryScope(
+					{
+						getCwd: () => deps.getCwd?.() ?? process.cwd(),
+						...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
+						...(deps.getSkillLoaderOptions ? { skillLoaderOptions: deps.getSkillLoaderOptions() } : {}),
+					},
+					args,
+					reservation,
+					options,
+					ToolNames.ClioLibrary,
+				);
+			} finally {
+				releaseObservation(reservation);
+			}
 		},
 	};
 }
