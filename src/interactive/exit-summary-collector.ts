@@ -244,8 +244,11 @@ export function exitSpend(
 	};
 }
 
-const shareWords = (share: { fact: { kind: string }; display: string } | undefined): string | null =>
-	share && (share.fact.kind === "measured" || share.fact.kind === "estimated") ? share.display : null;
+/** A share some call reported or derived a read for; one no call did stays out of the card. */
+const shareWords = (share: Quantity | undefined): string | null =>
+	share && !("kind" in share.fact) && share.fact.coverage.measured + share.fact.coverage.estimated > 0
+		? share.display
+		: null;
 
 interface CacheWords {
 	share: string;

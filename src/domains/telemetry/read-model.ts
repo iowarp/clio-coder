@@ -46,6 +46,7 @@ import {
 	renderDurationSum,
 	renderFact,
 	renderPricingSum,
+	renderShareSum,
 	renderTextFact,
 	renderUsdFact,
 	renderUsdLimit,
@@ -1301,7 +1302,8 @@ const RULES: Record<FactMetric, string> = {
 	toolErrors: "sealed evidence tool errors",
 	harnessShare: "100 × harnessTime / (harnessTime + networkTime + modelTime + toolTime), main-loop calls only",
 	callShare: "100 × group calls / whole-scope calls; unknown when model groups overlap",
-	cacheShare: "100 × cache-read tokens / prompt tokens; unknown without complete measured token fields",
+	cacheShare:
+		"100 × cache-read tokens / prompt tokens of the sent calls; ≥ while a call's read went unreported, ~ when a read was derived from the uncached prefill",
 	calls: "count(distinct callId); a run contributes its API calls",
 	attempts: "count(attempts)",
 	neverSent: "count(attempts where disposition=never_sent)",
@@ -1607,6 +1609,7 @@ function display(
 	}
 	if (family === "usd") return renderUsdSum(fact, free, freeRule);
 	if (family === "duration") return renderDurationSum(fact);
+	if (family === "percent") return renderShareSum(fact);
 	return renderCountSum(fact);
 }
 
@@ -1714,7 +1717,14 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 		};
 	}
 
-	if (ref.metric === "harnessShare" || ref.metric === "callShare" || ref.metric === "cacheShare") {
+	if (ref.metric === "cacheShare") {
+		const selection = select(view, ref);
+		if (!selection) return null;
+		const fact = shareFact(selectedShare(selection));
+		return { quantity: { fact, display: display(ref.metric, fact, false), ref: factRef(ref) }, selection };
+	}
+
+	if (ref.metric === "harnessShare" || ref.metric === "callShare") {
 		const base = ref.metric === "harnessShare" ? { ...ref, group: { by: "role" as const, key: "main" } } : ref;
 		const selection = select(view, base);
 		if (!selection) return null;
@@ -1735,10 +1745,6 @@ function measure(view: View, ref: ParsedFactRef): Measurement | null {
 				const total = values.reduce<number>((sum, part) => sum + (part ?? 0), 0);
 				if (total > 0) value = (100 * (values[0] ?? 0)) / total;
 			}
-		} else if (ref.metric === "cacheShare") {
-			const cached = exact(read("cacheRead"));
-			const prompt = exact(read("prompt"));
-			if (cached !== null && prompt !== null && prompt > 0 && cached <= prompt) value = (100 * cached) / prompt;
 		} else {
 			const numerator = exact(read("calls"));
 			const wholeRef = { ...ref, metric: "calls" as const };
@@ -2081,7 +2087,7 @@ function projectSession(source: SessionSource, analysis: Analysis, options: Read
 						cacheRead: quantity(view, own(id, "cacheRead", { attemptId: latest.started.attemptId })),
 						cacheWrite: quantity(view, own(id, "cacheWrite", { attemptId: latest.started.attemptId })),
 						input: quantity(view, own(id, "input", { attemptId: latest.started.attemptId })),
-						...cacheShares(analysis),
+						...cacheShares(view, analysis, id),
 						...replayMismatch(view, id, cacheBreaks(analysis.cache)),
 					}
 				: null,
@@ -2509,7 +2515,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 				rePrefilled: q("rePrefilled"),
 				uncachedPrefill: q("uncachedPrefill"),
 				breakUsd: q("breakUsd"),
-				share: cacheShare(shareOf([attempt])),
+				share: q("cacheShare"),
 			};
 		}),
 		byCause: causes.map((cause) => ({
@@ -2518,7 +2524,7 @@ export function cacheReport(source: SessionSource, options: ReadOptions = {}): C
 			rePrefilled: quantity(view, own(id, "rePrefilled", { group: { by: "cold", key: cause } })),
 			breakUsd: quantity(view, own(id, "breakUsd", { group: { by: "cold", key: cause } })),
 		})),
-		...cacheShares(analysis),
+		...cacheShares(view, analysis, id),
 		...replayMismatch(view, id, breaks),
 		engineFloor: floorRows,
 	};
@@ -2543,16 +2549,40 @@ function promptParts(attempt: Attempt): { read: number; write: number; input: nu
 	return uncached === null || uncached > input ? null : { read: input - uncached, write, input: uncached };
 }
 
+/** A cached share's tokens and the sent calls behind them: read, derived from the uncached prefill, or unreported. */
 interface ShareParts {
 	read: number;
 	total: number;
+	measured: number;
+	derived: number;
+	unknown: number;
 }
-const emptyShare = (): ShareParts => ({ read: 0, total: 0 });
+const emptyShare = (): ShareParts => ({ read: 0, total: 0, measured: 0, derived: 0, unknown: 0 });
+/**
+ * An unreported read adds the call's known prompt tokens and no read, so the share stays a lower bound: a read it
+ * missed can only raise it.
+ */
 function addShare(share: ShareParts, attempt: Attempt): void {
+	if (!invoked(attempt)) return;
 	const parts = promptParts(attempt);
-	if (!parts) return;
-	share.read += parts.read;
-	share.total += parts.read + parts.write + parts.input;
+	if (parts) {
+		share.read += parts.read;
+		share.total += parts.read + parts.write + parts.input;
+		if (knownCount(attempt.settled?.usage?.cacheRead) === null) share.derived += 1;
+		else share.measured += 1;
+		return;
+	}
+	const usage = attempt.settled?.usage;
+	const input = usage ? knownCount(usage.input) : null;
+	if (usage && input !== null) share.total += input + (knownCount(usage.cacheWrite) ?? 0);
+	share.unknown += 1;
+}
+function mergeShare(share: ShareParts, add: ShareParts): void {
+	share.read += add.read;
+	share.total += add.total;
+	share.measured += add.measured;
+	share.derived += add.derived;
+	share.unknown += add.unknown;
 }
 
 function shareOf(attempts: readonly Attempt[]): ShareParts {
@@ -2561,25 +2591,50 @@ function shareOf(attempts: readonly Attempt[]): ShareParts {
 	return share;
 }
 
-/** C-05: the cached share of the prompts these calls sent, over the calls that reported their read. */
-function cacheShare(share: ShareParts): { fact: Fact<number>; display: string } {
-	const fact: Fact<number> =
-		share.total > 0 ? { kind: "measured", value: (100 * share.read) / share.total, source: "local-count" } : unobserved;
-	return { fact, display: renderFact(fact, "percent") };
+/** A selection's share; a run that kept no calls, or none at all, is one call whose read is unknown. */
+function selectedShare(selection: Selection): ShareParts {
+	if (selection.attempt) return shareOf([selection.attempt]);
+	const share = emptyShare();
+	for (const part of selection.parts) {
+		if (part.selection) mergeShare(share, selectionShare(part.selection));
+		else if (part.run) {
+			if (part.run.source.present && part.run.fold.source === "calls") mergeShare(share, shareOf(part.run.attempts));
+			else share.unknown += 1;
+		} else mergeShare(share, shareOf(part.attempts ?? []));
+		share.unknown += part.gap;
+	}
+	return share;
+}
+
+/**
+ * C-05: the cached share of the prompts the calls sent. It reads `~` when a read was derived from the server's
+ * uncached prefill and `≥` while some call's read went unreported, never a bare measured figure for either (R1, R3).
+ */
+function shareFact(share: ShareParts): Fact<number> | FactSum {
+	if (share.total <= 0) return share.unknown > 0 ? unknownSum(share.unknown) : unobserved;
+	const percent = (100 * share.read) / share.total;
+	const derived = share.derived > 0;
+	return {
+		measured: derived ? 0 : percent,
+		estimated: derived ? percent : 0,
+		unknownCount: share.unknown,
+		absentCount: 0,
+		coverage: { measured: share.measured, estimated: share.derived, unknown: share.unknown },
+	};
 }
 
 /** The session's cached share and its last turn's, read by `telemetry cache`, the exit summary and ACP alike. */
-function cacheShares(analysis: Analysis) {
+function cacheShares(view: View, analysis: Analysis, id: string) {
 	let lastTurn: string | undefined;
 	for (let index = analysis.attempts.length - 1; index >= 0 && lastTurn === undefined; index -= 1) {
 		const attempt = analysis.attempts[index] as Attempt;
 		if (invoked(attempt) && attempt.ctx?.turnId) lastTurn = attempt.ctx.turnId;
 	}
 	return {
-		share: cacheShare(selectionShare(selectionOf(analysis, undefined))),
-		lastTurnShare: cacheShare(
-			lastTurn === undefined ? emptyShare() : selectionShare(selectionOf(analysis, { by: "turn", key: lastTurn })),
-		),
+		share: quantity(view, own(id, "cacheShare")),
+		...(lastTurn === undefined
+			? {}
+			: { lastTurnShare: quantity(view, own(id, "cacheShare", { group: { by: "turn", key: lastTurn } })) }),
 	};
 }
 

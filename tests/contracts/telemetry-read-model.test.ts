@@ -901,9 +901,13 @@ test("a cache break re-prefills past the shared band, or an unknown amount on a 
 		report.breaks.map((row) => row.verdict),
 		["partial", "partial", "cold"],
 	);
+	// The read derived from the timed prefill makes the session's cached share an estimate, never a measured figure.
+	const share = report.share?.fact;
+	ok(share && !("kind" in share) && share.coverage.estimated === 1 && share.measured === 0);
+	ok(report.share?.display.startsWith("~"), report.share?.display);
 });
 
-test("C-05: cached share skips an omitted read, and whole-block reads learn the engine floor", () => {
+test("C-05: an omitted read leaves the cached share a lower bound, and whole-block reads learn the engine floor", () => {
 	let second = 0;
 	const call = (cacheRead: number | null, input: number, verdict: CallSettled["cache"]["verdict"]) =>
 		telemetryCall("cache-floor", {
@@ -933,7 +937,10 @@ test("C-05: cached share skips an omitted read, and whole-block reads learn the 
 	);
 	deepStrictEqual([report.verdicts.hot, report.verdicts.partial, report.breaks.length], [3, 0, 0]);
 	const share = report.share?.fact;
-	ok(share?.kind === "measured" && Math.abs(share.value - (100 * 20_480) / (20_480 + 7_400)) < 1e-9);
+	ok(share && !("kind" in share));
+	deepStrictEqual([share.unknownCount, share.coverage.measured, share.estimated], [1, 3, 0]);
+	ok(Math.abs(share.measured - (100 * 20_480) / (20_480 + 7_400 + 9_000)) < 1e-9);
+	strictEqual(report.share?.display, "≥55.5% (1 call unknown)");
 });
 
 test("a cause's re-prefill counts only its breaks, not the calls that fell short of the engine floor", () => {

@@ -337,7 +337,8 @@ function latestSessionCacheFinding(stateDir: string): DoctorFinding | null {
 	const calls = counts.hot + counts.partial + counts.cold + counts.small + counts.unknown;
 	const share = report.share?.fact;
 	// C-05: a session that read under half its prompts from cache names what cost it the rest.
-	const low = share?.kind === "measured" && share.value < 50 && calls >= 5;
+	const value = share && !("kind" in share) && share.unknownCount === 0 ? share.measured + share.estimated : null;
+	const low = value !== null && value < 50 && calls >= 5;
 	const unreported = unreportedCacheReadWords(report.cacheRead.fact);
 	return {
 		ok: true,
