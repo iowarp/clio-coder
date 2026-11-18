@@ -80,6 +80,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
 - D2-2: command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` the output became, so a slow tool or an unexplained annotation traces back to its hook.
 - D2-3: a command hook's first-run stall is journaled (a subprocess gets no budget warmup grace), and a hook that throws is receipted as `failed`, not `skipped`, with its message reported as `hook_failed`.
 - P2M-1: memory promotion and task handoff redact a quoted secret even when the text already holds a `[redacted:...]` marker.
