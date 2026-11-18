@@ -12,6 +12,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
+- The telemetry session read commands accept `--session` (bt-20).
+- `compaction.settled` records `headroomTokens`, the room left below the automatic trigger after a committed checkpoint (bt-18).
 - An extension interview's done result may set `pipelineDone`, so an approval-gated last step ends the step pipeline (bt-16).
 - D3-6: judged checks (numeric-compare, reproduce) record declared input hashes (an input that changes while the check runs fails it), provenance probe output and the untracked file count in their reports.
 - D3-7: numeric-compare and reproduce accept an opt-in `repeat` (at most 5) under a seed and report failed runs and per-key spread; a single run says "n=1, determinism not checked".
@@ -40,6 +43,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- `context index --json` drops `codewikiPath`, which always repeated `codemapPath`; read `codemapPath` (bt-20).
 - A safety judge block now tells the model to ask the operator for the action, and that the judge hands a call to the operator itself only after repeated blocks (bt-21).
 - P2M-5: memory intervention and guardian are imported from the memory domain directly; the middleware compatibility shims and barrel re-exports are gone.
 - A2: one loop block no longer disables tools for the rest of the turn. The interactive turn locks after three blocks or after the same call is blocked twice, and the other calls of the model response that held the turn's first block still run.
@@ -86,6 +90,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Automatic compaction on small context windows no longer re-summarizes nearly every turn: the kept suffix now fits below the trigger, and the summary rearm band survives across headless `run` processes (bt-18).
+- `fleet view` and `evidence inspect` now use the same trust reader and agree on completion evidence (bt-20).
+- `extensions list` shows the runtime tools of api-2 extensions (bt-20).
+- `telemetry why-stopped` reports a normal model stop as a normal end, not as a stage (bt-20).
+- `evidence inspect` shows the stored result-contract quality verdict and the failed validation names (bt-20).
 - A gateway chain is charged only for its steps against the per-turn tool budget and the worker call cap, so an N-step chain costs N calls instead of N+1, and the budget refusal's by-tool breakdown no longer lists the wrapper (bt-14).
 - A headless run counts a gateway chain as its steps, so the observed tool-call and tool-error counts no longer add the wrapper on top (bt-14).
 - At default autonomy, a sandbox escape the safety judge would block now goes to the operator approval card when an operator message or an operator-answered ask_user round names its outside target. It never runs without the operator's approval; headless runs, contained yolo and worker asks still get the block (bt-21).
