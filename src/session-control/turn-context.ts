@@ -360,6 +360,8 @@ export interface TurnContext {
 		pendingUserText?: string,
 		skipProviderFallback?: boolean,
 	): Promise<CompiledSessionPrompt | null>;
+	/** Whether the runtime of a session the automatic pass could shrink still carries a prompt other than this session's compile, such as the seeded fallback. */
+	sessionPromptPending?(agentRuntime: AgentRuntime): boolean;
 	thinkingUsesConfigurationUpdate(): boolean;
 	commitSessionPosture(agentRuntime: AgentRuntime, userTurnId: string): void;
 	/**
@@ -3247,6 +3249,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		promptSideTokens(): number {
 			return currentContextSnapshot ? snapshotInputTokens(currentContextSnapshot) : 0;
+		},
+
+		sessionPromptPending(agentRuntime: AgentRuntime): boolean {
+			// The automatic pass's own guard: only history it could shrink makes the prompt it prices matter.
+			if (!deps.readSessionEntries || (deps.session && !deps.session.current())) return false;
+			return engineInitialSystemPrompt(agentRuntime.agent) !== sessionPrompt?.systemPrompt;
 		},
 
 		/**

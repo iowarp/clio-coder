@@ -306,118 +306,151 @@ describe("mandatory request-fit compaction", () => {
 		);
 	});
 
-	for (const autonomy of ["default", "yolo"] as const) {
-		it(`routes resumed ${autonomy} submit through overflow with the recorded skill selection`, async () => {
-			const settings = structuredClone(DEFAULT_SETTINGS);
-			settings.safety.autonomy = autonomy;
-			settings.chat.target = "source";
-			settings.chat.model = "source";
-			settings.chat.maxOutputTokens = 8192;
-			settings.chat.prewarm = false;
-			// A resume now builds the prompt it will send before the first submit, as live does, so the automatic
-			// pass would see the grown prompt first. This contract is about the overflow route alone.
-			settings.context.compaction.auto = false;
-			const capabilities = {
-				chat: true,
-				tools: true,
-				reasoning: false,
-				vision: false,
-				audio: false,
-				embeddings: false,
-				rerank: false,
-				fim: false,
-				contextWindow: 32768,
-				maxTokens: 8192,
-			};
-			const target = {
-				id: "source",
-				runtime: "source",
-				url: "https://source.invalid",
-				defaultModel: "source",
-				capabilities: { contextWindow: 32768 },
-			};
-			const runtime = {
-				id: "source",
-				displayName: "Offline",
-				kind: "http",
-				tier: "cloud",
-				apiFamily: "openai-completions",
-				auth: "none",
-				defaultCapabilities: capabilities,
-				synthesizeModel: () => structuredClone(model),
-			};
-			const providers = {
-				getTarget: () => target,
-				getRuntime: () => runtime,
-				getDetectedReasoning: () => false,
-				list: () => [
-					{
-						target,
-						runtime,
-						capabilities,
-						available: true,
-						discoveredModels: ["source"],
-						discoveredModelsSource: "probe",
-						probeCapabilities: null,
-					},
-				],
-			} as unknown as ProvidersContract;
-			const { entries } = overflowFixture();
-			const entryCount = entries.length;
-			const order: string[] = [];
-			const budgets: Array<
-				| Pick<
-						CompactInput,
-						"keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState" | "requireFit"
-				  >
-				| undefined
-			> = [];
-			const loop = createChatLoop({
-				getSettings: () => settings,
-				providers,
-				knownTargets: () => new Set(["source"]),
-				readSessionEntries: () => entries,
-				createAgent: (options) =>
-					createEngineAgent({
-						...options,
-						streamFn: () => {
-							throw new Error("No provider call is allowed in this caller-boundary contract");
+	for (const [autonomy, automatic] of [
+		["default", false],
+		["yolo", false],
+		["default", true],
+	] as const) {
+		it(
+			automatic
+				? "prices a resumed submit's automatic pass with the session prompt the request carries"
+				: `routes resumed ${autonomy} submit through overflow with the recorded skill selection`,
+			async () => {
+				const settings = structuredClone(DEFAULT_SETTINGS);
+				settings.safety.autonomy = autonomy;
+				settings.chat.target = "source";
+				settings.chat.model = "source";
+				settings.chat.maxOutputTokens = 8192;
+				settings.chat.prewarm = false;
+				// A resume now builds the prompt it will send before the first submit, as live does, so the automatic
+				// pass would see the grown prompt first. The overflow rows test the overflow route alone.
+				settings.context.compaction.auto = automatic;
+				const capabilities = {
+					chat: true,
+					tools: true,
+					reasoning: false,
+					vision: false,
+					audio: false,
+					embeddings: false,
+					rerank: false,
+					fim: false,
+					contextWindow: 32768,
+					maxTokens: 8192,
+				};
+				const target = {
+					id: "source",
+					runtime: "source",
+					url: "https://source.invalid",
+					defaultModel: "source",
+					capabilities: { contextWindow: 32768 },
+				};
+				const runtime = {
+					id: "source",
+					displayName: "Offline",
+					kind: "http",
+					tier: "cloud",
+					apiFamily: "openai-completions",
+					auth: "none",
+					defaultCapabilities: capabilities,
+					synthesizeModel: () => structuredClone(model),
+				};
+				const providers = {
+					getTarget: () => target,
+					getRuntime: () => runtime,
+					getDetectedReasoning: () => false,
+					list: () => [
+						{
+							target,
+							runtime,
+							capabilities,
+							available: true,
+							discoveredModels: ["source"],
+							discoveredModelsSource: "probe",
+							probeCapabilities: null,
 						},
-					}),
-				prompts: {
-					inputEpoch: () => 0,
-					compileSessionPrompt: async () => {
-						order.push("compile");
-						return {
-							systemPrompt: "p".repeat(140000),
-							systemPromptHash: "grown",
-							tokenEstimate: 35000,
-							sections: [],
-							fragmentManifest: [],
-						};
+					],
+				} as unknown as ProvidersContract;
+				const { entries } = overflowFixture();
+				const entryCount = entries.length;
+				const order: string[] = [];
+				const stageFigures: Array<{ tokensBefore: number; tokensAfter: number }> = [];
+				const budgets: Array<
+					| Pick<
+							CompactInput,
+							"keepRecentTokens" | "preserveUserTurnId" | "pendingOperatorTurn" | "skillContextState" | "requireFit"
+					  >
+					| undefined
+				> = [];
+				const loop = createChatLoop({
+					getSettings: () => settings,
+					providers,
+					knownTargets: () => new Set(["source"]),
+					readSessionEntries: () => entries,
+					createAgent: (options) =>
+						createEngineAgent({
+							...options,
+							streamFn: () => {
+								throw new Error("No provider call is allowed in this caller-boundary contract");
+							},
+						}),
+					prompts: {
+						inputEpoch: () => 0,
+						compileSessionPrompt: async () => {
+							order.push("compile");
+							return {
+								systemPrompt: "p".repeat(140000),
+								systemPromptHash: "grown",
+								tokenEstimate: 35000,
+								sections: [],
+								fragmentManifest: [],
+							};
+						},
+					} as unknown as PromptsContract,
+					autoCompact: async (_instructions, trigger, requested) => {
+						order.push(trigger ?? "unspecified");
+						budgets.push(requested);
+						const figures = (requested as Pick<CompactInput, "checkpointTokenFigures"> | undefined)?.checkpointTokenFigures;
+						if (trigger === "auto" && figures)
+							stageFigures.push(
+								figures({
+									kind: "compactionSummary",
+									turnId: "probe",
+									parentTurnId: null,
+									summary: "probe",
+									tokensBefore: 0,
+									firstKeptTurnId: "",
+									messagesSummarized: 0,
+									isSplitTurn: false,
+								}),
+							);
+						return null;
 					},
-				} as unknown as PromptsContract,
-				autoCompact: async (_instructions, trigger, requested) => {
-					order.push(trigger ?? "unspecified");
-					budgets.push(requested);
-					return null;
-				},
-			});
-			try {
-				loop.resetForSession("selected", buildModelReplayAgentMessagesFromTurns(entries));
-				await loop.submit("Create the current architecture map.");
-				deepStrictEqual(order, ["compile", "overflow"]);
-				ok((budgets[0]?.keepRecentTokens ?? 20000) < 20000);
-				strictEqual(budgets[0]?.pendingOperatorTurn, true);
-				deepStrictEqual(budgets[0]?.skillContextState, selection);
-				strictEqual(entries.length, entryCount, "failed preflight must not append the pending operator turn");
-				order.length = 0;
-				await loop.submit("Continue the current architecture map.", { requestContinuation: true });
-				strictEqual(budgets[1]?.pendingOperatorTurn, undefined, "middleware continuation is not a pending operator turn");
-			} finally {
-				loop.dispose();
-			}
-		});
+				});
+				try {
+					loop.resetForSession("selected", buildModelReplayAgentMessagesFromTurns(entries));
+					await loop.submit("Create the current architecture map.");
+					if (automatic) {
+						// The compiled prompt alone is 35000 tokens; the seeded fallback a resumed runtime starts with is a few
+						// hundred. The stage figures, and the card and record they become, price the prompt this request sends.
+						deepStrictEqual(order.slice(0, 2), ["compile", "auto"]);
+						ok(stageFigures.length > 0, "the automatic pass asked for its stage figures");
+						for (const figure of stageFigures)
+							ok(figure.tokensBefore >= 35000 && figure.tokensAfter >= 35000, JSON.stringify(figure));
+						return;
+					}
+					deepStrictEqual(order, ["compile", "overflow"]);
+					ok((budgets[0]?.keepRecentTokens ?? 20000) < 20000);
+					strictEqual(budgets[0]?.pendingOperatorTurn, true);
+					deepStrictEqual(budgets[0]?.skillContextState, selection);
+					strictEqual(entries.length, entryCount, "failed preflight must not append the pending operator turn");
+					order.length = 0;
+					await loop.submit("Continue the current architecture map.", { requestContinuation: true });
+					strictEqual(budgets[1]?.pendingOperatorTurn, undefined, "middleware continuation is not a pending operator turn");
+				} finally {
+					loop.dispose();
+				}
+			},
+		);
 	}
 
 	it("recovers output overflow the automatic pass did not take while manual force keeps its default", async () => {
