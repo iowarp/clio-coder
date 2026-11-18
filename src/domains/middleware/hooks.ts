@@ -414,6 +414,8 @@ export interface HookReceipt {
 	outcome: UserHookOutcome | "runtime-ok" | "runtime-failed" | "runtime-timeout";
 	effectKinds?: string[];
 	durationMs?: number;
+	/** The command hook's own wall-clock limit, so a receipt shows how close a run came to it. */
+	timeoutMs?: number;
 	exitCode?: number;
 	outputChars?: number;
 	toolName?: string;
@@ -540,18 +542,33 @@ function evaluateHook(
 		deps.recordReceipt({ ...base, outcome: "emitted", effectKinds: [hook.spec.effect.kind] });
 		return [hook.spec.effect];
 	}
+	const startedAt = performance.now();
 	const result = deps.runCommand(hook.spec.argv, {
 		timeoutMs: hook.spec.timeoutMs,
 		...(hook.spec.cwd !== undefined ? { cwd: hook.spec.cwd } : {}),
 	});
+	// The run blocks the event loop, and a before_tool or after_tool run is billed to the tool's own duration.
+	const timing = { durationMs: Math.round(performance.now() - startedAt), timeoutMs: hook.spec.timeoutMs };
 	const output = (result.stdout || result.stderr || "").trim();
 	if (result.timedOut) {
-		deps.recordReceipt({ ...base, outcome: "command-timeout", exitCode: result.code ?? -1, outputChars: output.length });
+		deps.recordReceipt({
+			...base,
+			outcome: "command-timeout",
+			exitCode: result.code ?? -1,
+			outputChars: output.length,
+			...timing,
+		});
 		return [];
 	}
 	const outcome: UserHookOutcome = result.code === 0 ? "command-ok" : "command-failed";
-	deps.recordReceipt({ ...base, outcome, exitCode: result.code ?? -1, outputChars: output.length });
-	if (output.length === 0) return [];
-	const effect = commandEffect(hook.spec, output);
-	return [effect];
+	const effect = output.length === 0 ? undefined : commandEffect(hook.spec, output);
+	deps.recordReceipt({
+		...base,
+		outcome,
+		exitCode: result.code ?? -1,
+		outputChars: output.length,
+		...timing,
+		...(effect !== undefined ? { effectKinds: [effect.kind] } : {}),
+	});
+	return effect !== undefined ? [effect] : [];
 }

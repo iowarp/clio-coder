@@ -504,7 +504,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	},
 	"worker.channel_failed": { ...keep("lane", "errno", "afterExit", "failure"), frameType: "token" },
 	"hook.ran": {
-		...keep("origin", "sourceId", "hook", "kind", "outcome", "durationMs", "exitCode", "outputChars"),
+		...keep("origin", "sourceId", "hook", "kind", "outcome", "durationMs", "timeoutMs", "exitCode", "outputChars"),
 		hookId: "name",
 		hash: "id",
 		effectKinds: "token",

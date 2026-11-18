@@ -8,7 +8,7 @@ import { ToolNames } from "../../src/core/tool-names.js";
 import { buildExtensionSnapshot } from "../../src/domains/extensions/snapshot.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createMiddlewareBundle } from "../../src/domains/middleware/extension.js";
-import { type HookReceipt, normalizeUserHook } from "../../src/domains/middleware/hooks.js";
+import { type HookReceipt, normalizeUserHook, userHookToRegistration } from "../../src/domains/middleware/hooks.js";
 import { buildUserHookRegistrations, readHookSources } from "../../src/domains/middleware/hooks-io.js";
 import { BUILTIN_MIDDLEWARE_RULE_IDS } from "../../src/domains/middleware/rules.js";
 import {
@@ -745,6 +745,28 @@ describe("user hook applicability", () => {
 			issuesFor({ on: "turn_end", kind: "effect", effect: { kind: "request_continuation", message: "m" } }),
 			[],
 		);
+	});
+
+	it("receipts a command hook's run time, its own limit and the effect its output became (D2-2)", () => {
+		const hook = normalizeUserHook(
+			{ id: "lint", on: "before_tool", tools: ["read"], kind: "command", argv: ["lint"], timeoutMs: 1500 },
+			source,
+			options,
+		).hook;
+		ok(hook);
+		const receipts: HookReceipt[] = [];
+		const registration = userHookToRegistration(hook, {
+			recordReceipt: (receipt) => receipts.push(receipt),
+			runCommand: () => ({ code: 1, timedOut: false, stdout: "lint failed\n", stderr: "" }),
+		});
+		deepStrictEqual(registration.evaluate({ hook: "before_tool", toolName: "read" }), [
+			{ kind: "annotate_tool_result", message: "lint failed" },
+		]);
+		const [receipt] = receipts;
+		strictEqual(receipt?.outcome, "command-failed");
+		strictEqual(receipt.timeoutMs, 1500);
+		ok(typeof receipt.durationMs === "number" && receipt.durationMs >= 0);
+		deepStrictEqual(receipt.effectKinds, ["annotate_tool_result"]);
 	});
 
 	it("strips operator-notification rules from the snapshot workers receive", () => {

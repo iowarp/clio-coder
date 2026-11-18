@@ -525,6 +525,7 @@ export const HookRanSchema = Type.Object(
 		]),
 		effectKinds: Type.Optional(Type.Array(ExistingId, { maxItems: 32 })),
 		durationMs: Type.Optional(duration),
+		timeoutMs: Type.Optional(duration),
 		exitCode: Type.Optional(Type.Integer()),
 		outputChars: Type.Optional(count),
 		tool: Type.Optional(ExistingId),
