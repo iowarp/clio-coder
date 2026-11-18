@@ -7,6 +7,7 @@ import type { TelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ToolBudgetExceededPayload } from "../../src/core/telemetry/live-events.js";
 import type { ToolName } from "../../src/core/tool-names.js";
 import {
+	narrowTurnConstraints,
 	snapshotTurnConstraints,
 	type TurnConstraints,
 	turnScopeGuidance,
@@ -18,10 +19,10 @@ import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
-import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
+import { loopSafety } from "../harness/loop-guard.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // WTF-P 0.8.3 C5: a desk turn chained every step the driver handed out, so one
@@ -33,15 +34,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 const STEP = "extension_desk__next_step";
 
 function fixture(extra: MiddlewareHookRegistration[] = []) {
-	let loopState = createLoopState();
 	const safety = createWorkerSafety();
-	const guardSafety = {
-		observeLoop(key: string, now: number) {
-			const [next, verdict] = observe(loopState, key, now);
-			loopState = next;
-			return verdict;
-		},
-	} as unknown as Parameters<typeof createLoopGuardRegistration>[0]["safety"];
 	const events: ToolBudgetExceededPayload[] = [];
 	const bus = {
 		emit(kind: string, payload: unknown) {
@@ -49,7 +42,7 @@ function fixture(extra: MiddlewareHookRegistration[] = []) {
 		},
 	} as unknown as TelemetryHub;
 	const guard = createLoopGuardRegistration({
-		safety: guardSafety,
+		safety: loopSafety(),
 		bus,
 		turnToolCallBudget: () => ({ soft: 60, hard: 75 }),
 		turnSynthesisLockout: true,
@@ -93,14 +86,16 @@ describe("template turnPolicy step", () => {
 		env.restore();
 	});
 
-	it("loads from frontmatter, rides the turn constraint, and stays out of workers", async () => {
+	it("loads from frontmatter, rides the turn constraint, and stays out of workers, with the template budget", async () => {
 		const prompts = join(env.dir, "prompts");
 		mkdirSync(prompts, { recursive: true });
 		writeFileSync(
 			join(prompts, "advance.md"),
-			`---\nallowed-tools: [read, ${STEP}]\nturnPolicy: {mode: step, stepTool: ${STEP}}\n---\nAdvance $ARGUMENTS\n`,
+			`---\nallowed-tools: [read, ${STEP}]\nturnPolicy: {mode: step, stepTool: ${STEP}}\nbudget: {toolCalls: 3, observationBytes: 4096}\n---\nAdvance $ARGUMENTS\n`,
 		);
 		writeFileSync(join(prompts, "bare.md"), "---\nturnPolicy: step\n---\nBare\n");
+		writeFileSync(join(prompts, "zero.md"), "---\nbudget: {toolCalls: 0}\n---\nZero\n");
+		writeFileSync(join(prompts, "typo.md"), "---\nbudget: {toolcalls: 5}\n---\nTypo\n");
 		writeFileSync(
 			join(prompts, "outside.md"),
 			`---\nallowed-tools: [read]\nturnPolicy: {mode: step, stepTool: ${STEP}}\n---\nX\n`,
@@ -108,6 +103,9 @@ describe("template turnPolicy step", () => {
 		const loaded = loadPromptTemplates({ roots: [{ path: prompts, scope: "project", trusted: true }] });
 		const byName = new Map(loaded.items.map((template) => [template.name, template]));
 		deepStrictEqual(byName.get("advance")?.turnPolicy, { mode: "step", stepTool: STEP });
+		deepStrictEqual(byName.get("advance")?.budget, { toolCalls: 3, observationBytes: 4096 });
+		ok(byName.get("zero")?.unavailable?.includes("budget.toolCalls must be a whole number of at least 1"));
+		ok(byName.get("typo")?.unavailable?.includes("budget has unknown keys toolcalls"));
 		ok(byName.get("bare")?.unavailable?.includes("turnPolicy must be a mapping that names its step tool"));
 		ok(byName.get("outside")?.unavailable?.includes("is not in this template's allowed-tools"));
 
@@ -118,8 +116,15 @@ describe("template turnPolicy step", () => {
 		const expansion = await expandSubmitText("/advance now", resources, env.dir);
 		const constraints = snapshotTurnConstraints(expansion.constraints);
 		deepStrictEqual(constraints?.turnPolicy, { mode: "step", stepTool: STEP, template: "advance" });
+		deepStrictEqual(constraints?.budget, { toolCalls: 3, observationBytes: 4096, template: "advance" });
 		ok(turnScopeGuidance(constraints).includes(`Call ${STEP} at most once per turn`));
 		strictEqual(workerTurnConstraints(constraints as TurnConstraints).turnPolicy, undefined);
+		strictEqual(workerTurnConstraints(constraints as TurnConstraints).budget, undefined);
+		deepStrictEqual(narrowTurnConstraints({ budget: { toolCalls: 2 } }, constraints)?.budget, {
+			toolCalls: 2,
+			observationBytes: 4096,
+			template: "advance",
+		});
 		strictEqual((await expandSubmitText("/bare", resources, env.dir)).promptRefusal?.includes("cannot run"), true);
 	});
 

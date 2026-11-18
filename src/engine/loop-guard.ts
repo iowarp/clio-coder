@@ -374,7 +374,7 @@ function priorFailureLine(priorFailure: string | undefined): string {
  * for tool ..." and dropped every field (WTF-P campaign). The echoed arguments
  * after the first blank line stay out.
  */
-export function clipFailure(message: string): string | undefined {
+function clipFailure(message: string): string | undefined {
 	const paragraph: string[] = [];
 	for (const raw of message.split("\n")) {
 		const entry = raw.trim();

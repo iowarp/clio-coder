@@ -14,7 +14,6 @@ import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { ResourcesContract } from "../../src/domains/resources/contract.js";
 import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { expandSubmitText } from "../../src/domains/resources/submit-expansion.js";
-import { createLoopState, observe } from "../../src/domains/safety/loop-detector.js";
 import type { SessionContract, TurnInput } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
@@ -23,6 +22,7 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/session-control/chat-loop.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { loopSafety } from "../harness/loop-guard.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // WTF-P 0.8.3 C5: `turnPolicy: step` ended every turn after one step on every
@@ -123,15 +123,8 @@ async function drive(
 			guardEvents.push(channel);
 		});
 
-	let loopState = createLoopState();
 	const guard = createLoopGuardRegistration({
-		safety: {
-			observeLoop(key: string, now: number) {
-				const [next, verdict] = observe(loopState, key, now);
-				loopState = next;
-				return verdict;
-			},
-		} as unknown as Parameters<typeof createLoopGuardRegistration>[0]["safety"],
+		safety: loopSafety(),
 		bus: context.bus,
 		turnToolCallBudget: () => ({ soft: 60, hard: 75 }),
 		turnSynthesisLockout: true,
