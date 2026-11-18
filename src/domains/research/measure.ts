@@ -170,6 +170,7 @@ export function filesNamedByCheck(check: DeclaredCheck, root: string): string[] 
 	const base = check.cwd === "." || check.cwd.length === 0 ? "" : check.cwd;
 	const candidates = [...check.command];
 	if (check.numeric?.reference !== undefined) candidates.push(check.numeric.reference);
+	candidates.push(...(check.numeric?.inputs ?? []));
 	if (check.perf?.baseline !== undefined) candidates.push(check.perf.baseline);
 	for (const arg of candidates) {
 		if (arg.startsWith("-") || arg.includes("\0")) continue;

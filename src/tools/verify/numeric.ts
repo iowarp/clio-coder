@@ -162,6 +162,35 @@ export interface NumericPayloadProvenance {
 	bytes: number;
 }
 
+/** A declared input file as it was hashed before the command ran; the check fails when it differs afterwards. */
+export interface JudgedInputRecord {
+	/** Repository-relative as declared, or the absolute path dispatch admission sealed. */
+	path: string;
+	sha256: string;
+	sizeBytes: number;
+}
+
+/**
+ * A declared provenance probe as it ran beside the check, for example `[python3, -c, "import numpy;
+ * print(numpy.__version__)"]` or `[printenv, OMP_NUM_THREADS]`. A probe that fails or cannot start is recorded, never
+ * gating; nothing beyond what a probe prints is captured, so no environment dump enters a record.
+ */
+export interface ProvenanceProbeRecord {
+	argv: string[];
+	/** Null when the probe could not start or did not exit. */
+	exitCode: number | null;
+	/** SHA-256 of the probe's stdout then stderr; null when it could not start. */
+	sha256: string | null;
+	/** The first non-empty output line, clipped; null when there was none. */
+	version: string | null;
+}
+
+/** What a judged check declared it reads and runs beside: input digests and probe outputs. */
+export interface JudgedProvenance {
+	inputs: JudgedInputRecord[];
+	probes: ProvenanceProbeRecord[];
+}
+
 export interface NumericCompareReport {
 	kind: "numeric-compare";
 	passed: boolean;
@@ -181,6 +210,8 @@ export interface NumericCompareReport {
 	reference?: NumericReferenceProvenance;
 	/** Actual payload identity, present when the judgement extracted payload text. */
 	actual?: NumericPayloadProvenance;
+	/** Declared inputs and probes; present when the check declared either. */
+	provenance?: JudgedProvenance;
 }
 
 export const NUMERIC_PAYLOAD_CAPS = Object.freeze({
@@ -692,6 +723,20 @@ export function renderNumericReport(report: NumericCompareReport): string {
 	if (report.actual !== undefined) {
 		lines.push(`actual: sha256=${report.actual.sha256.slice(0, 12)} (${report.actual.bytes}B)`);
 	}
+	if (report.provenance !== undefined) lines.push(...renderProvenance(report.provenance));
 	for (const key of report.keys) lines.push(`- ${key.detail}`);
 	return lines.join("\n");
+}
+
+/** Declared inputs and probe outputs as report lines. */
+export function renderProvenance(provenance: Partial<JudgedProvenance>): string[] {
+	return [
+		...(provenance.inputs ?? []).map(
+			(input) => `input: ${input.path} sha256=${input.sha256.slice(0, 12)} (${input.sizeBytes}B), unchanged by the run`,
+		),
+		...(provenance.probes ?? []).map(
+			(probe) =>
+				`probe: ${JSON.stringify(probe.argv)} ${probe.exitCode === null ? "did not run to an exit" : `exit ${probe.exitCode}`}${probe.version === null ? "" : `: ${probe.version}`}`,
+		),
+	];
 }

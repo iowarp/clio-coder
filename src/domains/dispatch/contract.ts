@@ -45,8 +45,16 @@ export interface ResolvedVerificationCheck {
 	/**
 	 * Sealed at admission with the reference as an absolute path and the sha256 of its text then; null when it was
 	 * absent. Host verification fails the check when the reference no longer matches. Absent on older requests.
+	 * `inputs` are the declared input files as absolute paths, hashed before the run and after it; `provenance`
+	 * holds the declared probes. Both are absent when the catalog declared none and on older requests.
 	 */
-	numeric?: { reference: string; tolerance: NumericTolerance; referenceSha256?: string | null };
+	numeric?: {
+		reference: string;
+		tolerance: NumericTolerance;
+		referenceSha256?: string | null;
+		inputs?: string[];
+		provenance?: string[][];
+	};
 	/** Sealed at admission with the baseline as an absolute path and its digest, as `numeric` seals its reference. */
 	perf?: {
 		budget?: PerfBudgetSpec;

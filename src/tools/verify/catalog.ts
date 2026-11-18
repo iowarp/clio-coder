@@ -28,6 +28,10 @@ export const PROJECT_VERIFIER_CATALOG_CAPS = Object.freeze({
 	timeoutMs: 900_000,
 	tags: 16,
 	tagBytes: 32,
+	/** Declared input files of one numeric-compare check. */
+	judgedInputs: 64,
+	/** Provenance probes of one judged check. */
+	provenanceProbes: 8,
 });
 
 /**
@@ -59,6 +63,14 @@ export interface DeclaredNumericCompare {
 	 * they existed.
 	 */
 	tolerance: NumericTolerance;
+	/**
+	 * Repository-relative files the command reads. Each is hashed before the run and again after it: one that
+	 * cannot be read fails the check before it runs, and one that changed fails it, so the report names the bytes
+	 * the command read.
+	 */
+	inputs?: string[];
+	/** Argv probes run once beside the check and recorded, never gating; see {@link validateProvenance}. */
+	provenance?: string[][];
 }
 
 export interface DeclaredPerfBudget {
@@ -120,7 +132,9 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
  * that omits them keeps the original single strict-conjunction,
  * non-finite-fails judgement.
  */
-const KIND_FIELDS = [...new Set(["reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS])];
+const KIND_FIELDS = [
+	...new Set(["reference", "tolerance", "budget", "baseline", "provenance", ...REPRODUCE_CATALOG_FIELDS]),
+];
 const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", "proof", ...KIND_FIELDS]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([
@@ -227,6 +241,48 @@ function validateRepositoryFile(value: unknown, location: string): string | Erro
 	return normalized;
 }
 
+/** The repository-relative files a numeric-compare check reads, each a file path named once. */
+function validateJudgedInputs(value: unknown, location: string): string[] | Error {
+	if (!Array.isArray(value) || value.length === 0) {
+		return new Error(`${location} must be a non-empty array of repository-relative file paths`);
+	}
+	if (value.length > PROJECT_VERIFIER_CATALOG_CAPS.judgedInputs) {
+		return new Error(`${location} exceeds the ${PROJECT_VERIFIER_CATALOG_CAPS.judgedInputs}-input cap`);
+	}
+	const inputs: string[] = [];
+	for (const [index, entry] of value.entries()) {
+		const at = `${location}[${index}]`;
+		const input = validateRepositoryFile(entry, at);
+		if (input instanceof Error) return input;
+		if (input === "." || input.endsWith("/")) return new Error(`${at} must name a file`);
+		if (inputs.includes(input)) return new Error(`${at} duplicates '${input}'`);
+		inputs.push(input);
+	}
+	return inputs;
+}
+
+/**
+ * Provenance probes: argv vectors under the same rule as a check's command, so no shell runs one. Each runs once
+ * beside the check, its exit code, output digest and first output line recorded; a failing probe never gates.
+ * An environment variable is recorded by probing it (`[printenv, OMP_NUM_THREADS]`), never by dumping the
+ * environment.
+ */
+function validateProvenance(value: unknown, location: string): string[][] | Error {
+	if (!Array.isArray(value) || value.length === 0) {
+		return new Error(`${location} must be a non-empty array of argv probes`);
+	}
+	if (value.length > PROJECT_VERIFIER_CATALOG_CAPS.provenanceProbes) {
+		return new Error(`${location} exceeds the ${PROJECT_VERIFIER_CATALOG_CAPS.provenanceProbes}-probe cap`);
+	}
+	const probes: string[][] = [];
+	for (const [index, entry] of value.entries()) {
+		const probe = validateCommand(entry, `${location}[${index}]`);
+		if (probe instanceof Error) return probe;
+		probes.push(probe);
+	}
+	return probes;
+}
+
 /**
  * The kind-specific fields of one check. Version 1 admits no such field, so a
  * version-1 check is always `command`. Under version 2 the kind gates which
@@ -245,19 +301,21 @@ function validateCheckKind(
 	const present = (field: string): boolean => Object.hasOwn(value, field);
 	const accepted: Record<DeclaredCheckKind, ReadonlyArray<string>> = {
 		command: [],
-		"numeric-compare": ["reference", "tolerance"],
+		"numeric-compare": ["reference", "tolerance", "inputs", "provenance"],
 		"perf-budget": ["budget", "baseline", "tolerance"],
-		reproduce: REPRODUCE_CATALOG_FIELDS,
+		reproduce: [...REPRODUCE_CATALOG_FIELDS, "provenance"],
 	};
 	const stray = KIND_FIELDS.filter((field) => present(field) && !accepted[kind].includes(field));
 	if (stray.length > 0) return new Error(`${location} kind '${kind}' does not accept ${stray.join(", ")}`);
 	if (version === 1 && kind !== "command") return new Error(`${location}.kind requires catalog version 2`);
 	if (kind === "command") return { kind };
+	const provenance = present("provenance") ? validateProvenance(value.provenance, `${location}.provenance`) : undefined;
+	if (provenance instanceof Error) return provenance;
 	if (kind === "reproduce") {
 		const fields = Object.fromEntries(REPRODUCE_CATALOG_FIELDS.filter(present).map((field) => [field, value[field]]));
 		const reproduce = normalizeReproduce(fields, location, validateRepositoryFile);
 		if (reproduce instanceof Error) return reproduce;
-		return { kind, reproduce };
+		return { kind, reproduce: { ...reproduce, ...(provenance !== undefined ? { provenance } : {}) } };
 	}
 	if (kind === "numeric-compare") {
 		if (!present("reference")) return new Error(`${location}.reference is required for kind numeric-compare`);
@@ -266,7 +324,17 @@ function validateCheckKind(
 		if (reference instanceof Error) return reference;
 		const tolerance = normalizeNumericTolerance(value.tolerance);
 		if (tolerance instanceof Error) return new Error(`${location}.${tolerance.message}`);
-		return { kind, numeric: { reference, tolerance } };
+		const inputs = present("inputs") ? validateJudgedInputs(value.inputs, `${location}.inputs`) : undefined;
+		if (inputs instanceof Error) return inputs;
+		return {
+			kind,
+			numeric: {
+				reference,
+				tolerance,
+				...(inputs !== undefined ? { inputs } : {}),
+				...(provenance !== undefined ? { provenance } : {}),
+			},
+		};
 	}
 	if (present("budget") === present("baseline")) {
 		return new Error(`${location} kind 'perf-budget' requires exactly one of budget or baseline`);

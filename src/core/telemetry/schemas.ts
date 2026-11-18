@@ -1019,6 +1019,29 @@ const SealedCheckReportSchema = Type.Object(
 		),
 		measuredMs: Type.Optional(duration),
 		budgetMs: Type.Optional(duration),
+		/** Declared input files and their digests before the run; absent when none was declared and on older results. */
+		inputs: Type.Optional(
+			Type.Array(Type.Object({ path: Type.String(), sha256: Type.String() }, closed), {
+				maxItems: SEALED_CHECK_REPORT_KEYS_MAX,
+			}),
+		),
+		/** Declared provenance probes as they ran; absent when none was declared and on older results. */
+		probes: Type.Optional(
+			Type.Array(
+				Type.Object(
+					{
+						argv: Type.Array(text, { maxItems: 64 }),
+						exitCode: nullable(Type.Integer()),
+						sha256: nullable(Type.String()),
+						version: nullable(text),
+					},
+					closed,
+				),
+				{ maxItems: 8 },
+			),
+		),
+		/** Untracked files git does not ignore in the checkout a reproduce check ran from; absent for other kinds. */
+		untracked: Type.Optional(count),
 	},
 	closed,
 );
@@ -1104,7 +1127,17 @@ export const RunResultObjectSchema = Type.Object(
 								/** The judged verdict, bounded; absent for a command check and on results sealed before it existed. */
 								report: Type.Optional(SealedCheckReportSchema),
 								/** The checkout the verdict judged; absent outside Git and on results sealed before it existed. */
-								tree: Type.Optional(Type.Object({ head: Type.String(), fingerprint: Type.String() }, closed)),
+								tree: Type.Optional(
+									Type.Object(
+										{
+											head: Type.String(),
+											fingerprint: Type.String(),
+											/** Untracked files git does not ignore in that checkout; absent on results sealed before it existed. */
+											untracked: Type.Optional(count),
+										},
+										closed,
+									),
+								),
 							},
 							closed,
 						),

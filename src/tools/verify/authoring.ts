@@ -556,6 +556,8 @@ function catalogEntry(check: AuthoringCheck): Record<string, unknown> {
 	if (check.numeric !== undefined) {
 		entry.reference = check.numeric.reference;
 		entry.tolerance = { ...check.numeric.tolerance };
+		if (check.numeric.inputs !== undefined) entry.inputs = [...check.numeric.inputs];
+		if (check.numeric.provenance !== undefined) entry.provenance = check.numeric.provenance.map((probe) => [...probe]);
 	}
 	if (check.perf !== undefined) {
 		if (check.perf.budget !== undefined) entry.budget = structuredClone(check.perf.budget);
@@ -600,7 +602,15 @@ function serializeVerifierDraft(draft: VerifierDraft): string {
 			changed = true;
 		}
 		// A check that returned to a plain command drops the kind fields it no longer carries.
-		for (const field of ["kind", "reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS]) {
+		for (const field of [
+			"kind",
+			"reference",
+			"tolerance",
+			"budget",
+			"baseline",
+			"provenance",
+			...REPRODUCE_CATALOG_FIELDS,
+		]) {
 			if (Object.hasOwn(current, field) && !Object.hasOwn(entry, field)) {
 				node.delete(field);
 				changed = true;
@@ -786,6 +796,7 @@ function renderKind(check: AuthoringCheck): string[] {
 	const lines = [`  kind: ${kind}`];
 	if (check.numeric !== undefined) {
 		lines.push(`  reference: ${check.numeric.reference}`, `  tolerance: ${JSON.stringify(check.numeric.tolerance)}`);
+		for (const input of check.numeric.inputs ?? []) lines.push(`  input: ${input}`);
 	}
 	if (check.perf !== undefined) {
 		if (check.perf.budget !== undefined) lines.push(`  budget: ${JSON.stringify(check.perf.budget)}`);
@@ -803,6 +814,9 @@ function renderKind(check: AuthoringCheck): string[] {
 			...(spec.units !== undefined ? [`  units: ${JSON.stringify(spec.units)}`] : []),
 			...(spec.shapes !== undefined ? [`  shapes: ${JSON.stringify(spec.shapes)}`] : []),
 		);
+	}
+	for (const probe of check.numeric?.provenance ?? check.reproduce?.provenance ?? []) {
+		lines.push(`  provenance probe: ${JSON.stringify(probe)}`);
 	}
 	return lines;
 }

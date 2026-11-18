@@ -185,6 +185,7 @@ function pathsNamedByCheck(check: DeclaredCheck): string[] {
 		add(arg);
 	}
 	if (check.numeric?.reference !== undefined) add(check.numeric.reference);
+	for (const input of check.numeric?.inputs ?? []) add(input);
 	if (check.perf?.baseline !== undefined) add(check.perf.baseline);
 	for (const pin of check.reproduce?.inputs ?? []) add(pin.path);
 	if (check.reproduce?.compare.mode === "reference") add(check.reproduce.compare.reference);

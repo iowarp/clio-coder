@@ -9445,7 +9445,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_8afac12d"
+															"$ref": "#/components/schemas/Union_f61b72a1"
 														}
 													}
 												},
@@ -20995,7 +20995,7 @@
 															"$ref": "#/components/schemas/Union_4dc8870f"
 														},
 														"result": {
-															"$ref": "#/components/schemas/Union_8afac12d"
+															"$ref": "#/components/schemas/Union_f61b72a1"
 														}
 													}
 												},
@@ -24673,6 +24673,13 @@
 				},
 				"maxItems": 32
 			},
+			"Array_7bfc277a": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_argv_exitCode_sha256_c9ebec67"
+				},
+				"maxItems": 8
+			},
 			"Array_7d31aeb6": {
 				"type": "array",
 				"items": {
@@ -24707,12 +24714,6 @@
 					"maxLength": 512
 				},
 				"maxItems": 9
-			},
-			"Array_8fb0e1ad": {
-				"type": "array",
-				"items": {
-					"$ref": "#/components/schemas/Object_argv_baseComparison_check_cde06ef4"
-				}
 			},
 			"Array_95e670fb": {
 				"type": "array",
@@ -24770,6 +24771,12 @@
 					"$ref": "#/components/schemas/Object_passed_sourceId_validatorDigest_d555b71d"
 				}
 			},
+			"Array_b1f16dc3": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_argv_baseComparison_check_204aaed0"
+				}
+			},
 			"Array_b41770ba": {
 				"type": "array",
 				"items": {
@@ -24782,6 +24789,13 @@
 					"$ref": "#/components/schemas/Object_canonicalization_field_function_dbe56c61"
 				},
 				"maxItems": 512
+			},
+			"Array_c52271ac": {
+				"type": "array",
+				"items": {
+					"$ref": "#/components/schemas/Object_path_sha256_df3a4a4b"
+				},
+				"maxItems": 64
 			},
 			"Array_c9730d18": {
 				"type": "array",
@@ -28036,7 +28050,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_argv_baseComparison_check_cde06ef4": {
+			"Object_argv_baseComparison_check_204aaed0": {
 				"type": "object",
 				"required": [
 					"check",
@@ -28050,7 +28064,48 @@
 					"baseComparison"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_2b057439"
+					"$ref": "#/components/schemas/Shape_84aea267"
+				},
+				"additionalProperties": false
+			},
+			"Object_argv_exitCode_sha256_c9ebec67": {
+				"type": "object",
+				"required": ["argv", "exitCode", "sha256", "version"],
+				"properties": {
+					"argv": {
+						"$ref": "#/components/schemas/Array_d853a408"
+					},
+					"exitCode": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"sha256": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"version": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 4096
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
 				},
 				"additionalProperties": false
 			},
@@ -28941,7 +28996,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_budgetMs_failedKeyCount_failedKeys_dee41b05": {
+			"Object_budgetMs_failedKeyCount_failedKeys_9f9103d2": {
 				"type": "object",
 				"required": [
 					"kind",
@@ -28956,7 +29011,7 @@
 					"keys"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_248c48aa"
+					"$ref": "#/components/schemas/Shape_050c83f3"
 				},
 				"additionalProperties": false
 			},
@@ -29565,7 +29620,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checkoutChanges_failureMessage_hostVerification_5e494317": {
+			"Object_checkoutChanges_failureMessage_hostVerification_cae55895": {
 				"type": "object",
 				"required": [
 					"version",
@@ -29577,7 +29632,7 @@
 					"hostVerification"
 				],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_87d0df97"
+					"$ref": "#/components/schemas/Shape_cd252a23"
 				},
 				"additionalProperties": false
 			},
@@ -29618,11 +29673,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_checks_reason_04371a54": {
+			"Object_checks_reason_da870ca4": {
 				"type": "object",
 				"required": ["reason", "checks"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_2f9e05c3"
+					"$ref": "#/components/schemas/Shape_21369a51"
 				},
 				"additionalProperties": false
 			},
@@ -30756,7 +30811,7 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_fingerprint_head_0b967845": {
+			"Object_fingerprint_head_untracked_8c293c60": {
 				"type": "object",
 				"required": ["head", "fingerprint"],
 				"properties": {
@@ -30765,6 +30820,10 @@
 					},
 					"fingerprint": {
 						"type": "string"
+					},
+					"untracked": {
+						"type": "integer",
+						"minimum": 0
 					}
 				},
 				"additionalProperties": false
@@ -31668,6 +31727,19 @@
 				},
 				"additionalProperties": false
 			},
+			"Object_path_sha256_df3a4a4b": {
+				"type": "object",
+				"required": ["path", "sha256"],
+				"properties": {
+					"path": {
+						"type": "string"
+					},
+					"sha256": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
 			"Object_path_why_89715cdc": {
 				"type": "object",
 				"required": ["path", "why"],
@@ -32072,11 +32144,11 @@
 				},
 				"additionalProperties": false
 			},
-			"Object_state_value_68319459": {
+			"Object_state_value_e771cd3f": {
 				"type": "object",
 				"required": ["state", "value"],
 				"properties": {
-					"$ref": "#/components/schemas/Shape_6ac40227"
+					"$ref": "#/components/schemas/Shape_1b507df7"
 				},
 				"additionalProperties": false
 			},
@@ -32254,7 +32326,7 @@
 						"$ref": "#/components/schemas/Union_4dc8870f"
 					},
 					"result": {
-						"$ref": "#/components/schemas/Union_8afac12d"
+						"$ref": "#/components/schemas/Union_f61b72a1"
 					},
 					"assessment": {
 						"anyOf": [
@@ -33100,6 +33172,66 @@
 					"$ref": "#/components/schemas/Union_74cd918b"
 				}
 			},
+			"Shape_050c83f3": {
+				"kind": {
+					"enum": ["numeric-compare", "perf-budget", "reproduce"]
+				},
+				"passed": {
+					"type": "boolean"
+				},
+				"rule": {
+					"type": "string",
+					"maxLength": 4096
+				},
+				"tolerance": {
+					"$ref": "#/components/schemas/Object_absolute_combine_nonFinite_70494b18"
+				},
+				"reference": {
+					"$ref": "#/components/schemas/Union_575ff27d"
+				},
+				"payloadSha256": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"keyCount": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"failedKeyCount": {
+					"type": "integer",
+					"minimum": 0
+				},
+				"failedKeys": {
+					"$ref": "#/components/schemas/Array_d853a408"
+				},
+				"keys": {
+					"$ref": "#/components/schemas/Array_4d992aa9"
+				},
+				"measuredMs": {
+					"type": "number",
+					"minimum": 0
+				},
+				"budgetMs": {
+					"type": "number",
+					"minimum": 0
+				},
+				"inputs": {
+					"$ref": "#/components/schemas/Array_c52271ac"
+				},
+				"probes": {
+					"$ref": "#/components/schemas/Array_7bfc277a"
+				},
+				"untracked": {
+					"type": "integer",
+					"minimum": 0
+				}
+			},
 			"Shape_052f2c8e": {
 				"title": {
 					"anyOf": [
@@ -33308,6 +33440,15 @@
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
 				}
 			},
+			"Shape_1b507df7": {
+				"state": {
+					"type": "string",
+					"const": "resolved"
+				},
+				"value": {
+					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_cae55895"
+				}
+			},
 			"Shape_1eb2e845": {
 				"input": {
 					"$ref": "#/components/schemas/Object_display_fact_ref_0b6b7bd4"
@@ -33353,33 +33494,8 @@
 					"enum": ["response-headers", "stream-event", "poll"]
 				}
 			},
-			"Shape_233bb951": {
-				"type": {
-					"type": "string",
-					"const": "fleet.completed"
-				},
-				"payload": {
-					"$ref": "#/components/schemas/Object_agentId_apiCalls_durationMs_c5921c78"
-				}
-			},
-			"Shape_248c48aa": {
-				"kind": {
-					"enum": ["numeric-compare", "perf-budget", "reproduce"]
-				},
-				"passed": {
-					"type": "boolean"
-				},
-				"rule": {
-					"type": "string",
-					"maxLength": 4096
-				},
-				"tolerance": {
-					"$ref": "#/components/schemas/Object_absolute_combine_nonFinite_70494b18"
-				},
-				"reference": {
-					"$ref": "#/components/schemas/Union_575ff27d"
-				},
-				"payloadSha256": {
+			"Shape_21369a51": {
+				"reason": {
 					"anyOf": [
 						{
 							"type": "string"
@@ -33389,27 +33505,17 @@
 						}
 					]
 				},
-				"keyCount": {
-					"type": "integer",
-					"minimum": 0
+				"checks": {
+					"$ref": "#/components/schemas/Array_b1f16dc3"
+				}
+			},
+			"Shape_233bb951": {
+				"type": {
+					"type": "string",
+					"const": "fleet.completed"
 				},
-				"failedKeyCount": {
-					"type": "integer",
-					"minimum": 0
-				},
-				"failedKeys": {
-					"$ref": "#/components/schemas/Array_d853a408"
-				},
-				"keys": {
-					"$ref": "#/components/schemas/Array_4d992aa9"
-				},
-				"measuredMs": {
-					"type": "number",
-					"minimum": 0
-				},
-				"budgetMs": {
-					"type": "number",
-					"minimum": 0
+				"payload": {
+					"$ref": "#/components/schemas/Object_agentId_apiCalls_durationMs_c5921c78"
 				}
 			},
 			"Shape_25795900": {
@@ -33551,55 +33657,6 @@
 					"type": "string"
 				}
 			},
-			"Shape_2b057439": {
-				"check": {
-					"type": "string"
-				},
-				"argv": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				},
-				"cwd": {
-					"type": "string"
-				},
-				"exitCode": {
-					"type": "integer"
-				},
-				"durationMs": {
-					"type": "number",
-					"minimum": 0
-				},
-				"memo": {
-					"type": "boolean"
-				},
-				"outputTail": {
-					"type": "string"
-				},
-				"evidenceRunId": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"notRun": {
-					"$ref": "#/components/schemas/Enum_46bc764e"
-				},
-				"baseComparison": {
-					"$ref": "#/components/schemas/Union_7e4ed1ca"
-				},
-				"report": {
-					"$ref": "#/components/schemas/Object_budgetMs_failedKeyCount_failedKeys_dee41b05"
-				},
-				"tree": {
-					"$ref": "#/components/schemas/Object_fingerprint_head_0b967845"
-				}
-			},
 			"Shape_2b7a18ac": {
 				"target": {
 					"$ref": "#/components/schemas/Union_82090872"
@@ -33620,21 +33677,6 @@
 				},
 				"missing": {
 					"$ref": "#/components/schemas/Object_display_fact_1897f681"
-				}
-			},
-			"Shape_2f9e05c3": {
-				"reason": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
-				},
-				"checks": {
-					"$ref": "#/components/schemas/Array_8fb0e1ad"
 				}
 			},
 			"Shape_39fec1f7": {
@@ -34417,15 +34459,6 @@
 					"$ref": "#/components/schemas/Union_6ab8d6d6"
 				}
 			},
-			"Shape_6ac40227": {
-				"state": {
-					"type": "string",
-					"const": "resolved"
-				},
-				"value": {
-					"$ref": "#/components/schemas/Object_checkoutChanges_failureMessage_hostVerification_5e494317"
-				}
-			},
 			"Shape_6b840e60": {
 				"used": {
 					"type": "string",
@@ -34889,15 +34922,33 @@
 					"$ref": "#/components/schemas/Array_d853a408"
 				}
 			},
-			"Shape_87d0df97": {
-				"version": {
+			"Shape_84aea267": {
+				"check": {
+					"type": "string"
+				},
+				"argv": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"exitCode": {
+					"type": "integer"
+				},
+				"durationMs": {
 					"type": "number",
-					"const": 1
+					"minimum": 0
 				},
-				"output": {
-					"$ref": "#/components/schemas/Union_9db58400"
+				"memo": {
+					"type": "boolean"
 				},
-				"failureMessage": {
+				"outputTail": {
+					"type": "string"
+				},
+				"evidenceRunId": {
 					"anyOf": [
 						{
 							"type": "string"
@@ -34907,24 +34958,17 @@
 						}
 					]
 				},
-				"outcomeDetail": {
-					"anyOf": [
-						{
-							"type": "string"
-						},
-						{
-							"type": "null"
-						}
-					]
+				"notRun": {
+					"$ref": "#/components/schemas/Enum_46bc764e"
 				},
-				"worktree": {
-					"$ref": "#/components/schemas/Union_4df9aa34"
+				"baseComparison": {
+					"$ref": "#/components/schemas/Union_7e4ed1ca"
 				},
-				"checkoutChanges": {
-					"$ref": "#/components/schemas/Union_6397a89f"
+				"report": {
+					"$ref": "#/components/schemas/Object_budgetMs_failedKeyCount_failedKeys_9f9103d2"
 				},
-				"hostVerification": {
-					"$ref": "#/components/schemas/Union_e5dc91da"
+				"tree": {
+					"$ref": "#/components/schemas/Object_fingerprint_head_untracked_8c293c60"
 				}
 			},
 			"Shape_8aaedd03": {
@@ -35931,6 +35975,44 @@
 				},
 				"retry": {
 					"$ref": "#/components/schemas/Union_4bf0a9b3"
+				}
+			},
+			"Shape_cd252a23": {
+				"version": {
+					"type": "number",
+					"const": 1
+				},
+				"output": {
+					"$ref": "#/components/schemas/Union_9db58400"
+				},
+				"failureMessage": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"outcomeDetail": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"worktree": {
+					"$ref": "#/components/schemas/Union_4df9aa34"
+				},
+				"checkoutChanges": {
+					"$ref": "#/components/schemas/Union_6397a89f"
+				},
+				"hostVerification": {
+					"$ref": "#/components/schemas/Union_9f38e23c"
 				}
 			},
 			"Shape_d129f32f": {
@@ -38865,19 +38947,6 @@
 					}
 				]
 			},
-			"Union_8afac12d": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_state_value_68319459"
-					},
-					{
-						"$ref": "#/components/schemas/Object_state_d674a4a9"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_8cf6829a": {
 				"anyOf": [
 					{
@@ -39150,6 +39219,16 @@
 					{
 						"type": "string",
 						"const": "observations"
+					}
+				]
+			},
+			"Union_9f38e23c": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_checks_reason_da870ca4"
+					},
+					{
+						"type": "null"
 					}
 				]
 			},
@@ -39905,16 +39984,6 @@
 					}
 				]
 			},
-			"Union_e5dc91da": {
-				"anyOf": [
-					{
-						"$ref": "#/components/schemas/Object_checks_reason_04371a54"
-					},
-					{
-						"type": "null"
-					}
-				]
-			},
 			"Union_e60bfcab": {
 				"anyOf": [
 					{
@@ -40078,6 +40147,19 @@
 				"anyOf": [
 					{
 						"$ref": "#/components/schemas/Object_cwd_elapsedMs_facts_bed7a8ed"
+					},
+					{
+						"type": "null"
+					}
+				]
+			},
+			"Union_f61b72a1": {
+				"anyOf": [
+					{
+						"$ref": "#/components/schemas/Object_state_value_e771cd3f"
+					},
+					{
+						"$ref": "#/components/schemas/Object_state_d674a4a9"
 					},
 					{
 						"type": "null"

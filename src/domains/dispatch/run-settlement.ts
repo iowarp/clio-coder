@@ -206,6 +206,9 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 	const failedKeys = report.kind === "numeric-compare" ? report.failedKeys : report.failedMetrics;
 	const payloadSha256 =
 		report.kind === "numeric-compare" ? (report.actual?.sha256 ?? null) : (report.runs[0]?.payload?.sha256 ?? null);
+	const inputs = report.kind === "numeric-compare" ? (report.provenance?.inputs ?? []) : report.conditions.inputs;
+	const probes = report.kind === "numeric-compare" ? report.provenance?.probes : report.conditions.probes;
+	const untracked = report.kind === "reproduce" ? report.conditions.untracked : undefined;
 	return {
 		kind: report.kind,
 		passed: report.passed,
@@ -220,6 +223,22 @@ function sealedCheckReport(report: DeclaredCheckReport): SealedCheckReport {
 			0,
 			SEALED_CHECK_REPORT_KEYS_MAX,
 		),
+		...(inputs.length > 0
+			? {
+					inputs: inputs.slice(0, SEALED_CHECK_REPORT_KEYS_MAX).map((input) => ({ path: input.path, sha256: input.sha256 })),
+				}
+			: {}),
+		...(probes !== undefined && probes.length > 0
+			? {
+					probes: probes.slice(0, 8).map((probe) => ({
+						argv: probe.argv.slice(0, 64).map(clipped),
+						exitCode: probe.exitCode,
+						sha256: probe.sha256,
+						version: probe.version === null ? null : clipped(probe.version),
+					})),
+				}
+			: {}),
+		...(untracked !== undefined ? { untracked } : {}),
 	};
 }
 
@@ -400,7 +419,15 @@ export function settleFinishedRun(
 							...(check.notRun !== undefined ? { notRun: check.notRun } : {}),
 							baseComparison: check.baseComparison ? { ...check.baseComparison } : null,
 							...(check.report !== undefined ? { report: sealedCheckReport(check.report) } : {}),
-							...(check.tree !== undefined ? { tree: { head: check.tree.head, fingerprint: check.tree.fingerprint } } : {}),
+							...(check.tree !== undefined
+								? {
+										tree: {
+											head: check.tree.head,
+											fingerprint: check.tree.fingerprint,
+											...(check.tree.untracked !== undefined ? { untracked: check.tree.untracked } : {}),
+										},
+									}
+								: {}),
 						})),
 					}
 				: null,

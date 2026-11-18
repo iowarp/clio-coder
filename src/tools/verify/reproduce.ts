@@ -26,6 +26,8 @@ import {
 	type NumericReferenceProvenance,
 	type NumericTolerance,
 	normalizeNumericTolerance,
+	type ProvenanceProbeRecord,
+	renderProvenance,
 } from "./numeric.js";
 
 export type ReproduceEnvironment = "worktree" | "copy";
@@ -59,6 +61,8 @@ export interface DeclaredReproduce {
 	units?: Record<string, string>;
 	/** Metric name to the exact nested-array shape; `[]` is a scalar. */
 	shapes?: Record<string, number[]>;
+	/** Argv probes run once beside the check and recorded in its conditions, never gating; validated by the catalog. */
+	provenance?: string[][];
 }
 
 export const REPRODUCE_CAPS = Object.freeze({
@@ -241,6 +245,7 @@ export function reproduceCatalogFields(spec: DeclaredReproduce): Record<string, 
 		...(spec.shapes !== undefined
 			? { shapes: Object.fromEntries(Object.entries(spec.shapes).map(([key, shape]) => [key, [...shape]])) }
 			: {}),
+		...(spec.provenance !== undefined ? { provenance: spec.provenance.map((probe) => [...probe]) } : {}),
 	};
 }
 
@@ -399,12 +404,19 @@ export interface ReproduceConditions {
 	 * analysis are not what this verdict judged.
 	 */
 	trackedTreeClean: boolean | null;
+	/**
+	 * Untracked files git does not ignore in the operator's checkout. A worktree run never sees them, and the commit
+	 * does not name them. Absent outside a repository and on reports made before it was recorded.
+	 */
+	untracked?: number;
 	seed: ReproduceSeed | null;
 	platform: ReproducePlatform;
 	/** The argv that ran, interpreter resolved. */
 	argv: string[];
 	/** Repository-relative directory the command ran in, inside each clean environment. */
 	cwd: string;
+	/** The declared provenance probes as they ran; absent when none was declared. */
+	probes?: ProvenanceProbeRecord[];
 }
 
 export interface ReproduceRunRecord {
@@ -592,7 +604,7 @@ export function renderReproduceReport(report: ReproduceReport): string {
 		report.summary,
 		`compare: ${report.compare}; rule: ${report.rule}`,
 		`tolerance: ${JSON.stringify(report.tolerance)}`,
-		`environment: ${c.environment}; commit: ${c.commit ?? "none"}${c.trackedTreeClean === false ? " (operator checkout has uncommitted tracked changes; the committed tree ran)" : ""}`,
+		`environment: ${c.environment}; commit: ${c.commit ?? "none"}${c.trackedTreeClean === false ? " (operator checkout has uncommitted tracked changes; the committed tree ran)" : ""}${c.untracked !== undefined ? `; ${c.untracked} untracked file(s) in the checkout` : ""}`,
 		`seed: ${c.seed === null ? "none" : `${c.seed.env}=${c.seed.value}`}`,
 		`platform: ${platform}`,
 		`argv: ${JSON.stringify(c.argv)} in ${c.cwd}`,
@@ -600,6 +612,7 @@ export function renderReproduceReport(report: ReproduceReport): string {
 			(input) =>
 				`input: ${input.path} sha256=${input.sha256} (${input.sizeBytes}B${input.tracked === null ? "" : input.tracked ? ", tracked" : ", untracked"})`,
 		),
+		...renderProvenance({ probes: c.probes ?? [] }),
 		...report.runs.map(
 			(run, index) =>
 				`run ${index + 1}: exit ${run.exitCode ?? "?"} in ${run.durationMs}ms${run.payload !== undefined ? ` payload sha256=${run.payload.sha256.slice(0, 12)} (${run.payload.bytes}B)` : ""}`,

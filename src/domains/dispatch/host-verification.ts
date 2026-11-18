@@ -28,6 +28,7 @@ import { settingsFileMasks, workerSandboxMasks } from "../../core/sandbox/worker
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
 import { taskWorktreeManifestsChanged } from "../../tools/task-worktree.js";
+import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "../../tools/verify/provenance.js";
 import { renderReproduceReport } from "../../tools/verify/reproduce.js";
 import { runReproduce } from "../../tools/verify/reproduce-run.js";
 import {
@@ -98,8 +99,30 @@ function repositoryRoot(cwd: string): string {
 	}).trim();
 }
 
-/** The checkout a check judged: its root, HEAD, and a digest of HEAD plus working-tree content. */
-function checkedTree(cwd: string): { root: string; head: string; fingerprint: string } | null {
+/** Untracked files git does not ignore under `root`; undefined when git cannot list them. */
+function untrackedCount(root: string): number | undefined {
+	try {
+		const listed = execFileSync(
+			"git",
+			internalGitArgv(["-C", root, "ls-files", "--others", "--exclude-standard", "-z"]),
+			{
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: 30_000,
+				maxBuffer: 64 * 1024 * 1024,
+			},
+		);
+		return listed.split("\0").filter((entry) => entry.length > 0).length;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The checkout a check judged: its root, HEAD, a digest of HEAD plus working-tree content, and how many untracked
+ * files it held, which HEAD alone does not name.
+ */
+function checkedTree(cwd: string): { root: string; head: string; fingerprint: string; untracked?: number } | null {
 	try {
 		const snapshot = captureWorkspaceSnapshot(repositoryRoot(cwd));
 		const fingerprint = sha256(
@@ -108,7 +131,8 @@ function checkedTree(cwd: string): { root: string; head: string; fingerprint: st
 				entries: [...snapshot.entries.entries()].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
 			}),
 		);
-		return { root: snapshot.root, head: snapshot.head, fingerprint };
+		const untracked = untrackedCount(snapshot.root);
+		return { root: snapshot.root, head: snapshot.head, fingerprint, ...(untracked !== undefined ? { untracked } : {}) };
 	} catch {
 		return null;
 	}
@@ -1041,6 +1065,34 @@ async function spawnResolvedCheck(
 	const resolvedCheck = input.resolvedCheck;
 	const judged = resolvedCheck.kind === "numeric-compare" || resolvedCheck.kind === "perf-budget";
 	const captureMaxBytes = judged ? JUDGED_CHECK_MAX_OUTPUT_BYTES : CODE_STEP_CAPTURE_MAX_BYTES;
+	const numeric = resolvedCheck.kind === "numeric-compare" ? resolvedCheck.numeric : undefined;
+	const inputs = (numeric?.inputs ?? []).map((absolute) => ({ path: absolute, absolute }));
+	// Hashed before the command runs and again after it, so the verdict names the bytes the command read.
+	const inputsBefore = await hashJudgedInputs(inputs);
+	if (inputsBefore instanceof Error) {
+		return {
+			check: {
+				check: resolvedCheck.check,
+				argv: [...resolvedCheck.argv],
+				cwd: resolvedCheck.cwd,
+				exitCode: 1,
+				durationMs: 0,
+				memo: false,
+				notRun: "refused",
+				outputTail: outputTail(`numeric-compare: ${inputsBefore.message}; nothing ran`),
+				...(tree !== undefined ? { tree } : {}),
+			},
+			outputExcerpt: "",
+		};
+	}
+	const probes =
+		numeric?.provenance === undefined
+			? []
+			: await runProvenanceProbes(numeric.provenance, {
+					cwd: resolvedCheck.cwd,
+					workspaceRoot: resolvedCheck.cwd,
+					...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+				});
 	const outcome = await runCodeStep({
 		stepId: `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`,
 		command,
@@ -1052,13 +1104,23 @@ async function spawnResolvedCheck(
 	});
 	const artifactPath = outcome.record.artifactPaths[0];
 	// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
-	const judgement =
+	let judgement =
 		judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
 			? {
 					exitCode: 1,
 					outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
 				}
 			: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
+	const inputDrift =
+		inputs.length === 0 || outcome.record.exitCode !== 0 ? undefined : await judgedInputDrift(inputsBefore, inputs);
+	if (inputDrift !== undefined) {
+		judgement = { exitCode: 1, outputTail: outputTail(`numeric-compare: ${inputDrift}`) };
+	} else if (
+		judgement.report?.kind === "numeric-compare" &&
+		(numeric?.inputs !== undefined || numeric?.provenance !== undefined)
+	) {
+		judgement.report.provenance = { inputs: inputsBefore, probes };
+	}
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
@@ -1179,6 +1241,8 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 							referenceDigest: sha256(JSON.stringify(readJudgedFile(numeric.reference) ?? null)),
 							sealedReference: numeric.referenceSha256,
 							tolerance: numeric.tolerance,
+							inputs: numeric.inputs,
+							provenance: numeric.provenance,
 						},
 			perf:
 				perf === undefined

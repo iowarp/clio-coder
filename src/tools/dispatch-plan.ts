@@ -261,6 +261,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 /** A sealed reference or baseline digest: a sha256, null for a file absent at admission, or absent on older plans. */
 function isOptionalDigest(value: unknown): boolean {
 	return value === undefined || value === null || (typeof value === "string" && /^[0-9a-f]{64}$/u.test(value));
@@ -688,7 +692,10 @@ function isResolvedTask(value: unknown): value is ResolvedDispatchPlanArtifact["
 					(check.numeric === undefined ||
 						(isRecord(check.numeric) &&
 							typeof check.numeric.reference === "string" &&
-							isOptionalDigest(check.numeric.referenceSha256))) &&
+							isOptionalDigest(check.numeric.referenceSha256) &&
+							(check.numeric.inputs === undefined || isStringArray(check.numeric.inputs)) &&
+							(check.numeric.provenance === undefined ||
+								(Array.isArray(check.numeric.provenance) && check.numeric.provenance.every(isStringArray))))) &&
 					(check.perf === undefined || (isRecord(check.perf) && isOptionalDigest(check.perf.baselineSha256))),
 			))
 	)

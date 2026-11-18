@@ -41,6 +41,7 @@ import {
 	renderPerfBaseline,
 } from "./perf.js";
 import { captureProofSnapshot } from "./proof.js";
+import { hashJudgedInputs, judgedInputDrift, runProvenanceProbes } from "./provenance.js";
 import { type ReproduceReport, renderReproduceReport } from "./reproduce.js";
 import { checkoutState, type ReproduceOutcome, runReproduce } from "./reproduce-run.js";
 import { availableToolchainChecks } from "./resolve.js";
@@ -567,6 +568,31 @@ async function runJudgedCheck(
 				? check.perf?.baseline
 				: undefined;
 	const judgedBefore = judgedPath === undefined ? undefined : checkFileSha256(workspaceRoot, judgedPath);
+	const numeric = check.kind === "numeric-compare" ? check.numeric : undefined;
+	let inputs: Array<{ path: string; absolute: string }>;
+	try {
+		inputs = (numeric?.inputs ?? []).map((input) => ({ path: input, absolute: resolveSafeCwd(input, workspaceRoot) }));
+	} catch (error) {
+		return { kind: "error", message: `verify: ${error instanceof Error ? error.message : String(error)}` };
+	}
+	// Hashed before the command runs and again after it, so the verdict names the bytes the command read.
+	const inputsBefore = await hashJudgedInputs(inputs);
+	if (inputsBefore instanceof Error) {
+		return {
+			kind: "error",
+			message: `verify: numeric-compare ${inputsBefore.message}; nothing ran`,
+			details: { judgement: judgement("unavailable", "not-run") },
+		};
+	}
+	const probes =
+		numeric?.provenance === undefined
+			? []
+			: await runProvenanceProbes(numeric.provenance, {
+					cwd,
+					workspaceRoot,
+					...(options?.shellSandbox !== undefined ? { shellSandbox: options.shellSandbox } : {}),
+					...(options?.signal !== undefined ? { signal: options.signal } : {}),
+				});
 	let result: SafeCommandResult;
 	try {
 		result = await runCommandVector(file, vector, {
@@ -615,6 +641,12 @@ async function runJudgedCheck(
 			message: `verify: ${report.kind} ${label} '${judgedPath}' changed while the check ran (${judgedBefore ?? "absent"}→${judgedAfter})`,
 			details: facts,
 		};
+	}
+	const inputDrift = await judgedInputDrift(inputsBefore, inputs);
+	if (inputDrift !== undefined)
+		return { kind: "error", message: `verify: numeric-compare ${inputDrift}`, details: facts };
+	if (report.kind === "numeric-compare" && (numeric?.inputs !== undefined || numeric?.provenance !== undefined)) {
+		report.provenance = { inputs: inputsBefore, probes };
 	}
 	const rendered = report.kind === "numeric-compare" ? renderNumericReport(report) : report.summary;
 	const details = {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, type Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { release, tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { type MainSandboxPolicy, mainSandboxWriteHint } from "../../core/sandbox
 import { clioStateDir } from "../../core/xdg.js";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "../process-lease.js";
 import { extractNumericPayloadText, type NumericReferenceProvenance } from "./numeric.js";
+import { runProvenanceProbes, sha256File } from "./provenance.js";
 import {
 	type DeclaredReproduce,
 	judgeReproduce,
@@ -129,16 +130,6 @@ export interface ReproduceRunInput {
 	referenceSha256?: string | null;
 }
 
-async function sha256File(filePath: string): Promise<{ sha256: string; sizeBytes: number }> {
-	const hash = createHash("sha256");
-	let sizeBytes = 0;
-	for await (const chunk of createReadStream(filePath)) {
-		hash.update(chunk as Buffer);
-		sizeBytes += (chunk as Buffer).byteLength;
-	}
-	return { sha256: hash.digest("hex"), sizeBytes };
-}
-
 function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -161,18 +152,23 @@ interface RepositoryState {
 	toplevel: string;
 	commit: string;
 	trackedTreeClean: boolean;
+	/** Untracked files git does not ignore; null when status could not be read. */
+	untracked: number | null;
 	tracked: Set<string>;
 }
 
 /**
- * HEAD and whether tracked files match it, for a judged check that runs in the live checkout; null outside a
- * repository. A numeric-compare result carries it so the claim it becomes names the commit it held at (#406).
+ * HEAD, whether tracked files match it, and how many untracked files git does not ignore, for a judged check that
+ * runs in the live checkout; null outside a repository. A numeric-compare result carries it so the claim it becomes
+ * names the commit it held at (#406); the untracked count says how much the commit alone does not name.
  */
 export async function checkoutState(
 	workspaceRoot: string,
-): Promise<{ commit: string; trackedTreeClean: boolean } | null> {
+): Promise<{ commit: string; trackedTreeClean: boolean; untracked: number | null } | null> {
 	const state = await repositoryState(workspaceRoot, []);
-	return state === null ? null : { commit: state.commit, trackedTreeClean: state.trackedTreeClean };
+	return state === null
+		? null
+		: { commit: state.commit, trackedTreeClean: state.trackedTreeClean, untracked: state.untracked };
 }
 
 async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<string>): Promise<RepositoryState | null> {
@@ -184,13 +180,22 @@ async function repositoryState(workspaceRoot: string, inputs: ReadonlyArray<stri
 	} catch {
 		return null;
 	}
-	const status = await git(toplevel, ["status", "--porcelain", "--untracked-files=no"]).catch(() => null);
+	const status = await git(toplevel, ["status", "--porcelain", "-z", "--no-renames", "--untracked-files=all"]).catch(
+		() => null,
+	);
+	const entries = status === null ? [] : status.split("\0").filter((entry) => entry.length > 3);
 	const tracked = new Set<string>();
 	if (inputs.length > 0) {
 		const listed = await git(workspaceRoot, ["ls-files", "-z", "--", ...inputs]).catch(() => "");
 		for (const entry of listed.split("\0")) if (entry.length > 0) tracked.add(entry);
 	}
-	return { toplevel, commit, trackedTreeClean: status !== null && status.trim().length === 0, tracked };
+	return {
+		toplevel,
+		commit,
+		trackedTreeClean: status !== null && entries.every((entry) => entry.startsWith("??")),
+		untracked: status === null ? null : entries.filter((entry) => entry.startsWith("??")).length,
+		tracked,
+	};
 }
 
 async function pythonVersion(
@@ -557,11 +562,21 @@ async function runReproduceIn(input: ReproduceRunInput, scratchRoot: string): Pr
 		environment: reproduceEnvironment(spec),
 		commit: repository?.commit ?? null,
 		trackedTreeClean: repository?.trackedTreeClean ?? null,
+		...(repository !== null && repository.untracked !== null ? { untracked: repository.untracked } : {}),
 		seed: spec.seed !== undefined ? { ...spec.seed } : null,
 		platform,
 		argv: [...argv],
 		cwd: input.cwd,
 	};
+	if (spec.provenance !== undefined) {
+		// Probes run in the operator's checkout, where the interpreter and libraries the clean runs use are found.
+		conditions.probes = await runProvenanceProbes(spec.provenance, {
+			cwd: resolveSafeCwd(input.cwd, workspaceRoot),
+			workspaceRoot,
+			...(input.shellSandbox !== undefined ? { shellSandbox: input.shellSandbox } : {}),
+			...(input.signal !== undefined ? { signal: input.signal } : {}),
+		});
+	}
 
 	await sweepAbandonedEnvironments(scratchRoot);
 	const runCount = spec.compare.mode === "twice" ? 2 : 1;
