@@ -988,7 +988,7 @@ export function checkpointContinuityCarry(input: ContinuityProjectionInput): Con
  * this one rule; a summary may then replace it with the active request its cut
  * removes.
  */
-export function carriedUserContext(
+function carriedUserContext(
 	entries: ReadonlyArray<SessionEntry>,
 	prior: SessionEntry | undefined,
 ): PreservedUserContext | undefined {
