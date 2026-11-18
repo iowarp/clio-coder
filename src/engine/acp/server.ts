@@ -81,7 +81,7 @@ import { clioStateDir } from "../../core/xdg.js";
 import type { StartupHint } from "../../domains/context/contract.js";
 import type { RunResultFacts } from "../../domains/dispatch/index.js";
 import { readRunResultFacts, readRunResultFactsForReplay, runResultWireFacts } from "../../domains/dispatch/index.js";
-import type { ProvidersContract } from "../../domains/providers/contract.js";
+import { PROVIDER_PROBE_TIMEOUT_MS, type ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
 import { modelIdsForStatus } from "../../domains/providers/model-discovery.js";
 import { resolveRuntimeTarget } from "../../domains/providers/runtime-resolution.js";
@@ -5216,12 +5216,12 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			},
 		],
 	});
-	const sessionThinking = (session: AcpServerSession, model = session.model) => {
+	const sessionThinking = (session: AcpServerSession, model = session.model, level = session.thinkingLevel) => {
 		if (!options.providers || !session.target || !model) return null;
 		const resolved = resolveRuntimeTarget(options.providers, {
 			targetId: session.target,
 			wireModelId: model,
-			requestedThinkingLevel: session.thinkingLevel,
+			requestedThinkingLevel: level,
 			use: "orchestrator",
 		});
 		return resolved.ok ? resolved.target.modelRuntime.thinking : null;
@@ -5261,12 +5261,14 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const status = options.providers?.list().find((item) => item.target.id === session.target);
 			const models = status === undefined ? [] : safeTargetModels(status);
 			if (!models.includes(session.model)) models.unshift(session.model);
+			const fallback = session.target === null ? undefined : listingFallbacks.get(session.target);
 			optionsList.push({
 				id: "model",
 				name: "Model",
 				category: "model",
 				type: "select",
 				currentValue: session.model,
+				...(fallback !== undefined ? { description: `Configured models only: ${fallback}.` } : {}),
 				options: models.slice(0, ACP_TARGET_MODEL_LIMIT).map((model) => {
 					const thinking = sessionThinking(session, model);
 					return { value: model, name: model, ...(thinking ? { thinkingLevels: thinking.supportedLevels } : {}) };
@@ -5280,7 +5282,11 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			category: "thought_level",
 			type: "select",
 			currentValue: thinking?.effectiveLevel ?? session.thinkingLevel,
-			...(thinking?.notice ? { notice: thinking.notice } : {}),
+			...(thinking && (thinking.notice || thinking.effectiveLevel !== session.thinkingLevel)
+				? {
+						notice: thinking.notice || `Thinking ${session.thinkingLevel} runs as ${thinking.effectiveLevel} on this model.`,
+					}
+				: {}),
 			options: (thinking?.supportedLevels ?? []).map((level) => ({
 				value: level,
 				name: thinking?.mechanism === "on-off" && level !== "off" ? "on" : level,
@@ -5293,6 +5299,54 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			sessionId: session.id,
 			update: { sessionUpdate: "config_option_update", configOptions: configOptions(session) },
 			_meta: { [ACP_SESSION_META_KEY]: { target: session.target } },
+		});
+	};
+	/** Why a target's model choices are its configured ones and not the account's live listing. */
+	const listingFallbacks = new Map<string, string>();
+	const listedLive = (status: ReturnType<ProvidersContract["list"]>[number] | null | undefined): boolean =>
+		status !== null &&
+		status !== undefined &&
+		status.discoveredModels.length > 0 &&
+		status.discoveredModelsSource !== "none" &&
+		status.probeModelCapabilities !== null &&
+		status.probeModelCapabilities !== undefined;
+	/**
+	 * A runtime whose listing carries each model's capabilities lists live when its cache is cold, stale or keeps no
+	 * capabilities, as `run` does, so the model choices and their thinking levels are the account's. The wait is the
+	 * provider probe's own timeout; a late listing still updates the session's options when it lands.
+	 */
+	const listTargetModels = async (targetId: string | null): Promise<void> => {
+		const providers = options.providers;
+		if (providers === undefined || targetId === null) return;
+		const status = providers.list().find((item) => item.target.id === targetId);
+		if (!status?.runtime?.listsModelCapabilities || typeof status.runtime.probe !== "function") return;
+		if (status.discoveredModelsSource === "probe" || listedLive(status)) return;
+		const probe = providers.probeTarget(targetId, { reasoning: false }).then(
+			(probed) =>
+				listedLive(probed) ? null : `the live model listing failed: ${probed?.reason ?? "it returned no models"}`,
+			(error: unknown) => `the live model listing failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timedOut = new Promise<"timeout">((resolve) => {
+			timer = setTimeout(() => resolve("timeout"), PROVIDER_PROBE_TIMEOUT_MS);
+			timer.unref?.();
+		});
+		const outcome = await Promise.race([probe, timedOut]);
+		clearTimeout(timer);
+		if (outcome === null) {
+			listingFallbacks.delete(targetId);
+			return;
+		}
+		const reason =
+			outcome === "timeout"
+				? `the live model listing took longer than ${PROVIDER_PROBE_TIMEOUT_MS / 1_000} s`
+				: modelSelectionErrorText(outcome, 512);
+		listingFallbacks.set(targetId, reason);
+		if (outcome !== "timeout") return;
+		void probe.then((late) => {
+			if (late !== null) return;
+			listingFallbacks.delete(targetId);
+			for (const session of sessions.values()) if (session.target === targetId) notifyConfigOptions(session);
 		});
 	};
 	const refuseYolo = (level: AutonomyLevel): void => {
@@ -5402,6 +5456,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			const ceilingEcho = applySessionCeiling(session);
 			announceCommands(id);
 			telemetry.bind(false);
+			await listTargetModels(session.target);
 			const opened = {
 				sessionId: id,
 				...sessionConfig(session),
@@ -6693,7 +6748,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		return { _meta: trustResultMeta(session.cwd) };
 	});
 
-	options.transport.onRequest("session/set_config_option", (params) => {
+	options.transport.onRequest("session/set_config_option", async (params) => {
 		requireInitialized();
 		requireAuthenticated();
 		const request = assertParamKeys(params, new Set(["sessionId", "configId", "value", "type"]));
@@ -6734,6 +6789,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (!options.setSessionRouting || !options.providers)
 					throw new AcpRequestError(-32601, "model selection is unavailable", { code: "method_not_found" });
 				const target = request.configId === "target" ? value : session.target;
+				if (request.configId === "target" && target !== session.target) await listTargetModels(target);
 				const status = options.providers.list().find((item) => item.target.id === target);
 				if (!target || !status) throw new AcpRequestError(-32602, "target is not available", { code: "invalid_params" });
 				const models = targetModelCandidates(status);
@@ -6757,7 +6813,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 					);
 					session.target = selected.target;
 					session.model = selected.model;
-					session.thinkingLevel = selected.thinkingLevel;
+					// The session keeps the level asked for; each model resolves what it does with it, shown as currentValue.
 				} catch (error) {
 					throw new AcpRequestError(-32602, "target cannot host this session model", {
 						code: "invalid_params",
@@ -6767,23 +6823,33 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				notifyConfigOptions(session);
 				break;
 			}
-			case "thinkingLevel":
+			case "thinkingLevel": {
 				if (!ACP_THINKING_LEVEL_SET.has(value as AcpThinkingLevel))
 					throw new AcpRequestError(-32602, "invalid thinking level", { code: "invalid_params" });
-				if (session.thinkingLevel !== value) {
+				const requested = value as AcpThinkingLevel;
+				// A level the model has runs; an unlisted one runs at the nearest listed level, returned as currentValue
+				// with a notice. A model with no thinking at all refuses any level but off rather than keep it silently.
+				const thinking = sessionThinking(session, session.model, requested);
+				if (options.providers !== undefined && requested !== "off") {
+					const levels = thinking?.supportedLevels ?? [];
+					if (!levels.some((level) => level !== "off"))
+						throw new AcpRequestError(
+							-32602,
+							`this model cannot run thinking ${requested}; it supports ${levels.length > 0 ? levels.join(", ") : "no thinking levels"}`,
+							{ code: "invalid_params", reason: "thinking-unsupported" },
+						);
+				}
+				if (session.thinkingLevel !== requested) {
 					if (!options.setSessionRouting)
 						throw new AcpRequestError(-32601, "thinking selection is unavailable", { code: "method_not_found" });
-					const thinkingLevel = clampThinkingLevel(
-						options.providers,
-						session.target,
-						session.model,
-						value as AcpThinkingLevel,
-					);
+					const thinkingLevel =
+						thinking?.effectiveLevel ?? clampThinkingLevel(options.providers, session.target, session.model, requested);
 					options.setSessionRouting({ thinkingLevel }, handshake.settingsSource);
-					session.thinkingLevel = thinkingLevel;
+					session.thinkingLevel = requested;
 					notifyConfigOptions(session);
 				}
 				break;
+			}
 			default:
 				throw new AcpRequestError(-32602, "unknown configuration option", { code: "invalid_params" });
 		}

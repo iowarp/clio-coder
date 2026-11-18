@@ -53,7 +53,7 @@ const SESSION_WORDS =
 const PROJECT_WORDS = /\b(?:(?:in|for)\s+this\s+(?:project|repo|repository|codebase|workspace)|in\s+here)\b/iu;
 
 /** The scope the operator's own words name, or null when they name none. */
-export function explicitOperatorScope(text: string): OperatorMemoryScope | null {
+function explicitOperatorScope(text: string): OperatorMemoryScope | null {
 	if (SESSION_WORDS.test(text)) return "session";
 	if (GLOBAL_WORDS.test(text)) return "global";
 	if (PROJECT_WORDS.test(text)) return "project";
@@ -157,7 +157,7 @@ export function operatorStatementHoldsSecret(text: string): boolean {
 export const OPERATOR_SECRET_REFUSAL =
 	"Not remembered: that looks like a secret, and memory is plain text read into every later prompt. Keep a provider key in Clio Coder's credential storage (`clio-coder auth login <target>`) and any other secret in an environment variable or your OS keychain, then tell Clio the variable's name instead.";
 
-export function normalizeOperatorStatement(text: string): string {
+function normalizeOperatorStatement(text: string): string {
 	return text
 		.normalize("NFKC")
 		.toLowerCase()
@@ -196,12 +196,8 @@ export function operatorStatementMatch(request: string, stored: string): number 
 	return ratio >= 0.5 ? ratio : 0;
 }
 
-export function isOperatorStated(record: MemoryRecord): boolean {
+function isOperatorStated(record: MemoryRecord): boolean {
 	return record.provenance?.sourceKind === "operator-stated";
-}
-
-export function operatorStatedKind(record: MemoryRecord): OperatorStatedKind {
-	return record.provenance?.statedKind ?? "fact";
 }
 
 /** The store scope a durable operator scope writes. */

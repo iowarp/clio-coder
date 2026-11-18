@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
+import { type CapabilityFlags, type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 export const TARGET_MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -29,8 +30,21 @@ export interface TargetModelSnapshot {
 	models: string[];
 	modelLabels?: Record<string, string>;
 	modelCreatedAt?: Record<string, string>;
+	/**
+	 * What the listing said about each model, for runtimes whose listing carries capabilities. A snapshot without
+	 * it (every file written before it existed) still lists models, and its capabilities count as unknown.
+	 */
+	modelCapabilities?: Record<string, CachedModelCapabilities>;
 	observedAt: string;
 }
+
+/** The listed capabilities a later process may trust: they describe the account's model, not a serving state. */
+export type CachedModelCapabilities = Partial<
+	Pick<
+		CapabilityFlags,
+		"reasoning" | "reasoningLevels" | "reasoningDefaultLevel" | "vision" | "contextWindow" | "maxTokens"
+	>
+>;
 
 interface TargetModelCacheOptions {
 	cacheDir?: string;
@@ -38,6 +52,7 @@ interface TargetModelCacheOptions {
 	ttlMs?: number;
 	modelLabels?: Readonly<Record<string, string>>;
 	modelCreatedAt?: Readonly<Record<string, string>>;
+	modelCapabilities?: Readonly<Record<string, Partial<CapabilityFlags>>>;
 }
 
 function targetCacheKey(targetId: string): string {
@@ -77,6 +92,44 @@ function normalizedLabels(models: ReadonlyArray<string>, labels: unknown): Recor
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+const THINKING_LEVELS = new Set<string>(VALID_THINKING_LEVELS);
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+	return typeof value === "string" && THINKING_LEVELS.has(value);
+}
+
+function positiveInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function cachedCapabilities(value: unknown): CachedModelCapabilities | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const row = value as Record<string, unknown>;
+	const out: CachedModelCapabilities = {};
+	if (typeof row.reasoning === "boolean") out.reasoning = row.reasoning;
+	if (Array.isArray(row.reasoningLevels) && row.reasoningLevels.length > 0 && row.reasoningLevels.every(isThinkingLevel))
+		out.reasoningLevels = [...new Set(row.reasoningLevels)];
+	if (isThinkingLevel(row.reasoningDefaultLevel)) out.reasoningDefaultLevel = row.reasoningDefaultLevel;
+	if (typeof row.vision === "boolean") out.vision = row.vision;
+	if (positiveInteger(row.contextWindow)) out.contextWindow = row.contextWindow;
+	if (positiveInteger(row.maxTokens)) out.maxTokens = row.maxTokens;
+	return out;
+}
+
+function normalizedCapabilities(
+	models: ReadonlyArray<string>,
+	capabilities: unknown,
+): Record<string, CachedModelCapabilities> | undefined {
+	if (typeof capabilities !== "object" || capabilities === null || Array.isArray(capabilities)) return undefined;
+	const source = capabilities as Record<string, unknown>;
+	const out: Record<string, CachedModelCapabilities> = {};
+	for (const id of models) {
+		const row = cachedCapabilities(source[id]);
+		if (row !== null) out[id] = row;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
 	const row = value as Partial<TargetModelSnapshot>;
@@ -100,6 +153,8 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
 	const modelCreatedAt = normalizedLabels(models, row.modelCreatedAt);
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
+	const modelCapabilities = normalizedCapabilities(models, row.modelCapabilities);
+	if (modelCapabilities !== undefined) snapshot.modelCapabilities = modelCapabilities;
 	return snapshot;
 }
 
@@ -129,7 +184,10 @@ export function readTargetModelSnapshot(
 export function recordTargetModelSnapshot(
 	target: Pick<TargetDescriptor, "id" | "runtime" | "url">,
 	models: ReadonlyArray<string>,
-	options: Pick<TargetModelCacheOptions, "cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt"> = {},
+	options: Pick<
+		TargetModelCacheOptions,
+		"cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt" | "modelCapabilities"
+	> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
 	const snapshot: TargetModelSnapshot = {
@@ -144,6 +202,8 @@ export function recordTargetModelSnapshot(
 	if (modelLabels !== undefined) snapshot.modelLabels = modelLabels;
 	const modelCreatedAt = normalizedLabels(snapshot.models, options.modelCreatedAt);
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
+	const modelCapabilities = normalizedCapabilities(snapshot.models, options.modelCapabilities);
+	if (modelCapabilities !== undefined) snapshot.modelCapabilities = modelCapabilities;
 	try {
 		// Every successful probe confirms the same list. Rewriting it costs a synchronous fsync on the probe path,
 		// so a snapshot that already says the same and is not yet half way to expiry stands as written.

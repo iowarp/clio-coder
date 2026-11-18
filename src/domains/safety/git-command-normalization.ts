@@ -1,3 +1,4 @@
+import { GIT_GLOBAL_VALUE_OPTIONS } from "../../core/internal-git.js";
 import { scanShellLike } from "./protected-artifacts.js";
 
 /**
@@ -42,9 +43,6 @@ const WRAPPER_VALUE_OPTIONS: Readonly<Record<string, ReadonlyArray<string>>> = {
 	doas: ["-u", "-C"],
 	timeout: ["-s", "--signal", "-k", "--kill-after"],
 };
-
-/** Global options Git reads with a separate value word before the subcommand. */
-const GIT_VALUE_OPTIONS = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix"];
 
 /** Git named bare, by path, or as the Windows executable. */
 export function isGitExecutable(word: string): boolean {
@@ -111,7 +109,7 @@ export function normalizedGitCommands(command: string): string[] {
 			let index = start + 1;
 			while (index < words.length) {
 				const word = words[index] ?? "";
-				if (GIT_VALUE_OPTIONS.includes(word)) {
+				if (GIT_GLOBAL_VALUE_OPTIONS.has(word)) {
 					index += 2;
 					continue;
 				}

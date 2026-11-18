@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { endianness, homedir, machine } from "node:os";
 import path from "node:path";
+import { relativePathEscapes } from "../path-containment.js";
 import { safeResourceWrite } from "../safe-resource-write.js";
 import { clioStateDir } from "../xdg.js";
 import { probeSandboxInvocation } from "./availability.js";
@@ -281,7 +282,7 @@ function physical(entry: string): string | null {
 
 function isInside(parent: string, candidate: string): boolean {
 	const rel = path.relative(parent, candidate);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return !relativePathEscapes(rel);
 }
 
 interface SocketWalk {

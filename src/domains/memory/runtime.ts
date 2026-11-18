@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { MemoryCommitScope } from "./commit-state.js";
 import type { RetentionStatus } from "./completion-retention.js";
-import { EMPTY_RETENTION, readRetention, retainCompletedTask, retentionPath } from "./completion-retention.js";
+import {
+	EMPTY_RETENTION,
+	NO_GROUNDING_EVIDENCE,
+	readRetention,
+	retainCompletedTask,
+	retentionPath,
+} from "./completion-retention.js";
 import type {
 	MemoryConsumptionReceipt,
 	MemoryContract,
@@ -102,6 +108,21 @@ export type MemoryGuardianInfrastructure = Omit<
 	"observations" | "getKeptLessons" | "onHistoryLessons"
 > &
 	Partial<Pick<MemoryGuardianDeps, "getKeptLessons" | "onHistoryLessons">>;
+
+/** Composition supplies routing and delivery infrastructure; memory owns its lesson queries and outcome handlers. */
+export type MemoryInterventionInfrastructure = Omit<
+	MemoryInterventionDeps,
+	| "bank"
+	| "getKeptLessons"
+	| "deferBoundaryPolicy"
+	| "onContentCancelled"
+	| "onInjectedEntries"
+	| "onDurableLessonOutcomes"
+	| "onDeliveryOutcomes"
+	| "onKnowledgeReview"
+	| "onKeptLessonsRetired"
+	| "onScopeEnd"
+>;
 
 /** Retention markers read per discovery step, and closed ledgers rebuilt per step. */
 const RETENTION_SCAN_BATCH = 16;
@@ -279,11 +300,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 		return this.#feedback.whenSettled();
 	}
 
-	createIntervention(deps: Omit<MemoryInterventionDeps, "bank">): MemoryInterventionRegistration {
+	createIntervention(deps: MemoryInterventionInfrastructure): MemoryInterventionRegistration {
 		if (this.#registration) throw new Error("memory intervention already bound");
 		const original = createMemoryInterventionRegistration({
 			...deps,
-			getKeptLessons: deps.getKeptLessons ?? (() => this.keptLessons()),
+			getKeptLessons: () => this.keptLessons(),
 			// Only a job actually in flight holds the boundary step back. Pending observation
 			// work runs only when idle, so waiting on it starved every mid-turn step.
 			deferBoundaryPolicy: () => this.#controller !== null,
@@ -291,13 +312,11 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			onInjectedEntries: (entries) => {
 				this.#event("reminder-entries-submitted", { count: entries.length, ids: entries.map((entry) => entry.id) });
 				this.#feedback.delivered(entries);
-				deps.onInjectedEntries?.(entries);
 			},
 			onDurableLessonOutcomes: (input) => {
 				if (input.delivered.length) this.#event("durable-lessons-submitted", { ids: input.delivered });
 				if (input.held.length) this.#event("durable-lessons-held", { ids: input.held });
 				this.#feedback.durableOutcomes(input);
-				deps.onDurableLessonOutcomes?.(input);
 			},
 			onDeliveryOutcomes: (outcomes, final) => {
 				this.#event("reminder-outcomes", {
@@ -305,26 +324,17 @@ export class MemoryRuntime implements MemoryObservationCommands {
 					outcomes: outcomes.map((outcome) => ({ kind: outcome.kind, ids: outcome.entries.map((entry) => entry.id) })),
 				});
 				this.#feedback.settleDeliveries(outcomes, final);
-				deps.onDeliveryOutcomes?.(outcomes, final);
 			},
-			onKnowledgeReview: (review) => {
-				this.#feedback.reviewKnowledge(review);
-				deps.onKnowledgeReview?.(review);
-			},
-			onKeptLessonsRetired: (memoryIds) => {
-				this.#feedback.retiredKept(memoryIds);
-				deps.onKeptLessonsRetired?.(memoryIds);
-			},
+			onKnowledgeReview: (review) => this.#feedback.reviewKnowledge(review),
+			onKeptLessonsRetired: (memoryIds) => this.#feedback.retiredKept(memoryIds),
 			bank: this.bank,
 			onContentCancelled: () => this.#invalidate("cancelled"),
 			onScopeEnd: (input) => {
-				const scoped = {
+				this.#feedback.scopeEnd({
 					...input,
 					// The bounded retention job owns these proposals, including its recoverable pending candidates.
 					lessons: input.lessons.filter((entry) => !this.#retention.candidateIds?.includes(entry.id)),
-				};
-				this.#feedback.scopeEnd(scoped);
-				deps.onScopeEnd?.(scoped);
+				});
 			},
 		});
 		const registration: MemoryInterventionRegistration = {
@@ -1054,7 +1064,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 			});
 			if (isCurrent() || orphan) publish(retained);
 			// A settled review covers this task: history review need not pay for it again.
-			if (retentionSettled(retained))
+			// One settled without a model call reviewed nothing, so history keeps it.
+			if (retentionSettled(retained) && retained.reason !== NO_GROUNDING_EVIDENCE)
 				recordReviewedHistoryCalls(infra.stateDir(), infra.cwd?.() ?? "", source.callIds ?? []);
 			if (orphan && this.#orphan === orphan && retentionSettled(retained)) this.#orphan = null;
 		} catch (error) {

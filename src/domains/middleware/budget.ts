@@ -36,6 +36,12 @@ export const DEFAULT_HOOK_BUDGET_WARMUP_CALLS = 1;
 export const DEFAULT_HOOK_BUDGET_WINDOW = 5;
 /** Warn only when ≥N of the last M post-warmup calls exceeded budget. */
 export const DEFAULT_HOOK_BUDGET_THRESHOLD = 3;
+/**
+ * A lone overrun of at least this multiple of the budget is a stall (a cold
+ * spawn, a blocking read), not jitter, so it is recorded without waiting for
+ * the window. A smaller lone overrun only counts in the window.
+ */
+export const HOOK_BUDGET_STALL_FACTOR = 10;
 
 export type HookBudgetMap = Record<MiddlewareHook, number>;
 
@@ -68,7 +74,8 @@ export interface HookBudgetOutcome {
 
 export interface HookBudgetTracker {
 	budgetFor(hook: MiddlewareHook): number;
-	record(registrationId: string, hook: MiddlewareHook, elapsedMs: number): HookBudgetOutcome;
+	/** `warmupGrace: false` counts the first calls like any other, for a registration with no in-process warmup. */
+	record(registrationId: string, hook: MiddlewareHook, elapsedMs: number, warmupGrace?: boolean): HookBudgetOutcome;
 }
 
 export interface HookBudgetTrackerOptions {
@@ -181,7 +188,7 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 		budgetFor(hook: MiddlewareHook): number {
 			return budgets[hook];
 		},
-		record(registrationId: string, hook: MiddlewareHook, elapsedMs: number): HookBudgetOutcome {
+		record(registrationId: string, hook: MiddlewareHook, elapsedMs: number, warmupGrace = true): HookBudgetOutcome {
 			const budgetMs = budgets[hook];
 			const exceeded = elapsedMs > budgetMs;
 			const key = `${registrationId}\u0000${hook}`;
@@ -191,7 +198,7 @@ export function createHookBudgetTracker(options: HookBudgetTrackerOptions = {}):
 				states.set(key, state);
 			}
 			state.calls += 1;
-			if (state.calls <= warmupCalls) {
+			if (warmupGrace && state.calls <= warmupCalls) {
 				return {
 					budgetMs,
 					exceeded,

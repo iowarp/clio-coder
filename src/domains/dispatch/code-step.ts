@@ -177,7 +177,7 @@ export interface CodeStepOutcome {
 }
 
 /** Stable stringification of the report, so its digest is reproducible. */
-export function canonicalCodeReport(report: CodeReportResult): string {
+function canonicalCodeReport(report: CodeReportResult): string {
 	return JSON.stringify({
 		passed: report.passed,
 		exitCode: report.exitCode,
@@ -192,7 +192,7 @@ export function canonicalCodeReport(report: CodeReportResult): string {
 	});
 }
 
-export function codeReportDigest(report: CodeReportResult): string {
+function codeReportDigest(report: CodeReportResult): string {
 	return createHash("sha256").update(canonicalCodeReport(report), "utf8").digest("hex");
 }
 
@@ -237,10 +237,7 @@ const ARGV_PLACEHOLDER = /^\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}$/u;
  * arguments. An unbound placeholder is an error rather than an empty string:
  * committing with an empty message is the failure this check exists to stop.
  */
-export function resolveCommandArgv(
-	command: PlaybookCommand,
-	substitutions: Readonly<Record<string, string>> = {},
-): string[] {
+function resolveCommandArgv(command: PlaybookCommand, substitutions: Readonly<Record<string, string>> = {}): string[] {
 	return command.argv.map((token) => {
 		const match = ARGV_PLACEHOLDER.exec(token);
 		if (match === null) {
@@ -259,7 +256,7 @@ export function resolveCommandArgv(
 }
 
 /** Whether the checkout has anything a commit could record. */
-export function workspaceHasChanges(root: string): boolean {
+function workspaceHasChanges(root: string): boolean {
 	const status = execFileSync("git", internalGitArgv(["-C", root, "status", "--porcelain", "-uall"]), {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],

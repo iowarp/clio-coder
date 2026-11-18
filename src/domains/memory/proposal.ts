@@ -10,7 +10,7 @@ import {
 } from "./promotion.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
+import { assertValidMemoryRecord } from "./validate.js";
 
 const LESSON_MAX_CHARS = 240;
 const APPLY_MAX_CHARS = 160;
@@ -53,12 +53,14 @@ export async function proposeMemoryFromEvidence(
 	return insertMemoryRecordIfAbsent(dataDir, memoryRecordFromEvidence(evidence, context, selection));
 }
 
-export function memoryIdFromEvidence(runId: string): string {
-	const digest = createHash("sha256").update(runId, "utf8").digest("hex").slice(0, 16);
+/** A proposal with a chosen scope hashes the scope in, so each scope keeps its own record. */
+function memoryIdFromEvidence(runId: string, scopeKey?: string): string {
+	const input = scopeKey === undefined ? runId : `${runId}\n${scopeKey}`;
+	const digest = createHash("sha256").update(input, "utf8").digest("hex").slice(0, 16);
 	return `mem-${digest}`;
 }
 
-export function memoryRecordFromEvidence(
+function memoryRecordFromEvidence(
 	evidence: RunEvidence,
 	context: EvidenceRunContext,
 	selection?: MemoryScopeSelection,
@@ -77,7 +79,7 @@ export function memoryRecordFromEvidence(
 		id:
 			validatedSelection === undefined
 				? memoryIdFromEvidence(evidence.runId)
-				: memoryIdFromEvidenceScope(evidence.runId, memoryScopeIdentityKey(validatedSelection)),
+				: memoryIdFromEvidence(evidence.runId, memoryScopeIdentityKey(validatedSelection)),
 		scope,
 		key: `evidence:${evidence.runId}`,
 		lesson: truncateText(buildLesson(evidence, context, primaryTag), LESSON_MAX_CHARS),
@@ -100,18 +102,7 @@ export function memoryRecordFromEvidence(
 	else if (scope === "repo" && repository !== null) record.repository = repository;
 	else if (scope === "runtime" && runtimeIds[0] !== undefined) record.runtime = { kind: "runtime", key: runtimeIds[0] };
 	else if (scope === "agent" && agentIds[0] !== undefined) record.agent = { kind: "agent", key: agentIds[0] };
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid) {
-		throw new Error(
-			`evidence memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	}
-	return validated.record;
-}
-
-function memoryIdFromEvidenceScope(evidenceId: string, scopeKey: string): string {
-	const digest = createHash("sha256").update(`${evidenceId}\n${scopeKey}`, "utf8").digest("hex").slice(0, 16);
-	return `mem-${digest}`;
+	return assertValidMemoryRecord(record, "evidence");
 }
 
 function primaryEvidenceTag(tags: ReadonlyArray<EvidenceTag>): EvidenceTag | null {

@@ -1,92 +1,93 @@
 /**
- * Layered rule pack loader for damage-control-rules.yaml (schema v2).
- *
- * v2 stores the always-on hard blocks in a named base pack.
- *
- * v1 schema is tolerated for backward compatibility: a top-level `rules:`
- * array is mapped to packs[base].
+ * Loader for the package-owned damage-control-rules.yaml (schema v2), whose
+ * single `base` pack holds the always-on rules. Each rule compiles once here.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { parsePackagedYaml } from "../../core/packaged-yaml.js";
 import type { DamageControlRule, DamageControlRuleset } from "./damage-control.js";
-import { compileDamageControlRule } from "./rule-compiler.js";
 
-export type PackId = "base";
-
-export interface RulePacks {
-	base: DamageControlRuleset;
-}
-
-interface RawPack {
+interface RawRule {
 	id?: unknown;
-	rules?: unknown;
+	description?: unknown;
+	pattern?: unknown;
+	class?: unknown;
+	block?: unknown;
+	ask?: unknown;
 }
 
 interface RawDocument {
 	version?: unknown;
 	packs?: unknown;
-	rules?: unknown;
 }
 
-function compilePackRules(rawRules: unknown, packId: string): DamageControlRule[] {
-	if (rawRules === undefined || rawRules === null) return [];
-	if (!Array.isArray(rawRules)) {
-		throw new Error(`damage-control pack '${packId}': expected array at 'rules'`);
+function asString(value: unknown, ruleId: string, field: string): string {
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error(`damage-control rule '${ruleId}': expected string for ${field}`);
 	}
-	return rawRules.map((rule, index) => compileDamageControlRule(rule as Record<string, unknown>, index));
+	return value;
 }
 
-function emptyRuleset(version: number): DamageControlRuleset {
-	return { version, rules: [] };
+function compileRule(raw: RawRule, index: number): DamageControlRule {
+	if (typeof raw.id !== "string" || raw.id.length === 0) {
+		throw new Error(`damage-control rule at index ${index}: missing or non-string 'id'`);
+	}
+	const id = raw.id;
+	const description = asString(raw.description, id, "description");
+	const patternString = asString(raw.pattern, id, "pattern");
+	const klass = asString(raw.class, id, "class");
+	if (typeof raw.block !== "boolean") {
+		throw new Error(`damage-control rule '${id}': expected boolean for block`);
+	}
+	if (raw.ask !== undefined && typeof raw.ask !== "boolean") {
+		throw new Error(`damage-control rule '${id}': expected boolean for ask`);
+	}
+	let pattern: RegExp;
+	try {
+		pattern = new RegExp(patternString, "i");
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		throw new Error(`damage-control rule '${id}': invalid pattern: ${msg}`);
+	}
+	return {
+		id,
+		description,
+		pattern,
+		class: klass,
+		block: raw.block,
+		...(raw.ask !== undefined ? { ask: raw.ask } : {}),
+	};
 }
 
-function loadRulePacks(yamlPath: string): RulePacks {
-	const raw = readFileSync(yamlPath, "utf8");
-	const parsed = parseYaml(raw) as RawDocument | null;
+function loadBaseRuleset(yamlPath: string): DamageControlRuleset {
+	const parsed = parsePackagedYaml(readFileSync(yamlPath, "utf8")) as RawDocument | null;
 	if (!parsed || typeof parsed !== "object") {
 		throw new Error(`damage-control rules at ${yamlPath}: expected mapping at document root`);
 	}
-	const version = typeof parsed.version === "number" ? parsed.version : 0;
-
-	if (version === 1) {
-		// v1: flat `rules:` becomes the base pack.
-		const baseRules = compilePackRules(parsed.rules, "base");
-		return {
-			base: { version: 1, rules: baseRules },
-		};
-	}
-
-	if (version !== 2) {
+	if (parsed.version !== 2) {
 		throw new Error(`damage-control rules at ${yamlPath}: unsupported version ${String(parsed.version)}`);
 	}
-
 	if (!Array.isArray(parsed.packs)) {
 		throw new Error(`damage-control rules at ${yamlPath}: expected array at 'packs'`);
 	}
-	const out: RulePacks = {
-		base: emptyRuleset(2),
-	};
-	for (const rawPack of parsed.packs as RawPack[]) {
-		const packId = rawPack.id;
-		if (packId !== "base") {
-			throw new Error(`damage-control rules at ${yamlPath}: unknown pack id ${String(packId)}`);
+	let rawRules: unknown;
+	for (const pack of parsed.packs as Array<{ id?: unknown; rules?: unknown }>) {
+		if (pack.id !== "base") {
+			throw new Error(`damage-control rules at ${yamlPath}: unknown pack id ${String(pack.id)}`);
 		}
-		const rules = compilePackRules(rawPack.rules, packId);
-		out[packId] = { version: 2, rules };
+		rawRules = pack.rules;
 	}
-	return out;
+	if (rawRules === undefined || rawRules === null) return { version: 2, rules: [] };
+	if (!Array.isArray(rawRules)) throw new Error("damage-control pack 'base': expected array at 'rules'");
+	return { version: 2, rules: rawRules.map((rule, index) => compileRule(rule as RawRule, index)) };
 }
 
-function loadDefaultRulePacks(): RulePacks {
-	return loadRulePacks(join(resolvePackageRoot(), "damage-control-rules.yaml"));
-}
+let cachedBase: DamageControlRuleset | null = null;
 
-let cachedPacks: RulePacks | null = null;
-
-export function getCachedDefaultRulePacks(): RulePacks {
-	if (cachedPacks === null) cachedPacks = loadDefaultRulePacks();
-	return cachedPacks;
+/** The shipped base ruleset, loaded and compiled on first use. */
+export function getCachedBaseRuleset(): DamageControlRuleset {
+	cachedBase ??= loadBaseRuleset(join(resolvePackageRoot(), "damage-control-rules.yaml"));
+	return cachedBase;
 }

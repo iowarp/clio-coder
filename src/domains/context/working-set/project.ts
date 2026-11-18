@@ -88,8 +88,7 @@ function hasVisibleContent(obj: Record<string, unknown>, content: unknown[] | un
  * the model will now receive. `calculateContextTokens` anchors on the newest
  * assistant usage it trusts, so leaving those anchors in place would report the
  * pre-eviction size forever and the pressure estimator would never see the
- * space the eviction freed. Mirrors `invalidateUsage()` in
- * mask-observations.ts, bounded to the entries that precede the event.
+ * space the eviction freed. Bounded to the entries that precede the event.
  */
 function invalidateUsage(entry: SessionEntry): SessionEntry {
 	if (entry.kind !== "message" || entry.role !== "assistant") return entry;

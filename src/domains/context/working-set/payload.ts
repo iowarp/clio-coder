@@ -3,12 +3,7 @@
  * `tool_result` (whose body is replaced by a marker) and `assistant` (whose
  * thinking blocks are dropped).
  *
- * These deliberately mirror the private helpers in
- * `src/domains/session/compaction/mask-observations.ts`. That module is the
- * destructive stage this layer replaces and it goes away once the legacy path
- * is retired, so the working set carries its own copy rather than importing
- * from a module scheduled for deletion. The shapes themselves are not this
- * layer's invention: `turn-persistence.ts` writes
+ * The shapes are not this layer's invention: `turn-persistence.ts` writes
  * `{ toolCallId, toolName, result, isError, resultSummary }`, and `result` is
  * whatever the tool returned, usually `{ content: [...], details: {...} }`.
  */
@@ -158,7 +153,7 @@ export function withoutThinkingBlocks(content: unknown): unknown[] | undefined {
 /**
  * True when an earlier destructive compaction run already replaced this body.
  * Such a result has no body left to evict, and re-marking it would spend a
- * marker on a marker. Mirrors `alreadyCompacted()` in mask-observations.ts.
+ * marker on a marker.
  */
 export function hasLegacyCompactionMarker(payload: unknown): boolean {
 	if (!isRecord(payload)) return false;

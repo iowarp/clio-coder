@@ -6,6 +6,7 @@ import { mcpToolName, ToolNames } from "../../src/core/tool-names.js";
 import { clioStateDir } from "../../src/core/xdg.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { invokeRegisteredTool, type ToolFinishEvent } from "../../src/tools/agent-tools.js";
+import { runGatewayChain } from "../../src/tools/gateway/chain.js";
 import { createDataTool } from "../../src/tools/gateway/data-tool.js";
 import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { limitationTool } from "../../src/tools/limitation.js";
@@ -247,5 +248,56 @@ describe("gateway correction contracts", () => {
 			match(rejected.result.message, new RegExp(`gateway: ${capability} arguments rejected`));
 		}
 		strictEqual(scriptRuns.length, 1);
+	});
+
+	it("reads a stringified chain step args object, numbers unlinked steps, and names the failing step field", async () => {
+		const calls: Array<[string, Record<string, unknown>]> = [];
+		const chain = (steps: unknown) =>
+			runGatewayChain(steps, {
+				getSpec: () => undefined,
+				call: async (capability, args) => {
+					calls.push([capability, args]);
+					return { kind: "ok", output: "done" };
+				},
+			});
+		const ran = await chain([
+			{ capability: "tasks", args: '{"action":"start","id":"t1"}' },
+			{ id: "s1", capability: "ls", args: {} },
+		]);
+		ok(ran.kind === "ok", JSON.stringify(ran));
+		deepStrictEqual(calls, [
+			["tasks", { action: "start", id: "t1" }],
+			["ls", {}],
+		]);
+		deepStrictEqual(
+			(ran.details?.steps as Array<{ id: string }>).map((step) => step.id),
+			["s1_2", "s1"],
+		);
+
+		for (const [steps, error] of [
+			[
+				[{ id: "a", capability: "ls", args: "[1]" }],
+				"steps[0].args must be an object (got a string that is not a JSON object)",
+			],
+			[[{ id: "a", capability: "ls", args: 7 }], "steps[0].args must be an object (got number)"],
+			[[{ id: "a", capability: "ls" }], "steps[0].args is missing"],
+			[
+				[
+					{ id: "a", capability: "ls", args: {} },
+					{ capability: "ls", args: {} },
+					{ capability: "read", args: {}, after: ["a"] },
+				],
+				"steps[1].id is missing; every step needs an id when any step uses after or $from",
+			],
+			[[{ id: "a", capability: "ls", args: {}, note: "x" }], 'steps[0] has unknown key "note"'],
+			[[{ capability: "gateway", args: {} }], "nested gateways are not chain steps"],
+		] as const) {
+			const rejected = await chain(steps);
+			ok(
+				rejected.kind === "error" && rejected.message.startsWith(`gateway: invalid chain: ${error}`),
+				JSON.stringify(rejected),
+			);
+		}
+		strictEqual(calls.length, 2);
 	});
 });

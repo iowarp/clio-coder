@@ -15,7 +15,7 @@
  * folded by the per-attempt pump before it reached here.
  */
 
-import { EVENT_TEE_LIMIT } from "./event-pump.js";
+import { createBoundedTee, EVENT_TEE_LIMIT } from "./event-pump.js";
 
 /** Synthetic boundary frame published between two attempts of one assignment. */
 export interface AssignmentAttemptStartEvent {
@@ -46,71 +46,11 @@ export interface AssignmentEventStream {
 export function createAssignmentEventStream(
 	options: { limit?: number; onError?: (error: unknown) => void } = {},
 ): AssignmentEventStream {
-	const limit = options.limit ?? EVENT_TEE_LIMIT;
-	const pending = new Map<number, unknown>();
-	let readIndex = 0;
-	let writeIndex = 0;
-	for (const event of []) pending.set(writeIndex++, event);
-	const shiftPending = (): unknown => {
-		const value = pending.get(readIndex);
-		pending.delete(readIndex++);
-		if (pending.size === 0) readIndex = writeIndex = 0;
-		return value;
-	};
-	const waiters: Array<(result: IteratorResult<unknown>) => void> = [];
-	let finished = false;
-	let abandoned = false;
+	const { events, push, end, dropped } = createBoundedTee(options.limit ?? EVENT_TEE_LIMIT);
 	let closed = false;
-	let dropped = 0;
 	// Sources drain sequentially so attempt N's frames never interleave with
 	// attempt N+1's, and so `close()` observes every attach that preceded it.
 	let chain: Promise<void> = Promise.resolve();
-
-	const push = (value: unknown): void => {
-		if (abandoned || finished) return;
-		const waiter = waiters.shift();
-		if (waiter) {
-			waiter({ value, done: false });
-			return;
-		}
-		pending.set(writeIndex++, value);
-		while (pending.size > limit) {
-			shiftPending();
-			dropped += 1;
-		}
-	};
-
-	const end = (): void => {
-		if (finished) return;
-		finished = true;
-		while (waiters.length > 0) {
-			waiters.shift()?.({ value: undefined, done: true });
-		}
-	};
-
-	const events: AsyncIterableIterator<unknown> = {
-		next(): Promise<IteratorResult<unknown>> {
-			if (pending.size > 0) {
-				return Promise.resolve({ value: shiftPending(), done: false });
-			}
-			if (finished || abandoned) return Promise.resolve({ value: undefined, done: true });
-			return new Promise<IteratorResult<unknown>>((resolve) => {
-				waiters.push(resolve);
-			});
-		},
-		return(): Promise<IteratorResult<unknown>> {
-			abandoned = true;
-			pending.clear();
-			readIndex = writeIndex = 0;
-			while (waiters.length > 0) {
-				waiters.shift()?.({ value: undefined, done: true });
-			}
-			return Promise.resolve({ value: undefined, done: true });
-		},
-		[Symbol.asyncIterator](): AsyncIterableIterator<unknown> {
-			return this;
-		},
-	};
 
 	return {
 		events,
@@ -137,6 +77,6 @@ export function createAssignmentEventStream(
 			closed = true;
 			end();
 		},
-		droppedEvents: () => dropped,
+		droppedEvents: dropped,
 	};
 }

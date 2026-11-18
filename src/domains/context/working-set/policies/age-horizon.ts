@@ -1,8 +1,8 @@
 /**
  * `age-horizon`: today's selection, recorded instead of destroyed.
  *
- * The rule is exactly what `maskStaleObservations` applied before this layer
- * existed. Every tool-result body older than the protected recent-turn horizon
+ * The rule is exactly what the retired destructive mask stage applied before
+ * this layer existed. Every tool-result body older than the protected recent-turn horizon
  * leaves the working set, and every assistant message older than the horizon
  * loses its thinking blocks. Same turn-start definition, same cutoff, same
  * skip conditions. The difference is that the bodies stay in the ledger and

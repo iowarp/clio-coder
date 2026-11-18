@@ -78,6 +78,11 @@ function simpleEvidenceCommand(command: string): boolean {
 	return invocation !== null && !diagnosticInvocation(invocation) && !trivialInvocation(invocation);
 }
 
+/** Whether a `relative()` result leaves its root; a child named `..x` stays inside. */
+function escapesRoot(inside: string): boolean {
+	return inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside);
+}
+
 /**
  * A path as the repository names it: relative, POSIX-separated, inside one of
  * the given roots. An absolute path under a root is made relative to it; a
@@ -90,7 +95,7 @@ export function repositoryRelativePath(path: string, roots: ReadonlyArray<string
 	if (isAbsolute(trimmed)) {
 		for (const root of roots) {
 			const inside = relative(resolve(root), resolve(trimmed));
-			if (inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside)) {
+			if (inside.length > 0 && !escapesRoot(inside)) {
 				candidate = inside;
 				break;
 			}
@@ -109,7 +114,7 @@ export function readInsideRoot(root: string, path: string): string | null {
 		const realRoot = realpathSync(root);
 		const target = realpathSync(resolve(realRoot, path));
 		const inside = relative(realRoot, target);
-		if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside)) return null;
+		if (inside.length === 0 || escapesRoot(inside)) return null;
 		const info = statSync(target);
 		if (!info.isFile() || info.size > SOURCE_EVIDENCE_MAX_BYTES) return null;
 		return readFileSync(target, "utf8");

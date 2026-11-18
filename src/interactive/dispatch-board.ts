@@ -2931,13 +2931,16 @@ export function createDispatchBoardStore(
 		},
 		activeRows: () => projectRows(true),
 		liveRows: () => {
+			// One projection per frame: the active rows and their settled council siblings are both read from it.
+			const all = projectRows(false);
+			const workers = withCouncilSiblings(
+				all.filter((row) => !isTerminalStatus(row.status)),
+				all,
+			);
 			const live = plans.live();
-			if (live.length === 0) return withCouncilSiblings(projectRows(true), projectRows(false));
-			const byRun = new Map(projectRows(false).map((row) => [row.runId, row]));
-			return [
-				...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())),
-				...withCouncilSiblings(projectRows(true), projectRows(false)),
-			];
+			if (live.length === 0) return workers;
+			const byRun = new Map(all.map((row) => [row.runId, row]));
+			return [...live.map((plan) => fleetPlanRow(planWithWorkers(plan, byRun), Date.now())), ...workers];
 		},
 		workerRows: () => projectRows(false),
 		reconcile() {

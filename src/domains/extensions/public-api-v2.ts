@@ -247,12 +247,14 @@ export type ExtensionHookEvent = (
 	  } & ExtensionToolHookLanding)
 	| ({
 			point: "turn_start";
+			/** The user turn's id, which this turn's before_tool, after_tool and turn_end carry too. */
 			turnId: string;
 			/** access: prompt */
 			text?: string;
 	  } & Partial<ExtensionTurnOrigin>)
 	| ({
 			point: "turn_end";
+			/** The id the same turn's turn_start carried. */
 			turnId: string;
 			outcome: "completed" | "aborted" | "error";
 			/** access: assistant-text */

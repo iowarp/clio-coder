@@ -118,6 +118,19 @@ export function integrityClause(status: CanonicalTrustStatus): string {
 }
 
 /**
+ * Why passing host checks left validation unknown: some reused a pass from another run, were skipped, or settled
+ * before the record said which. Undefined for any other authority.
+ */
+export function unexecutedHostChecksClause(authorityId: string): string | undefined {
+	if (authorityId === "host-verification-reused") return "host checks reused an earlier run's pass; validation unknown";
+	if (authorityId === "host-verification-skipped")
+		return "no host check ran: nothing changed under any of them; validation unknown";
+	if (authorityId === "host-verification-unrecorded")
+		return "host checks passed without a record of which ran; validation unknown";
+	return undefined;
+}
+
+/**
  * The validation clause names its claimant, because "grounded" alone hides
  * the difference between a host-run check and a self-reported one.
  */
@@ -126,6 +139,8 @@ export function validationClause(status: Pick<CanonicalTrustStatus, "validationG
 	const word = trustStateWord("validationGrounding", entry.state);
 	if (entry.state === "unknown" && entry.authority.id === "host-verification-baseline-failed")
 		return "check also failed on task base; change validation unknown";
+	const unexecuted = entry.state === "unknown" ? unexecutedHostChecksClause(entry.authority.id) : undefined;
+	if (unexecuted !== undefined) return unexecuted;
 	if (entry.state === "absent") return word;
 	if ((entry.state === "validated" || entry.state === "failed") && entry.authority.id === "host-observed-command") {
 		const commands = entry.artifacts

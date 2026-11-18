@@ -1,4 +1,5 @@
 import path from "node:path";
+import { relativePathEscapes } from "../path-containment.js";
 import type { SandboxCommand, SandboxInvocation, SandboxInvocationSpec } from "./types.js";
 
 export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
@@ -23,7 +24,7 @@ export function sandboxCommandArgv(command: SandboxCommand): string[] {
 
 function isUnder(parent: string, candidate: string): boolean {
 	const rel = path.relative(parent, candidate);
-	return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
+	return rel.length > 0 && !relativePathEscapes(rel);
 }
 
 /** Bind sources and targets are the same path; a trailing slash only marks a subtree. */

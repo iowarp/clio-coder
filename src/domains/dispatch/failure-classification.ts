@@ -375,7 +375,7 @@ export function affectsTargetBreaker(failureClass: FailureClass): boolean {
 	);
 }
 
-export function affectsNodeBreaker(failureClass: FailureClass): boolean {
+function affectsNodeBreaker(failureClass: FailureClass): boolean {
 	return failureClass === "node-channel" || failureClass === "node-resource" || failureClass === "capacity";
 }
 

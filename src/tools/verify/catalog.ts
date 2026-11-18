@@ -54,8 +54,9 @@ export interface DeclaredNumericCompare {
 	/**
 	 * At least one of `relative`, `absolute`, `ulp`, plus the optional rule
 	 * fields `combine` (`all`, the default, or `any`) and `nonFinite` (`fail`,
-	 * the default, or `match`). A catalog that omits the rule fields judges
-	 * exactly as before they existed.
+	 * the default, or `match`), and `keys`, a per-key rule of its own bounds and
+	 * `combine`. A catalog that omits the rule fields judges exactly as before
+	 * they existed.
 	 */
 	tolerance: NumericTolerance;
 }
@@ -113,10 +114,11 @@ const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs"
 /**
  * Version 2 adds the kind and its parameters; every one is optional and
  * kind-gated. The numeric tolerance object's own fields (`relative`,
- * `absolute`, `ulp`, `combine`, `nonFinite`) are validated by
- * `normalizeNumericTolerance`, so this version admits a `combine` or
- * `nonFinite` rule without a catalog version bump: a file that omits them
- * keeps the original strict-conjunction, non-finite-fails judgement.
+ * `absolute`, `ulp`, `combine`, `nonFinite`, `keys`) are validated by
+ * `normalizeNumericTolerance`, so this version admits a `combine`,
+ * `nonFinite` or per-key `keys` rule without a catalog version bump: a file
+ * that omits them keeps the original single strict-conjunction,
+ * non-finite-fails judgement.
  */
 const KIND_FIELDS = [...new Set(["reference", "tolerance", "budget", "baseline", ...REPRODUCE_CATALOG_FIELDS])];
 const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "runs", "proof", ...KIND_FIELDS]);

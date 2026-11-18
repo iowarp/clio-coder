@@ -31,10 +31,9 @@ export interface MemoryPromptRequest {
 export interface MemoryPromptReaderOptions {
 	onSelection?: (selection: MemoryPromptSelection) => void;
 	getDataDir: () => string;
-	/** Explicit experiment only: rank by the turn without dropping anything. */
-	experimentalRelevance?: boolean;
 	/**
-	 * Carry only records the turn plainly concerns (`selectRelevantMemory`).
+	 * Rank by the turn and carry only records it plainly concerns (`selectRelevantMemory`).
+	 * Without a gate the reader keeps the legacy priority order.
 	 * `demoted` is read at each fresh selection; a throw counts as none.
 	 */
 	relevanceGate?: { demoted?: () => ReadonlySet<string> };
@@ -60,7 +59,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 	// Copy options now: mutable caller arrays must not silently change eligibility.
 	const selection = { ...options.selection, scopes: [...(options.selection?.scopes ?? MEMORY_MAIN_PROMPT_SCOPES)] };
 	const relevanceGate = options.relevanceGate;
-	const experimentalRelevance = options.experimentalRelevance === true || relevanceGate !== undefined;
 	const demotedNow = (): ReadonlySet<string> => {
 		try {
 			return relevanceGate?.demoted?.() ?? new Set();
@@ -104,7 +102,6 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 						authority,
 						selection,
 						relevance,
-						experimentalRelevance,
 						demoted === null ? null : [...demoted].sort(),
 						MEMORY_RELEVANCE_VERSION,
 					]),
@@ -116,8 +113,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): Me
 					...selection,
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
-					...(experimentalRelevance ? { relevance } : {}),
-					...(demoted === null ? {} : { gate: { demoted } }),
+					...(demoted === null ? {} : { relevance, gate: { demoted } }),
 				});
 				section = renderMemoryPromptSection(built.records);
 				const records = new Map(snapshot.records.map((record) => [record.id, record]));

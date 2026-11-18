@@ -10,13 +10,14 @@ import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { hintCapabilities, mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
-import type {
-	ContextWindowProvenance,
-	LiveProbeOptions,
-	ProvidersContract,
-	TargetHealth,
-	TargetStatus,
-	ToolCallVerification,
+import {
+	type ContextWindowProvenance,
+	type LiveProbeOptions,
+	PROVIDER_PROBE_TIMEOUT_MS,
+	type ProvidersContract,
+	type TargetHealth,
+	type TargetStatus,
+	type ToolCallVerification,
 } from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { recordEndpointSlotsFromStatus } from "./endpoint-capacity.js";
@@ -43,7 +44,6 @@ import {
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "./types/runtime-descriptor.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
-const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
 /** The tool probe generates, so it can pay for a cold load of a large local model. */
 const DEFAULT_TOOL_PROBE_TIMEOUT_MS = 120_000;
 /** The key a turn sends to a target that needs none, matched so the probe request is the turn's. */
@@ -220,6 +220,7 @@ export function mergeProbeResult(
 	cachedModels: ReadonlyArray<string> = [],
 	cachedModelLabels: Readonly<Record<string, string>> = {},
 	cachedModelCreatedAt?: Readonly<Record<string, string>>,
+	cachedModelCapabilities?: Readonly<Record<string, Partial<CapabilityFlags>>>,
 ): ProbeMerge {
 	const probeSucceeded = probe?.ok ?? false;
 	const preserveCatalog = previous !== undefined && sameProbeIdentity(previous.target, target);
@@ -232,7 +233,10 @@ export function mergeProbeResult(
 	let probeCapabilities =
 		probe?.discoveredCapabilities ?? (preservePrevious ? previous.probeCapabilities : null) ?? null;
 	let probeModelCapabilities =
-		probe?.modelCapabilities ?? (preservePrevious ? previous.probeModelCapabilities : null) ?? null;
+		probe?.modelCapabilities ??
+		(preservePrevious ? previous.probeModelCapabilities : null) ??
+		(catalogProbe === null && cachedModelCapabilities ? { ...cachedModelCapabilities } : null) ??
+		null;
 	const probeModelId =
 		probe?.discoveredCapabilities !== undefined
 			? (probe.capabilityModelId ?? null)
@@ -399,7 +403,7 @@ export function createProvidersBundle(
 	): Promise<ProbeContext> {
 		const probeCtx: ProbeContext = {
 			credentialsPresent: credentialsPresent(),
-			httpTimeoutMs: DEFAULT_PROBE_TIMEOUT_MS,
+			httpTimeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
 			...(signal ? { signal } : {}),
 		};
 		const authTarget = resolveAuthTarget(target, desc);
@@ -487,6 +491,7 @@ export function createProvidersBundle(
 			cachedModels,
 			cachedSnapshot?.modelLabels ?? {},
 			cachedSnapshot?.modelCreatedAt,
+			desc.listsModelCapabilities ? cachedSnapshot?.modelCapabilities : undefined,
 		);
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthProbe = probe?.modelsSource === "cache" ? null : probe;
@@ -699,6 +704,9 @@ export function createProvidersBundle(
 			recordTargetModelSnapshot(target, probeResult.models, {
 				...(probeResult.modelLabels ? { modelLabels: probeResult.modelLabels } : {}),
 				...(probeResult.modelCreatedAt ? { modelCreatedAt: probeResult.modelCreatedAt } : {}),
+				...(desc.listsModelCapabilities && probeResult.modelCapabilities
+					? { modelCapabilities: probeResult.modelCapabilities }
+					: {}),
 			});
 		}
 		// Durable so the next process resolves this endpoint's real slot count

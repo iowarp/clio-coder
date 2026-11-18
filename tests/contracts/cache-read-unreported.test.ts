@@ -17,7 +17,7 @@ test("cache reads a provider left unreported are named as unmeasured, never as a
 	);
 	strictEqual(
 		unreportedCacheReadWords(sum(3, 1)),
-		"1 of 4 calls reported no cache read; the cached share counts only the calls that did",
+		"1 of 4 calls reported no cache read; the cached share marks them ≥, or ~ where the server timed its uncached prefill",
 	);
 	strictEqual(unreportedCacheReadWords(sum(5, 0)), null);
 	strictEqual(unreportedCacheReadWords({ kind: "measured", value: 0, source: "provider" }), null);

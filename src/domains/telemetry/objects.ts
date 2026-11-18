@@ -8,6 +8,7 @@ import { Value } from "typebox/value";
 import { safeResourceWriteAsync } from "../../core/safe-resource-write.js";
 import type { ObjectRef } from "../../core/telemetry/schemas.js";
 import { EvidenceFindingsObjectSchema, ObjectRefSchema, RunResultObjectSchema } from "../../core/telemetry/schemas.js";
+import { matchesTrace, traceValue } from "../../core/value-trace.js";
 import type { RedactionTally } from "../evidence/redact.js";
 import { createRedactionTally, secretRedactingReplacer } from "../evidence/redact.js";
 import { canonicalJson } from "../prompts/hash.js";
@@ -310,6 +311,31 @@ function storedPreimage(subject: StoredSubject, value: unknown): { ref: ObjectRe
 	return { ref: reference(subject, bytes, "resolvable"), bytes };
 }
 
+/** Structure every model call stores again, usually unchanged: the request's prompt structure and tool schemas. */
+const REQUEST_SUBJECTS: ReadonlySet<StoredSubject> = new Set<StoredSubject>(["prompt-structure", "tool-schemas"]);
+
+type Preimage = ReturnType<typeof storedPreimage>;
+
+/**
+ * One writer's preimages. A request subject keeps its last prepared bytes with the trace of the value they came from,
+ * and a value with the same keys and leaves reuses them instead of validating, redacting, canonicalizing and hashing
+ * again. Content subjects are always prepared afresh and never held. Reuse only skips preparation: storing still
+ * reads the object back without following links, compares the bytes and writes a missing one (Astra r8-2).
+ */
+export function createTelemetryPreimages(): (subject: StoredSubject, value: unknown) => Preimage {
+	const last = new Map<StoredSubject, { trace: unknown[]; preimage: Preimage }>();
+	return (subject, value) => {
+		if (!REQUEST_SUBJECTS.has(subject)) return storedPreimage(subject, value);
+		const cached = last.get(subject);
+		if (cached && matchesTrace(value, cached.trace)) return cached.preimage;
+		const preimage = storedPreimage(subject, value);
+		const trace = traceValue(value);
+		if (trace) last.set(subject, { trace, preimage });
+		else last.delete(subject);
+		return preimage;
+	};
+}
+
 /**
  * The reference an object will store under, computed without storing it: a producer that must name the object before
  * its writer stores it, such as a run's result, cites the same id the store writes (#434).
@@ -328,8 +354,9 @@ export async function storeTelemetryObject(
 	scopeDirectory: string,
 	subject: StoredSubject,
 	value: unknown,
+	prepare: (subject: StoredSubject, value: unknown) => Preimage = storedPreimage,
 ): Promise<ObjectRef> {
-	const { ref, bytes } = storedPreimage(subject, value);
+	const { ref, bytes } = prepare(subject, value);
 	const directory = await objectDirectory(scopeDirectory, true);
 	if (directory === null) throw new Error("telemetry object directory unavailable");
 	const path = join(directory, `${ref.id}.json`);

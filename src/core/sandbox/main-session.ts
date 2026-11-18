@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import type { YoloConfinement } from "../../domains/safety/autonomy.js";
 import { canonicalizePath } from "../path-canonical.js";
+import { relativePathEscapes } from "../path-containment.js";
 import { assertClioDirLayout, clioCachePath, clioConfigPath, clioDataPath, clioStatePath } from "../xdg.js";
 import { sandboxAvailability } from "./availability.js";
 import { buildSandboxInvocation } from "./invocation.js";
@@ -249,7 +250,7 @@ function moduleWorktree(gitDir: string): string | null {
 
 function isInside(parent: string, candidate: string): boolean {
 	const rel = path.relative(parent, candidate);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+	return !relativePathEscapes(rel);
 }
 
 /** Includes followed while reading core.hooksPath. */

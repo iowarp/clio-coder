@@ -32,7 +32,7 @@ import {
 } from "./commit-state.js";
 import type { MemoryObservationCommands } from "./contract.js";
 import { lessonEvidence, readInsideRoot, recordObservedRead, repositoryRelativePath } from "./lesson-evidence.js";
-import { asKeptLesson, type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
+import { type KeptLesson, renderKeptLesson } from "./lesson-projection.js";
 import {
 	type TaskMemoryBankDelta,
 	type TaskMemoryTelemetryDecision,
@@ -57,6 +57,7 @@ import {
 	type TaskMemoryTrajectoryStep,
 } from "./task-memory-policy.js";
 import type { TaskMemoryActivityEvent } from "./task-memory-status.js";
+import { positiveInteger, shortText } from "./util.js";
 
 const noTokens: Fact<number> = { kind: "absent", reason: "not-applicable" };
 
@@ -334,7 +335,7 @@ export interface MemoryInterventionDeps {
 	 * provenance. Action reminders select from all of them before any item limit;
 	 * the turn-end pass is shown a bounded subset so it does not rewrite them.
 	 */
-	getKeptLessons?: () => ReadonlyArray<{ id: string; text: string } & Partial<KeptLesson>>;
+	getKeptLessons?: () => readonly KeptLesson[];
 	/** Kept lessons the turn-end pass deleted because the turn showed them wrong. */
 	onKeptLessonsRetired?: (memoryIds: ReadonlyArray<string>) => void;
 	onScopeEnd?: (scope: { sessionId: string | undefined; lessons: ReadonlyArray<TaskMemoryEntry> }) => void;
@@ -1003,7 +1004,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	function keptLessons(): ReadonlyArray<KeptLesson> {
 		if (!settings().enabled) return [];
 		try {
-			return (deps.getKeptLessons?.() ?? []).map(asKeptLesson);
+			return deps.getKeptLessons?.() ?? [];
 		} catch {
 			// An unreadable store surfaces nothing; the session continues without it.
 			return [];
@@ -2387,15 +2388,6 @@ function boundedReminder(message: string, maxTokens: number): string {
 	if (maxChars <= 0) return "";
 	const normalized = message.replace(/[^\S\n]+/gu, " ").trim();
 	return normalized.length <= maxChars ? normalized : normalized.slice(0, maxChars).trimEnd();
-}
-
-function shortText(value: string, maxChars: number): string {
-	const normalized = value.replace(/\s+/gu, " ").trim();
-	return normalized.length <= maxChars ? normalized : `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-function positiveInteger(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function countBankWrites(delta: TaskMemoryBankDelta): number {

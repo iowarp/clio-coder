@@ -17,7 +17,7 @@ import {
 import { ToolNames } from "../../src/core/tool-names.js";
 import { writeWikiMeta } from "../../src/domains/context/wiki/meta.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
-import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
 import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
@@ -30,7 +30,7 @@ function allowAllSafety() {
 		classify: () => ({ actionClass: "read" as const, reasons: [] }),
 		evaluate: () => ({ kind: "allow" as const, classification: { actionClass: "read" as const, reasons: [] } }),
 		observeLoop: () => ({ looping: false, key: "contract", count: 0 }),
-		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE, confirmed: CONFIRMED_SCOPE },
+		scopes: { readonly: READONLY_SCOPE, workspace: WORKSPACE_SCOPE },
 		isSubset: () => true,
 		decisions: {},
 	};
@@ -83,8 +83,6 @@ describe("tool boundary contract", () => {
 			metadata: {
 				objective: "exercise the tool boundary",
 				uiLabel: "Contract",
-				retrySafety: "idempotent",
-				costLatency: "local_fast",
 				resultSizePolicy: { kind: "bounded", maxBytes: 8_192 },
 				resultDisposition: {
 					presentation: {

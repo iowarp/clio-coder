@@ -59,7 +59,7 @@ export interface BackgroundRouteFacts {
 	quotaProviderId: string | null;
 }
 
-export function backgroundRouteKind(route: BackgroundRouteFacts): BackgroundRouteKind {
+function backgroundRouteKind(route: BackgroundRouteFacts): BackgroundRouteKind {
 	const subscription =
 		route.runtime.auth === "oauth" || route.runtime.auth === "claude-cli" || route.runtime.tier === "subscription";
 	if (subscription && route.quotaProviderId !== null) return "quota";

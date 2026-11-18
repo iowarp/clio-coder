@@ -657,7 +657,7 @@ function effectiveRecipients(restriction: FlowRestriction, policy: InformationFl
  * explicit violation wins over an unresolved destination, and the reason
  * names the first violated rule. Advisory annotations never decide.
  */
-export function evaluateInformationFlow(input: InformationFlowInput): InformationFlowVerdict {
+function evaluateInformationFlow(input: InformationFlowInput): InformationFlowVerdict {
 	const carried = Array.isArray(input.restrictions)
 		? mergeFlowRestrictions(...(input.restrictions as ReadonlyArray<FlowRestrictionSet>))
 		: (input.restrictions as FlowRestrictionSet);

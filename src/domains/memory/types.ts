@@ -118,18 +118,9 @@ export type MemoryRecordValidationResult =
 	| { valid: true; record: MemoryRecord }
 	| { valid: false; issues: MemoryValidationIssue[] };
 
-export type MemoryStoreValidationResult =
-	| { valid: true; store: MemoryStoreFile }
-	| { valid: false; issues: MemoryValidationIssue[] };
-
 export interface MemoryProposalResult {
 	record: MemoryRecord;
 	created: boolean;
-}
-
-export interface MemoryPruneResult {
-	pruned: MemoryRecord[];
-	kept: MemoryRecord[];
 }
 
 export interface MemoryRetrievalOptions {

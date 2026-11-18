@@ -46,23 +46,27 @@ export interface StartDispatchEventPumpOptions {
 	onEvent?: (event: unknown) => void;
 }
 
+export interface BoundedTee {
+	/** Single-consumer replay, oldest first. */
+	events: AsyncIterableIterator<unknown>;
+	/** Deliver to a waiting consumer or buffer, dropping the oldest past the limit. Ignored once ended or abandoned. */
+	push(value: unknown): void;
+	/** No further values; the consumer drains what is buffered, then ends. Idempotent. */
+	end(): void;
+	/** Values dropped because no consumer kept pace. */
+	dropped(): number;
+}
+
 /**
- * Start consuming `source` immediately, folding every event through `fold`
- * and buffering it for one external consumer. A fold failure is reported and
- * skipped so one malformed event cannot starve the meters behind it; a source
- * failure ends the pump. The consumer's early `return()` abandons the tee
- * without stopping ingestion.
+ * Bounded drop-oldest queue for one consumer. Producers never await it, so a
+ * slow or absent reader degrades live display and cannot stall ingestion; the
+ * consumer's early `return()` abandons the queue and later pushes are ignored.
  */
-export function startDispatchEventPump(
-	source: AsyncIterable<unknown>,
-	fold: (event: unknown) => void,
-	options: StartDispatchEventPumpOptions = {},
-): DispatchEventPump {
-	const limit = options.limit ?? EVENT_TEE_LIMIT;
+export function createBoundedTee(limit: number, prelude: ReadonlyArray<unknown> = []): BoundedTee {
 	const pending = new Map<number, unknown>();
 	let readIndex = 0;
 	let writeIndex = 0;
-	for (const event of options.prelude ?? []) pending.set(writeIndex++, event);
+	for (const event of prelude) pending.set(writeIndex++, event);
 	const shiftPending = (): unknown => {
 		const value = pending.get(readIndex);
 		pending.delete(readIndex++);
@@ -73,53 +77,6 @@ export function startDispatchEventPump(
 	let finished = false;
 	let abandoned = false;
 	let dropped = 0;
-
-	const push = (value: unknown): void => {
-		if (abandoned) return;
-		const waiter = waiters.shift();
-		if (waiter) {
-			waiter({ value, done: false });
-			return;
-		}
-		pending.set(writeIndex++, value);
-		while (pending.size > limit) {
-			shiftPending();
-			dropped += 1;
-		}
-	};
-
-	const end = (): void => {
-		finished = true;
-		while (waiters.length > 0) {
-			waiters.shift()?.({ value: undefined, done: true });
-		}
-	};
-	const notify = (event: unknown): void => {
-		try {
-			options.onEvent?.(event);
-		} catch (error) {
-			options.onError?.(error);
-		}
-	};
-
-	const done = (async (): Promise<void> => {
-		try {
-			for (const event of options.prelude ?? []) notify(event);
-			for await (const event of source) {
-				try {
-					fold(event);
-				} catch (error) {
-					options.onError?.(error);
-				}
-				notify(event);
-				push(event);
-			}
-		} catch (error) {
-			options.onError?.(error);
-		} finally {
-			end();
-		}
-	})();
 
 	const events: AsyncIterableIterator<unknown> = {
 		next(): Promise<IteratorResult<unknown>> {
@@ -145,7 +102,73 @@ export function startDispatchEventPump(
 		},
 	};
 
-	return { events, done, droppedEvents: () => dropped };
+	return {
+		events,
+		push(value: unknown): void {
+			if (abandoned || finished) return;
+			const waiter = waiters.shift();
+			if (waiter) {
+				waiter({ value, done: false });
+				return;
+			}
+			pending.set(writeIndex++, value);
+			while (pending.size > limit) {
+				shiftPending();
+				dropped += 1;
+			}
+		},
+		end(): void {
+			if (finished) return;
+			finished = true;
+			while (waiters.length > 0) {
+				waiters.shift()?.({ value: undefined, done: true });
+			}
+		},
+		dropped: () => dropped,
+	};
+}
+
+/**
+ * Start consuming `source` immediately, folding every event through `fold`
+ * and buffering it for one external consumer. A fold failure is reported and
+ * skipped so one malformed event cannot starve the meters behind it; a source
+ * failure ends the pump. The consumer's early `return()` abandons the tee
+ * without stopping ingestion.
+ */
+export function startDispatchEventPump(
+	source: AsyncIterable<unknown>,
+	fold: (event: unknown) => void,
+	options: StartDispatchEventPumpOptions = {},
+): DispatchEventPump {
+	const tee = createBoundedTee(options.limit ?? EVENT_TEE_LIMIT, options.prelude);
+	const notify = (event: unknown): void => {
+		try {
+			options.onEvent?.(event);
+		} catch (error) {
+			options.onError?.(error);
+		}
+	};
+
+	const done = (async (): Promise<void> => {
+		try {
+			for (const event of options.prelude ?? []) notify(event);
+			for await (const event of source) {
+				try {
+					fold(event);
+				} catch (error) {
+					options.onError?.(error);
+				}
+				notify(event);
+				tee.push(event);
+			}
+		} catch (error) {
+			options.onError?.(error);
+		} finally {
+			tee.end();
+		}
+	})();
+
+	return { events: tee.events, done, droppedEvents: tee.dropped };
 }
 
 /**

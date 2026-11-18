@@ -111,38 +111,79 @@ function references(value: unknown, depth = 0): string[] {
 	return Object.values(value).flatMap((entry) => references(entry, depth + 1));
 }
 
+const STEP_KEYS = ["id", "capability", "args", "after"];
+const STEP_ID = /^[a-z][a-z0-9_-]{0,31}$/u;
+
+function shapeOf(value: unknown): string {
+	return value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+}
+
+/** A step's args, accepting the JSON-encoded object some model families send in place of the object. */
+function stepArgs(value: unknown, at: string): Record<string, unknown> {
+	if (value === undefined) throw new Error(`${at}.args is missing`);
+	if (record(value)) return value;
+	if (typeof value === "string") {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(value);
+		} catch {
+			/* Reported below. */
+		}
+		if (record(parsed)) return parsed;
+		throw new Error(`${at}.args must be an object (got a string that is not a JSON object)`);
+	}
+	throw new Error(`${at}.args must be an object (got ${shapeOf(value)})`);
+}
+
 function parseSteps(value: unknown): Step[] {
 	if (!Array.isArray(value) || value.length === 0 || value.length > CHAIN_MAX_STEPS) {
 		throw new Error(`steps must contain 1..${CHAIN_MAX_STEPS} operations`);
 	}
-	const steps = value.map((entry): Step => {
-		if (
-			!record(entry) ||
-			typeof entry.id !== "string" ||
-			!/^[a-z][a-z0-9_-]{0,31}$/u.test(entry.id) ||
-			typeof entry.capability !== "string" ||
-			!entry.capability.trim() ||
-			!record(entry.args) ||
-			(entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((id) => typeof id !== "string"))) ||
-			Object.keys(entry).some((key) => !["id", "capability", "args", "after"].includes(key))
-		) {
-			throw new Error("each step needs id, capability, args, and optional after:[ids]");
-		}
+	const parsed = value.map((entry, index): Omit<Step, "id"> & { id: string | undefined } => {
+		const at = `steps[${index}]`;
+		if (!record(entry)) throw new Error(`${at} must be an object (got ${shapeOf(entry)})`);
+		const unknown = Object.keys(entry).find((key) => !STEP_KEYS.includes(key));
+		if (unknown !== undefined)
+			throw new Error(`${at} has unknown key "${unknown}"; a step takes id, capability, args, after`);
+		if (entry.id !== undefined && (typeof entry.id !== "string" || !STEP_ID.test(entry.id)))
+			throw new Error(`${at}.id must match ${STEP_ID.source}`);
+		if (typeof entry.capability !== "string" || !entry.capability.trim())
+			throw new Error(`${at}.capability must be a non-empty string`);
+		const args = stepArgs(entry.args, at);
+		if (entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((id) => typeof id !== "string")))
+			throw new Error(`${at}.after must be an array of step ids`);
 		if (entry.capability.trim() === ToolNames.Gateway) throw new Error("nested gateways are not chain steps");
 		if (entry.capability.trim() === ToolNames.SelfCompact)
 			throw new Error("self_compact must be called alone with gateway op=call");
 		return {
-			id: entry.id,
+			id: entry.id as string | undefined,
 			capability: entry.capability.trim(),
-			args: entry.args,
-			after: [...new Set([...((entry.after as string[]) ?? []), ...references(entry.args)])],
+			args,
+			after: [...new Set([...((entry.after as string[]) ?? []), ...references(args)])],
 		};
 	});
-	const ids = new Set(steps.map((step) => step.id));
-	if (ids.size !== steps.length) throw new Error("step ids must be unique");
-	for (const step of steps) {
-		if (step.after.some((id) => !ids.has(id))) throw new Error(`unknown dependency for ${step.id}`);
-	}
+	// A step without an id gets one by position only while nothing can depend on it.
+	const linked = parsed.some((step) => step.after.length > 0);
+	const used = new Set(parsed.flatMap((step) => (step.id === undefined ? [] : [step.id])));
+	const steps = parsed.map((step, index): Step => {
+		if (step.id !== undefined) return { ...step, id: step.id };
+		if (linked)
+			throw new Error(`steps[${index}].id is missing; every step needs an id when any step uses after or $from`);
+		let id = `s${index + 1}`;
+		for (let n = 2; used.has(id); n++) id = `s${index + 1}_${n}`;
+		used.add(id);
+		return { ...step, id };
+	});
+	const seen = new Map<string, number>();
+	steps.forEach((step, index) => {
+		const first = seen.get(step.id);
+		if (first !== undefined) throw new Error(`steps[${index}].id "${step.id}" repeats steps[${first}].id`);
+		seen.set(step.id, index);
+	});
+	steps.forEach((step, index) => {
+		const unknown = step.after.find((id) => !seen.has(id));
+		if (unknown !== undefined) throw new Error(`steps[${index}] depends on unknown step id "${unknown}"`);
+	});
 	const visited = new Set<string>();
 	while (visited.size < steps.length) {
 		const ready = steps.filter((step) => !visited.has(step.id) && step.after.every((id) => visited.has(id)));

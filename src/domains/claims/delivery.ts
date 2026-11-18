@@ -5,6 +5,7 @@ import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../../core/untrusted-content.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
+import { type ClaimSealBinding, claimSealReader } from "./binding.js";
 import { claimStatuses, contradictionConditions, supersedeConditions } from "./edges.js";
 import { hypothesisStatuses, latestHypotheses } from "./hypotheses.js";
 import { type ClaimsLogRead, claimsLogPath, readClaims } from "./store.js";
@@ -51,12 +52,15 @@ function staleNote(claim: ClaimRecord, head: string | null): string | null {
 	return `[stale: recorded at commit ${short(commit)}; HEAD is now ${short(head)}]`;
 }
 
-function claimLine(claim: ClaimRecord, head: string | null = null): string {
+function claimLine(claim: ClaimRecord, head: string | null, seal: (claim: ClaimRecord) => ClaimSealBinding): string {
 	// The text is built from typed fields, but check ids and paths come from the project's catalog.
 	const text =
 		claim.flagged !== undefined ? "[text withheld: instruction-shaped]" : clip(claim.text, CLAIM_TEXT_MAX_CHARS);
 	const stale = staleNote(claim, head);
-	return `claim ${short(claim.id)} ${claim.verdict}${stale !== null ? ` ${stale}` : ""}: ${text}`;
+	// A host-verification claim its cited run's seal does not hold is named as such, never offered as grounded (D3-4).
+	const binding = seal(claim);
+	const unverified = binding.state === "unverified" ? ` [unverified: ${binding.reason}]` : "";
+	return `claim ${short(claim.id)} ${claim.verdict}${stale !== null ? ` ${stale}` : ""}${unverified}: ${text}`;
 }
 
 /** The latest open contradiction and the latest supersede of one check: what its delivery is about. */
@@ -107,6 +111,7 @@ export function claimsDeliveryMessage(
 	read: Pick<ClaimsLogRead, "records" | "edges">,
 	statuses: ReadonlyMap<string, ClaimStatus> = claimStatuses(read.records, read.edges),
 	head: string | null = null,
+	seal: (claim: ClaimRecord) => ClaimSealBinding = claimSealReader(),
 ): string | null {
 	const claims = read.records.filter((claim) => claim.keys.check === check);
 	const latest = claims.at(-1);
@@ -123,10 +128,10 @@ export function claimsDeliveryMessage(
 	if (later !== undefined && earlier !== undefined) {
 		const retired = statuses.get(earlier.id) === "retired" ? " (retired: this failure overturned it)" : "";
 		parts.push(
-			`Contested: ${claimLine(later, head)} It contradicts ${claimLine(earlier, head)}${retired} Opposite verdicts ${contradictionConditions(later, earlier)}.`,
+			`Contested: ${claimLine(later, head, seal)} It contradicts ${claimLine(earlier, head, seal)}${retired} Opposite verdicts ${contradictionConditions(later, earlier)}.`,
 		);
 	} else {
-		parts.push(`Latest: ${claimLine(latest, head)}`);
+		parts.push(`Latest: ${claimLine(latest, head, seal)}`);
 	}
 	const replacing = lastSupersede === undefined ? undefined : byId.get(lastSupersede.from);
 	const replaced = lastSupersede === undefined ? undefined : byId.get(lastSupersede.to);
@@ -410,9 +415,10 @@ export function createClaimsDeliveryRegistrations(options: {
 		const head = read.records.length === 0 ? null : checkoutHead(checkout.checkout);
 		const messages: string[] = [];
 		const states: string[] = [];
+		const seal = claimSealReader();
 		for (const check of pick(read)) {
 			if (messages.length >= CLAIMS_DELIVERY_MAX_CHECKS) break;
-			const message = claimsDeliveryMessage(check, read, statuses, head);
+			const message = claimsDeliveryMessage(check, read, statuses, head, seal);
 			const state = claimsDeliveryState(check, read, statuses, head);
 			if (message === null || offered.has(state)) continue;
 			offered.add(state);

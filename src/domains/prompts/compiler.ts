@@ -124,8 +124,6 @@ export interface SessionPromptInputs {
 	promptProfile?: "v1" | "v2";
 	contextFiles?: string;
 	memorySection?: string;
-	/** Bounded host facts from completed operator context operations; never a user message. */
-	contextOperationUpdate?: string;
 	/** True when the main session's shell commands run under an OS sandbox on this host. */
 	sandbox?: boolean;
 	/** True when another installed agent is listed as a peer this session can hand work to. */
@@ -1355,7 +1353,6 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
-	push("context-operation-update", session.contextOperationUpdate ?? "");
 	push("memory", rendered.get("memory") ?? "");
 
 	const systemPrompt = parts.join("\n\n");

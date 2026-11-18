@@ -6,8 +6,13 @@ Notable changes to CLIO Coder, following [Keep a Changelog](https://keepachangel
 
 This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 0.8.3 install (send-back, revision plan, rewrite, acceptance, re-audit and re-archive at autonomy `yolo`, orchestrator and writers on openai-codex gpt-6-luna, reviewers on gpt-6.1-terra), and adds the harness features an extension-driven pipeline needs to run across small, mid-tier and frontier models. Each entry names its finding id from that run.
 
+### Upgrade notes
+
+- **`CLIO_CODER_LEGACY_MASK` is gone.** Setting it no longer brings back the stale-observation mask; working-set eviction runs unless `context.workingSet.enabled` is `false`.
+
 ### Added
 
+- D3-3: a run's sealed result keeps each judged host check's bounded report (rule, tolerance, reference and payload digests, worst deviation per key) and the tree it judged.
 - A1: an api 2 extension tool may declare `readOnly: true` and `idempotent: true` in `clio-coder-extension.yaml`. Only a tool declared one or the other counts toward the loop guard's identical-call repeats; a `read` tool is read-only by default, and a `write` tool cannot claim it.
 - A4: the session prompt carries the operator's local date, weekday and time zone, recompiled when the date changes. Each turn start, continuations included, states the local time, and the first tool result after the date changes inside a long turn says so.
 - B1: `clio-coder run --answers <file.yaml>` scripts the author of a headless run. The file answers only the author's questions: extension interview steps and `operator_only` `ask_user` questions. Each entry matches one by an extension question's checkpoint id (`id`), by its header (`header`) or by a regular expression over its text (`match`), and gives a `choice` by option label, a `note`, or both. With the file, `ask_user` is registered and extension interviews are asked; a matched question is answered as the operator and recorded as scripted, naming the file and the entry, on the decision ledger and on the extension's `InterviewAnswer.scripted`. An author question no entry matches is never answered for the author: its round is cancelled as `unscripted` and the run exits 5 naming the question. A model's ordinary `ask_user` call is refused as having no operator, as without the file, and no entry answers it. Permission asks stay denied, and a file that fails validation exits 2 naming the offending entry. Api 2 gains `InterviewQuestion.checkpoint`.
@@ -37,9 +42,69 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - C4: an extension tool's interview result records the checkpoint ids it put to the author in its details, kept on the session ledger even when the interview is cancelled.
 - Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.3) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), `ignorable` and `turnPolicy.when` included. `docs/architecture/context-engine.md` gains an Observation aging section (C3).
 - Amazon Bedrock is hidden from `clio-coder configure` and its provider listings. A target that already names the `bedrock` runtime still resolves and runs.
+- Astra r8-4: the post-tool continuation guard decides on one history observation and does not publish the live budget again when no compaction ran.
+- Astra r8-5: the live budget's handoff and outcome fields share one continuity resolution and reuse the active-branch selection until the ledger or the leaf changes.
+- Astra r8-6: prompt-cache structure recording rehashes only the wire entries whose fields changed.
+- Astra r8-2: telemetry reuses the prepared prompt-structure and tool-schema bytes for an unchanged request surface and still verifies the stored object on disk.
+- Astra r8-1: `run --session <id>` resolves the id or prefix from session metadata instead of parsing every transcript in the workspace, so a named resume no longer slows as other conversations grow.
+- Astra r8-3: shipped YAML (prompt fragments, damage-control rules, the bundled model catalog, model profiles) is parsed at build time and digest-verified at load, which removes about 45 ms of parsing from each CLI start and about 40 ms from each native worker start. Overlays still parse at runtime.
+- Astra r9-2: cache keepalive stops once its refreshes for one awaited request cost as much as the miss they prevent, stops after a refresh that read nothing from the cache, and uses the 30-minute lifetime Pi's adapter requests in OpenAI explicit cache mode.
+- Astra r9-5: with no `cache.warm.maxInputTokens` set, the pre-warm input budget is 16,384 tokens, capped at the model's window (8,192 when the window is unknown), so the first attended prompt warms.
+- Astra r9-6: the repetition detector resets on each streamed message instead of each partial object, so a long reply is checked about a hundredth as often.
+- Astra r9-3: the attached gateway schema shows a known edit and its verify as one chain, which saves a round when the model uses it.
+- Astra r10-6: `/export` shows an "exporting" notice at once and writes the file asynchronously; rendering a long session still holds input briefly.
+- P1-8: turn context shares one compaction budget and trigger helper, one JSON digest and one active-path read; prompt bytes, ledger records and telemetry are unchanged.
+- P1-6: tool registry refusals go through one block builder (rejection text and policy key order unchanged), and a call's success and error paths share one flow-withhold and after_tool step.
+- P1-4: the chat loop drops seven unwired dependency seams and the duplicate `admitRuntimeFlow` gate; /btw, /draft, /handoff, triage and pre-warm admit information flow through `admitFlow` directly.
+- P1-5: worker receipt accounting moves from the chat loop into `session-control/worker-receipts.ts`, and the cancel-before-admission and submit-settle paths share one turn-outcome write.
+- P1-7: information-flow admissions, the operator-shell command label and file-reference labels are answered by the flow ledger (`admitDestination`, `labelCommand`, `labelPaths`); refusal text and absorb attributions are unchanged.
+- P1-3: the session-settings state machine (overrides, routing, thinking and scoped-target advances, ACP safe settings) moves out of the composition root into `src/entry/session-settings-view.ts`, and four duplicate routed-session constructors become one.
+- P1-8: the stale-edit guard and decision boards read the active path through the same closure.
+- Astra r10-1: a streaming reasoning rail redacts and wraps only the text after its last certified line break, so per-delta cost no longer grows with the length of the reasoning.
+- Astra r10-4: restoring a session reads each telemetry view's run list once instead of once per receipt.
+- Astra r10-5: a terminal height change that leaves every preview budget unchanged keeps the settled transcript rows instead of re-rendering every entry.
+- P2D-1: ACP delegation and native worker runs settle through one shared finalizer with byte-identical receipts, ledger rows and events.
+- D2-1: live telemetry keeps cache floors, cache breaks and the session projection incremental across batches instead of re-folding every call (12k calls: about 380 ms to 1.4 ms per batch), and ACP skips unchanged session snapshots.
+- P2S-3..7: safety decisions convert through one `toSafetyDecision`, base rules load through one cached loader (the rule compiler and the `rulePacks` option are gone), the safety barrel drops 21 unread exports, and the dead confirmed scope and `tokenizeShellLike` are removed.
+- P2M-2..8: memory promotion validates once with the shared validators, the memory barrel keeps only names read outside the domain, the runtime stops forwarding unsupplied intervention callbacks, kept lessons are typed as projected values, duplicated helpers live in `memory/util.ts`, and the dead `experimentalRelevance` switch is removed (prompt bytes unchanged).
+- bt-12: a lone middleware hook budget overrun short of a stall (10x the budget) is no longer journaled as `middleware.hook_failed`; steady-state slowness and stalls still are, and `CLIO_CODER_HOOK_BUDGET_DEBUG=1` records every overrun.
+- P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
+- P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
+- P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
+
+### Removed
+
+- P1-1: the `CLIO_CODER_LEGACY_MASK=1` escape hatch (announced as one-release in 0.3.4) and its destructive stale-observation mask stage; working-set eviction is the only pre-summary stage, and `context.workingSet.enabled: false` turns it off.
+- P1-2: the unread `retrySafety` and `costLatency` tool metadata fields.
+- P2D-4: the unread typed-intent warn codes (`intent_absent_legacy_inference`, `intent_partial_verification_absent`) and the intent retirement constants; the compatibility classifier reports refusals only.
 
 ### Fixed
 
+- bt-3: `campaign run` entries resolve the copilot-sdk and claude-sdk components the operator installed (read-only, never installing into an entry's throwaway home), and a missing one names the operator's directory, so Copilot and Claude SDK routes run in a campaign.
+- D2-2: command hook `hook.ran` receipts record `durationMs`, `timeoutMs` and the `effectKinds` the output became, so a slow tool or an unexplained annotation traces back to its hook.
+- D2-3: a command hook's first-run stall is journaled (a subprocess gets no budget warmup grace), and a hook that throws is receipted as `failed`, not `skipped`, with its message reported as `hook_failed`.
+- P2M-1: memory promotion and task handoff redact a quoted secret even when the text already holds a `[redacted:...]` marker.
+- Lesson evidence treats a repository child named `..x` as inside the repository.
+- P2S-1: containment checks across safety, sandbox and core no longer treat a child whose name starts with `..` (such as `..cache`) as outside its parent; one shared helper replaces the private copies.
+- P2S-2: `git --attr-source <tree>` (and other value-taking global options) no longer hides the git subcommand from the reset, clean and push rails.
+- D2-4: the cached share comes from one fold everywhere, shown as a lower bound (`≥`) when a cache read went unreported and as an estimate (`~`) when derived from a timed prefill; `telemetry cost` and GUI operator metrics now show it.
+- bt-1: Copilot targets launch the SDK's bundled runtime even from inside a Copilot CLI shell, and a protocol mismatch names the foreign runtime.
+- bt-2: Copilot models offer exactly the reasoning efforts their listing publishes (medium is no longer sent as low), with a notice when a level is clamped.
+- bt-5: ACP sessions and agent workers on Copilot list live models on a cold cache, resolve the same thinking levels, context window and output budget as the main agent, and keep their thinking level across model switches.
+- bt-9: a worker that verifies through the `verify` tool and claims that check, by `verify <id>` or by its resolved command, has the claim grounded instead of reported as "unmatched validation" next to a "verified" verdict.
+- D3-4: claims from host verification read as verified only against the sealed check of the run and settlement they cite; any other reads as unverified in delivery, `claims` and `memory propose`, and a numeric-compare that compared nothing records no claim.
+- D3-2: host verification honors a memoized pass only when the run it cites has a verified seal holding that check, executed with exit 0 on the same tree; a forged or dangling memo entry runs the check.
+- P2D-5: plan preview refuses what dispatch admission refuses for ACP delegations, harness-origin writers, pinned read-only recipes on mutating tasks and denyTools on external CLIs.
+- bt-7: dispatch `intent.verification` accepts the toolchain-derived checks verify lists (such as `python-unittest`) and seals the argv verify runs, so Python, C/C++ and Fortran projects with no package.json or verifiers.yaml no longer get "declared ids: none".
+- bt-8: gateway chains accept a step's `args` sent as a JSON-object string, number id-less steps `s1`, `s2`, ... when nothing depends on them, and name the step index and field in every shape error.
+- bt-4: api-2 extension `turn_end` hook events carry the id of the user turn that the same turn's `before_tool` and `after_tool` events name, instead of the final assistant entry's id.
+- D3-1: a numeric-compare or perf-budget host check fails when its reference or baseline changed since dispatch admission or while the check ran.
+- D3-2: host verification validates a run only when every check that applied ran for it: a pass reused from another run's memo, a run whose every check was skipped, and a record without the executed/reused/skipped counts read as unknown; numeric-compare and perf-budget verdicts are never memoized.
+- D3-5: `numeric-compare` checks accept per-key `tolerance.keys` bounds (an entry replaces the check-level bounds for its key; an entry naming a key the reference lacks fails), and a reference with no keys or a key whose arrays are both empty is unjudgeable and fails instead of passing.
+- Astra r10-2: the fleet board no longer rereads every running worker's run scope and re-projects its rows several times on each frame.
+- Astra r10-3: the footer reads the main route's first-output history only when the long-silence note prints it, instead of on every refresh.
+- Astra r9-1: a failed `/context` operation no longer rewrites the system prompt and breaks the prompt cache; the fact arrives once in the turn reminder.
+- Astra r9-4: a completed task that left no command receipt or read excerpt settles its lesson retention without a model call, so headless exit no longer waits on one.
 - A1 (F-C13 residual): a successful call that may have changed state resets the identical-call count of every other call, so read, write, read of a desk record is admitted while three reads with nothing between are still blocked. Write, edit, any bash command that is not a plain read, and any extension tool not declared read-only count.
 - A3: a verifier-report whose fail verdict no executed check produced is labelled `review verdict: fail (N findings)` in dispatch and collect results, not "validation failed; a check ran and did not pass". A check that ran and failed keeps the validation wording.
 - B2: a pinned round (`require_tool` or a terminal handoff) on openai-codex and openai-responses keeps the full tool list and names the tool with the Responses function choice, so it reuses the prompt cache instead of missing it.

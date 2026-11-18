@@ -8,19 +8,12 @@
  * carries a version this build does not speak, or contradicts another field on
  * the same request.
  *
- * Every answer here is one of three decisions, and the boundary between them is
- * the load-bearing rule:
+ * The answer is either nothing or a refusal. A request is refused when it states
+ * two incompatible things about authority, or states one this build cannot
+ * interpret, and the dispatch never runs. Omitted or partial intent is not
+ * reported here: it never widens authority, so it cannot change admission.
  *
- * - `accept`: the request is unambiguous. Nothing is reported.
- * - `warn`: the request is compatible but its policy-bearing scope was resolved
- *   from something weaker than a declaration. The dispatch proceeds with the
- *   authority it would have had anyway; the warning exists so the weaker basis
- *   is visible before execution and countable afterwards.
- * - `refuse`: the request states two incompatible things about authority, or
- *   states one this build cannot interpret. The dispatch never runs.
- *
- * A `warn` may never be the difference between a narrow and a wide grant. That
- * is the invariant every rule below is written to preserve: no path through this
+ * Every rule below is written to preserve one invariant: no path through this
  * module widens read, write, or verification authority to resolve an ambiguity.
  * When the compatible reading and the declared reading disagree about what a
  * worker may touch, the answer is a refusal, never the union.
@@ -45,18 +38,12 @@ export const DISPATCH_INTENT_VERSION = 2;
  */
 export const DISPATCH_INTENT_SUPPORTED_VERSIONS: ReadonlyArray<number> = [DISPATCH_INTENT_VERSION];
 
-export type DispatchIntentCompatibilityDecision = "accept" | "warn" | "refuse";
-
 /**
  * Stable reason codes. These are a contract: they appear in refusal messages,
  * diagnostics, and contract tests, and callers may branch on them. Renaming one
  * is a breaking change to every surface that reports dispatch admission.
  */
 export type DispatchIntentCompatibilityCode =
-	/** No typed intent at all; policy-bearing scope came from legacy inference. */
-	| "intent_absent_legacy_inference"
-	/** Typed intent declared paths but no verification requirement. */
-	| "intent_partial_verification_absent"
 	/** `intent.version` names a version this build does not speak. */
 	| "intent_version_unsupported"
 	/** Present but not a normalized intent for a reason other than its version. */
@@ -72,7 +59,7 @@ export type DispatchIntentCompatibilityCode =
 
 export interface DispatchIntentCompatibilityFinding {
 	code: DispatchIntentCompatibilityCode;
-	decision: DispatchIntentCompatibilityDecision;
+	decision: "refuse";
 	/** Operator-facing text, prefixed with the code and naming the fix. */
 	message: string;
 }
@@ -88,12 +75,8 @@ export interface DispatchIntentCompatibilityInput {
 	cwd?: string;
 }
 
-function finding(
-	code: DispatchIntentCompatibilityCode,
-	decision: DispatchIntentCompatibilityDecision,
-	detail: string,
-): DispatchIntentCompatibilityFinding {
-	return { code, decision, message: admissionDiagnostic(`${code}: ${detail}`) };
+function finding(code: DispatchIntentCompatibilityCode, detail: string): DispatchIntentCompatibilityFinding {
+	return { code, decision: "refuse", message: admissionDiagnostic(`${code}: ${detail}`) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,7 +88,7 @@ function declaredVersion(value: Record<string, unknown>): number | null {
 }
 
 /** Whether an intent-shaped value carries a version this build can interpret. */
-export function isSupportedDispatchIntentVersion(value: unknown): boolean {
+function isSupportedDispatchIntentVersion(value: unknown): boolean {
 	if (!isRecord(value)) return false;
 	const version = declaredVersion(value);
 	return version !== null && DISPATCH_INTENT_SUPPORTED_VERSIONS.includes(version);
@@ -117,13 +100,11 @@ function versionFinding(value: Record<string, unknown>): DispatchIntentCompatibi
 	if (version === null) {
 		return finding(
 			"intent_version_unsupported",
-			"refuse",
 			`intent carries no integer version; this build speaks dispatch intent version ${supported}. Re-declare the intent through the dispatch tool rather than replaying a stored object.`,
 		);
 	}
 	return finding(
 		"intent_version_unsupported",
-		"refuse",
 		`intent declares version ${version}; this build speaks dispatch intent version ${supported}. A stored plan or spec at another version is refused rather than migrated: re-declare read_roots, write_roots, relevant_paths, expected_outputs, and verification on a fresh dispatch call.`,
 	);
 }
@@ -144,7 +125,6 @@ function writeRootsContradiction(
 	if (resolve(writeRoots) === resolve(intent.writeRoots)) return null;
 	return finding(
 		"intent_write_roots_contradiction",
-		"refuse",
 		`legacy writeRoots [${[...writeRoots].sort().join(", ")}] and intent.write_roots [${intent.writeRoots.join(", ")}] name different trees. Neither the union nor the legacy field wins: drop writeRoots and declare the exact write scope once in intent.write_roots.`,
 	);
 }
@@ -155,7 +135,6 @@ function outputsOutsideWriteRoots(intent: DispatchIntent): DispatchIntentCompati
 	if (outside.length === 0) return null;
 	return finding(
 		"intent_outputs_outside_write_roots",
-		"refuse",
 		`expected_outputs [${outside.join(", ")}] lie outside intent.write_roots [${intent.writeRoots.join(", ")}]. The write boundary would block exactly the outputs the task is required to produce, so correct expected_outputs to the actual file paths within the authorized write_roots. expected_outputs are file paths, never actions such as commit or the repository marker ".". The host commits worktree tasks; the worker only edits and reports.`,
 	);
 }
@@ -164,38 +143,27 @@ function writeWithoutAuthority(intent: DispatchIntent, readOnly: unknown): Dispa
 	if (intent.writeRoots.length === 0 || readOnly !== true) return null;
 	return finding(
 		"intent_write_without_authority",
-		"refuse",
 		`intent.write_roots [${intent.writeRoots.join(", ")}] was declared on a read-only request. A read-only worker cannot be granted the declared trees and the declaration cannot be silently dropped, because dropping it would leave the request claiming a write scope nothing enforces. Declare write_roots only on a writing request.`,
 	);
 }
 
 /**
- * Classify one dispatch request's intent against the compatibility rules.
+ * Every refusal of one dispatch request's intent under the compatibility rules.
  *
- * Findings are returned in a stable order: version and shape first (a value this
+ * Refusals are returned in a stable order: version and shape first (a value this
  * build cannot read makes every later question meaningless), then the
- * contradictions between intent and its neighbouring fields, then the
- * lower-confidence notices. Callers treat any `refuse` as terminal.
+ * contradictions between intent and its neighbouring fields. Callers treat any
+ * refusal as terminal; an omitted intent has none.
  */
 export function classifyDispatchIntentCompatibility(
 	input: DispatchIntentCompatibilityInput,
 ): DispatchIntentCompatibilityFinding[] {
 	const findings: DispatchIntentCompatibilityFinding[] = [];
-	if (input.intent === undefined) {
-		findings.push(
-			finding(
-				"intent_absent_legacy_inference",
-				"warn",
-				"no typed intent was declared, so policy-bearing scope was resolved from legacy writeRoots plus path-like task and briefing tokens. Inferred paths select project rules and worker context only; they never widen write or verification authority. Declare intent.read_roots, intent.write_roots, and intent.relevant_paths to make the scope exact.",
-			),
-		);
-		return findings;
-	}
+	if (input.intent === undefined) return findings;
 	if (!isRecord(input.intent)) {
 		findings.push(
 			finding(
 				"intent_malformed",
-				"refuse",
 				"intent must be an object carrying normalized read_roots, write_roots, relevant_paths, expected_outputs, and verification.",
 			),
 		);
@@ -209,7 +177,6 @@ export function classifyDispatchIntentCompatibility(
 		findings.push(
 			finding(
 				"intent_malformed",
-				"refuse",
 				`intent declares supported version ${DISPATCH_INTENT_VERSION} but is not a normalized intent: path lists must be deduplicated and sorted, pathProvenance must match the declared fields exactly, and every verification entry must name a declared check with an integer timeout. Re-declare it through the dispatch tool rather than hand-building the normalized object.`,
 			),
 		);
@@ -226,23 +193,7 @@ export function classifyDispatchIntentCompatibility(
 	if (outputs !== null) findings.push(outputs);
 	const authority = writeWithoutAuthority(intent, input.readOnly);
 	if (authority !== null) findings.push(authority);
-	if (intent.verification.length === 0 && (intent.writeRoots.length > 0 || intent.expectedOutputs.length > 0)) {
-		findings.push(
-			finding(
-				"intent_partial_verification_absent",
-				"warn",
-				"intent declares work that changes the tree but no verification requirement, so nothing the orchestrator runs proves the change is sound. Add intent.verification entries naming declared check ids from package scripts or .clio-coder/verifiers.yaml.",
-			),
-		);
-	}
 	return findings;
-}
-
-/** Every terminal refusal in a classification, in reporting order. */
-export function dispatchIntentRefusals(
-	findings: ReadonlyArray<DispatchIntentCompatibilityFinding>,
-): DispatchIntentCompatibilityFinding[] {
-	return findings.filter((entry) => entry.decision === "refuse");
 }
 
 /**
@@ -277,21 +228,8 @@ export function dispatchIntentScopeWidening(
 		if (outside === undefined) continue;
 		return finding(
 			"intent_scope_widening",
-			"refuse",
 			`${field} entry '${outside}' is outside the enclosing intent ceiling [${ceilings[field].join(", ") || "empty"}]. A narrower scope may shrink the ceiling and never reach outside it; add the path to the enclosing declaration or drop it here.`,
 		);
 	}
 	return null;
 }
-
-/**
- * The retirement criterion for the legacy inference fallback: the largest
- * share of dispatches that may still resolve policy-bearing scope from prose.
- * Receipts no longer record the resolution mode, so the retirement issue must
- * record it again before the share can be measured. Removal stays a separate,
- * explicit issue; this is the gate that issue has to clear.
- */
-export const DISPATCH_INTENT_RETIREMENT_MAX_LEGACY_SHARE = 0.02;
-
-/** Receipts below this count cannot decide the criterion either way. */
-export const DISPATCH_INTENT_RETIREMENT_MIN_SAMPLE = 200;

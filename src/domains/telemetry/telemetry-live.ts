@@ -37,6 +37,7 @@ import {
 	journalSourceFromRead,
 	prepareSource,
 	processQuantity,
+	type QuotaWindowScan,
 	quantityOf,
 	quotaAccount,
 	quotaAccountDetails,
@@ -45,12 +46,13 @@ import {
 	runsReport,
 	runTelemetry,
 	sessionAccountQuotaWindow,
+	sessionRevision,
 	sessionTelemetry,
 	timeline,
 	turnsSum,
 	whyStopped,
 } from "./read-model.js";
-import type { TelemetryScopeFiles } from "./seal.js";
+import type { SealVerdict, TelemetryScopeFiles } from "./seal.js";
 
 /**
  * The live telemetry read model (#434 §11). It never reads a journal on a render path and never folds per token:
@@ -108,10 +110,17 @@ export function telemetryView(
 	verifiedRuns: Map<string, VerifiedRun> = new Map(),
 ): LocalView {
 	let session: SessionTelemetryV1 | undefined;
+	// A run still open has no seal or result to verify, so this view reads its scope once and every frame after reuses
+	// it; the DTO is still built per call so its elapsed time advances while the journal is quiet.
+	const openScopes = new Map<
+		string,
+		{ source: JournalSource; files: TelemetryScopeFiles | null; seal: SealVerdict | null }
+	>();
 	return {
 		sessionId: source.sessionId,
 		seeding: source.journal.seeding === true,
 		session: () => (session ??= sessionTelemetry(source)),
+		revision: () => sessionRevision(source),
 		calls: (filter) => callsReport(source, filter),
 		callRecords: (filter) => callRecords(source, filter),
 		cost: (groupBy) => costReport(source, groupBy),
@@ -124,9 +133,15 @@ export function telemetryView(
 			if (!run) return null;
 			const verified = verifiedRuns.get(runId);
 			if (verified?.source === run) return verified.telemetry;
-			const telemetry = runTelemetry(runId, run, {}, scope(runId));
+			const open = openScopes.get(runId);
+			if (open?.source === run) return runTelemetry(runId, run, {}, open.files, open.seal);
+			const files = scope(runId);
+			const telemetry = runTelemetry(runId, run, {}, files);
 			if (telemetry.seal?.status === "verified") verifiedRuns.set(runId, { source: run, telemetry });
 			else verifiedRuns.delete(runId);
+			const tip = run.records.at(-1)?.k;
+			if (telemetry.settled === null && tip !== "run.sealed" && tip !== "share.sealed")
+				openScopes.set(runId, { source: run, files, seal: telemetry.seal });
 			return telemetry;
 		},
 		runEnqueued: (runId) => runEnqueued(source, runId),
@@ -161,6 +176,8 @@ interface Owned {
 	snapshot?: { version: number; source: JournalSource };
 	/** The origin of the newest batch or cold read, which the session's lifecycle reads (#434 §6.1). */
 	writer?: ClockOrigin;
+	/** How far the account-quota window has read `records`. */
+	windowScan?: { records: TelemetryRecord[]; scan: QuotaWindowScan };
 }
 interface Node {
 	sessionId: string;
@@ -621,7 +638,14 @@ export function createLiveTelemetryModel(options: LiveTelemetryOptions): LiveTel
 	};
 
 	const mergeNodeAccountQuota = (node: Node): boolean => {
-		const window = sessionAccountQuotaWindow(node.journal.records);
+		const journal = node.journal;
+		// A live journal grows by pushing onto the same array; a seed merge replaces it and the scan starts over.
+		if (journal.windowScan?.records !== journal.records)
+			journal.windowScan = {
+				records: journal.records,
+				scan: { scanned: 0, from: Number.POSITIVE_INFINITY, last: undefined },
+			};
+		const window = sessionAccountQuotaWindow(journal.records, journal.windowScan.scan);
 		const records = new Map(node.accountQuota.map((record) => [record.id, record]));
 		for (const record of processFollow?.quota.values() ?? []) {
 			const at = Date.parse(record.t);

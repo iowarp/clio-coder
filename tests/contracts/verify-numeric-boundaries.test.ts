@@ -90,6 +90,30 @@ describe("numeric-compare combination rule", () => {
 		deepStrictEqual(key(tier).violated, ["relative"]);
 	});
 
+	it("judges a key with a tolerance.keys entry by that entry alone and fails an entry the reference lacks", () => {
+		const tolerance = normalizeNumericTolerance({
+			relative: 1e-6,
+			absolute: 1e-6,
+			combine: "any",
+			keys: { residual: { relative: 1e-2 } },
+		});
+		ok(!(tolerance instanceof Error));
+		const reference = { energy: -76.0, residual: 1e-12 };
+		const drifted = compareNumeric({ energy: -76.0000001, residual: 1e-9 }, reference, tolerance);
+		strictEqual(drifted.passed, false, "one check-level rule waved the residual through");
+		deepStrictEqual(drifted.failedKeys, ["residual"]);
+		deepStrictEqual(key(drifted, "residual").failed, ["relative"]);
+		deepStrictEqual(key(drifted, "energy").held, ["relative", "absolute"]);
+		strictEqual(
+			drifted.rule,
+			'any of relative<=1e-6, absolute<=1e-6 may hold; key "residual": relative<=0.01 must hold; non-finite values fail',
+		);
+		strictEqual(compareNumeric({ energy: -76.0000001, residual: 1.001e-12 }, reference, tolerance).passed, true);
+		const typo = compareNumeric(reference, reference, { absolute: 0, keys: { residal: { relative: 1 } } });
+		deepStrictEqual(typo.failedKeys, ["residal"]);
+		deepStrictEqual(key(typo, "residal").failed, ["missing-reference"]);
+	});
+
 	it("states the effective rule in words for one, two, and three bounds", () => {
 		strictEqual(describeNumericRule({ relative: 1e-6 }), "relative<=1e-6 must hold; non-finite values fail");
 		strictEqual(
@@ -150,6 +174,16 @@ describe("numeric-compare combination rule", () => {
 			[{ ulp: Number.MAX_SAFE_INTEGER + 1 }, "tolerance.ulp must not exceed 9007199254740991 (Number.MAX_SAFE_INTEGER)"],
 			[{ ulp: 2 ** 62 }, "tolerance.ulp must not exceed 9007199254740991 (Number.MAX_SAFE_INTEGER)"],
 			[[], "tolerance must be an object with relative, absolute, or ulp"],
+			[{ absolute: 1, keys: [] }, "tolerance.keys must be an object of key -> tolerance"],
+			[{ absolute: 1, keys: { r: 1 } }, "tolerance.keys.r must be an object with relative, absolute, or ulp"],
+			[
+				{ absolute: 1, keys: { r: { combine: "any" } } },
+				"tolerance.keys.r must name at least one of relative, absolute, or ulp",
+			],
+			[
+				{ absolute: 1, keys: { r: { relative: 1, nonFinite: "match" } } },
+				"tolerance.keys.r has unknown field(s): nonFinite",
+			],
 		];
 		for (const [value, message] of cases) {
 			const result = normalizeNumericTolerance(value);
@@ -367,16 +401,16 @@ describe("numeric-compare non-finite policy", () => {
 });
 
 describe("numeric-compare shapes and missing values", () => {
-	it("passes empty arrays on both sides and fails an empty array against a filled one", () => {
+	it("refuses to pass empty arrays on both sides and fails an empty array against a filled one", () => {
 		const empty = compareNumeric({ v: [] }, { v: [] }, { absolute: 0 });
-		strictEqual(empty.passed, true);
+		strictEqual(empty.passed, false);
 		deepStrictEqual(key(empty), {
 			key: "v",
-			passed: true,
-			failed: [],
+			passed: false,
+			failed: ["unjudgeable"],
 			held: [],
 			violated: [],
-			detail: "v: empty array matches",
+			detail: "v: unjudgeable, both arrays are empty so nothing was compared",
 		});
 		const filled = compareNumeric({ v: [] }, { v: [1] }, { absolute: 0 });
 		strictEqual(filled.passed, false);
@@ -438,7 +472,9 @@ describe("numeric-compare shapes and missing values", () => {
 			strictEqual(parsed.message, message);
 		}
 		deepStrictEqual(parseNumericPayload("{}", "command output"), {});
-		strictEqual(compareNumeric({}, {}, { absolute: 0 }).passed, true);
-		strictEqual(compareNumeric({}, {}, { absolute: 0 }).summary, "numeric-compare passed: 0 key(s) within tolerance");
+		const nothing = compareNumeric({}, {}, { absolute: 0 });
+		strictEqual(nothing.passed, false);
+		strictEqual(nothing.summary, "numeric-compare unjudgeable: the reference has no keys, so nothing was compared");
+		strictEqual(compareNumeric({ v: 1 }, {}, { absolute: 0 }).passed, false);
 	});
 });

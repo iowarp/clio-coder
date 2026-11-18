@@ -25,7 +25,7 @@ import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js"
 import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
-import { requestStructure } from "../engine/request-structure.js";
+import { createRequestStructures } from "../engine/request-structure.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
@@ -760,6 +760,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let modelCall: TelemetryCall | undefined;
 		let journalLease: TelemetrySessionLease | undefined;
 		let settledAttempts: CallSettled[] = [];
+		const requestStructure = createRequestStructures();
 		// What each attempt handed Pi, digested only at settle so the hashing stays off the send path (#434).
 		let attemptRequest:
 			| {
@@ -1656,8 +1657,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// at agent_end, no terminal ledger row was ever written for this turn,
 		// so one is synthesized below.
 		let pendingTerminalToolResult: { toolCallId: string; toolName: string } | null = null;
-		// Per streamed assistant message: how far each block was last checked for repetition.
-		let repetitionCheck: { partial: unknown; text: number; thinking: number } = { partial: null, text: 0, thinking: 0 };
+		// Per streamed assistant message: how far each block was last checked for repetition. The prose filter
+		// hands every delta a fresh partial object, so the counters reset on the message lifecycle, not identity.
+		const repetitionCheck = { text: 0, thinking: 0 };
 		// state.messages length when this run started; agent state appends every
 		// message of the run (prompts, assistant, tool results) via message_end,
 		// so the slice from here is the run's real message window.
@@ -1929,6 +1931,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				return;
 			}
 			if (publicEvent) deps.emit(publicEvent);
+			if (enrichedEvent.type === "message_start") {
+				repetitionCheck.text = 0;
+				repetitionCheck.thinking = 0;
+			}
 			if (publicEvent?.type === "message_update") {
 				const assistantEvent = publicEvent.assistantMessageEvent as {
 					type: string;
@@ -1941,10 +1947,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					state.repetitionAbortReason === null &&
 					state.activeInterruptReason === null
 				) {
-					if (repetitionCheck.partial !== assistantEvent.partial)
-						repetitionCheck = { partial: assistantEvent.partial, text: 0, thinking: 0 };
 					const thinking = assistantEvent.type === "thinking_delta";
 					const streamed = thinking ? extractThinking(assistantEvent.partial) : extractText(assistantEvent.partial);
+					// A replacement-style diffusion frame can shorten the text; measure growth from what it now holds.
+					if (thinking) repetitionCheck.thinking = Math.min(repetitionCheck.thinking, streamed.length);
+					else repetitionCheck.text = Math.min(repetitionCheck.text, streamed.length);
 					if (shouldAssessRepetition(streamed.length, thinking ? repetitionCheck.thinking : repetitionCheck.text)) {
 						if (thinking) repetitionCheck.thinking = streamed.length;
 						else repetitionCheck.text = streamed.length;

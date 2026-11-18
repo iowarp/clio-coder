@@ -118,23 +118,19 @@ test("prewarm reads cannot freeze the next attempt and mutable caller options ca
 	strictEqual(read({ ...f.request, turnId: "2" }), "");
 });
 
-test("explicit experimental queries can change at the next turn, with a distinct legacy default", (t) => {
+test("gated queries can change at the next turn, with a distinct legacy default", (t) => {
 	const f = fixture(t);
 	f.save([
 		record("Compaction receipts persist.", { id: "mem-0000000000000001" }),
 		record("Formatting preserves indentation.", { id: "mem-0000000000000002", createdAt: "2026-09-22T00:00:00.000Z" }),
 	]);
 	const legacy = createMemoryPromptReader({ getDataDir: () => f.root, selection: { maxItems: 1 } });
-	const experimental = createMemoryPromptReader({
-		getDataDir: () => f.root,
-		selection: { maxItems: 1 },
-		experimentalRelevance: true,
-	});
-	const first = { ...f.request, taskText: "compaction" };
+	const gated = createMemoryPromptReader({ getDataDir: () => f.root, selection: { maxItems: 1 }, relevanceGate: {} });
+	const first = { ...f.request, taskText: "compaction receipts" };
 	ok(legacy(first).includes("Formatting"));
-	ok(experimental(first).includes("Compaction"));
-	ok(experimental({ ...first, taskText: "formatting" }).includes("Compaction"));
-	ok(experimental({ ...first, turnId: "2", taskText: "formatting" }).includes("Formatting"));
+	ok(gated(first).includes("Compaction"));
+	ok(gated({ ...first, taskText: "formatting indentation" }).includes("Compaction"));
+	ok(gated({ ...first, turnId: "2", taskText: "formatting indentation" }).includes("Formatting"));
 });
 
 test("bounded snapshot reads refuse oversized storage and validate rather than trusting a revision", (t) => {

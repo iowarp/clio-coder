@@ -330,7 +330,7 @@ export function runEvidenceLabels(run: FinishedRun, integrity: RunIntegrity): st
 					`Host check evidence is separate from the worker report: ${checks
 						.map((check) => {
 							const source = check.memo
-								? "reused prior host result"
+								? `reused a pass from run ${check.evidenceRunId ?? "unrecorded"}`
 								: host?.strategy === "batch-settled"
 									? "executed after the worker batch"
 									: "executed after the worker";

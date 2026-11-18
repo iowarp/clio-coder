@@ -259,6 +259,13 @@ export interface RuntimeDescriptor {
 	 * resolves as typed, and the provider itself answers an id it does not serve.
 	 */
 	servesUnlistedModels?: boolean;
+	/**
+	 * Set when the live model listing carries each model's capabilities for the
+	 * account (the Copilot runtime lists reasoning efforts and windows). The
+	 * listing cache keeps them, a status read from that cache uses them, and an
+	 * ACP session lists live when the cache has none.
+	 */
+	listsModelCapabilities?: true;
 	/** Curated chat choice from knownModels or the pinned provider catalog. */
 	defaultModel?: string;
 	binaryName?: string;

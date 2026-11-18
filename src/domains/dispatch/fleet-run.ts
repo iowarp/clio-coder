@@ -416,7 +416,7 @@ function codeStepSettledFacts(record: CodeStepRecord): EventPayload<"code_step.s
 	};
 }
 
-export function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
+function fleetPlanWaveIndex(plan: ExecutionPlan, stepId: string): number {
 	return plan.waves.findIndex((wave) => wave.includes(stepId));
 }
 

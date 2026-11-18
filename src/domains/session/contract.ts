@@ -163,6 +163,11 @@ export interface SessionContract {
 	deleteSession(id: string, opts?: DeleteSessionOptions): void;
 	/** List sessions for current cwd (most-recent first). */
 	history(): ReadonlyArray<SessionMeta>;
+	/**
+	 * Resolve a session id or unique id prefix for the current cwd from session metadata alone. An exact id wins,
+	 * no match returns the input, and an ambiguous prefix returns its matches most-recent first.
+	 */
+	resolveId(idOrPrefix: string): string | { ambiguous: string[] };
 	/** End current session. */
 	close(): Promise<void>;
 }

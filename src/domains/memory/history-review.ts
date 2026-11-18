@@ -31,6 +31,7 @@ import { observationDigest } from "./observations.js";
 import { relatedRepositoryRoots } from "./operations.js";
 import { entriesBeforeMemoryOff, isMemoryOffEntry } from "./recording-marker.js";
 import { redactForMemoryRoute } from "./secret-text.js";
+import { shortText } from "./util.js";
 
 export interface CompletedLessonSource {
 	readonly revision: string;
@@ -917,9 +918,4 @@ function boundCursors(cursors: RepositoryCursors): RepositoryCursors {
 
 function record(value: unknown): Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function shortText(value: string, maxChars: number): string {
-	const normalized = value.replace(/\s+/gu, " ").trim();
-	return normalized.length <= maxChars ? normalized : `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }

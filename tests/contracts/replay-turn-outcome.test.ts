@@ -11,6 +11,7 @@ import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/i
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import type { TelemetryView } from "../../src/domains/telemetry/contract.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -899,7 +900,7 @@ test("the TUI echoes an operator command and hands the host the same line to rec
 	]);
 });
 
-test("/export reports a workspace file by its relative path", () => {
+test("/export reports a workspace file by its relative path, after a notice that paints before the render", async () => {
 	const workspace = mkdtempSync(join(tmpdir(), "clio-export-notice-"));
 	const blocks: Array<(width: number) => string[]> = [];
 	const target = join(workspace, ".clio-coder", "exports", "session.html");
@@ -913,12 +914,17 @@ test("/export reports a workspace file by its relative path", () => {
 			requestRender() {},
 			now: () => new Date("2026-09-23T12:00:00Z"),
 		} as unknown as InteractiveSlashRuntimeDeps);
-		runtime.context.exportTranscript?.(target);
+		const pending = runtime.context.exportTranscript?.(target);
+		const shown = () =>
+			blocks
+				.flatMap((block) => block(100))
+				.map(stripTerminalSequences)
+				.join("\n");
+		assert.equal(existsSync(target), false);
+		assert.match(shown(), /\[\/export\] exporting session session/u);
+		await pending;
 		assert.equal(existsSync(target), true);
-		const notice = blocks
-			.flatMap((block) => block(100))
-			.map(stripTerminalSequences)
-			.join("\n");
+		const notice = shown();
 		assert.match(notice, /\[\/export\] wrote \d+ lines to \.clio-coder\/exports\/session\.html/u);
 		assert.doesNotMatch(notice, new RegExp(workspace));
 	} finally {
@@ -1098,7 +1104,15 @@ test("a receipt whose run ended before its last call was folded settles on the t
 	};
 	const messages = [message(first, "One"), message(last, "Two")];
 	// The writer's batch holding the run's last call has not been folded when the run ends.
-	let view = telemetryViewOf("settle-receipt", first);
+	let runReads = 0;
+	const firstView = telemetryViewOf("settle-receipt", first);
+	let view: TelemetryView = {
+		...firstView,
+		runs: () => {
+			runReads += 1;
+			return firstView.runs();
+		},
+	};
 	const panel = createChatPanel({ getOutputStyle: () => "detailed", getTelemetry: () => view, now: () => 0 });
 	const receipt = () =>
 		panel
@@ -1114,6 +1128,7 @@ test("a receipt whose run ended before its last call was folded settles on the t
 	}
 	panel.applyEvent({ type: "agent_end", messages } as unknown as ChatLoopEvent);
 	assert.equal(receipt(), "✓ Done · 0ms · in 7 · out 5 · 00:00");
+	assert.equal(runReads, 1, "every receipt read against one view shares its run list");
 	view = telemetryViewOf("settle-receipt", [...first, ...last]);
 	assert.equal(receipt(), "✓ Done · 0ms · 2 calls · in 10 · out 7 · 00:00");
 	// Settled: a later view no longer moves this turn's receipt.

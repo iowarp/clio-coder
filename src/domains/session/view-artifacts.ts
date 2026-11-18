@@ -18,7 +18,7 @@ import { dispatchOwnership } from "../dispatch/ownership.js";
 import type { RunEnvelope } from "../dispatch/types.js";
 import { listRunEvidence, runEvidence } from "../evidence/run-evidence.js";
 import { readRunGateIndex } from "../evidence/run-trust.js";
-import { formatTrustSummaryLine, trustStateWord } from "../evidence/trust-projection.js";
+import { formatTrustSummaryLine, trustStateWord, unexecutedHostChecksClause } from "../evidence/trust-projection.js";
 import type { CanonicalTrustStatus, TrustStatusAxis } from "../evidence/trust-status.js";
 import { inspectRunTrustStatus, TRUST_STATUS_AXES } from "../evidence/trust-status.js";
 import type { RunEvidence } from "../evidence/types.js";
@@ -512,7 +512,8 @@ function readableVerification(status: CanonicalTrustStatus): string {
 				? `${checkLabel} failed`
 				: authority === "host-verification-baseline-failed"
 					? "check also failed on the task base; change validation unknown"
-					: trustStateWord("validationGrounding", validation.state);
+					: ((authority === null ? undefined : unexecutedHostChecksClause(authority)) ??
+						trustStateWord("validationGrounding", validation.state));
 	return [
 		status.artifactIntegrity.state === "verified"
 			? "run seal valid"
@@ -632,7 +633,7 @@ function renderRunChecks(run: SettledRunView): string[] {
 		...(checks.length > 0
 			? checks.map(
 					(check) =>
-						`- ${check.notRun !== undefined ? `Did not run: ${check.check} (${hostCheckNotRunNote(check.notRun)})` : `${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})`}${check.memo ? "; reused result" : ""}`,
+						`- ${check.notRun !== undefined ? `Did not run: ${check.check} (${hostCheckNotRunNote(check.notRun)})` : `${check.exitCode === 0 ? "Passed" : "Failed"}: ${check.check} (exit ${check.exitCode})`}${check.memo ? `; reused a pass from run ${check.evidenceRunId ?? "unrecorded"}` : ""}`,
 				)
 			: ["No host-run checks recorded."]),
 		...(failedOnBase > 0 ? [`${failedOnBase} failing check(s) also failed on the task base.`] : []),

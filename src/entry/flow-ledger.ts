@@ -16,11 +16,22 @@
  * are retried on a session switch; persistence is retried on every later call.
  */
 
+import { ToolNames } from "../core/tool-names.js";
 import type { MemoryCommitScope } from "../domains/memory/commit-state.js";
 import type { CompletedLessonSource } from "../domains/memory/history-review.js";
 import { completedLessonSource } from "../domains/memory/index.js";
-import type { FlowRestrictionSet } from "../domains/safety/index.js";
-import { isFlowRestrictionSet, mergeFlowRestrictions } from "../domains/safety/index.js";
+import type {
+	FlowDestination,
+	FlowRestrictionSet,
+	InformationFlowPolicy,
+	SafetyContract,
+} from "../domains/safety/index.js";
+import {
+	EMPTY_INFORMATION_FLOW_POLICY,
+	flowTransferRefusal,
+	isFlowRestrictionSet,
+	mergeFlowRestrictions,
+} from "../domains/safety/index.js";
 import type { SessionContract } from "../domains/session/index.js";
 import { parseSessionEntries } from "../domains/session/index.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -42,7 +53,28 @@ export interface FlowLedger {
 	restrictionsOf(sessionId: string): FlowRestrictionSet | null;
 	/** Whether a session carries a restriction. An unreadable ledger answers true, since the ledger never downgrades on failure. */
 	isRestricted(sessionId: string): boolean;
+	/** The live information-flow policy, read at every call so a mid-session reload is judged as it is now. */
+	policy(): InformationFlowPolicy;
+	/** A configured source policy requires provenance even before a label has been recovered. */
+	hasSourceRules(): boolean;
+	/**
+	 * Block reason when the carried context, plus any restrictions the request `inherited`, may not reach `destination`,
+	 * or null. An unusable ledger refuses before the policy is consulted.
+	 */
+	admitDestination(destination: FlowDestination, inherited?: FlowRestrictionSet | null): string | null;
+	/**
+	 * Labels an operator shell line the way a bash tool call is labeled, since its output joins the context the next
+	 * request sends. Returns the policy's or the ledger's refusal, or null.
+	 */
+	labelCommand(command: string, cwd: string): string | null;
+	/** Absorbs what host-opened files carry, attributed to `tool`, and returns those labels. */
+	labelPaths(paths: ReadonlyArray<string>, cwd: string, tool: string): FlowRestrictionSet | null;
 }
+
+type FlowPolicySource = Pick<
+	NonNullable<SafetyContract["policy"]>,
+	"informationFlow" | "flowRestrictionsFor" | "flowRestrictionsForPaths"
+>;
 
 /** The union of every flow-restriction entry in a session's ledger. */
 function flowRestrictionsFromEntries(entries: ReadonlyArray<unknown>): FlowRestrictionSet | null {
@@ -82,8 +114,8 @@ export function closedSessionLessonSource(
 export function createFlowLedger(deps: {
 	session: SessionContract | null;
 	readEntries: (sessionId: string) => ReadonlyArray<unknown>;
-	/** A configured source policy requires provenance even before a label has been recovered. */
-	hasSourceRules?: () => boolean;
+	/** The safety domain's policy; absent judges against the empty policy and labels nothing. */
+	policy?: FlowPolicySource | undefined;
 }): FlowLedger {
 	let loadedFor: string | null = null;
 	let carried: FlowRestrictionSet | null = null;
@@ -183,32 +215,36 @@ export function createFlowLedger(deps: {
 		);
 	};
 
+	const policy = (): InformationFlowPolicy => deps.policy?.informationFlow?.() ?? EMPTY_INFORMATION_FLOW_POLICY;
+	const hasSourceRules = (): boolean => policy().rules.length > 0;
+	const current = (): FlowRestrictionSet | null => {
+		sync();
+		flush();
+		return carried;
+	};
+	const refusal = (): string | null => {
+		sync();
+		flush();
+		return ((carried?.restrictions.length ?? 0) > 0 || hasSourceRules() ? readFailure : null) ?? writeFailure;
+	};
+	const absorb = (set: FlowRestrictionSet, origin: { tool?: string; toolCallId?: string }): void => {
+		sync();
+		const merged = mergeFlowRestrictions(carried, set);
+		const before = carried?.restrictions.length ?? 0;
+		carried = merged;
+		if (loadedFor !== null && carried !== null) known.set(loadedFor, carried);
+		if (merged !== null && merged.restrictions.length > before) {
+			const queue = pending.get(loadedFor) ?? [];
+			queue.push({ set, origin });
+			pending.set(loadedFor, queue);
+		}
+		flush();
+	};
+
 	return {
-		current() {
-			sync();
-			flush();
-			return carried;
-		},
-		refusal() {
-			sync();
-			flush();
-			return (
-				((carried?.restrictions.length ?? 0) > 0 || deps.hasSourceRules?.() === true ? readFailure : null) ?? writeFailure
-			);
-		},
-		absorb(set, origin) {
-			sync();
-			const merged = mergeFlowRestrictions(carried, set);
-			const before = carried?.restrictions.length ?? 0;
-			carried = merged;
-			if (loadedFor !== null && carried !== null) known.set(loadedFor, carried);
-			if (merged !== null && merged.restrictions.length > before) {
-				const queue = pending.get(loadedFor) ?? [];
-				queue.push({ set, origin });
-				pending.set(loadedFor, queue);
-			}
-			flush();
-		},
+		current,
+		refusal,
+		absorb,
 		restrictionsOf,
 		isRestricted(sessionId) {
 			try {
@@ -216,6 +252,26 @@ export function createFlowLedger(deps: {
 			} catch {
 				return true;
 			}
+		},
+		policy,
+		hasSourceRules,
+		admitDestination(destination, inherited) {
+			const unusable = refusal();
+			if (unusable !== null) return unusable;
+			return flowTransferRefusal(policy(), mergeFlowRestrictions(inherited, current()), destination);
+		},
+		labelCommand(command, cwd) {
+			const unavailable = policy().refusal;
+			if (unavailable !== null) return unavailable;
+			const labels = deps.policy?.flowRestrictionsFor?.({ tool: ToolNames.Bash, args: { command, cwd } }) ?? null;
+			if (labels === null) return null;
+			absorb(labels, { tool: "operator-bash" });
+			return refusal();
+		},
+		labelPaths(paths, cwd, tool) {
+			const labels = deps.policy?.flowRestrictionsForPaths?.(paths, cwd) ?? null;
+			if (labels !== null) absorb(labels, { tool });
+			return labels;
 		},
 	};
 }

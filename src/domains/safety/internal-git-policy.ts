@@ -16,6 +16,7 @@ import {
 	type GitHookDriftGuard,
 	type GitHookDriftReport,
 } from "./hook-drift.js";
+import { isSameOrDescendant } from "./path-policy.js";
 
 /**
  * The commands `git lfs install --local` writes, which run git-lfs from PATH
@@ -201,11 +202,6 @@ function realOrResolved(entry: string): string {
 	}
 }
 
-function atOrBelow(parent: string, candidate: string): boolean {
-	const rel = path.relative(parent, candidate);
-	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
 /** Impure: `dir`, created and emptied, or null when it cannot be. */
 function emptyDirectory(dir: string): string | null {
 	try {
@@ -259,7 +255,7 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 	const outsideGuard = (repository: string): GitHookDriftGuard | null => {
 		const real = realOrResolved(repository);
 		// The session guard covers the repository holding the workspace and every one nested in it.
-		if (atOrBelow(workspace, real) || atOrBelow(real, workspace)) return null;
+		if (isSameOrDescendant(real, workspace) || isSameOrDescendant(workspace, real)) return null;
 		let guard = outside.get(real);
 		if (guard === undefined) {
 			const fingerprinter = createGitHooksFingerprinter(real);
@@ -279,7 +275,7 @@ export function createInternalGitPolicy(deps: InternalGitPolicyDeps): InternalGi
 	 */
 	const outsideConfigGuard = (repository: string): GitHookDriftGuard | null => {
 		const real = realOrResolved(repository);
-		if (atOrBelow(workspace, real) || atOrBelow(real, workspace)) return null;
+		if (isSameOrDescendant(real, workspace) || isSameOrDescendant(workspace, real)) return null;
 		let guard = outsideConfig.get(real);
 		if (guard === undefined) {
 			const fingerprinter = createGitHooksFingerprinter(real);

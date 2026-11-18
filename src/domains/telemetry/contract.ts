@@ -143,6 +143,8 @@ export interface TelemetryView {
 	/** True while the live model's cold read has not merged; whole-scope sums stay partial until it does. */
 	readonly seeding: boolean;
 	session(): SessionTelemetryV1;
+	/** A cheap stamp that changes whenever `session()` might; equal stamps mean an unchanged projection. */
+	revision?(): string;
 	calls(filter?: CallFilter): CallsReportV1;
 	/** The journal records behind the session's own attempts the filter matches, for a fold that keeps provenance. */
 	callRecords(filter?: CallFilter): TelemetryRecord[];

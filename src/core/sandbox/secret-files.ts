@@ -3,6 +3,7 @@ import { type Dirent, lstatSync, readdirSync, readFileSync, realpathSync, statSy
 import path from "node:path";
 import { HOME_SECRET_RELATIVE_PATHS, WORKSPACE_SECRET_PATHS } from "../../domains/safety/secret-paths.js";
 import { internalGitArgv } from "../internal-git.js";
+import { relativePathEscapes } from "../path-containment.js";
 import type { SandboxMaskedPath } from "./types.js";
 
 /**
@@ -560,7 +561,7 @@ export interface SecretMaskScan {
 
 function isInside(parent: string, candidate: string): boolean {
 	const rel = path.relative(parent, candidate);
-	return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
+	return rel.length > 0 && !relativePathEscapes(rel);
 }
 
 /**

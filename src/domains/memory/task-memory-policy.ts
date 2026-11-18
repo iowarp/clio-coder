@@ -20,6 +20,7 @@ import {
 	type TaskMemoryRenderableClass,
 } from "./task-bank.js";
 import { rejectReminder, rejectStoredContent, stripBoundaryControlTokens } from "./task-memory-output.js";
+import { hasExactKeys, isRecord, nonEmptyString, positiveInteger } from "./util.js";
 
 export const TASK_MEMORY_POLICY_MAX_OPERATIONS = 8;
 /**
@@ -1063,23 +1064,6 @@ function boundedContent(value: unknown): string | null {
 	if (typeof value !== "string") return null;
 	const normalized = value.replace(/\s+/gu, " ").trim();
 	return normalized.length > 0 && normalized.length <= TASK_MEMORY_CONTENT_MAX_CHARS ? normalized : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasExactKeys(record: Record<string, unknown>, expected: ReadonlyArray<string>): boolean {
-	const keys = Object.keys(record).sort();
-	return keys.length === expected.length && [...expected].sort().every((key, index) => keys[index] === key);
-}
-
-function nonEmptyString(value: unknown): value is string {
-	return typeof value === "string" && value.trim().length > 0;
-}
-
-function positiveInteger(value: number | undefined, fallback: number): number {
-	return value !== undefined && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 /**

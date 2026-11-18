@@ -23,7 +23,7 @@ export interface DispatchMemoryRoute {
  * constrained to the same runtime: a pinned target, or a bound profile whose
  * target runtime the request also names.
  */
-export function dispatchMemoryRuntimeId(
+function dispatchMemoryRuntimeId(
 	settings: Pick<ClioSettings, "targets" | "fleet">,
 	route: DispatchMemoryRoute,
 ): string | undefined {

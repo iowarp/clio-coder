@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { sessionTelemetryContext } from "../core/telemetry/context.js";
@@ -62,6 +63,8 @@ import { renderDoctorReport } from "./renderers/doctor-report.js";
 import { renameCurrentSession } from "./session-rename.js";
 
 const EXPORT_RENDER_WIDTH = 100;
+/** Two of pi-tui's 16 ms render intervals: long enough for the frame an export notice requests to commit first. */
+const EXPORT_PAINT_WAIT_MS = 32;
 
 /** Longest run of consecutive backticks in the rendered transcript, for fence sizing. */
 function longestBacktickRun(lines: ReadonlyArray<string>): number {
@@ -836,7 +839,35 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				appendCommandNotice("error", "[/export] no active session to export");
 				return;
 			}
-			try {
+			// The async body runs synchronously up to its first await, so the capture below still happens at dispatch and a
+			// failure in it still ends as an error notice.
+			return (async () => {
+				// What the export reads about the session is captured at dispatch, so a
+				// session switch while it renders cannot redirect it. It is scoped to the
+				// leaf the session is on, the same way /resume replays (issue #107): with
+				// a /tree pin persisted and not yet extended, the file still holds the
+				// abandoned branch after the pin, and an unscoped rehydrate exported it as
+				// ordinary history (issue #109). No session contract means no pin can
+				// exist for this reader, so the file replays whole.
+				const leafTurnId = deps.session?.leafId(sessionId) ?? null;
+				const sessionMeta = deps.session?.current() ?? null;
+				const telemetry = deps.getTelemetry?.() ?? null;
+				// The operator names this file by the day they ran the export, so the
+				// date in it is their calendar date. The header below keeps the ISO
+				// instant, which is the machine-readable half of the same fact.
+				const exportedAt = deps.now?.() ?? new Date();
+				const requestedPath = pathArg?.trim() ?? "";
+				const markdown = requestedPath.toLowerCase().endsWith(".md");
+				const target = resolve(
+					requestedPath.length > 0
+						? requestedPath
+						: join(".clio-coder", "exports", `${sessionId}-${dateLocal(exportedAt)}.html`),
+				);
+				const workspace = resolve(cwd());
+				appendCommandNotice("info", `[/export] exporting session ${sessionId}…`);
+				// The notice paints before the render below holds the event loop: pi-tui throttles frames to one per
+				// render interval, so waiting two lets the frame the notice requested reach the terminal first.
+				await delay(EXPORT_PAINT_WAIT_MS);
 				const turns = deps.readStructuredEntries(sessionId);
 				// Same pure render pipeline as the live panel and /resume replay: a
 				// throwaway panel is rehydrated from the ledger under the verbose
@@ -850,14 +881,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					unboundedToolBodies: true,
 					bareCodeFences: true,
 					getOutputStyle: () => "detailed",
-					...(deps.getTelemetry ? { getTelemetry: deps.getTelemetry } : {}),
+					...(deps.getTelemetry ? { getTelemetry: () => telemetry } : {}),
 				});
-				// Scoped to the leaf the session is on, the same way /resume replays
-				// (issue #107): with a /tree pin persisted and not yet extended, the
-				// file still holds the abandoned branch after the pin, and an unscoped
-				// rehydrate exported it as ordinary history (issue #109). No session
-				// contract means no pin can exist for this reader, so the file replays whole.
-				const leafTurnId = deps.session?.leafId(sessionId) ?? null;
 				// The export shows the same continuity the model sees, resolved from
 				// the same ledger through the same helper, so the two cannot drift.
 				// It is labelled as assistant handoff text and is never rendered as an
@@ -868,21 +893,11 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					withContinuityReplay(
 						turns,
 						{ unboundedToolBodies: true, ...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}) },
-						deps.session,
+						deps.session ? { current: () => sessionMeta } : undefined,
 					),
 				);
 				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
-				// The operator names this file by the day they ran the export, so the
-				// date in it is their calendar date. The header below keeps the ISO
-				// instant, which is the machine-readable half of the same fact.
-				const exportedAt = deps.now?.() ?? new Date();
-				const date = dateLocal(exportedAt);
-				const requestedPath = pathArg?.trim() ?? "";
-				const markdown = requestedPath.toLowerCase().endsWith(".md");
-				const target = resolve(
-					requestedPath.length > 0 ? requestedPath : join(".clio-coder", "exports", `${sessionId}-${date}.html`),
-				);
-				mkdirSync(resolve(target, ".."), { recursive: true });
+				let body: string;
 				if (markdown) {
 					const lines = ansiLines.map(stripTerminalSequences);
 					// The fence has to be longer than the longest backtick run the
@@ -892,19 +907,21 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 					// fenced code, so this is reachable content, not a hypothetical.
 					const fence = "`".repeat(Math.max(3, longestBacktickRun(lines) + 1));
 					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", `${fence}text`];
-					writeFileSync(target, `${[...header, ...lines, fence, ""].join("\n")}`, "utf8");
+					body = `${[...header, ...lines, fence, ""].join("\n")}`;
 				} else {
-					writeFileSync(target, renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines }), "utf8");
+					body = renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines });
 				}
-				const fromWorkspace = relative(resolve(cwd()), target);
+				await mkdir(resolve(target, ".."), { recursive: true });
+				await writeFile(target, body, "utf8");
+				const fromWorkspace = relative(workspace, target);
 				const shownPath =
 					fromWorkspace !== ".." && !fromWorkspace.startsWith(`..${sep}`) && !isAbsolute(fromWorkspace)
 						? fromWorkspace || "."
 						: target;
 				appendCommandNotice("success", `[/export] wrote ${ansiLines.length} lines to ${shownPath}`);
-			} catch (err) {
+			})().catch((err) => {
 				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
-			}
+			});
 		},
 		runInit: (options) => {
 			const onInit = deps.onInit;

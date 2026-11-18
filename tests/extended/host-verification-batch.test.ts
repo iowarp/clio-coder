@@ -22,7 +22,7 @@ import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
 import { JUDGED_CHECK_MAX_OUTPUT_BYTES, runProjectCheck } from "../../src/tools/verify/scripts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
-import { settledRunTrust } from "../harness/settled-run.js";
+import { settledRunTrust, writeSettledRun } from "../harness/settled-run.js";
 
 // The verification slot is machine-wide; keep this file's slot in scratch.
 const slotDir = mkdtempSync(join(tmpdir(), "clio-coder-verification-slot-"));
@@ -263,7 +263,7 @@ describe("host verification judgment identity", () => {
 	}
 
 	for (const kind of ["numeric-compare", "perf-budget"] as const) {
-		it(`invalidates ${kind} evidence when an ignored reference or baseline changes`, async () => {
+		it(`never reuses a ${kind} pass and judges a changed ignored reference or baseline afresh`, async () => {
 			const scratch = makeScratch();
 			writeFileSync(join(scratch.project, ".gitignore"), "measurements/\n");
 			mkdirSync(join(scratch.project, "measurements"));
@@ -280,10 +280,10 @@ describe("host verification judgment identity", () => {
 			ok(fingerprint);
 			const first = await verify(scratch, "original", resolved);
 			strictEqual(first?.status, "verified");
-			const reused = await verify(scratch, "identical", structuredClone(resolved));
-			strictEqual(reused?.checks[0]?.memo, true);
-			strictEqual(reused?.checks[0]?.evidenceRunId, "original");
-			deepStrictEqual(reused?.checks[0]?.report, first?.checks[0]?.report);
+			const again = await verify(scratch, "identical", structuredClone(resolved));
+			strictEqual(again?.status, "verified");
+			strictEqual(again?.checks[0]?.memo, false);
+			strictEqual(again?.checks[0]?.evidenceRunId, undefined);
 			writeFileSync(path, kind === "numeric-compare" ? '{"value":1}' : '{"version":1,"wallTimeMs":0.001}');
 			strictEqual(
 				workspaceFingerprint(scratch.project),
@@ -297,15 +297,20 @@ describe("host verification judgment identity", () => {
 			const missing = await verify(scratch, "missing", resolved);
 			strictEqual(missing?.status, "rejected");
 			strictEqual(missing?.checks[0]?.memo, false);
-			strictEqual(runCount(scratch), 3);
+			strictEqual(runCount(scratch), 4);
 		});
 	}
 
-	it("preserves check names and reuses identical command evidence with provenance", async () => {
+	it("preserves check names and reuses identical command evidence only from the run that sealed it", async () => {
 		const scratch = makeScratch();
 		const base = measurement(scratch);
 		const first = await verify(scratch, "first", base);
 		strictEqual(first?.status, "verified");
+		ok(first);
+		await writeSettledRun(scratch.stateDir, {
+			...fixtureReceiptDraft(fixtureEnvelope("first")),
+			hostVerification: first,
+		});
 		const renamed = await verify(scratch, "renamed", { ...base, check: "energy" });
 		strictEqual(renamed?.checks[0]?.check, "energy");
 		strictEqual(renamed?.checks[0]?.memo, false);
@@ -313,8 +318,18 @@ describe("host verification judgment identity", () => {
 		strictEqual(reused?.checks[0]?.check, "value");
 		strictEqual(reused?.checks[0]?.memo, true);
 		strictEqual(reused?.checks[0]?.evidenceRunId, "first");
-		strictEqual(reused?.checks[0]?.artifactPath, first?.checks[0]?.artifactPath);
+		strictEqual(reused?.checks[0]?.artifactPath, first.checks[0]?.artifactPath);
 		strictEqual(runCount(scratch), 2);
+		// D3-2: a memo line edited to cite a run that never sealed this check is a miss, not a pass.
+		const memoPath = join(scratch.stateDir, "dispatch-verification-memo.json");
+		const memo = JSON.parse(readFileSync(memoPath, "utf8")) as { entries: Array<{ runId: string }> };
+		writeFileSync(
+			memoPath,
+			JSON.stringify({ ...memo, entries: memo.entries.map((entry) => ({ ...entry, runId: "forged" })) }),
+		);
+		const forged = await verify(scratch, "after-forgery", base);
+		strictEqual(forged?.checks[0]?.memo, false);
+		strictEqual(runCount(scratch), 3);
 	});
 
 	it("retains every batch judgment sharing argv and only deduplicates identical declarations", async () => {
@@ -1025,6 +1040,7 @@ describe("lint and format checks scoped to the task's changed files", () => {
 			stateDir: scratch.stateDir,
 		});
 		strictEqual(verification?.status, "verified");
+		strictEqual(verification?.checks[0]?.notRun, "nothing-changed");
 		strictEqual(existsSync(linter.log), false);
 	});
 

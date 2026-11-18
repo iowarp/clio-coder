@@ -397,6 +397,15 @@ export function disposeCopilotConversations(sessionId: string): void {
 	}
 }
 
+/** The levels the runtime's listing names for this model, carried on the model by the copilot-sdk probe. */
+function listedLevelsOf(model: Model<Api>): readonly string[] | undefined {
+	return (model as Model<Api> & { clioCoder?: { reasoningLevels?: readonly string[] } }).clioCoder?.reasoningLevels;
+}
+
+/**
+ * The `reasoningEffort` for the resolved thinking level. The level was already mapped onto the listed set, so
+ * each passes through by name. Off sends `none` only where the listing offers it; elsewhere the effort is omitted.
+ */
 function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | undefined): string | undefined {
 	if (!model.reasoning) return undefined;
 	switch (options?.reasoning) {
@@ -409,8 +418,10 @@ function reasoningEffortFor(model: Model<Api>, options: SimpleStreamOptions | un
 			return "high";
 		case "xhigh":
 			return "xhigh";
+		case "max":
+			return "max";
 		default:
-			return undefined;
+			return listedLevelsOf(model)?.includes("off") ? "none" : undefined;
 	}
 }
 

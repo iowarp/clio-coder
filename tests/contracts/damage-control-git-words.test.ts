@@ -47,6 +47,17 @@ it("F2: a path-spelled or wrapped git with global options still meets the hard g
 			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", `${level}: ${command}`);
 });
 
+it("a separate-word --attr-source value does not hide the git subcommand from the hard rails", () => {
+	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
+	for (const command of [
+		"git --attr-source HEAD reset --hard",
+		"git --attr-source HEAD clean -fdx",
+		"git --attr-source HEAD push --force origin main",
+	])
+		for (const level of ["default", "yolo"] as const)
+			strictEqual(engine.evaluate({ tool: "bash", args: { command } }, level).kind, "block", `${level}: ${command}`);
+});
+
 it("accepted clean and checkout force prefixes retain destructive rails", () => {
 	const engine = createSafetyPolicyEngine({ cwd: process.cwd() });
 	for (const flag of ["--f", "--fo", "--for", "--forc"]) {

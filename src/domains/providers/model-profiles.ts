@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml } from "yaml";
 import type { ClioSettings } from "../../core/config.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { parsePackagedYaml } from "../../core/packaged-yaml.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import {
 	type CapabilityFlags,
@@ -104,6 +105,7 @@ const LIVE_ONLY_CAPABILITY_FIELDS: readonly string[] = [
 	"contextWindow",
 	"maxTokens",
 	"reasoningLevels",
+	"reasoningDefaultLevel",
 	"thinkingControlRuntime",
 	"parallelSlots",
 ];
@@ -156,8 +158,9 @@ function validateProfile(value: unknown, where: string): ModelProfile {
 	return item as unknown as ModelProfile;
 }
 
-function parseManifest(path: string): unknown[] {
-	const document = record(parseYaml(readFileSync(path, "utf8")), path);
+function parseManifest(path: string, packaged: boolean): unknown[] {
+	const text = readFileSync(path, "utf8");
+	const document = record(packaged ? parsePackagedYaml(text) : parseYaml(text), path);
 	keysOnly(document, ["version", "models"], path);
 	if (document.version !== 1 || !Array.isArray(document.models)) {
 		throw new Error(`${path} must contain version: 1 and a models list`);
@@ -333,7 +336,7 @@ export function loadModelProfiles(
 	const userPath = options.userPath ?? join(resolveClioDirs().config, "model-profiles.yaml");
 	const warn = options.onWarning ?? (() => undefined);
 	const byId = new Map<string, unknown>();
-	for (const [index, item] of parseManifest(packagedPath).entries()) {
+	for (const [index, item] of parseManifest(packagedPath, true).entries()) {
 		const profile = validateProfile(item, `${packagedPath}.models[${index}]`);
 		if (byId.has(profile.id.toLowerCase())) throw new Error(`${packagedPath}: duplicate id '${profile.id}'`);
 		byId.set(profile.id.toLowerCase(), profile);
@@ -341,7 +344,7 @@ export function loadModelProfiles(
 	if (existsSync(userPath)) {
 		let overrides: unknown[] = [];
 		try {
-			overrides = parseManifest(userPath);
+			overrides = parseManifest(userPath, false);
 		} catch (err) {
 			warn(`${userPath} ignored: ${err instanceof Error ? err.message : String(err)}`);
 		}

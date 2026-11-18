@@ -1163,7 +1163,8 @@ writers can run side by side without `parallel_writer_conflict`; declare
 `intent.write_roots` if that worker must also edit the workspace.
 
 Verification values are declared check ids, never shell commands. Admission
-resolves each id from a package script or `.clio-coder/verifiers.yaml`
+resolves each id from a package script, `.clio-coder/verifiers.yaml`, or a check
+`verify` derives from the toolchain files (such as `python-unittest`)
 ([quality-policy.md](quality-policy.md) covers declared checks, including the judged
 `numeric-compare`, `perf-budget` and `reproduce` kinds), clamps
 the requested timeout to the declaration, and freezes the exact argv, cwd,

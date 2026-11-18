@@ -96,7 +96,7 @@ export interface GatewayToolDeps {
 }
 
 const DESCRIPTION =
-	'Discover builtin, extension and MCP capabilities. op="find" searches; an exact name adds its schema. op="describe" returns a schema; op="call" runs it with args under its own admission; op="chain" runs tool steps. Put capability at top level, its parameters in args. After an argument error, describe the capability before retrying. Chain syntax: op="describe", capability="gateway"; gateway ops are not chain capabilities. Discovery grants no authority.';
+	'Discover builtin, extension and MCP capabilities. op="find" searches; an exact name adds its schema. op="describe" returns a schema; op="call" runs it with args under its own admission; op="chain" runs steps of any tool but gateway. Put capability at top level, its parameters in args. After an argument error, describe the capability before retrying. Discovery grants no authority.';
 
 export const gatewayToolSurface: ToolSurface = {
 	name: ToolNames.Gateway,
@@ -120,7 +120,10 @@ export const gatewayToolSurface: ToolSurface = {
 		steps: Type.Optional(
 			Type.Array(Type.Unknown(), {
 				maxItems: 16,
-				description: 'chain: {id,capability,args,after?:[ids]}; describe capability="gateway" for bindings.',
+				// A known edit and its check finish in one round (Astra r9-3); the full
+				// step contract stays in describe, so the attached bytes barely move.
+				description:
+					'chain: a known edit then its check is [{id:e,capability:edit,args:{path,edits}},{id:v,capability:verify,args:{check},after:[e]}]. Bindings: describe capability="gateway".',
 			}),
 		),
 	}),

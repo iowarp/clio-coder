@@ -834,8 +834,9 @@ export interface MiddlewareHookFailedPayload {
 	/**
 	 * budget_exceeded only. True when the overrun is steady-state slowness (≥N of
 	 * the last M post-warmup calls over budget), not a lone spike. The interactive
-	 * notice surfaces only on steady-state; every post-warmup overrun is still
-	 * published for telemetry regardless.
+	 * notice surfaces only on steady-state; a lone stall (ten times the budget or
+	 * more) is still published for telemetry, and a smaller lone overrun only
+	 * under CLIO_CODER_HOOK_BUDGET_DEBUG=1.
 	 */
 	steadyStateWarn?: boolean | undefined;
 	/** Rolling-window stats; budget_exceeded only. */

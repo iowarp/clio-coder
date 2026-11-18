@@ -148,6 +148,19 @@ export function renderCountSum(sum: FactSum, unit = "call"): string {
 }
 
 /**
+ * A cached share folded over calls (C-05): `~` when a read was derived, and `≥` with the calls whose read went
+ * unreported, since a read they left out can only raise it (L3, L5).
+ */
+export function renderShareSum(sum: FactSum): string {
+	if (allAbsent(sum)) return renderAbsent("not-applicable");
+	const known = `${sum.coverage.estimated > 0 ? "~" : ""}${renderScalar(sum.measured + sum.estimated, "percent")}`;
+	if (sum.unknownCount === 0) return known;
+	const gap = `${plural(sum.unknownCount, "call")} unknown`;
+	if (sum.coverage.measured + sum.coverage.estimated === 0) return `unknown (${gap})`;
+	return `≥${known} (${gap})`;
+}
+
+/**
  * What the calls behind a cache-read figure did not report, or null when every call reported one. A local server
  * behind LiteLLM reused its prefix (300-700 ms to first token on 18-23K-token prompts) while every call omitted its
  * cache read, and an unknown share read as a cache that served nothing (WTF-P campaign, 2026-11-15). Clio does not
@@ -160,7 +173,7 @@ export function unreportedCacheReadWords(fact: Fact<number> | FactSum): string |
 	const reported = fact.coverage.measured + fact.coverage.estimated;
 	return reported === 0
 		? `no call reported a cache read (${plural(fact.unknownCount, "call")}); reuse is unmeasured, not a miss`
-		: `${renderCount(fact.unknownCount)} of ${plural(reported + fact.unknownCount, "call")} reported no cache read; the cached share counts only the calls that did`;
+		: `${renderCount(fact.unknownCount)} of ${plural(reported + fact.unknownCount, "call")} reported no cache read; the cached share marks them ≥, or ~ where the server timed its uncached prefill`;
 }
 
 /**

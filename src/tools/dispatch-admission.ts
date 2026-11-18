@@ -61,7 +61,8 @@ import type {
 } from "./dispatch-types.js";
 import type { HostEffectCall, ToolSpec } from "./registry.js";
 import { gitCheckoutRoot, gitHeadIsUnborn, WORKTREE_UNBORN_HEAD_MESSAGE } from "./task-worktree.js";
-import { discoverDeclaredChecksAtRoot } from "./verify/discovery.js";
+import { runnableChecksAtRoot } from "./verify/resolve.js";
+import { judgedFileSha256, readJudgedFile } from "./verify/scripts.js";
 
 /**
  * The six identity-sensitive stores which bind synchronous admission to the
@@ -369,9 +370,9 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			workspaceRoot: sessionWorkspace,
 			operatorNamedChecks(cwd) {
 				if (turnText.length === 0) return [];
-				const discovery = discoverDeclaredChecksAtRoot(sessionWorkspace, cwd);
+				const discovery = runnableChecksAtRoot(sessionWorkspace, cwd);
 				if (!discovery.ok) return [];
-				const declared = discovery.sources.flatMap((source) => source.checks);
+				const declared = discovery.checks;
 				// Sweep checks judge one named run and cannot ride host verification.
 				const ids = new Set(declared.filter((check) => check.runs === undefined).map((check) => check.id));
 				return operatorNamedChecks(turnText, ids);
@@ -390,11 +391,10 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 				const workspaceRoot = externalReadRoot ?? sessionWorkspace;
 				// External Scouts cannot verify; do not inspect their project catalog before consent (#433).
 				const discovery =
-					externalReadRoot === undefined
-						? discoverDeclaredChecksAtRoot(workspaceRoot, cwd)
-						: { ok: true as const, sources: [] };
+					externalReadRoot === undefined ? runnableChecksAtRoot(workspaceRoot, cwd) : { ok: true as const, checks: [] };
 				if (!discovery.ok) return { ok: false, message: `verification_catalog_invalid: ${discovery.reason}` };
-				const declared = discovery.sources.flatMap((source) => source.checks);
+				// The ids verify runs, derived toolchain checks included, so a worker verifies as the main agent does (bt-7).
+				const declared = discovery.checks;
 				const byId = new Map(declared.map((check) => [check.id, check]));
 				const normalized = normalizeDispatchIntent(rawIntent, byId);
 				if (!normalized.ok)
@@ -419,15 +419,17 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							argv: [...check.command],
 							cwd: resolve(workspaceRoot, check.cwd),
 							timeoutMs: entry.timeoutMs,
-							// A judged check seals its kind and absolute file paths here, so
-							// host verification judges against what the catalog declared at
-							// admission rather than whatever the file says at run time.
+							// A judged check seals its kind, absolute file paths and the digest of
+							// each reference or baseline here. Host verification reads the file
+							// again at run time and fails the check when it no longer matches
+							// the digest, so a run that rewrites its own reference cannot pass.
 							...(check.kind !== "command" ? { kind: check.kind } : {}),
 							...(check.numeric !== undefined
 								? {
 										numeric: {
 											reference: resolve(workspaceRoot, check.numeric.reference),
 											tolerance: { ...check.numeric.tolerance },
+											referenceSha256: judgedFileSha256(readJudgedFile(resolve(workspaceRoot, check.numeric.reference))),
 										},
 									}
 								: {}),
@@ -435,7 +437,12 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 								? {
 										perf: {
 											...(check.perf.budget !== undefined ? { budget: structuredClone(check.perf.budget) } : {}),
-											...(check.perf.baseline !== undefined ? { baseline: resolve(workspaceRoot, check.perf.baseline) } : {}),
+											...(check.perf.baseline !== undefined
+												? {
+														baseline: resolve(workspaceRoot, check.perf.baseline),
+														baselineSha256: judgedFileSha256(readJudgedFile(resolve(workspaceRoot, check.perf.baseline))),
+													}
+												: {}),
 											...(check.perf.tolerance !== undefined ? { tolerance: { ...check.perf.tolerance } } : {}),
 										},
 									}

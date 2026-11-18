@@ -35,6 +35,8 @@ export interface CacheKeepaliveReply {
  */
 const OPENAI_IN_MEMORY_CACHE_SECONDS = 300;
 const OPENAI_EXTENDED_CACHE_SECONDS = 24 * 60 * 60;
+/** Pi's Responses adapter asks a route in explicit prompt-cache mode for `prompt_cache: { ttl: "30m" }` under long retention. */
+const OPENAI_EXPLICIT_LONG_CACHE_SECONDS = 30 * 60;
 /** Pi raises a smaller Responses output cap to 16, the API's minimum. */
 const OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
 
@@ -60,9 +62,13 @@ function lifetimeSeconds(model: Model<Api>, retention: "short" | "long"): number
 	const declared = model.promptCache?.[retention];
 	switch (model.api) {
 		case "openai-responses": {
+			if (declared !== undefined) return declared;
+			// The lifetime Pi's adapter asks for on the wire: 24 hours, or 30 minutes in explicit prompt-cache mode.
 			const compat = (model as Model<"openai-responses">).compat;
-			const extended = retention === "long" && compat?.supportsLongCacheRetention !== false;
-			return declared ?? (extended ? OPENAI_EXTENDED_CACHE_SECONDS : OPENAI_IN_MEMORY_CACHE_SECONDS);
+			if (retention !== "long" || compat?.supportsLongCacheRetention === false) return OPENAI_IN_MEMORY_CACHE_SECONDS;
+			return compat?.supportsExplicitPromptCacheMode === true
+				? OPENAI_EXPLICIT_LONG_CACHE_SECONDS
+				: OPENAI_EXTENDED_CACHE_SECONDS;
 		}
 		case "openai-codex-responses":
 			// Measured on gpt-6-luna, 2026-10-30 (#423): the backend rejects prompt_cache_retention ("Unsupported
@@ -113,6 +119,8 @@ export interface CacheKeepaliveEconomics {
 	warmUsd: number;
 	/** What the next request pays extra when the entry has expired. */
 	missUsd: number;
+	/** What earlier refreshes for the same awaited request already cost. */
+	spentUsd: number;
 	expectedSavingsUsd: number;
 	/** False when the prompt size or the route's prices are unknown. */
 	available: boolean;
@@ -136,13 +144,15 @@ function priced(
 
 /**
  * Price one refresh against the miss it prevents. The caller supplies the chance that a real request arrives after
- * the entry would have expired; a turn waiting on its own tools will send one.
+ * the entry would have expired; a turn waiting on its own tools will send one. That request can avoid only one
+ * miss however long it is awaited, so the refreshes already sent for it (`spentUsd`) come out of that value.
  */
 export function cacheKeepaliveEconomics(
 	model: Model<Api>,
 	promptTokens: number,
 	outputTokens: number,
 	continuationProbability: number,
+	spentUsd = 0,
 ): CacheKeepaliveEconomics {
 	const hit = priced(model, { cacheRead: promptTokens });
 	const miss = priced(model, model.cost.cacheWrite > 0 ? { cacheWrite: promptTokens } : { input: promptTokens });
@@ -151,9 +161,22 @@ export function cacheKeepaliveEconomics(
 	return {
 		warmUsd,
 		missUsd,
-		expectedSavingsUsd: continuationProbability * missUsd - warmUsd,
+		spentUsd,
+		expectedSavingsUsd: continuationProbability * missUsd - spentUsd - warmUsd,
 		available: promptTokens > 0 && (hit > 0 || miss > 0),
 	};
+}
+
+/** What a sent refresh cost at the route's rates. */
+export function cacheKeepaliveReplyUsd(model: Model<Api>, message: CacheKeepaliveReply): number {
+	return calculateEngineCost(model, message.usage).total;
+}
+
+/** The provider reported a cache read of zero: the entry was gone. An omitted read count is unknown, never zero. */
+export function cacheKeepaliveMissed(message: CacheKeepaliveReply): boolean {
+	return (
+		(message.usage as Usage & { cacheReadField?: unknown }).cacheReadField === "sent" && message.usage.cacheRead === 0
+	);
 }
 
 /** Prompt tokens a finished request processed, cached or not. */
