@@ -85,7 +85,8 @@ function buildOperatorInstructions(instructions?: string): string {
 
 /**
  * The room a checkpoint has in a small window, stated so a cumulative summary stops outgrowing the history space it
- * shares with the retained suffix (bt-18). Absent when the summary's own output room is the tighter bound.
+ * shares with the retained suffix (bt-18). A capped summary under 52,428 tokens always states it; elsewhere it is
+ * absent when the summary's own output room is the tighter bound.
  */
 function buildCheckpointRoom(roomTokens?: number): string {
 	if (roomTokens === undefined) return "";

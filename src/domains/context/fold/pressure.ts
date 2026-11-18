@@ -62,6 +62,8 @@ export interface EvictionPressureInput {
 	target: number;
 	/** The fraction the automatic trigger fires at, counting its reserve; read only when it applies. */
 	triggerFraction: () => number;
+	/** The static prefix (system prompt and tool schemas) the request carries whatever S1 evicts. */
+	prefixTokens?: number;
 }
 
 /**
@@ -69,12 +71,18 @@ export interface EvictionPressureInput {
  * so the age rung never acted and every pass paid for a summary; there S1 takes the trigger's fraction, and its
  * target scales by the same ratio, as notice and prepare do (0.75 x the trigger at the defaults). Every other case
  * keeps the raw figures (bt-47 tui-cf1 D6, cf1h-D5, ContextFold A3).
+ *
+ * That ratio applies to the history below the trigger, not to the static prefix S1 cannot evict: counted over the
+ * whole trigger, an 8K prefix left the 40K route's history about half its space (bt-18 item 8).
  */
 export function evictionPressure(input: EvictionPressureInput): { threshold: number; target: number } {
 	if (!input.automatic || !(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS || !(input.threshold > 0))
 		return { threshold: input.threshold, target: input.target };
 	const threshold = input.triggerFraction();
-	return { threshold, target: input.target * (threshold / input.threshold) };
+	const ratio = input.target / input.threshold;
+	const prefix = (input.prefixTokens ?? 0) / input.window;
+	if (!(prefix > 0) || prefix >= threshold) return { threshold, target: input.target * (threshold / input.threshold) };
+	return { threshold, target: prefix + ratio * (threshold - prefix) };
 }
 
 export interface FitOutputReserveInput {
@@ -98,6 +106,21 @@ export interface FitOutputReserveInput {
 export function fitOutputReserve(input: FitOutputReserveInput): number {
 	if (input.hardReserve || !(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS) return input.turnReserve;
 	return Math.min(input.turnReserve, input.admissibleReserve);
+}
+
+/**
+ * The cap on a chat-route compaction summary call's own output. Under 52,428 tokens it is the admissible reserve, or
+ * a configured chat.maxOutputTokens above it, as fit counts (A5): a reasoning route asked its whole output limit, and
+ * the summary request kept that much of a small window from the history it reads (bt-18). Every other window has
+ * no cap, as today.
+ */
+export function summaryOutputCap(input: {
+	window: number;
+	admissibleReserve: number;
+	configured: number | null;
+}): number | undefined {
+	if (!(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS) return undefined;
+	return Math.max(input.admissibleReserve, input.configured ?? 0);
 }
 
 /**

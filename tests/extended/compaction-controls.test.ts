@@ -1287,6 +1287,133 @@ describe("production compaction controls", () => {
 		}
 	});
 
+	it("keeps the bt-18 shape on an uncapped 40K reasoning route to three automatic summaries, none on overflow, each stating its budget (bt-18 items 7, 8)", async () => {
+		const f = fixture(false, false, true);
+		f.settings.context.workingSet.enabled = false;
+		faux.setResponses(Array.from({ length: 80 }, () => f.respond));
+		const note = `noted step ${"carried detail ".repeat(30)}`;
+		f.response.beforeReturn = () => {
+			const user = f.calls.at(-1)?.user ?? "";
+			const previous = user.slice(user.indexOf("<previous-context>"), user.indexOf("</previous-context>"));
+			let notes = (user.includes("<previous-context>") ? previous.split("noted step").length - 1 : 0) + 4;
+			const room = Number(/\((\d+) tokens\) in a small context window/.exec(user)?.[1] ?? Number.POSITIVE_INFINITY);
+			const write = () => syntheticCompactionSummary(note.repeat(notes));
+			while (notes > 0 && write().length / 4 > room) notes--;
+			f.response.text = write();
+		};
+		const passes: Array<{ requireFit: boolean; cap: number | undefined }> = [];
+		const autoCompact: typeof f.run = (instructions, trigger, budget) => {
+			passes.push({ requireFit: budget?.requireFit === true, cap: budget?.summaryOutputCap });
+			return f.run(instructions, trigger, budget);
+		};
+		// The bt-18 route: a reasoning chat route with no output cap configured, an 8K static prefix, a 40K window.
+		const runtime = {
+			targetId: "chat-target",
+			runtimeId: "fixture",
+			wireModelId: "chat",
+			runtimeResolution: {
+				pricedBy: "free",
+				capabilityDecisions: { maxTokens: 32_000 },
+				contextWindowDetails: { effectiveContextWindow: 40_000 },
+			},
+			agent: {
+				state: {
+					systemPrompt: "Follow the operating contract. ".repeat(1050),
+					tools: [],
+					messages: [],
+					thinkingLevel: "off",
+					model: { ...faux.getModel("chat"), contextWindow: 40_000, maxTokens: 32_000, reasoning: true },
+				},
+			},
+		} as unknown as AgentRuntime;
+		let leaf: string | null = null;
+		for (let turn = 1; turn <= 16; turn++) {
+			const state = createTurnState("off");
+			state.runtime = runtime;
+			const context = createTurnContext({
+				state,
+				session: f.session,
+				getSettings: () => f.settings,
+				providers: f.providers,
+				readSessionEntries: f.entries,
+				autoCompact,
+				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
+				emitNotice: () => {},
+			});
+			const user = appendEntry(f.state, {
+				kind: "message",
+				role: "user",
+				parentTurnId: leaf,
+				payload: { text: `turn ${turn}: continue the change` },
+			});
+			leaf = user.turnId;
+			state.activeUserTurnId = user.turnId;
+			for (let step = 1; step <= 2; step++) {
+				const id = `call-${turn}-${step}`;
+				const read = { path: `src/module-${turn}-${step}.ts` };
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "assistant",
+					parentTurnId: leaf,
+					payload: {
+						text: `Reading module ${turn}.${step}.`,
+						content: [
+							{ type: "text", text: `Reading module ${turn}.${step}.` },
+							{ type: "toolCall", id, name: "read", arguments: read },
+						],
+					},
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_call",
+					parentTurnId: leaf,
+					payload: { toolCallId: id, name: "read", args: read },
+				}).turnId;
+				leaf = appendEntry(f.state, {
+					kind: "message",
+					role: "tool_result",
+					parentTurnId: leaf,
+					payload: {
+						toolCallId: id,
+						toolName: "read",
+						isError: false,
+						result: {
+							content: [{ type: "text", text: `export const step${step} = ${turn};\n`.repeat(step === 1 ? 40 : 260) }],
+						},
+					},
+				}).turnId;
+				f.pinLeaf(leaf);
+				state.lastTurnId = leaf;
+				context.refreshAgentMessagesFromSession(runtime);
+				await context.postToolContinuationGuard(runtime);
+				leaf = state.lastTurnId ?? leaf;
+			}
+		}
+		// The summary call keeps to 4,096 + Pi's 4,096 margin, so a span past the room that leaves gains at the
+		// trigger; before, each call asked the whole summary room (a reasoning summarizer its whole limit).
+		const summaries = f.entries().filter((entry) => entry.kind === "compactionSummary").length;
+		const facts = JSON.stringify({ summaries, passes, maxTokens: f.calls.map((call) => call.maxTokens) });
+		ok(summaries >= 1 && summaries <= 3, facts);
+		ok(
+			passes.every((pass) => !pass.requireFit && pass.cap === 8_192),
+			facts,
+		);
+		ok(
+			f.calls.every((call) => (call.maxTokens ?? Infinity) <= 8_192),
+			facts,
+		);
+		// Each request states its length budget and asks for that much output, the summarizer here not reasoning (item 8).
+		for (const call of f.calls) {
+			const room = /\((\d+) tokens\) in a small context window/.exec(call.user)?.[1];
+			strictEqual(call.maxTokens, Number(room), facts);
+		}
+		deepStrictEqual(
+			(await f.journalOutcomes()).map((row) => (row.data as { outcome: string }).outcome),
+			Array.from({ length: summaries }, () => "committed"),
+			facts,
+		);
+	});
+
 	it("holds a checkpoint inside the rearm band without creating a context operation (#422)", async () => {
 		const f = fixture();
 		let attempts = 0;
@@ -1583,7 +1710,11 @@ describe("production compaction controls", () => {
 			await context.runAutoCompact(runtime, row.force, undefined, row.trigger);
 			const stages = folds.flatMap((fold) => fold.stages.map(({ stage, outcome }) => [stage, outcome]));
 			if (!row.force) {
-				deepStrictEqual(pressures, [{ threshold: 0.5, target: 0.375 }], row.label);
+				// 0.75 x the trigger over the history; the fixture's few-token prompt keeps a quarter of its own share.
+				strictEqual(pressures.length, 1, row.label);
+				strictEqual(pressures[0]?.threshold, 0.5, row.label);
+				const target = pressures[0]?.target ?? 0;
+				ok(target > 0.375 && target < 0.375 + 0.25 * (50 / 28_000), `${row.label}: ${target}`);
 				deepStrictEqual(stages, [["working_set", "committed"]], `${row.label}: S1 alone, no aging, no summary`);
 				strictEqual(f.calls.length, 0, row.label);
 				strictEqual(pruned.length, 1, row.label);
@@ -1602,7 +1733,9 @@ describe("production compaction controls", () => {
 	it("fits a 28K uncapped route against the admissible reserve, so the guard's pass stays automatic and the turn goes on (bt3 m2a-1, m2a-2, m2a-3, ContextFold A5)", async () => {
 		// An uncapped route reserves half the window, 14,000, for the turn and the trigger. Fit counted it too, so the
 		// guard took every pass as overflow. Twelve reads (~18K) put four outside protectLastSteps; eight (~16K, m2a-2)
-		// leave nothing to evict or summarize, and the old guard stopped the turn at input + 14,000 > 28,000.
+		// leave nothing to evict, and the old guard stopped the turn at input + 14,000 > 28,000. Their span was below
+		// the summary room, so the pass skipped; the summary call now keeps to the admissible reserve, whose room the
+		// span passes, so it pays one automatic summary (bt-18 item 7).
 		for (const reads of [12, 8]) {
 			const f = fixture(false, false);
 			let leaf = appendEntry(f.state, {
@@ -1641,9 +1774,7 @@ describe("production compaction controls", () => {
 			}
 			f.pinLeaf(leaf);
 			const pressures: Array<{ threshold: number; forced?: boolean }> = [];
-			const notices: string[] = [];
 			const { state, runtime, context, bus } = automaticContext(f, f.run, {
-				emitNotice: (text) => notices.push(text),
 				planEviction: (policy, input) => {
 					pressures.push({ threshold: input.pressure.threshold, ...(input.pressure.forced ? { forced: true } : {}) });
 					return planEviction(policy, input);
@@ -1664,14 +1795,20 @@ describe("production compaction controls", () => {
 			ok(input > 14_000 && input + 14_000 > 28_000 && input + 8_192 <= 28_000, `${reads}: ${input}`);
 			await context.postToolContinuationGuard(runtime);
 			const stages = folds.flatMap((fold) => fold.stages.map(({ stage, outcome }) => [stage, outcome]));
-			strictEqual(f.calls.length, 0, `${reads}: no paid summary`);
 			ok(!pressures.some((pressure) => pressure.forced), `${reads}: automatic, not overflow`);
 			if (reads === 12) {
+				strictEqual(f.calls.length, 0, `${reads}: no paid summary`);
 				deepStrictEqual(pressures, [{ threshold: 0.5 }], "S1 takes the trigger's fraction");
 				deepStrictEqual(stages, [["working_set", "committed"]], "S1 evicts, no summary");
 			} else {
-				deepStrictEqual(stages.at(-1), ["llm_summary", "none"], "the summary is skipped");
-				ok(!notices.some((text) => text.includes("llm_summary")), "a skipped pass names no summary (m2a-3)");
+				deepStrictEqual(stages.at(-1), ["llm_summary", "committed"], "one automatic summary");
+				const room = Number(/\((\d+) tokens\) in a small context window/.exec(f.calls[0]?.user ?? "")?.[1]);
+				ok(room > 0 && room <= 6_553, `the prompt states a budget within 4,096 + Pi's 4,096 margin: ${room}`);
+				deepStrictEqual(
+					f.calls.map((call) => call.maxTokens),
+					[room],
+					"and the request's output cap is that budget (bt-18 item 8)",
+				);
 			}
 			const after = context.refreshLiveBudget();
 			ok((after.inputTokens ?? Infinity) + (after.outputReserveTokens ?? 0) <= 28_000, `${reads}: admitted`);
@@ -2534,9 +2671,9 @@ describe("compaction trigger output reservation", () => {
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
 	});
 
-	it("bounds a reasoning route's summary reserve at half a known window, S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, ContextFold A1, A3, A5)", async () => {
+	it("bounds a reasoning route's summary reserve at half a known window, S1 follows the trigger and fit sits above it under 52,428 (bt-47 cf1j-b, D6, bt3 m2a, bt-18, ContextFold A1, A3, A5)", async () => {
 		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
-		const { evictionPressure, fitOutputReserve, foldTriggerReserve } = await import(
+		const { evictionPressure, fitOutputReserve, foldTriggerReserve, summaryOutputCap } = await import(
 			"../../src/domains/context/fold/pressure.js"
 		);
 		const { ADMISSIBLE_OUTPUT_RESERVE, requestOutputReserve, setGlobalDefaultMaxOutputTokens } = await import(
@@ -2577,6 +2714,23 @@ describe("compaction trigger output reservation", () => {
 			if (window >= 52_428 || route === small)
 				deepStrictEqual(auto, { threshold: 0.8, target: 0.6 }, `${window}: S1 inputs as today`);
 			deepStrictEqual(s1(false), { threshold: 0.8, target: 0.6 }, `${window}: a forced pass keeps S1's inputs`);
+			// S1's target counts the history below the trigger, not the static prefix it cannot evict (bt-18 item 8).
+			const prefixTokens = 8_300;
+			const history = evictionPressure({
+				automatic: true,
+				window,
+				threshold: 0.8,
+				target: 0.6,
+				triggerFraction: () => fraction,
+				prefixTokens,
+			});
+			if (window >= 52_428) deepStrictEqual(history, auto, `${window}: the prefix changes nothing from 52,428`);
+			else {
+				const expectedTarget = prefixTokens + 0.75 * (s1Threshold - prefixTokens);
+				ok(Math.abs(history.target * window - expectedTarget) < 1e-6, `${window}: ${history.target * window}`);
+				ok(history.target * window < s1Threshold, `${window}: below the trigger`);
+				strictEqual(history.threshold, auto.threshold);
+			}
 		}
 		// The fit line on an uncapped route, whose turn reserve is min(32,768, W / 2) (bt3 m2a, ContextFold A5). Under
 		// 52,428 fit counts 4,096 + Pi's 4,096 margin, so it sits above the trigger; from there both are as today.
@@ -2609,6 +2763,12 @@ describe("compaction trigger output reservation", () => {
 				hardReserve: configured !== undefined,
 			});
 			strictEqual(window - fit, fitLine, `${window}: fit line`);
+			// A chat-route summary call keeps to the same admissible reserve under 52,428 (bt-18 item 7).
+			strictEqual(
+				summaryOutputCap({ window, admissibleReserve: ADMISSIBLE_OUTPUT_RESERVE, configured: configured ?? null }),
+				window < 52_428 ? Math.max(8_192, configured ?? 0) : undefined,
+				`${window}: summary output cap`,
+			);
 			if (window < 52_428 && configured === undefined) ok(window - fit > trigger, `${window}: fit above the trigger`);
 			else strictEqual(fit, turnReserve, `${window}: fit counts the turn reserve, as today`);
 		}

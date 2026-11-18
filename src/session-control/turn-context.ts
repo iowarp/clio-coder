@@ -206,7 +206,7 @@ import {
 	continuityContextFromSession,
 	renderModelReplay,
 } from "./model-session-replay.js";
-import { resolveFitOutputReserve, resolveTurnOutputReserve } from "./output-reserve.js";
+import { resolveFitOutputReserve, resolveSummaryOutputCap, resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { extractTurnText } from "./session-replay-messages.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
@@ -259,6 +259,7 @@ export interface TurnContextDeps {
 					| "providerFallbackReason"
 					| "providerReplayFallback"
 					| "keepRecentTokens"
+					| "summaryOutputCap"
 					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
@@ -2302,6 +2303,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					| "livePrefix"
 					| "providerFallbackReason"
 					| "keepRecentTokens"
+					| "summaryOutputCap"
 					| "retainedTargetTokens"
 					| "requireFit"
 					| "preserveUserTurnId"
@@ -2316,6 +2318,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (pendingUserText !== undefined && state.activeUserTurnId === null && pendingUserIsOperator)
 			budget = { ...budget, pendingOperatorTurn: true };
+		// A summary written on this route shares its small window with the history it reads (bt-18).
+		const summaryCap = summaryOnChatRoute(agentRuntime, settings.context.compaction.model)
+			? resolveSummaryOutputCap(agentRuntime)
+			: undefined;
+		if (summaryCap !== undefined) budget = { ...budget, summaryOutputCap: summaryCap };
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
 			const output = resolveFitOutputReserve(agentRuntime, estimate.tokens);

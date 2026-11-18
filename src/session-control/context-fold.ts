@@ -531,6 +531,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 				threshold: compactionThreshold,
 				target: workingSetTarget,
 				triggerFraction: () => input.triggerFraction(estimate.tokens),
+				prefixTokens: estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens,
 			});
 			const policyInput = selectionInput(entries, session, settings, {
 				tokens: port.liveContextEstimate(agentRuntime, pendingUserText).tokens,

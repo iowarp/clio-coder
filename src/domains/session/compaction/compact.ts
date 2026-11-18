@@ -73,7 +73,7 @@ import {
 	stripEchoedExactFacts,
 } from "./exact-facts.js";
 import { noteSummaryUsage } from "./reasoning-share.js";
-import { summaryOutputBudget, summaryRoomTokens } from "./summary-output.js";
+import { summaryOutputBudget, summaryOutputForRoom, summaryRoomTokens } from "./summary-output.js";
 import { type ContinuityNoteCost, calculateContextTokens, estimateTokens, getLastAssistantUsage } from "./tokens.js";
 
 /** Validate the history checkpoint, never the intentionally different split-turn prompt. */
@@ -197,6 +197,8 @@ export interface CompactInput extends SideCallAuth {
 	reserveTokens?: number;
 	/** Override the built-in keep-recent default (DEFAULT_KEEP_RECENT_TOKENS). */
 	keepRecentTokens?: number;
+	/** A bound on the summary request's output cap: a chat-route summary on a small window (bt-18). */
+	summaryOutputCap?: number;
 	/**
 	 * History the cut aims to leave: the checkpoint plus the retained suffix. The summary request states the room
 	 * this leaves the checkpoint when that room is below the summary's own output room.
@@ -1514,7 +1516,9 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 			(entry) => entry.turnId !== preservedTurnId,
 		);
 		if (!hasConversation(span)) return emptyResult("nothing-to-summarize");
-		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < summaryRoomTokens(reserveTokens))
+		// A capped summary on a small window keeps to the room its cap leaves, so a span above that still gains (bt-18).
+		const room = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap).summaryRoom;
+		if (span.reduce((tokens, entry) => tokens + estimateTokens(entry), 0) < room)
 			return { ...emptyResult("below-summary-room"), noGain: true };
 	}
 
@@ -1556,20 +1560,28 @@ async function compactWithCalls(input: CompactInput): Promise<CompactResult> {
 	}
 	// A fixed cap let reasoning consume it and the summary was never saved (pi
 	// upstream #9512); summaryOutputBudget sizes it per route.
-	const { maxTokens, summaryRoom } = summaryOutputBudget(input.model, reserveTokens);
+	const outputBudget = summaryOutputBudget(input.model, reserveTokens, input.summaryOutputCap);
+	const { summaryRoom } = outputBudget;
 	// A cumulative checkpoint told nothing of its room outgrew a small window's history space a little more each cycle,
 	// while the retained suffix could shrink no further than the newest tool batch, so each cut landed closer to the
 	// trigger (bt-18). The request names what the target leaves once the kept suffix and Clio's blocks are counted.
+	// A capped summary on a small window always names its budget, the tighter of that and its own room (item 8).
+	const capped = input.summaryOutputCap !== undefined;
 	const checkpointRoom = (() => {
-		if (input.retainedTargetTokens === undefined) return undefined;
+		if (input.retainedTargetTokens === undefined) return capped ? summaryRoom : undefined;
 		const kept = entries.slice(cut.firstKeptEntryIndex).reduce((tokens, entry) => tokens + estimateTokens(entry), 0);
 		const room = Math.max(
 			CHECKPOINT_ROOM_FLOOR,
 			Math.floor(input.retainedTargetTokens / 3),
 			input.retainedTargetTokens - kept - ceilChars(trailer.length),
 		);
-		return room < summaryRoom ? room : undefined;
+		return room < summaryRoom ? room : capped ? summaryRoom : undefined;
 	})();
+	// The stated budget is the request's too: the output cap leaves it past the route's reasoning share.
+	const maxTokens =
+		capped && checkpointRoom !== undefined && outputBudget.maxTokens !== undefined
+			? Math.min(outputBudget.maxTokens, summaryOutputForRoom(input.model, checkpointRoom))
+			: outputBudget.maxTokens;
 	// A split turn's summary is the smaller part of the checkpoint, so it gets a third of the room.
 	const historyRoom =
 		checkpointRoom === undefined || turnPrefix.length === 0 ? checkpointRoom : Math.ceil((checkpointRoom * 2) / 3);
