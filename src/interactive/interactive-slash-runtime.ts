@@ -839,30 +839,32 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				appendCommandNotice("error", "[/export] no active session to export");
 				return;
 			}
-			// What the export reads about the session is captured at dispatch, so a
-			// session switch while it renders cannot redirect it. It is scoped to the
-			// leaf the session is on, the same way /resume replays (issue #107): with
-			// a /tree pin persisted and not yet extended, the file still holds the
-			// abandoned branch after the pin, and an unscoped rehydrate exported it as
-			// ordinary history (issue #109). No session contract means no pin can
-			// exist for this reader, so the file replays whole.
-			const leafTurnId = deps.session?.leafId(sessionId) ?? null;
-			const sessionMeta = deps.session?.current() ?? null;
-			const telemetry = deps.getTelemetry?.() ?? null;
-			// The operator names this file by the day they ran the export, so the
-			// date in it is their calendar date. The header below keeps the ISO
-			// instant, which is the machine-readable half of the same fact.
-			const exportedAt = deps.now?.() ?? new Date();
-			const requestedPath = pathArg?.trim() ?? "";
-			const markdown = requestedPath.toLowerCase().endsWith(".md");
-			const target = resolve(
-				requestedPath.length > 0
-					? requestedPath
-					: join(".clio-coder", "exports", `${sessionId}-${dateLocal(exportedAt)}.html`),
-			);
-			const workspace = resolve(cwd());
-			appendCommandNotice("info", `[/export] exporting session ${sessionId}…`);
+			// The async body runs synchronously up to its first await, so the capture below still happens at dispatch and a
+			// failure in it still ends as an error notice.
 			return (async () => {
+				// What the export reads about the session is captured at dispatch, so a
+				// session switch while it renders cannot redirect it. It is scoped to the
+				// leaf the session is on, the same way /resume replays (issue #107): with
+				// a /tree pin persisted and not yet extended, the file still holds the
+				// abandoned branch after the pin, and an unscoped rehydrate exported it as
+				// ordinary history (issue #109). No session contract means no pin can
+				// exist for this reader, so the file replays whole.
+				const leafTurnId = deps.session?.leafId(sessionId) ?? null;
+				const sessionMeta = deps.session?.current() ?? null;
+				const telemetry = deps.getTelemetry?.() ?? null;
+				// The operator names this file by the day they ran the export, so the
+				// date in it is their calendar date. The header below keeps the ISO
+				// instant, which is the machine-readable half of the same fact.
+				const exportedAt = deps.now?.() ?? new Date();
+				const requestedPath = pathArg?.trim() ?? "";
+				const markdown = requestedPath.toLowerCase().endsWith(".md");
+				const target = resolve(
+					requestedPath.length > 0
+						? requestedPath
+						: join(".clio-coder", "exports", `${sessionId}-${dateLocal(exportedAt)}.html`),
+				);
+				const workspace = resolve(cwd());
+				appendCommandNotice("info", `[/export] exporting session ${sessionId}…`);
 				// The notice paints before the render below holds the event loop: pi-tui throttles frames to one per
 				// render interval, so waiting two lets the frame the notice requested reach the terminal first.
 				await delay(EXPORT_PAINT_WAIT_MS);
