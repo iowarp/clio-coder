@@ -25,6 +25,13 @@ const CONTEXT_BUDGET_SAFETY_TOKENS =
 	);
 
 /**
+ * The output reserve a request needs to be sendable at all on a small window: a
+ * usable 4,096-token response plus the margin Pi's clamp subtracts, so the wire
+ * still allocates that response (ContextFold A5).
+ */
+export const ADMISSIBLE_OUTPUT_RESERVE = 4_096 + CONTEXT_BUDGET_SAFETY_TOKENS;
+
+/**
  * Output budget when nothing more specific applies. It is the product floor,
  * not a conservative guess: a turn that writes a source file or a wiki page
  * routinely needs tens of thousands of tokens, and every runtime Clio targets

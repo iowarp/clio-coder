@@ -77,6 +77,29 @@ export function evictionPressure(input: EvictionPressureInput): { threshold: num
 	return { threshold, target: input.target * (threshold / input.threshold) };
 }
 
+export interface FitOutputReserveInput {
+	/** The route's real context window; zero or less when it reports none. */
+	window: number;
+	/** The turn's own output reserve, the one the automatic trigger counts. */
+	turnReserve: number;
+	/** The reserve that still leaves the wire a usable response; see `ADMISSIBLE_OUTPUT_RESERVE`. */
+	admissibleReserve: number;
+	/** A configured chat.maxOutputTokens: the operator's reserve, refused by name rather than shrunk (bt-13). */
+	hardReserve: boolean;
+}
+
+/**
+ * The output reserve physical fit counts. Under 52,428 tokens an uncapped turn reserve is half the window, the figure
+ * the automatic trigger counts too, so fit failed exactly where the trigger fired: every pass took the overflow path,
+ * A1's no-gain skip and A3's S1 never ran, and the post-tool guard stopped requests the provider accepts (bt3 m2a).
+ * There fit counts the admissible reserve, never more than the turn's, so it fails only above the trigger. A
+ * configured chat.maxOutputTokens and every other window keep the turn reserve (ContextFold A5).
+ */
+export function fitOutputReserve(input: FitOutputReserveInput): number {
+	if (input.hardReserve || !(input.window > 0) || input.window >= SMALL_WINDOW_TOKENS) return input.turnReserve;
+	return Math.min(input.turnReserve, input.admissibleReserve);
+}
+
 /**
  * Whether one finalized attempt fits the real window: input plus reserved
  * output at most the window, so exactly at the window fits. An unknown window

@@ -31,7 +31,7 @@ import { createRequestStructures } from "../engine/request-structure.js";
 import { type AttemptReceipt, carriedCheckpoints, type RequestCursor } from "./attempt-receipt.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
-import { resolveTurnOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
+import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
 import { prefixBlocksOf } from "./prefix-blocks.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
@@ -1325,7 +1325,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					middlewareChoice,
 				);
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
-				const output = resolveTurnOutputReserve(localRuntime, input);
+				const output = resolveFitOutputReserve(localRuntime, input);
 				if (view.effectiveWindow !== null && !requestFits(input, output, view.effectiveWindow))
 					return {
 						block: true,
