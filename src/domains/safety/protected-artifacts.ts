@@ -258,6 +258,23 @@ export function detectValidationCommand(
 }
 
 /**
+ * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
+ * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` that plumbing
+ * never changes the exit status. Tools and arguments stay distinct, so `pytest` never settles `pytest -q` (bt-27).
+ */
+export function observedValidationCommand(command: string): string {
+	let current = command.trim();
+	for (;;) {
+		const next = current
+			.replace(/\s*\|&?\s*(?:tail|head)(?:\s+[^|;&<>]*)?$/u, "")
+			.replace(/\s+2>&1$/u, "")
+			.trim();
+		if (next === current) return current;
+		current = next;
+	}
+}
+
+/**
  * Returns every path the command would write to: shell redirect targets
  * (`>`, `>>`), all path arguments to `tee`, `mkdir`, and `touch`, the
  * destination argument of `cp`, `mv`, and `ln`, and the file operands of an
