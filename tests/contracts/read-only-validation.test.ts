@@ -21,7 +21,9 @@ import {
 } from "../../src/domains/dispatch/run-findings.js";
 import type { RunResult } from "../../src/domains/dispatch/types.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
-import { type CallVerdict, classifyCall } from "../../src/domains/safety/check-classifier.js";
+import { type CallVerdict, classifyCall, settleCheckCall } from "../../src/domains/safety/check-classifier.js";
+import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
+import { extractCommandDeleteTargets } from "../../src/domains/safety/protected-artifacts.js";
 import { checkOutputReader, createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
 
@@ -1117,6 +1119,71 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	} finally {
 		rmSync(repo, { recursive: true, force: true });
 	}
+});
+
+it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", () => {
+	const cwd = process.cwd();
+	const read = (command: string) => classifyCall("bash", { command }, { cwd, outputTarget: checkOutputReader(cwd) });
+	const gate = (command: string) => {
+		const call = (id: string, name: string, args: Record<string, unknown>) => [
+			{ kind: "message", role: "tool_call", turnId: id, payload: { name, toolCallId: id, args } },
+			{ kind: "message", role: "tool_result", turnId: id, payload: { toolName: name, toolCallId: id, isError: false } },
+		];
+		const sessionEntries = [
+			{ kind: "message", role: "user", turnId: "user", payload: { text: "fix it" } },
+			...call("write", "write", { path: "src/a.ts", content: "x" }),
+			...call("check", "bash", { command }),
+			{ kind: "message", role: "assistant", turnId: "done", payload: { text: "Done.", stopReason: "stop" } },
+		];
+		const { kind, reason } = assessFinishContract({ sessionEntries, assistantTurnId: "done" });
+		return `${kind}/${reason}`;
+	};
+	for (const command of [
+		"timeout 300 npm test",
+		"timeout -s KILL -k 10 5m pytest",
+		"timeout 600 cargo test",
+		"timeout 300 go test ./...",
+		"timeout 300 npx vitest run",
+		"nice -n 10 npm test",
+		"nice -5 npm test",
+		"xvfb-run -a -s '-screen 0 1x1x24' npm test",
+		"python -m mypy src",
+		"python3 -m ruff check .",
+		"python -m pylint src",
+		"python -m flake8",
+		"pnpm vitest run",
+		"yarn vitest run",
+		"npm exec vitest run",
+		"yarn exec -- vitest run",
+		"npm --prefix web test",
+		"pnpm -C web run lint",
+		"yarn --cwd=web test",
+		"cargo build",
+		"php artisan test",
+	]) {
+		const call = read(command);
+		deepStrictEqual([call.verdict, call.changesTree], ["check", false], command);
+		strictEqual(settleCheckCall(call, false, "ok", true).settled, true, command);
+		strictEqual(gate(command), "ok/validation_evidence", command);
+	}
+	// The wrapped check keeps its identity, and its red under timeout (exit 124 included) is its own.
+	strictEqual(read("timeout 300 npm test").check, "npm test");
+	strictEqual(read("npm --prefix web test").check, "npm --prefix web test");
+	strictEqual(settleCheckCall(read("timeout 300 npm test"), true, "error", true).settled, true);
+	// Writers stay writers through a wrapper or an exec, and a wrapped delete names its target.
+	for (const command of [
+		"timeout 60 npx eslint --fix .",
+		"nice prettier --write .",
+		"npm exec vitest -u",
+		"pnpm vitest -u",
+		"python -m ruff format .",
+		"python -m black src",
+		"timeout 5 rm -rf build",
+	]) {
+		strictEqual(read(command).verdict, "mutation", command);
+		strictEqual(gate(command), "engage/unvalidated_mutation", command);
+	}
+	deepStrictEqual(extractCommandDeleteTargets("timeout 5 rm -rf build"), ["build"]);
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {
