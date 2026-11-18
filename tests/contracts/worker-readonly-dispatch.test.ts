@@ -1,4 +1,4 @@
-import { match, ok, rejects, strictEqual, throws } from "node:assert/strict";
+import { doesNotMatch, match, ok, rejects, strictEqual, throws } from "node:assert/strict";
 import { test } from "node:test";
 import { Type } from "typebox";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -371,5 +371,8 @@ test("an ACP read-only worker receives the default posture and its run restricti
 		{ autonomy: "default", readOnly: true },
 	);
 	match(messages.find(({ id }) => id === "dispatch-safety-posture")?.body ?? "", /autonomy default/u);
+	const posture = messages.find(({ id }) => id === "dispatch-safety-posture")?.body ?? "";
+	match(posture, /workspace edits are not permitted in this run; read-only inspection runs/u);
+	doesNotMatch(posture, /workspace edits and recognized commands run/u);
 	match(messages.find(({ id }) => id === "dispatch-read-only")?.body ?? "", /inspection inside the workspace/u);
 });

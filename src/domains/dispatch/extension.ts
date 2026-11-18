@@ -2233,7 +2233,7 @@ export function buildDynamicPromptMessages(
 		const body =
 			dynamicContext.permit !== undefined
 				? `Safety posture: the permit in your instructions applies. Worker permission routing: ${permission}.${sandbox}`
-				: `Safety posture: ${posture} ${workerSafetyOneLiner(permission)} Worker permission routing: ${permission}.${sandbox}`;
+				: `Safety posture: ${posture} ${workerSafetyOneLiner(permission, dynamicContext.readOnly === true)} Worker permission routing: ${permission}.${sandbox}`;
 		messages.push({ id: "dispatch-safety-posture", body, contentHash: sha256(body) });
 	}
 	if (dynamicContext.readOnly === true) {
