@@ -103,6 +103,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Working-set eviction no longer credits the full body of a tool result that observation aging already stubbed, so the plan no longer stops before the request is under target (D1-1).
+- Observation aging records each batch in the session ledger and seeds from it, so a resumed or forked session sends the same stub set instead of a fresh batch that broke the prompt cache (D1-6).
 - `evidence inspect` and the run row now report a headless main-agent run's real token usage, read from its settlement, instead of a measured "tokens: 0" (bt-31).
 - A `verify` pass, or a validation tool's passing aggregate, followed by a workspace edit no longer marks the run verified; only checks that ran on the final tree count, a red after the last edit still fails and a fixed, re-run check still passes (bt-27c).
 - `run --json` (full) keeps the checked answer in the final `turn_end.message` when the reply to a citation check only confirms or corrects citations (bt-29).
