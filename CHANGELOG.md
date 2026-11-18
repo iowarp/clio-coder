@@ -51,6 +51,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- D3-5: `numeric-compare` checks accept per-key `tolerance.keys` bounds (an entry replaces the check-level bounds for its key; an entry naming a key the reference lacks fails), and a reference with no keys or a key whose arrays are both empty is unjudgeable and fails instead of passing.
 - Astra r10-2: the fleet board no longer rereads every running worker's run scope and re-projects its rows several times on each frame.
 - Astra r10-3: the footer reads the main route's first-output history only when the long-silence note prints it, instead of on every refresh.
 - Astra r9-1: a failed `/context` operation no longer rewrites the system prompt and breaks the prompt cache; the fact arrives once in the turn reminder.
