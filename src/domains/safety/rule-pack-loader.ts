@@ -9,8 +9,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
+import { parsePackagedYaml } from "../../core/packaged-yaml.js";
 import type { DamageControlRule, DamageControlRuleset } from "./damage-control.js";
 import { compileDamageControlRule } from "./rule-compiler.js";
 
@@ -45,7 +45,7 @@ function emptyRuleset(version: number): DamageControlRuleset {
 
 function loadRulePacks(yamlPath: string): RulePacks {
 	const raw = readFileSync(yamlPath, "utf8");
-	const parsed = parseYaml(raw) as RawDocument | null;
+	const parsed = parsePackagedYaml(raw) as RawDocument | null;
 	if (!parsed || typeof parsed !== "object") {
 		throw new Error(`damage-control rules at ${yamlPath}: expected mapping at document root`);
 	}

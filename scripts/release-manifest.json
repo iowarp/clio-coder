@@ -28,6 +28,7 @@
 		"dist/assets/gui-notices/@hono__node-server-LICENSE",
 		"dist/worker/entry.js",
 		"dist/assets/codemap.json.gz",
+		"dist/assets/preparsed-yaml.json",
 		"dist/assets/source.pack",
 		"dist/assets/tui-notices/pi-tui-LICENSE",
 		"dist/assets/tui-notices/marked-LICENSE",

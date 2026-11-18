@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { parsePackagedYaml } from "../../../core/packaged-yaml.js";
 
 import type { CapabilityFlags } from "./capability-flags.js";
 
@@ -39,6 +40,8 @@ export interface KnowledgeBaseRoot {
 	label?: string;
 	/** Missing optional roots are ignored; non-optional roots must exist. */
 	optional?: boolean;
+	/** The catalog the package ships, whose files the build parsed ahead of time; overlays are never packaged. */
+	packaged?: boolean;
 }
 
 export class FileKnowledgeBase implements KnowledgeBase {
@@ -57,7 +60,7 @@ export class FileKnowledgeBase implements KnowledgeBase {
 			for (const file of files) {
 				const name = root.label ? `${root.label}:${file.name}` : file.name;
 				const raw = readFileSync(file.path, "utf8");
-				const parsed = parseYaml(raw);
+				const parsed = root.packaged === true ? parsePackagedYaml(raw) : parseYaml(raw);
 				if (!Array.isArray(parsed)) {
 					throw new Error(`knowledge base file ${name} must be a YAML list of KnowledgeBaseEntry`);
 				}
@@ -112,7 +115,12 @@ function normalizeRoots(root: string | ReadonlyArray<string | KnowledgeBaseRoot>
 			throw new Error(`knowledge base path is not a directory: ${dir}`);
 		}
 		seen.add(dir);
-		out.push({ dir, ...(raw.label ? { label: raw.label } : {}), ...(raw.optional === true ? { optional: true } : {}) });
+		out.push({
+			dir,
+			...(raw.label ? { label: raw.label } : {}),
+			...(raw.optional === true ? { optional: true } : {}),
+			...(raw.packaged === true ? { packaged: true } : {}),
+		});
 	}
 	return out;
 }
