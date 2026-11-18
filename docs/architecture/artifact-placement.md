@@ -102,7 +102,7 @@ problem.
 
 | Path | Contents |
 | --- | --- |
-| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl` and `tree.json`, in `0700` directories with `0600` files. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
+| `sessions/<cwdHash>/<sessionId>/` | `meta.json`, `current.jsonl`, `tree.json` and `details/<ref>.txt`, the full detail behind a compact tool result that `ledger(action="detail", ref=...)` fetches ([tool-details.ts](../../src/domains/session/tool-details.ts)), in `0700` directories with `0600` files. `<cwdHash>` is the first 16 hex characters of the SHA-256 of the resolved working directory. |
 | `telemetry/` | Every telemetry journal, object, seal and bundle, plus `consent.json`, `install.json`, `prune.stamp` and `imported/`; see [telemetry.md](telemetry.md#layout) |
 | `runs.json`, `fleet-runs/<runId>.json`, `assignments.json`, `batches.json`, `agent-ledgers.json` | The run ledger (written mode `0600`), fleet run records and the durable dispatch stores |
 | `gate-decisions/<id>.json` | Review and compete gate decisions; undecided ones sit in `gate-decisions/pending/` |
@@ -113,6 +113,8 @@ problem.
 | `handbooks/<key>/` | The handbook compile of another repository a run worked in (`<hash>.json`, one per input set) and its verification `ledger.json`. `<key>` is the first 16 hex characters of the SHA-256 of that repository's real path, so nothing is written into it ([sister-repository.ts](../../src/domains/context/sister-repository.ts)) |
 | `claims/<sha256(project root)>.jsonl` | The append-only claims log of one project, read by `clio-coder claims`. It holds six line types: `claim` (a judged reproduce or numeric-compare verdict with its conditions), `edge`, `regression`, `hypothesis`, `check-start` and `hypothesis-test` ([store.ts](../../src/domains/claims/store.ts)). The project root is the realpath of the repository root, so every subdirectory shares one log. A line over 64 KiB is never written, and on read it counts as unreadable without being parsed. |
 | `memory/banks/<sessionId>.json` | Same-session task-bank snapshot, consumed on resume; newest 64 retained ([task-bank-store.ts](../../src/domains/memory/task-bank-store.ts)) |
+| `memory/observations/<sessionId>/` | Source-linked continuity notes of one session, one immutable JSON batch per file (at most 64 read), that compaction can offer in place of raw history ([observation-store.ts](../../src/domains/memory/observation-store.ts)) |
+| `memory/history-candidates/` | Lesson candidates saved for filing that an interrupted process or a failed store write left pending; a later process replays and removes them ([lesson-feedback.ts](../../src/domains/memory/lesson-feedback.ts)) |
 | `memory/recall-use-v1.json` | Per-record recall and use counts that demote memory a session keeps carrying unused ([recall-use.ts](../../src/domains/memory/recall-use.ts)) |
 | `scratch/<sessionId>/` | Offloaded tool output and harness scratch; tool offloads are `0600` files in `0700` directories |
 | `reports/` | Reports to the maintainers: `drafts/<id>.json` with the rendered Markdown beside it, `bundles/` for kept diagnostic bundles, `crashes/` for crash records, `shares.json` for share receipts, and the `offers.json`, `reply-check.json` and `outbox.json` ledgers. Drafts are written mode `0600`. |
@@ -126,6 +128,7 @@ problem.
 | `home.json`, `migration-reports/`, `workspace-conversions.json`, `restart-intent.json`, `restart-continuation.json` | Install metadata, migration reports, per-workspace layout conversions, a pending relaunch and the task it continues |
 | `live/`, `peer-inbox/`, `running-builds/`, `fleet-locks/` | Open-session heartbeats, messages between sessions, the builds running processes loaded, and fleet locks |
 | `jobs/`, `provider-checkpoints/`, `sandbox/`, `fleet-preflight.json` | Background job records, provider checkpoints, sandbox state and the last fleet preflight |
+| `extensions/` | Extension runtime state: `<id>/store.json` and `<id>/files/` (the extension's own store), `<id>/sessions/<sessionId>.json` (its per-session state), `.pinned/<sha256(sessionId)>.json` (pinned context blocks) and `.dock/` (dock frames and taps). Deleting a session removes its per-session files ([runtime-state.ts](../../src/domains/extensions/runtime-state.ts), [session-state.ts](../../src/domains/extensions/session-state.ts)) |
 | `extension-workspaces/`, `extension-dev-roots.json`, `library-receipts.json` | Extension working directories, registered dev roots and library install receipts |
 | `settings-shortcuts.json`, `recent-models.json`, `harness-profile.json`, `interop.json`, `endpoint-slots.json` | Small per-machine stores |
 | `lmstudio-ownership/`, `residency-locks/`, `git-hooks/v9/`, `git-hooks/v9-shim/`, `watch-selection`, `watch-dock-taps` | Runtime ownership markers, locks, the managed Git hooks and git shim, and the request and tap files shared with the workers dashboard |

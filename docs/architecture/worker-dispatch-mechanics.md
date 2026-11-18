@@ -439,7 +439,7 @@ The ledger gives a card its identity, route, budget and lifecycle, and the read 
 
 ## Route history settled labels
 
-Route history is a fold over this host's settled runs, not a file. [route-history.ts](../../src/domains/telemetry/route-history.ts) reads each run scope under `<stateDir>/telemetry/runs/` and turns every `run.settled` that ran under a route decision into one entry. It re-reads a run only when its bundle, journal segments or objects change, and no index file exists. The route observer ([route-observer.ts](../../src/domains/dispatch/route-observer.ts)) journals each `route.decided` and reduces route quality from the fold.
+Route history is a fold over this host's settled runs, not a file. [route-history.ts](../../src/domains/telemetry/route-history.ts) reads the newest 2,000 run scopes under `<stateDir>/telemetry/runs/` from the last 30 days, by directory time, and turns every `run.settled` that ran under a route decision into one entry. A sealed run outside that bound leaves the fold and is not checked again while the process runs. It re-reads a run only when its bundle, journal segments or objects change, and no index file exists. The route observer ([route-observer.ts](../../src/domains/dispatch/route-observer.ts)) journals each `route.decided` and reduces route quality from the fold.
 
 An entry has this shape:
 
