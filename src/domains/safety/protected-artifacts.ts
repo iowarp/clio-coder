@@ -259,8 +259,10 @@ export function detectValidationCommand(
 
 /**
  * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
- * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` that plumbing
- * never changes the exit status. Tools and arguments stay distinct, so `pytest` never settles `pytest -q` (bt-27).
+ * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
+ * 0 only when the check did, so a green settles the name however it was piped; `head` can turn a green into a red
+ * (SIGPIPE), so a red behind it lands nowhere ({@link checkFailureAttributable}). Tools and arguments stay distinct, so
+ * `pytest` never settles `pytest -q` (bt-27).
  */
 export function observedValidationCommand(command: string): string {
 	let current = command.trim();
@@ -1395,6 +1397,36 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
 		!steps.slice(0, lastChange + 1).some((step) => step.check);
 	return handsOver ? "after-change" : "mixed";
+}
+
+/** Pipeline stages that read their input to its end and exit 0, so the pipeline's status is the stage feeding them. */
+function drainsInput(step: ShellStep): boolean {
+	if (step.index === null) return false;
+	const [executable, ...args] = step.argv.slice(step.index);
+	if (executable === "cat") return true;
+	return (
+		executable === "tail" &&
+		!args.some((arg) => /^-[^-]*[fF]/u.test(arg) || arg.startsWith("--follow") || arg === "--retry")
+	);
+}
+
+/**
+ * Whether a red exit of a command running a recognized check is the check's own red (x3-2). Under `pipefail` a stage
+ * after the check fails a green check: `head` closes the pipe so the check dies of SIGPIPE or EPIPE, and `grep`
+ * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail` or `cat`, which read to
+ * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
+ */
+export function checkFailureAttributable(command: string): boolean {
+	const steps = shellSteps(scanShellLike(command));
+	return steps.every((step, position) => {
+		if (!isCheckStep(step)) return true;
+		for (let next = position; ; next += 1) {
+			const joinedBy = steps[next]?.joinedBy;
+			if (joinedBy !== "|") return joinedBy !== "";
+			const stage = steps[next + 1];
+			if (stage === undefined || !drainsInput(stage)) return false;
+		}
+	});
 }
 
 /**

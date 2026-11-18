@@ -738,6 +738,10 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified"]);
+	// A red behind head or grep may be that filter's own, so it settles nothing; behind tail it is the check's (x3-2).
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | head -30"), green);
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | grep FAIL"), green);
+	deepStrictEqual(seal("npm test", "!npm test 2>&1 | tail -5"), [["npm test"], "unverified"]);
 });
 
 it("read-only inspection refuses helpers that write the tree or run another program (x1-3)", () => {

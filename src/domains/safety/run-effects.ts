@@ -13,6 +13,7 @@ import { typedValidationSummary } from "./finish-contract.js";
 import {
 	type CheckCommandShape,
 	checkCommandShape,
+	checkFailureAttributable,
 	commandArgumentSegments,
 	detectValidationCommand,
 	extractCommandDeleteTargets,
@@ -166,6 +167,8 @@ interface PendingEffects {
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
 	checkStatusAttributable: boolean;
+	/** False when a stage piped after the check can fail a green check ({@link checkFailureAttributable}). */
+	checkFailureAttributable: boolean;
 	mutationRevision: number;
 	verificationCommand: string | null;
 	opaque: boolean;
@@ -403,6 +406,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 						? `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(commandOf(args) ?? "")}`
 						: null,
 				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
+				checkFailureAttributable: command === null || checkFailureAttributable(command),
 				mutationRevision,
 				verificationCommand,
 				opaque,
@@ -465,10 +469,13 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
 			// `pytest; echo done` ran the check, but its status is echo's, so the outcome stays unknown either way.
+			// `pytest | head` exits 0 only when pytest did, but its red may be head's SIGPIPE (x3-2).
 			if (
 				effects.validationName !== null &&
 				effects.checkStatusAttributable &&
-				(failed ? effects.outcome === "error" : effects.outcome !== "blocked" && checkedRevision === mutationRevision)
+				(failed
+					? effects.outcome === "error" && effects.checkFailureAttributable
+					: effects.outcome !== "blocked" && checkedRevision === mutationRevision)
 			)
 				validationOutcomes.set(effects.validationName, !failed);
 			if (failed) {
