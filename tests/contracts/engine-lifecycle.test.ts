@@ -28,6 +28,7 @@ import type { Terminal } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { assistantOutputChars } from "../../src/core/assistant-output.js";
 import { CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
+import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
 import { createEngineAgent, type EngineStreamFn as StreamFn } from "../../src/engine/agent.js";
 import { StringEnum, validateEngineToolArguments } from "../../src/engine/ai.js";
 import {
@@ -284,7 +285,7 @@ describe("tool argument generation bounds", () => {
 		strictEqual((await guarded.result()).stopReason, "toolUse");
 	});
 
-	it("cancels the entire batch at the byte ceiling before any valid sibling executes", async () => {
+	it("cancels the entire batch at the byte ceiling before any valid sibling executes, and prices a delegate's own send", async () => {
 		let invocations = 0;
 		let observedSignal: AbortSignal | undefined;
 		const timeline: string[] = [];
@@ -314,6 +315,48 @@ describe("tool argument generation bounds", () => {
 		const last = agent.state.messages.at(-1) as AssistantMessage;
 		strictEqual(last.stopReason, "aborted");
 		ok(last.errorMessage?.includes("byte safety ceiling"));
+
+		// cf1h-D3: a transcript past the window before the delegate evicts it priced the ceiling at 32 bytes, so the
+		// agent-level guard cut off a 39-byte read call. A delegate that guards its own send is not guarded twice.
+		const overWindow = [user("x".repeat(MODEL.contextWindow * 8))];
+		const turns = (delegateGuardsToolArguments: boolean) => {
+			const ran: string[] = [];
+			let round = 0;
+			const { agent: worker } = createEngineAgent({
+				initialState: { model: MODEL, tools: [echoTool(ran)], messages: overWindow },
+				delegateGuardsToolArguments,
+				streamFn: () => {
+					const source = createAssistantMessageEventStream();
+					const message = round++ === 0 ? toolTurn("read", { value: "bignotes/pump-1.md limit=30" }) : finalTurn();
+					source.push({ type: "start", partial: message });
+					if (message.stopReason === "toolUse")
+						source.push({
+							type: "toolcall_delta",
+							contentIndex: 0,
+							delta: JSON.stringify({ value: "bignotes/pump-1.md limit=30" }),
+							partial: message,
+						});
+					source.push({ type: "done", reason: message.stopReason === "toolUse" ? "toolUse" : "stop", message });
+					return source;
+				},
+			});
+			return { worker, ran };
+		};
+		const guardedTwice = turns(false);
+		await guardedTwice.worker.prompt("go");
+		const cutOff = guardedTwice.worker.state.messages.at(-1) as AssistantMessage;
+		strictEqual(cutOff.stopReason, "aborted");
+		deepStrictEqual(guardedTwice.ran, []);
+		// A call a bound cut off settles with the bound named, in the vocabulary why-stopped reads.
+		deepStrictEqual(callSettlementFromMessage(cutOff, "none").stop, { reason: "aborted", failure: "generation_guard" });
+		deepStrictEqual(
+			callSettlementFromMessage({ ...cutOff, failure: { stage: "harness", errorClass: "loop_guard" } }, "none").stop,
+			{ reason: "aborted", failure: "loop_guard" },
+		);
+		const delegated = turns(true);
+		await delegated.worker.prompt("go");
+		deepStrictEqual(delegated.ran, ["tool:bignotes/pump-1.md limit=30"]);
+		strictEqual((delegated.worker.state.messages.at(-1) as AssistantMessage).stopReason, "stop");
 	});
 
 	it("rejects oversized terminal-only tool arguments too", async () => {

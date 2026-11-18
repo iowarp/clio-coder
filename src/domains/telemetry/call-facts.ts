@@ -106,6 +106,8 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		case "autonomy_stop":
 		case "repetition":
 		case "shutdown":
+		case "parent_cancel":
+		case "loop_guard":
 			return failure.stage === "harness" ? failure.errorClass : undefined;
 	}
 	const status = amount(failure.httpStatus);
@@ -116,6 +118,19 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 	if (failure.stage === "admission") return "admission_refused";
 	if (failure.stage === "transport") return failure.invoked === false ? "transport_connect" : "transport_dropped";
 	return failure.errorClass === "internal" ? "internal" : undefined;
+}
+
+/** The cause a Clio stream bound wrote on the message it ended, so a call it cut off names who stopped it (cf1h-D3). */
+export function abortReasonCause(message: unknown): FailureCause | undefined {
+	switch (record(message).clioCoderAbortReason) {
+		case "tool_argument_generation":
+			return "generation_guard";
+		case "worker_turn_timeout":
+			return "turn_timeout";
+		case "worker_output_cap_exhausted":
+			return "output_cap";
+	}
+	return undefined;
 }
 
 /**
@@ -209,7 +224,7 @@ export function callSettlementFromMessage(
 		...(total?.kind === "measured" ? { total } : {}),
 	};
 	const observed = Object.values(counts).some((fact) => fact.kind === "measured");
-	const failureCode = cause ?? failureCause(failure);
+	const failureCode = cause ?? failureCause(failure) ?? abortReasonCause(raw);
 	const cost = record(usage.cost);
 	const usd = amount(cost.total);
 	let pricing: CallSettled["pricing"] = { usd: unknown, pricedBy: "none" };

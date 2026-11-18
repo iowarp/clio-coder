@@ -604,10 +604,13 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 			if (runCount !== null) {
 				// A card under the call is the run's row: a single dispatch states no
 				// tally, a fan-out keeps its execution counts, and quality stays on
-				// each card. A dispatch with no card carries both.
-				if (finished.cardAttached === true && runCount <= 1) break;
+				// each card. A dispatch with no card carries both. A recovery after a
+				// failed attempt is always stated, since the card shows only the last.
+				const recovered = numberField(details, "recoveredCount") ?? 0;
+				if (finished.cardAttached === true && runCount <= 1 && recovered === 0) break;
 				const failed = numberField(details, "failedCount") ?? 0;
 				parts.push(failed > 0 ? `${runCount - failed} ok, ${failed} failed` : `${runCount} ok`);
+				if (recovered > 0) parts.push(`${recovered} recovered after a failed attempt`);
 				const quality = finished.cardAttached === true ? null : runQuality(details, runCount);
 				if (quality !== null) parts.push(`quality ${quality}`);
 				break;

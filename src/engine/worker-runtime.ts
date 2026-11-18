@@ -22,6 +22,7 @@ import { createWorkerObservationStore } from "../domains/context/worker/recall.j
 import { compactionBudget, resolveEffectivePricing } from "../domains/providers/catalog.js";
 import { confirmationRuleOf } from "../domains/safety/decision-events.js";
 import type { WorkerFlowPolicyInput } from "../domains/safety/information-flow.js";
+import { abortReasonCause } from "../domains/telemetry/call-facts.js";
 import { seededWorkerMessages, seedRecallLineage } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { requestOutputReserve } from "./apis/output-budget.js";
@@ -822,6 +823,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	let workerBoundAborted = false;
 	let abortWorkerForBound: (() => void) | null = null;
+	// Who aborted the agent, so the call it cut off and the run's diagnostic name the same cause (cf1h-D3).
+	let workerStopCause: "loop_guard" | "parent_cancel" | undefined;
 	// For synthesis:false, the loop guard records the final admitted call while
 	// rejecting later siblings immediately. The runtime stops only after pi has
 	// emitted that call's tool-result message, so a slow tool is never aborted
@@ -1384,6 +1387,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				? { action: "end" }
 				: undefined;
 		},
+		// Each round sends through engineStreamSimple, whose guard sees the evicted request.
+		delegateGuardsToolArguments: true,
 		streamFn: (currentModel, transcript, streamOptions) => {
 			if (resultContractRepairsQueued > resultContractRepairsStarted) resultContractRepairsStarted += 1;
 			const round = ++responseRound;
@@ -1661,13 +1666,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 								}),
 						);
 						return (
-							workerTelemetry?.observe(source, (message) =>
-								tracking.failure(
-									message,
-									input.signal?.aborted || (message as { stopReason?: unknown } | null)?.stopReason === "aborted",
-									callUsageReported,
-								),
-							) ?? source
+							workerTelemetry?.observe(source, (message) => {
+								const aborted = input.signal?.aborted || (message as { stopReason?: unknown } | null)?.stopReason === "aborted";
+								const failure = tracking.failure(message, aborted, callUsageReported);
+								const harness = aborted
+									? (workerStopCause ?? (input.signal?.aborted ? "parent_cancel" : undefined))
+									: undefined;
+								return harness ? { ...failure, stage: "harness", errorClass: harness } : failure;
+							}) ?? source
 						);
 					},
 					input.target.id,
@@ -1757,7 +1763,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// steers batch the same way the main agent's do: all at the next slot.
 	agent.followUpMode = "all";
 	agent.steeringMode = "all";
-	abortWorkerForBound = () => agent.abort();
+	abortWorkerForBound = () => {
+		workerStopCause ??= "loop_guard";
+		agent.abort();
+	};
 	// Qwopus 3.8 explored context init's whole 240 s ceiling one read at a time and was
 	// aborted before submitting. A host deadline ends exploration while the terminal round fits.
 	const synthesisTimer =
@@ -2718,9 +2727,12 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				(fallbackOnly || !isTerminalAssistantMessage(messages.at(-1)) || !assistantMessageText(messages.at(-1)))
 			) {
 				const lastAssistant = [...messages].reverse().find(isAssistantMessage);
+				const stopped = lastAssistant?.stopReason === "aborted" || lastAssistant?.stopReason === "error";
+				const cause = stopped ? (workerStopCause ?? abortReasonCause(lastAssistant) ?? "unrecorded") : undefined;
+				const why = cause ? `, cause=${cause}${lastAssistant?.errorMessage ? `: ${lastAssistant.errorMessage}` : ""}` : "";
 				const detail = fallbackOnly
 					? "worker synthesis reply held only tool-call markup after the tool-call lockout, so no final answer was delivered"
-					: `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"})`;
+					: `worker loop ended without a final assistant output (last role=${messages.at(-1)?.role ?? "none"}, stopReason=${lastAssistant?.stopReason ?? "none"}${why})`;
 				emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "worker_final_output_missing", detail } });
 				process.stderr.write(`[worker] ${detail}\n`);
 				return { messages, exitCode: 1 };
@@ -2773,6 +2785,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				denyActiveEscalationOnAbort(reason);
 				registry.cancelParkedCalls(reason);
 			}
+			workerStopCause ??= "parent_cancel";
 			agent.abort();
 		},
 		steer: (text: string) => {
