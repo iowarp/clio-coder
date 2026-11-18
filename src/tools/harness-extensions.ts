@@ -110,9 +110,7 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 		metadata: {
 			objective: tool.description,
 			uiLabel: `${extension.id}/${tool.name}`,
-			retrySafety: "not_retry_safe",
 			resultSizePolicy: { kind: "bounded", maxBytes: tool.maxOutputBytes ?? 600000 },
-			costLatency: "local_slow",
 		},
 		safetyCall(args) {
 			// The vector stays execution-class even for inputs such as {op:"read"}.

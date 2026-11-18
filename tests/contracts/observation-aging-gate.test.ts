@@ -165,10 +165,8 @@ async function drive(effect: DeclaredToolEffect): Promise<AgentMessage[][]> {
 		metadata: {
 			objective: "advance the desk",
 			uiLabel: "wtfp/next_step",
-			retrySafety: "not_retry_safe",
 			...effect,
 			resultSizePolicy: { kind: "bounded", maxBytes: 256 * 1024 },
-			costLatency: "local_slow",
 		},
 		run: async () => {
 			step += 1;

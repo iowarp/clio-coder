@@ -110,8 +110,6 @@ const WORKSPACE_WRITING_TOOLS: ReadonlySet<string> = new Set([
 
 export type ToolExecutionMode = "sequential" | "parallel";
 export type ToolSourceScope = "core" | "domain";
-export type ToolRetrySafety = "idempotent" | "retry_safe" | "not_retry_safe" | "unknown";
-export type ToolCostLatencyClass = "local_fast" | "local_medium" | "local_slow" | "network" | "agent";
 export type ToolPromptHintRole = "session" | "worker" | "bound-worker";
 
 export interface ToolPromptHintVariants {
@@ -165,8 +163,6 @@ export interface ToolMetadata {
 	objective: string;
 	/** Stable UI label shown in compact renderers. */
 	uiLabel: string;
-	/** Whether automatic recovery may safely retry an unfinished call. */
-	retrySafety: ToolRetrySafety;
 	/** Read-only idempotent MCP polling: bounded by call budgets rather than repetition. */
 	repeatableRead?: boolean;
 	/**
@@ -181,8 +177,6 @@ export interface ToolMetadata {
 	resultSizePolicy: ToolResultSizePolicy;
 	/** Independent operator-presentation and model-context policy for this result. */
 	resultDisposition?: ToolResultDisposition;
-	/** Coarse cost/latency bucket for dashboard diagnostics. */
-	costLatency: ToolCostLatencyClass;
 	/**
 	 * One sentence of usage guidance rendered when this tool is on the frozen
 	 * surface. A string applies to every role; variants keep session consent

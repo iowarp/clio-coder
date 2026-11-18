@@ -52,30 +52,24 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		discoveryHint: "A run's seal proves only what it records; check a completion claim against its run.",
 		examples: [{ goal: "List assessed runs without running a check", args: { mode: "list" }, startup: true }],
 		uiLabel: "Evidence",
-		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Inspect one run with evidence(mode=inspect, runId=<id>) to narrow the output."),
-		costLatency: "local_medium",
 	},
 	[ToolNames.Read]: {
 		objective: "Read exact UTF-8 file content with line and byte bounds.",
 		uiLabel: "Read",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			readMaxBytes(),
 			"Use offset/limit or a narrower locate/search tool call to inspect omitted content.",
 		),
-		costLatency: "local_fast",
 	},
 	[ToolNames.Grep]: {
 		objective: "Search file contents and return line-referenced matches.",
 		discoveryHint: "Start in the named path; stop when the matching lines answer the question.",
 		uiLabel: "Grep",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			OBSERVE_SELF_CAPS.grepContent,
 			"Refine the pattern, path, glob, context, or limit, or use mode=files, to inspect omitted matches.",
 		),
-		costLatency: "local_medium",
 		examples: [
 			{
 				goal: "Find literal text in file contents",
@@ -89,12 +83,10 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective: "Find paths by glob pattern with optional mtime ordering.",
 		discoveryHint: "Names only, not contents; match the requested extension.",
 		uiLabel: "Find",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			OBSERVE_SELF_CAPS.find,
 			"Refine the pattern, path, or limit to inspect omitted paths.",
 		),
-		costLatency: "local_medium",
 		examples: [
 			{
 				goal: "Find file paths by glob, not their contents",
@@ -106,25 +98,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Ls]: {
 		objective: "List directory entries.",
 		uiLabel: "List",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.ls, "Raise limit or list a narrower directory."),
-		costLatency: "local_fast",
 	},
 	[ToolNames.Count]: {
 		objective: "Count a file's words, lines and bytes without reading it into context.",
 		uiLabel: "Count",
-		retrySafety: "idempotent",
 		resultSizePolicy: { kind: "exact", maxBytes: 1_024 },
-		costLatency: "local_fast",
 	},
 	[ToolNames.CodeNav]: {
 		objective: "Navigate the codemap index by symbol, path, entry points, outline, imports, or importers.",
 		discoveryHint:
 			'A file\'s structure: mode="outline". Follow with read for exact source; fall back to grep if the index misses.',
 		uiLabel: "Nav",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.codeNav, "Raise limit or use a narrower mode/query."),
-		costLatency: "local_fast",
 		examples: [
 			{ goal: "Locate a symbol definition", args: { mode: "symbol", query: "retry", limit: 10 }, startup: true },
 			{ goal: "List symbols in a known file", args: { mode: "outline", query: "src/index.ts" } },
@@ -136,9 +122,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.SelfCompact]: {
 		objective: "Save an exact assistant handoff and reduce native session context.",
 		uiLabel: "Compact",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 2048 },
-		costLatency: "local_fast",
 		promptHint:
 			'Use self_compact alone at a safe boundary. Preserve decisions, evidence, paths, and next actions in note_to_self. Inspect context(scope="budget") for current pressure; recovery belongs to the operator.',
 	},
@@ -147,12 +131,10 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		discoveryHint:
 			'scope="recall" with a ref restores content marked [evicted]; scope="settings" reads live configuration; scope="budget" shows context pressure.',
 		uiLabel: "Context",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			Math.max(OBSERVE_SELF_CAPS.contextSkills, OBSERVE_SELF_CAPS.contextWorkspace),
 			"Use a narrower query or scope to inspect omitted content.",
 		),
-		costLatency: "local_fast",
 		examples: [
 			{ goal: "Discover ready skills for a task without activating them", args: { scope: "skills", query: "review" } },
 			{ goal: "Recall the evicted result for a file", args: { scope: "recall", path: "src/index.ts" } },
@@ -170,13 +152,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.CredentialPresent]: {
 		objective: "Check whether a credential key is present without returning its value.",
 		uiLabel: "Credential",
-		retrySafety: "idempotent",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 4_096,
 			followUpHint: "Use the boolean result only; never ask to print the credential value.",
 		},
-		costLatency: "local_fast",
 	},
 	[ToolNames.ClioDocs]: {
 		objective: "Search Clio's bundled documentation or list its corpus.",
@@ -185,9 +165,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Propose and approve persistent repository memory", args: { query: "memory promotion" } },
 		],
 		uiLabel: "Clio docs",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(OBSERVE_SELF_CAPS.contextDocs, "Use a narrower query or a lower limit."),
-		costLatency: "local_fast",
 	},
 	[ToolNames.ClioLibrary]: {
 		objective: "Read the recipe catalog: installed skills, agents, prompts, playbooks, and installable packages.",
@@ -196,23 +174,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "Find review workflows and specialists with their readiness and invocation", args: { query: "review" } },
 		],
 		uiLabel: "Clio library",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			OBSERVE_SELF_CAPS.contextLibrary,
 			"Use kind, query, or ref to narrow the rows, or follow nextOffset.",
 		),
-		costLatency: "local_fast",
 	},
 	[ToolNames.Data]: {
 		objective:
 			"Inspect, select, validate, or summarize tabular and scientific data (CSV/TSV, JSON Lines, SQLite, HDF5, NetCDF, Parquet) with bounded memory and honest counts.",
 		uiLabel: "Data",
-		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
 			DATA_OBSERVATION_SELF_CAP_BYTES,
 			"Lower limit or sample_rows, project fewer columns, select by pointer, or inspect one variable to see omitted content.",
 		),
-		costLatency: "local_medium",
 		examples: [
 			{
 				goal: "Inspect a CSV schema and a small sample without dumping the file",
@@ -226,12 +200,10 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective:
 			"Keep files as blobs in named tags outside the working tree, shared with every worker, with what Clio observed about each; a `<tag>:<blob>` ref names one.",
 		uiLabel: "Store",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: observePolicy(
 			STORE_OBSERVATION_SELF_CAP_BYTES,
 			"Pass pattern, offset or limit to list fewer blobs, or stat one blob.",
 		),
-		costLatency: "local_fast",
 		examples: [
 			{
 				goal: "Store a result file with a note",
@@ -246,47 +218,37 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.MemoryRecall]: {
 		objective: "Recall task memory and approved durable memory that matches a query, without writing memory.",
 		uiLabel: "Memory",
-		retrySafety: "idempotent",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 32_768,
 			followUpHint: "Narrow the query or lower limit.",
 		},
-		costLatency: "local_fast",
 	},
 	// MUTATE: write-class, sequential, file-mutation queue.
 	[ToolNames.Write]: {
 		objective: "Create a file, or replace all of an existing file.",
 		uiLabel: "Write",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
-		costLatency: "local_fast",
 	},
 	[ToolNames.Edit]: {
 		objective: "Change part of an existing file by exact text replacement.",
 		uiLabel: "Edit",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
-		costLatency: "local_fast",
 	},
 	// EXECUTE: the safe-exec spine (canonical shaping offloads Bash overflow).
 	[ToolNames.Bash]: {
 		objective: "Execute an explicit shell command when narrower tools are insufficient.",
 		uiLabel: "Shell",
-		retrySafety: "unknown",
 		resultSizePolicy: {
 			...summaryPolicy("Use a narrower command or a dedicated verification/read/search tool to inspect omitted output."),
 			offloadMaxBytes: BASH_HARD_CAP_BYTES,
 		},
 		resultDisposition: BASH_DEFAULT_RESULT_DISPOSITION,
-		costLatency: "local_slow",
 	},
 	[ToolNames.Git]: {
 		objective: "Git through fixed argv: inspect with status, diff, log, or show; stage and record with add or commit.",
 		uiLabel: "Git",
-		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Limit the diff/log to one path or fewer commits."),
-		costLatency: "local_fast",
 		examples: [
 			{ goal: "Inspect workspace status", args: { op: "status" } },
 			{ goal: "Inspect workspace changes", args: { op: "diff" } },
@@ -302,23 +264,19 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Ids are under Declared checks in Project; verify({}) lists them all. Report actual pass, fail or unrun status.",
 		examples: [{ goal: "Run the project's tests", args: { check: "test" }, startup: true }],
 		uiLabel: "Verify",
-		retrySafety: "retry_safe",
 		resultSizePolicy: summaryPolicy(
 			"Rerun the check with narrower args or inspect the named failing file/test directly.",
 		),
-		costLatency: "local_slow",
 	},
 	[ToolNames.RunScript]: {
 		objective: "Run one workspace script under an explicit interpreter with streamed logs and a recorded manifest.",
 		uiLabel: "Script",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 32_768,
 			followUpHint:
 				"Read stdout.log and stderr.log under the run's .clio-coder/runs/<runId>/ directory for the full streams.",
 		},
-		costLatency: "local_slow",
 		promptHint:
 			"Prefer run_script over bash for a script that produces large or long-running output: it streams both streams to .clio-coder/runs/<runId>/ and records the script hash, argv, and declared inputs and outputs.",
 	},
@@ -337,13 +295,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		uiLabel: "Tasks",
 		// A repeated plan/start/done lands on the same board state; a repeated
 		// add duplicates a task, so the surface as a whole is not retry safe.
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 8_192,
 			followUpHint: 'Use the advertised tasks route with action="list" to re-read the board.',
 		},
-		costLatency: "local_fast",
 		promptHint:
 			"For an operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. " +
 			"Leave unrelated inbox tasks alone. Before claiming completion, confirm from the state a successful tasks call returned (list only when you hold none) that the linked board row is completed " +
@@ -371,13 +327,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		uiLabel: "Ledger",
 		// A repeated post lands a second entry and spends another of the run's
 		// twenty posts, so the surface as a whole is not retry safe.
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 16_384,
 			followUpHint: 'Call ledger with action="read" and a since sequence to re-read only what is new.',
 		},
-		costLatency: "local_fast",
 	},
 	[ToolNames.Dispatch]: {
 		objective: "Dispatch bounded tasks to configured Clio workers.",
@@ -397,14 +351,12 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			},
 		],
 		uiLabel: "Dispatch",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: summaryPolicy(
 			"Use the dispatch run records or ask a narrower worker follow-up for omitted output.",
 		),
 		// No hint: the Tool Contract's inventory line already says when
 		// dispatch(list:true) is the right answer, and the Fleet section says
 		// everything else about routing.
-		costLatency: "agent",
 	},
 	[ToolNames.Job]: {
 		objective: "Create and control bounded interval jobs owned by this conversation.",
@@ -427,9 +379,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			},
 		],
 		uiLabel: "Job",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: summaryPolicy("Use monitor(job_id=...) for current state and bounded occurrence evidence."),
-		costLatency: "local_fast",
 	},
 	[ToolNames.Monitor]: {
 		objective: "Inspect dispatched runs and conversation-owned jobs: state and settled evidence.",
@@ -439,33 +389,27 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			{ goal: "List existing worker runs and results without starting a worker", args: { mode: "list" }, startup: true },
 		],
 		uiLabel: "Monitor",
-		retrySafety: "idempotent",
 		resultSizePolicy: summaryPolicy("Use monitor(mode=record) for full details."),
-		costLatency: "local_fast",
 	},
 	[ToolNames.Steer]: {
 		objective: "Guide or cancel a running dispatched worker.",
 		uiLabel: "Steer",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 4_096,
 			followUpHint: "Use monitor(mode=status) to confirm the run state after steering.",
 		},
-		costLatency: "local_fast",
 	},
 	[ToolNames.Panes]: {
 		objective: "Focus, open, close, and inventory the terminal panes Clio owns beside this session.",
 		uiLabel: "Panes",
 		// show and list land on the same state twice; open starts a second pane
 		// and close is a no-op the second time, so the surface as a whole is not.
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 8_192,
 			followUpHint: 'Call panes with action="list" to re-read the pane inventory.',
 		},
-		costLatency: "local_fast",
 		promptHint:
 			'When the operator asks to see a dispatched agent ("show me the tester"), call panes(action="show", target=<agent id>). ' +
 			'When asked to open a pane and run Claude, use panes(action="handoff", peer="claude-code") and omit brief unless a task was supplied. ' +
@@ -479,24 +423,20 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		// model reads.
 		objective: "",
 		uiLabel: "Music",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 2_048,
 			followUpHint: 'Call music with action="status" to see what is playing.',
 		},
-		costLatency: "local_fast",
 	},
 	[ToolNames.Limitation]: {
 		objective: "Record a needed check that could not run here, and why.",
 		uiLabel: "Limitation",
-		retrySafety: "idempotent",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 4_096,
 			followUpHint: "Call limitation again with a narrower scope if the first call was rejected.",
 		},
-		costLatency: "local_fast",
 	},
 	[ToolNames.Consult]: {
 		objective: "Filter evidence you do not hold through the bound decision model, or ask it typed questions, as advice.",
@@ -505,21 +445,17 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Filter with consult before opening many files or a long offload. A filter answers what a file is for, from its path and a digest of its comment, exports and imports; behavior inside a file body belongs to grep. A miss on a partly read item does not prove it irrelevant, and carried.partial counts those, so read before ruling one out. When you write consult questions, state each outcome as something observable in the evidence, describe what a call does rather than severity words (a plain curl GET read as irreversible until the rung was reworded around changing remote state), include the previous reply when a short follow-up is the subject, keep quoted code out of the evidence, and ask one claim per question.",
 		uiLabel: "Consult",
 		// Each call counts against the per-turn limit, so a retry is not free.
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			// At most 32 matches of a 160-byte id and about 40 bytes of fields, plus about 1.5 KB of fixed fields and reasons.
 			maxBytes: 8_192,
 			followUpHint: "Ask fewer questions, send less state, or lower the filter's limit.",
 		},
-		costLatency: "network",
 	},
 	[ToolNames.Vision]: {
 		objective: "Ask a separately configured image model a question about a local image.",
 		uiLabel: "Vision",
-		retrySafety: "retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 32_768 },
-		costLatency: "network",
 	},
 	[ToolNames.Decide]: {
 		examples: [
@@ -537,68 +473,56 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		uiLabel: "Decide",
 		// A repeated call with the same key supersedes the earlier record, so
 		// the surface as a whole is not retry safe.
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 4_096,
 			followUpHint: "The decision ref in the result is what receipts and commits cite.",
 		},
-		costLatency: "local_fast",
 	},
 	// RETRIEVE: network-class.
 	[ToolNames.WebRead]: {
 		promptHint: UNTRUSTED_CONTENT_BANNER,
 		objective: "Read an HTTP(S) URL with a GET request; never sends data outward.",
 		uiLabel: "Web read",
-		retrySafety: "idempotent",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 16_384,
 			followUpHint: "Read a narrower URL or lower max_bytes to inspect a specific section.",
 		},
-		costLatency: "network",
 	},
 	[ToolNames.WebFetch]: {
 		promptHint: UNTRUSTED_CONTENT_BANNER,
 		objective: "Fetch HTTP(S) text for explicit external research.",
 		uiLabel: "Fetch",
-		retrySafety: "retry_safe",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 16_384,
 			followUpHint: "Fetch a narrower URL or lower max_bytes to inspect a specific section.",
 		},
-		costLatency: "network",
 	},
 	// INTERACT: operator dialogue.
 	[ToolNames.AskUser]: {
 		objective: "Put a question to the operator as structured choices with context.",
 		uiLabel: "Ask",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: {
 			kind: "exact",
 			maxBytes: 20_000,
 			followUpHint: "Proceed with stated assumptions if the operator cancels or no UI is available.",
 		},
-		costLatency: "local_slow",
 		promptHint:
 			'Do not ask about something the operator already stated. Ask one question per round in interviews, up to four related questions otherwise, then action="complete" with the decisions before final prose.',
 	},
 	[ToolNames.ConfigureClio]: {
 		objective: "Preview one Clio settings or target change and apply it only after the operator approves the diff.",
 		uiLabel: "Configure",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 8_192 },
-		costLatency: "local_slow",
 		promptHint:
 			"When asked to change Clio settings or add a target, call configure_clio through gateway. Preview first, then apply the returned proposal id; the operator approves the exact diff on a card. Headless, read-only and yolo sessions only preview: hand the operator the diff and steps. Never run clio-coder configure, targets or auth from bash.",
 	},
 	[ToolNames.RestartSession]: {
 		objective: "Restart Clio on a rebuilt build of this tree and continue the task, after the operator approves.",
 		uiLabel: "Restart",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 2_048 },
-		costLatency: "local_slow",
 		promptHint:
 			"After rebuilding the tree this session runs from, request restart_session with what to do next; the session resumes on the new build and receives that text.",
 	},
@@ -606,9 +530,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		objective:
 			"Draft a Clio Coder report for the operator to review, or ask once whether to; it never sends or shares one.",
 		uiLabel: "Report",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: { kind: "exact", maxBytes: 4_096 },
-		costLatency: "local_fast",
 		promptHint:
 			'When Clio Coder itself is broken, call report through gateway with action="draft"; the operator reviews and sends it. action="offer" asks once and the host may refuse. Never file a Clio Coder issue with gh. Sharing a bundle or telemetry with the maintainers is optional, encrypted to them, deletable with forget and run only by the operator: never pass --share or --send, but you may tell them the command (docs/guide/troubleshooting.md#share-with-the-maintainers).',
 	},
@@ -616,9 +538,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Artifact]: {
 		objective: "Write terminal plan/review/report documents that complete the turn.",
 		uiLabel: "Artifact",
-		retrySafety: "not_retry_safe",
 		resultSizePolicy: exactMutationPolicy,
-		costLatency: "local_fast",
 	},
 	// GATEWAY: secondary capabilities on demand. The cap sits at the largest
 	// capability cap (extension commands) because a call result was already
@@ -626,13 +546,11 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	[ToolNames.Gateway]: {
 		objective: "Find, describe, and call secondary capabilities under their own admission and evidence.",
 		uiLabel: "Gateway",
-		retrySafety: "unknown",
 		resultSizePolicy: {
 			kind: "bounded",
 			maxBytes: 600_000,
 			followUpHint: "Narrow the find query, or call the capability with narrower arguments.",
 		},
-		costLatency: "local_medium",
 		promptHint: gatewayPromptHint(),
 	},
 };
