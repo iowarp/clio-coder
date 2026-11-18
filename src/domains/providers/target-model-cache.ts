@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioCacheDir, clioCachePath } from "../../core/xdg.js";
 import { type CapabilityFlags, type ThinkingLevel, VALID_THINKING_LEVELS } from "./types/capability-flags.js";
-import type { TargetDescriptor } from "./types/target-descriptor.js";
+import type { CopilotContextTier, TargetDescriptor } from "./types/target-descriptor.js";
 
 export const TARGET_MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 const TARGET_MODEL_CACHE_VERSION = 1;
@@ -35,8 +35,15 @@ export interface TargetModelSnapshot {
 	 * it (every file written before it existed) still lists models, and its capabilities count as unknown.
 	 */
 	modelCapabilities?: Record<string, CachedModelCapabilities>;
+	/**
+	 * Each model's context window on every tier the listing published, for runtimes whose window depends on a
+	 * target's context tier. `modelCapabilities` holds the writing target's tier; this lets any tier resolve.
+	 */
+	modelContextWindows?: Record<string, CachedContextWindows>;
 	observedAt: string;
 }
+
+export type CachedContextWindows = Partial<Record<CopilotContextTier, number>>;
 
 /** The listed capabilities a later process may trust: they describe the account's model, not a serving state. */
 export type CachedModelCapabilities = Partial<
@@ -53,6 +60,7 @@ interface TargetModelCacheOptions {
 	modelLabels?: Readonly<Record<string, string>>;
 	modelCreatedAt?: Readonly<Record<string, string>>;
 	modelCapabilities?: Readonly<Record<string, Partial<CapabilityFlags>>>;
+	modelContextWindows?: Readonly<Record<string, CachedContextWindows>>;
 }
 
 function targetCacheKey(targetId: string): string {
@@ -130,6 +138,26 @@ function normalizedCapabilities(
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Kept only when every model has an entry, possibly empty: a partial record cannot vouch for any tier. */
+function normalizedContextWindows(
+	models: ReadonlyArray<string>,
+	windows: unknown,
+): Record<string, CachedContextWindows> | undefined {
+	if (typeof windows !== "object" || windows === null || Array.isArray(windows) || models.length === 0) return undefined;
+	const source = windows as Record<string, unknown>;
+	const out: Record<string, CachedContextWindows> = {};
+	for (const id of models) {
+		const row = source[id];
+		if (typeof row !== "object" || row === null || Array.isArray(row)) return undefined;
+		const tiers = row as Record<string, unknown>;
+		const entry: CachedContextWindows = {};
+		if (positiveInteger(tiers.default)) entry.default = tiers.default;
+		if (positiveInteger(tiers.long_context)) entry.long_context = tiers.long_context;
+		out[id] = entry;
+	}
+	return out;
+}
+
 function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
 	const row = value as Partial<TargetModelSnapshot>;
@@ -155,6 +183,8 @@ function parseSnapshot(value: unknown): TargetModelSnapshot | null {
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	const modelCapabilities = normalizedCapabilities(models, row.modelCapabilities);
 	if (modelCapabilities !== undefined) snapshot.modelCapabilities = modelCapabilities;
+	const modelContextWindows = normalizedContextWindows(models, row.modelContextWindows);
+	if (modelContextWindows !== undefined) snapshot.modelContextWindows = modelContextWindows;
 	return snapshot;
 }
 
@@ -186,7 +216,7 @@ export function recordTargetModelSnapshot(
 	models: ReadonlyArray<string>,
 	options: Pick<
 		TargetModelCacheOptions,
-		"cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt" | "modelCapabilities"
+		"cacheDir" | "nowMs" | "modelLabels" | "modelCreatedAt" | "modelCapabilities" | "modelContextWindows"
 	> = {},
 ): boolean {
 	if (target.id.length === 0 || target.runtime.length === 0) return false;
@@ -204,6 +234,8 @@ export function recordTargetModelSnapshot(
 	if (modelCreatedAt !== undefined) snapshot.modelCreatedAt = modelCreatedAt;
 	const modelCapabilities = normalizedCapabilities(snapshot.models, options.modelCapabilities);
 	if (modelCapabilities !== undefined) snapshot.modelCapabilities = modelCapabilities;
+	const modelContextWindows = normalizedContextWindows(snapshot.models, options.modelContextWindows);
+	if (modelContextWindows !== undefined) snapshot.modelContextWindows = modelContextWindows;
 	try {
 		// Every successful probe confirms the same list. Rewriting it costs a synchronous fsync on the probe path,
 		// so a snapshot that already says the same and is not yet half way to expiry stands as written.
