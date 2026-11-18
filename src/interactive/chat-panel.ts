@@ -3048,11 +3048,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
 	/** Read one receipt's turn from the view; it stays live until the view holds all of the turn's spend. */
-	const readReceipt = (
-		entry: Extract<TranscriptEntry, { role: "assistant" }>,
-		view: TelemetryView,
-		runningTurns: ReadonlySet<string>,
-	): void => {
+	const readReceipt = (entry: Extract<TranscriptEntry, { role: "assistant" }>, view: TelemetryView): void => {
 		const usage = entry.turnUsage;
 		if (usage?.turnId === undefined) {
 			liveReceipts.delete(entry);
@@ -3066,12 +3062,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			entry.turnUsage = { ...usage, spend };
 			markDirty();
 		}
-		if (!runningTurns.has(usage.turnId) && turnHoldsCalls(view, usage.turnId, usage.callIds ?? []))
+		if (!runningTurns(view).has(usage.turnId) && turnHoldsCalls(view, usage.turnId, usage.callIds ?? []))
 			liveReceipts.delete(entry);
 	};
-	/** The turns with a referenced run still going, read once per view. */
-	const runningTurns = (view: TelemetryView): Set<string> =>
-		new Set(view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])));
+	/** The turns with a referenced run still going, built once per view: a replay reads one view for every receipt. */
+	const runningTurnsByView = new WeakMap<TelemetryView, ReadonlySet<string>>();
+	const runningTurns = (view: TelemetryView): ReadonlySet<string> => {
+		let running = runningTurnsByView.get(view);
+		if (running === undefined) {
+			running = new Set(
+				view.runs().flatMap((run) => (run.terminalReason === null && run.turnId !== null ? [run.turnId] : [])),
+			);
+			runningTurnsByView.set(view, running);
+		}
+		return running;
+	};
 	const refreshReceipts = (): void => {
 		const view = options.getTelemetry?.() ?? null;
 		if (view === receiptView) return;
@@ -3085,14 +3090,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		// A view still merging its cold read holds a partial session; its turns are read once it has merged.
 		if (view === null || view.seeding) return;
-		const running = runningTurns(view);
-		for (const entry of liveReceipts) readReceipt(entry, view, running);
+		for (const entry of liveReceipts) readReceipt(entry, view);
 	};
 	/** A receipt the run just gave a turn: read now, and again on each new view while it is live. */
 	const trackReceipt = (entry: Extract<TranscriptEntry, { role: "assistant" }>): void => {
 		liveReceipts.add(entry);
 		const view = options.getTelemetry?.() ?? null;
-		if (view !== null && !view.seeding) readReceipt(entry, view, runningTurns(view));
+		if (view !== null && !view.seeding) readReceipt(entry, view);
 	};
 	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
 	const clearRenderCaches = (): void => {
