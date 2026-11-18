@@ -10,7 +10,7 @@ import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { readRetention, retentionPath } from "../../src/domains/memory/completion-retention.js";
 import type { CompletedLessonSource } from "../../src/domains/memory/history-review.js";
 import { createMemoryInterventionRegistration } from "../../src/domains/memory/intervention.js";
-import { lessonEvidence } from "../../src/domains/memory/lesson-evidence.js";
+import { lessonEvidence, readInsideRoot, repositoryRelativePath } from "../../src/domains/memory/lesson-evidence.js";
 import { MemoryLessonFeedback } from "../../src/domains/memory/lesson-feedback.js";
 import { rejectMemoryRecord } from "../../src/domains/memory/operations.js";
 import { MemoryRuntime } from "../../src/domains/memory/runtime.js";
@@ -710,4 +710,20 @@ test("a wrapper's success is judged by the command it runs, and an unreadable wr
 		strictEqual(evidence(command), null, command);
 	for (const command of [COMMAND, `env -i FOO=1 ${COMMAND}`, `timeout 30 nice ${COMMAND}`, `command ${COMMAND}`])
 		strictEqual(evidence(command), "command", command);
+});
+
+test("a child named ..x is inside the repository, and a sibling of the root is not", () => {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "lesson-evidence-root-")));
+	try {
+		mkdirSync(join(root, "repo", "..x"), { recursive: true });
+		writeFileSync(join(root, "repo", "..x", "notes.md"), "kept\n");
+		writeFileSync(join(root, "outside.md"), "outside\n");
+		const repo = join(root, "repo");
+		strictEqual(repositoryRelativePath(join(repo, "..x", "notes.md"), [repo]), "..x/notes.md");
+		strictEqual(readInsideRoot(repo, "..x/notes.md"), "kept\n");
+		strictEqual(repositoryRelativePath(join(root, "outside.md"), [repo]), null);
+		strictEqual(readInsideRoot(repo, "../outside.md"), null);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
