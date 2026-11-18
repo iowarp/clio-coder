@@ -952,6 +952,11 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["python script.py", "unknown"],
 		["make build", "unknown"],
 		["npm test -- --import ./loader.mjs", "unknown"],
+		// A loader runs code beside the check in either order, or handed on to the script (x6-5).
+		["node --test --import tsx tests/", "unknown"],
+		["node --import tsx --test tests/", "unknown"],
+		["node --test --require=./x.cjs tests/", "unknown"],
+		["pnpm test --import ./loader.mjs", "unknown"],
 		["source env.sh", "unknown"],
 		["echo $(npm test)", "unknown"],
 		["black --check src", "unknown"],

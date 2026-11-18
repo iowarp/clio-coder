@@ -2668,13 +2668,14 @@ function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): ValidationCommandLabel | PackageScriptLabel | null {
-	if (executable === "node" && args[0] === "--test") return "node --test";
+	// A runtime loader (`--import`, `--require`) runs code beside the check, so wherever it appears the run is not the
+	// project's check (x6-5).
+	if (executable === "node") return args[0] === "--test" && !args.some(isRuntimeLoaderFlag) ? "node --test" : null;
 	const script = packageScriptMatch(executable, args);
 	if (script !== null) {
-		// A runtime loader after `--` (`--import`, `--require`) runs code beside the script, so it is not the project's
-		// check. A runner's own flag (`--run`, `-t name`) is, filed under its full command (x5-2).
-		const separator = args.indexOf("--");
-		return separator >= 0 && args.slice(separator + 1).some(isRuntimeLoaderFlag) ? null : script;
+		// The same holds for one handed to the script; a runner's own flag (`--run`, `-t name`) is filed under its
+		// full command (x5-2).
+		return packageScriptRun(executable, args)?.forwarded.some(isRuntimeLoaderFlag) === true ? null : script;
 	}
 	if (executable === "uv") {
 		const invocation = args.join(" ");
