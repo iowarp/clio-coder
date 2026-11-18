@@ -511,9 +511,11 @@ const OPERATOR_UNAVAILABLE_DENIAL =
  * worker reports does not cover what those calls would have checked (bt-23).
  */
 function operatorUnavailableLine(receipt: RunResult): string | null {
-	const denied = (receipt.safety?.blockedAttempts ?? []).filter((attempt) =>
-		OPERATOR_UNAVAILABLE_DENIAL.test(attempt.reason ?? ""),
-	);
+	// The denied ask is a permission request; an older record listed it as blocked.
+	const denied = [
+		...(receipt.safety?.permissionRequestedAttempts ?? []),
+		...(receipt.safety?.blockedAttempts ?? []),
+	].filter((attempt) => OPERATOR_UNAVAILABLE_DENIAL.test(attempt.reason ?? ""));
 	if (denied.length === 0) return null;
 	const tools = [...new Set(denied.map((attempt) => attempt.tool))].join(", ");
 	return (

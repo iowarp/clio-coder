@@ -1126,7 +1126,9 @@ function foldAssistantCall(
 
 /**
  * Counts one finished tool call's safety decision, a tool guard's block apart from a safety refusal, and records it as
- * a blocked attempt when it was refused, in the list of the counter that counted it (bt-15 c12b, c13a).
+ * a blocked attempt when it was refused, in the list of the counter that counted it (bt-15 c12b, c13a). A parked ask
+ * the registry denied (`deniedPark`, as when no operator can answer a worker's ask) arrives as a block but is a
+ * permission request, as the headless main run counts it.
  */
 function foldToolDecision(
 	payload: {
@@ -1137,6 +1139,7 @@ function foldToolDecision(
 		reasonCode?: string;
 		policySource?: string;
 		reason?: string;
+		deniedPark?: unknown;
 	},
 	tool: string,
 	counts: { allowed: number; blocked: number; guardBlocked: number; permissionRequested: number },
@@ -1144,11 +1147,13 @@ function foldToolDecision(
 	guardBlockedAttempts: SafetyBlockedAttempt[],
 	permissionRequestedAttempts: SafetyBlockedAttempt[],
 ): void {
-	const guardBlock = payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE;
+	const deniedAsk = payload.decision === "blocked" && payload.deniedPark === true;
+	const permissionAsk = payload.decision === "permission_requested" || deniedAsk;
+	const guardBlock = payload.decision === "blocked" && !deniedAsk && payload.reasonCode === TOOL_GUARD_REASON_CODE;
 	if (payload.decision === "allowed") counts.allowed += 1;
+	else if (permissionAsk) counts.permissionRequested += 1;
 	else if (guardBlock) counts.guardBlocked += 1;
 	else if (payload.decision === "blocked") counts.blocked += 1;
-	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
 	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
 	const attempt: SafetyBlockedAttempt = { tool };
 	if (payload.actionClass !== undefined) attempt.actionClass = payload.actionClass;
@@ -1156,12 +1161,8 @@ function foldToolDecision(
 	if (payload.reasonCode !== undefined) attempt.reasonCode = payload.reasonCode;
 	if (payload.policySource !== undefined) attempt.policySource = payload.policySource;
 	if (payload.reason !== undefined) attempt.reason = payload.reason;
-	(guardBlock
-		? guardBlockedAttempts
-		: payload.decision === "permission_requested"
-			? permissionRequestedAttempts
-			: blockedAttempts
-	).push(attempt);
+	if (deniedAsk) attempt.permissionRequired = true;
+	(guardBlock ? guardBlockedAttempts : permissionAsk ? permissionRequestedAttempts : blockedAttempts).push(attempt);
 }
 
 const CALL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "toolUse", "error", "aborted"]);
