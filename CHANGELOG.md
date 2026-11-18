@@ -133,6 +133,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `steer` cancel and `clio-coder fleet cancel` now find a headless (hosted) worker's assignment by its attempt id. Cancelling a hosted worker waiting on its retry backoff no longer reports 'nothing to cancel' and lets the retry spawn, and `fleet cancel` of a hosted worker whose owner is gone seals it as an orphan instead of waiting 15 s and exiting pending.
+- A very large bash call (for example a 130 KB heredoc) no longer stalls admission: each distinct read token is judged once per evaluation, so path lookups no longer grow with repeated lines (about 1.8 s to 0.65 s end to end at 130 KB). While such a call is still streaming, the TUI renders only the visible preview of its arguments, so each frame stays a few milliseconds whatever the argument size; the settled card and `/view` are unchanged.
 - A read-only worker's authority line now says workspace edits are not permitted in this run. It no longer says "workspace edits and recognized commands run". Other workers' prompts are byte-identical (D-C).
 - Headless `run`: a killed or timed-out worker that is not retried now prints its not_retried line, as interactive does, including under the review gate and a pipeline halt. A delegated task whose workers started and then failed reads "failed (...)" instead of "never started" (D3-c, H6).
 - ask_user: a timed-out question that names writing outside the workspace now declines a recommended option that affirms it ("Yes, run it"). Before, only the option's own words were checked. A recommended option that declines is still picked (bt-21).
