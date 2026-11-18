@@ -118,12 +118,28 @@ describe("clio-coder run --timeout", () => {
 		return { turn, scratch, provider };
 	}
 
-	it("ends a stalled run with exit 124 and a sealed timed_out receipt", async () => {
+	it("ends a stalled run with exit 124 and a sealed timed_out receipt, not a no-op under --fail-on-noop", async () => {
 		// The budget includes cold CLI boot. Give it room to reach the provider
 		// under load before asserting timeout semantics on the stalled stream.
-		const { turn, scratch, provider } = await headlessTurn([{ kind: "stall" }], "default", ["--timeout", "15"]);
+		// Hidden shell content asks in default for an uncontained shell, which makes a
+		// headless run a no-op; the model then stalls, and the timeout is what ends it.
+		// The sandbox is off so the ask holds on every host: a bwrap-contained shell
+		// runs the command instead (287a523c0) and the run would not be a no-op.
+		const { turn, scratch, provider } = await headlessTurn(
+			[
+				{
+					kind: "tool",
+					name: "bash",
+					arguments: { command: "python3 -c \"print('hidden')\"" },
+				},
+				{ kind: "stall" },
+			],
+			"default",
+			["--timeout", "15", "--fail-on-noop"],
+			"off",
+		);
 		strictEqual(turn.code, 124, turn.stderr);
-		ok(provider.streams >= 1, "the run must have been waiting on the model");
+		ok(provider.streams >= 2, "the run must have been waiting on the model after the hidden ask");
 		ok(turn.elapsedMs >= 15_000, `exited before the limit: ${turn.elapsedMs}ms`);
 		match(turn.stderr, /timed out after 15s \(--timeout\)/);
 		strictEqual(turn.stderr.split("\n").filter((line) => line.includes("--timeout")).length, 1);
@@ -139,6 +155,7 @@ describe("clio-coder run --timeout", () => {
 		ok(envelope.outcome);
 		strictEqual(envelope.status, runStatusForOutcome(envelope.outcome));
 		match(envelope.outcomeDetail ?? "", /timed out after 15s \(--timeout\)/);
+		notStrictEqual(envelope.outcomeDetail, "noop");
 	});
 
 	it("leaves a run that finishes inside the limit untouched and does not hold the process open", async () => {
@@ -151,33 +168,6 @@ describe("clio-coder run --timeout", () => {
 		ok(envelope);
 		strictEqual(envelope.outcome, "succeeded");
 		strictEqual(envelope.exitCode, 0);
-	});
-
-	it("reports a timeout, not a no-op, when --fail-on-noop is also set", async () => {
-		// Hidden shell content asks in default for an uncontained shell, which makes a
-		// headless run a no-op; the model then stalls, and the timeout is what ends it.
-		// The sandbox is off so the ask holds on every host: a bwrap-contained shell
-		// runs the command instead (287a523c0) and the run would not be a no-op.
-		const { turn, scratch } = await headlessTurn(
-			[
-				{
-					kind: "tool",
-					name: "bash",
-					arguments: { command: "python3 -c \"print('hidden')\"" },
-				},
-				{ kind: "stall" },
-			],
-			"default",
-			["--timeout", "15", "--fail-on-noop"],
-			"off",
-		);
-		strictEqual(turn.code, 124, turn.stderr);
-		const runJournal = readRunJournal(scratch.stateDir);
-		ok(runJournal);
-		const envelope = [...runJournal.envelopes.values()][0];
-		ok(envelope);
-		strictEqual(envelope.outcome, "timed_out");
-		notStrictEqual(envelope.outcomeDetail, "noop");
 	});
 
 	it("disarms the deadline on an early usage-error return while the process is held open", async () => {
