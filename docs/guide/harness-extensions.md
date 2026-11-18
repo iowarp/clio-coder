@@ -10,6 +10,16 @@ An extension declares its capabilities in `clio-coder-extension.yaml`, `.yml`, o
 
 Source: `src/domains/extensions/`, [harness-extensions.ts](../../src/tools/harness-extensions.ts), [extension-runtime-tools.ts](../../src/tools/extension-runtime-tools.ts), [slash-commands.ts](../../src/session-control/slash-commands.ts), and [extensions.ts](../../src/cli/extensions.ts).
 
+> [!NOTE]
+> Promotion, compact `summary` results and `detail_ref` storage described here
+> are `0.8.4-dev` HEAD behavior (`package.json`;
+> `src/domains/extensions/runtime-schema-v2.ts`,
+> `src/tools/extension-runtime-tools.ts` and
+> `src/domains/session/tool-details.ts`). The public site still records
+> `0.8.3` in `site/product.json` and `site/content/docs-manifest.json`.
+> Check the running version rather than treating every 0.8.x tag as
+> interchangeable.
+
 ## Package manifest
 
 An extension root contains one manifest, found in the order `clio-coder-extension.yaml`, `clio-coder-extension.yml`, `clio-coder-extension.json`. Any other top-level key is an error unless the manifest lists it under `ignorable`.
@@ -275,7 +285,7 @@ Superseded values stay in older history until compaction, so a block that change
 
 #### Compact tool results
 
-A runtime tool may return `summary` beside `text` and `data`: non-empty text of at most 2048 bytes. The model then sees the summary followed by `detail_ref: xd_<16 hex digits> (<n> bytes; read it with ledger action="detail" ref="xd_...")`, and the full result (`text`, then `data` as JSON) is stored in the session's own directory. `ledger(action="detail", ref=...)` returns it in pages of up to 12,000 bytes, each naming the `offset` of the next. The store survives compaction and resume, a forked session resolves its parent's refs, and the details go when the session is removed. Without a saved session to hold the detail, the model gets the full result as before. Where dispatch is available `ledger` is already registered. A session without dispatch gets a `ledger` behind the gateway that takes only `detail`, once an extension serves a runtime tool or a resumed session's detail store holds entries (so a `detail_ref` stays readable after its extension is removed), so `gateway(op="call", capability="ledger", args={action: "detail", ref: "xd_..."})` reads a `detail_ref` on every main-session surface. On a `small`-tier route or a route that does not cache prompts, a large result that a later identical call replaced is stubbed in the outgoing request when the tool is declared `readOnly` or `idempotent` ([observation aging](../architecture/context-engine.md#observation-aging)); the session ledger and the detail store keep it.
+A runtime tool may return `summary` beside `text` and `data`: non-empty text of at most 2048 bytes. The model then sees the summary followed by `detail_ref: xd_<16 hex digits> (<n> bytes; read it with ledger action="detail" ref="xd_...")`, and the full result (`text`, then `data` as JSON) is stored in the session's own directory. `ledger(action="detail", ref=...)` returns it in pages of up to 12,000 bytes, each naming the `offset` of the next. The store survives compaction and resume. Fork lookup follows at most eight parent hops, and deleting a session removes its details. Without a saved session to hold the detail, the model gets the full result as before. Where dispatch is available `ledger` is already registered. A session without dispatch gets a `ledger` behind the gateway that takes only `detail`, once an extension serves a runtime tool or a resumed session's detail store holds entries (so a `detail_ref` stays readable after its extension is removed), so `gateway(op="call", capability="ledger", args={action: "detail", ref: "xd_..."})` reads a `detail_ref` on every main-session surface. On a `small`-tier route or a route that does not cache prompts, a large result that a later identical call replaced is stubbed in the outgoing request when the tool is declared `readOnly` or `idempotent` ([observation aging](../architecture/context-engine.md#observation-aging)); the session ledger and the detail store keep it.
 
 ```typescript
 api.tool("status", async (_input, ctx) => {

@@ -1,6 +1,19 @@
 # Portable plugins and the library
 
-A plugin is an Agent Plugin: a complete, versioned package of content with a portable root `plugin.json` that follows [Agent Plugins 1.0.0](https://agent-plugins.org/). It is content only. CLIO Coder reads its own prompts, agents, and playbooks from its own namespace in that manifest, `extensions["ai.iowarp.clio"]`, and from the `ai.iowarp.clio/` directory. Installing a plugin keeps its content and references together, pins the whole tree by SHA-256, and never runs code inside CLIO Coder.
+A plugin is an Agent Plugin: a complete, versioned package of content with a portable root `plugin.json` that follows [Agent Plugins 1.0.0](https://agent-plugins.org/). It is content only. CLIO Coder reads its own prompts, agents, and playbooks from its own namespace in that manifest, `extensions["ai.iowarp.clio"]`, and from the `ai.iowarp.clio/` directory. Installing a plugin keeps its content and references together, pins the whole tree by SHA-256, and installation/discovery do not execute plugin code inside CLIO Coder.
+
+Source anchors: plugin discovery/validation is in
+`src/domains/plugins/` and `src/domains/resources/`; installed library lifecycle
+is in `src/domains/resources/library.ts` and
+`src/domains/resources/library-packages.ts`; plugin state and digest logic are
+in `src/domains/plugins/state.ts`, `src/domains/plugins/integrity.ts`, and
+`src/domains/plugins/verified-tree.ts`; plugin MCP declaration/trust is in
+`src/domains/gateway/mcp/` and `src/cli/mcp.ts`. Focused contract coverage
+includes
+[extension-resources.test.ts](../../tests/contracts/extension-resources.test.ts)
+and [materio-plugin.test.ts](../../tests/extended/materio-plugin.test.ts).
+The digest check proves the installed bytes CLIO Coder read; it does not make
+scripts later invoked by a tool harmless.
 
 This page is the concept map. Each contract is stated once, in the page named in the last table. A library plugin is unrelated to `integrations.runtimePlugins`, which lists pi-ai compatibility plugins loaded by the engine; see [pi-boundary.md](../architecture/pi-boundary.md). A runtime plugin is imported into CLIO Coder's own process, so an entry must be a bare npm package name or an absolute path under `<configDir>/runtimes/`, and the list is read from user settings only: a project value is ignored with a warning.
 
@@ -45,7 +58,7 @@ User plugins install under `<configDir>/plugins/<name>/` and project plugins und
 | State | `plugins/state.json` | `extensions/state.json` | None | None |
 | Reload | `/reload library` | `/reload extensions`; tool schemas stay frozen for the session | Next discovery | Not applicable |
 
-The two package systems never overlap. An extension manifest that declares `skills`, `prompts`, `agents`, `playbooks`, or `resources` is refused with a pointer to `clio-coder library install <path>`, and an extension root never holds a `plugin.json`. A plugin may carry scripts that a skill or playbook runs explicitly, and explicitly trusted `mcp.json` servers can expose gateway capabilities. A plugin contributes no extension hooks or UI. Prompt templates provide slash invocations without an extension runtime.
+The two package systems never overlap. An extension manifest that declares `skills`, `prompts`, `agents`, `playbooks`, or `resources` is refused with a pointer to `clio-coder library install <path>`, and an extension root never holds a `plugin.json`. A plugin may carry scripts that a skill or playbook runs explicitly, and explicitly trusted `mcp.json` servers can expose gateway capabilities. Those scripts/processes are ordinary executable content once invoked; "content only" means installation and resource loading do not register plugin code as an extension runtime. A plugin contributes no extension hooks or UI. Prompt templates provide slash invocations without an extension runtime.
 
 ### Pairing a plugin with an extension
 

@@ -4,6 +4,13 @@
 
 CLIO Coder manages two complementary layers of context: the active working set compiled for the language model on every turn, and the persistent project knowledge used to navigate and ground repository work.
 
+> [!NOTE]
+> Observation aging is `0.8.4-dev` behavior in this checkout (`package.json`;
+> `src/session-control/observation-aging.ts`). The published site still pins
+> `0.8.3` in `site/product.json` and
+> `site/content/docs-manifest.json`; check the running build before relying on
+> the behavior.
+
 The core thesis of CLIO Coder's context architecture is that **context management must be deterministic, reversible, and source-grounded**. Rather than treating conversation history as an unbounded append-only log that periodically collapses into lossy prose summaries, it employs an active working-set model with deterministic token accounting, reversible observation eviction, prefix-stabilized prompt caching, and dual-layer repository indexing.
 
 **Start with `/context`.** It shows the active model window, current token occupancy, project handbook guidance, and live prompt-cache reuse measurements.
@@ -153,12 +160,41 @@ Assistant-directed handoffs have a unique `handoffId` bound to the branch and du
 
 ## Observation aging
 
-On a route whose model tier is `small` or that does not cache prompts, the outgoing request drops a tool result the model has already replaced ([observation-aging.ts](../../src/session-control/observation-aging.ts)). Cached standard and frontier routes never see it.
+On a route whose model tier is `small`, **or** whose route resolution says
+`promptCaching: false`, the outgoing request may drop a read result that a
+later call has replaced
+([observation-aging.ts](../../src/session-control/observation-aging.ts)).
+This gate is tested in
+[observation-aging-gate.test.ts](../../tests/contracts/observation-aging-gate.test.ts):
+small plus caching still ages, and an uncached frontier route ages; cached
+standard/frontier routes do not.
 
-- **Superseded only.** A result ages only when a later call with the same effective tool and canonical arguments succeeded in the same request. A gateway call counts as the capability it runs. Age alone never ages anything, and a failed call supersedes nothing.
-- **Reads only.** The call must be one the loop guard reads as making no change: a builtin read-class tool, a bash command that only reads, a typed git inspection, or an extension tool declared `readOnly` or `idempotent`. A step tool such as `next_step` returns a new state for the same arguments, so its earlier results always go out whole.
-- **Batched.** Superseded results wait until 32 KiB of them are pending, then each is replaced by a one-line stub naming the tool, its arguments and the bytes removed. A stubbed result stays stubbed in every later request of the session, model switches and reloads included, so the prefix breaks once per batch. A session switch, a new session or a fork starts over.
-- **Lossless.** The session ledger keeps every full result; only the copy sent to the provider changes. The batch is recorded as the `observation_aging` cold reason, with the bytes saved in `cache.observationAgingBytes` on the call's `call.settled` record.
+- **Superseded only.** A later successful result with the same effective tool
+  and canonical arguments must cover the earlier delivery. Gateway calls are
+  compared as their inner capability. A later complete result always covers;
+  a truncated result covers only at least the bytes/count it replaced. Age
+  alone, errors and later budget-exhausted notices supersede nothing.
+- **Reads only.** The call must be one the loop guard classifies as repeatable
+  state (`callRepeatsAsRead`): a builtin read tool, a read-only bash command,
+  a typed Git inspection, or an extension tool declared `readOnly` or
+  `idempotent`. A state-changing step tool such as `next_step` is never aged.
+- **Batched and cheaper only.** Results that have not already been stubbed
+  accumulate until 32 KiB of original text is pending. The projection then
+  stubs each eligible result only when the one-line stand-in is smaller. The
+  stub names the tool, a deterministic truncated argument rendering, the
+  removed byte count and the fact that a later same-argument result is below it.
+- **Session projection, not ledger mutation.** The tracker remembers sent stub
+  ids for the live session so an in-process agent rebuild, model switch and
+  replay request reuse the projection. A different session id starts from no
+  remembered stubs; a process restart does too. A resumed full ledger is
+  therefore scanned again at the next eligible request, so the resume can form
+  a new batch from its copied history when no live tracker state remains. A
+  fork likewise has a separate session id and can age copied superseded
+  results. The durable ledger retains every full result, and `/view
+  transcript` still reads the original history rather than a persisted stub.
+- **Reported.** A new batch records the `observation_aging` cold reason and the
+  bytes saved in `cache.observationAgingBytes` on `call.settled`. Later sends
+  carry existing stubs without announcing the same batch again.
 
 This is the one exception to the rule that working-set eviction waits for pressure. It holds because it is superseded-only, batched and gated to routes where a reprocessed prefix costs little or nothing.
 

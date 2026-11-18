@@ -5,6 +5,16 @@ or 20 through `module load nodejs`, run an old glibc (RHEL and CentOS 7 ship
 2.17, while official Node 22 and 24 builds need 2.28), sit behind a proxy, or
 have no internet at all. The installer handles each of these without root.
 
+Source anchors for this page: installer selection and verification are in
+[`scripts/install.sh`](../../scripts/install.sh); provider/proxy setup is in
+`src/domains/providers/` and [`proxy-env.ts`](../../src/core/proxy-env.ts);
+scheduler classification is in
+[`policy-engine.ts`](../../src/domains/safety/policy-engine.ts) and
+[`containment.ts`](../../src/domains/safety/containment.ts). Focused coverage
+includes
+[`doctor-hpc.test.ts`](../../tests/contracts/doctor-hpc.test.ts) and
+[`doctor-slurm-controller.test.ts`](../../tests/contracts/doctor-slurm-controller.test.ts).
+
 ## Quick start on a login node
 
 1. **Install** without root: `curl -fsSL https://coder.iowarp.ai/install.sh | sh`,
@@ -201,16 +211,23 @@ clio-coder          # the interactive session
 
 `clio-coder doctor` names anything still missing, such as a key variable not
 set in this shell, with the command that fixes it. On a cluster, the agent's
-scheduler commands run outside the shell sandbox behind an approval; see
+scheduler commands are outward-action candidates and pass the containment and
+approval checks described below; see
 [Scheduler clients](#scheduler-clients).
 
 ## Scheduler clients
 
 Slurm, PBS, LSF and Flux client commands (`squeue`, `sbatch`, `qstat`, `bsub`,
-`flux` and the rest) run outside the shell sandbox behind the same review as
-`ssh`: at the default autonomy level the safety judge decides first and asks
-you when it has no verdict, contained yolo runs one only when your own message
-names it, and unconfined yolo runs it. A script
+`flux` and the rest) are outward-action candidates, reviewed like `ssh`: at
+the default autonomy level the safety judge decides first and asks you when it
+has no verdict, contained yolo runs one only when your own message names it,
+and unconfined yolo runs it. Whether a recognized literal line leaves the OS
+sandbox is then decided by
+[`containment.ts`](../../src/domains/safety/containment.ts); under
+`safety.sandbox: required`, only the narrow listed literal forms leave, and
+clients outside that list remain inside without the daemon credentials they
+need. This page therefore should not be read as a promise that every
+scheduler spelling always runs outside. A script
 that calls `sbatch` itself stays inside the sandbox and fails there, so submit
 from the command line the agent runs rather than from a wrapper script. A
 workspace script named like a client (`./sbatch`, `bin/ssh`) is not one and

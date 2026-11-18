@@ -11,17 +11,33 @@ and implementation boundaries.
 ```text
 docs/
 ├── README.md        Documentation map
-├── corpus.json      Declared documentation roots and exclusions
+├── corpus.json      Maintainer documentation-policy metadata
+├── pi-surface.json  Maintainer-only source-declaration snapshot
 ├── guide/           Configuration and operator workflows
 ├── architecture/    Runtime architecture and contracts
-└── wiki/            Generated development reference, v0.1
+└── wiki/            Generated development reference
 ```
 
-CLIO Coder reads this Markdown from its installed package. The website serves only
-the guides listed in `site/public-docs.json`. The
+CLIO Coder reads the product Markdown from its installed package. The website
+publishes a separate, allowlisted snapshot from `site/public-docs.json`; those
+pages are not assumed to mirror every guide in this checkout. The
 [GitHub Wiki](https://github.com/iowarp/clio-coder/wiki) is a generated source
-reference (v0.1); for implementation decisions, use the architecture guides and
-current source.
+reference. For product contracts and implementation decisions, use the authored
+guides, architecture pages, and current source.
+
+## Documentation controls and release baseline
+
+This checkout's package version is `0.8.4-dev`, and its local `HEAD` is
+untagged. The tagged 0.8.x documentation baseline represented in local history
+is `v0.8.0-rc.1` followed by `v0.8.0`, `v0.8.1`, `v0.8.2`, and `v0.8.3`.
+Use the package version and tags as grounding for documentation; detailed
+release chronology belongs in the [CHANGELOG](../CHANGELOG.md).
+
+Public documentation is pinned independently. At this baseline,
+`site/content/docs-manifest.json` records a `0.8.3` snapshot at
+`f7c15144937cf81de0321a3875ba57148a7f9834`. A public snapshot can therefore
+differ from the Markdown at the local `HEAD`; its manifest is the authority for
+what the site claims to publish.
 
 ## Start here
 
@@ -209,27 +225,43 @@ otherwise the nearest directory holding a `package.json` above the running code
 
 `clio_docs` ([docs-engine.ts](../src/tools/context/docs-engine.ts))
 walks `<package root>/docs` for every `.md` file in name order and skips
-`docs/html` and `docs/wiki`. It then adds the package root's `README.md`,
-`CHANGELOG.md` and `CLIO-CODER.md`, each only when it exists. In an installed
-package that is this map, `docs/guide/**`, `docs/architecture/**`, `README.md`
-and `CHANGELOG.md`. `CLIO-CODER.md` is a source-checkout handbook and is not
-shipped. The generated `docs/wiki/**` pages stay out of the index in a source
-checkout too, and `package.json` leaves them out of the npm package.
+`docs/html` and `docs/wiki`. It then adds the package root's `README.md` and
+`CHANGELOG.md`, each only when it exists. In an installed package, the product
+corpus is therefore this map, `docs/guide/**`, `docs/architecture/**`,
+`README.md`, and `CHANGELOG.md`.
+
+A project's `CLIO-CODER.md` is different: CLIO Coder loads it as workspace
+handbook context, not as packaged documentation. `clio_docs` does not add it,
+and the npm package does not ship an arbitrary project's handbook.
+
+The generated `docs/wiki/**` pages stay out of the index in a source checkout
+too, and `package.json` leaves them out of the npm package.
 `scripts/check-hygiene.ts` requires every other Markdown file under `docs/` to
 appear in the listing. A search returns sections, one per heading, ranked by
 BM25 over headings and bodies with CLIO Coder vocabulary aliases and phrase
 boosts. The index is deterministic and needs no network or embedding service.
 
-### What docs/corpus.json controls
+### What docs/corpus.json records
 
-`docs/corpus.json` declares the product corpus: roots relative
-to `docs/` (this map, `architecture/`, `guide/`), the package-root files that
-also count, and the trees left out (`html/**` and `wiki/**`, both skipped by
-retrieval, with `wiki/**` also omitted from the package). It ships in the
-package and the installed-package smoke test checks that it exists. No
-retrieval, build or website code reads it. Adding or removing
-a page changes the corpus through the Markdown file alone, and editing
-`corpus.json` does not change what `clio_docs` returns.
+`docs/corpus.json` is maintainer-facing policy metadata, not an executable
+manifest. It declares the product-corpus roots relative to `docs/` (this map,
+`architecture/`, and `guide/`), the package-root files that also count, and the
+trees left out (`html/**` and `wiki/**`, both skipped by retrieval, with
+`wiki/**` also omitted from the package). It ships in the package so the
+declaration can accompany the documentation, but no current retrieval, build,
+or website code consumes it. Adding or removing a page changes runtime
+retrieval through the Markdown file alone; editing `corpus.json` does not change
+what `clio_docs` returns.
+
+### What docs/pi-surface.json records
+
+`docs/pi-surface.json` is a maintainer-only snapshot of the normalized Pi
+source declarations that CLIO Coder imports. The explicit
+`pnpm pi:surface-diff` command compares installed declarations with it, and
+`pnpm pi:surface-snapshot` writes a reviewed replacement. It is not part of the
+runtime documentation corpus and is not indexed by `clio_docs`. At the current
+baseline it is deliberately absent from both the npm package's `files`
+allowlist and `scripts/release-manifest.json`.
 
 ### Search and read the installed documentation
 
@@ -268,11 +300,24 @@ your current project. The offline `clio_docs` capability indexes that Markdown
 for agents without a model connection or network request for retrieval.
 
 Edit the authoritative Markdown once to update the installed reference. The
-static product website has a generated snapshot of the guides listed in
-`site/public-docs.json`, built by `site/sync-docs.py`, because it deploys
-independently from npm; its manifest records the source revision, commit and
-file hashes. The generated development Wiki has separate generation and
-publication ownership.
+static product website deploys independently from npm and builds only the
+entries allowlisted by `site/public-docs.json`. At the current baseline that
+allowlist has 29 public entries: the package-root `README.md` and 28 of the 33
+pages under `docs/guide/`. The following guides are present in the product
+corpus but omitted from public-site publication:
+
+- `authoring-plugins.md`
+- `extensions-and-sharing.md`
+- `installation-and-lifecycle.md`
+- `music.md`
+- `skills-marketplace.md`
+
+Do not infer from this map, a link in it, or `clio_docs` that an omitted guide
+appears on the website. `site/public-docs.json` is the publication source of
+truth; `site/sync-docs.py` creates the snapshot, and
+`site/content/docs-manifest.json` records its source revision, commit, and file
+hashes. The generated development Wiki has separate generation and publication
+ownership.
 
 ## Writing documentation
 

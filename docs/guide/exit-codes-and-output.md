@@ -2,6 +2,13 @@
 
 Process exit codes, stdout/stderr contracts, `--help` guarantees, and JSONL stream schemas across CLIO Coder CLI commands ([index.ts](../../src/cli/index.ts), [run.ts](../../src/cli/run.ts), [print.ts](../../src/cli/modes/print.ts), [run-json-schema.ts](../../src/cli/modes/run-json-schema.ts)).
 
+> [!NOTE]
+> `telemetry doctor` is present in the `0.8.4-dev` source checkout
+> (`package.json`, `src/cli/telemetry-doctor.ts`). The public site still pins
+> `0.8.3` in `site/product.json` and
+> `site/content/docs-manifest.json`; check `clio-coder --version` before
+> scripting this subcommand or its exit contract.
+
 ## Exit code contract
 
 Interactive sessions, headless main-agent `run`, and `run --agent` exit `128 + signal` on terminating signals (`129` SIGHUP, `130` SIGINT, `143` SIGTERM). `run` interrupted by SIGINT while reading `@file` inputs exits `130` before sending any request; `clio-coder configure` exits `130` if exited before saving a first target ([configure-import.ts](../../src/cli/configure-import.ts)).

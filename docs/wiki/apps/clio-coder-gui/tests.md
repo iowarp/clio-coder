@@ -17,6 +17,16 @@ tests:
   - "apps/clio-coder-gui/tests/markdown.test.tsx"
   - "apps/clio-coder-gui/tests/background.test.ts"
   - "apps/clio-coder-gui/tests/real/acp.test.ts"
+  - "apps/clio-coder-gui/tests/arena-model.test.ts"
+  - "apps/clio-coder-gui/tests/research-http.test.ts"
+  - "apps/clio-coder-gui/tests/research-model.test.ts"
+  - "apps/clio-coder-gui/tests/reports-http.test.ts"
+  - "apps/clio-coder-gui/tests/rewind-http.test.ts"
+  - "apps/clio-coder-gui/tests/rewind-model.test.ts"
+  - "apps/clio-coder-gui/tests/review-http.test.ts"
+  - "apps/clio-coder-gui/tests/session-controls.test.ts"
+  - "apps/clio-coder-gui/tests/client-auth.test.ts"
+  - "apps/clio-coder-gui/tests/telemetry-http.test.ts"
 invariants:
   - "The ACP fixture child speaks newline-delimited JSON-RPC on stdio and selects its behavior from CLIO_CODER_WEB_FIXTURE_SCENARIO, defaulting to text when the variable is unset."
   - "In the fixture child, a permission request resolves to an executed write only when the client answers with optionId allow; any other optionId yields a refused write result with status failed and isError true."
@@ -28,6 +38,8 @@ validate:
 ---
 
 # Graphical application test suite
+
+> **Audit status (`3aae1044`):** current test files were located for the families below. Presence establishes ownership only; passing assertions were not reverified.
 
 This directory holds the tests for the optional graphical application under `apps/clio-coder-gui`. Most files are focused unit tests of client view models (turn grouping, approval timing, markdown rendering, background launcher configuration). A smaller set exercises the server end to end. Those server tests start the server in a child process and talk to a scripted stand-in for the ACP agent, or, in one case, to the real built CLI. A reader needs this page to choose between the two harnesses, to understand the fixture's scenario switch, or to add a case that depends on the scripted agent.
 
@@ -117,6 +129,20 @@ The test combines `realAcpHome()` with `processServer(fixture.env)`. It drives t
 Those last steps extend beyond the turn flow, and the test's own assertions are the authority for them. This is the only test in the directory that runs the built CLI against the real provider path.
 
 ## Focused tests
+
+Current domain coverage includes:
+
+| Area | Present test files |
+| --- | --- |
+| Arena | `arena-model.test.ts` |
+| Research | `research-model.test.ts`, `research-http.test.ts` |
+| Metrics/telemetry | `telemetry-http.test.ts`, `telemetry-live.test.ts`, `usage-insights-model.test.ts`, `usage-model.test.ts`, `metrics-scope-model.test.ts` |
+| Reports | `reports-http.test.ts`, `report-dialog-model.test.ts` |
+| Rewind | `rewind-model.test.ts`, `rewind-http.test.ts` |
+| Review/trust | `review-http.test.ts`, `trust-model.test.ts` |
+| Session control | `session-control.test.ts`, `session-controls.test.ts` |
+| Auth/launch | `auth-recovery.test.ts`, `client-auth.test.ts`, `open-browser.test.ts` |
+| Wire contract | `contracts.test.ts`, `openapi.test.ts` |
 
 These tests import client modules directly and do not start the server. Each case below was read.
 

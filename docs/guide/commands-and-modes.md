@@ -2,6 +2,13 @@
 
 This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: the [CLI command table](../../src/cli/index.ts), [startup flags](../../src/cli/argv.ts), [run arguments](../../src/cli/args.ts), the [slash-command registry](../../src/session-control/slash-commands.ts), and the [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md). The TUI's layout, theme and rendering contracts are in [TUI design](../architecture/tui-design.md).
 
+> [!NOTE]
+> The telemetry-doctor command documented below is verified in this
+> `0.8.4-dev` checkout (`package.json`, `src/cli/telemetry.ts` and
+> `src/cli/telemetry-doctor.ts`). The public site remains pinned to `0.8.3`
+> (`site/product.json`, `site/content/docs-manifest.json`); 0.8.x tags should
+> not be treated as interchangeable CLI snapshots.
+
 ## Demo presentation and guidance
 
 Demo presentation and guidance are on by default before 1.0 and follow output detail. Minimal opens with an identity header. Default shows a compact launchpad with the route, autonomy, project awareness and next action; Detailed adds artwork, project facts and shortcut hints. Detailed reserves two subscription rows from the first paint; longer account summaries end in an ellipsis and `/usage`. With `--no-demo` or `interface.demo: false`, both the instant shell and hydrated TUI use the identity header and skip welcome-only reads and learning tips. Immediate controls, work status and approval text remain visible. Stream pacing and motion preferences are independent. Dumb/unknown terminals and screen-reader mode also use the identity header.
@@ -16,12 +23,21 @@ Turn it off under Settings → Chat and display → Demo presentation and guidan
 
 ## CLI Commands
 
+The table uses three distinct surfaces, which the registry in
+[index.ts](../../src/cli/index.ts) also enforces:
+
+| Surface | Meaning |
+| --- | --- |
+| Public | Operator-facing commands named by normal `clio-coder --help`. |
+| Developer / compatibility | `clio-coder dev <name>` is the current developer-instrument form; the bare dev names and aliases such as `ext`, `export`, `import`, `targets workers` and `targets worker` still resolve for existing scripts. They are compatibility spellings, not additional public names. |
+| Internal / retired | `worker` is an internal stdin/NDJSON host used by placement, and `setup --next` is an installer handoff. They are intentionally absent from normal help and are not operator workflows. `context-init`, `context-index` and `context-clear` are retired command-shaped tombstones: they reserve parsing and are not dispatchable commands. |
+
 | Command | Purpose |
 | --- | --- |
 | `clio-coder` | Launch the interactive terminal UI. |
 | `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. Everything after `--` is task text, even text that starts with `-`. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively. The finished run settles and seals in its telemetry run scope. |
-| `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]` | Serve CLIO Coder as an ACP v1 agent over stdio for ACP frontends. `--permission-timeout` overrides `integrations.externalAgents.defaults.permissionTimeoutMs`, the server's default bound on a mediated permission request, and a client's negotiated `timeoutMs` never overrides it. `--autonomy default` caps every hosted session at `default`, so a client's choice of `yolo` is refused; the flag lowers the configured level and never raises it. `--read-only` holds every session to the read-only ceiling, so no file outside CLIO Coder's home changes; see [ACP read-only server](#acp-session-and-prompt-capability-ceilings). |
+| `clio-coder acp [--cwd PATH] [--permission-timeout MS] [--autonomy LEVEL] [--allow-tools NAMES] [--delegate-tools NAMES] [--read-only]` | Serve CLIO Coder as an ACP v1 agent over stdio for ACP frontends. `--permission-timeout` overrides `integrations.externalAgents.defaults.permissionTimeoutMs`, the server's default bound on a mediated permission request, and a client's negotiated `timeoutMs` never overrides it. `--autonomy default` caps every hosted session at `default`, so a client's choice of `yolo` is refused; the flag lowers the configured level and never raises it. `--read-only` applies the mediated ACP read-only ceiling; see [Read-only runs](../architecture/safety-model.md#read-only-runs) for the external-process boundary. |
 | `clio-coder acp [--cwd PATH] auth login` | Open interactive Quick Connect when an ACP client offers terminal authentication. `clio-coder --acp` is an alias for `clio-coder acp`. |
 | `clio-coder --version` / `-v` | Print the installed version. Only before a subcommand and before `--`. After a subcommand the token belongs to that command, so `clio-coder paths -v` is refused as an unknown flag and `clio-coder run -- -v` treats it as prompt text. `clio-coder -- -v` starts an interactive session. `clio-coder version` is the subcommand form. A running CLIO Coder names the same build in its process title, `clio-coder <version>@<commit>` (for example `clio-coder 0.8.0-dev@67b3247`, `-dirty` when built from a modified tree, no `@` part when the bundle records no commit), which `ps -o args=` and `/proc/<pid>/cmdline` show, so a session's build can be checked from outside it. The title cannot be longer than the command line the process started with, so a very short launch command shows it cut; the installed `clio-coder` command and an absolute `dist/cli/index.js` path leave room for it. Workers keep their own `clio-coder-worker` title. |
 | `clio-coder --help [--all]` / `-h` | Print the command list. `--all` appends every command under `clio-coder dev`. |
@@ -290,7 +306,7 @@ Known confusions, as found on recorded sessions:
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--autonomy <level>` | Main-agent one-run autonomy override: `default` or `yolo`. It does not change saved settings. A headless run takes `yolo` only from this flag: a `settings.yaml` that sets `yolo` runs at `default` and says so on stderr. `--autonomy yolo` as root outside a container exits 2. Combining it with `--agent` is a usage error; use `--read-only` to restrict a dispatch. |
-| `--read-only` | Run read-only: no file outside CLIO Coder's home changes. The main agent's writes are refused, its shell commands run only in the read-only sandbox, its delegations run read-only on runtimes that can enforce it, and only MCP servers the operator classes as read start. A refused call returns to the model and does not itself fail the run. With `--agent`, restrict the dispatch to read-only tools. `--agent-profile`, `--agent-runtime`, `--tool-profile` and `--require` need `--agent` (`fleet dispatch flags require --agent <recipe-id>`). |
+| `--read-only` | Apply CLIO Coder's mediated read-only ceiling. The main agent's writes are refused, its shell commands run only in the read-only sandbox, its delegations run read-only on runtimes that can enforce it, and only MCP tools the operator classes as read start. A third-party read-class server or other external process is still trusted for its classification; see the explicit boundary in [Read-only runs](../architecture/safety-model.md#read-only-runs). A refused call returns to the model and does not itself fail the run. With `--agent`, restrict the dispatch to read-only tools. `--agent-profile`, `--agent-runtime`, `--tool-profile` and `--require` need `--agent` (`fleet dispatch flags require --agent <recipe-id>`). |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. `--temperature` takes a number of 0 or more, `--top-p` and `--min-p` take 0 to 1, and `--top-k` takes a number of 0 or more, rounded down. They reach the main agent and an `--agent` worker alike. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. They reach the main agent and an `--agent` worker alike. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
@@ -457,7 +473,28 @@ clio-coder run \
 
 #### Run without changing files with --read-only
 
-To run without changing files, use `clio-coder run --read-only "<task>"`. No file outside CLIO Coder's home changes: the workspace, the repository and every other path stay byte-identical. CLIO Coder itself keeps working, so the run records its session, run records and telemetry, refreshes its caches and may write the project's `.clio-coder/` harness state; a run resumed with `--session` or `--continue` saves the new turn. The main agent may read inside the workspace. Its writes, edits and artifacts are refused, and its shell commands run only in the [read-only sandbox](../architecture/safety-model.md#the-read-only-sandbox), which bubblewrap provides: they may write only a scratch directory under CLIO Coder's state directory and a private `/tmp`. With no bubblewrap, on macOS, or with `safety.sandbox: off`, shell commands are refused. Delegation runs read-only, on runtimes that CLIO Coder mediates per call or that confine their own tools in an OS-level read-only sandbox; the Claude Code, Pi, OpenCode and Antigravity subprocess runtimes, plugin runtimes that do not declare `readOnlySandbox: "os"` and ACP peers are refused. A read-only dispatch cannot create a task worktree or run host verification, and the sandboxed shell takes no workspace snapshot. With `--agent`, the dispatched worker runs under the same restriction. An extension runtime may write its own store but no workspace directory. See [Read-only runs](../architecture/safety-model.md#read-only-runs) and the [headless flags](#headless-run-flags) for MCP admission and flag combinations.
+To run with the mediated no-source-write policy, use `clio-coder run --read-only
+"<task>"`. Native user files and Git metadata are covered by CLIO Coder's
+admission and OS confinement; this is not a universal guarantee about a
+trusted external server's implementation. CLIO Coder itself keeps working, so
+the run records its session, run records and telemetry, refreshes its caches
+and may write the project's `.clio-coder/` harness state; a run resumed with
+`--session` or `--continue` saves the new turn. The main agent may read inside
+the workspace. Its writes, edits and artifacts are refused, and its shell
+commands run only in the [read-only
+sandbox](../architecture/safety-model.md#the-read-only-sandbox), which
+bubblewrap provides: they may write only a scratch directory under CLIO
+Coder's state directory and a private `/tmp`. With no bubblewrap, on macOS,
+or with `safety.sandbox: off`, shell commands are refused. Delegation runs
+read-only on runtimes that CLIO Coder mediates per call or that confine their
+own tools in an OS-level read-only sandbox; the Claude Code, Pi, OpenCode and
+Antigravity subprocess runtimes, plugin runtimes that do not declare
+`readOnlySandbox: "os"` and ACP peers are refused. A read-only dispatch cannot
+create a task worktree or run host verification, and the sandboxed shell takes
+no workspace snapshot. With `--agent`, the dispatched worker runs under the
+same restriction. An extension runtime may write its own store but no
+workspace directory. See [Read-only runs](../architecture/safety-model.md#read-only-runs)
+for the enforced and tested boundaries, including MCP admission.
 
 #### Other turn constraints
 
@@ -478,7 +515,7 @@ Start `clio-coder --allow-tools read,grep,find,ls --delegate-tools read,grep,fin
 
 ### ACP session and prompt capability ceilings
 
-An ACP client can send `_meta["clio-coder/ceiling"]` on `session/new`, `session/load`, `session/resume` or `session/prompt`. Its fields are `allowedTools` and `delegatedTools` (arrays of capability names), `delegation` (`allowed` or `forbidden`) and `readOnly` (`true`). An omitted field adds no client restriction; without `delegatedTools`, workers inherit `allowedTools`. An empty tool array permits no capabilities. A read-only ceiling applies the [read-only restriction](../architecture/safety-model.md#read-only-runs): no file outside CLIO Coder's home changes. Client ceilings intersect the operator's limits; they never grant authority.
+An ACP client can send `_meta["clio-coder/ceiling"]` on `session/new`, `session/load`, `session/resume` or `session/prompt`. Its fields are `allowedTools` and `delegatedTools` (arrays of capability names), `delegation` (`allowed` or `forbidden`) and `readOnly` (`true`). An omitted field adds no client restriction; without `delegatedTools`, workers inherit `allowedTools`. An empty tool array permits no capabilities. A read-only ceiling applies the [mediated read-only restriction](../architecture/safety-model.md#read-only-runs), with the external-runtime and MCP boundaries stated there. Client ceilings intersect the operator's limits; they never grant authority.
 
 `clio-coder acp --read-only` sets the operator's limit for the whole server: every session it creates, loads or forks carries `readOnly`, and no client ceiling can lift it. Sessions, run records and telemetry are saved as usual, so a loaded session's new turns are kept.
 

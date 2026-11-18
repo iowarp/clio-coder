@@ -9,12 +9,12 @@
 		{
 			"path": "apps/clio-coder-gui/client.md",
 			"title": "Browser client",
-			"summary": "The React single-page client of the Clio Coder GUI: its route table, query and error policy, the chat composer's submit decision and draft store, tool-call presentation, the settings controls view, the machines registration flow, the setup wizard steps, and the Markdown rendering boundary. Read this to find where a browser view or client rule lives."
+			"summary": "Current React routes and view ownership, including arena, research, operator metrics, usage/reports, rewind, session control, auth and launch."
 		},
 		{
 			"path": "apps/clio-coder-gui/contracts.md",
 			"title": "GUI wire contracts",
-			"summary": "The shared TypeBox contracts between the Clio Coder GUI server and browser client: the route table, the OpenAPI generator and its schema hoist, and the session projection that folds streamed deltas into a snapshot. Read this when adding a route, changing a DTO, or touching session streaming."
+			"summary": "Current TypeBox and runtime route families for sessions, metrics/reports, arena, research, rewind, review, control, runtime, auth and launch."
 		},
 		{
 			"path": "apps/clio-coder-gui/scripts.md",
@@ -24,12 +24,12 @@
 		{
 			"path": "apps/clio-coder-gui/server.md",
 			"title": "GUI server",
-			"summary": "How the local GUI server starts, owns its domain worker threads, child processes, and path completion, and how the background launcher reuses it. Read this before changing server startup, worker dispatch, ACP child lifecycle, or background install behavior."
+			"summary": "GUI HTTP composition and current route/service ownership plus retained worker, ACP, process, path and launcher coverage."
 		},
 		{
 			"path": "apps/clio-coder-gui/tests.md",
 			"title": "Graphical application test suite",
-			"summary": "Describes the tests under apps/clio-coder-gui/tests: the scripted ACP fixture child, the harnesses that launch the server against it or against the real built CLI, and the focused client and server tests. Read this to pick the right harness or to add a case."
+			"summary": "GUI harnesses and current source-located coverage pointers for domain views, HTTP services, contracts, control, auth and runtime behavior."
 		},
 		{
 			"path": "architecture.md",
@@ -63,8 +63,8 @@
 		},
 		{
 			"path": "domains.md",
-			"title": "Domain modules: semantic index, share archives, operator tasks and related boundaries",
-			"summary": "Describes the domain-level entry modules for semantic app composition, share archive export and import, the operator task store, and the config, evolution, turn-control and components barrels. Read this to find which boundary owns a given behavior."
+			"title": "Domain modules: application boundaries and aggregate ownership",
+			"summary": "Maps current arena, campaign, claims, components, config, evolution, report, research, semantic-app, share, store, turn-control and user-task entry points."
 		},
 		{
 			"path": "domains/agents.md",
@@ -218,8 +218,8 @@
 		},
 		{
 			"path": "interactive/footer.md",
-			"title": "Interactive footer: compact line, expanded pages and notices",
-			"summary": "The live region under the interactive prompt: the compact status line, the three expanded pages (Activity, Context, Status), the notification center, the spend and context readers, and the local machine sampler. Read this when changing what the footer shows or when it refreshes."
+			"title": "Interactive footer: compact line, expanded page and notices",
+			"summary": "The compact status line, one scrollable expanded dashboard, notifications, and spend/context readers; machine sampling belongs to /usage Health."
 		},
 		{
 			"path": "interactive/overlays.md",
@@ -6593,7 +6593,9 @@
 				"path": "tests/boundaries.md",
 				"title": "Tests boundaries",
 				"intent": "Assigned scope (1 indexed files, 1199 lines): document responsibilities and key entry points/symbols; explain lifecycle rules, callers, dependencies, and specific test cases only where inspected source or tests establish them. Anchors are starting points, not the full assignment. Assigned areas: tests/boundaries.",
-				"sources": ["tests/boundaries/check-boundaries.ts"],
+				"sources": [
+					"tests/boundaries/check-boundaries.ts"
+				],
 				"dependencies": [
 					"docs/architecture/architecture.md",
 					"scripts/check-hygiene.ts",
@@ -6618,5 +6620,40 @@
 				"attempts": 4
 			}
 		]
+	},
+	"maintenance": {
+		"status": "partial-source-audit-not-regenerated",
+		"generatedSnapshotUpdatedAt": "2026-11-04T17:40:53.439Z",
+		"generatedSnapshotGitHead": "a3333e52a8b8e6a241192d78d3083dfe38103183",
+		"auditUpdatedAt": "2026-11-17",
+		"auditGitHead": "3aae104412c3edb7f315cd6dcbb19becd4027d2c",
+		"testsExecuted": [],
+		"coverage": "Only the audit pages/sections below were source-checked. Historical sourceTreeHash, contentHash and completeness counts were not recomputed; unlisted pages may be stale.",
+		"auditSourceCheckedPages": [
+			"apps/clio-coder-gui/client.md",
+			"apps/clio-coder-gui/contracts.md",
+			"apps/clio-coder-gui/server.md",
+			"apps/clio-coder-gui/tests.md",
+			"domains.md",
+			"interactive/footer.md",
+			"library/index.md",
+			"library/plugins/index.md",
+			"library/extensions/index.md",
+			"root.md",
+			"site.md"
+		],
+		"sectionScope": {
+			"apps/clio-coder-gui/client.md": "Current route and arena/research/metrics/report/rewind/control/auth/launch view ownership.",
+			"apps/clio-coder-gui/contracts.md": "Current runtime routes and domain contract families.",
+			"apps/clio-coder-gui/server.md": "Current HTTP route/service composition; retained prior worker/launcher detail.",
+			"apps/clio-coder-gui/tests.md": "Current test-path ownership only; assertions not reverified.",
+			"domains.md": "Entry-point ownership for active undocumented domains, not branch-by-branch behavior.",
+			"interactive/footer.md": "Two modes, one viewport, scrolling and /usage-owned sampler.",
+			"library/index.md": "Top-level package kinds, authoring and registry structure.",
+			"library/plugins/index.md": "Current non-Materio and Materio package inventory.",
+			"library/extensions/index.md": "Current local-status and Materio extension inventory.",
+			"root.md": "src/utils/git.ts and provenance only.",
+			"site.md": "Current Python test inventory only."
+		}
 	}
 }

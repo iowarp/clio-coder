@@ -18,6 +18,13 @@ A question is one of three types ([questions.ts](../../src/domains/system-one/qu
 
 A question also carries answer semantics ([contract.ts](../../src/domains/system-one/contract.ts)): `boolean` for one claim about one state, `exclusive` for a choice, `ordinal` for a level, and `independent` for one item of a filter, whose number does not compete with any other item's. Every answer carries `certainty`, an engine-neutral peakedness recomputed from the mass ([answers.ts](../../src/domains/system-one/answers.ts)), and `readout`, which names what the number is: `server` (a typed wire's own value), `softmax-binary`, `softmax-exclusive`, `sigmoid-independent`, `ordinal-expectation` or `categorical` (a label with no probability scale). A readout is not a calibration claim. A missing answer is an abstention on that question alone.
 
+The "no effect while unbound" and "screen only tightens" statements below are
+contracts of the current consumers, not a calibration or isolation claim.
+Focused sources are `src/domains/system-one/factory.ts`,
+`src/tools/consult.ts` and `src/entry/safety-judge-host.ts`; the contract is
+exercised in `tests/contracts/consult-tool.test.ts` and
+`tests/contracts/judge-screen.test.ts`.
+
 ## Decision points
 
 A point declares `id`, a `version`, a hard `deadlineMs`, optional `requires` and `optional` flags, and pure functions: `state(object)` builds the bounded state or returns `null` to ask nothing, `questions(object)` gives every question about that state and `read(answers, object)` returns the typed value or `null`. There is no table of thresholds. A point that reads a yes/no uses `p >= 0.5`, the question's own boundary. Definitions live under `src/domains/system-one/points/`, with shared caps in [bounds.ts](../../src/domains/system-one/points/bounds.ts).

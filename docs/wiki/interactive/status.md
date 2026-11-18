@@ -35,6 +35,8 @@ validate:
 
 # Command-line status and footer state
 
+> **Evidence status:** retained source-derived coverage, not fully rechecked at `3aae1044`. Cited tests were not executed; unread or partially read assertions remain unverified.
+
 The status subsystem under `src/interactive/status/` owns what the interactive footer says about a turn while it runs and after it ends. A reader needs this page when footer text, the stuck/no-output indicator, the watchdog timing, the reasoning chip, or the end-of-turn summary behaves unexpectedly. The subsystem is a pure reducer (`reduceStatus`) driven by a controller (`createStatusController`) that subscribes to chat and telemetry events, plus presentation helpers that turn the resulting `AgentStatus` into strings.
 
 ## What this area does

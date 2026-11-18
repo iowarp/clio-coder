@@ -2,6 +2,13 @@
 
 CLIO Coder records what a process, a session and a run did as typed events in local journals, and every token, cost, decision and outcome a surface shows is a fold of those journals. This page defines the namespace, the five nouns the system is built from, the on-disk layout, sealing, sharing and the read model. [The /view viewer](observability.md) browses the artifacts, and [Artifact Versions](artifact-versions.md) lists the format identities.
 
+> [!NOTE]
+> The `clio-coder telemetry doctor` section describes `0.8.4-dev` HEAD
+> behavior (`package.json`, `src/cli/telemetry.ts`,
+> `src/cli/telemetry-doctor.ts`). The public site remains on `0.8.3`
+> (`site/product.json`, `site/content/docs-manifest.json`), so use the
+> installed version to choose a compatible telemetry command set.
+
 ## Namespace
 
 Telemetry has one name everywhere: the domain [src/domains/telemetry](../../src/domains/telemetry/index.ts), the kernel under `src/core/telemetry/`, the `clio-coder telemetry` command, the ACP methods `_clio-coder/telemetry/*`, the `telemetry.*` settings and the `<stateDir>/telemetry/` root. No environment variable configures it.

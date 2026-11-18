@@ -26,7 +26,7 @@ invariants:
   - "A bash command that would run in the main session without a sandbox plan is refused with a not-spawned result rather than executed."
   - "A run record directory is refused if the records root resolves outside the workspace root, and a pre-existing directory with the same run id is an error."
 validate:
-  - "pnpm exec node --test dist/tests/contracts/trust-gate.test.js"
+  - "pnpm run test:file -- tests/contracts/trust-gate.test.ts"
   - "pnpm exec node --test dist/tests/contracts/safe-exec-streaming.test.js"
   - "pnpm exec node --test dist/tests/contracts/bash-exec-settlement.test.js"
 ---

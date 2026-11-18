@@ -4,6 +4,15 @@ CLIO Coder compiles every system prompt from typed inputs and disk fragments. Th
 
 This page owns which fragments each prompt carries and how they are selected. The cache identity, section order and tool delivery around the compiled text are in [Prompt Envelope and Tools](prompt-envelope-and-tools.md).
 
+> [!NOTE]
+> The promoted-tool and local-clock behavior on this page is present in the
+> `0.8.4-dev` checkout (`package.json`, with `src/domains/prompts/compiler.ts`,
+> `src/session-control/turn-context.ts` and
+> `src/domains/middleware/local-clock-reminder.ts` as its implementation).
+> The public site still pins `0.8.3` in `site/product.json` and
+> `site/content/docs-manifest.json`. Those 0.8.x snapshots are not
+> interchangeable; check `clio-coder --version`.
+
 ## Three compilation tiers
 
 | Tier | Who gets it | Entry point | Selected by |
@@ -104,7 +113,11 @@ These fragments are not attended-only. Their tiers are in the inventory above.
 - `operating.fleet` states that workers run locally unless a pin or preference selects an SSH node, and how the model asks once per session for a node.
 - `operating.discovered-skills` teaches progressive skill discovery through `context(scope="skills")` and carries `{SKILL_ACTIVATION_POLICY}`.
 - `operating.worker` is the assigned-task contract. A task worded as an instruction to dispatch or delegate is the worker's own assignment, and the worker does it itself.
-- `dispatch.read-only` tells a read-only worker that it must leave every user file unchanged: inspection inside the workspace, shell commands only inside its sandbox, and read-only workers of its own.
+- `dispatch.read-only` tells a read-only worker to use the mediated
+  read-only boundary: inspection inside the workspace, shell commands only in
+  the qualifying runtime's OS sandbox, and read-only workers of its own. This
+  is enforced for the worker surfaces the host can mediate; the safety model
+  states the external-runtime limits.
 - The `safety.default` bodies (`safety.default-sandboxed`, `safety.default-unsandboxed`) and `safety.yolo` describe what runs, what is approval-required and what is blocked, in the safety net's action-class vocabulary. The default bodies describe containment, workspace snapshots and the safety judge; `safety.yolo` says nothing waits for approval, names the floor, tells the model when to ask with `ask_user` (an `{ask_user}` row, absent where no one can answer), and otherwise to take reasonable defaults and state its assumptions. `safety.yolo-worker` is the worker form of the yolo statement, and `safety.worker` and `safety.worker-no-shell` state what a worker's own commands may do, or that it runs none. They are the model-facing mirror of the enforced admission and grant nothing themselves. Each body describes only the reading session's own situation. Row conditions drop the lines a session cannot use, such as `/rewind` in a headless run, and the `{ask_user}` rows in the yolo bodies, which say how a yolo session asks.
 
 The safety section opens with `Autonomy: <level>.` and a one-line directive, then one approval sentence, then the fragment body. The attended approval sentence says that approval-required calls pause for one operator confirmation. At `yolo` nothing parks, so the section carries no approval sentence. A worker has no autonomy level, so its section opens with a line naming its permit and, unless the permit inherited yolo, ends the line with its `onPermission` routing:
@@ -212,7 +225,7 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 | --- | --- | --- | --- |
 | `project-context` | Under a `# Project` heading, a `Declared checks (verify):` line naming up to 12 of the project's declared check ids when `verify` is reachable, then the project handbook text. | session | Captured in the session source snapshot and sized by `selectProjectPreload`. |
 | `memory` | The task-scored memory section. | turn | Selected at each prepared turn but frozen into the compiled prompt until a completed compaction, a session switch or a recompile that another input forces. Later changes arrive as a `# Memory update` block in the turn's reminder. See [Memory in the prompt](#memory-in-the-prompt). |
-| `runtime` | Provider, model, the `Routes:` line, the context window, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. |
+| `runtime` | Provider, model, the `Routes:` line, context window, operator-local calendar facts, thinking guidance, and the `model.anthropic-5-5` notes for a Claude 5.5 model. | session | Rendered on every compile. The `Routes:` line is frozen per route identity. The calendar date, weekday and IANA time zone change the compiled bytes when the local date changes. |
 | `context.workspace-root` | Absolute workspace root, local OS account and hostname. | session | Snapshot. The workspace facts stay pinned for the session while the process lives, even when another source is recaptured. Per-session facts are not in this fragment; see [Session context](#session-context). |
 | `context.fleet` | Observed SSH node readiness and capacity. | turn | Rendered only when `fleet.nodes` is non-empty and `dispatch` is attached. It is absent from the layer table, so it counts as turn, and its hash is part of `inputEpoch()`. |
 | `context.clio-repo-awareness` | The note that the workspace is CLIO Coder's own source tree, and whether the running build came from that tree or from another one. | session | Snapshot. |
@@ -224,6 +237,35 @@ The compiled prompt has fixed sections in this order (`SESSION_PROMPT_SECTION_OR
 ### Session context
 
 Facts that differ between two sessions on an unchanged tree are not compiled into the system prompt, so two sessions in one workspace share the whole prompt as a cache prefix. The prompts extension renders them as a `<session-context>` block (`renderSessionContext` in `src/domains/prompts/extension.ts`), bounded at 400 characters before the orientation line: git branch and tree state, the last recorded session in this workspace, the last commit, a `Rigor: high` line when the project or `CLIO_CODER_RIGOR` declares it, and the time the project orientation snapshot was recorded. The block rides in the reminder of the session's first user message, beside the task scope. It is sent again only when no message still in context carries it, as after a compaction that summarized the first turn away. It is captured once per session and pinned with the workspace facts.
+
+### Local clock
+
+The main session compiles the operator's calendar date, weekday and IANA time
+zone into the Runtime block from `operatorCalendar`
+([format-time.ts](../../src/core/format-time.ts)). The date line tells the model
+to use that date in ids, records and prose rather than infer one from its
+training data. A full submit that crosses a local date recompiles that line; the
+clock has deliberately not entered the stable prefix.
+
+At every main-turn start, including a continuation, middleware also injects a
+tail reminder with the full local date, weekday, `HH:MM` and zone/UTC offset
+([local-clock-reminder.ts](../../src/domains/middleware/local-clock-reminder.ts)).
+If the local date changes while a long turn is running, the first subsequent
+outer tool result receives one `[Clock]` annotation with the new calendar
+facts. A gateway's nested result is not announced twice. No clock text is
+persisted as a replacement for the tool's result: it is model-facing context,
+so the operator should expect date-sensitive filenames and summaries to follow
+the announced date, and a date change can invalidate cached prompt bytes.
+Workers receive their task messages and model facts, but this main-session
+clock reminder is registered in the orchestrator, not in worker processes.
+
+An attached extension tool promoted by `runtime.promote` is part of the same
+typed tool-surface input as a builtin direct tool
+([compiler.ts](../../src/domains/prompts/compiler.ts),
+[extension-runtime-tools.ts](../../src/tools/extension-runtime-tools.ts)).
+The compiler therefore names it on the `Direct tools` line and hashes its exact
+attached schema into the cache identity. Promotion is not a turn hint and
+cannot make a worker's schema wider.
 
 ### Route provenance
 

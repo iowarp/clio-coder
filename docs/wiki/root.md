@@ -7,6 +7,7 @@ sources:
   - "src/utils/image-resize.ts"
   - "src/utils/photon.ts"
   - "src/utils/exif-orientation.ts"
+  - "src/utils/git.ts"
   - "examples/extensions/peer-guard/runtime/extension.ts"
   - "examples/extensions/git-pulse/runtime/extension.ts"
   - "examples/extensions/lab-status/extension.mjs"
@@ -17,6 +18,7 @@ symbols:
   - "loadPhoton"
   - "applyExifOrientation"
   - "getExifOrientation"
+  - "getCurrentBranch"
 tests:
   - "tests/contracts/launcher-guard.test.ts"
 invariants:
@@ -28,6 +30,8 @@ validate:
 ---
 
 # Repository root: launcher, build configuration, image utilities and example extensions
+
+> **Provenance status:** the generated snapshot is `2026-11-04` / `a3333e52`; this partial audit at `3aae1044` added only current-source coverage for `src/utils/git.ts`. The full page was not regenerated.
 
 This page covers the files at the top of the tree that a reader needs when the CLI fails to start, when the bundle layout in `dist/` changes, when an image attached to a prompt is downscaled, or when an example extension is copied as a starting point. The owning subsystem pages are linked where they exist.
 
@@ -111,6 +115,10 @@ Things to watch when editing this file:
 - `resizeImage` swallows all errors and returns `null`; a change that throws would alter the caller contract, which the callers in `src/core/file-references.ts` and `src/entry/orchestrator.ts` rely on through their `null` handling.
 - The size loop only shrinks dimensions; it never raises the JPEG quality beyond `jpegQuality` in the first step.
 - `loadPhoton` patches the global `fs.readFileSync` during the dynamic import. Code running concurrently with that import observes the patched function.
+
+## Git branch helper: `src/utils/git.ts`
+
+`getCurrentBranch` runs `git rev-parse --abbrev-ref HEAD` through `internalGitArgv`, with a one-second timeout. It returns the trimmed branch on success and `null` for a missing binary, invalid/non-repository path, timeout, or empty result. No focused test was identified or executed.
 
 ## Example extensions: `examples/extensions/`
 

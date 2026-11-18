@@ -1,15 +1,21 @@
 ---
-title: "Domain modules: semantic index, share archives, operator tasks and related boundaries"
-summary: "Describes the domain-level entry modules for semantic app composition, share archive export and import, the operator task store, and the config, evolution, turn-control and components barrels. Read this to find which boundary owns a given behavior."
+title: "Domain modules: application boundaries and aggregate ownership"
+summary: "Maps active arena, campaign, claims, components, config, evolution, report, research, semantic-app, share, store, turn-control and user-task entry points."
 sources:
+  - "src/domains/arena/index.ts"
+  - "src/domains/campaign/index.ts"
+  - "src/domains/claims/index.ts"
+  - "src/domains/components/index.ts"
+  - "src/domains/config/index.ts"
+  - "src/domains/evolution/index.ts"
+  - "src/domains/report/index.ts"
+  - "src/domains/research/index.ts"
   - "src/domains/semantic-app/index.ts"
   - "src/domains/share/index.ts"
   - "src/domains/share/archive.ts"
-  - "src/domains/user-tasks/store.ts"
-  - "src/domains/config/index.ts"
-  - "src/domains/evolution/index.ts"
+  - "src/domains/store/index.ts"
   - "src/domains/turn-control/index.ts"
-  - "src/domains/components/index.ts"
+  - "src/domains/user-tasks/store.ts"
 symbols:
   - "openSemanticApp"
   - "refreshSemantic"
@@ -40,9 +46,29 @@ validate:
   - "pnpm run typecheck"
 ---
 
-# Domain modules: semantic index, share archives, operator tasks and related boundaries
+# Domain modules: application boundaries and aggregate ownership
 
-This page covers the domain-level boundary modules under `src/domains/`: the semantic app composition, the share archive, the operator task store, and four barrel modules (config, evolution, turn-control, components). A reader needs it to find which module owns an operation and which conditions it enforces. Subsystems such as the semantic index itself, the safety policy engine, and the telemetry importer have their own pages and are only referenced here at the interface this page inspected.
+> **Audit status (`3aae1044`):** this table was checked at each domain's current entry point. It establishes ownership, not every policy branch; tests were not executed.
+
+This page aggregates active boundaries under `src/domains/` that lack dedicated wiki pages. Follow the named implementation modules before changing policy, persistence or validation details.
+
+## Current aggregate ownership
+
+| Domain | Entry-point ownership |
+| --- | --- |
+| Arena | `arena/index.ts`: blind identity/order, contender environment and facts, run validation, standings, persistent matches/votes and blinded views. |
+| Campaign | `campaign/index.ts`: roster load/parse, metric folding and the multi-entry campaign runner/probe validation. |
+| Claims | `claims/index.ts`: verification-claim capture, hypothesis binding, edges/disputes/regressions, journal compaction and bounded delivery registrations. |
+| Components | `components/index.ts`: create/load/diff snapshots backed by `scan.ts`, `snapshot.ts`, `hash.ts` and `diff.ts`. |
+| Config | `config/index.ts`: strict-startup domain binding, bundle creation, settings classification, agent namespaces and manifest/contract exports. |
+| Evolution | `evolution/index.ts`: versioned change manifests, authority levels, summarization, loading and validation. |
+| Report | `report/index.ts`: draft/scrub/canary consent, bundles, outbox/rate limits, reviewed send flow, transport, sharing and follow-up. |
+| Research | `research/index.ts`: open/resume/run loop, measurement/grading, budgets, journal folding, reports and resume planning. |
+| Semantic app | `semantic-app/index.ts`: settings/target/safety composition around the semantic store and embedding service. |
+| Share | `share/index.ts`: archive creation, import planning/conflicts and verified archive installation. |
+| Store | `store/index.ts`: local versus explicitly selected `clio-core` backend, refusal patterns, locks and workspace signals; explicit unusable selection does not silently fall back. |
+| Turn control | `turn-control/index.ts`: workflow decisions/hashes, facts/outcomes, bounded collected rendering and workflow settings. |
+| User tasks | `user-tasks/store.ts`, `acceptance.ts`, `active-acceptance.ts`, `handoff.ts`: task-file transitions, normalized acceptance and active-session handoff ownership. |
 
 ## Semantic app
 
@@ -98,16 +124,16 @@ Callers and dependencies: the store imports `atomicWrite` from `src/engine/sessi
 
 Focused test: `tests/extended/user-task-acceptance.test.ts` creates a store, adds a task with `expectedOutputs` containing `" ./src//solver.ts "` and `"src/solver.ts"`, and asserts that the stored acceptance is normalized to `["src/solver.ts"]`. It then mutates the returned arrays and asserts that a new store instance still reads the original values, which shows that returned tasks are detached copies. A later assertion checks that the file is unchanged after a set of invalid updates, though the exact invalid inputs were not read in full.
 
-## Barrel modules
+## Entry-point details
 
-`src/domains/config/index.ts` exports `ConfigDomainModule`, which uses `createConfigBundle(context)`, and `createConfigDomainModule(initialSettings, options)`, which binds a startup settings snapshot. It also re-exports `ConfigManifest`, `diffSettings`, `assertAgentIdNamespace` and the `ConfigContract` type. The implementation files (`extension.ts`, `src/domains/config/classify.ts`, `src/domains/config/agent-namespace.ts`) were not read.
+`src/domains/config/index.ts` exports `ConfigDomainModule`, which uses `createConfigBundle(context)`, and `createConfigDomainModule(initialSettings, options)`, which binds a startup settings snapshot. It also re-exports `ConfigManifest`, `diffSettings`, `assertAgentIdNamespace` and the `ConfigContract` type. The implementation is split across `extension.ts`, `classify.ts`, `agent-namespace.ts`, `keybindings.ts` and `watcher.ts`; their policy branches are not exhaustively described here.
 
-`src/domains/evolution/index.ts` re-exports the change-manifest API from `./manifest.js` and `src/domains/evolution/validate.ts`, including `validateChangeManifest`, `loadChangeManifestJson`, `summarizeChangeManifest` and the authority-level constants. The validation rules were not read.
+`src/domains/evolution/index.ts` re-exports the change-manifest API from `./manifest.js` and `src/domains/evolution/validate.ts`, including `validateChangeManifest`, `loadChangeManifestJson`, `summarizeChangeManifest` and the authority-level constants. The exported validator authority is current; individual validation branches are intentionally outside this aggregate page.
 
-`src/domains/turn-control/index.ts` re-exports the decision, facts, outcome, record, render and settings modules: `decide`, `decisionHash`, `factsDigest`, `reduceTurnOutcome`, `renderCollectedBlock` with its `TURN_CONTROL_BLOCK_MAX_CHARS` limit, and `TURN_CONTROL_WORKFLOWS`. The implementation files were not read.
+`src/domains/turn-control/index.ts` re-exports the decision, facts, outcome, record, render and settings modules: `decide`, `decisionHash`, `factsDigest`, `reduceTurnOutcome`, `renderCollectedBlock` with its `TURN_CONTROL_BLOCK_MAX_CHARS` limit, and `TURN_CONTROL_WORKFLOWS`. The exported decision/outcome/render APIs are current; per-workflow behavior is not expanded here.
 
-`src/domains/components/index.ts` re-exports `createComponentSnapshot`, `loadComponentSnapshot` and `diffComponentSnapshots`. The implementation files were not read.
+`src/domains/components/index.ts` re-exports `createComponentSnapshot`, `loadComponentSnapshot` and `diffComponentSnapshots`. Scan exclusions and diff semantics should be read in the implementation files, not inferred from this barrel.
 
 ## Coverage gaps
 
-The following are not grounded by this page and are listed as gaps in the page's frontmatter when they are central to a reader's question: the config bundle's behavior and its `src/domains/config/classify.ts` change categories, the evolution manifest validation rules, the turn-control decision logic, and the components snapshot scan and diff. This page describes those modules only at the level of their barrel exports.
+This aggregate deliberately stops at entry-point ownership. Consult the named implementation files before changing detailed validation, scan, persistence or policy behavior.

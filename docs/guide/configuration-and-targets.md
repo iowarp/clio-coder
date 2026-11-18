@@ -411,6 +411,21 @@ Inside a container, bubblewrap must be installed in the image, and the container
 
 Each model gets a tier, `small`, `standard` or `frontier`, that says how much scaffolding a prompt should give it. Hooks read it as `model.tier` ([extension hooks](harness-extensions.md#runtime-api-2)) and prompt templates pick a body by it ([variants](extensions-and-sharing.md#variants-per-model-tier)). Nothing in the system prompt reads it, so a tier never changes a cached prefix.
 
+Turn policy and context also consume the resolved tier without changing that
+prefix. A template's `turnPolicy.when` admits the matching `small`, `standard`
+or `frontier` token at the start of each turn
+([turn-constraints.ts](../../src/core/turn-constraints.ts)); observation aging
+also runs on `small` routes ([observation-aging.ts](../../src/session-control/observation-aging.ts)).
+The separate `uncached` token tests the route's `promptCaching: false` fact.
+Consequently a model switch can activate step turns and aging on the next turn
+while leaving the template bytes and system-prompt shape alone.
+
+> [!NOTE]
+> Model-tier consumers and the conditional step policy are `0.8.4-dev`
+> behavior in this checkout (`package.json`; `src/core/model-tier.ts` and
+> `src/core/turn-constraints.ts`). The public site remains a `0.8.3` snapshot
+> (`site/product.json`, `site/content/docs-manifest.json`).
+
 `models.<id>.tier` sets the tier for one model, keyed by the wire model id; `models` takes no other field. In `/settings` the map is under **Model tiers**.
 
 ```yaml
@@ -699,6 +714,16 @@ CLIO Coder supplies a thinking choice for model calls outside the main conversat
 `copilot-sdk` is the one `subscription` runtime that is not worker-only. It is an `http`-kind runtime with the `copilot-sdk` API family, so it serves chat, main and worker routes like any target; [GitHub Copilot](#github-copilot) describes it.
 
 Hidden registrations stay resolvable by id: `llamacpp-anthropic`, `llamacpp-completion`, `llamacpp-embed` and `llamacpp-rerank` are the other surfaces of one llama.cpp server, `lemonade-anthropic` is Lemonade's Anthropic surface, `systemone` is the System One decision server, and `typesafe-jev` is its hosted engine. `alcf` is documented in the [ALCF provider contract](../architecture/alcf-provider.md). A custom runtime joins the registry as the [provider adapter cookbook](../architecture/provider-adapter-cookbook.md) describes. The Claude Agent SDK is an optional dependency that the installer skips; see the [installation guide](installation-and-lifecycle.md) for how `claude-sdk` obtains it on first use.
+
+`bedrock` is also a hidden registered runtime in 0.8.4-dev, not a removed
+runtime. Its descriptor has `hidden: true`, so new-configuration lists such as
+`clio-coder configure --list` omit it unless `--all` is supplied. A legacy or
+otherwise existing target whose `runtime` is `bedrock` still resolves through
+the registry and runs with the `bedrock-converse-stream` adapter and the AWS
+SDK credential chain. The distinction is the visibility of new configuration,
+not runtime compatibility ([bedrock.ts](../../src/domains/providers/runtimes/cloud/bedrock.ts),
+[support.ts](../../src/domains/providers/support.ts) and
+[runtime-descriptor.ts](../../src/domains/providers/types/runtime-descriptor.ts)).
 
 `inception` declares no reasoning support. The older Mercury models get `reasoning_effort: "instant"` pinned on every chat request, because their reasoning is not observable over the API and any higher effort returns an empty completion. `mercury-3` takes no pin. Thinking controls supplied by callers are still removed for it.
 

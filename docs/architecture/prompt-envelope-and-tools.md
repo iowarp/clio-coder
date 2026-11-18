@@ -14,6 +14,15 @@ Which fragments each prompt tier carries, and how they are selected, is in [Prom
 
 Source of truth: [tool-names.ts](../../src/core/tool-names.ts), [agent-tools.ts](../../src/tools/agent-tools.ts), [bootstrap.ts](../../src/tools/bootstrap.ts), [policy.ts](../../src/tools/policy.ts), [observation.ts](../../src/tools/observation.ts), [ignore-policy.ts](../../src/tools/ignore-policy.ts), and the per-tool modules under `src/tools/**`.
 
+> [!NOTE]
+> This page includes `0.8.4-dev` behavior for promoted extension tools and
+> compact runtime-tool results from this checkout (`package.json`).
+> Implementation anchors are `src/tools/extension-runtime-tools.ts`,
+> `src/domains/extensions/runtime-schema-v2.ts` and
+> `src/domains/session/tool-details.ts`. The public site remains pinned to
+> `0.8.3` by `site/product.json` and `site/content/docs-manifest.json`; do not
+> infer 0.8.4 behavior from another 0.8.x tag.
+
 ## Typed composition and cache identity
 
 The chat loop compiles a provider-facing system prompt from typed inputs. The
@@ -81,6 +90,19 @@ permits workflow discovery, so disabling skill discovery alone does not hide
 the rest of the library. Catalog reads activate and install nothing.
 
 The prompts extension adds dynamic fragments for the workspace root, project rules, the operator profile, catalogs and CLIO Coder source-tree awareness; see [dynamic sections](prompt-compilation.md#dynamic-sections). Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.
+
+### Promoted extension tools
+
+An api 2 extension tool named by `runtime.promote` is attached under its
+qualified `extension_<id>__<tool>` schema, just like any other admitted direct
+tool. The extension registry still creates the gateway form and the promoted
+form from the same `ToolSpec`, so admission, hooks, approvals and loop-guard
+facts do not depend on placement. The gateway refuses a promoted name, leaving
+one callable route. A promoted schema is session-standing, changes the exact
+schema identity when it changes, and is absent from dispatched workers even
+when the main session carries it. See [Promoted
+tools](../guide/harness-extensions.md#promoted-tools) for the manifest limits
+and operator review.
 
 ## Prompt template expansion
 
@@ -268,6 +290,28 @@ Unknown segments are omitted. `<total>` renders as `N+` when the search was kill
 Per-call self caps: `read` 50KB (`safety.limits.readBytesPerCall`), `grep` 16KB for `mode=content` and 8KB for `files`/`count`, `find` 8KB, `ls` 8KB, `code_nav` 16KB, `context` 50KB for skills/workspace, `clio_docs`/`clio_library` 16KB, `data` 32KiB, `store` 32KiB, and gateway find 32KiB. The registry backstop cap for each envelope tool is its self cap plus 2KB slack, so a tool's own notice with its exact continuation call survives shaping instead of being cut again and replaced by a generic hint; the bootstrap policy assertion fails loudly if a cap ever drops below that.
 
 Every envelope result carries `details.observation` (`{tool, unit, shownCount, totalCount, shownBytes, totalBytes, truncated, format, next?, offloadPath?, budget?}`) for the TUI ledger, session turns, and observers.
+
+### Compact extension results and detail references
+
+Outside that ordinary observation envelope, an api 2 runtime tool may return a
+nonempty `summary` with its full `text`/`data`. When a saved session is
+available, the model receives the summary plus
+`detail_ref: xd_<16 hex digits>` rather than the full body. CLIO Coder stores
+the full result under the session directory; the `detail_ref` is data, not a
+prompt or tool schema change. `ledger(action="detail", ref=..., offset=0)` pages
+the saved body and names the next offset. Detail lookup follows at most eight
+fork-parent hops; a resumed session keeps its own detail store.
+
+The registry registers a detail-only `ledger` capability behind the gateway
+when there is neither a dispatch board nor another ledger route but a compact
+result is reachable or retained. Removing an extension does not remove saved
+details. Session deletion does. Without a saved session there is no durable
+place to keep a detail, so the host returns the full tool result instead and
+does not manufacture a dangling reference. These are the contracts in
+[extension-runtime-tools.ts](../../src/tools/extension-runtime-tools.ts),
+[tool-details.ts](../../src/domains/session/tool-details.ts) and
+[ledger.ts](../../src/tools/ledger.ts), and are distinct from ordinary
+observation offload pointers.
 
 ## Description tiering
 

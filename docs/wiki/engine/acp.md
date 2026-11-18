@@ -31,6 +31,8 @@ validate:
 
 # Agent Client Protocol engine
 
+> **Evidence status:** retained source-derived coverage, not a full ACP audit at `3aae1044`. Unread paths and test assertions are explicitly unverified; no cited test was executed.
+
 The `src/engine/acp` directory implements Clio's side of the Agent Client Protocol. It is needed in two directions: serving Clio as an ACP agent to editor clients (`src/engine/acp/server.ts`, launched from `src/cli/acp.ts`), and delegating a turn to an external ACP peer process (`src/engine/acp/adapter.ts`, called from `src/domains/dispatch/extension.ts`). This page covers the transport, the delegation adapter, the tool-permission mediator and the command allowlist. It describes the server only at the level of its exported interfaces; the server file is 7258 lines and its prompt, tool-progress and handoff workflows are not traced here.
 
 ## Transport: newline-delimited JSON-RPC over stdio

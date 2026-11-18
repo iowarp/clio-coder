@@ -3,6 +3,17 @@ title: "GUI wire contracts"
 summary: "The shared TypeBox contracts between the Clio Coder GUI server and browser client: the route table, the OpenAPI generator and its schema hoist, and the session projection that folds streamed deltas into a snapshot. Read this when adding a route, changing a DTO, or touching session streaming."
 sources:
   - "apps/clio-coder-gui/contracts/routes.ts"
+  - "apps/clio-coder-gui/contracts/runtime-routes.ts"
+  - "apps/clio-coder-gui/contracts/runtime.ts"
+  - "apps/clio-coder-gui/contracts/telemetry.ts"
+  - "apps/clio-coder-gui/contracts/arena.ts"
+  - "apps/clio-coder-gui/contracts/research.ts"
+  - "apps/clio-coder-gui/contracts/reports.ts"
+  - "apps/clio-coder-gui/contracts/rewind.ts"
+  - "apps/clio-coder-gui/contracts/review.ts"
+  - "apps/clio-coder-gui/contracts/control.ts"
+  - "apps/clio-coder-gui/contracts/auth.ts"
+  - "apps/clio-coder-gui/contracts/launch-capability.ts"
   - "apps/clio-coder-gui/contracts/openapi.ts"
   - "apps/clio-coder-gui/contracts/openapi-hoist.ts"
   - "apps/clio-coder-gui/contracts/session-projection.ts"
@@ -41,6 +52,8 @@ validate:
 
 # GUI wire contracts
 
+> **Audit status (`3aae1044`):** the route-family additions below were source-checked; no tests were executed.
+
 This area holds the schemas that the GUI server and the browser client share. A reader needs it when adding or changing an HTTP route, when a DTO shape changes, when the generated OpenAPI document must be regenerated, or when session streaming behaves unexpectedly on the client. The files live in `apps/clio-coder-gui/contracts/` and are imported by both sides, so a change here is a change to the wire format.
 
 ## What this area does
@@ -55,6 +68,21 @@ The area has four responsibilities, each in its own file:
 ## Route table
 
 `apps/clio-coder-gui/contracts/routes.ts` declares `Route`, `defineRoute`, `Input`, and `Output`. `Input<R>` is `{ params, query, body }` typed from the route's schemas, and `Output<R>` is the static type of its `response`. A route entry looks like the `evidenceList` and `evidenceDetail` entries, which set `query: FleetPageQuery` and `response: EvidencePage` on a `get` template. The shared templates `get` and `post` in that file supply `method`, `params`, `query`, `body`, and `status` defaults that individual entries override. Changing a status or method is a per-entry edit, not a change to the templates.
+
+`runtime-routes.ts` carries only `name`, `method`, and `path`; `routes.ts` merges those locations into the TypeBox entries. This keeps browser and server URL handles shareable without importing all schemas.
+
+### Current domain contracts
+
+| Family | Source and scope |
+| --- | --- |
+| Arena | `arena.ts`: 2–4 bounded contenders, blinded matches/entries, standings and vote replacement. |
+| Research | `research.ts`: bounded objective/scope/budget starts, campaign folds, grades, reports and list errors. |
+| Metrics/reports | `telemetry.ts`, `reports.ts`, `problem-reports.ts`: retained metrics, usage and explicitly reviewed problem-report drafts. |
+| Rewind | `rewind.ts`: snapshot list/plan/outcome and HTML/Markdown transcript downloads. |
+| Review | `review.ts`: trust previews/approval hashes and pending-memory decisions. |
+| Control | `control.ts`: session controller and current-client identities. |
+| Auth | `auth.ts`: launch challenge/bootstrap/credential plus launch and event tickets. |
+| Launch/runtime | `apps/clio-coder-gui/contracts/launch-capability.ts`, `apps/clio-coder-gui/contracts/runtime.ts` and `apps/clio-coder-gui/contracts/runtime-routes.ts`: background capability, worker/runtime facts and concrete route locations. |
 
 Server side, `apps/clio-coder-gui/server/app.ts` calls `register(app, hub, routes.<name>, handler)` for each route it serves. `register` is in `apps/clio-coder-gui/server/http/validate.ts`. For every request it:
 

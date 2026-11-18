@@ -62,8 +62,11 @@ runs in its own process namespace and cannot signal your other programs.
 
 ## What the sandbox hides
 
-A contained command cannot read your credentials, even though it can read
-the rest of the filesystem. Hidden are, among others:
+A contained command masks the known credential paths and shapes listed below.
+That is deliberately stronger than ordinary OS access but is a denylist, not
+a claim that every possible secret under an arbitrary name is hidden. A
+contained command also may still read other ordinary filesystem paths. Hidden
+are, among others:
 
 - SSH and GPG keys, the SSH agent, and Kerberos ticket caches;
 - cloud and cluster logins: `~/.aws`, `~/.azure`, `~/.config/gcloud`,
@@ -90,8 +93,11 @@ start method. `safety.sandboxUnixSockets` (`owned` or `allow`) loosens this.
 
 ## When a command leaves the sandbox
 
-Some commands cannot work without your credentials. CLIO Coder never runs
-these inside the sandbox; it sends them to the safety judge first:
+Some commands cannot normally work without credentials or an outward
+destination. CLIO Coder classifies the intended outward action and asks the
+safety judge first. Whether its literal command can then leave the OS sandbox
+is a separate containment decision; it is not determined by the CLI name
+alone. The common outward-action classes are:
 
 - `git push` (other than `--dry-run`);
 - code-host and cloud CLIs such as `gh`, `glab`, `aws`, `gcloud`, `az`,
@@ -104,7 +110,9 @@ these inside the sandbox; it sends them to the safety judge first:
 When a contained command fails because of the sandbox, CLIO Coder can rerun it
 with `unsandboxed: true`. That rerun also goes to the judge, which lets it run
 only when one of your messages mentions leaving the sandbox; otherwise it asks
-you.
+you. Under `safety.sandbox: required`, the narrow literal-command containment
+exceptions in the [safety model](../architecture/safety-model.md#sandbox-questions-and-turns)
+still apply.
 
 Scheduler clients authenticate through a local daemon socket that the sandbox
 refuses, so a script that calls `sbatch` itself fails inside the sandbox.
@@ -202,17 +210,43 @@ and restores files only; it never moves your branches. See
 
 ## Workers
 
-Workers you dispatch run in their own sandbox, with no network unless
-`safety.sandboxNetwork` is on or they hold `web_fetch`. Their ordinary asks go
-to the same safety judge by default, and a worker cannot raise its own level.
+Workers you dispatch use the worker sandbox when a backend is available and
+the sandbox policy requires or admits it; no backend and `auto` can run
+unsandboxed, while `required` refuses. A sandboxed worker has no network unless
+`safety.sandboxNetwork` is on, it holds `web_fetch`, or an admitted MCP server
+has an explicit network grant. Ordinary asks go to the same safety judge by
+default, and a worker cannot raise its own level.
 See [Workers at each level](../architecture/safety-model.md#workers-at-each-level).
 
 ## What the sandbox does not cover
 
-Typed tools such as `write` and `edit`, git hooks, the MCP servers the main
-session starts, and external coding agents are checked by the rules above but
-run with your own operating-system permissions. Windows has no sandbox
-backend; WSL uses the Linux one.
+There is no one sandbox around every action:
+
+- The OS sandbox is applied to admitted shell commands. Native typed tools
+  such as `write` and `edit` are mediated separately by action, path, scope,
+  information-flow and read-only policy; they do not become OS-isolated
+  because a shell is sandboxed.
+- A main-session MCP server is started from the operator's trust record and its
+  tools are classed before admission, but the server process is not wrapped by
+  the worker shell sandbox. A worker-started MCP server inherits that worker's
+  policy when one is active. A `read` classification is not an implementation
+  guarantee that a third-party server performs only a read.
+- Api 2 extensions have their own child-process sandbox plan and may be less
+  contained when the host has no backend. Project settings/hooks do not receive
+  a blanket sandbox promise merely because CLIO Coder itself launched them.
+- Git hooks execute as part of the Git command's process tree when Git runs
+  them. An outward or uncontained Git command therefore does not turn a hook
+  into a sandboxed operation.
+- External coding agents either have their own enforced OS mode (for example a
+  Codex read-only launch) or are refused for read-only work; an opt-in
+  unmediated write runtime remains an external process under its own policy.
+- Provider calls cross an API boundary with the content CLIO Coder sends, but
+  the provider itself is not the mechanism protecting local files.
+
+Windows has no CLIO Coder OS sandbox backend; WSL uses the Linux one. Hook
+classification, tool admission and sandboxing are complementary controls, not
+substitutes. The enforced functions and their focused test coverage are
+indexed in [the safety model](../architecture/safety-model.md#read-only-runs).
 
 The masks match known names and value shapes, so a credential stored under an
 unusual name stays readable. The network stays on, so a contained command can

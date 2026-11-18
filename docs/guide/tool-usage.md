@@ -2,6 +2,14 @@
 
 Operational reference for agents and operators. Sections summarize each tool's arguments, boundaries, outputs, and core workflow; schemas and implementation live in `src/tools/` and linked source files. Retrieve a section through `gateway(op="call", capability="clio_docs", args={query: ...})`.
 
+> [!NOTE]
+> The `count` tool and extension-result `detail_ref` behavior are present in
+> the `0.8.4-dev` checkout (`package.json`; `src/tools/count.ts` and
+> `src/tools/extension-runtime-tools.ts`). The public site still pins
+> `0.8.3` in `site/product.json` and
+> `site/content/docs-manifest.json`; verify the installed version before
+> relying on either feature.
+
 ## Quick start
 
 You never call these tools yourself. Ask in plain words, and the agent picks
@@ -528,6 +536,17 @@ Counts a file without reading it into context. Source: [count.ts](../../src/tool
 | `path` | File to count. A directory is refused. |
 
 Returns `<path>: <words> words, <lines> lines, <bytes> bytes`. Words are runs of non-whitespace, as `wc -w` counts them, and a last line without a trailing newline still counts as a line. The file is streamed, so a large one is counted in bounded memory. `count` is held to the same workspace scope, path policy and information-flow rules as `read`. It exists for a delegated worker without `bash` that must check its length against a budget; a prompt template lists it in `delegated-tools` ([tool ceilings](extensions-and-sharing.md#prompt-template-tool-ceilings)).
+
+This tool measures one regular file only. It does not scan directories,
+expand globs, infer a document's rendered length or apply extension-specific
+word rules. Its read action and workspace path boundary are the contract
+enforced by [count.ts](../../src/tools/count.ts),
+[read-scope.ts](../../src/domains/safety/read-scope.ts) and
+[information-flow.ts](../../src/domains/safety/information-flow.ts). On a
+surface that already has `bash`, `surfaceToolPlacement` leaves the schema
+behind the gateway; a worker without `bash` receives it directly so a
+writer/verifier recipe can measure its own output. The argument is still
+subject to the session and worker tool ceiling.
 
 ```text
 count(path="paper/sections/introduction.tex")
@@ -1124,7 +1143,10 @@ returns a `summary` gives the model that summary and a `detail_ref`
 `detail` returns the full result in pages of up to 12,000 bytes. Each page is
 headed `detail <ref>, bytes <from>-<to> of <total>` and, when more remains,
 names the next call with its `offset`. The store survives compaction and resume,
-and a forked session resolves its parent's refs.
+and a forked session resolves ancestors through at most eight parent hops. A
+main session with no dispatch board still gets a detail-only `ledger` behind
+the gateway when an extension serves a runtime tool or a resumed detail store
+already exists, so a saved ref stays readable after that extension is removed.
 
 ## panes: manage terminal panes owned by CLIO Coder
 
