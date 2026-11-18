@@ -1222,7 +1222,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			(reserve ??= summaryOutputReserve(model, { summaryOnChatRoute: summaryOnChatRoute(agentRuntime, cfg?.model) }));
 		const triggerReserve = (tokens: number): number =>
 			foldTriggerReserve({
-				knownWindow: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow > 0,
+				window: agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow,
 				summaryReserve,
 				turnReserve: () => resolveTurnOutputReserve(agentRuntime, tokens),
 			});

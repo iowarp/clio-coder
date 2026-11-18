@@ -1130,8 +1130,10 @@ describe("production compaction controls", () => {
 			while (notes > 0 && write().length / 4 > room) notes--;
 			f.response.text = write();
 		};
-		// A reasoning chat route reserves 26,214 summary tokens, so on a 40K window the trigger sits near 13.8K,
-		// and an 8K static prefix leaves about 5.8K of history below it (the bt-18 run).
+		// A reasoning chat route reserves 26,214 summary tokens; on a 40K window A1 bounds that at half the window, so
+		// the threshold holds the trigger at the 13,786 of the bt-18 run, and an 8K static prefix leaves about 5.8K of
+		// history below it.
+		f.settings.context.compaction.threshold = 13_786 / 40_000;
 		const runtime = {
 			targetId: "chat-target",
 			runtimeId: "fixture",
@@ -2100,5 +2102,36 @@ describe("compaction trigger output reservation", () => {
 		// A reserve the threshold's headroom covers leaves the threshold as configured.
 		strictEqual(effectiveCompactionThreshold(0.8, 100_000, 16_000), 0.8);
 		strictEqual(effectiveCompactionThreshold(0.9, 0, 26_214), 0.9);
+	});
+
+	it("bounds a reasoning route's summary reserve at half a known window (bt-47 cf1j-b, ContextFold A1)", async () => {
+		const { effectiveCompactionThreshold } = await import("../../src/domains/session/compaction/auto.js");
+		const { foldTriggerReserve } = await import("../../src/domains/context/fold/pressure.js");
+		const { summaryOutputReserve } = await import("../../src/domains/session/compaction/summary-output.js");
+		// A reasoning chat route with no observed summary share reserves ceil(0.8 x 16,384 / 0.5) = 26,214; the turn
+		// reserve sits below it. Old trigger: min(0.8, 1 - 26,214 / window) x window.
+		const model = { provider: "a1-table", baseUrl: "http://a1.invalid", id: "a1", maxTokens: 128_000, reasoning: true };
+		const table: Array<[window: number, trigger: number]> = [
+			[28_000, 14_000], // was 1,786
+			[32_768, 16_384], // was 6,554
+			[64_000, 64_000 - 26_214],
+			[128_000, 128_000 - 26_214],
+			[200_000, 0.8 * 200_000],
+		];
+		for (const [window, expected] of table) {
+			const reserve = foldTriggerReserve({
+				window,
+				summaryReserve: () => summaryOutputReserve(model, { summaryOnChatRoute: true }),
+				turnReserve: () => 8_192,
+			});
+			const trigger = effectiveCompactionThreshold(0.8, window, reserve) * window;
+			// Within 1e-6 tokens absolute: the fraction round-trips through a float.
+			ok(Math.abs(trigger - expected) < 1e-6, `${window}: ${trigger}`);
+		}
+		strictEqual(
+			foldTriggerReserve({ window: 0, summaryReserve: () => 26_214, turnReserve: () => 8_192 }),
+			26_214,
+			"an unknown window keeps the summary reserve unbounded",
+		);
 	});
 });
