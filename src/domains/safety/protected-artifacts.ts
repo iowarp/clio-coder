@@ -700,12 +700,86 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * removed, and a write escalates when either walk escalates it. A
  * here-document that cannot be removed, because it sits inside a substitution
  * or an `sh -c` script or has no word, leaves every later cd unmodeled.
+ *
+ * When every here-document is quoted and copied by `cat` or `tee` into a file,
+ * no shell reads its body, so only the walk without bodies counts: `=>` in a
+ * TypeScript body is not a redirect. A body fed to a shell, an interpreter,
+ * a pipe, or any other command is still read as commands, and so is one whose
+ * file a later command names, since that command may run it.
  */
 export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
-	const withoutBodies = withoutHeredocBodies(command);
+	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
 	if (withoutBodies === command) return [extractCommandPathWalk(command)];
 	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
+	if (removedAll && dataOutputs !== null && !mayRunHeredocOutputs(withoutBodies, dataOutputs))
+		return [extractCommandPathWalk(withoutBodies)];
 	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
+}
+
+/** Commands that copy a here-document to their output as text and run none of it. */
+const HEREDOC_DATA_CONSUMERS: ReadonlySet<string> = new Set(["cat", "tee"]);
+
+/**
+ * The files a quoted here-document's command copies it into, or null unless
+ * that command is `cat` or `tee` with its standard output sent to a file, so
+ * no pipe, process substitution, or descriptor can hand the text to a shell.
+ */
+function heredocDataOutputs(tokens: ReadonlyArray<ShellToken>, operatorIndex: number): string[] | null {
+	const separator = (token: ShellToken | undefined): boolean =>
+		token?.operator === true && COMMAND_SEPARATORS.has(token.value);
+	let start = operatorIndex;
+	while (start > 0 && !separator(tokens[start - 1])) start -= 1;
+	let end = operatorIndex;
+	while (end < tokens.length && !separator(tokens[end])) end += 1;
+	const segment = tokens.slice(start, end);
+	if (segment.some((token) => (token.substitutions?.length ?? 0) > 0)) return null;
+	const argv = shellCommandArguments(segment);
+	const commandIndex = commandTokenIndex(argv);
+	if (commandIndex === null || !HEREDOC_DATA_CONSUMERS.has(basenameToken(argv[commandIndex]))) return null;
+	let stdout: string | null = null;
+	for (let index = 0; index < segment.length - 1; index += 1) {
+		const operator = segment[index];
+		const target = segment[index + 1];
+		if (operator === undefined || target === undefined || !operator.operator || target.operator) continue;
+		const previous = segment[index - 1];
+		const fd =
+			previous !== undefined &&
+			!previous.operator &&
+			!previous.quoted &&
+			previous.end === operator.start &&
+			/^\d+$/u.test(previous.value)
+				? previous.value
+				: null;
+		if (operator.value === "<&") {
+			if (fd === "1") stdout = null;
+			continue;
+		}
+		if (!SHELL_WRITE_REDIRECTIONS.has(operator.value)) continue;
+		const both = operator.value === "&>" || operator.value === "&>>";
+		if (!both && (fd ?? (operator.value === "<>" ? "0" : "1")) !== "1") continue;
+		stdout = operator.value === ">&" && /^(?:\d+-?|-)$/u.test(target.value) ? null : target.value;
+	}
+	if (stdout === null || (stdout.startsWith("/dev/") && stdout !== "/dev/null")) return null;
+	const outputs = basenameToken(argv[commandIndex]) === "tee" ? pathArgs(argv, commandIndex) : [];
+	return [stdout, ...outputs].filter((output) => output !== "/dev/null");
+}
+
+/**
+ * Whether the command, bodies removed, may run a file a data here-document
+ * wrote: another word names the file, or a function, alias, or PATH change
+ * may make `cat` or `tee` something else.
+ */
+function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): boolean {
+	if (/\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command)) return true;
+	const text = command.toLowerCase();
+	const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
+	for (const output of outputs) {
+		const name = basenameToken(output);
+		if (name === "") return true;
+		const written = outputs.reduce((sum, other) => sum + count(other.toLowerCase(), name), 0);
+		if (count(text, name) > written) return true;
+	}
+	return false;
 }
 
 /** More here-documents than this in one command are left in place. */
@@ -719,11 +793,23 @@ const MAX_HEREDOCS = 64;
  * Several here-documents on one line take their bodies in order.
  */
 export function withoutHeredocBodies(command: string, keepSubstitutions = false): string {
+	return removeHeredocBodies(command, keepSubstitutions).text;
+}
+
+/**
+ * {@link withoutHeredocBodies}, with the files its here-documents are copied
+ * into as data ({@link heredocDataOutputs}), or null when any one is not.
+ */
+function removeHeredocBodies(
+	command: string,
+	keepSubstitutions: boolean,
+): { text: string; dataOutputs: string[] | null } {
 	let text = command;
+	let dataOutputs: string[] | null = [];
 	for (let pass = 0; pass < MAX_HEREDOCS; pass += 1) {
 		const tokens = scanShellLike(text);
 		const first = tokens.findIndex((token) => token.operator && token.value === "<<");
-		if (first === -1) return text;
+		if (first === -1) return { text, dataOutputs };
 		const lineEnd = tokens.findIndex(
 			(token, index) => index > first && token.operator && token.value === ";" && text[token.start] === "\n",
 		);
@@ -738,7 +824,9 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
 				if (word.value === "-") word = tokens[index + 2];
 			}
 			// `<<` with no word is a syntax error: bash runs nothing, so leave it as written.
-			if (word === undefined || word.operator) return text;
+			if (word === undefined || word.operator) return { text, dataOutputs: null };
+			const outputs = word.quoted ? heredocDataOutputs(tokens, index) : null;
+			dataOutputs = outputs === null || dataOutputs === null ? null : [...dataOutputs, ...outputs];
 			const delimiter = stripTabs && text[word.start] === "-" ? word.value.slice(1) : word.value;
 			docs.push({ start: operator.start, end: word.end, word: delimiter, stripTabs, quoted: word.quoted });
 		}
@@ -768,7 +856,7 @@ export function withoutHeredocBodies(command: string, keepSubstitutions = false)
 		}
 		text = `${head.slice(0, bodyStart)}${substitutions.length > 0 ? `${substitutions.join("\n")}\n` : ""}${text.slice(cursor)}`;
 	}
-	return text;
+	return { text, dataOutputs: null };
 }
 
 function heredocSubstitutions(body: string): string[] {
