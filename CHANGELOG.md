@@ -46,6 +46,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- A worker's account of failed attempts is followed by the feed's own attempt counts. (bt-23 #3)
+- A judge-mode dispatch with no seated safety judge raises a worker_judge_withheld notice saying workers run as deny. (N2)
 - Unattended countdowns read m:ss under a minute too (0:59, 0:05). (bt-11 q)
 - The exit card row reads "Session verified" in every style. (drv-tui11)
 - A live worker's spend is kept in `runs/<id>/spend.json`, and runs.json is written only at lifecycle and status transitions. (P3 #2)
@@ -117,6 +119,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A worker ask that no operator could answer counts as a permission request in the receipt. (bt-readonly residual)
+- A worker call refused before it reached a tool counts in toolStats as an error, and a call cut off by the output token limit is not counted as one. (bt-23 #5)
+- A worker call refused by an approval timeout names that cause in its evidence. (bt-11 t)
+- A headless run whose delegated task never started exits 1 as a no-op. (c16-B)
+- A failed dispatch run that was not retried says why, including at the review gate and a pipeline halt. (D3-c)
 - Enter on a slash draft under an approval card shows a notice naming the card and its keys instead of doing nothing. (bt-11 p)
 - `/fleet` at narrow widths keeps who holds an approval-waiting run. (bt-11 l residual)
 - An unanswered ask_user declines a recommended option that leaves the workspace, and prompts, help, the yolo card and docs say so. (bt-21 residual)
