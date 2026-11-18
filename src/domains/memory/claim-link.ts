@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { canonicalMemoryRepositoryIdentity, cloneMemoryRecord } from "./operations.js";
 import { insertMemoryRecordIfAbsent, mutateMemoryRecords } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
+import { assertValidMemoryRecord } from "./validate.js";
 
 /**
  * Memory's side of the claims log (#406). A record rests on a claim when its evidence refs name it; a contradiction of
@@ -83,12 +83,7 @@ export function memoryRecordFromClaim(source: ClaimMemorySource): MemoryRecord {
 		approved: false,
 		repository,
 	};
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid)
-		throw new Error(
-			`claim memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	return validated.record;
+	return assertValidMemoryRecord(record, "claim");
 }
 
 export async function proposeMemoryFromClaim(

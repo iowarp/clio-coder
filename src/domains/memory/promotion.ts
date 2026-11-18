@@ -11,7 +11,7 @@ import type {
 	MemoryRepositoryIdentity,
 	MemoryRuntimeIdentity,
 } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
+import { assertValidMemoryRecord, validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export const MEMORY_PROMOTION_SCOPES = ["repo", "global", "runtime", "agent"] as const;
 export type MemoryPromotionScope = (typeof MEMORY_PROMOTION_SCOPES)[number];
@@ -102,12 +102,7 @@ export async function proposeMemoryPromotion(
 	findExisting?: (records: ReadonlyArray<MemoryRecord>) => MemoryRecord | null,
 	options: MemoryMutationOptions = {},
 ): Promise<MemoryProposalResult> {
-	validatePromotionSource(source);
-	const validatedScope = validateMemoryScopeSelection(selection, {
-		runtimeIds: source.runtimeIds ?? [],
-		agentIds: source.agentIds ?? [],
-	});
-	const record = memoryRecordFromPromotion(source, validatedScope, now);
+	const record = memoryRecordFromPromotion(source, selection, now);
 	return insertMemoryRecordIfAbsent(dataDir, record, findExisting, options);
 }
 
@@ -163,13 +158,7 @@ export function memoryRecordFromPromotion(
 		},
 	};
 	applyScopeIdentity(record, validatedScope);
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid) {
-		throw new Error(
-			`promoted memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	}
-	return validated.record;
+	return assertValidMemoryRecord(record, "promoted");
 }
 
 export function applyScopeIdentity(record: MemoryRecord, selection: MemoryScopeSelection): void {
@@ -223,14 +212,6 @@ function normalizeNamedIdentity<T extends "runtime" | "agent">(
 		throw new Error(`${kind} scope requires a valid ${kind} identity`);
 	}
 	return { kind, key: identity.key };
-}
-
-function validNamedIdentityKey(value: string): boolean {
-	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
-}
-
-function validSourceValue(value: string): boolean {
-	return value.length > 0 && value.length <= 1_024 && value.trim() === value && !/[\0\r\n]/u.test(value);
 }
 
 function scopeApplicability(selection: MemoryScopeSelection): string[] {

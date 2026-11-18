@@ -10,7 +10,7 @@ import {
 } from "./promotion.js";
 import { insertMemoryRecordIfAbsent } from "./store.js";
 import type { MemoryProposalResult, MemoryRecord } from "./types.js";
-import { validateMemoryRecord } from "./validate.js";
+import { assertValidMemoryRecord } from "./validate.js";
 
 const LESSON_MAX_CHARS = 240;
 const APPLY_MAX_CHARS = 160;
@@ -100,13 +100,7 @@ export function memoryRecordFromEvidence(
 	else if (scope === "repo" && repository !== null) record.repository = repository;
 	else if (scope === "runtime" && runtimeIds[0] !== undefined) record.runtime = { kind: "runtime", key: runtimeIds[0] };
 	else if (scope === "agent" && agentIds[0] !== undefined) record.agent = { kind: "agent", key: agentIds[0] };
-	const validated = validateMemoryRecord(record);
-	if (!validated.valid) {
-		throw new Error(
-			`evidence memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
-		);
-	}
-	return validated.record;
+	return assertValidMemoryRecord(record, "evidence");
 }
 
 function memoryIdFromEvidenceScope(evidenceId: string, scopeKey: string): string {

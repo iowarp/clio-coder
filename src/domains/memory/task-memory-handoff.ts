@@ -9,6 +9,7 @@ import {
 	type TaskMemoryEntry,
 	type TaskMemorySnapshot,
 } from "./task-bank.js";
+import { validNamedIdentityKey, validSourceValue } from "./validate.js";
 
 export const TASK_MEMORY_HANDOFF_VERSION = 2;
 export const TASK_MEMORY_HANDOFF_LANGUAGE = "clio-coder-task-memory";
@@ -307,22 +308,9 @@ function parseSourceValues(value: unknown, allowEmpty: boolean): string[] | null
 }
 
 function parseNamedIdentities(value: unknown): string[] | null {
-	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !validNamedIdentity(item))) return null;
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !validNamedIdentityKey(item)))
+		return null;
 	return [...new Set(value as string[])].sort(compareStrings);
-}
-
-function validSourceValue(value: unknown): value is string {
-	return (
-		typeof value === "string" &&
-		value.length > 0 &&
-		value.length <= 1_024 &&
-		value.trim() === value &&
-		!/[\0\r\n]/u.test(value)
-	);
-}
-
-function validNamedIdentity(value: string): boolean {
-	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
 }
 
 function redactHandoffEntry(

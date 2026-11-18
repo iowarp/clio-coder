@@ -44,6 +44,15 @@ export function validateMemoryRecord(value: unknown, source = "$"): MemoryRecord
 	return { valid: true, record };
 }
 
+/** The validated record, or an error naming every issue under `label`, which the CLI prints as is. */
+export function assertValidMemoryRecord(value: unknown, label: string): MemoryRecord {
+	const validated = validateMemoryRecord(value);
+	if (validated.valid) return validated.record;
+	throw new Error(
+		`${label} memory record invalid: ${validated.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+	);
+}
+
 export function validateMemoryStore(value: unknown, source = "$"): MemoryStoreValidationResult {
 	const issues: MemoryValidationIssue[] = [];
 	if (!isRecord(value)) return { valid: false, issues: [{ path: source, message: "expected object" }] };
@@ -288,10 +297,10 @@ function readOptionalNamedIdentity<T extends "runtime" | "agent">(
 		issues.push({ path: `${path}.kind`, message: `expected ${kind}` });
 	}
 	const key = readString(value, `${path}.key`, issues);
-	if (key !== null && !isValidNamedIdentityKey(key)) {
+	if (key !== null && !validNamedIdentityKey(key)) {
 		issues.push({ path: `${path}.key`, message: `expected valid ${kind} identity` });
 	}
-	if (actualKind !== kind || key === null || !isValidNamedIdentityKey(key)) return undefined;
+	if (actualKind !== kind || key === null || !validNamedIdentityKey(key)) return undefined;
 	return { kind, key } as T extends "runtime" ? MemoryRuntimeIdentity : MemoryAgentIdentity;
 }
 
@@ -422,7 +431,7 @@ function readOptionalSourceString(
 	const field = fieldName(path);
 	if (!Object.hasOwn(record, field)) return undefined;
 	const value = record[field];
-	if (typeof value !== "string" || !isValidSourceValue(value)) {
+	if (!validSourceValue(value)) {
 		issues.push({ path, message: "expected valid non-empty source value" });
 		return undefined;
 	}
@@ -433,12 +442,20 @@ function isNormalizedAbsoluteRepositoryPath(value: string): boolean {
 	return !/[\0\r\n]/u.test(value) && isAbsolute(value) && resolve(value) === value;
 }
 
-function isValidNamedIdentityKey(value: string): boolean {
+/** A runtime or agent identity key: non-empty, at most 256 characters, with no whitespace. */
+export function validNamedIdentityKey(value: string): boolean {
 	return value.length > 0 && value.length <= 256 && value.trim() === value && !/[\0\r\n\t ]/u.test(value);
 }
 
-function isValidSourceValue(value: string): boolean {
-	return value.length > 0 && value.length <= 1_024 && value.trim() === value && !/[\0\r\n]/u.test(value);
+/** A source session id, evidence ref, entry id or redacted field name as the store accepts it. */
+export function validSourceValue(value: unknown): value is string {
+	return (
+		typeof value === "string" &&
+		value.length > 0 &&
+		value.length <= 1_024 &&
+		value.trim() === value &&
+		!/[\0\r\n]/u.test(value)
+	);
 }
 
 function rejectUnexpectedFields(
