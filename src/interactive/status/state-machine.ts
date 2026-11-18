@@ -395,6 +395,7 @@ const ABORT_SOURCE_LABELS: Record<RunAbortSource | TurnAbortSource, string> = {
 	loop_guard: "loop guard",
 	job_clock: "job clock",
 	autonomy: "yolo pause",
+	triage: "triage stop",
 };
 
 function runAbortDetail(event: RunAbortedStatusEvent): string | undefined {

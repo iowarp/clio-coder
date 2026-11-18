@@ -101,6 +101,7 @@ function failureCause(failure: Record<string, unknown>): FailureCause | undefine
 		// A harness stop persists its own cause as its class (bt-26 N2a).
 		case "operator_cancel":
 		case "route_moved":
+		case "triage_stop":
 		case "repetition":
 		case "shutdown":
 			return failure.stage === "harness" ? failure.errorClass : undefined;

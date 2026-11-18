@@ -36,6 +36,7 @@ const ABORT_SOURCES: Readonly<Record<string, string>> = {
 	loop_guard: "the loop guard",
 	job_clock: "a job's clock",
 	autonomy: "a yolo pause",
+	triage: "steering triage",
 };
 
 const COMPACTION_OUTCOMES: Readonly<Record<string, string>> = {
