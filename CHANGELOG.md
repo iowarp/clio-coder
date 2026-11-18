@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
 - Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
 - Run records and the headless terminal frame report tool guard blocks as safety.decisions.guardBlocked, and decisions.blocked counts safety refusals only. Run records written earlier keep the mixed count under blocked (bt-15 T3).
 - `run --agent` exits 1 when the run's sealed result-contract quality is `fail` (a check red after its last edit), as a verifier fail verdict already does; the outcome stays `succeeded`, and a baseline red before any edit stays exit 0 (x1-5).
