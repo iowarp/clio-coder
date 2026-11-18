@@ -239,7 +239,7 @@ it("the default tokens table counts unmeasured calls and prints a span with no m
 		{
 			version: 1,
 			sessionId: "s",
-			basis: { usage: "ledger", systemSide: "residual", split: "estimated", note: "n" },
+			basis: { usage: "ledger", systemSide: "residual", split: "estimated", note: "n", freshIsCacheWriteCalls: 0 },
 			turns: [turn(1, 0, 1, 0), turn(2, 2, 1, 40)],
 			totals: { calls: 2, unmeasuredCalls: 2, input: { ...input, fresh: 40, total: 40 }, output: 5, rows: [] },
 		},
@@ -254,4 +254,42 @@ it("the default tokens table counts unmeasured calls and prints a span with no m
 	strictEqual(cells("1 ")?.slice(2).join("|"), "1 (1 unmeasured)|unknown|unknown|unknown|unknown", text);
 	strictEqual(cells("2 ")?.slice(2).join("|"), "3 (1 unmeasured)|0|40|40|5", text);
 	strictEqual(cells("all")?.slice(1).join("|"), "4 (2 unmeasured)|0|40|40|5", text);
+});
+
+it("names the copilot-sdk calls whose fresh input is their cache write (bt-12 #12)", async () => {
+	const env = await isolateClioEnv("clio-coder-token-sources-sdk-");
+	try {
+		const sessionId = "token-sources-sdk";
+		const directory = join(clioStateDir(), "sessions", "token-sources-repo", sessionId);
+		mkdirSync(directory, { recursive: true });
+		const at = new Date().toISOString();
+		const assistant = (turnId: string, api: string, usage: Record<string, number>) => ({
+			kind: "message",
+			turnId,
+			parentTurnId: null,
+			timestamp: at,
+			role: "assistant",
+			payload: { role: "assistant", api, content: [{ type: "text", text: "ok" }], usage },
+		});
+		const lines = [
+			{ type: "session", version: 6, id: sessionId, timestamp: at, cwd: env.dir },
+			{ kind: "message", turnId: "u1", parentTurnId: null, timestamp: at, role: "user", payload: { text: "hi" } },
+			assistant("a1", "copilot-sdk", { input: 3, cacheRead: 9000, cacheWrite: 1200, output: 40 }),
+			assistant("a2", "anthropic-messages", { input: 50, cacheRead: 9000, cacheWrite: 0, output: 40 }),
+		];
+		writeFileSync(join(directory, "current.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+		const report = loadTokenSourcesReport(clioStateDir(), sessionId);
+		ok(report, "the session ledger loads");
+		strictEqual(report.totals.calls, 2, JSON.stringify(report.turns));
+		strictEqual(report.basis.freshIsCacheWriteCalls, 1);
+		strictEqual(report.totals.input.fresh, 3 + 1200 + 50, "fresh keeps its definition, uncached plus cache write");
+		ok(
+			renderTokenSources(report, false).includes(
+				"note: 1 of 2 measured call(s) ran on copilot-sdk, which reports no uncached input; their fresh is cache write",
+			),
+			renderTokenSources(report, false),
+		);
+	} finally {
+		env.restore();
+	}
 });
