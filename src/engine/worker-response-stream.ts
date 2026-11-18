@@ -9,7 +9,7 @@ import type {
 import { calculateCost, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import type { CallUsage } from "../core/token-split.js";
 import { normalizeCallUsage } from "../core/token-split.js";
-import { remainingContextMaxTokens } from "./apis/output-budget.js";
+import { type PinnedInputTokens, remainingContextMaxTokens } from "./apis/output-budget.js";
 import { RESPONSE_DEADLINE } from "./response-deadline.js";
 
 export type WorkerResponseLimitCode = "worker_turn_timeout" | "worker_output_cap_exhausted";
@@ -34,7 +34,12 @@ export function boundWorkerResponse<T extends StreamOptions>(
 	const seconds = limits.responseSeconds;
 	const maxTokens = remainingContextMaxTokens(model, context, options);
 	const outputLimitDetail = (): string => {
-		const contextLimit = remainingContextMaxTokens(model, context, { maxTokens: Number.POSITIVE_INFINITY });
+		// The same pinned input count admission sized, so a fitted request's label names the window it ran into.
+		const pinned = (options as PinnedInputTokens | undefined)?.clioInputTokens;
+		const contextLimit = remainingContextMaxTokens(model, context, {
+			maxTokens: Number.POSITIVE_INFINITY,
+			...(pinned === undefined ? {} : { clioInputTokens: pinned }),
+		});
 		const source =
 			maxTokens === model.maxTokens
 				? "model output limit"

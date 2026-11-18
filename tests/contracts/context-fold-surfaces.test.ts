@@ -1,9 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
+import { ACP_CONTEXT_LEDGER_METHOD } from "../../src/engine/acp/types.js";
+import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 import {
 	type CapturedRequest,
 	contextElements,
@@ -258,4 +260,159 @@ describe("surface capture", () => {
 			deepStrictEqual(tapped, requests, "the adapter payloads are the captured requests");
 		});
 	}
+
+	it("headless run: `context working-set --verify` matches every main attempt to its receipt across an eviction and a checkpoint (ContextFold CF-9, F14)", {
+		timeout: 300_000,
+	}, async (t) => {
+		const turns: Record<string, string[]> = {
+			"read the first notes": ["a.txt", "b.txt", "c.txt", "d.txt"],
+			"read the later notes": ["e.txt", "f.txt"],
+		};
+		// A request without tools is the summary call; a turn reads its files one call at a time.
+		const server = await startCaptureServer((request) => {
+			if (!Array.isArray(request.body.tools)) return { text: syntheticCompactionSummary("read the notes") };
+			const elements = wireElements(request);
+			let opened = elements.length - 1;
+			while (
+				opened >= 0 &&
+				!(elements[opened]?.startsWith("user:") && Object.keys(turns).some((prompt) => elements[opened]?.includes(prompt)))
+			)
+				opened -= 1;
+			const files = Object.entries(turns).find(([prompt]) => elements[opened]?.includes(prompt))?.[1] ?? [];
+			const reads = elements.slice(opened + 1).filter((element) => element.startsWith("result:")).length;
+			const next = files[reads];
+			return next ? { calls: [{ id: `call_${next}`, name: "read", arguments: { path: next } }] } : { text: "done" };
+		});
+		const scratch = headlessScratch("cf-verify-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		const line = `${"n".repeat(67)}\n`;
+		for (const file of Object.values(turns).flat())
+			writeFileSync(path.join(project, file), line.repeat(Math.ceil((22 * 1024) / line.length)));
+		// The first run evicts under a short protected tail; the second, without the working set, checkpoints.
+		const settingsFile = path.join(scratch.configDir, "settings.yaml");
+		const settings = [
+			(yaml: string) => yaml.replace("    protectLastSteps: 8", "    protectLastSteps: 2"),
+			(yaml: string) => yaml.replace(/(\n {2}workingSet:\n(?: {4}.*\n)*?) {4}enabled: true\n/, "$1    enabled: false\n"),
+		];
+		for (const [index, prompt] of Object.keys(turns).entries()) {
+			const yaml = readFileSync(settingsFile, "utf8");
+			const changed = settings[index]?.(yaml) ?? yaml;
+			ok(changed !== yaml, "the settings edit applied");
+			writeFileSync(settingsFile, changed);
+			const result = await runCli(
+				["--no-context-files", "--no-skills", "run", ...(index > 0 ? ["--continue"] : []), prompt],
+				{ env: scratch.env, cwd: project, timeoutMs: 240_000 },
+			);
+			strictEqual(result.code, 0, result.stderr);
+		}
+		const sessionsRoot = path.join(scratch.stateDir, "sessions");
+		const [cwdHash = ""] = readdirSync(sessionsRoot);
+		const [id = ""] = readdirSync(path.join(sessionsRoot, cwdHash));
+		const kinds = readFileSync(path.join(sessionsRoot, cwdHash, id, "current.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((entry) => (JSON.parse(entry) as { kind?: string }).kind);
+		ok(kinds.includes("contextEviction") && kinds.includes("compactionSummary"), "the session folded both ways");
+		const verify = await runCli(["context", "working-set", "--verify", id], { env: scratch.env, cwd: project });
+		strictEqual(verify.code, 0, verify.stdout + verify.stderr);
+		const attempts = verify.stdout.split("\n").filter((row) => / attempt \d+: /u.test(row));
+		const main = attempts.filter((row) => row.includes(" main attempt "));
+		ok(main.length >= 8, verify.stdout);
+		deepStrictEqual(
+			main.filter((row) => !row.endsWith(": verified")),
+			[],
+			"every main attempt is verified",
+		);
+		ok(
+			attempts.some((row) => row.endsWith(": not-verifiable (summary call)")),
+			verify.stdout,
+		);
+		ok(verify.stdout.includes("fold decisions: 0 missing, 0 duplicate, 0 orphan"), verify.stdout);
+	});
+
+	it("acp: usage_update and /context read one figure after an eviction and after a reopen", {
+		timeout: 300_000,
+	}, async (t) => {
+		const server = await startCaptureServer((_request, index) =>
+			index < 2
+				? { calls: [{ id: `call_${index + 1}`, name: "read", arguments: { path: "notes.txt" } }] }
+				: { text: "done" },
+		);
+		const scratch = headlessScratch("cf-usage-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		const settingsFile = path.join(scratch.configDir, "settings.yaml");
+		// The uncached route above: the second read supersedes the first, and S0 commits an eviction mid-turn.
+		writeFileSync(
+			settingsFile,
+			readFileSync(settingsFile, "utf8")
+				.replace("contextWindow: 32768", "contextWindow: 262144")
+				.replace(
+					"    wireModels:\n      - mock-model",
+					"    cache:\n      retention: none\n    wireModels:\n      - mock-model",
+				),
+		);
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		const line = `${"n".repeat(67)}\n`;
+		writeFileSync(path.join(project, "notes.txt"), line.repeat(Math.ceil((34 * 1024) / line.length)));
+		const env = Object.fromEntries(
+			Object.entries(scratch.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+		const cli = tappedCli(path.join(scratch.root, "session-capture.jsonl"));
+		let sessionId = "";
+		const figures: Array<{ used: number; ledger: number }> = [];
+		for (const reopen of [false, true]) {
+			const acp = createStdioTransport(
+				process.execPath,
+				[...cli.node, cli.cli, "--no-context-files", "--no-skills", "acp"],
+				{
+					cwd: project,
+					env,
+				},
+			);
+			t.signal.addEventListener("abort", () => void acp.forceTerminate(), { once: true });
+			const used: number[] = [];
+			acp.onNotification("session/update", (params) => {
+				const update = (params as { update?: { sessionUpdate?: string; used?: number } }).update;
+				if (update?.sessionUpdate === "usage_update" && typeof update.used === "number") used.push(update.used);
+			});
+			try {
+				await acp.request("initialize", { protocolVersion: 1 });
+				if (!reopen) {
+					({ sessionId } = await acp.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] }));
+					const turn = await acp.request<{ stopReason: string }>("session/prompt", {
+						sessionId,
+						prompt: [{ type: "text", text: "read notes.txt twice" }],
+					});
+					strictEqual(turn.stopReason, "end_turn");
+				} else await acp.request("session/load", { sessionId, cwd: project, mcpServers: [] });
+				await new Promise((resolve) => setImmediate(resolve));
+				const ledger = await acp.request<{ usedTokens: number }>(ACP_CONTEXT_LEDGER_METHOD, { sessionId });
+				ok(used.length > 0, "a usage_update was sent");
+				figures.push({ used: used.at(-1) ?? -1, ledger: ledger.usedTokens });
+			} finally {
+				await acp.forceTerminate();
+			}
+		}
+		const results = wireElements(server.requests.at(-1) as CapturedRequest).filter((element) =>
+			element.startsWith("result:"),
+		);
+		ok(results[0]?.startsWith("result:[evicted ref=r1 reason=superseded_call by="), "the S0 eviction committed");
+		const [live, reopened] = figures;
+		ok(live && reopened && live.used > 0);
+		strictEqual(live.used, live.ledger, "usage_update and /context read one figure after the eviction");
+		// The capture server reports 10 input tokens per call; the view prices the retained 34 KiB read instead.
+		ok(live.used > (34 * 1024) / 4, `usage_update reads the view, not the provider's report: ${live.used}`);
+		strictEqual(reopened.used, reopened.ledger, "and after the reopen");
+	});
 });

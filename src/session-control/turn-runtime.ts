@@ -14,6 +14,7 @@ import { requestFits } from "../domains/context/budget/request-fit.js";
 import { endpointCapacityHolders } from "../domains/dispatch/index.js";
 import { observationTracing, traceObservation } from "../domains/memory/observation-events.js";
 import { calculatePricingCostUsd, resolveEffectivePricing } from "../domains/providers/catalog.js";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { journalAccountQuota, quotaReadingFromMessage } from "../domains/quota/index.js";
 import { PROMPT_MANIFEST_VERSION } from "../domains/session/prompt-manifest.js";
 import type { CacheBaseline } from "../domains/telemetry/cache-physics.js";
@@ -27,6 +28,7 @@ import { resolvedRequestContext } from "../engine/context.js";
 import { hasAssistantGenerationDelta } from "../engine/generation-delta.js";
 import { MODEL_ADMISSION } from "../engine/model-admission.js";
 import { createRequestStructures } from "../engine/request-structure.js";
+import { type AttemptReceipt, carriedCheckpoints, type RequestCursor } from "./attempt-receipt.js";
 import { firstTokenStallLimitMs } from "./chat-loop-policy.js";
 import type { ContinuityController } from "./continuity-controller.js";
 import { resolveFitOutputReserve, turnAdmissionRemedy } from "./output-reserve.js";
@@ -68,7 +70,7 @@ import type { HostInsertSource } from "../domains/session/entries.js";
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { TelemetryContract } from "../domains/telemetry/contract.js";
 import type { createEngineAgent } from "../engine/agent.js";
-import { enginePinnedPrefix } from "../engine/agent.js";
+import { enginePinnedPrefix, providerFallbackOf } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
 import { engineMainStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
@@ -81,7 +83,7 @@ import {
 	streamToolRound,
 	type ToolRound,
 } from "../engine/provider-payload.js";
-import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
+import type { AgentEvent, AgentMessage, CodexConfiguration, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
 import { effectiveToolCall } from "../tools/surface.js";
 import type { ChatNoticeEvent } from "./chat-loop.js";
@@ -347,8 +349,8 @@ export interface TurnRuntimeDeps {
 		context: TelemetrySessionLease["context"];
 	}) => void;
 	onModelCallSettled?: (facts: CallSettled) => void;
-	/** The `turnId` of the session ledger's last row, read when admission prepares a request: the attempt's `hwm`. */
-	ledgerHighWaterMark?: () => string | null;
+	/** The ledger as admission prepares a request: the attempt's cursor, owner and the fold records it renders. */
+	requestCursor?: () => RequestCursor;
 	/**
 	 * Information-flow admission of one model request: the block reason when
 	 * the session's restricted context may not reach this target, or null.
@@ -467,7 +469,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	let cacheBaselineGeneration: number | undefined;
 	// The last structure journaled on each session and cache key in this process, never reset, so each request
 	// journals only what it appended to it and a later process can rebuild the transcript the provider saw.
-	const journaledStructures = new Map<string, CacheRequestStructure>();
+	const journaledStructures = new Map<string, { structure: CacheRequestStructure; attemptId?: string }>();
 	// Disturbances owed to the next request that leaves: those taken for one that never left, and a Codex auth reset
 	// that closed the socket after its call, so the next call sends the recovery frame (#434).
 	let carriedColdReasons: ExpectedColdReason[] = [];
@@ -803,15 +805,16 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// What each attempt handed Pi, digested only at settle so the hashing stays off the send path (#434).
 		let attemptRequest:
 			| {
-					/** The cursor's `hwm`: the last ledger row when admission prepared this request (SPEC §1.1). */
-					hwm: string | null;
+					/** The ledger as admission prepared this request (SPEC §1.1), or as a portable fallback rewrote it. */
+					cursor: RequestCursor | null;
 					model: Parameters<typeof requestStructure>[0];
 					context: Parameters<typeof requestStructure>[1];
 					compiled: Parameters<typeof requestStructure>[2];
 					coldReasons: ExpectedColdReason[];
+					receipt: Pick<AttemptReceipt, "toolChoice" | "tail" | "fallback" | "codex">;
 			  }
 			| undefined;
-		let admittedHwm: string | null = null;
+		let admittedCursor: RequestCursor | null = null;
 		/**
 		 * Cache physics against the previous request on the same key. Every attempt the provider saw advances the
 		 * baseline, hidden #426 retries included, so the ledger's #423 shortfall, which only persisted replies
@@ -820,6 +823,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const withCachePhysics = (
 			settlement: ReturnType<typeof callSettlementFromMessage>,
 			message: AgentMessage,
+			attemptId: string | undefined,
 		): ReturnType<typeof callSettlementFromMessage> => {
 			const request = attemptRequest;
 			attemptRequest = undefined;
@@ -865,8 +869,28 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			if (physics.baseline) cacheBaselines.set(key, physics.baseline);
 			else cacheBaselines.delete(key);
 			const journalKey = JSON.stringify([deps.sessionId?.() ?? null, key]);
-			const journaled = structure ? journaledStructure(structure, journaledStructures.get(journalKey)) : undefined;
-			if (structure) journaledStructures.set(journalKey, structure);
+			const prior = journaledStructures.get(journalKey);
+			const journaled = structure ? journaledStructure(structure, prior?.structure, prior?.attemptId) : undefined;
+			if (structure) journaledStructures.set(journalKey, { structure, ...(attemptId ? { attemptId } : {}) });
+			// The receipt is taken at send, beside the structure, for an attempt the provider saw (F14).
+			const receipt: AttemptReceipt | undefined =
+				sent && request?.cursor && journaled
+					? {
+							cursor: { hwm: request.cursor.hwm, leaf: request.cursor.leaf },
+							...(request.cursor.owner ? { owner: request.cursor.owner } : {}),
+							route: {
+								...(resolution.modelTier !== undefined ? { modelTier: resolution.modelTier } : {}),
+								...(resolution.promptCaching !== undefined ? { promptCaching: resolution.promptCaching } : {}),
+								images: acceptsImageInput({ modelInput: request.model.input }),
+								midConversation:
+									(request.model.compat as { supportsMidConvoSystemMessages?: boolean } | undefined)
+										?.supportsMidConvoSystemMessages === true,
+							},
+							...request.receipt,
+							records: request.cursor.records,
+							checkpoints: carriedCheckpoints(request.context),
+						}
+					: undefined;
 			const usage = (message as { usage?: Record<string, unknown> }).usage ?? {};
 			const verdict =
 				settlement.disposition === "settled" && typeof usage.input === "number" && typeof usage.cacheRead === "number"
@@ -886,6 +910,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					expectedColdReasons: sent ? reasons : [],
 					verdict,
 					...(journaled ? { structure: journaled } : {}),
+					...(receipt ? { receipt } : {}),
 				},
 			};
 		};
@@ -957,6 +982,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						interrupted,
 					),
 					message,
+					call.attemptId,
 				);
 				const facts = call.settle(
 					{
@@ -1165,8 +1191,17 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						};
 						const sent = finalizeAttempt(request, state.synthesisToolLock, middlewareChoice);
 						if (attempt) {
+							const fallback = providerFallbackOf(request.options);
+							const codex = (request.options as { codexConfiguration?: CodexConfiguration } | undefined)?.codexConfiguration;
 							attemptRequest = {
-								hwm: admittedHwm,
+								// A portable fallback wrote its record after admission; the request renders through it.
+								cursor: fallback !== undefined ? (deps.requestCursor?.() ?? admittedCursor) : admittedCursor,
+								receipt: {
+									toolChoice: JSON.stringify(request.options?.toolChoice ?? "auto"),
+									tail: sent === request.context ? "none" : "synthesis_directive",
+									...(fallback !== undefined ? { fallback } : {}),
+									...(codex ? { codex: { initialEffort: codex.initialEffort, updates: [...codex.updates] } } : {}),
+								},
 								model: currentModel,
 								context: sent,
 								compiled: context.compiledSessionPrompt?.() ?? null,
@@ -1218,6 +1253,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						const settlement = withCachePhysics(
 							callSettlementFromMessage({ ...message, ...(failure ? { failure } : {}) }, localRuntime.runtimeResolution),
 							message,
+							modelCall.attemptId,
 						);
 						const facts = modelCall.settle(settlement, reportedModelFromMessage(message));
 						carryRelabelledReasons(settlement, facts);
@@ -1273,7 +1309,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				}
 				const view = context.refreshLiveBudget();
 				const resolved = resolvedRequestContext(request);
-				admittedHwm = deps.ledgerHighWaterMark?.() ?? null;
+				admittedCursor = deps.requestCursor?.() ?? null;
 				// The first invocation as the send path builds it; a #426 retry after a rejection is not re-admitted.
 				const middlewareChoice = middlewareToolChoice.current();
 				const controlled = applyToolRounds(

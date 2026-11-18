@@ -1,11 +1,14 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { Type } from "typebox";
 import {
 	buildCacheCallObservation,
 	type CacheCallBaseline,
 	type CacheRequestStructure,
 } from "../../src/core/cache-telemetry.js";
-import type { CallUsage } from "../../src/core/telemetry/schemas.js";
+import type { CallSettled, CallUsage } from "../../src/core/telemetry/schemas.js";
+import { clioStateDir } from "../../src/core/xdg.js";
+import type { SessionEntry } from "../../src/domains/session/entries.js";
 import {
 	cachePhysics,
 	firstDivergentSection,
@@ -13,6 +16,14 @@ import {
 	serverTimedUsage,
 } from "../../src/domains/telemetry/cache-physics.js";
 import { callSettlementFromMessage } from "../../src/domains/telemetry/call-facts.js";
+import { readCallJournal } from "../../src/domains/telemetry/call-journal.js";
+import type { TelemetryContract } from "../../src/domains/telemetry/contract.js";
+import { telemetrySessionDirectory } from "../../src/domains/telemetry/paths.js";
+import { createSessionJournals } from "../../src/domains/telemetry/session-journals.js";
+import { type ReceiptJournalRecord, verifyAttemptReceipts } from "../../src/session-control/attempt-receipt.js";
+import type { ToolSpec } from "../../src/tools/registry.js";
+import { type CaptureScript, chatHarness, startCaptureServer, wireElements } from "../harness/context-capture.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 // #423: a break the host cannot name is attributed to the route lifetime it outlived, or to a continuation
 // the transport rebuilt, before it is left unknown.
@@ -186,4 +197,202 @@ test("a request's structure is journaled whole once per process and route, then 
 		base: 1,
 		entries: [`assistant:${"9".repeat(16)}`, `user:${"3".repeat(16)}`],
 	});
+});
+
+/** A chat harness whose calls journal to the session's telemetry, read back as `context working-set --verify` reads it. */
+async function journaledSession(
+	script: CaptureScript,
+	drive: (harness: ReturnType<typeof chatHarness>) => Promise<void>,
+	options: Omit<Parameters<typeof chatHarness>[0], "server" | "telemetry"> = {},
+	bind?: (harness: ReturnType<typeof chatHarness>) => void,
+): Promise<{ entries: ReadonlyArray<SessionEntry>; records: ReceiptJournalRecord[] }> {
+	const env = await isolateClioEnv("attempt-receipt-");
+	const server = await startCaptureServer(script);
+	const journals = createSessionJournals(clioStateDir(), () => {});
+	const telemetry = { acquireTelemetrySession: journals.acquire } as unknown as TelemetryContract;
+	const harness = chatHarness({ ...options, server, telemetry });
+	bind?.(harness);
+	try {
+		const id = harness.session.create({ cwd: process.cwd() }).id;
+		await drive(harness);
+		await journals.flush();
+		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), id));
+		return { entries: harness.session.readEntries(), records: journal.records.map(({ record }) => record) };
+	} finally {
+		await harness.close();
+		await journals.closeAll();
+		await server.close();
+		env.restore();
+	}
+}
+
+const settledCalls = (records: ReadonlyArray<ReceiptJournalRecord>): CallSettled[] =>
+	records.flatMap((record) => (record.k === "call.settled" ? [record.data as CallSettled] : []));
+
+test("a hidden #426 retry verifies against its own attempt, and the next request names what it changed (ContextFold CF-9, F14)", {
+	timeout: 30_000,
+}, async () => {
+	let lock: () => void = () => {};
+	const locker: ToolSpec = {
+		name: "probe" as ToolSpec["name"],
+		description: "Repeats the same failing call until the loop guard locks the run",
+		parameters: Type.Object({}),
+		baseActionClass: "read",
+		run: async () => {
+			lock();
+			return { kind: "ok", output: "probe result" };
+		},
+	};
+	const { entries, records } = await journaledSession(
+		(request) =>
+			wireElements(request).at(-1) === "user:lock this round"
+				? { calls: [{ id: "call-probe", name: "probe", arguments: {} }] }
+				: request.body.tool_choice === "none"
+					? { status: 400, error: "400 tool_choice none is not supported" }
+					: { text: "answered" },
+		async (harness) => {
+			await harness.submit("lock this round");
+			await harness.submit("and continue");
+		},
+		{ tools: [locker] },
+		(harness) => {
+			lock = () =>
+				harness.context.bus.emit("safety.loop_blocked", {
+					disposition: "lockout",
+					tool: "probe",
+					priorFailure: "the same call failed again",
+					repeatCount: 3,
+					blocksThisTurn: 1,
+					budget: 3,
+					interrupted: false,
+					at: Date.now(),
+				});
+		},
+	);
+	const [opening, rejected, retry, next] = settledCalls(records);
+	ok(opening && rejected && retry && next);
+	strictEqual(retry.callId, rejected.callId, "the retry is the same call");
+	strictEqual(retry.attempt, 1);
+	deepStrictEqual(
+		[rejected, retry].map((call) => [call.cache.receipt?.toolChoice, call.cache.receipt?.tail]),
+		[
+			['"none"', "synthesis_directive"],
+			['"auto"', "synthesis_directive"],
+		],
+		"each attempt took its own receipt at send",
+	);
+	strictEqual(retry.cache.structure?.baseAttempt, rejected.attemptId);
+	const verdicts = verifyAttemptReceipts({ entries, records }).attempts;
+	deepStrictEqual(
+		verdicts.map((verdict) => [verdict.attemptId, verdict.status]),
+		[opening, rejected, retry, next].map((call) => [call.attemptId, "verified"]),
+	);
+	// The next request drops the directive the locked round's tool result carried: its first changed element.
+	deepStrictEqual(next.cache.firstChangedElement, { index: 2, role: "toolResult" });
+});
+
+test("the receipt verifier reports each attempt kind and reconciles fold decisions by record id (ContextFold CF-9, F14)", {
+	timeout: 30_000,
+}, async () => {
+	// cf-q2 R7: the checkpoint append writes and then throws; its decision still names the record it wrote.
+	const { entries, records } = await journaledSession(
+		(_request, index) => ({ text: index < 2 ? "old ".repeat(25_000) : "answered" }),
+		async (harness) => {
+			await harness.submit("first");
+			await harness.submit("second");
+			const append = harness.session.appendEntry;
+			harness.session.appendEntry = (entry) => {
+				const written = append(entry);
+				if (entry.kind === "compactionSummary") throw new Error("post-append failure");
+				return written;
+			};
+			await harness.loop.compact();
+			await harness.loop.whenSettled();
+			harness.session.appendEntry = append;
+			await harness.submit("third");
+		},
+		{ autoCompact: true },
+	);
+	const checkpoint = entries.find((entry) => entry.kind === "compactionSummary");
+	ok(checkpoint, "the append wrote its checkpoint");
+	const fold = records.find((record) => record.k === "context.fold");
+	ok(fold);
+	const calls = settledCalls(records);
+	const last = calls.at(-1);
+	ok(last, "the post-checkpoint attempt settled");
+	ok(last.cache.receipt?.records.includes(checkpoint.turnId), "the post-checkpoint attempt's view names the record");
+	const statuses = (input: Partial<Parameters<typeof verifyAttemptReceipts>[0]>) =>
+		verifyAttemptReceipts({ entries, records, ...input }).attempts.map((verdict) =>
+			verdict.reason ? `${verdict.status} (${verdict.reason})` : verdict.status,
+		);
+	/** The journal with the last attempt's records rewritten, as another writer or an older build would journal them. */
+	const rewritten = (change: (record: ReceiptJournalRecord) => ReceiptJournalRecord | null) =>
+		records.flatMap((record) => {
+			const data = record.data as { callId?: string };
+			if (data.callId !== last.callId) return [record];
+			const changed = change(record);
+			return changed ? [changed] : [];
+		});
+	const relabelled = (role: string) =>
+		rewritten((record) =>
+			record.ctx
+				? { ...record, ctx: { ...record.ctx, agent: { ...record.ctx.agent, role } } as typeof record.ctx }
+				: record,
+		);
+	const earlier = calls.slice(0, -1).map(() => "verified");
+	const table: ReadonlyArray<[string, Partial<Parameters<typeof verifyAttemptReceipts>[0]>, string[]]> = [
+		["every main attempt matches the receipt taken at its send", {}, [...earlier, "verified"]],
+		["a prewarm", { records: relabelled("prewarm") }, [...earlier, "not-verifiable (prewarm)"]],
+		["a summary call", { records: relabelled("compaction") }, [...earlier, "not-verifiable (summary call)"]],
+		["a v6 attempt", { formatVersion: 6 }, calls.map(() => "not-verifiable (v6 session)")],
+		[
+			"a worker history",
+			{ runRecords: records.filter((record) => record.k === "call.settled").slice(0, 1) },
+			[...earlier, "verified", "not-verifiable (worker history)"],
+		],
+		[
+			"a native checkpoint the ledger cannot supply",
+			{
+				records: rewritten((record) =>
+					record.k === "call.settled"
+						? {
+								...record,
+								data: {
+									...last,
+									cache: { ...last.cache, receipt: { ...last.cache.receipt, checkpoints: ["0123456789abcdef"] } },
+								},
+							}
+						: record,
+				),
+			},
+			[...earlier, "not-verifiable (native checkpoint unavailable)"],
+		],
+		[
+			"a peer-owned call",
+			{ records: rewritten((record) => (record.k === "call.started" ? null : record)) },
+			[...earlier, "external"],
+		],
+		[
+			"a ledger that no longer renders what was sent",
+			{
+				entries: entries.map((entry) =>
+					entry.turnId === checkpoint.turnId && entry.kind === "compactionSummary"
+						? { ...entry, summary: `${entry.summary} (edited)` }
+						: entry,
+				),
+			},
+			[...earlier, "mismatch (element 0 (user) differs)"],
+		],
+	];
+	for (const [label, input, expected] of table) deepStrictEqual(statuses(input), expected, label);
+	// R7: the one committed stage names the record the append wrote; missing and duplicate decisions are reported.
+	strictEqual(
+		(fold.data as { stages: Array<{ recordId?: string }> }).stages.find((stage) => stage.recordId)?.recordId,
+		checkpoint.turnId,
+	);
+	const decisions = (input: Partial<Parameters<typeof verifyAttemptReceipts>[0]>) =>
+		verifyAttemptReceipts({ entries, records, ...input }).decisions;
+	deepStrictEqual(decisions({}), { missing: [], duplicate: [], orphan: [] }, "reconciled by record id");
+	deepStrictEqual(decisions({ records: records.filter((record) => record !== fold) }).missing, [checkpoint.turnId]);
+	deepStrictEqual(decisions({ records: [...records, fold] }).duplicate, [checkpoint.turnId]);
 });

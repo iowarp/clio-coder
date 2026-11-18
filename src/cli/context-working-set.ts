@@ -24,6 +24,7 @@ import { generateSyntheticCorpora, SYNTHETIC_CORPORA } from "../domains/context/
 import type { Trace } from "../domains/context/working-set/replay/trace.js";
 import { parseSessionEntries } from "../domains/session/archive-readers.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
+import type { SessionEntry } from "../domains/session/entries.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 
 const REPLAY_HELP = `Usage:
@@ -56,8 +57,12 @@ Options:
 
 const WORKING_SET_HELP = `Usage:
   clio-coder context working-set --session <id|path>
+  clio-coder context working-set --verify <id|path>
 
-Print the durable working-set fold and path-index summary for one Clio session.
+--session prints the durable working-set fold and path-index summary for one Clio session.
+--verify renders the session at each dispatched attempt's cursor and owner and compares it with the receipt the
+attempt journaled at send: verified, not-verifiable (with the reason), external, or mismatch. It also reconciles
+fold decisions against the fold records on the ledger. Exits 1 when any attempt mismatches.
 `;
 
 /**
@@ -509,15 +514,58 @@ function formatWorkingSet(trace: Trace): string {
 	return lines.join("\n");
 }
 
+/** `--verify`: every dispatched attempt of the session against its receipt (ContextFold CF-9, F14). */
+async function verifySession(source: string, raw: string, entries: SessionEntry[]): Promise<number> {
+	const { verifyAttemptReceipts } = await import("../session-control/attempt-receipt.js");
+	const { loadSessionTelemetrySource } = await import("../domains/session/telemetry-source.js");
+	const sessionId = basename(dirname(source));
+	const telemetry = loadSessionTelemetrySource(clioStatePath(), sessionId, dirname(source));
+	let formatVersion: number | undefined;
+	try {
+		const header = JSON.parse(raw.slice(0, raw.indexOf("\n") >>> 0)) as { type?: unknown; version?: unknown };
+		if (header.type === "session" && typeof header.version === "number") formatVersion = header.version;
+	} catch {
+		// A ledger without a readable header is verified as the current format.
+	}
+	const result = verifyAttemptReceipts({
+		entries,
+		records: telemetry?.journal.records ?? [],
+		runRecords: [...(telemetry?.runs.values() ?? [])].flatMap((run) => run.records),
+		...(formatVersion !== undefined ? { formatVersion } : {}),
+	});
+	const counts = { verified: 0, "not-verifiable": 0, external: 0, mismatch: 0 };
+	const lines = [`Receipts for session ${sessionId}`, `  source: ${source}`];
+	if (!telemetry?.journal.present) lines.push("  telemetry journal: absent");
+	for (const attempt of result.attempts) {
+		counts[attempt.status] += 1;
+		lines.push(
+			`  ${attempt.attemptId} ${attempt.role} attempt ${attempt.attempt}: ${attempt.status}${attempt.reason ? ` (${attempt.reason})` : ""}`,
+		);
+	}
+	const { missing, duplicate, orphan } = result.decisions;
+	lines.push(
+		`  attempts: ${counts.verified} verified, ${counts["not-verifiable"]} not-verifiable, ${counts.external} external, ${counts.mismatch} mismatch`,
+		`  fold decisions: ${missing.length} missing, ${duplicate.length} duplicate, ${orphan.length} orphan`,
+		...missing.map((id) => `    missing decision for record ${id}`),
+		...duplicate.map((id) => `    duplicate decisions for record ${id}`),
+		...orphan.map((id) => `    decision names record ${id}, which the ledger does not hold`),
+		"",
+	);
+	process.stdout.write(lines.join("\n"));
+	return counts.mismatch > 0 ? 1 : 0;
+}
+
 export async function runContextWorkingSetCommand(args: string[]): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(WORKING_SET_HELP);
 		return 0;
 	}
 	let session: string | undefined;
+	let verify = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
-		if (arg === "--session") {
+		if (arg === "--session" || arg === "--verify") {
+			verify = arg === "--verify";
 			try {
 				session = requiredValue(args, index, arg);
 			} catch (error) {
@@ -533,7 +581,7 @@ export async function runContextWorkingSetCommand(args: string[]): Promise<numbe
 		return 2;
 	}
 	if (session === undefined) {
-		process.stderr.write(`clio-coder context working-set: --session is required\n${WORKING_SET_HELP}`);
+		process.stderr.write(`clio-coder context working-set: --session or --verify is required\n${WORKING_SET_HELP}`);
 		return 2;
 	}
 	try {
@@ -541,6 +589,7 @@ export async function runContextWorkingSetCommand(args: string[]): Promise<numbe
 		const raw = await readFile(source, "utf8");
 		const parsed = parseSessionEntries(raw, source);
 		if (parsed.errors.length > 0) throw new Error(parsed.errors.join("; "));
+		if (verify) return await verifySession(source, raw, parsed.entries);
 		const entries = filterEntriesToActivePath(parsed.entries, await pinnedLeafForSession(source));
 		const cwd = await sessionCwdForSession(source);
 		process.stdout.write(

@@ -91,6 +91,7 @@ Usage:
   clio-coder context map [--out <path>] [--json]  create a native interactive HTML codebase map
   clio-coder context replay --sessions <path>...  compare working-set policies over Clio ledgers
   clio-coder context working-set --session <id|path>  inspect one session's working-set state
+  clio-coder context working-set --verify <id|path>  verify each attempt against the receipt taken at send
   clio-coder uninstall            remove Clio Coder: its state, settings and launcher
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
   clio-coder gui                  open the alpha graphical application; 'gui background restart' after an upgrade

@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { planEviction } from "../../src/domains/context/working-set/engine.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
 import {
 	estimateAgentContextBreakdown,
@@ -8,7 +9,12 @@ import {
 	estimateAgentMessageTokens,
 } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
-import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import {
+	type ContextEvictionEntry,
+	HOST_INSERT_CUSTOM_TYPE,
+	type MessageEntry,
+	type SessionEntry,
+} from "../../src/domains/session/entries.js";
 import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent.js";
 import type { AgentMessage, Usage } from "../../src/engine/types.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
@@ -277,4 +283,229 @@ describe("live measured context anchor", () => {
 		ok(JSON.stringify(f.runtime.agent.state.messages).includes("retained"));
 		ok(!JSON.stringify(f.runtime.agent.state.messages).includes("oldoldold"));
 	});
+
+	// r1 sits alone between two measured calls, so the provider measured it at 20650 - 18050 = 2600 tokens.
+	const U1 = usage(18000, 50);
+	const U2 = usage(20650, 50);
+	const callRow = (id: string, measured: Usage) => ({
+		content: [{ type: "toolCall", id, name: "read", arguments: { path: `${id}.ts` } }],
+		usage: measured,
+	});
+	const readRow = (id: string, text: string) => ({
+		toolCallId: id,
+		toolName: "read",
+		result: { content: [{ type: "text", text }] },
+	});
+
+	/** A live session that measured U2 at a2, appended r2, and folded `evict` on its next pressure check. */
+	async function foldScenario(options: { evict: string[]; insert?: boolean; resumed?: boolean }) {
+		const entries: SessionEntry[] = [
+			entry("u", null, "user", { text: "Inspect sources" }),
+			entry("c1", "u", "assistant", callRow("read1", U1)),
+			entry("r1", "c1", "tool_result", readRow("read1", "alpha ".repeat(1000))),
+		];
+		if (options.insert)
+			entries.push({
+				kind: "custom",
+				turnId: "ins",
+				parentTurnId: "r1",
+				customType: HOST_INSERT_CUSTOM_TYPE,
+				data: {
+					version: 1,
+					id: "ins1",
+					source: "reminder",
+					elements: [{ role: "user", content: "Keep the tests green.", timestamp: 3 }],
+					place: { after: "r1" },
+				},
+				timestamp: "2026-09-06T00:00:00.000Z",
+			} as SessionEntry);
+		entries.push(entry("a2", options.insert ? "ins" : "r1", "assistant", callRow("read2", U2)));
+		let meta = { id: "fold-session", cwdHash: "fold-fixture", cwd: isolated.dir } as SessionMeta;
+		let appended = 0;
+		let plans = 0;
+		const f = fixture({
+			readSessionEntries: () => entries,
+			session: {
+				current: () => meta,
+				appendEntry: (fields: object) => {
+					appended += 1;
+					const row = { ...fields, turnId: `ev${appended}`, timestamp: "2026-09-06T00:00:01.000Z" } as SessionEntry;
+					entries.push(row);
+					f.state.lastTurnId = row.turnId;
+					return row;
+				},
+			} as unknown as SessionContract,
+			planEviction: (_policy, input) => {
+				plans += 1;
+				const refs = options.evict.map((id) => ({ ref: { entry: id }, reason: "age_horizon" as const }));
+				return planEviction({ id: "age-horizon", select: () => refs }, input);
+			},
+		});
+		f.settings.context.workingSet.enabled = true;
+		const render = () =>
+			buildModelReplayAgentMessagesFromTurns(entries, {
+				...(f.state.lastTurnId ? { activeLeafTurnId: f.state.lastTurnId } : {}),
+			});
+		const navigate = (leaf: string) => {
+			f.state.lastTurnId = leaf;
+			f.runtime.agent.state.messages = render();
+			f.context.resetForSession();
+		};
+		const resultMessage = (id: string) => {
+			const found = render().find((message) => message.role === "toolResult" && message.toolCallId === id);
+			ok(found);
+			return found;
+		};
+		f.state.lastTurnId = "a2";
+		f.runtime.agent.state.messages = render();
+		if (!options.resumed) f.context.reconcileUsage(U2);
+		entries.push(entry("r2", "a2", "tool_result", readRow("read2", "beta ".repeat(3800))));
+		f.state.lastTurnId = "r2";
+		if (options.resumed) navigate("r2");
+		else f.runtime.agent.state.messages.push(render().at(-1) as AgentMessage);
+		const before = {
+			r1: estimateAgentMessageTokens(resultMessage("read1")),
+			r2: estimateAgentMessageTokens(resultMessage("read2")),
+		};
+		const structuralBefore = estimateAgentContextTokens(f.runtime.agent.state);
+		const fired = await f.context.runAutoCompact(f.runtime, false);
+		const record = entries.find((row): row is ContextEvictionEntry => row.kind === "contextEviction");
+		ok(fired && record, "the fixture's eviction commits");
+		strictEqual(f.summaries(), 0, "the eviction alone clears the trigger");
+		const markers = {
+			r1: estimateAgentMessageTokens(resultMessage("read1")),
+			r2: estimateAgentMessageTokens(resultMessage("read2")),
+		};
+		return {
+			f,
+			entries,
+			record,
+			before,
+			markers,
+			structuralBefore,
+			plans: () => plans,
+			navigate,
+			setSession: (id: string) => {
+				meta = { ...meta, id };
+			},
+		};
+	}
+
+	const anchorCases = [
+		{
+			name: "a mixed batch spanning the attestation credits the measured result and the structural tail",
+			evict: ["r1", "r2"],
+			// r1 is inside the measured prefix at its measured size; r2 is after it, priced structurally, so its marker replaces it.
+			expected: (s: Awaited<ReturnType<typeof foldScenario>>) => U2.totalTokens - 2600 + s.markers.r1 + s.markers.r2,
+		},
+		{
+			name: "an isolated expensive result credits its measured size and its marker is priced structurally",
+			evict: ["r1"],
+			expected: (s: Awaited<ReturnType<typeof foldScenario>>) => U2.totalTokens - 2600 + s.markers.r1 + s.before.r2,
+		},
+		{
+			name: "the same pair separated by an insert is not isolated",
+			evict: ["r1"],
+			insert: true,
+			expected: (s: Awaited<ReturnType<typeof foldScenario>>) => U2.totalTokens - s.before.r1 + s.markers.r1 + s.before.r2,
+		},
+	];
+	for (const anchorCase of anchorCases) {
+		it(`anchors the eviction record live and after reopen: ${anchorCase.name}`, async () => {
+			const s = await foldScenario(anchorCase);
+			const expected = anchorCase.expected(s);
+			ok(s.before.r1 < 2600, "the measured size differs from the structural one");
+			strictEqual(s.record.anchor?.tokens, expected);
+			strictEqual(s.f.context.liveContextEstimate(s.f.runtime).reconciledTokens, expected);
+			s.navigate(s.record.turnId);
+			strictEqual(s.f.context.liveContextEstimate(s.f.runtime).reconciledTokens, expected);
+			strictEqual(s.f.context.liveContextEstimate(s.f.runtime).tokens, expected);
+		});
+	}
+
+	it("declines the record's anchor after reopen on another route under the same model id", async () => {
+		const s = await foldScenario({ evict: ["r1", "r2"] });
+		s.f.runtime.targetId = "mini";
+		s.navigate(s.record.turnId);
+		const live = s.f.context.liveContextEstimate(s.f.runtime);
+		strictEqual(live.reconciledTokens, null);
+		strictEqual(live.tokens, estimateAgentContextTokens(s.f.runtime.agent.state));
+	});
+
+	for (const when of ["before", "after"] as const) {
+		it(`declines the record's anchor after a same-size prefix rewrite ${when} rehydration`, async () => {
+			const s = await foldScenario({ evict: ["r1", "r2"] });
+			s.f.state.lastTurnId = s.record.turnId;
+			s.f.runtime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(s.entries, {
+				activeLeafTurnId: s.record.turnId,
+			});
+			s.f.context.resetForSession();
+			if (when === "after") ok(s.f.context.liveContextEstimate(s.f.runtime).reconciledTokens !== null);
+			const first = s.f.runtime.agent.state.messages[0];
+			ok(first?.role === "user");
+			const rewritten = JSON.stringify(first.content).replace("Inspect sources", "Inspect sourcez");
+			first.content = JSON.parse(rewritten);
+			strictEqual(s.f.context.liveContextEstimate(s.f.runtime).reconciledTokens, null);
+		});
+	}
+
+	it("gives a trigger between the structural and the anchored figure the same decision live and after reopen", async () => {
+		const decisions: boolean[] = [];
+		for (const reopen of [false, true, "other route"] as const) {
+			const s = await foldScenario({ evict: ["r1", "r2"] });
+			const anchored = s.record.anchor?.tokens ?? 0;
+			const structural = estimateAgentContextTokens(s.f.runtime.agent.state);
+			s.f.settings.context.compaction.threshold = (structural + anchored) / 2 / 32768;
+			// No rearm band, so a trigger past the record's own figure asks the planner rather than holding.
+			s.f.settings.context.workingSet.rearmFraction = 0;
+			ok(structural < anchored - 2000, "the band is wide enough to tell the two bases apart");
+			if (reopen === "other route") s.f.runtime.targetId = "mini";
+			if (reopen !== false) s.navigate(s.record.turnId);
+			const plans = s.plans();
+			await s.f.context.runAutoCompact(s.f.runtime, false);
+			decisions.push(s.plans() > plans || s.f.summaries() > 0);
+		}
+		deepStrictEqual(decisions, [true, true, false]);
+	});
+
+	it("carries a resumed session's replayed usage through its first eviction", async () => {
+		const s = await foldScenario({ evict: ["r1"], resumed: true });
+		ok(s.record.anchor, "the commit seeds an anchor from the replayed usage");
+		const live = s.f.context.liveContextEstimate(s.f.runtime);
+		strictEqual(live.tokens, s.record.tokensAfter);
+		strictEqual(live.reconciledTokens, s.record.tokensAfter);
+		ok(live.tokens > estimateAgentContextTokens(s.f.runtime.agent.state), "not the structural estimate");
+	});
+
+	for (const navigation of ["branch", "fork", "resume"] as const) {
+		it(`publishes one context figure and the current path's last reduction after a ${navigation}`, async () => {
+			const s = await foldScenario({ evict: ["r1", "r2"] });
+			s.entries.push(entry("b", "u", "user", { text: "Try the other path" }));
+			if (navigation === "branch") s.navigate("b");
+			if (navigation === "fork") {
+				s.setSession("fork-session");
+				s.navigate(s.record.turnId);
+			}
+			if (navigation === "resume") {
+				s.navigate("b");
+				s.navigate(s.record.turnId);
+			}
+			const ledger = s.f.context.contextLedger();
+			const live = s.f.context.liveContextEstimate(s.f.runtime);
+			strictEqual(ledger.usedTokens, live.tokens);
+			strictEqual(ledger.usedTokens, s.f.context.liveBudget().inputTokens);
+			if (navigation === "branch") {
+				strictEqual(ledger.lastCompaction, null);
+				strictEqual(live.reconciledTokens, null);
+				return;
+			}
+			deepStrictEqual(ledger.lastCompaction, {
+				stage: "working_set",
+				tokensBefore: s.record.tokensBefore,
+				tokensAfter: s.record.tokensAfter,
+				trigger: "pressure",
+			});
+			strictEqual(live.reconciledTokens, s.record.anchor?.tokens);
+		});
+	}
 });

@@ -300,7 +300,71 @@ export const CallSettledSchema = Type.Object(
 							system: Type.String({ pattern: "^[0-9a-f]{16}$" }),
 							tools: Type.String({ pattern: "^[0-9a-f]{16}$" }),
 							base: Type.Optional(count),
+							/** The attempt whose structure the first `base` entries are, so a reader can chain them (F14). */
+							baseAttempt: Type.Optional(AttemptIdSchema),
 							entries: Type.Array(Type.String({ pattern: "^[A-Za-z]{1,32}:[0-9a-f]{16}$" }), { maxItems: 65536 }),
+						},
+						closed,
+					),
+				),
+				/**
+				 * Cold attribution: the first rendered history element this request changed against the previous one on
+				 * its cache key, by position and role. Absent when it only extends that request. Kept apart from
+				 * rePrefilledTokens, which is the provider's shortfall, and named by `expectedColdReasons` (F14).
+				 */
+				firstChangedElement: Type.Optional(
+					Type.Object({ index: count, role: vocabulary(["user", "assistant", "toolResult", "entry"]) }, closed),
+				),
+				/**
+				 * What a main attempt sent, taken at send, so `context working-set --verify` can render the session at its
+				 * cursor and owner and compare (ContextFold CF-9, F14). Its element digests are `structure`'s, chained
+				 * through `structure.baseAttempt`. Opaque provider bytes stay out.
+				 */
+				receipt: Type.Optional(
+					Type.Object(
+						{
+							cursor: Type.Object(
+								{ hwm: Type.Union([ExistingId, Type.Null()]), leaf: Type.Union([ExistingId, Type.Null()]) },
+								closed,
+							),
+							owner: Type.Optional(
+								Type.Object(
+									{
+										sessionId: ExistingId,
+										fork: Type.Optional(Type.Object({ parentSessionId: ExistingId, parentTurnId: ExistingId }, closed)),
+									},
+									closed,
+								),
+							),
+							route: Type.Object(
+								{
+									modelTier: Type.Optional(vocabulary(["small", "standard", "frontier"])),
+									promptCaching: Type.Optional(Type.Boolean()),
+									images: Type.Boolean(),
+									midConversation: Type.Boolean(),
+								},
+								closed,
+							),
+							/** The tool choice the attempt sent, as the cache fingerprint serializes it. */
+							toolChoice: text,
+							tail: vocabulary(["none", "synthesis_directive"]),
+							/** The adapter's reason for replaying a native checkpoint portably. */
+							fallback: Type.Optional(text),
+							codex: Type.Optional(
+								Type.Object(
+									{
+										initialEffort: ExistingId,
+										updates: Type.Array(Type.Object({ position: ExistingId, effort: ExistingId }, closed), {
+											maxItems: 65536,
+										}),
+									},
+									closed,
+								),
+							),
+							/** The fold records (evictions, recalls, checkpoints) on the path the cursor renders. */
+							records: Type.Array(ExistingId, { maxItems: 65536 }),
+							/** Native checkpoint identities the request carried, as short digests. */
+							checkpoints: Type.Array(Type.String({ pattern: "^[0-9a-f]{16}$" }), { maxItems: 256 }),
 						},
 						closed,
 					),
