@@ -1918,9 +1918,102 @@ describe("production compaction controls", () => {
 			append(entry);
 			throw new Error("post-append failure");
 		};
-		await rejects(f.run(), /post-append failure/);
+		// The ledger holds the checkpoint, so the append committed and the flow names it (ContextFold CF-8, F8).
+		const result = await f.run();
+		const written = f.entries().filter((entry) => entry.kind === "compactionSummary");
+		strictEqual(written.length, 1);
+		strictEqual(result?.checkpointId, written[0]?.turnId);
 		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
 		strictEqual(ledgerUsageCalls(f.entries(), await f.journal()).length, 1);
+	});
+	it("publishes a native checkpoint whose publication failed once, through the portable fallback (ContextFold CF-8, F8)", async () => {
+		const f = fixture(true, true, true);
+		f.settings.context.workingSet.enabled = false;
+		f.settings.context.compaction.provider = "native";
+		f.runtime.id = "openai-codex";
+		for (const status of f.statuses) status.target.runtime = "openai-codex";
+		const usage = {
+			input: 10,
+			output: 5,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 15,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const autoCompact: typeof f.run = (instructions, trigger, budget) =>
+			f.run(instructions, trigger, {
+				...budget,
+				providerCompaction: async () => ({
+					outputJson: "{}",
+					usage,
+					compatibility: { accountScope: "a", provider: "openai-codex", model: "m", protocol: "codex-responses-trigger-v1" },
+					initialEffort: "low",
+					effectiveEffort: "low",
+					policyDigest: "p",
+				}),
+				checkpointTokenFigures: (entry) => {
+					// A directory where the handle's file goes makes the private publication's rename fail.
+					if (entry.providerCheckpoint)
+						mkdirSync(join(clioStateDir(), "provider-checkpoints", `${entry.providerCheckpoint.digest}.json`), {
+							recursive: true,
+						});
+					const figures = budget?.checkpointTokenFigures;
+					ok(figures);
+					return figures(entry);
+				},
+			});
+		const notices: string[] = [];
+		const { runtime, context, bus } = automaticContext(f, autoCompact, { emitNotice: (text) => notices.push(text) });
+		const folds: ContextFoldPayload[] = [];
+		const pruned: ContextPrunedPayload[] = [];
+		bus.subscribe("context.fold", (event) => {
+			folds.push(event);
+		});
+		bus.subscribe("context.pruned", (event) => {
+			pruned.push(event);
+		});
+		strictEqual(await context.runAutoCompact(runtime, true), true);
+		const written = f.entries().filter((entry) => entry.kind === "compactionSummary");
+		strictEqual(written.length, 1);
+		const [checkpoint] = written;
+		ok(checkpoint?.kind === "compactionSummary");
+		strictEqual(checkpoint.providerCheckpoint, undefined);
+		strictEqual(checkpoint.providerFallbackReason, "checkpoint-publication-failed");
+		strictEqual(pruned.length, 1);
+		deepStrictEqual(
+			folds.map((fold) => fold.stages.filter((stage) => stage.stage === "llm_summary")),
+			[[{ stage: "llm_summary", outcome: "committed", reason: "summarized", recordId: checkpoint.turnId }]],
+		);
+		ok(notices.includes("Native compaction used Clio's portable path: checkpoint-publication-failed."));
+	});
+	it("publishes a checkpoint whose append wrote before throwing once, by its id (ContextFold CF-8, F8)", async () => {
+		const f = fixture(true, true, true);
+		f.settings.context.workingSet.enabled = false;
+		const append = f.session.appendEntry;
+		f.session.appendEntry = (entry) => {
+			const written = append(entry);
+			if (entry.kind === "compactionSummary") throw new Error("post-append failure");
+			return written;
+		};
+		const { runtime, context, bus } = automaticContext(f);
+		const folds: ContextFoldPayload[] = [];
+		const pruned: ContextPrunedPayload[] = [];
+		bus.subscribe("context.fold", (event) => {
+			folds.push(event);
+		});
+		bus.subscribe("context.pruned", (event) => {
+			pruned.push(event);
+		});
+		strictEqual(await context.runAutoCompact(runtime, true), true);
+		const written = f.entries().filter((entry) => entry.kind === "compactionSummary");
+		strictEqual(written.length, 1);
+		strictEqual(pruned.length, 1);
+		strictEqual(pruned[0]?.stage, "llm_summary");
+		deepStrictEqual(
+			folds.map((fold) => fold.stages.filter((stage) => stage.stage === "llm_summary")),
+			[[{ stage: "llm_summary", outcome: "committed", reason: "summarized", recordId: written[0]?.turnId }]],
+		);
+		strictEqual((await f.journalOutcomes())[0]?.data.outcome, "committed");
 	});
 	it("reports ambiguous checkpoint persistence without a speculative second accounting write", async () => {
 		const f = fixture(true, true, true);

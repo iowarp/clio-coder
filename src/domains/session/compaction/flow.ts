@@ -32,7 +32,6 @@ import type { SchedulingContract } from "../../scheduling/contract.js";
 import type { AdmissionHold } from "../../telemetry/call-scope.js";
 import type { TelemetryContract } from "../../telemetry/index.js";
 import { estimateAgentContextBreakdown } from "../context-accounting.js";
-import { continuityPayloadFromFold } from "../continuity/carry.js";
 import { continuityProjectionTokens, resolveContinuityProjection } from "../continuity/projection.js";
 import type { SessionContract } from "../contract.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../entries.js";
@@ -40,7 +39,13 @@ import { withProviderCheckpointMeasurements } from "../entries.js";
 import { observationCheckpoint, observationSourceUnits } from "../memory-source.js";
 import { filterEntriesToActivePath } from "../tree/active-path.js";
 import { serializeConversation } from "./branch-summary.js";
-import { type CompactInput, type CompactionCallObservation, type CompactResult, compact } from "./compact.js";
+import {
+	type CompactInput,
+	type CompactionCallObservation,
+	type CompactResult,
+	checkpointContinuityCarry,
+	compact,
+} from "./compact.js";
 import { readCompactionSystemPrompt } from "./system-prompt.js";
 
 /** The live budget a caller threads into one compaction. */
@@ -370,17 +375,13 @@ export async function runCompactionFlow(
 		// validated fold, so the ledger is re-read and refolded here. Only the carry
 		// is re-derived: `result` indexes the entry array the cut was computed
 		// against, which must not move under it.
-		const settledContinuity = resolveContinuityProjection({
+		const continuityCarry = checkpointContinuityCarry({
 			entries: filterEntriesToActivePath(session.readEntries(), activeLeafTurnId),
 			sessionId: meta.id,
 			...(meta.parentSessionId && meta.parentTurnId
 				? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
 				: {}),
 		});
-		// A suppressed projection publishes no authoritative carry: the adapter marks
-		// its own fold unvalidated, and `continuityPayloadFromFold` refuses one.
-		const continuityCarry =
-			settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
 
 		if (result.usage)
 			result.usage = {
@@ -486,23 +487,27 @@ export async function runCompactionFlow(
 		} catch (error) {
 			// A write may have reached the ledger before its caller threw. Reconcile
 			// this exact checkpoint identity before choosing a second accounting store.
+			let written: boolean;
 			try {
-				if (!compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId)) {
-					closure.outcome = "failed";
-					if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
-				} else closure.outcome = "committed";
+				written = compactionCheckpointWasWritten(sessionPaths(meta).current, entry.turnId);
 			} catch (recordingError) {
 				throw new AggregateError(
 					[error, recordingError],
 					"compaction checkpoint persistence is unresolved; usage was not duplicated",
 				);
 			}
-			throw error;
+			if (!written) {
+				closure.outcome = "failed";
+				if (result.providerCheckpoint) pruneProviderCheckpoints(result.providerCheckpoint);
+				throw error;
+			}
+			// The ledger holds this checkpoint by id, so the append committed and the
+			// caller publishes it like any other; only an absent checkpoint fails.
 		}
 		session.flushAppends?.();
 		closure.outcome = "committed";
 		if (headroomTokens !== undefined) closure.headroomTokens = Math.round(headroomTokens);
-		return result;
+		return { ...result, checkpointId: entry.turnId };
 	} finally {
 		if (lease && callIds.size > 0)
 			telemetryHub().emit("compaction.settled", { ...closure, callIds: [...callIds] }, lease.context);

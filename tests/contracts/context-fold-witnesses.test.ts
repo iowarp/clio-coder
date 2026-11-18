@@ -27,7 +27,11 @@ import {
 } from "../../src/session-control/model-session-replay.js";
 import { OBSERVATION_AGING_CUSTOM_TYPE, observationAgingRecord } from "../../src/session-control/observation-aging.js";
 import { RunEvidenceLog } from "../../src/session-control/run-evidence.js";
-import { createStepStartTracker, stepTurnOutcome } from "../../src/session-control/step-start.js";
+import {
+	createStepStartTracker,
+	sessionStepChainStore,
+	stepTurnOutcome,
+} from "../../src/session-control/step-start.js";
 import { recoveryAttemptHasOutput } from "../../src/session-control/turn-recovery.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import type { ToolSpec } from "../../src/tools/registry.js";
@@ -209,16 +213,89 @@ describe("W7 (F8 -> CF-8): the step chain lives in the stream", () => {
 	const BODY = "Advance the paper one step: call extension_wtfp__next_step, run the step it returns, then summarize.";
 	const constraints = { turnPolicy: { mode: "step" as const, stepTool: STEP, template: "wtfp:advance" } };
 
-	it("a step chain reopened mid-pipeline still leads the next step", { todo: "F8 -> CF-8" }, () => {
-		const position = { sessionId: "session-a", leafTurnId: "a-leaf" };
-		const live = createStepStartTracker();
-		strictEqual(live.begin(constraints, BODY, false, { ...position, leafTurnId: "a-start" }), null);
-		live.settle(constraints, "Step one ran: drafted intro.", true, position);
-		// What a reopen sees: a new process, a new tracker, the same session standing on the settled leaf.
-		// CF-8 adds the step-chain record and has `begin` read it when the in-memory chain is empty.
-		const reopened = createStepStartTracker();
-		const lead = reopened.begin(constraints, BODY, true, position);
-		ok(lead?.includes("Step one ran: drafted intro."), "the reopened chain leads with the settled step's summary");
+	it("a step chain reopened mid-pipeline still leads the next step", async () => {
+		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		try {
+			session.create({ cwd: process.cwd() });
+			const sessionId = session.current()?.id ?? null;
+			ok(sessionId);
+			const store = sessionStepChainStore(session, () => session.readEntries());
+			const at = (leafTurnId: string | null) => ({ sessionId, leafTurnId });
+			/** One step turn on the ledger: its user row, the step call and result, then the settled leaf. */
+			const stepTurn = (id: string, parent: string | null, userText: string, final: AgentMessage | null): string => {
+				session.appendEntry(message(`${id}-u`, parent, "user", { text: userText }) as SessionEntryInput);
+				session.appendEntry(
+					message(`${id}-a`, `${id}-u`, "assistant", {
+						content: [{ type: "toolCall", id: `${id}-c`, name: STEP, arguments: {} }],
+						stopReason: "toolUse",
+					}) as SessionEntryInput,
+				);
+				session.appendEntry(
+					message(`${id}-r`, `${id}-a`, "tool_result", {
+						toolCallId: `${id}-c`,
+						toolName: STEP,
+						result: { content: [{ type: "text", text: "step ran" }] },
+					}) as SessionEntryInput,
+				);
+				session.appendEntry(message(`${id}-z`, `${id}-r`, "assistant", final) as SessionEntryInput);
+				return `${id}-z`;
+			};
+			const said = (text: string) =>
+				({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop" }) as unknown as AgentMessage;
+
+			// Step one: the user row holds the decorated prompt; the chain's body is the operator's own text.
+			const live = createStepStartTracker(store);
+			strictEqual(live.begin(constraints, BODY, false, at(null)), null);
+			const leaf1 = stepTurn("s1", null, `<reminder>tests are red</reminder>\n\n${BODY}`, said("Step one ran."));
+			live.settle(constraints, "Step one ran: drafted intro.", true, at(leaf1), "s1-u");
+
+			// What a reopen sees: a new process, a new tracker, the same session standing on the settled leaf.
+			const reopened = createStepStartTracker(store);
+			const lead = reopened.begin(constraints, "continue", true, at(leaf1));
+			ok(lead?.includes("Step one ran: drafted intro."), "the reopened chain leads with the settled step's summary");
+			ok(lead?.includes(BODY) && !lead.includes("<reminder>"), "the body is the operator's text, not the user row");
+			const leaf2 = stepTurn("s2", leaf1, "continue", said("Step two ran."));
+			reopened.settle(constraints, "Step two ran: drafted methods.", true, at(leaf2), "s2-u");
+
+			// Step three ends on a terminal tool: its leaf is a synthetic assistant with no text.
+			const mid = createStepStartTracker(store);
+			ok(mid.begin(constraints, "continue", true, at(leaf2))?.includes("Step two ran: drafted methods."));
+			const leaf3 = stepTurn("s3", leaf2, "continue", {
+				role: "assistant",
+				content: [],
+				stopReason: "stop",
+				synthetic: true,
+			} as unknown as AgentMessage);
+			mid.settle(constraints, "Step three ran: drafted results.", true, at(leaf3), "s3-u");
+			const third = createStepStartTracker(store).begin(constraints, "continue", true, at(leaf3));
+			ok(third?.includes("Step three ran: drafted results.") && third.includes(BODY), "reopened at a terminal leaf");
+			const record = store.read(leaf3);
+			ok(record !== null && !("cleared" in record));
+			deepStrictEqual([record.body, record.bodyTurnId, record.settledLeaf], [BODY, "s1-u", leaf3]);
+
+			// A changed template does not continue the chain.
+			const otherTemplate = { turnPolicy: { ...constraints.turnPolicy, template: "wtfp:review" } };
+			strictEqual(createStepStartTracker(store).begin(otherTemplate, BODY, false, at(leaf3)), null);
+
+			// Away and back: the navigation clears the chain on the leaf it leaves.
+			const away = createStepStartTracker(store);
+			ok(away.begin(constraints, "continue", true, at(leaf3)));
+			const leaf4 = stepTurn("s4", leaf3, "continue", said("Step four ran."));
+			away.settle(constraints, "Step four ran: drafted discussion.", true, at(leaf4), "s4-u");
+			away.reset(at(leaf4), leaf1);
+			away.reset(at(leaf1), leaf4);
+			strictEqual(away.begin(constraints, "continue", true, at(leaf4)), null);
+			strictEqual(createStepStartTracker(store).begin(constraints, "continue", true, at(leaf4)), null);
+
+			// A dirty settlement drops the chain at the leaf it left.
+			const dirty = createStepStartTracker(store);
+			ok(dirty.begin(constraints, "continue", true, at(leaf3)));
+			const leaf5 = stepTurn("s5", leaf3, "continue", said("Stopped mid-step."));
+			dirty.settle(constraints, "Stopped mid-step.", false, at(leaf5), "s5-u");
+			strictEqual(createStepStartTracker(store).begin(constraints, "continue", true, at(leaf5)), null);
+		} finally {
+			await session.close();
+		}
 	});
 });
 

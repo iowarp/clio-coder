@@ -229,6 +229,7 @@ import {
 	createStepPipeline,
 	createStepStartTracker,
 	type StepRun,
+	sessionStepChainStore,
 	stepTurnOutcome,
 } from "./step-start.js";
 import {
@@ -2086,7 +2087,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/** The prompt template whose step policy ended this turn; read once as the turn settles. */
 	let stepPolicyStop: { template?: string } | null = null;
 	/** Step turns after the first start from a compact state on small or uncached routes (WTF-P 0.8.3 C5). */
-	const stepStarts = createStepStartTracker();
+	const stepStarts = createStepStartTracker(sessionStepChainStore(deps.session, deps.readSessionEntries));
 	const stepPipeline = createStepPipeline();
 	let lastStepPipeline: StepPipelineEnd | null = null;
 	/** The running submit's runtime, where its own messages start, and whether it is a yolo continuation. */
@@ -3444,7 +3445,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				);
 				if (stepLead !== null && compactStepStartDue(agentRuntime.runtimeResolution)) {
 					try {
-						context.runStepCheckpoint(agentRuntime, stepLead, pendingSkillPolicy);
+						await context.runStepCheckpoint(agentRuntime, stepLead, pendingSkillPolicy);
 					} catch (err) {
 						emitNotice(
 							`[Clio Coder] step checkpoint failed: ${err instanceof Error ? err.message : String(err)}. This step turn keeps the full history.`,
@@ -4146,6 +4147,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 								(!state.toolBudgetLock || stepStop !== null) &&
 								detectTerminalFailureFromState(agentRuntime.agent) === null,
 							{ sessionId: deps.session?.current()?.id ?? null, leafTurnId: state.lastTurnId },
+							userTurnId,
 						);
 					const continuation =
 						options.machineTurn === undefined && !canceled && !interviewDismissed && (admissionCurrent() || guardStopped)
@@ -4499,7 +4501,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = sessionToolLimits;
-			stepStarts.reset();
+			// The leaf being left is still `state.lastTurnId`; a navigation clears the chain there.
+			stepStarts.reset({ sessionId: deps.session?.current()?.id ?? null, leafTurnId: state.lastTurnId }, leafTurnId);
 			state.activeSkillSurface = undefined;
 			state.currentPendingSkillPolicy = undefined;
 			if (state.runtime) {

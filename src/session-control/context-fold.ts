@@ -193,23 +193,30 @@ export interface EvictionStageResult {
 	skipNotice: string | null;
 }
 
-export interface SummaryPublicationInput {
+export interface CheckpointPublicationInput {
+	/** The checkpoint's turn id, which the ledger must already hold. */
+	checkpointId: string;
+	kind: "summary" | "step";
 	agentRuntime: AgentRuntime;
-	compactionThreshold: number;
-	snapshotMetadata: Parameters<TurnContext["captureRuntimeContextSnapshot"]>[3];
-	preCompactSnapshot: ContextSnapshot;
-	footerTokensBefore: number;
-	pendingUserText: string | undefined;
-	trigger: CompactionTrigger;
-	originSession: string | undefined;
-}
-
-export interface StepPublicationInput {
-	agentRuntime: AgentRuntime;
+	/** The snapshot captured before the checkpoint was written. */
 	before: ContextSnapshot;
 	threshold: number | null;
+	snapshotMetadata?: Parameters<TurnContext["captureRuntimeContextSnapshot"]>[3];
 	tokensBefore: number;
+	pendingUserText: string | undefined;
+	trigger: CompactionTrigger;
 	sessionId: string | undefined;
+}
+
+export interface CheckpointPublication {
+	checkpointId: string;
+	tokensBefore: number;
+	tokensAfter: number;
+}
+
+/** The ledger holds a compaction checkpoint with this turn id. */
+export function ledgerHoldsCheckpoint(entries: ReadonlyArray<SessionEntry>, checkpointId: string): boolean {
+	return entries.some((entry) => entry.kind === "compactionSummary" && entry.turnId === checkpointId);
 }
 
 export interface ContextFold {
@@ -218,8 +225,8 @@ export interface ContextFold {
 	runEvictionStage(input: EvictionStageInput): EvictionStageResult;
 	/** The first checkpoint of a session whose path holds v6 aging records: adopt or release them, once. */
 	adoptLegacyAging(input: LegacyAdoptionInput): boolean;
-	publishSummaryCheckpoint(input: SummaryPublicationInput): Promise<{ tokensBefore: number; tokensAfter: number }>;
-	publishStepCheckpoint(input: StepPublicationInput): { tokensAfter: number };
+	/** The one publication for a checkpoint of either kind, keyed on the id the ledger confirmed. */
+	publishCheckpoint(input: CheckpointPublicationInput): Promise<CheckpointPublication>;
 }
 
 /**
@@ -646,83 +653,55 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		return true;
 	};
 
-	/** After a summary checkpoint is on the ledger: rebuild, drop the anchor, snapshot, emit `context.pruned`. */
-	const publishSummaryCheckpoint = async (
-		input: SummaryPublicationInput,
-	): Promise<{ tokensBefore: number; tokensAfter: number }> => {
-		const { agentRuntime, compactionThreshold, snapshotMetadata, preCompactSnapshot, pendingUserText, trigger } = input;
-		port.resetCacheCallBaseline();
+	/**
+	 * After a checkpoint is on the ledger, for either kind: confirm the ledger holds
+	 * `checkpointId`, rebuild, drop the anchor, snapshot, emit `context.pruned` once.
+	 * A summary also restarts the cache baseline and recompiles a posture prompt;
+	 * a step checkpoint does neither.
+	 */
+	const publishCheckpoint = async (input: CheckpointPublicationInput): Promise<CheckpointPublication> => {
+		const { agentRuntime, kind, before, threshold, pendingUserText, tokensBefore, trigger } = input;
+		if (!ledgerHoldsCheckpoint(deps.readSessionEntries?.() ?? [], input.checkpointId))
+			throw new Error(`checkpoint ${input.checkpointId} is not on the session ledger; nothing was published`);
+		if (kind === "summary") port.resetCacheCallBaseline();
 		// Durable before the rebuild, so render places what no attempt has carried yet after the checkpoint.
 		deps.hostInserts?.reissueUnsent();
 		refreshAgentMessagesFromSession(agentRuntime);
-		if (port.hasPostureGeneration()) {
+		if (kind === "summary" && port.hasPostureGeneration()) {
 			await port.ensureSessionPrompt(agentRuntime);
 			port.logPromptCompileIfPending();
 		}
-		// A summary replaces the conversation the attestation described, so no
+		// A checkpoint replaces the conversation the attestation described, so no
 		// arithmetic carries it forward; the next call re-anchors it.
 		port.dropReconciledAnchor();
 
-		const postCompactSnapshot = port.captureRuntimeContextSnapshot(
+		const after = port.captureRuntimeContextSnapshot(
 			agentRuntime,
 			state.activeUserTurnId || "compaction",
-			compactionThreshold,
-			snapshotMetadata,
+			threshold,
+			input.snapshotMetadata,
 		);
-		port.setCurrentSnapshot(postCompactSnapshot);
-		port.persistContextSnapshot(preCompactSnapshot);
-		port.persistContextSnapshot(postCompactSnapshot);
-
-		const tokensBefore = input.footerTokensBefore;
-		const tokensAfter = port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
-		port.noteCompactionEvent({
-			stage: "llm_summary",
-			tokensBefore,
-			tokensAfter,
-			trigger,
-		});
-		deps.bus?.emit(
-			"context.pruned",
-			{
-				stage: "llm_summary",
-				tokensBefore,
-				tokensAfter,
-				trigger,
-				snapshotIdBefore: preCompactSnapshot.snapshotId,
-				snapshotIdAfter: postCompactSnapshot.snapshotId,
-				at: Date.now(),
-			} satisfies ContextPrunedPayload,
-			sessionTelemetryContext(input.originSession),
-		);
-		return { tokensBefore, tokensAfter };
-	};
-
-	/** After a step checkpoint is on the ledger: the same publication, with no prompt recompile. */
-	const publishStepCheckpoint = (input: StepPublicationInput): { tokensAfter: number } => {
-		const { agentRuntime, before, threshold, tokensBefore } = input;
-		deps.hostInserts?.reissueUnsent();
-		refreshAgentMessagesFromSession(agentRuntime);
-		port.dropReconciledAnchor();
-		const after = port.captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);
 		port.setCurrentSnapshot(after);
 		port.persistContextSnapshot(before);
 		port.persistContextSnapshot(after);
-		const tokensAfter = port.liveContextEstimate(agentRuntime).tokens;
-		port.noteCompactionEvent({ stage: "step_checkpoint", tokensBefore, tokensAfter, trigger: "step" });
+
+		const tokensAfter = port.liveContextEstimate(agentRuntime, pendingUserText).tokens;
+		const stage = kind === "summary" ? "llm_summary" : "step_checkpoint";
+		port.noteCompactionEvent({ stage, tokensBefore, tokensAfter, trigger });
 		deps.bus?.emit(
 			"context.pruned",
 			{
-				stage: "step_checkpoint",
+				stage,
 				tokensBefore,
 				tokensAfter,
-				trigger: "step",
+				trigger,
 				snapshotIdBefore: before.snapshotId,
 				snapshotIdAfter: after.snapshotId,
 				at: Date.now(),
 			} satisfies ContextPrunedPayload,
 			sessionTelemetryContext(input.sessionId),
 		);
-		return { tokensAfter };
+		return { checkpointId: input.checkpointId, tokensBefore, tokensAfter };
 	};
 
 	return {
@@ -730,7 +709,6 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		refreshAgentMessagesFromSession,
 		runEvictionStage,
 		adoptLegacyAging,
-		publishSummaryCheckpoint,
-		publishStepCheckpoint,
+		publishCheckpoint,
 	};
 }
