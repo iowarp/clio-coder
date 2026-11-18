@@ -41,9 +41,14 @@ const NO_CALL_PATHS: CallPaths = new Map();
  */
 const PENDING_EVENT_TURN_ID = "";
 
-/** The main fold's overflow cut (ContextFold A4 addendum) tells the model how to take the read again. */
+/**
+ * The main fold's overflow cut (ContextFold A4 addendum): a read the model has not seen yet says how to take it
+ * again; one it already answered says not to, since a re-read refills the window the cut just made (A2b).
+ */
 const STEP_OVERFLOW_ADVICE =
 	"This read did not fit the model's context window. Read only the part you need, with offset and limit.";
+const SEEN_OVERFLOW_ADVICE =
+	'You already read this; its body was dropped to fit the context window. Continue from what you took from it, or recall a detail by ref with context(scope="recall"). Do not read it again in full.';
 
 /**
  * The stub that replaces this unit's body, or null when there is nothing to
@@ -71,7 +76,8 @@ function markerFor(
 		offloadPath: offloadPathOf(payload),
 		path: primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId)),
 	});
-	return candidate.reason === "step_overflow" ? `${marker} ${STEP_OVERFLOW_ADVICE}` : marker;
+	if (candidate.reason !== "step_overflow") return marker;
+	return `${marker} ${candidate.seen === true ? SEEN_OVERFLOW_ADVICE : STEP_OVERFLOW_ADVICE}`;
 }
 
 function pendingState(candidate: EvictionCandidate, marker: string, policyId: string): EvictedState {
