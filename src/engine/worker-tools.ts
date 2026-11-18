@@ -34,6 +34,7 @@ import {
 	protectedArtifactMutationBlockReason,
 } from "../domains/safety/protected-artifacts.js";
 import { isSubset, READONLY_SCOPE, WORKSPACE_SCOPE } from "../domains/safety/scope.js";
+import { probeWorkspace } from "../domains/session/workspace/index.js";
 import { effectiveToolNames } from "../tools/agent-tools.js";
 import { assertRegisteredBuiltinTools, registerCoreTools } from "../tools/core-bootstrap.js";
 import type { McpCapabilitySource } from "../tools/gateway/index.js";
@@ -203,6 +204,8 @@ export function createWorkerToolRegistry(
 		includeLedgerTools: true,
 		...(storeGrant !== undefined && storeGrant.tags.length > 0 ? { storeGrant } : {}),
 		...(workerRecall ? { workerRecall } : {}),
+		// A fresh probe of the worker's own cwd; nothing is saved into the dispatching session.
+		workerWorkspace: () => probeWorkspace(process.cwd()),
 		...(agentLedger ? { agentLedger } : {}),
 		// A worker cannot install a skill or reach the operator who could, so
 		// its skill listing carries installed (or bound) skills only; the

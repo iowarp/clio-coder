@@ -192,6 +192,24 @@ export function journalSourceFromRead(
 	};
 }
 
+/**
+ * A main run's calls carry its session's context, not its run id, so its run journal holds only `run.settled`, whose
+ * `callIds` name them. With every named call settled in the session journal, the run reads those calls' records too,
+ * so a run report groups the calls its total sums; otherwise it keeps the settled aggregate (#434).
+ */
+export function withSettledCalls(run: JournalSource, session: JournalSource | null): JournalSource {
+	if (!session?.present || run.records.some((r) => r.k === "call.started" || r.k === "run.usage_reported")) return run;
+	let settled: TelemetryRecord<"run.settled"> | undefined;
+	for (const record of run.records)
+		if (record.k === "run.settled" && (!settled || record.t >= settled.t)) settled = record;
+	const callIds = new Set(settled?.data.callIds ?? []);
+	if (callIds.size === 0) return run;
+	const calls = session.records.filter((record) => record.ctx.callId !== undefined && callIds.has(record.ctx.callId));
+	const settledCalls = new Set(calls.flatMap((record) => (record.k === "call.settled" ? [record.ctx.callId] : [])));
+	if ([...callIds].some((callId) => !settledCalls.has(callId))) return run;
+	return { ...run, records: [...run.records, ...calls].sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)) };
+}
+
 interface Attempt extends FoldedAttempt {
 	startedAt: string;
 	settledAt: string | null;

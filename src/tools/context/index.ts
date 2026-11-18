@@ -105,8 +105,10 @@ export interface ContextToolDeps {
 		LoadSkillsInput,
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	>;
-	/** Absent in worker registries without a session; scope=workspace errors cleanly. */
+	/** Absent in worker registries without a session; scope=workspace then falls back to workerWorkspace. */
 	workspace?: ContextWorkspaceDeps;
+	/** Run-scoped workspace probe of the worker's own cwd; never reads or saves into the parent session. */
+	workerWorkspace?: () => WorkspaceSnapshot;
 	/** Absent in worker registries without a session; scope=recall errors cleanly. */
 	session?: ContextSessionDeps;
 	/**
@@ -386,13 +388,21 @@ function runWorkspaceScope(
 	options: ToolInvokeOptions | undefined,
 ): ToolResult {
 	const workspace = deps.workspace;
-	if (!workspace?.hasSession()) {
-		return { kind: "error", message: "context: workspace scope requires a bound session; none is active here" };
-	}
-	let snap = workspace.getSnapshot();
-	if (!snap) {
-		snap = workspace.probeWorkspace();
-		workspace.saveSnapshot(snap);
+	let snap: WorkspaceSnapshot | null;
+	if (workspace?.hasSession()) {
+		snap = workspace.getSnapshot();
+		if (!snap) {
+			snap = workspace.probeWorkspace();
+			workspace.saveSnapshot(snap);
+		}
+	} else if (deps.workerWorkspace) {
+		snap = deps.workerWorkspace();
+	} else {
+		return {
+			kind: "error",
+			message:
+				'context: workspace scope requires a bound session or a worker run; neither is active here. scope="skills" still answers.',
+		};
 	}
 	// Orientation is where the model actually looks before multi-step work, so
 	// the snapshot carries a one-line pointer at the skill catalog. Pointer

@@ -318,7 +318,7 @@ test("observed checks follow the receipt's rules on the task board and the headl
 		);
 		match(red.stderr, /check passed: npm test · check failed: npx tsc --noEmit/u);
 		const settled = readRunJournal(join(env.dir, "state"))?.runs.at(-1)?.settled;
-		deepStrictEqual(settled?.verification, { state: "unverified", basis: "validation-tool" });
+		deepStrictEqual(settled?.verification, { state: "unverified", basis: "host-observed-command" });
 		deepStrictEqual(
 			settled?.quality?.typedValidations.map((fact) => [fact.sourceId, fact.passed]),
 			[
@@ -353,7 +353,7 @@ test("a headless receipt counts a bash check that ran after the last write as a 
 		strictEqual(run.code, 0, run.stderr);
 		const settled = readRunJournal(join(env.dir, "state"))?.runs[0]?.settled;
 		ok(settled, run.stderr);
-		deepStrictEqual(settled.verification, { state: "verified", basis: "validation-tool" });
+		deepStrictEqual(settled.verification, { state: "verified", basis: "host-observed-command" });
 		deepStrictEqual(
 			settled.quality?.typedValidations.map((fact) => [fact.sourceId, fact.passed]),
 			[["command:npm test", true]],

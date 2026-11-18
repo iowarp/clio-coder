@@ -29,7 +29,7 @@ import {
 	telemetrySessionsDirectory,
 } from "../telemetry/index.js";
 import type { JournalSource, ProcessIdentity, SessionSource } from "../telemetry/read-model.js";
-import { journalSourceFromRead, sessionAccountQuotaWindow } from "../telemetry/read-model.js";
+import { journalSourceFromRead, sessionAccountQuotaWindow, withSettledCalls } from "../telemetry/read-model.js";
 import { readRunRecord } from "../telemetry/run-record.js";
 import type { TelemetryScopeFiles } from "../telemetry/seal.js";
 import { readTelemetryScopeFiles, readTelemetryScopeFilesSync } from "../telemetry/seal.js";
@@ -374,6 +374,29 @@ export function loadProcessTelemetrySourceAsync(stateDir: string, processId: str
 
 export function loadRunTelemetrySource(stateDir: string, runId: string): JournalSource {
 	return runSync(stateDir, loadRun(stateDir, runId));
+}
+
+/** A run journal with the calls its session journal holds for it, for the run reports that group by call (#434). */
+export function loadRunCallsTelemetrySource(stateDir: string, runId: string): JournalSource {
+	return runSync(
+		stateDir,
+		(function* (): Load<JournalSource> {
+			const run = yield* loadRun(stateDir, runId);
+			const sessionId = run.records.find((record) => record.k === "run.settled")?.ctx.sessionId;
+			if (!sessionId) return run;
+			try {
+				assertSafeId(sessionId, "session");
+				const directory = telemetrySessionDirectory(stateDir, sessionId);
+				return withSettledCalls(
+					run,
+					journalSourceFromRead(yield* journal(directory), yield* exists(telemetryJournalPath(directory))),
+				);
+			} catch {
+				// An unreadable session journal leaves the run its settled aggregate (#434).
+				return run;
+			}
+		})(),
+	);
 }
 
 /** The same read off the event loop's critical path, for the live model and ACP (#434). */

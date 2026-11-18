@@ -84,7 +84,7 @@ describe("evidence integrity boundary", () => {
 		match(labels, /validation observed passing: python -m pytest/u);
 		match(labels, /validationGrounding:validated/u);
 		match(labels, /completionEvidence:evidenced/u);
-		match(labels, /evidence_verification=verified\/validation-tool/u);
+		match(labels, /evidence_verification=verified\/host-observed-command/u);
 		strictEqual(run.facts.outcome, "failed");
 		// bt-20: `fleet view` and `evidence inspect` read one sealed run DTO and must agree on its completion axis.
 		const record = {

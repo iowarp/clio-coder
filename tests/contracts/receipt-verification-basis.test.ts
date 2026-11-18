@@ -41,6 +41,12 @@ test("a validation tool that ran and passed stays verified", () => {
 		state: "verified",
 		basis: "validation-tool",
 	});
+	// bt-45 F: `verify` was refused and only a host-observed bash check passed, so the basis is not the tool.
+	const observed = { sourceId: "command:python3 -m unittest", validatorDigest: "d", passed: true };
+	deepStrictEqual(
+		deriveRunVerification({ toolStats: [stat("verify", { ok: 0, errors: 1 })], typedValidations: [observed] }),
+		{ state: "verified", basis: "host-observed-command" },
+	);
 });
 
 // x1-2: identity is explicit. `decide` once verified a run because its name
