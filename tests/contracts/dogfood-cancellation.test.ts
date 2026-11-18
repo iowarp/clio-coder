@@ -62,6 +62,7 @@ type WireMode =
 	| "tool"
 	| "guard"
 	| "repeat"
+	| "flood"
 	| "loop"
 	| "overthink"
 	| "overthink-always";
@@ -109,7 +110,7 @@ function transport(mode: WireMode) {
 					mode === "success" ||
 					mode === "overthink" ||
 					(mode === "tool" && calls === 1) ||
-					(mode === "repeat" && calls > 1)
+					((mode === "repeat" || mode === "flood") && calls > 1)
 				) {
 					send(
 						mode === "tool"
@@ -133,6 +134,16 @@ function transport(mode: WireMode) {
 					return;
 				}
 				signal?.addEventListener("abort", abort, { once: true });
+				if (mode === "flood") {
+					// One response that keeps issuing the same write and never ends; only an abort stops it.
+					const args = JSON.stringify({ path: "src/format.ts", content: "export const format = (value) => value;\n" });
+					for (let index = 0; index < 40; index++)
+						send({
+							...(index === 0 ? { role: "assistant" } : {}),
+							tool_calls: [{ index, id: `flood-${index}`, type: "function", function: { name: "write", arguments: args } }],
+						});
+					return;
+				}
 				if (mode === "repeat" || mode === "loop") {
 					// Reasoning that cycles three sentences and never ends; only an abort stops it.
 					for (let chunk = 0; chunk < 60; chunk++)
@@ -1061,6 +1072,27 @@ it("headless shutdown retains its cancelled receipt and exit 143 without route a
 	}
 });
 
+it("a reply cut off by shutdown is the harness's stop and names no route", { timeout: 15_000 }, async () => {
+	const f = fixture("partial");
+	// A `run --timeout` deadline or a signal reaches the turn as the composition root disposing the loop.
+	f.loop.onEvent((event) => {
+		if (event.type === "text_delta") f.loop.dispose();
+	});
+	try {
+		await f.loop.submit("Start");
+		await f.loop.whenSettled();
+		const closing = f
+			.entries()
+			.map((entry) => (entry.kind === "message" && entry.role === "assistant" ? recordValue(entry.payload) : undefined))
+			.find((payload) => payload?.stopReason === "aborted");
+		ok(closing, JSON.stringify(f.entries()));
+		strictEqual(closing.failureRoute, undefined);
+		match(String(closing.errorMessage), /Clio Coder shut down/u);
+	} finally {
+		await f.close();
+	}
+});
+
 it("a looping stream is stopped and re-prompted once with a nudge, without resending the loop", {
 	timeout: 15_000,
 }, async () => {
@@ -1072,6 +1104,31 @@ it("a looping stream is stopped and re-prompted once with a nudge, without resen
 		ok(retry.includes("clio_repetition_reprompt"), retry);
 		strictEqual(retry.includes("seven sections"), false, "the stopped loop is not sent back");
 		ok(f.events.some((event) => event.type === "notice" && event.key === "turn.repetition-reprompt"));
+		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a response repeating one tool call is stopped while streaming and re-prompted once to make one call", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("flood");
+	try {
+		await f.loop.submit("Fix the formatter.");
+		strictEqual(f.wire().aborted(), 1, "the flood is stopped mid-stream, not at the output cap");
+		strictEqual(f.wire().calls(), 2);
+		const retry = f.wire().requestBodies()[1] ?? "";
+		ok(retry.includes("clio_repetition_reprompt") && retry.includes("Make ONE tool call"), retry);
+		strictEqual(retry.includes("src/format.ts"), false, "the stopped flood is not sent back");
+		strictEqual(
+			f.events.filter((event) => event.type === "tool_execution_end").length,
+			0,
+			"no flooded call ran or failed",
+		);
+		ok(
+			f.events.some((event) => event.type === "notice" && /repeating one tool call \("write" 5 times/u.test(event.text)),
+		);
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
 		await f.close();

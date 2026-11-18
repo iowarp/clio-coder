@@ -104,7 +104,13 @@ import {
 	toolResultSummary,
 } from "./chat-loop-messages.js";
 import { createObservationAging } from "./observation-aging.js";
-import { assessRepetition, repetitionAbortReason, shouldAssessRepetition } from "./repetition-detector.js";
+import {
+	assessRepetition,
+	assessToolCallFlood,
+	repetitionAbortReason,
+	shouldAssessRepetition,
+	toolCallFloodAbortReason,
+} from "./repetition-detector.js";
 import type { ModelRequestFacts, ModelRequestSlots } from "./status-types.js";
 import { assessToolProseLoop, runtimeNarratesToolCalls, shouldAssessToolProse } from "./tool-prose-loop.js";
 import type { ExpectedColdReason, TurnContext } from "./turn-context.js";
@@ -113,6 +119,8 @@ import type { TurnPersistence } from "./turn-persistence.js";
 import type { AgentRuntime, ChatLoopTarget, PreInvocationStage, TurnRuntimeState } from "./turn-state.js";
 
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
+/** The reason a reply cut off by shutdown carries in place of the transport's abort text (bt-26). */
+const SHUTDOWN_STOP_REASON = "[Clio Coder] stopped the request because Clio Coder shut down before it finished.";
 type StreamAdmission = NonNullable<NonNullable<Parameters<typeof createEngineAgent>[0]>["beforeStreamRequest"]>;
 type AdmissionHold = { waitedOn?: "budget" };
 
@@ -912,7 +920,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 									? "operator_cancel"
 									: state.repetitionAbortReason !== null
 										? "repetition"
-										: undefined
+										: disposed
+											? "shutdown"
+											: undefined
 							: undefined,
 						interrupted,
 					),
@@ -1819,9 +1829,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					});
 					Object.assign(message, { callInvoked: failure.invoked });
 					// The harness, not the route, stopped this reply: it carries the harness's reason and names no route.
+					// A shutdown (a `run --timeout` deadline, a signal, quitting) aborts the stream through dispose.
 					const harnessStop =
 						terminal.stopReason === "aborted" && state.activeInterruptReason === null
-							? (state.repetitionAbortReason ?? state.toolProseAbortReason)
+							? (state.repetitionAbortReason ?? state.toolProseAbortReason ?? (disposed ? SHUTDOWN_STOP_REASON : null))
 							: null;
 					if (harnessStop !== null) Object.assign(message, { errorMessage: harnessStop, harnessStopped: true });
 					else
@@ -1978,6 +1989,21 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							deps.emitNotice(state.repetitionAbortReason, "warning");
 							localRuntime.agent.abort();
 						}
+					}
+				}
+				// Some adapters end every call block only when the stream ends, so the calls before a starting one are judged
+				// at its start: their arguments are complete by then, and the stop lands while the flood is still streaming.
+				if (
+					(assistantEvent.type === "toolcall_start" || assistantEvent.type === "toolcall_end") &&
+					state.repetitionAbortReason === null &&
+					state.activeInterruptReason === null
+				) {
+					const completeBlocks = (assistantEvent.contentIndex ?? 0) + (assistantEvent.type === "toolcall_end" ? 1 : 0);
+					const flood = assessToolCallFlood(assistantEvent.partial, completeBlocks);
+					if (flood.kind === "flooding") {
+						state.repetitionAbortReason = toolCallFloodAbortReason(flood);
+						deps.emitNotice(state.repetitionAbortReason, "warning");
+						localRuntime.agent.abort();
 					}
 				}
 				if (assistantEvent.type === "text_delta") {

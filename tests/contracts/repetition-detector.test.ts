@@ -1,6 +1,10 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { assessRepetition, shouldAssessRepetition } from "../../src/session-control/repetition-detector.js";
+import {
+	assessRepetition,
+	assessToolCallFlood,
+	shouldAssessRepetition,
+} from "../../src/session-control/repetition-detector.js";
 
 test("a stream cycling a few sentences or paragraphs is repeating; varied long output is not", () => {
 	const sentences =
@@ -26,4 +30,10 @@ test("a stream cycling a few sentences or paragraphs is repeating; varied long o
 	strictEqual(shouldAssessRepetition(3_999, 0), false);
 	strictEqual(shouldAssessRepetition(5_000, 4_500), false);
 	strictEqual(shouldAssessRepetition(5_600, 4_500), true);
+	const call = (name: string, args: Record<string, unknown>) => ({ type: "toolCall", id: name, name, arguments: args });
+	const reads = { content: Array.from({ length: 12 }, (_, index) => call("read", { path: `src/file-${index}.ts` })) };
+	deepStrictEqual(assessToolCallFlood(reads, 12), { kind: "ok" }, "distinct parallel reads are not a flood");
+	const writes = { content: Array.from({ length: 6 }, () => call("write", { path: "src/format.ts", content: "x" })) };
+	deepStrictEqual(assessToolCallFlood(writes, 4), { kind: "ok" }, "only complete calls are judged");
+	deepStrictEqual(assessToolCallFlood(writes, 5), { kind: "flooding", toolName: "write", repeats: 5 });
 });

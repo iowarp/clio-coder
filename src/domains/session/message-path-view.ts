@@ -67,6 +67,7 @@ const FAILURE_WORDS: Record<Failure, string> = {
 	operator_cancel: "you stopped it",
 	parent_cancel: "its parent run stopped it",
 	repetition: "stopped for repeating itself",
+	shutdown: "Clio Coder shut down",
 	internal: "Clio failed internally",
 };
 
@@ -129,7 +130,7 @@ function isCarrierAnswered(row: MessageRow): boolean {
 }
 
 function isCancel(failure: MessageRow["callFailure"]): boolean {
-	return failure === "operator_cancel" || failure === "parent_cancel";
+	return failure === "operator_cancel" || failure === "parent_cancel" || failure === "shutdown";
 }
 
 function callName(row: MessageRow, carriers: ReadonlyMap<string, CarrierFacts>): string {

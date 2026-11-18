@@ -61,6 +61,44 @@ export function repetitionAbortReason(assessment: Extract<RepetitionAssessment, 
 	return `[Clio Coder] stopped a model response that kept repeating itself ("${unit}" ${assessment.repeats} times in its last stretch).`;
 }
 
+/**
+ * The same loop in tool calls: one response that streams the same call again
+ * and again (bt-39: 99 `write` calls rewriting one file, run to the output cap,
+ * where each then failed as truncated). Parallel calls in one response differ
+ * in their arguments, so only a call repeated with the same arguments counts;
+ * the leading characters of its arguments stand for them, as a rewrite with a
+ * drifting tail is still the same call.
+ */
+const FLOOD_MIN_REPEATS = 5;
+const FLOOD_ARGUMENT_CHARS = 200;
+const TOOL_CALL_FLOOD_REASON_PREFIX = "[Clio Coder] stopped a model response that kept repeating one tool call";
+
+export type ToolCallFloodAssessment = { kind: "ok" } | { kind: "flooding"; toolName: string; repeats: number };
+
+/** Judge the first `completeBlocks` content blocks of a streamed message, the ones whose arguments are final. */
+export function assessToolCallFlood(message: unknown, completeBlocks: number): ToolCallFloodAssessment {
+	const content = (message as { content?: unknown } | null | undefined)?.content;
+	if (!Array.isArray(content)) return { kind: "ok" };
+	const counts = new Map<string, number>();
+	for (const block of content.slice(0, completeBlocks) as Array<{
+		type?: unknown;
+		name?: unknown;
+		arguments?: unknown;
+	}>) {
+		if (block?.type !== "toolCall" || typeof block.name !== "string") continue;
+		const args = (JSON.stringify(block.arguments ?? {}) ?? "").replace(/\s+/gu, " ").slice(0, FLOOD_ARGUMENT_CHARS);
+		const key = `${block.name}\n${args}`;
+		const repeats = (counts.get(key) ?? 0) + 1;
+		counts.set(key, repeats);
+		if (repeats >= FLOOD_MIN_REPEATS) return { kind: "flooding", toolName: block.name, repeats };
+	}
+	return { kind: "ok" };
+}
+
+export function toolCallFloodAbortReason(assessment: Extract<ToolCallFloodAssessment, { kind: "flooding" }>): string {
+	return `${TOOL_CALL_FLOOD_REASON_PREFIX} ("${assessment.toolName}" ${assessment.repeats} times with the same arguments in one response).`;
+}
+
 export const REPETITION_REPROMPT_TOOL = "clio_repetition_reprompt";
 export const REPETITION_REPROMPT_NOTICE_KEY = "turn.repetition-reprompt";
 
@@ -68,13 +106,17 @@ export const REPETITION_REPROMPT_NOTICE_KEY = "turn.repetition-reprompt";
  * The one nudge after a stopped repetition. A paired synthetic tool exchange,
  * never a user turn, as the locked-synthesis repair is: a late user message
  * re-renders earlier turns on templates keyed off the last user message and
- * invalidates the prompt cache (#55).
+ * invalidates the prompt cache (#55). `stoppedFor` is the stop's reason, which
+ * says whether sentences or tool calls repeated.
  */
-export function repetitionRepromptMessages(origin: {
-	provider: string;
-	api: string;
-	model: string;
-}): ReadonlyArray<AgentMessage> {
+export function repetitionRepromptMessages(
+	origin: {
+		provider: string;
+		api: string;
+		model: string;
+	},
+	stoppedFor: string,
+): ReadonlyArray<AgentMessage> {
 	const id = `clio-repetition-reprompt-${Date.now()}`;
 	const timestamp = Date.now();
 	return [
@@ -102,9 +144,11 @@ export function repetitionRepromptMessages(origin: {
 			content: [
 				{
 					type: "text",
-					text:
-						"Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
-						"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.",
+					text: stoppedFor.startsWith(TOOL_CALL_FLOOD_REASON_PREFIX)
+						? "Your last response was stopped because it issued the same tool call again and again, so none of those calls ran. " +
+							"Do not repeat it. Make ONE tool call with complete arguments, read its result, then decide the next step."
+						: "Your last response was stopped because it kept repeating the same sentences without acting or answering. " +
+							"Do not repeat it. Make the next tool call the task needs, or answer now from what you already have.",
 				},
 			],
 			isError: true,

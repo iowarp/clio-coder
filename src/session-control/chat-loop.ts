@@ -3750,6 +3750,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						const turnId = state.activeUserTurnId;
 						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
 							state.repetitionRepromptTurnId = turnId;
+							const stoppedFor = state.repetitionAbortReason;
 							state.repetitionAbortReason = null;
 							const last = agentRuntime.agent.state.messages.at(-1);
 							// The looping reply is in the ledger; replaying it would resend the loop.
@@ -3762,7 +3763,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							);
 							const model = agentRuntime.agent.state.model;
 							await agentRuntime.agent.prompt([
-								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }),
+								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }, stoppedFor),
 							]);
 						}
 					}
