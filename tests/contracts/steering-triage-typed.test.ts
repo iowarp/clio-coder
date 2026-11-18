@@ -1,5 +1,7 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
+import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
@@ -24,6 +26,8 @@ import {
 	triageMayInterrupt,
 } from "../../src/session-control/steering-triage.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { readRunJournal } from "../harness/run-journal.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const MASS: EngineCapabilities = {
 	semantics: new Set(["boolean", "exclusive", "ordinal", "independent"]),
@@ -283,5 +287,126 @@ test("a steer through the chat api, as the headless steer channel and ACP send i
 		release();
 		loop.dispose();
 		await loop.whenSettled();
+	}
+});
+
+test("a steer triage reads as a stop redirects a headless run to answer it; only a real cancel ends it canceled (bt-41)", {
+	timeout: 20_000,
+}, async () => {
+	const env = await isolateClioEnv("triage-stop-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	settings.chat.steering.triage.enabled = true;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	// The first queued line reads as a stop; the line after it is ordinary work.
+	const typed: DecisionEngine = {
+		...engine(MASS, "stop", 0.99),
+		async decide(request): Promise<EngineReply> {
+			const answers: Record<string, EngineReply["answers"][string]> = {};
+			for (const id of Object.keys(request.questions)) {
+				const relation = id === "relation0" ? "stop" : "addition";
+				answers[id] = id.startsWith("relation")
+					? { type: "choice", choice: relation, probabilities: { [relation]: 0.99, newTask: 0.01 } }
+					: { type: "choice", choice: "now", probabilities: { now: 0.9, nextSlot: 0.1 } };
+			}
+			return { build: "fake", answers };
+		},
+	};
+	const prompts: string[] = [];
+	const handed: string[] = [];
+	let aborted: () => void = () => {};
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		systemOne: over(typed),
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+			let listener: (event: unknown) => unknown = () => {};
+			const state = options?.initialState as { messages: AgentMessage[] };
+			const reply = async (text: string, stopReason: "stop" | "aborted") => {
+				const message = {
+					role: "assistant",
+					content: text.length > 0 ? [{ type: "text", text }] : [],
+					stopReason,
+					timestamp: Date.now(),
+				} as unknown as AgentMessage;
+				state.messages.push(message);
+				await listener({ type: "message_end", message });
+				await listener({ type: "agent_end", messages: [message] });
+			};
+			return {
+				agent: {
+					state,
+					subscribe: (next: typeof listener) => {
+						listener = next;
+						return () => {};
+					},
+					abort: () => aborted(),
+					steer: (message: AgentMessage) => handed.push(JSON.stringify(message)),
+					followUp: (message: AgentMessage) => handed.push(JSON.stringify(message)),
+					clearAllQueues() {},
+					async prompt(input: unknown) {
+						const text = JSON.stringify(input);
+						prompts.push(text);
+						await listener({ type: "agent_start" });
+						if (text.includes("HOLD")) {
+							await new Promise<void>((resolve) => {
+								aborted = resolve;
+							});
+							await reply("", "aborted");
+							return;
+						}
+						await reply(`ANSWERED ${prompts.length}`, "stop");
+					},
+				},
+			};
+		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+	});
+	const stdout: string[] = [];
+	const write = process.stdout.write;
+	const errWrite = process.stderr.write;
+	// The run's own lines are held back; the test runner's reporter still writes through.
+	process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]) =>
+		String(chunk).startsWith("ANSWERED")
+			? stdout.push(String(chunk)) > 0
+			: Reflect.apply(write, process.stdout, [chunk, ...rest])) as typeof process.stdout.write;
+	process.stderr.write = (() => true) as typeof process.stderr.write;
+	const shutdown = { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false };
+	const streaming = async (count: number) => {
+		for (let i = 0; i < 1000 && !(loop.isStreaming() && prompts.length >= count); i++)
+			await new Promise((resolve) => setImmediate(resolve));
+		strictEqual(loop.isStreaming(), true);
+	};
+	try {
+		const redirected = runHeadlessMainAgent(loop, { prompt: "HOLD fix the cache", mode: "text", shutdown });
+		await streaming(1);
+		strictEqual(loop.steer("Stop now. Just report what you have."), true);
+		strictEqual(loop.steer("also add docs"), true);
+		strictEqual(await redirected, 0);
+		ok(prompts[1]?.includes("Stop now"), prompts.join("\n"));
+		ok(
+			[...handed, ...prompts.slice(2)].some((text) => text.includes("also add docs")),
+			"the follow-up is not dropped",
+		);
+		match(stdout.join(""), /ANSWERED/u);
+		const cancelled = runHeadlessMainAgent(loop, { prompt: "HOLD again", mode: "text", shutdown });
+		await streaming(prompts.length);
+		loop.cancel();
+		strictEqual(await cancelled, 1);
+		const envelopes = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])];
+		deepStrictEqual(envelopes.map((envelope) => [envelope.outcome, envelope.exitCode]).sort(), [
+			["canceled", 1],
+			["succeeded", 0],
+		]);
+	} finally {
+		process.stdout.write = write;
+		process.stderr.write = errWrite;
+		loop.dispose();
+		await loop.whenSettled();
+		env.restore();
 	}
 });

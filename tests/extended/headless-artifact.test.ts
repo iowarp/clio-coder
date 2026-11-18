@@ -323,7 +323,7 @@ for (const scenario of [
 					getExitCode: () => (shuttingDown ? 143 : 0),
 					isShuttingDown: () => shuttingDown,
 				};
-				const chat: Pick<ChatLoop, "getSessionId" | "lastRunSnapshot" | "onEvent" | "submit"> = {
+				const chat: Pick<ChatLoop, "getSessionId" | "lastRunSnapshot" | "onEvent" | "submit" | "whenSettled"> = {
 					getSessionId: () => "fixture-session",
 					lastRunSnapshot: () => ({
 						targetId: "fixture",
@@ -351,6 +351,7 @@ for (const scenario of [
 						for (const event of scenario.events) listener?.(event as ChatLoopEvent);
 						if (shuttingDown) await drain?.();
 					},
+					whenSettled: async () => {},
 				};
 				const code = await runHeadlessMainAgent(chat as ChatLoop, {
 					prompt: "fixture report",
