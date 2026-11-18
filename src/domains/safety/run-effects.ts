@@ -14,6 +14,7 @@ import {
 	settleCheckCall,
 	validationCommandOf,
 } from "./check-classifier.js";
+import { declaredVerifierCommands, type SessionVerifier } from "./finish-contract.js";
 import { isSameOrDescendant } from "./path-policy.js";
 import { observedValidationCommand } from "./protected-artifacts.js";
 import { effectiveScratchRoots } from "./scratch-roots.js";
@@ -157,6 +158,11 @@ export interface RunEffectsRecorderOptions {
 	env?: NodeJS.ProcessEnv;
 	/** `safety.scratchRoots` from the operator's settings: a check logged under one changes no tree (x5-4). */
 	scratchRoots?: ReadonlyArray<string>;
+	/**
+	 * Checks declared for this run only (`run --verify`). With the project catalog's, read when the recorder is made, a
+	 * shell run of one is a check, as the finish contract credits it (x7-5).
+	 */
+	sessionVerifiers?: ReadonlyArray<SessionVerifier>;
 }
 
 export interface RunEffectsRecorder {
@@ -246,7 +252,7 @@ export type { CheckOutputReader };
 
 /**
  * Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir or a scratch root, or
- * git-ignored. `$TMPDIR`, `$HOME` and `~` expand from the run's env first (x5-4). A check log the call's check
+ * git-ignored. `outside` asks only the first three, of any write (x7-1). `$TMPDIR`, `$HOME` and `~` expand from the run's env first (x5-4). A check log the call's check
  * pipeline writes (`npm test > out.txt`) to a path git does not track and the run did not change is output too.
  * A tracked source path stays a change, and a target this cannot resolve is one too. Shared by the recorder and the
  * task board's replay, so a check logged through `tee` keeps its outcome on both (x4-1).
@@ -284,21 +290,30 @@ export function checkOutputReader(
 			.replace(/\$\{(TMPDIR|HOME)\}|\$(TMPDIR|HOME)(?![A-Za-z0-9_])/gu, (_, braced, bare) => env[braced ?? bare] || "\0");
 		return /^~|[$`\0]/u.test(expanded) ? null : expanded;
 	};
+	const landsOutside = (resolved: string): boolean => {
+		if (!isSameOrDescendant(resolved, cwd)) return true;
+		if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
+		scratch ??= effectiveScratchRoots(configuredScratchRoots, cwd);
+		return scratch.some((root) => isSameOrDescendant(resolved, root) && !isSameOrDescendant(cwd, root));
+	};
 	const reader = (base: string, logs?: ReadonlySet<string>) => (target: string) => {
 		if (/\.log$/u.test(target)) return true;
 		const expanded = expand(target);
 		if (expanded === null) return false;
 		const resolved = path.resolve(base, expanded);
-		if (!isSameOrDescendant(resolved, cwd)) return true;
-		if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
-		scratch ??= effectiveScratchRoots(configuredScratchRoots, cwd);
-		if (scratch.some((root) => isSameOrDescendant(resolved, root) && !isSameOrDescendant(cwd, root))) return true;
+		if (landsOutside(resolved)) return true;
 		if (gitIgnores(resolved)) return true;
 		return logs?.has(target) === true && !changedByRun.has(resolved) && untracked(resolved);
 	};
 	return Object.assign(reader, {
 		changed(paths: Iterable<string>) {
 			for (const target of paths) changedByRun.add(target);
+		},
+		outside(base: string) {
+			return (target: string) => {
+				const expanded = expand(target);
+				return expanded !== null && landsOutside(path.resolve(base, expanded));
+			};
 		},
 	});
 }
@@ -312,6 +327,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
 	const outputTarget = checkOutputReader(cwd, options.env, options.scratchRoots);
+	const declaredChecks = declaredVerifierCommands(cwd, options.sessionVerifiers);
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -345,7 +361,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				latestProofCalls.set(proofCheck, toolCallId);
 			}
 			inFlight.set(toolCallId, { tool: toolName, revision: mutationRevision, outcome: null });
-			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget });
+			const reading = classifyCall(toolName, args, { cwd, gitHelpers, outputTarget, declaredChecks });
 			const { base, shell } = reading;
 			// The classifier alone says whether the call ran a check; the vocabularies only name it.
 			const validationCommand = reading.verdict === "check" ? receiptValidationCommand(toolName, args, base) : null;

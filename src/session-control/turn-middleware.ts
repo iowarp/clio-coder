@@ -28,6 +28,7 @@ import {
 	FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_DECLARED_CHECKS_PREFIX,
 	FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE,
+	FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE,
 	FINISH_CONTRACT_RAN_CHANGED_PREFIX,
 	FINISH_CONTRACT_RUN_CHECKS_PREFIX,
 } from "../domains/safety/finish-contract.js";
@@ -290,15 +291,19 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		if (
 			severity === "warn" &&
 			(message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE ||
+				message === FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE ||
 				message === FINISH_CONTRACT_EVIDENCE_SCOPE_ADVISORY_MESSAGE)
 		) {
 			// CLB-3: unknown coverage is operator status, never a recovery request
-			// or permission to execute another check.
+			// or permission to execute another check. A red after the last change is never "checks passed" (bt-44).
+			const failed = message === FINISH_CONTRACT_FAILED_CHECK_ADVISORY_MESSAGE;
 			deps.emitFooterNotice(
-				"info",
-				message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
-					? "checks passed; coverage of the change not measured"
-					: "validation evidence recorded; coverage of the change not measured",
+				failed ? "warning" : "info",
+				failed
+					? "a check failed after the last change; coverage of the change not measured"
+					: message === FINISH_CONTRACT_COVERAGE_ADVISORY_MESSAGE
+						? "checks passed; coverage of the change not measured"
+						: "validation evidence recorded; coverage of the change not measured",
 				"finish.coverage-unverified",
 			);
 			return;

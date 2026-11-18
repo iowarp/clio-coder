@@ -1055,7 +1055,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		pendingVerifyCalls: new Map(),
 		pendingShellWrites: new Set(),
 		verifyCalls: [],
-		runEffects: createRunEffectsRecorder(process.cwd(), { scratchRoots: options.scratchRoots ?? [] }),
+		runEffects: createRunEffectsRecorder(process.cwd(), {
+			scratchRoots: options.scratchRoots ?? [],
+			...(options.verify ? { sessionVerifiers: options.verify.checks } : {}),
+		}),
 		skillActivations: [],
 		calls: [],
 		seenAttempts: new Set(),

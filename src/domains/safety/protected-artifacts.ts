@@ -1803,6 +1803,27 @@ export function shellCommandVerdict(command: string, gitHelpersConfigured: boole
 	return verdict;
 }
 
+/** Writers whose every write is a target {@link extractCommandWriteTargets} or {@link extractCommandDeleteTargets} names. */
+const NAMED_TARGET_WRITERS: ReadonlySet<string> = new Set(["tee", "mkdir", "touch", "rm", "cp"]);
+
+/**
+ * Whether a command writes only the targets the write and delete extractors name (x7-1): every step only reads, is
+ * a bare redirect, or is a writer whose targets those extractors list in full. A here-document body is data unless a
+ * shell or interpreter reads it, and either of those, git, a substitution or an inline script stays unenumerable.
+ */
+export function shellWritesOnlyNamedTargets(command: string, gitHelpersConfigured: boolean): boolean {
+	const steps = shellSteps(scanShellLike(withoutHeredocBodies(command, true)));
+	if (steps.length === 0) return false;
+	return steps.every((step) => {
+		if (step.tokens.some((token) => token.substitutions?.length || token.hiddenContent || token.unterminated))
+			return false;
+		if (segmentShellScript(step.argv) !== null) return false;
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		if (argv.length === 0 || NAMED_TARGET_WRITERS.has(basenameToken(argv[0]))) return true;
+		return stepVerdict(argv, gitHelpersConfigured) === "inspection";
+	});
+}
+
 /** Runners that read the tree and write none of it, unless told to update snapshots or fix what they find. */
 const READ_ONLY_RUNNERS: ReadonlySet<string> = new Set(["vitest", "jest", "mocha", "eslint"]);
 
@@ -1883,20 +1904,23 @@ function testRunnerArgs(executable: string, args: ReadonlyArray<string>): Readon
 
 /**
  * `isOutput` says a redirect or `tee` target is a log the check's output lands in, not part of the tree (x4-2), so
- * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check.
+ * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check. `declaredSteps` are the
+ * indices of steps that run a declared check (x7-5), which count as check steps.
  */
 export function checkCommandShape(
 	command: string,
 	gitHelpersConfigured: boolean,
 	isOutput: (target: string) => boolean = () => false,
+	declaredSteps: ReadonlySet<number> = new Set(),
 ): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
 	const parsed = shellSteps(tokens);
-	if (!parsed.some(isCheckStep)) return null;
-	const steps = parsed.map((step) => {
+	const isCheck = (step: ShellStep, index: number) => isCheckStep(step) || declaredSteps.has(index);
+	if (!parsed.some(isCheck)) return null;
+	const steps = parsed.map((step, index) => {
 		const writes: string[] = [];
 		collectRedirectTargets(step.tokens, writes);
-		const check = isCheckStep(step);
+		const check = isCheck(step, index);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
 		const readOnly =
 			step.index === null ||
