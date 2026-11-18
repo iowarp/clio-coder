@@ -622,7 +622,7 @@ Cost appears in these places, and every one renders the journaled facts through 
 - The footer shows the session total, and the expanded footer dashboard (Alt+U) shows the session ceiling beside it as `ceiling`, which reads `none` when `safety.limits.sessionCostUsd` is `0`.
 - `/usage` shows a `cost` row for the session and for each model.
 - The dispatch board, `clio-coder fleet` output and the `monitor` tool show a cost per run.
-- The exit summary prints a `Cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
+- The exit summary prints a `Session cost` row, and under `report` a cost per model in its `Models` section, in the same wording as the table below.
 
 | `usd` fact | What the footer, `/usage` and run tables show |
 | --- | --- |
