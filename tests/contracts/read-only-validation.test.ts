@@ -807,6 +807,11 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	// A file the run itself changed, or one a step other than the check writes, stays a change.
 	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
 	deepStrictEqual(seal("npm test", "npm test && cat package.json > notes.txt"), stale);
+	// A write that lands only outside the workspace changes no tree; one inside it, an opaque writer or a move out does (x7-1).
+	for (const scratch of ["echo hi > /tmp/x.txt", "cat > /tmp/c.py <<'EOF'\nimport os\nEOF", "rm -rf /tmp/scratch"])
+		deepStrictEqual(seal("npm test", scratch), green, scratch);
+	for (const change of ["echo hi > notes.txt", "echo hi > /tmp/x && npm ci", "mv src/a.ts /tmp/a.ts"])
+		deepStrictEqual(seal("npm test", change), stale, change);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);

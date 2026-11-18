@@ -79,7 +79,10 @@ function readCall(
 			asked = true;
 			return replay.outputTarget(base, logs);
 		},
-		{ changed: (paths: Iterable<string>) => replay.outputTarget.changed(paths) },
+		{
+			changed: (paths: Iterable<string>) => replay.outputTarget.changed(paths),
+			outside: (base: string) => replay.outputTarget.outside(base),
+		},
 	);
 	const reading = classifyCall(tool, args, { cwd: replay.root, gitHelpers: replay.gitHelpers, outputTarget });
 	if (!asked && id !== null) replay.readings?.set(id, { fingerprint, reading });

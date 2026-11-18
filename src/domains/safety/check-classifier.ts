@@ -15,10 +15,12 @@ import {
 	checkWritesTree,
 	commandArgumentSegments,
 	detectValidationCommand,
+	extractCommandCdTargets,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	observedValidationCommand,
 	shellCommandVerdict,
+	shellWritesOnlyNamedTargets,
 	toolMutationPaths,
 	type ValidationCommandScope,
 } from "./protected-artifacts.js";
@@ -34,8 +36,8 @@ import {
  * - `inspection`: only reads. Settles nothing and clears nothing.
  * - `mutation`: provably or plausibly writes: an edit, write or artifact path, a redirect or `tee` to a tree path, a
  *   known writer (`node -e`, an emitting `tsc`, `jest -u`, `sed -i`, git beyond inspection, an install), or a
- *   registered tool that writes paths its arguments do not name (`dispatch`, `run_script`). It clears standing passes
- *   and settles no pass of its own.
+ *   registered tool that writes paths its arguments do not name (`dispatch`, `run_script`). It clears standing passes,
+ *   unless every write is a target it names outside the workspace (x7-1), and settles no pass of its own.
  * - `unknown`: cannot be told apart (an unrecognized command, a package check refused for a runtime loader after
  *   `--`, a tool this process has no registration for). It neither settles nor clears a recorded outcome; the
  *   recorder lists it so a receipt can say it ran after a standing check.
@@ -47,6 +49,8 @@ export interface CheckOutputReader {
 	(base: string, logs?: ReadonlySet<string>): (target: string) => boolean;
 	/** Paths a call changed: a later check log written there overwrites the run's own work, so it stays a change. */
 	changed(paths: Iterable<string>): void;
+	/** Whether a write target lands outside the workspace: out of `cwd`, under the temp dir or a scratch root (x7-1). */
+	outside(base: string): (target: string) => boolean;
 }
 
 export interface ClassifierContext {
@@ -61,7 +65,10 @@ export interface ClassifierContext {
 	outputTarget?: CheckOutputReader;
 }
 
-const NO_OUTPUT_TARGET: CheckOutputReader = Object.assign(() => () => false, { changed() {} });
+const NO_OUTPUT_TARGET: CheckOutputReader = Object.assign(() => () => false, {
+	changed() {},
+	outside: () => () => false,
+});
 
 /** What a bash command's own text says about the check it runs. */
 export interface ShellCheckReading {
@@ -75,7 +82,7 @@ export interface ShellCheckReading {
 
 export interface CallClassification {
 	verdict: CallVerdict;
-	/** The call changes the tree: a mutation, or a check whose own shape or targets write it. */
+	/** The call changes the tree: a mutation that writes the workspace, or a check whose own shape or targets write it. */
 	changesTree: boolean;
 	/** Where the call ran: the run's cwd, re-based by a bash call's own cwd argument. */
 	base: string;
@@ -260,6 +267,28 @@ function toolVerdict(toolName: string, args: Record<string, unknown> | undefined
 }
 
 /**
+ * Whether a mutation changes the workspace tree (x7-1). One whose every write is a target it names, all landing outside
+ * the workspace (out of `cwd`, under the temp dir or a scratch root, never a git-ignored path inside it), leaves the
+ * tree as it was, as the finish contract's in-workspace filter already reads it. An opaque writer (git, an interpreter,
+ * an install, a tool that writes paths its arguments do not name) stays a change. After a `cd` only an absolute target
+ * is placed.
+ */
+function writesTree(
+	toolName: string,
+	command: string | null,
+	targets: ReadonlyArray<string>,
+	base: string,
+	gitHelpers: boolean,
+	outputTarget: CheckOutputReader,
+): boolean {
+	const named = command !== null ? shellWritesOnlyNamedTargets(command, gitHelpers) : !toolWritesOpaquely(toolName);
+	if (!named) return true;
+	const rebased = command !== null && extractCommandCdTargets(command).length > 0;
+	const outside = outputTarget.outside(base);
+	return targets.some((target) => (rebased && !/^[/~$]/u.test(target)) || !outside(target));
+}
+
+/**
  * Read one call at its start, for the recorder and the task board's replay alike (x4-1). `context.cwd` is the run's
  * workspace; a bash call's own `cwd` argument re-bases it.
  */
@@ -272,7 +301,8 @@ export function classifyCall(
 	const base = typeof args?.cwd === "string" && args.cwd.length > 0 ? path.resolve(cwd, args.cwd) : cwd;
 	const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 	const shellCommand = command ?? verifyCommandOf(toolName, args, base);
-	const paths = mutationTargets(toolName, args).map((target) => path.resolve(base, target));
+	const targets = mutationTargets(toolName, args);
+	const paths = targets.map((target) => path.resolve(base, target));
 	const verdict = callVerdict(toolName, args, gitHelpers);
 	// A bash command has a shape exactly when it runs a check, so only a check reads where its output lands.
 	const isOutput = command !== null && verdict === "check" ? outputTarget(base, checkLogTargets(command)) : () => false;
@@ -298,7 +328,7 @@ export function classifyCall(
 	return {
 		verdict,
 		changesTree:
-			verdict === "mutation" ||
+			(verdict === "mutation" && writesTree(toolName, command, targets, base, gitHelpers, outputTarget)) ||
 			(verdict === "check" && (changedPaths.length > 0 || shape === "after-change" || shape === "mixed")),
 		base,
 		paths,
