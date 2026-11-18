@@ -1867,15 +1867,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const session = deps.session;
 			if (!session?.current()) return false;
 			const current = estimate ?? liveContextEstimate(agentRuntime, pendingUserText);
+			// A hold or a release states the context it left as it was; a commit's own figures take precedence.
+			const settle = (): false => {
+				openedDecision?.measure(current.tokens);
+				return false;
+			};
 			adoptOnce(current);
-			if (!supersededApplies) return false;
+			if (!supersededApplies) return settle();
 			const key = foldAttemptKey({
 				turn: state.activeUserTurnId || null,
 				leaf: state.lastTurnId ?? null,
 				view: foldWorkingSet(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
 				history: observeHistory(agentRuntime).digest(),
 			});
-			if (key === supersededAttemptKey) return false;
+			if (key === supersededAttemptKey) return settle();
 			const stage = contextFold.runEvictionStage({
 				agentRuntime,
 				decision: openDecision(),
@@ -1898,7 +1903,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				classify: classifyCall,
 			});
 			if (!stage.committed) supersededAttemptKey = key;
-			return false;
+			return settle();
 		};
 		if (!force && !autoEnabled) return supersededOnly(null);
 		if (originSession !== undefined && summaryRearmSeededFor !== originSession) {

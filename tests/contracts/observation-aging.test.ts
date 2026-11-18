@@ -255,14 +255,14 @@ it("a superseded set below the floor commits nothing, and the checkpoint records
 		await harness.submit("Read the small file twice.");
 		deepStrictEqual(evictions(harness.session.readEntries() as SessionEntry[]), []);
 		deepStrictEqual(results(wireElements(server.requests[2] as never)), [`result:${SMALL}`, `result:${SMALL}`]);
-		ok(
-			folds.some((fold) =>
-				fold.stages.some(
-					(stage) => stage.stage === "superseded" && stage.outcome === "held" && stage.reason === "below_floor",
-				),
+		const hold = folds.find((fold) =>
+			fold.stages.some(
+				(stage) => stage.stage === "superseded" && stage.outcome === "held" && stage.reason === "below_floor",
 			),
-			JSON.stringify(folds),
 		);
+		ok(hold, JSON.stringify(folds));
+		ok(hold.tokensBefore > 0, "the hold states the context it measured");
+		strictEqual(hold.tokensAfter, hold.tokensBefore, "a hold changes nothing");
 	} finally {
 		await harness.close();
 	}
