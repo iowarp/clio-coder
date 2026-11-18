@@ -551,12 +551,17 @@ function blobAttachments(images: ReadonlyArray<ImageContent>) {
 	return images.map((image) => ({ type: "blob" as const, data: image.data, mimeType: image.mimeType }));
 }
 
-function toolResultObject(message: Extract<CoreMessage, { role: "toolResult" }>, extraText = ""): ToolResultObject {
+/** The wire's `skipLargeOutputProcessing` (rpc ToolResultExpanded), which the SDK passes through untyped. */
+function toolResultObject(
+	message: Extract<CoreMessage, { role: "toolResult" }>,
+	extraText = "",
+): ToolResultObject & { skipLargeOutputProcessing: true } {
 	const text = [textOf(message.content), extraText].filter((part) => part.length > 0).join("\n\n");
 	const images = imagesOf(message.content);
 	return {
 		textResultForLlm: text,
 		resultType: message.isError ? "failure" : "success",
+		skipLargeOutputProcessing: true,
 		...(images.length > 0
 			? {
 					binaryResultsForLlm: images.map((image) => ({
@@ -1058,6 +1063,9 @@ async function openConversationHeld(input: {
 		tools: declareTools(() => conversation, input.tools),
 		availableTools: ["custom:*"],
 		infiniteSessions: { enabled: false },
+		// Clio's registry already capped every result and offloaded the rest to a real path the model can read.
+		// The runtime's own spill (at 50 KB, under Clio's 64 KB cap) names a sessionFs path that exists nowhere.
+		largeOutput: { enabled: false },
 		enableSessionStore: false,
 		enableSkills: false,
 		enableConfigDiscovery: false,
