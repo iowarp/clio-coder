@@ -888,6 +888,17 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["git status", "inspection"],
 		["git diff", "inspection"],
 		["git log -p", "inspection"],
+		// Value-free globals and read-only plumbing read (x6-2).
+		["git --no-pager diff", "inspection"],
+		["git -P --no-optional-locks log -1", "inspection"],
+		["git -c color.ui=never status", "inspection"],
+		["git ls-files", "inspection"],
+		["git rev-list HEAD", "inspection"],
+		["git describe --tags", "inspection"],
+		["git cat-file -p HEAD", "inspection"],
+		["git ls-tree HEAD", "inspection"],
+		["git grep -n foo", "inspection"],
+		["git blame a.ts", "inspection"],
 		["sed -n 1,80p a.ts", "inspection"],
 		// A bracket expression with no write behind it reads (x5-5).
 		["sed -n '/^[[:space:]]*export/p' a.ts", "inspection"],
@@ -901,6 +912,18 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		["rg --hostname-bin=./x.sh foo", "mutation"],
 		["git diff --ext-diff", "mutation"],
 		["git show --textconv", "mutation"],
+		// A global that relocates the repository or a config key that may name a program (x6-2).
+		["git -C . status", "mutation"],
+		["git --paginate diff", "mutation"],
+		["git -c core.pager=./x.sh diff", "mutation"],
+		["git -c alias.st=!./x.sh st", "mutation"],
+		["git -c diff.x.textconv=./x.sh diff", "mutation"],
+		["git -c diff.external=./x.sh diff", "mutation"],
+		["git -c core.fsmonitor=./x.sh status", "mutation"],
+		["git -c credential.helper=./x.sh status", "mutation"],
+		["git cat-file --textconv HEAD:a.ts", "mutation"],
+		["git grep -O foo", "mutation"],
+		["git grep --open-files-in-pager=./x.sh foo", "mutation"],
 		["sed -i s/a/b/ a.ts", "mutation"],
 		["sed 's/a/b/w out' a.ts", "mutation"],
 		["awk '{system(\"sh\")}' a.ts", "mutation"],
@@ -934,9 +957,16 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	strictEqual(verdict("run_script", { script: "x" }), "mutation");
 	strictEqual(verdict("mcp__server__tool", {}), "unknown");
 	// Where git config names a helper program, only log and show with both helpers switched off still read.
-	for (const command of ["git status", "git diff --no-ext-diff --no-textconv", "git log -p"])
+	for (const command of [
+		"git status",
+		"git diff --no-ext-diff --no-textconv",
+		"git log -p",
+		"git blame a.ts",
+		"git ls-files",
+	])
 		strictEqual(bash(command, true), "mutation", command);
 	strictEqual(bash("git log -p --no-ext-diff --no-textconv", true), "inspection");
+	strictEqual(bash("git --no-pager cat-file -p HEAD", true), "inspection");
 	// An unknown call after a pass keeps it and is listed beside it; an inspection is not, and a new outcome resets it.
 	const recorder = createRunEffectsRecorder(cwd);
 	for (const [id, tool, args] of [

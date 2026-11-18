@@ -1452,7 +1452,62 @@ const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
 	"show",
 	"rev-parse",
 	"branch",
+	"ls-files",
+	"rev-list",
+	"describe",
+	"cat-file",
+	"ls-tree",
+	"grep",
+	"blame",
 ]);
+
+/** Read-only git subcommands that only read objects and refs, so no configured helper program can run under them. */
+const HELPER_FREE_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set(["rev-parse", "rev-list", "ls-tree", "cat-file"]);
+
+/**
+ * Git global options that take no value and change neither the repository git reads nor a program it runs (x6-2).
+ * `-C`, `--git-dir` and `--work-tree` stay outside: helper config is read at the recorder's cwd only.
+ */
+const READ_ONLY_GIT_GLOBALS: ReadonlySet<string> = new Set([
+	"--no-pager",
+	"-P",
+	"--no-optional-locks",
+	"--literal-pathspecs",
+	"--glob-pathspecs",
+	"--noglob-pathspecs",
+	"--icase-pathspecs",
+	"--no-replace-objects",
+	"--no-lazy-fetch",
+	"--no-advice",
+]);
+
+/**
+ * Config keys a `git -c key=value` may set on a read-only step: display settings that name no program. Any other key
+ * (`core.pager`, `alias.*`, `diff.external`, `*.textconv`, `core.fsmonitor`, `credential.*`, `include.path`) may run
+ * one, so it is refused.
+ */
+const READ_ONLY_GIT_CONFIG_KEY =
+	/^(?:color\.[^=]+|advice\.[^=.]+|column\.ui|core\.quotepath|core\.abbrev|diff\.(?:noprefix|mnemonicprefix|relative|renames|renamelimit|algorithm|indentheuristic|context|interhunkcontext|statgraphwidth)|log\.(?:decorate|abbrevcommit|date|follow)|status\.(?:short|branch|showuntrackedfiles|relativepaths)|grep\.(?:linenumber|patterntype|extendedregexp|column|fullname))$/u;
+
+/** The git subcommand and its arguments past the read-only global options; null when a global may run or relocate. */
+function gitSubcommand(args: ReadonlyArray<string>): { subcommand: string; rest: ReadonlyArray<string> } | null {
+	let index = 0;
+	for (; index < args.length; index += 1) {
+		const arg = args[index] ?? "";
+		if (READ_ONLY_GIT_GLOBALS.has(arg)) continue;
+		if (arg !== "-c") break;
+		const setting = args[index + 1] ?? "";
+		const key = setting.split("=", 1)[0] ?? "";
+		if (!READ_ONLY_GIT_CONFIG_KEY.test(key.toLowerCase()) || setting.includes("!")) return null;
+		index += 1;
+	}
+	const subcommand = args[index];
+	if (subcommand === undefined || subcommand.startsWith("-")) return null;
+	return { subcommand, rest: args.slice(index + 1) };
+}
+
+/** `git cat-file` modes that print an object, its type or its size; `--textconv`, `--filters` and batches stay out. */
+const READ_ONLY_CAT_FILE_FLAGS: ReadonlySet<string> = new Set(["-p", "-t", "-s", "-e"]);
 
 /**
  * Where the repository's git config names a helper program (x1-3), `git status` and `git diff` refresh the index
@@ -1480,11 +1535,21 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
 	const [executable, ...args] = argv;
 	if (executable === undefined) return false;
 	if (executable === "git") {
-		const [subcommand, ...rest] = args;
-		if (subcommand === undefined || !READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) return false;
+		const invocation = gitSubcommand(args);
+		if (invocation === null || !READ_ONLY_GIT_SUBCOMMANDS.has(invocation.subcommand)) return false;
+		const { subcommand, rest } = invocation;
 		if (subcommand === "branch") return rest.every((arg) => READ_ONLY_GIT_BRANCH_FLAGS.has(arg));
 		if (subcommand === "rev-parse") return true;
 		if (rest.some((arg) => arg.startsWith("--output") || arg === "--ext-diff" || arg === "--textconv")) return false;
+		if (subcommand === "cat-file")
+			return (
+				rest.some((arg) => READ_ONLY_CAT_FILE_FLAGS.has(arg)) &&
+				rest.every((arg) => !arg.startsWith("-") || READ_ONLY_CAT_FILE_FLAGS.has(arg))
+			);
+		// `-O`/`--open-files-in-pager` hands the matches to a program, bundled (`-nOvim`) or not.
+		if (subcommand === "grep" && rest.some((arg) => /^-[^-]*O/u.test(arg) || arg.startsWith("--open-files-in-pager")))
+			return false;
+		if (HELPER_FREE_GIT_SUBCOMMANDS.has(subcommand)) return true;
 		if (!gitHelpersConfigured) return true;
 		return (subcommand === "log" || subcommand === "show") && GIT_HELPER_OPT_OUTS.every((flag) => rest.includes(flag));
 	}
@@ -2653,8 +2718,9 @@ function packageScriptMatch(
  */
 function groundingMatch(executable: string, args: ReadonlyArray<string>): string | null {
 	if (executable === "git") {
-		if (args[0] === "diff") return "git diff";
-		if (args[0] === "status") return "git status";
+		const subcommand = gitSubcommand(args)?.subcommand;
+		if (subcommand === "diff") return "git diff";
+		if (subcommand === "status") return "git status";
 		return null;
 	}
 	if (executable === "node") {
