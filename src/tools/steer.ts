@@ -73,15 +73,17 @@ function guide(deps: SteerToolDeps, runId: string, message: string): ToolResult 
 
 function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 	const run = deps.dispatch.getRun(runId);
-	const rootRunId = run?.lineage?.rootRunId ?? runId;
-	const assignment = deps.dispatch.assignments?.getStored(rootRunId) ?? null;
+	// The contract resolves any attempt id to its assignment. A hosted worker's published lineage root names the main
+	// run, which keys no assignment, so a hosted attempt waiting on its retry read as finished (bt-45 follow-up).
+	const assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
 	if (!run && !assignment) return { kind: "error", message: `steer: unknown run or assignment '${runId}'` };
 	if (assignment?.status === "running") {
-		deps.dispatch.abort(rootRunId);
+		const assignmentId = assignment.assignmentId;
+		deps.dispatch.abort(assignmentId);
 		return {
 			kind: "ok",
-			output: `cancellation signalled for assignment ${rootRunId}; its current attempt will finalize and no future attempt will start.`,
-			details: { action: "cancel", runId: rootRunId, assignmentId: rootRunId },
+			output: `cancellation signalled for assignment ${assignmentId}; its current attempt will finalize and no future attempt will start.`,
+			details: { action: "cancel", runId: assignmentId, assignmentId },
 		};
 	}
 	if (!run || TERMINAL_STATUSES.has(run.status)) {

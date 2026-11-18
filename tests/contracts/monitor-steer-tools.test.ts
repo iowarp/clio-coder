@@ -49,7 +49,13 @@ function controlledWorker() {
 				};
 		})(),
 	};
-	return { worker, messages, aborts: () => aborts, finish: () => resolve({ exitCode: 0, signal: null }) };
+	return {
+		worker,
+		messages,
+		aborts: () => aborts,
+		finish: () => resolve({ exitCode: 0, signal: null }),
+		failRetryably: () => resolve({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" }),
+	};
 }
 
 /** Runs belong to the session that dispatched them, and monitor and steer act as that session. */
@@ -166,6 +172,41 @@ describe("steer tool", () => {
 			await f.stop();
 		}
 	});
+
+	const hostRun = {
+		runId: "authoritative-parent",
+		lineage: { parentRunId: "ancestor", rootRunId: "authoritative-root", depth: 3, attempt: 2 },
+	};
+	for (const hosted of [false, true]) {
+		it(`cancels a ${hosted ? "hosted" : "direct"} assignment waiting on its retry by the finished attempt id`, async () => {
+			const f = await fixture(scratch);
+			try {
+				const handle = await f.contract.dispatch(f.request, undefined, hosted ? { hostRun } : undefined);
+				f.workers[0]?.failRetryably();
+				const deadline = Date.now() + 5_000;
+				while (f.contract.getRun(handle.runId)?.status === "running" || f.contract.getRun(handle.runId) === null) {
+					if (Date.now() > deadline) throw new Error("first attempt never finalized");
+					await setImmediate();
+				}
+				strictEqual(f.contract.getRun(handle.runId)?.lineage?.rootRunId, hosted ? "authoritative-root" : handle.runId);
+				strictEqual(f.contract.assignments?.getStored(handle.runId)?.status, "running");
+
+				const cancelled = okResult(await f.call(ToolNames.Steer, { run_id: handle.runId, action: "cancel" }));
+				match(cancelled.output, new RegExp(`cancellation signalled for assignment ${handle.runId}`));
+				deepStrictEqual(cancelled.details, { action: "cancel", runId: handle.runId, assignmentId: handle.runId });
+				const settleBy = Date.now() + 5_000;
+				while (f.contract.assignments?.getStored(handle.runId)?.status === "running") {
+					if (Date.now() > settleBy) throw new Error("assignment never settled");
+					await setImmediate();
+				}
+				strictEqual(f.contract.assignments?.getStored(handle.runId)?.status, "canceled");
+				await new Promise((resolve) => setTimeout(resolve, 700));
+				strictEqual(f.workers.length, 1);
+			} finally {
+				await f.stop();
+			}
+		});
+	}
 });
 
 describe("monitor tool", () => {
