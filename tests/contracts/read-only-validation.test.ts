@@ -797,6 +797,9 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("!npm test", "npm test -- -t parses"), [["npm test"], "unverified", ["npm test"]]);
 	// A line continuation separates nothing, so the continued check's red stands under its single-line name (x7-4).
 	deepStrictEqual(seal("!npm test \\\n  -- --reporter=dot"), [[], "unverified", ["npm test -- --reporter=dot"]]);
+	// A here-document body is data no continuation joins, so its quoted terminator still ends it in the check's name (S2).
+	const continued = "cat > /tmp/n.md <<'EOF'\nline one \\\nEOF\nnpm test";
+	strictEqual(classifyCall("bash", { command: continued }, { cwd: process.cwd() }).name, continued);
 	deepStrictEqual(seal("!npm test", "npm test -- --import ./x.mjs"), red);
 	deepStrictEqual(seal("npm test -- --run"), green);
 	// Every change ran before the check through `&&`, or the call held only checks, cd and plumbing.

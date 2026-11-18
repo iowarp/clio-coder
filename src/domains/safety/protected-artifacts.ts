@@ -259,12 +259,21 @@ export function detectValidationCommand(
 
 /**
  * The command's single-line form: a backslash-newline is a line continuation, not a separator, so
- * `npm test \<newline>  -- -x` is `npm test -- -x` (x7-4).
+ * `npm test \<newline>  -- -x` is `npm test -- -x` (x7-4). A here-document body is data the shell does not join here,
+ * so it stays as written, terminator line included (S2).
  */
 export function joinLineContinuations(command: string): string {
-	return command.replace(/([ \t]*)(?<=(?:^|[^\\])(?:\\\\)*)\\\n([ \t]*)/gu, (_, before: string, after: string) =>
-		before.length > 0 || after.length > 0 ? " " : "",
-	);
+	const join = (text: string) =>
+		text.replace(/([ \t]*)(?<=(?:^|[^\\])(?:\\\\)*)\\\n([ \t]*)/gu, (_, before: string, after: string) =>
+			before.length > 0 || after.length > 0 ? " " : "",
+		);
+	let joined = "";
+	let cursor = 0;
+	for (const body of cachedShellScan(command, true).bodies) {
+		joined += `${join(command.slice(cursor, body.start))}${command.slice(body.start, body.end)}`;
+		cursor = body.end;
+	}
+	return `${joined}${join(command.slice(cursor))}`;
 }
 
 /**
@@ -882,15 +891,17 @@ function removeHeredocBodies(
 				if ((doc.stripTabs ? line.replace(/^\t+/u, "") : line) === doc.word) break;
 				bodyEnd = cursor;
 			}
-			if (keepSubstitutions && !doc.quoted) substitutions.push(...heredocSubstitutions(text.slice(start, bodyEnd)));
+			if (keepSubstitutions && !doc.quoted)
+				substitutions.push(...heredocSubstitutions(text.slice(start, bodyEnd)).map((found) => found.text));
 		}
 		text = `${head.slice(0, bodyStart)}${substitutions.length > 0 ? `${substitutions.join("\n")}\n` : ""}${text.slice(cursor)}`;
 	}
 	return { text, dataOutputs: null };
 }
 
-function heredocSubstitutions(body: string): string[] {
-	const substitutions: string[] = [];
+/** The `$(...)` and backtick substitutions an unquoted here-document body runs, each with its offset in `body`. */
+function heredocSubstitutions(body: string): Array<{ start: number; text: string }> {
+	const substitutions: Array<{ start: number; text: string }> = [];
 	for (let index = 0; index < body.length; index += 1) {
 		const char = body[index];
 		if (char === "\\" && /[$`\\\n]/u.test(body[index + 1] ?? "")) {
@@ -904,7 +915,7 @@ function heredocSubstitutions(body: string): string[] {
 					? matchingBacktick(body, index)
 					: null;
 		if (close === null) continue;
-		substitutions.push(body.slice(index, close + 1));
+		substitutions.push({ start: index, text: body.slice(index, close + 1) });
 		index = close;
 	}
 	return substitutions;
@@ -3177,25 +3188,188 @@ function decodeAnsiCQuote(command: string, open: number): { value: string; end: 
 	return { value: hidden ? command.slice(open + 1, end) : value, end, hidden };
 }
 
-/** The most recent scans, so the many readers of one call's command tokenize it once (x6-7). */
-const recentScans = new Map<string, ReadonlyArray<ShellToken>>();
-const RECENT_SCAN_LIMIT = 8;
+/**
+ * A here-document body in the command text, from the line after its head through its terminator line and that line's
+ * newline, with the `$(...)` and backtick substitutions an unquoted body still runs, each at its offset.
+ */
+interface HeredocBody {
+	start: number;
+	end: number;
+	substitutions: ReadonlyArray<{ start: number; text: string }>;
+}
+
+interface ShellScan {
+	tokens: ReadonlyArray<ShellToken>;
+	bodies: ReadonlyArray<HeredocBody>;
+}
+
+/** The most recent scans, each keyed by its mode and text, so the many readers of one call's command tokenize it once (x6-7). */
+const recentScans = new Map<string, ShellScan>();
+const RECENT_SCAN_LIMIT = 16;
 
 /**
  * Literal shell words and operators only; no expansion or script execution. A scan is a pure function of the text, so
- * the last few are kept and each caller gets its own array over the shared tokens, which no reader writes to.
+ * the last few are kept and each caller gets its own array over the shared tokens, which no reader writes to. With
+ * `skipHeredocBodies`, a here-document's body is data, not commands: its `<<WORD` head and body yield no tokens but the
+ * substitutions an unquoted body runs, and every other token keeps its offset in `command` (S2, S3).
  */
-export function scanShellLike(command: string): ShellToken[] {
-	let tokens = recentScans.get(command);
-	if (tokens === undefined) {
-		tokens = scanShellText(command);
-		if (recentScans.size >= RECENT_SCAN_LIMIT) recentScans.delete(recentScans.keys().next().value as string);
-	} else recentScans.delete(command);
-	recentScans.set(command, tokens);
-	return [...tokens];
+export function scanShellLike(command: string, skipHeredocBodies = false): ShellToken[] {
+	return [...cachedShellScan(command, skipHeredocBodies).tokens];
 }
 
-function scanShellText(command: string): ShellToken[] {
+function cachedShellScan(command: string, skipHeredocBodies: boolean): ShellScan {
+	if (skipHeredocBodies && !command.includes("<<")) return cachedShellScan(command, false);
+	const key = `${skipHeredocBodies ? "b" : "t"}${command}`;
+	let scan = recentScans.get(key);
+	if (scan === undefined) {
+		scan = skipHeredocBodies ? scanSkippingHeredocBodies(command) : { tokens: scanShellText(command), bodies: [] };
+		if (recentScans.size >= RECENT_SCAN_LIMIT) recentScans.delete(recentScans.keys().next().value as string);
+	} else recentScans.delete(key);
+	recentScans.set(key, scan);
+	return scan;
+}
+
+/** Commands that read a here-document as shell commands, so its body stays commands to every reader. */
+const HEREDOC_SHELL_READERS: ReadonlySet<string> = new Set([
+	...BARE_WRAPPER_SHELLS,
+	"ksh",
+	"mksh",
+	"ash",
+	"busybox",
+	"source",
+	".",
+	"eval",
+	"exec",
+	"xargs",
+]);
+
+/**
+ * Whether the here-document at `operatorIndex` may be read as shell: a stage of its pipeline is a shell, a word no
+ * literal names, or carries a substitution (`> >(sh)`).
+ */
+function heredocFeedsShell(tokens: ReadonlyArray<ShellToken>, operatorIndex: number): boolean {
+	const ends = (token: ShellToken | undefined, previous: ShellToken | undefined) =>
+		token?.operator === true &&
+		COMMAND_SEPARATORS.has(token.value) &&
+		token.value !== "|" &&
+		!(token.value === "&" && previous?.value === "|" && previous.end === token.start);
+	let start = operatorIndex;
+	while (start > 0 && !ends(tokens[start - 1], tokens[start - 2])) start -= 1;
+	let end = operatorIndex;
+	while (end < tokens.length && !ends(tokens[end], tokens[end - 1])) end += 1;
+	const pipeline = tokens.slice(start, end);
+	if (pipeline.some((token) => (token.substitutions?.length ?? 0) > 0 || token.hiddenContent === true)) return true;
+	return splitSegments(pipeline).some((stage) => {
+		const argv = shellCommandArguments(stage);
+		const index = commandTokenIndex(argv);
+		if (index === null) return false;
+		const word = argv[index] ?? "";
+		return /[$`]/u.test(word) || HEREDOC_SHELL_READERS.has(basenameToken(word));
+	});
+}
+
+/** An arithmetic `(( x << 2 ))` shifts; it opens no here-document. */
+function insideArithmetic(tokens: ReadonlyArray<ShellToken>, operatorIndex: number): boolean {
+	for (let index = operatorIndex - 1; index > 0; index -= 1) {
+		const token = tokens[index] as ShellToken;
+		const previous = tokens[index - 1] as ShellToken;
+		if (token.value === "(" && previous.value === "(" && previous.operator && previous.end === token.start) return true;
+		if (token.operator && COMMAND_SEPARATORS.has(token.value) && token.value !== "(") return false;
+	}
+	return false;
+}
+
+/**
+ * {@link scanShellLike} with here-document bodies skipped. A body starts on the line after its head and ends at the
+ * line that is exactly its word (tabs stripped first for `<<-`), or at the end of the command, as in bash; an unquoted
+ * word's body joins its backslash-newlines before that comparison, a quoted one's never does. Several here-documents
+ * on one line take their bodies in order. A head bash rejects, one whose pipeline may read it as shell
+ * ({@link heredocFeedsShell}), or a command that may redefine what reads it (a function, alias or PATH change) leaves
+ * that body and every later one read as commands.
+ */
+function scanSkippingHeredocBodies(command: string): ShellScan {
+	const bodies: HeredocBody[] = [];
+	const heads = new Set<number>();
+	const shifts = new Set<number>();
+	for (let pass = 0; pass < MAX_HEREDOCS; pass += 1) {
+		const tokens = scanShellText(command, bodies);
+		const first = tokens.findIndex(
+			(token) => token.operator && token.value === "<<" && !heads.has(token.start) && !shifts.has(token.start),
+		);
+		if (first === -1) break;
+		const lineEnd = tokens.findIndex(
+			(token, index) => index > first && token.operator && token.value === ";" && command[token.start] === "\n",
+		);
+		const docs: Array<{ word: string; stripTabs: boolean; quoted: boolean; head: number[] }> = [];
+		let readable = true;
+		for (let index = first; index < (lineEnd === -1 ? tokens.length : lineEnd); index += 1) {
+			const operator = tokens[index];
+			if (operator === undefined || !operator.operator || operator.value !== "<<") continue;
+			if (insideArithmetic(tokens, index)) {
+				shifts.add(operator.start);
+				continue;
+			}
+			const head = [operator.start];
+			let word = tokens[index + 1];
+			let stripTabs = false;
+			if (word !== undefined && !word.operator && word.start === operator.end && command[word.start] === "-") {
+				stripTabs = true;
+				if (word.value === "-") {
+					head.push(word.start);
+					word = tokens[index + 2];
+				}
+			}
+			if (word === undefined || word.operator || heredocFeedsShell(tokens, index)) {
+				readable = false;
+				break;
+			}
+			head.push(word.start);
+			const delimiter = stripTabs && command[word.start] === "-" ? word.value.slice(1) : word.value;
+			docs.push({ word: delimiter, stripTabs, quoted: word.quoted, head });
+		}
+		if (!readable) break;
+		for (const doc of docs) for (const start of doc.head) heads.add(start);
+		const newline = lineEnd === -1 ? undefined : tokens[lineEnd];
+		if (newline === undefined || docs.length === 0) continue;
+		const start = newline.start + 1;
+		let cursor = start;
+		const substitutions: Array<{ start: number; text: string }> = [];
+		for (const doc of docs) {
+			const bodyStart = cursor;
+			let bodyEnd = cursor;
+			while (cursor < command.length) {
+				bodyEnd = cursor;
+				let line = "";
+				for (;;) {
+					const lineBreak = command.indexOf("\n", cursor);
+					const physical = command.slice(cursor, lineBreak === -1 ? command.length : lineBreak);
+					cursor = lineBreak === -1 ? command.length : lineBreak + 1;
+					const continued = !doc.quoted && lineBreak !== -1 && /(?:^|[^\\])(?:\\\\)*\\$/u.test(physical);
+					line += continued ? physical.slice(0, -1) : physical;
+					if (!continued) break;
+				}
+				if ((doc.stripTabs ? line.replace(/^\t+/u, "") : line) === doc.word) break;
+				bodyEnd = cursor;
+			}
+			if (!doc.quoted)
+				for (const found of heredocSubstitutions(command.slice(bodyStart, bodyEnd)))
+					substitutions.push({ start: bodyStart + found.start, text: found.text });
+		}
+		bodies.push({ start, end: cursor, substitutions });
+	}
+	// A function, alias or PATH change outside the bodies may turn `cat` into a shell, so nothing there is data.
+	let outside = "";
+	let cursor = 0;
+	for (const body of bodies) {
+		outside += command.slice(cursor, body.start);
+		cursor = body.end;
+	}
+	outside += command.slice(cursor);
+	if (/\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(outside)) return cachedShellScan(command, false);
+	return { tokens: scanShellText(command, bodies).filter((token) => !heads.has(token.start)), bodies };
+}
+
+function scanShellText(command: string, bodies: ReadonlyArray<HeredocBody> = []): ShellToken[] {
 	const tokens: ShellToken[] = [];
 	let current = "";
 	let wordStart: number | null = null;
@@ -3203,6 +3377,7 @@ function scanShellText(command: string): ShellToken[] {
 	let hiddenContent = false;
 	let ansiCQuoted = false;
 	let quote: "'" | '"' | null = null;
+	let nextBody = 0;
 
 	let substitutions: string[] = [];
 	const pushCurrent = (end: number): void => {
@@ -3233,6 +3408,19 @@ function scanShellText(command: string): ShellToken[] {
 	for (let index = 0; index < command.length; index += 1) {
 		const char = command[index];
 		if (char === undefined) continue;
+		while ((bodies[nextBody]?.start ?? command.length) < index) nextBody += 1;
+		const body = quote === null && bodies[nextBody]?.start === index ? bodies[nextBody] : undefined;
+		if (body !== undefined) {
+			pushCurrent(index);
+			for (const substitution of body.substitutions) {
+				for (const token of scanShellText(substitution.text))
+					tokens.push({ ...token, start: token.start + substitution.start, end: token.end + substitution.start });
+				tokens.push({ value: ";", operator: true, quoted: false, start: substitution.start, end: substitution.start });
+			}
+			nextBody += 1;
+			index = body.end - 1;
+			continue;
+		}
 		if (quote !== null) {
 			if (char === quote) {
 				quote = null;
