@@ -82,6 +82,12 @@ export function responseModelIdObservationFromRecord(
 	return { state: "legacy-difference-only", differingModelId: nonEmptyString(record.responseModel) };
 }
 
+/** The response's model id only when it is not the requested one; a stream that echoes the requested id differs in nothing. */
+export function differingResponseModelId(requestedModelId: unknown, responseModelId: unknown): string | null {
+	const response = nonEmptyString(responseModelId);
+	return response === null || response === nonEmptyString(requestedModelId) ? null : response;
+}
+
 /** Model id used for accounting without claiming more than the observation supports. */
 export function attributedModelId(
 	observation: ResponseModelIdObservation,

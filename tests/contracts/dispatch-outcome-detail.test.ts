@@ -85,6 +85,8 @@ describe("exhausted result contract detail", () => {
 			stopReason: "stop",
 			usage,
 			responseId: "resp-1",
+			// The stream echoed the requested id, which is no difference to record.
+			responseModel: "gpt-4o",
 			...origin,
 		};
 		const [repair] = resultContractRepairMessages(
@@ -97,12 +99,15 @@ describe("exhausted result contract detail", () => {
 			stopReason: "error",
 			errorMessage: "provider closed the stream before the first chunk",
 			usage: { ...usage, input: 0, output: 0, totalTokens: 0 },
+			responseModel: "gpt-4o-2024-08-06",
 			...origin,
 		};
 		const receipt = await exhaustedRun(REASON, [answered, repair, failed]);
 		const rows = receipt.upstreamResponses ?? [];
 		strictEqual(rows.length, 2, JSON.stringify(rows));
 		strictEqual(rows[0]?.providerResponseId, "resp-1");
+		strictEqual(rows[0]?.differingResponseModelId, null);
+		strictEqual(rows[1]?.differingResponseModelId, "gpt-4o-2024-08-06");
 		strictEqual(rows[0]?.stopReason, "stop");
 		strictEqual(rows[1]?.providerResponseId, null);
 		strictEqual(rows[1]?.stopReason, "error");
