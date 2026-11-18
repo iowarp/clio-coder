@@ -215,7 +215,7 @@ function isHostInsertRestoration(value: unknown): value is HostInsertRestoration
 	);
 }
 
-function isHostInsertData(value: unknown): value is HostInsertData {
+export function isHostInsertData(value: unknown): value is HostInsertData {
 	if (!isRecord(value) || value.version !== 1 || !isString(value.id)) return false;
 	if (value.retract === true) return true;
 	const place = value.place;

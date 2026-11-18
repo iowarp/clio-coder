@@ -191,6 +191,7 @@ import {
 	runDraftWithSamplerFallback,
 } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
+import { createHostInserts } from "./host-inserts.js";
 import { loopGuardContinuationDetail, TOOL_LOCK_RESET_DETAIL } from "./loop-guard-interrupt.js";
 import { createMessagePath } from "./message-path.js";
 import type { NoticeSource } from "./notice-source.js";
@@ -1527,8 +1528,14 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 	});
 
+	const hostInserts = createHostInserts({
+		session: deps.session,
+		readSessionEntries: deps.readSessionEntries,
+		leaf: () => state.lastTurnId,
+	});
 	const middleware = createTurnMiddleware({
 		memoryContentGuard: deps.memoryCommitBridge?.isContentCurrent,
+		hostInserts,
 		state,
 		middleware: deps.middleware,
 		toolRegistry: deps.toolRegistry,
@@ -1595,6 +1602,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		return budgetFold.current;
 	};
 	const context = createTurnContext({
+		hostInserts,
 		isTurnActive: () => turnActive,
 		turnSignal: () => submitOwner?.signal,
 		standingTurnConstraints: () => sessionToolLimits,
@@ -1753,6 +1761,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	const persistence = createTurnPersistence({
+		hostInserts,
 		getToolOwner: (name) => deps.toolRegistry?.get(name as import("../core/tool-names.js").ToolName)?.sourceInfo?.owner,
 		state,
 		session: deps.session,
@@ -1917,6 +1926,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	/** A stop waiting for the running round's tool batch to settle (F-C16); cleared when the submit settles. */
 	let boundaryStop: ChatCancelOptions | null = null;
 	const turnRuntime = createTurnRuntime({
+		hostInserts,
 		onMemoryRequestSubmitted: deps.onMemoryRequestSubmitted,
 		turnIdentity: () => submitGeneration,
 		interactiveGuidance: deps.interactiveGuidance === true,
@@ -3583,7 +3593,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				const turnIndex = operatorTurnIndex(userTurnId ?? undefined);
 				// A continuation is a synthetic user turn, which the count skips.
 				if (options.requestContinuation !== true) operatorTurnsBefore = turnIndex + 1;
-				context.installMemoryRestoration(agentRuntime, submittedText);
+				context.installMemoryRestoration(agentRuntime, submittedText, userTurnId ?? undefined);
 				context.commitMemoryTurn(agentRuntime);
 				// An interrupt was submitted while a run was active, so no caller drew
 				// it in the transcript; render it here, after the cancel notice and the

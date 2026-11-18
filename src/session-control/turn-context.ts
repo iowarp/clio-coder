@@ -163,6 +163,7 @@ import type { SessionContract } from "../domains/session/contract.js";
 import {
 	type CompactionSummaryEntry,
 	type CompactionTrigger,
+	type HostInsertRecord,
 	mainSkillContextState,
 	type SessionEntry,
 	withProviderCheckpointMeasurements,
@@ -197,6 +198,7 @@ import {
 } from "./chat-loop-messages.js";
 import { coldCacheNoticeText } from "./cold-reasons.js";
 import { footerTokens, renderCompactionSummaryLine } from "./compaction-lines.js";
+import type { HostInserts } from "./host-inserts.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
@@ -220,6 +222,8 @@ export interface TurnContextDeps {
 	 */
 	standingTurnConstraints?: () => TurnConstraints | undefined;
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
+	/** Durable host inserts: pinned deltas and memory restorations, and the re-issue a checkpoint owes them. */
+	hostInserts?: HostInserts | undefined;
 	interactiveGuidance?: boolean;
 	/** An ACP client that advertised interviews: ask_user guidance without the TUI-only demo tips. */
 	operatorInterviews?: boolean;
@@ -331,7 +335,8 @@ export interface TurnContext {
 		kind: SuccessfulMemoryContextCommit["kind"],
 		outcome: SuccessfulMemoryContextCommit["outcome"],
 	): void;
-	installMemoryRestoration(runtime: AgentRuntime, pendingUserText?: string): boolean;
+	/** `beforeTurnId` is the submitted user row the install renders ahead of; absent, it follows the newest row. */
+	installMemoryRestoration(runtime: AgentRuntime, pendingUserText?: string, beforeTurnId?: string): boolean;
 	/** Prepare an attempt before preflight; rejected attempts never freeze the next submit. */
 	prepareMemoryTurn(
 		runtime: AgentRuntime,
@@ -2546,9 +2551,36 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			});
 		}
 	};
-	const installMemoryRestoration: TurnContext["installMemoryRestoration"] = (runtime, pendingText) => {
+	/**
+	 * The restoration protocol (SPEC §1.3). The install is a durable host insert,
+	 * so an install that survives a failed attempt is found again, never doubled,
+	 * and one the model already read is never offered a second time.
+	 */
+	const installMemoryRestoration: TurnContext["installMemoryRestoration"] = (runtime, pendingText, beforeTurnId) => {
 		const bridge = deps.memoryCommitBridge;
 		if (!bridge || !bindMemoryScope()) return false;
+		// An install an earlier process wrote has no offer here, so it stays as delivered text and is only journaled.
+		for (const prior of deps.hostInserts?.inherited("memory-restoration") ?? []) {
+			if (prior.restoration)
+				bridge.noteInheritedRestoration?.(prior.restoration.commitId, prior.restoration.citedEntryIds);
+		}
+		const inserts = deps.hostInserts;
+		// Navigation or a stopped turn voided the offer behind an install no request carried: acknowledgement
+		// would refuse it, so it is undone on both sides under its original owner.
+		const authority = bridge.captureMemoryAuthority();
+		for (const prior of inserts?.onPath() ?? []) {
+			const held = prior.restoration;
+			if (
+				prior.source === "memory-restoration" &&
+				held &&
+				inserts?.isUnsent(prior.id) &&
+				(!authority ||
+					held.sessionId !== authority.scope.sessionId ||
+					held.branchAnchorTurnId !== authority.scope.branchAnchorTurnId ||
+					held.generation !== authority.stamp.generation)
+			)
+				inserts.retract(prior, runtime);
+		}
 		const entries = activeEntries();
 		const latest = findLastEntry(
 			entries,
@@ -2571,17 +2603,61 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bridge.acknowledgeRestoration(offer);
 			return false;
 		}
-		const message: AgentMessage = {
-			role: "user",
-			content: `<system-reminder>\n${offer.message}\n</system-reminder>`,
-			timestamp: Date.now(),
+		if (!bridge.canAcknowledgeRestoration(offer)) return false;
+		const content = `<system-reminder>\n${offer.message}\n</system-reminder>`;
+		const restoration = {
+			installId: createHash("sha256")
+				.update(
+					JSON.stringify([
+						offer.scope.sessionId,
+						offer.scope.branchAnchorTurnId,
+						offer.commitId,
+						content,
+						offer.citedEntryIds,
+					]),
+				)
+				.digest("hex"),
+			sessionId: offer.scope.sessionId,
+			branchAnchorTurnId: offer.scope.branchAnchorTurnId,
+			commitId: offer.commitId,
+			generation: offer.authority.generation,
+			citedEntryIds: [...offer.citedEntryIds],
 		};
-		const cost = estimateAgentMessageTokens(message);
-		if (!requestFits((view.inputTokens ?? Infinity) + cost, view.outputReserveTokens, view.effectiveWindow)) return false;
-		const prior = [...runtime.agent.state.messages];
-		replaceEngineMessages(runtime.agent, [...prior, message]);
+		let install: HostInsertRecord | null = null;
+		for (const prior of inserts?.onPath() ?? []) {
+			const held = prior.restoration;
+			if (
+				prior.source !== "memory-restoration" ||
+				!held ||
+				held.sessionId !== restoration.sessionId ||
+				held.branchAnchorTurnId !== restoration.branchAnchorTurnId ||
+				held.commitId !== restoration.commitId ||
+				held.generation !== restoration.generation
+			)
+				continue;
+			if (held.installId === restoration.installId) install = prior;
+			else if (inserts?.isUnsent(prior.id)) inserts.retract(prior, runtime);
+			else {
+				// The model already read restoration text for this commit; a second install would repeat it.
+				bridge.releaseRestoration(offer);
+				return false;
+			}
+		}
+		let pushed: AgentMessage | null = null;
+		// Present, its cost is already in the estimate; absent, it is pushed from the record. Fit is charged once.
+		if (install) inserts?.ensureLive(runtime, install);
+		else {
+			pushed = { role: "user", content, timestamp: Date.now() };
+			const cost = estimateAgentMessageTokens(pushed);
+			if (!requestFits((view.inputTokens ?? Infinity) + cost, view.outputReserveTokens, view.effectiveWindow))
+				return false;
+			const options = { restoration, ...(beforeTurnId !== undefined ? { before: beforeTurnId } : {}) };
+			if (inserts) install = inserts.insert(runtime, "memory-restoration", [pushed], options);
+			else runtime.agent.state.messages.push(pushed);
+		}
 		if (!bridge.acknowledgeRestoration(offer)) {
-			replaceEngineMessages(runtime.agent, prior);
+			if (install) inserts?.retract(install, runtime);
+			else runtime.agent.state.messages = runtime.agent.state.messages.filter((item) => item !== pushed);
 			return false;
 		}
 		refreshLiveBudget(pendingText);
@@ -3417,16 +3493,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const delta = pinnedDelta(agentRuntime);
 			if (delta.length === 0) return false;
 			// A context-only tail, like a deferred reminder: the cached prefix keeps its bytes (#423).
-			agentRuntime.agent.state.messages.push({ role: "user", content: systemReminderBlock(delta), timestamp: Date.now() });
+			const message: AgentMessage = { role: "user", content: systemReminderBlock(delta), timestamp: Date.now() };
+			if (deps.hostInserts) deps.hostInserts.insert(agentRuntime, "pinned", [message]);
+			else agentRuntime.agent.state.messages.push(message);
 			return true;
 		},
 
 		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal, contextChanged = false) {
 			if (signal?.aborted || (!contextChanged && !toolResultTail(agentRuntime))) return undefined;
-			// A background reminder has its own middleware receipt, not a user
-			// ledger turn. Preserve its newly appended context tail if compaction
-			// rebuilds messages from the ledger, and count it in both estimates.
-			const reminder = contextChanged ? agentRuntime.agent.state.messages.at(-1) : undefined;
+			// A host tail appended before this guard is a durable insert: a compaction
+			// that rebuilds the messages re-issues it after the checkpoint when the
+			// cut took its anchor, so the rebuild itself carries it.
 			// The tool batch appended results the last publication predates, and the
 			// guard is about to decide on them. Publish before that inspection, not
 			// after it, from the same history observation and estimate it decides on.
@@ -3465,9 +3542,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 			}
 
-			if (reminder && !agentRuntime.agent.state.messages.includes(reminder)) {
-				agentRuntime.agent.state.messages.push(reminder);
-			}
 			// The mid-run settled tool-batch boundary: whatever the guard did or
 			// declined to do, this is the context the continuation will send. Without
 			// a compaction attempt the guard never yielded or touched the messages,

@@ -43,7 +43,10 @@ export interface CompactionEvent {
 
 /** What the fold reads and writes of the turn context that owns it. */
 export interface ContextFoldPort {
-	deps: Pick<TurnContextDeps, "session" | "readSessionEntries" | "planEviction" | "bus" | "emitNotice" | "middleware">;
+	deps: Pick<
+		TurnContextDeps,
+		"session" | "readSessionEntries" | "planEviction" | "bus" | "emitNotice" | "middleware" | "hostInserts"
+	>;
 	state: TurnContextState;
 	syncCodexConfiguration(runtime: AgentRuntime): void;
 	observeHistory(agentRuntime: AgentRuntime): MessageListDigests;
@@ -431,6 +434,8 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 	): Promise<{ tokensBefore: number; tokensAfter: number }> => {
 		const { agentRuntime, compactionThreshold, snapshotMetadata, preCompactSnapshot, pendingUserText, trigger } = input;
 		port.resetCacheCallBaseline();
+		// Durable before the rebuild, so render places what no attempt has carried yet after the checkpoint.
+		deps.hostInserts?.reissueUnsent();
 		refreshAgentMessagesFromSession(agentRuntime);
 		if (port.hasPostureGeneration()) {
 			await port.ensureSessionPrompt(agentRuntime);
@@ -477,6 +482,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 	/** After a step checkpoint is on the ledger: the same publication, with no prompt recompile. */
 	const publishStepCheckpoint = (input: StepPublicationInput): { tokensAfter: number } => {
 		const { agentRuntime, before, threshold, tokensBefore } = input;
+		deps.hostInserts?.reissueUnsent();
 		refreshAgentMessagesFromSession(agentRuntime);
 		port.dropReconciledAnchor();
 		const after = port.captureRuntimeContextSnapshot(agentRuntime, state.activeUserTurnId || "compaction", threshold);

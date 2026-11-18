@@ -345,6 +345,8 @@ export class MemoryRuntime implements MemoryObservationCommands {
 				if (accepted) this.#event("restoration-delivered", { commitId: offer.commitId, count: offer.citedEntryIds.length });
 				return accepted;
 			},
+			noteInheritedRestoration: (commitId, citedEntryIds) =>
+				this.#event("restoration-inherited", { commitId, count: citedEntryIds.length }),
 			reset: () => {
 				original.reset();
 				this.#resetObservations();

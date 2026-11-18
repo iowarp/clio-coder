@@ -8,6 +8,7 @@
  */
 
 import { createHostPolicyMessage } from "../core/host-policy-message.js";
+import { markHostAuthored } from "../core/message-accounting.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
@@ -16,11 +17,18 @@ import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
 	CompactionSummaryEntry,
+	HostInsertRecord,
 	MessageEntry,
 	PreservedSkillContext,
 	SessionEntry,
 } from "../domains/session/entries.js";
-import { decisionRef, latestSkillContextState, verifiedSkillContextCheckpoint } from "../domains/session/entries.js";
+import {
+	decisionRef,
+	HOST_INSERT_CUSTOM_TYPE,
+	isHostInsertData,
+	latestSkillContextState,
+	verifiedSkillContextCheckpoint,
+} from "../domains/session/entries.js";
 import { HANDOFF_SEED_CUSTOM_TYPE, handoffSeedContextText, isHandoffSeedData } from "../domains/session/handoff.js";
 import { foldTaskBoard } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
@@ -873,6 +881,101 @@ export interface ReplayRender {
 	sourceIds: Array<string | null>;
 }
 
+/**
+ * Whether a ledger row becomes a replay element (SPEC §1.3). The host-insert writer picks its anchor with this and
+ * render places inserts with it, so the two cannot disagree: a failed assistant and the synthetic terminal-tool row
+ * render nothing and are never anchors.
+ */
+export function rowRenders(entry: SessionEntry): boolean {
+	switch (entry.kind) {
+		case "message":
+			if (entry.role === "assistant")
+				return !messageFailure(entry) && payloadObject(entry.payload)?.terminalToolResult !== true;
+			return true;
+		case "bashExecution":
+			return !entry.excludeFromContext;
+		case "branchSummary":
+		case "compactionSummary":
+			return true;
+		case "custom":
+			return entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data);
+		default:
+			return false;
+	}
+}
+
+/** The host-insert records on a path, in record order, without the ones a later retraction withdrew. */
+export function readHostInserts(entries: ReadonlyArray<SessionEntry>): HostInsertRecord[] {
+	const records: HostInsertRecord[] = [];
+	const retracted = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind !== "custom" || entry.customType !== HOST_INSERT_CUSTOM_TYPE || !isHostInsertData(entry.data))
+			continue;
+		if ("retract" in entry.data) retracted.add(entry.data.id);
+		else records.push(entry.data);
+	}
+	return records.filter((record) => !retracted.has(record.id));
+}
+
+function insertAnchor(record: HostInsertRecord): string {
+	return "after" in record.place ? record.place.after : record.place.before;
+}
+
+/** Inserts whose anchor renders in this replay window, grouped by anchor, and the rows they stand for. */
+function visibleHostInserts(replayEntries: ReadonlyArray<SessionEntry>): {
+	before: Map<string, HostInsertRecord[]>;
+	after: Map<string, HostInsertRecord[]>;
+	replaced: Set<string>;
+} {
+	const rendering = new Set(replayEntries.filter(rowRenders).map((entry) => entry.turnId));
+	const visible = readHostInserts(replayEntries).filter((record) => rendering.has(insertAnchor(record)));
+	const replaced = new Set(visible.flatMap((record) => record.replaces ?? []));
+	const before = new Map<string, HostInsertRecord[]>();
+	const after = new Map<string, HostInsertRecord[]>();
+	for (const record of visible) {
+		const anchor = insertAnchor(record);
+		if (replaced.has(anchor)) continue;
+		const group = "after" in record.place ? after : before;
+		group.set(anchor, [...(group.get(anchor) ?? []), record]);
+	}
+	return { before, after, replaced };
+}
+
+/** A fresh copy of the recorded bytes; a recovery's assistant stays host-authored, as the live one was. */
+function hostInsertElement(record: HostInsertRecord, element: AgentMessage): AgentMessage {
+	const copy = structuredClone(element);
+	return record.source.endsWith("-recovery") && copy.role === "assistant" ? markHostAuthored(copy) : copy;
+}
+
+/**
+ * The newest row the model would read on this path, in render order: after a checkpoint with a kept suffix that is
+ * the last kept row, not the checkpoint, because render places the suffix after the checkpoint's carry.
+ */
+export function newestRenderedRow(
+	turns: ReadonlyArray<SessionEntry>,
+	leaf: string | null,
+	exclude: ReadonlySet<string> = new Set(),
+): string | null {
+	const replayEntries = selectReplayEntries(turns, leaf !== null ? { activeLeafTurnId: leaf } : {});
+	const { replaced } = visibleHostInserts(replayEntries);
+	for (let i = replayEntries.length - 1; i >= 0; i -= 1) {
+		const entry = replayEntries[i];
+		if (entry && rowRenders(entry) && !replaced.has(entry.turnId) && !exclude.has(entry.turnId)) return entry.turnId;
+	}
+	return null;
+}
+
+/** Whether a record's anchor renders on this path, which is whether the record itself renders. */
+export function hostInsertVisible(
+	turns: ReadonlyArray<SessionEntry>,
+	leaf: string | null,
+	record: HostInsertRecord,
+): boolean {
+	const replayEntries = selectReplayEntries(turns, leaf !== null ? { activeLeafTurnId: leaf } : {});
+	const { before, after } = visibleHostInserts(replayEntries);
+	return [...before.values(), ...after.values()].some((group) => group.some((item) => item.id === record.id));
+}
+
 export function buildReplayAgentMessagesFromTurns(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
@@ -920,7 +1023,15 @@ export function renderReplayElements(
 				entry.role === "user" &&
 				(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true,
 		);
+	const inserts = visibleHostInserts(replayEntries);
+	const placeInserts = (records: ReadonlyArray<HostInsertRecord> | undefined): void => {
+		for (const record of records ?? []) {
+			for (const element of record.elements) out.push(hostInsertElement(record, element), record.id);
+		}
+	};
 	for (const entry of replayEntries) {
+		if (inserts.replaced.has(entry.turnId)) continue;
+		placeInserts(inserts.before.get(entry.turnId));
 		const policy = postureUpdates.get(entry.turnId);
 		if (entry.kind === "message" && entry.role === "user" && policy)
 			out.push(
@@ -1078,6 +1189,7 @@ export function renderReplayElements(
 			case "continuityCommit":
 				break;
 		}
+		placeInserts(inserts.after.get(entry.turnId));
 	}
 	// No compaction summary in the replay window: an eviction-only or
 	// continuity-only outcome still has a note to carry, so it lands at the end

@@ -15,6 +15,7 @@ import { createRequestStructures } from "../../src/engine/request-structure.js";
 import { openSession } from "../../src/engine/session.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { lastToolCallOf } from "../../src/session-control/continuation-tool-call.js";
+import { createHostInserts } from "../../src/session-control/host-inserts.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import {
 	agedToolCallIdsFromEntries,
@@ -652,7 +653,7 @@ describe("W1 and W2 (F6 -> CF-4): host inserts are records", () => {
 		return start < 0 || end < start ? [] : elements.slice(start, end + 1);
 	};
 
-	it("W1: mid-turn inserts survive a rebuild and a reopen", { todo: "F6 -> CF-4", timeout: 60_000 }, async (t) => {
+	it("W1: mid-turn inserts survive a rebuild and a reopen", { timeout: 60_000 }, async (t) => {
 		const server = await startCaptureServer(script);
 		t.after(() => server.close());
 		const { harness, pins, id } = await liveTurn(server);
@@ -675,7 +676,6 @@ describe("W1 and W2 (F6 -> CF-4): host inserts are records", () => {
 	});
 
 	it("W2: the kept element sequence with inserts is the same live, rebuilt and reopened", {
-		todo: "F6 -> CF-4",
 		timeout: 60_000,
 	}, async (t) => {
 		const server = await startCaptureServer(script);
@@ -697,6 +697,131 @@ describe("W1 and W2 (F6 -> CF-4): host inserts are records", () => {
 			await reopened.close();
 		}
 		deepStrictEqual(kept(server.requests.at(-1)), expected, "a reopen keeps it too");
+	});
+});
+
+describe("W2 (F6 -> CF-4): the full element sequence with inserts", () => {
+	const REMINDER: AgentMessage = { role: "user", content: "<system-reminder>pending</system-reminder>", timestamp: 1 };
+	const RESTORATION: AgentMessage = {
+		role: "user",
+		content: "<system-reminder>restored</system-reminder>",
+		timestamp: 2,
+	};
+	const flat = (messages: ReadonlyArray<AgentMessage>): string[] =>
+		messages.map((item) => {
+			const content = (item as { content?: unknown }).content;
+			const blocks = Array.isArray(content) ? (content as Array<{ type?: string; text?: string }>) : [];
+			const text =
+				typeof content === "string"
+					? content
+					: blocks.every((block) => block.type === "text")
+						? blocks.map((block) => block.text).join("")
+						: JSON.stringify(content);
+			return `${item.role}:${text}`;
+		});
+	const once = (elements: string[], insert: AgentMessage): number => {
+		const [text] = flat([insert]);
+		strictEqual(elements.filter((element) => element === text).length, 1, `${text} renders once`);
+		return elements.indexOf(text ?? "");
+	};
+	/** One session the way the loop keeps it: each row converted onto the live history as it is written. */
+	function ledger() {
+		const session: SessionContract = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		const id = session.create({ cwd: process.cwd() }).id;
+		let leaf: string | null = null;
+		const runtime = { agent: { state: { messages: [] as AgentMessage[] } } };
+		const inserts = createHostInserts({ session, readSessionEntries: () => session.readEntries(), leaf: () => leaf });
+		const render = (entries: ReadonlyArray<SessionEntry>) =>
+			flat(buildModelReplayAgentMessagesFromTurns(entries, leaf ? { activeLeafTurnId: leaf } : {}));
+		const write = (...rows: MessageEntry[]) => {
+			for (const row of rows) session.appendEntry(row as SessionEntryInput);
+			leaf = rows.at(-1)?.turnId ?? leaf;
+		};
+		const row = (...rows: MessageEntry[]) => {
+			write(...rows);
+			runtime.agent.state.messages.push(...buildModelReplayAgentMessagesFromTurns(rows));
+		};
+		/** A checkpoint commits: the shared publication re-issues, then the live history is rebuilt from the ledger. */
+		const checkpoint = (kept: string | null) => {
+			session.appendEntry({
+				kind: "compactionSummary",
+				turnId: "cp",
+				parentTurnId: kept ?? leaf,
+				summary: "the checkpoint",
+				tokensBefore: 10_000,
+				firstKeptTurnId: kept ?? "",
+				messagesSummarized: 4,
+				isSplitTurn: false,
+				trigger: kept === null ? "step" : "force",
+			} as SessionEntryInput);
+			inserts.reissueUnsent();
+			runtime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(
+				session.readEntries(),
+				leaf ? { activeLeafTurnId: leaf } : {},
+			);
+		};
+		const live = () => flat(runtime.agent.state.messages);
+		const rebuilt = () => render(session.readEntries());
+		const reopened = async () => {
+			await session.close();
+			return render(openSession(id).turns() as SessionEntry[]);
+		};
+		return { inserts, runtime, row, write, checkpoint, live, rebuilt, reopened };
+	}
+	const assistant = (turnId: string, parent: string, text: string) =>
+		message(turnId, parent, "assistant", { content: [{ type: "text", text }], stopReason: "stop" });
+	const user = (turnId: string, parent: string | null, text: string) => message(turnId, parent, "user", { text });
+
+	for (const cut of ["a full cut", "a kept suffix"] as const)
+		for (const sent of [false, true])
+			it(`after ${cut}, ${sent ? "after a send with no reply" : "before send"}: live, rebuilt and reopened agree`, async () => {
+				const l = ledger();
+				l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+				l.row(user("u2", "a1", "second"));
+				l.inserts.insert(l.runtime, "reminder", [REMINDER]);
+				deepStrictEqual(l.rebuilt(), l.live(), "the record renders where the live history holds it");
+				if (sent) l.inserts.dispatched();
+				l.checkpoint(cut === "a full cut" ? null : "u2");
+				const rebuilt = l.rebuilt();
+				deepStrictEqual(l.live(), rebuilt, "the rebuilt live history is the render");
+				if (cut === "a full cut" && sent) {
+					// The request that carried it is summarized history now; a portable summary does not carry inserts.
+					ok(!rebuilt.some((element) => element === flat([REMINDER])[0]), "a sent insert is not re-issued");
+				} else {
+					const at = once(rebuilt, REMINDER);
+					strictEqual(at, rebuilt.length - 1, "it stays at the tail, after the checkpoint or its kept anchor");
+					if (cut === "a kept suffix") strictEqual(rebuilt[at - 1], "user:second");
+				}
+				l.row(user("u3", "u2", "after"));
+				const next = l.live();
+				deepStrictEqual(l.rebuilt(), next, "the next request renders as live");
+				deepStrictEqual(await l.reopened(), next, "and a reopen renders the same");
+			});
+
+	it("one submit with restoration and queued steering: live, rebuilt and reopened agree", async () => {
+		const l = ledger();
+		l.row(user("u1", null, "first"), assistant("a1", "u1", "one"));
+		// The user row is written, the restoration is installed before it, then the engine takes the prompt.
+		const prompt = user("u2", "a1", "second");
+		l.write(prompt);
+		l.inserts.insert(l.runtime, "memory-restoration", [RESTORATION], { before: "u2" });
+		l.runtime.agent.state.messages.push(...buildModelReplayAgentMessagesFromTurns([prompt]));
+		l.inserts.dispatched();
+		l.row(readCall("a2", "u2", "c2", "src/a.ts"), readResult("r2", "a2", "c2", "body"));
+		l.inserts.insert(l.runtime, "reminder", [REMINDER]);
+		// The steering the operator queued lands after the tail reminder, then the reply.
+		l.row(user("s", "r2", "also check b"), assistant("a3", "s", "done"));
+		const live = l.live();
+		deepStrictEqual(l.rebuilt(), live, "the render places both inserts where the live history holds them");
+		strictEqual(live[once(live, RESTORATION) + 1], "user:second", "the restoration leads its user row");
+		strictEqual(live[once(live, REMINDER) + 1], "user:also check b", "the reminder precedes the steering");
+		l.checkpoint("u2");
+		const rebuilt = l.rebuilt();
+		const keptFrom = live.indexOf(flat([RESTORATION])[0] ?? "");
+		deepStrictEqual(rebuilt.slice(-(live.length - keptFrom)), live.slice(keptFrom), "the kept submit is the live one");
+		strictEqual(rebuilt[once(rebuilt, RESTORATION) + 1], "user:second", "a kept submit keeps its restoration");
+		strictEqual(rebuilt[once(rebuilt, REMINDER) + 1], "user:also check b");
+		deepStrictEqual(await l.reopened(), rebuilt, "a reopen renders the same");
 	});
 });
 
