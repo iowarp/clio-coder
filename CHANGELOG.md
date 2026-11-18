@@ -103,6 +103,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A byte-stable prompt recompile keeps its prompt-structure object id; the predecessor hash moved from the hashed structure to the `prompt.compiled` record (bt-10).
+- A refused heredoc command, and each entry of the refusal-limit list, appears once in the model-facing rejection, with its reason and remedy intact (bt-28).
+- A claim grounds in a passing `verify` run on the final tree when it or its evidence names the check id, or it names the command the check resolved to (bt-9).
 - Working-set eviction no longer credits the full body of a tool result that observation aging already stubbed, so the plan no longer stops before the request is under target (D1-1).
 - Observation aging records each batch in the session ledger and seeds from it, so a resumed or forked session sends the same stub set instead of a fresh batch that broke the prompt cache (D1-6).
 - `evidence inspect` and the run row now report a headless main-agent run's real token usage, read from its settlement, instead of a measured "tokens: 0" (bt-31).
