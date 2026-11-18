@@ -1307,19 +1307,43 @@ function sedOnlyReads(args: ReadonlyArray<string>): boolean {
 
 /**
  * A sed script made only of commands that print, edit the pattern space or branch. `w`, `W`, `e`, `r`, `R`, an `s`
- * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression may hold the delimiter
- * (`s/[/]/x/w out`), which the delimiter scan below does not model, so any `[` answers false (x4-3).
+ * flagged `w` or `e`, and anything this cannot parse answer false. A bracket expression in a regex may hold the
+ * delimiter (`s/[/]/x/w out`, x4-3), so the scan steps over it whole (x5-5); an unclosed one answers false.
  */
 function sedScriptOnlyReads(script: string): boolean {
-	if (script.includes("[")) return false;
 	let index = 0;
 	const at = () => script[index] ?? "";
 	const skip = (pattern: RegExp) => {
 		while (index < script.length && pattern.test(at())) index += 1;
 	};
-	const closes = (delimiter: string): boolean => {
+	// Past a bracket expression's `]`. A leading `]` (after an optional `^`) is literal, `[:class:]`, `[.x.]` and
+	// `[=x=]` nest, and a backslash inside is literal, as GNU sed reads it.
+	const bracket = (): boolean => {
+		index += 1;
+		if (at() === "^") index += 1;
+		if (at() === "]") index += 1;
 		while (index < script.length) {
 			const char = at();
+			const kind = script[index + 1] ?? "";
+			if (char === "]") {
+				index += 1;
+				return true;
+			}
+			if (char === "[" && ".:=".includes(kind) && kind !== "") {
+				const end = script.indexOf(`${kind}]`, index + 2);
+				if (end < 0) return false;
+				index = end + 2;
+			} else index += 1;
+		}
+		return false;
+	};
+	const closes = (delimiter: string, regex = true): boolean => {
+		while (index < script.length) {
+			const char = at();
+			if (regex && char === "[" && char !== delimiter) {
+				if (!bracket()) return false;
+				continue;
+			}
 			index += char === "\\" ? 2 : 1;
 			if (char === delimiter) return true;
 		}
@@ -1355,7 +1379,7 @@ function sedScriptOnlyReads(script: string): boolean {
 			const delimiter = at();
 			if (delimiter === "" || delimiter === "\\" || delimiter === "\n") return false;
 			index += 1;
-			if (!closes(delimiter) || !closes(delimiter)) return false;
+			if (!closes(delimiter, command === "s") || !closes(delimiter, false)) return false;
 			// `w` and `e` stop here and parse next as a command, which refuses them.
 			if (command === "s") skip(/[gpiImM0-9]/u);
 		} else if (command === "b" || command === "t" || command === "T" || command === ":" || command === "#")

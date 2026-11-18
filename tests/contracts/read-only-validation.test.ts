@@ -873,6 +873,8 @@ it("read-only inspection refuses helpers that write the tree or run another prog
 		"git diff",
 		"git log -p",
 		"sed -n 1,80p a.ts",
+		// A bracket expression with no write behind it reads (x5-5).
+		"sed -n '/^[[:space:]]*export/p' a.ts",
 		"awk '{print $1}' a.ts",
 		"sort --reverse --key=2 a.ts",
 	])
