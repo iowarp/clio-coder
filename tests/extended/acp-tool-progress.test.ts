@@ -278,7 +278,7 @@ describe("contracts/acp streams a running tool's cumulative output only to a cli
 
 it("projects transcript notices for plain ACP clients while keeping footer state and context status off the reply", async () => {
 	const status = [
-		"[context engine] working set: nothing evictable, all 1 turn are inside the protected window; llm_summary runs instead",
+		"[context engine] working set: nothing evictable, the 1 turn is inside the protected window; llm_summary runs instead",
 		"compaction would not reduce context; checkpoint discarded (usage recorded)",
 		"Clio compacted 36.2K → 28.6K tokens: 42 earlier messages now read as one summary",
 	];

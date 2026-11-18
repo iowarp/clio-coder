@@ -1,3 +1,4 @@
+import { assistantMessageNeverSent } from "../../../core/assistant-model.js";
 import type { ContextFoldPayload } from "../../../core/telemetry/live-events.js";
 import type { AgentMessage } from "../../../engine/types.js";
 import { effectiveToolCall } from "../../../tools/surface.js";
@@ -165,7 +166,9 @@ export function createWorkerContextGuard(
 					message?.role !== "assistant" ||
 					!message.usage ||
 					message.stopReason === "error" ||
-					message.stopReason === "aborted"
+					message.stopReason === "aborted" ||
+					// Clio wrote it, as with a result-contract repair call: its zero usage is no provider count.
+					assistantMessageNeverSent(message)
 				)
 					continue;
 				const usage = message.usage;
