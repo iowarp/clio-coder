@@ -239,6 +239,8 @@ export interface PresentationToolEnd {
 	toolCallId: string;
 	isError: boolean;
 	truncated: boolean;
+	/** A chain that settled as steps the footer tallies on their own, so its start tally is withdrawn. */
+	settledAsSteps?: boolean;
 }
 
 export interface InteractivePresentation {
@@ -535,7 +537,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const contextActivityStore = factories.createContextActivityStore(deps.bus, () => deps.chat.getSessionId());
 
 	const footerToolCounts = new Map<string, number>();
-	const footerActiveTools = new Set<string>();
+	const footerActiveTools = new Map<string, string>();
 	let footerToolErrors = 0;
 	let footerToolTruncatedResults = 0;
 	let lastTurnSummary: TurnSummary | null = null;
@@ -1438,11 +1440,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {
-			footerActiveTools.add(toolCallId);
+			footerActiveTools.set(toolCallId, toolName);
 			footerToolCounts.set(toolName, (footerToolCounts.get(toolName) ?? 0) + 1);
 		},
-		recordToolEnd: ({ toolCallId, isError, truncated }) => {
-			if (!footerActiveTools.delete(toolCallId)) return;
+		recordToolEnd: ({ toolCallId, isError, truncated, settledAsSteps }) => {
+			const started = footerActiveTools.get(toolCallId);
+			if (started === undefined) return;
+			footerActiveTools.delete(toolCallId);
+			if (settledAsSteps === true) {
+				const left = (footerToolCounts.get(started) ?? 1) - 1;
+				if (left > 0) footerToolCounts.set(started, left);
+				else footerToolCounts.delete(started);
+			}
 			if (isError) footerToolErrors += 1;
 			if (truncated) footerToolTruncatedResults += 1;
 		},

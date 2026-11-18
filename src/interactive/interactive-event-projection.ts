@@ -59,7 +59,14 @@ export interface InteractiveEventProjectionDeps {
 	closeAskUserSession: () => void;
 	resetAskUserCancellation: () => void;
 	recordToolStart: (toolName: string, toolCallId: string) => void;
-	recordToolEnd: (toolName: string, toolCallId: string, isError: boolean, truncated: boolean) => void;
+	/** `settledAsSteps`: a chain whose steps are tallied next, so its own start tally comes back out. */
+	recordToolEnd: (
+		toolName: string,
+		toolCallId: string,
+		isError: boolean,
+		truncated: boolean,
+		settledAsSteps: boolean,
+	) => void;
 	/**
 	 * Publish the live turn's reasoning projection to the transcript. Optional so
 	 * a host without a chat panel still gets every other projection.
@@ -203,16 +210,17 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 				}
 				const summary = (event as { resultSummary?: { truncated?: unknown } }).resultSummary;
 				const details = recordObject(recordObject(event.result)?.details);
-				// A chain is one gateway call and one tally; each settled step also
-				// counts as the capability it ran, with its own error and cut. A
-				// chain fails only through a failed step, so its own error counts
-				// only when no step settled (a plan that never parsed).
+				// A chain counts as its settled steps, each as the capability it ran,
+				// with its own error and cut, as a headless run counts it; the
+				// wrapper's tally stays only when no step settled (a plan that never
+				// parsed), and so does its error.
 				const steps = gatewayChainSteps(event.toolName, event.result);
 				deps.recordToolEnd(
 					displayToolCall(event.toolName, undefined, details).toolName,
 					event.toolCallId,
 					event.isError && steps.length === 0,
 					summary?.truncated === true,
+					steps.length > 0,
 				);
 				for (const step of steps) {
 					const stepId = chainStepToolCallId(event.toolCallId, step.id);
@@ -224,6 +232,7 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 						step.isError,
 						recordObject(stepDetails?.resultSize)?.truncated === true ||
 							recordObject(stepDetails?.observation)?.truncated === true,
+						false,
 					);
 				}
 				deps.refreshFooter();
