@@ -325,6 +325,34 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
+	it("names a changed file a later command ran, without counting the run as a check (bt-12)", () => {
+		const assess = (before: unknown[], after: unknown[]) =>
+			assessFinishContract({
+				sessionEntries: [
+					userMessage("user-1"),
+					...before,
+					toolCall("write-1", ToolNames.Write, { path: "src/clean.py", content: "x" }),
+					toolResult("write-1", ToolNames.Write, false),
+					...after,
+					assistantMessage("assistant-1", "Cleaned the data."),
+				],
+				assistantTurnId: "assistant-1",
+			});
+		const run = (id: string, command: string) => [
+			toolCall(id, ToolNames.Bash, { command }),
+			toolResult(id, ToolNames.Bash, false),
+		];
+		const ran = assess([], run("run-1", "python3 -B src/clean.py data/raw.csv > out/clean.csv; cat out/clean.csv"));
+		strictEqual(ran.reason, "unvalidated_mutation");
+		strictEqual(ran.kind === "engage" && ran.message.endsWith(" Ran after the edit: src/clean.py."), true);
+		// A run before the edit, or a call that both writes and runs the file, did not run the change.
+		for (const unrun of [
+			assess(run("run-0", "python3 src/clean.py"), []),
+			assess([], run("run-2", "echo x > src/clean.py && python3 src/clean.py")),
+		])
+			strictEqual(unrun.kind === "engage" && unrun.message, FINISH_CONTRACT_ADVISORY_MESSAGE);
+	});
+
 	it("credits a declared check the model ran whole through the shell after its last edit, and nothing looser", (t) => {
 		const root = mkdtempSync(join(tmpdir(), "finish-declared-"));
 		t.after(() => rmSync(root, { recursive: true, force: true }));

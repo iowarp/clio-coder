@@ -207,12 +207,17 @@ rest of the turn, so the next round is text only, with the prompt prefix and
 tool schemas unchanged. Under yolo a turn whose step tool succeeded continues
 into a fresh turn that runs the next step, whether it ended on its own summary
 or on that refusal, and each such continuation counts against the cap of 3
-continuations per operator prompt. The chain stops at a turn that does not call
-the step tool, at a step result that sets `pipelineDone`, or at the cap. An api 2
-step tool marks its last step by returning `pipelineDone: true` beside `text`
-(any other tool sets `pipelineDone: true` in its result details); an error result
-never ends the chain this way. A step tool that never sets it stops at the first
-turn that does not call it, or at the cap. While the policy is active, no
+continuations per operator prompt. Once a step has run, a continuation turn
+that does the step's work without calling the step tool continues the chain
+too, and each continuation is a new turn that starts with the next step call.
+The chain stops at a step result that sets `pipelineDone`, or at the cap. An api 2
+step tool marks its last step by returning `pipelineDone: true` beside `text`,
+or, when the step asks for an approval interview, in the `{ done: true }` that
+completes the interview (any other tool sets `pipelineDone: true` in its result
+details); an error result, such as a cancelled interview,
+never ends the chain this way. A step tool that never sets it continues to the
+cap, and a headless run reports a pipeline that ended without `pipelineDone` in
+the `stepPipeline` field of its `run_end` frame. While the policy is active, no
 middleware re-prompts the model inside the turn: the high-rigor finish gate
 asks the summary to report an unverified change instead of requesting a check.
 Without yolo the turn ends after its

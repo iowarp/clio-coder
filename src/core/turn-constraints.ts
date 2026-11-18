@@ -475,7 +475,7 @@ export function turnScopeGuidance(constraints: TurnConstraints | undefined): str
 		policy?.when === undefined ? "" : ` This step policy applies on this route (when: ${policy.when.join(", ")}).`;
 	if (policy !== undefined)
 		lines.push(
-			`One step per turn: once ${policy.stepTool} returns a step, run that step, then end the turn with a compact state summary (the step, its outcome, what changed, and the after value for the next ${policy.stepTool} call). Do not call ${policy.stepTool} again this turn; the next turn starts the next step.${scoped}`,
+			`One step per turn: once ${policy.stepTool} returns a step, run that step, then end the turn with a compact state summary (the step, its outcome, what changed, and the after value for the next ${policy.stepTool} call). Call ${policy.stepTool} at most once per turn. Each later turn, a continuation included, is a new turn that starts with the next ${policy.stepTool} call.${scoped}`,
 		);
 	const dormant = constraints.dormantTurnPolicy;
 	if (policy === undefined && dormant?.when !== undefined)

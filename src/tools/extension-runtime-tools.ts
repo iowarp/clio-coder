@@ -168,9 +168,10 @@ export function buildExtensionRuntimeToolSpecs(
 							);
 							// The interview's shape rides the details, which the session ledger keeps, so a reader such as
 							// `campaign run` counts the gates a run reached without parsing what the model was shown.
+							// A step gated by an approval interview signals its end when the interview completes (bt-16).
 							const details = {
 								owner,
-								...(result.pipelineDone === true ? { pipelineDone: true } : {}),
+								...(result.pipelineDone === true || parked.pipelineDone === true ? { pipelineDone: true } : {}),
 								interview: {
 									outcome: parked.outcome,
 									...(parked.reason === undefined ? {} : { reason: parked.reason }),

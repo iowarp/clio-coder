@@ -386,7 +386,14 @@ export interface InterviewAnswer {
 	scripted?: { file: string; rules: Record<string, string> };
 }
 
-export type InterviewNext = { step: InterviewStep; total?: number } | ({ done: true } & ExtensionOutputV2);
+/**
+ * A tool's interview ends with `done`. `pipelineDone: true` there marks the
+ * last step of a step pipeline, as a tool result's `pipelineDone` does, so a
+ * step gated by an approval interview can still end the chain.
+ */
+export type InterviewNext =
+	| { step: InterviewStep; total?: number }
+	| ({ done: true; pipelineDone?: boolean } & ExtensionOutputV2);
 
 /**
  * What a handler returns. `text` is always the headless fallback. The fields

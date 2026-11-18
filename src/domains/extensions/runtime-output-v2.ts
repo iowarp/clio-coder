@@ -397,8 +397,14 @@ export function parseExtensionToolResult(
 export function parseInterviewNext(value: unknown, declaration: ExtensionRuntimeDeclarationV2): InterviewNext {
 	bounded(value, "interview answer", RUNTIME_V2_LIMITS.outputBytes);
 	if ((value as { done?: unknown } | null)?.done === true) {
-		const { done: _done, ...rest } = value as Record<string, unknown>;
-		return { done: true, ...parseExtensionOutputV2(rest, declaration, "action") };
+		const { done: _done, pipelineDone, ...rest } = value as Record<string, unknown>;
+		if (pipelineDone !== undefined && typeof pipelineDone !== "boolean")
+			throw new Error("interview pipelineDone must be true or false");
+		return {
+			done: true,
+			...parseExtensionOutputV2(rest, declaration, "action"),
+			...(pipelineDone === undefined ? {} : { pipelineDone }),
+		};
 	}
 	const raw = record(value, "interview answer", ["step", "total"]);
 	const checked = validateInterviewStep(raw.step);

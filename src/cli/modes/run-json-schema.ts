@@ -20,7 +20,7 @@ import type { PricingSum } from "../../core/telemetry/pricing.js";
 import type { RunResult } from "../../domains/dispatch/types.js";
 import type { AutonomyReport } from "../../domains/safety/autonomy-window.js";
 import type { AgentMessage } from "../../engine/types.js";
-import type { ChatLoopEvent } from "../../session-control/chat-loop.js";
+import type { ChatLoopEvent, StepPipelineEnd } from "../../session-control/chat-loop.js";
 import type { VIA_GATEWAY } from "../../tools/gateway-display.js";
 
 export const RUN_JSON_SCHEMA_VERSION = 1;
@@ -238,6 +238,8 @@ export interface RunJsonTerminalTurnEndFrame {
 	autonomy?: AutonomyReport;
 	/** `run --verify`: each check as the run ran it after the turn, in flag order. */
 	verify?: RunJsonVerifyResult[];
+	/** How a step template's pipeline ended; `done: false` is a pipeline the run left with steps to go (bt-15). */
+	stepPipeline?: StepPipelineEnd;
 	/** What the harness saw the run do (tool calls, refusals, writes, standing checks); absent when no tool ran. */
 	observed?: { toolCalls: number; refused: number; writes: number; checks: Array<{ name: string; passed: boolean }> };
 }
@@ -255,6 +257,7 @@ export interface RunJsonRunEndFrame {
 	outcome: RunResult["outcome"];
 	outcomeDetail?: string;
 	safety?: RunJsonTerminalTurnEndFrame["safety"];
+	stepPipeline?: StepPipelineEnd;
 }
 
 /** One `run --verify` check, run with bash in the run's cwd once the turn settled. */

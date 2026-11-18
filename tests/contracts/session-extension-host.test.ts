@@ -4,12 +4,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
-import { createExtensionRuntimeHookBridge } from "../../src/domains/extensions/runtime-hook-bridge.js";
+import type { Interview } from "../../src/domains/extensions/public-api-v2.js";
+import {
+	createExtensionRuntimeHookBridge,
+	type ExtensionRuntimeHookExecutor,
+} from "../../src/domains/extensions/runtime-hook-bridge.js";
+import { parseInterviewNext } from "../../src/domains/extensions/runtime-output-v2.js";
 import { parseExtensionRuntimeV2 } from "../../src/domains/extensions/runtime-schema-v2.js";
 import { installExtension, listInstalledExtensions } from "../../src/domains/extensions/state.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { startExtensionHost } from "../../src/entry/extension-host.js";
 import type { ChatLoopEvent } from "../../src/session-control/chat-loop.js";
+import { runParkedInterview } from "../../src/tools/extension-interview.js";
 import { buildExtensionRuntimeToolSpecs } from "../../src/tools/extension-runtime-tools.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -90,6 +96,48 @@ test("admission decides an api 2 tool by its declared class, not the extension n
 	registry.register(note);
 	await registry.invoke({ tool: note.name, args: {} });
 	deepStrictEqual(classes, ["write"]);
+});
+
+test("an interview that completes a step's last step puts pipelineDone in the step result's details (bt-16)", async (t) => {
+	const env = await isolateClioEnv("clio-coder-session-host-");
+	t.after(() => env.restore());
+	const cwd = installRuntime(
+		env.dir,
+		"desk",
+		{
+			tools: [{ name: "advance", description: "Run one step", actionClass: "read", inputSchema: { type: "object" } }],
+			ui: ["interview"],
+		},
+		"export default () => {};\n",
+	);
+	const [entry] = listInstalledExtensions(cwd, { all: true });
+	const declaration = entry?.runtimeV2;
+	ok(entry && declaration);
+	throws(() => parseInterviewNext({ done: true, text: "x", pipelineDone: "yes" }, declaration), /pipelineDone/u);
+	const interview: Interview = {
+		id: "gate",
+		title: "Gate",
+		step: {
+			key: "s1",
+			questions: [{ id: "q", label: "Approve?", kind: "single", options: [{ value: "yes", label: "Yes" }] }],
+		},
+	};
+	const bridge = createExtensionRuntimeHookBridge();
+	bridge.bind({
+		tool: async () => ({ text: "asking", interview }),
+		interview: (_extensionId: string, asked: Interview) =>
+			runParkedInterview(
+				{ ask: async () => ({ answers: [{ question: "Approve?", answer: "Yes", options: ["Yes"] }] }) },
+				asked,
+				{ extensionId: "desk", title: "Desk" },
+				async () => parseInterviewNext({ done: true, text: "approved", pipelineDone: true }, declaration),
+			),
+	} as unknown as ExtensionRuntimeHookExecutor);
+	const [advance] = buildExtensionRuntimeToolSpecs([entry], bridge);
+	ok(advance);
+	const result = await advance.run({}, {});
+	equal(result.kind, "ok");
+	equal((result.details as { pipelineDone?: boolean } | undefined)?.pipelineDone, true);
 });
 
 test("a headless session hosts api 2 runtimes: hooks gate, observations arrive, an interview fails closed at once", async (t) => {

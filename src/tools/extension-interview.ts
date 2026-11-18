@@ -128,6 +128,8 @@ export async function runExtensionInterview(
 	reason?: string;
 	/** The step was cancelled because a run's answers file had no answer for it. */
 	unscripted?: true;
+	/** The handler finished with `pipelineDone: true`. */
+	pipelineDone?: true;
 }> {
 	const hold = createHarnessHold();
 	let active = interview;
@@ -191,8 +193,8 @@ export async function runExtensionInterview(
 			// Cancelled while the handler ran: the caller is told it did not finish.
 			if (signal?.aborted) return await interrupted("interview aborted");
 			if ("done" in next && next.done === true) {
-				const { done: _done, ...output } = next;
-				return { outcome: "done", output };
+				const { done: _done, pipelineDone, ...output } = next;
+				return { outcome: "done", output, ...(pipelineDone === true ? { pipelineDone } : {}) };
 			}
 			const candidate = { ...active, ...next, step: "step" in next ? next.step : undefined };
 			const validatedNext = validateInterview(candidate);
@@ -254,6 +256,7 @@ export async function runParkedInterview(
 		...(Object.keys(scripted).length > 0 ? { scripted } : {}),
 		...(result.unscripted === true ? { reason: "unscripted" as const } : {}),
 		...(checkpoints.length > 0 ? { checkpoints } : {}),
+		...(result.pipelineDone === true ? { pipelineDone: true as const } : {}),
 		text: result.output?.text ?? result.reason ?? (result.outcome === "cancelled" ? "cancelled by the operator" : ""),
 	};
 }

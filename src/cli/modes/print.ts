@@ -1046,6 +1046,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		};
 	};
 
+	// A step pipeline the run left unfinished keeps the outcome and says so here (bt-15).
+	const stepPipelineField = () => {
+		const stepPipeline = chat.stepPipeline?.() ?? null;
+		return stepPipeline === null ? {} : { stepPipeline };
+	};
 	// The host's verdict, one builder for terminal mode's turn_end and full mode's run_end so the two cannot drift.
 	const runVerdict = (terminal: HeadlessTerminalOutcome, endedAt: string) => ({
 		startedAt,
@@ -1054,6 +1059,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		...(terminal.failureMessage !== null ? { error: terminal.failureMessage } : {}),
 		outcome: terminal.outcome,
 		...(terminal.outcomeDetail !== undefined ? { outcomeDetail: terminal.outcomeDetail } : {}),
+		...stepPipelineField(),
 		safety: {
 			decisions: { ...runStats.decisions },
 			blockedAttempts: [...runStats.blockedAttempts],
