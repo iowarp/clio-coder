@@ -1,4 +1,4 @@
-import { deepStrictEqual, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, notDeepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -486,6 +486,46 @@ describe("W9 (F12 -> CF-3): a run judges its own evidence, not the projected arr
 			// dropped call unmeasured.
 			strictEqual(result?.usage?.tokens.measured, 36);
 			strictEqual(result?.usage?.tokens.unknownCount, 1);
+		} finally {
+			await harness.close();
+		}
+	});
+
+	it("a machine turn whose ladder is exhausted settles on the failed attempt, not an earlier round's text (#445)", {
+		timeout: 30_000,
+	}, async (t) => {
+		// A tool round with text, a reply cut off while thinking (re-run), then two drops before output against one retry.
+		const server = await startCaptureServer((_request, index) =>
+			index === 0
+				? { text: "Reading the intro first.", calls: [{ id: "c1", name: READ, arguments: { path: "src/intro.md" } }] }
+				: index === 1
+					? { thinkingOnlyLength: "deliberating" }
+					: { drop: true },
+		);
+		t.after(() => server.close());
+		const harness = chatHarness({ server });
+		harness.settings.chat.retry = { ...harness.settings.chat.retry, maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0 };
+		try {
+			const sessionId = harness.session.create({ cwd: process.cwd() }).id;
+			const result = await harness.loop.submitMachineTurn?.({
+				jobId: "job-1",
+				executionId: "run-1",
+				text: "draft the intro",
+				origin: "job job-1 run-1",
+				sessionId,
+				isAdmissionCurrent: () => true,
+				signal: new AbortController().signal,
+				onStarting: () => true,
+			});
+			strictEqual(server.requests.length, 4, "the dropped re-run was retried once, then the ladder gave up");
+			match(JSON.stringify(server.requests[1]), /Reading the intro first\./u, "an earlier round has text");
+			ok(harness.events.some((event) => event.type === "retry_status" && event.status.phase === "exhausted"));
+			strictEqual(result?.status, "failed");
+			match(result?.reason ?? "", /^Connection error\./u);
+			// The final message is the failed attempt, though the exhausted ladder pruned it from the array.
+			strictEqual(result?.text, "");
+			// The job summary (job-runtime.ts) is the reply text or else the reason: here the reason.
+			strictEqual(result?.text || result?.reason, result?.reason);
 		} finally {
 			await harness.close();
 		}
