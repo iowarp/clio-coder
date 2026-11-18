@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
+import { relativePathEscapes } from "../../core/path-containment.js";
 import { observeFileHash } from "../../core/run-records.js";
 import {
 	isRecordsTag,
@@ -146,7 +147,7 @@ async function requireTag(backend: StoreBackend, tag: string): Promise<void> {
 
 function isInside(root: string, target: string): boolean {
 	const relative = path.relative(root, target);
-	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	return !relativePathEscapes(relative);
 }
 
 /** The put's source: a regular file whose real path stays inside the workspace root. */

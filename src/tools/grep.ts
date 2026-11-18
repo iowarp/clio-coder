@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path, { join, relative } from "node:path";
 import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { Type } from "typebox";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
 import { resolveRgBinary } from "./executables.js";
@@ -61,7 +62,7 @@ function parseContext(value: unknown): number | null {
 function formatPath(filePath: string, searchPath: string, isDirectory: boolean): string {
 	if (isDirectory) {
 		const relativePath = path.relative(searchPath, filePath);
-		if (relativePath && !relativePath.startsWith("..")) return toPosixPath(relativePath);
+		if (relativePath && !relativePathEscapes(relativePath)) return toPosixPath(relativePath);
 	}
 	return path.basename(filePath);
 }

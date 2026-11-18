@@ -19,6 +19,7 @@ import { taskWorktreeFindings } from "../../src/cli/doctor-task-worktrees.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { captureWorkspaceSnapshot } from "../../src/domains/dispatch/write-boundary.js";
+import { workspaceRelative } from "../../src/tools/presentation.js";
 import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
@@ -388,5 +389,21 @@ describe("task worktree root", () => {
 				.detail ?? "",
 			/nothing merged.*outside its task worktree.*on no branch: \/work\/repo\/src\/a\.py$/u,
 		);
+	});
+
+	it("keeps a child whose name starts with .. inside its root and a ../ path outside", () => {
+		const worktree = { path: join(scratch, "wt") };
+		const merged = { applied: true, detail: "nothing merged" };
+		for (const [child, inside] of [
+			["..cache/a.py", true],
+			["..", false],
+			["../a.py", false],
+		] as const) {
+			const target = join(worktree.path, child);
+			strictEqual(withStrayWrites(merged, worktree, [target]) === merged, inside, `stray ${child}`);
+			strictEqual(workspaceRelative(child, worktree.path) !== null, inside, `workspace ${child}`);
+			const parent = prepareWorktreeParent({ kind: "tmpfs", base: shm, parent: join(shm, child) });
+			strictEqual(parent === null, inside, `parent ${child}: ${parent}`);
+		}
 	});
 });

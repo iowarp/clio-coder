@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readdir, rm, rmdir, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { INSTRUCTION_SHAPED_NOTE } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
 import { acceptsImageInput } from "../domains/providers/image-input.js";
@@ -255,7 +256,7 @@ export function offloadPointer(offloadPath: string): string {
 export function isSessionOffloadPath(filePath: string, sessionId: string | undefined): boolean {
 	const dir = join(clioStateDir(), "scratch", safePathSegment(sessionId ?? "no-session"));
 	const rel = relative(dir, resolve(filePath));
-	return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
+	return rel.length > 0 && !relativePathEscapes(rel);
 }
 
 function bracketedHint(spec: ToolSpec, offloadPath: string | null): string {

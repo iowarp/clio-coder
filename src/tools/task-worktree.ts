@@ -21,6 +21,7 @@ import { attributeCommitMessage } from "../core/commit-attribution.js";
 import { stripAuthoredTrailers } from "../core/commit-message.js";
 import { autonomousLandAuthorship } from "../core/git-commit-attribution.js";
 import { internalGitArgv, withoutRepositoryEnv } from "../core/internal-git.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { safeResourceWrite } from "../core/safe-resource-write.js";
 import {
 	LEGACY_TASK_WORKTREE_KIND,
@@ -413,8 +414,7 @@ export interface TaskWorktreeOverlay {
 function overlayTarget(path: string, file: string): string {
 	const target = resolve(path, file);
 	const rel = relative(resolve(path), target);
-	if (rel.length === 0 || rel.startsWith("..") || isAbsolute(rel))
-		throw new Error(`overlay path ${file} leaves the worktree`);
+	if (rel.length === 0 || relativePathEscapes(rel)) throw new Error(`overlay path ${file} leaves the worktree`);
 	return target;
 }
 
@@ -1513,7 +1513,7 @@ export function withStrayWrites<Receipt extends { detail?: string }>(
 ): Receipt {
 	const stray = [...mutatedPaths].filter((target) => {
 		const inside = relative(worktree.path, target);
-		return inside.startsWith("..") || isAbsolute(inside);
+		return relativePathEscapes(inside);
 	});
 	if (stray.length === 0) return receipt;
 	const named = `${stray.slice(0, 5).join(", ")}${stray.length > 5 ? ", ..." : ""}`;

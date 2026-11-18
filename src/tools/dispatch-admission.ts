@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { ToolNames } from "../core/tool-names.js";
 import { selectWorkerContext } from "../domains/context/worker/select.js";
 import type {
@@ -805,7 +806,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 			if (request.cwd !== undefined) {
 				const requested = resolve(request.cwd);
 				const rel = relative(parentCheckout, requested);
-				if (rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+				if (relativePathEscapes(rel)) {
 					return shapeRejection(args, "worktree_cwd_outside_checkout");
 				}
 			}

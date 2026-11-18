@@ -20,6 +20,7 @@ import { lstatSync, mkdirSync, readFileSync, statfsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { internalGitArgv } from "../core/internal-git.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import { taskWorktreeClaimParent } from "../core/task-worktree-claim.js";
 
 export type WorktreeRootSetting = "auto" | "tmpfs" | "disk" | (string & {});
@@ -228,8 +229,7 @@ export function resolveWorktreeRoot(input: ResolveWorktreeRootInput): ResolvedWo
 export function prepareWorktreeParent(resolved: ResolvedWorktreeRoot): string | null {
 	if (resolved.kind === "disk" || resolved.base === undefined) return null;
 	const rel = relative(resolved.base, resolved.parent);
-	if (rel.length === 0 || rel.startsWith("..") || isAbsolute(rel))
-		return `${resolved.parent} is not under ${resolved.base}`;
+	if (rel.length === 0 || relativePathEscapes(rel)) return `${resolved.parent} is not under ${resolved.base}`;
 	const uid = typeof process.getuid === "function" ? process.getuid() : null;
 	let cursor = resolved.base;
 	for (const segment of rel.split(sep)) {

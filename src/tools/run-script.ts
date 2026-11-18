@@ -2,6 +2,7 @@ import { closeSync, lstatSync, openSync, realpathSync, statSync, writeSync } fro
 import path from "node:path";
 import { Type } from "typebox";
 import { bashSecretValues } from "../core/bash-exec.js";
+import { relativePathEscapes } from "../core/path-containment.js";
 import {
 	assertRunRecordIntact,
 	captureFileRef,
@@ -331,7 +332,7 @@ function validateEnv(value: unknown): Record<string, string> | string {
 
 function insideRoot(realRoot: string, candidate: string): boolean {
 	const relative = path.relative(realRoot, candidate);
-	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	return !relativePathEscapes(relative);
 }
 
 function validateRequest(args: Record<string, unknown>, workspaceRoot: string, outsideAllowed: boolean): Validation {
