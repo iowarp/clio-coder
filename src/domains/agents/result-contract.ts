@@ -12,6 +12,7 @@ import {
 } from "../../core/hoare.js";
 import { parseJsonObjectPayload, parseVerifierPayload } from "../../core/json-payload.js";
 import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
+import { observedValidationCommand } from "../safety/protected-artifacts.js";
 import type { AgentAutomationAuthority } from "./spec.js";
 import { AGENT_AUTOMATION_AUTHORITIES } from "./spec.js";
 
@@ -343,8 +344,10 @@ export interface ObservedRunEffects {
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
 	checksAllBlocked?: boolean;
-	/** Observed failures and final passes by exact command name; report order is not evidence. */
+	/** Observed failures and final passes since the last mutation, keyed by `observedValidationCommand`. */
 	validationOutcomes?: ReadonlyMap<string, boolean>;
+	/** Whether the run made an observed workspace mutation; absent reads as unknown. */
+	mutationObserved?: boolean;
 }
 
 export interface ResultContractValidationInput {
@@ -2013,10 +2016,17 @@ function validateMutation(contract: ResultContract, input: ResultContractValidat
 	const validations = reported.filter((check) => !isBaselineValidation(check));
 	// Settle a historical failure only with a matching observed final pass.
 	// Missing evidence keeps old, potentially nonchronological reports conservative.
+	const outcomes = input.observedRunEffects?.validationOutcomes;
+	// A reported baseline excuses its own observed red only while no mutation was observed: after one, every
+	// standing outcome judged the changed tree, and calling it a baseline cannot clear a real failure (bt-27).
+	const baselines = new Set(
+		input.observedRunEffects?.mutationObserved === false
+			? reported.filter(isBaselineValidation).map((check) => observedValidationCommand(check.name))
+			: [],
+	);
 	const reportedFailure =
-		validations.some(
-			(check) => !check.passed && input.observedRunEffects?.validationOutcomes?.get(check.name) !== true,
-		) || [...(input.observedRunEffects?.validationOutcomes?.values() ?? [])].some((passed) => !passed);
+		validations.some((check) => !check.passed && outcomes?.get(observedValidationCommand(check.name)) !== true) ||
+		[...(outcomes ?? [])].some(([name, passed]) => !passed && !baselines.has(name));
 	const effects = input.observedRunEffects;
 	if (effects === undefined)
 		return success(contract, reportedFailure ? "fail" : validations.length > 0 ? "pass" : "unmeasured", value);

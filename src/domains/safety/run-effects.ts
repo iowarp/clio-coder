@@ -14,6 +14,7 @@ import {
 	detectValidationCommand,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
+	observedValidationCommand,
 	toolMutationPaths,
 	type ValidationCommandScope,
 } from "./protected-artifacts.js";
@@ -56,8 +57,14 @@ export interface RunEffects {
 	failedMutationPaths: ReadonlySet<string>;
 	/** Canonical validation commands the run ran to a clean exit. */
 	validationCommands: ReadonlySet<string>;
-	/** Exact commands in the run cwd; observed finishes, never report order. */
+	/**
+	 * Outcomes observed since the run's last workspace mutation, keyed by `observedValidationCommand`; observed
+	 * finishes, never report order. A mutation clears them all: a check run on the pre-change tree says nothing
+	 * about the final one (bt-27).
+	 */
 	validationOutcomes: ReadonlyMap<string, boolean>;
+	/** True once a call counted as a workspace mutation ran, so no standing outcome predates every change. */
+	mutationObserved: boolean;
 	/** True only when every observed checking call has an authoritative blocked outcome. */
 	checksAllBlocked?: boolean;
 	/**
@@ -319,7 +326,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				validationCommand,
 				validationName:
 					toolName === ToolNames.Bash && validationCommand !== null
-						? `${base === cwd ? "" : `cwd=${base}: `}${commandOf(args)?.trim() ?? ""}`
+						? `${base === cwd ? "" : `cwd=${base}: `}${observedValidationCommand(commandOf(args) ?? "")}`
 						: null,
 				checkStatusAttributable: toolName !== ToolNames.Bash || shellExitSpeaksForCommand(commandOf(args) ?? ""),
 				mutationRevision,
@@ -344,13 +351,14 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				const proof = readObservedProof(value, effects.proofCheck, toolCallId);
 				if (proof !== null) proofs.set(effects.proofCheck, proof);
 			}
-			// A pass before a later mutation cannot settle the final tree. A refused
-			// call never reached its tool, so it changed nothing and leaves passes
-			// standing. A failed call that really ran may have partly written.
+			// An outcome before a later mutation judged a tree that is gone: a pass
+			// cannot settle the final tree and a red baseline cannot fail it (bt-27).
+			// A refused call never reached its tool, so it changed nothing and leaves
+			// outcomes standing. A failed call that really ran may have partly written.
 			const refused = failed && effects.outcome !== "error" && effects.outcome !== "ok";
 			if (!refused && (effects.paths.length > 0 || (effects.opaque && effects.validationCommand === null))) {
 				mutationRevision += 1;
-				for (const [name, passed] of validationOutcomes) if (passed) validationOutcomes.delete(name);
+				validationOutcomes.clear();
 			}
 			// Only a check that ran can fail. A call the engine answered without
 			// reaching its tool settles with no outcome, so it records nothing.
@@ -418,6 +426,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				failedMutationPaths: new Set([...failedMutationPaths].filter((target) => !mutatedPaths.has(target))),
 				validationCommands: new Set(validationCommands),
 				validationOutcomes: new Map(validationOutcomes),
+				mutationObserved: mutationRevision > 0,
 				checksAllBlocked: checkingCalls.size > 0 && [...checkingCalls.values()].every((outcome) => outcome === "blocked"),
 				verificationCommands: new Set(verificationCommands),
 				writeRecordComplete: writeRecordDowngrades.size === 0,

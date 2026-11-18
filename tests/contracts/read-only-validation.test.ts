@@ -9,7 +9,11 @@ import {
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
 import { mergeWithheldDetail, removedTestCases } from "../../src/domains/dispatch/merge-gate.js";
-import { typedValidationFactsFromVerifyCalls } from "../../src/domains/dispatch/run-findings.js";
+import {
+	deriveRunVerification,
+	typedValidationFactsFromObservedEffects,
+	typedValidationFactsFromVerifyCalls,
+} from "../../src/domains/dispatch/run-findings.js";
 import { groundClaimedValidations } from "../../src/domains/dispatch/validation-grounding.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
 import { clearTaskGates, configureTaskGates } from "../../src/tools/verify/task-gates.js";
@@ -495,6 +499,70 @@ it("requires observed final outcomes to settle mutation-report failures", () => 
 			strictEqual(result.quality, expected);
 		}
 	}
+});
+
+it("an observed red judges only the tree it ran on, and respelled runs of one check settle each other (bt-27)", () => {
+	const seal = (steps: ReadonlyArray<readonly [string, string, boolean?]>, validations: unknown[]) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, command, failed] of steps) {
+			if (command === "edit") recorder.start(id, "edit", { path: "src/calc.c" });
+			else recorder.start(id, "bash", { command });
+			recorder.checkOutcome(id, failed === true ? "error" : "ok");
+			recorder.finish(id, failed === true);
+		}
+		const effects = recorder.snapshot();
+		const quality = validateResultContract({
+			contract: { kind: "mutation-report" },
+			output: JSON.stringify({
+				mutatedPaths: steps.some(([, step]) => step === "edit") ? ["src/calc.c"] : [],
+				validations,
+			}),
+			cwd: process.cwd(),
+			networkAllowed: false,
+			filesystem: { readFile: () => "" },
+			observedRunEffects: effects,
+		}).quality;
+		const typedValidations = typedValidationFactsFromObservedEffects(effects);
+		return { quality, state: deriveRunVerification({ toolStats: [], typedValidations }).state };
+	};
+	const red = { name: "make test 2>&1 | tail -5", passed: false, evidence: "exit 2", baseline: true };
+	const green = { name: "make test 2>&1", passed: true, evidence: "exit 0" };
+	// S7: red baseline piped through tail, the fix, a green plain run.
+	deepStrictEqual(
+		seal(
+			[
+				["base", "make test 2>&1 | tail -5", true],
+				["fix", "edit"],
+				["final", "make test 2>&1"],
+			],
+			[red, green],
+		),
+		{ quality: "pass", state: "verified" },
+	);
+	// After the last edit, a later pass of the same check settles a red however it was piped.
+	deepStrictEqual(
+		seal(
+			[
+				["fix", "edit"],
+				["piped", "make test | head -20", true],
+				["final", "make test"],
+			],
+			[green],
+		),
+		{ quality: "pass", state: "verified" },
+	);
+	// A red after the last edit with no later pass of that check stays a failure, even when called a baseline.
+	for (const after of [
+		[["final", "make test 2>&1 | tail -5", true]],
+		[
+			["final", "pytest", true],
+			["q", "pytest -q"],
+		],
+	] as const)
+		strictEqual(seal([["fix", "edit"], ...after], [{ ...red, name: after[0][1] }, green]).quality, "fail");
+	// With no observed edit, a reported baseline excuses only its own observed red.
+	strictEqual(seal([["base", "pytest", true]], [{ ...red, name: "pytest" }, green]).quality, "unmeasured");
+	strictEqual(seal([["base", "pytest -q", true]], [{ ...red, name: "pytest" }, green]).quality, "fail");
 });
 
 it("the review gate reads a verifier report that closes prose containing braces, and nothing weaker", () => {
