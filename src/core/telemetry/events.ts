@@ -257,6 +257,7 @@ export const EVENTS = {
 	"session.closed": journal(S.SessionClosedSchema, { tier: "accountability", cc: "content-free" }),
 	"journal.segment_closed": journal(S.JournalSegmentClosedSchema, { tier: "accountability", cc: "content-free" }),
 	"turn.settled": journal(S.TurnSettledSchema, { tier: "accountability", cc: "content-free" }),
+	"step_pipeline.settled": journal(S.StepPipelineSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"run.settled": journal(S.RunSettledSchema, { tier: "accountability", cc: "content-free" }),
 	"evidence.assessed": journal(S.EvidenceAssessedSchema, {
 		tier: "accountability",

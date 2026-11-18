@@ -109,6 +109,11 @@ function renderEvidence(evidence: RunEvidence): void {
 	write(`seal: ${evidence.integrity.state === "verified" ? "verified" : evidence.integrity.reason}`);
 	write(`assessed: ${evidence.assessedAt ?? "no"}`);
 	if (evidence.settled) write(`outcome: ${evidence.settled.outcome} (exit ${evidence.settled.exitCode ?? "?"})`);
+	const pipeline = evidence.settled?.stepPipeline;
+	if (pipeline)
+		write(
+			`step pipeline: ${pipeline.done ? "done" : `incomplete (${pipeline.stoppedBy ?? "unknown"})`} via ${pipeline.stepTool}${pipeline.template ? ` for ${pipeline.template}` : ""}`,
+		);
 	if (evidence.totals) {
 		write(`tool calls: ${evidence.totals.toolCalls}`);
 		write(`blocked tools: ${evidence.totals.blockedToolCalls}`);

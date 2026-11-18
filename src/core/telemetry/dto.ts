@@ -35,6 +35,7 @@ import {
 	RunResultObjectSchema,
 	RunSettledSchema,
 	SessionCloseReason,
+	StepPipelineSettledSchema,
 	SYSTEM_ONE_OUTCOME,
 	UtcSchema,
 } from "./schemas.js";
@@ -1351,6 +1352,11 @@ export const WhyStoppedSchema = Type.Object(
 				closed,
 			),
 		),
+		/**
+		 * How the last turn's step template pipeline ended, from its `step_pipeline.settled` (bt-20). Absent when the last
+		 * turn drove no step template or the journal predates the record.
+		 */
+		stepPipeline: Type.Optional(StepPipelineSettledSchema),
 		/** Rendered findings, most decisive first; every number in them also appears above. */
 		findings: Type.Array(Type.String()),
 	},

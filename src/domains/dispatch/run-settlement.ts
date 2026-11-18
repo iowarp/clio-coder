@@ -263,6 +263,8 @@ export function settleFinishedRun(
 		usage: RunUsageFacts | undefined;
 		/** From the ledger row's phase marks; a producer settling without its row records them unmarked. */
 		phaseTiming?: RunPhaseDurations;
+		/** How the run's step template pipeline ended, when the run drove one (bt-20). */
+		stepPipeline?: RunSettled["stepPipeline"];
 	},
 ): RunSettlement {
 	const usage = input.usage ?? unobservedRunUsageFacts();
@@ -291,6 +293,7 @@ export function settleFinishedRun(
 			callIds: receipt.callIds ?? null,
 			processExitCode: input.processExitCode,
 			...(input.terminal.boundKind ? { boundKind: input.terminal.boundKind } : {}),
+			...(input.stepPipeline ? { stepPipeline: { ...input.stepPipeline } } : {}),
 			repairRounds: repairRounds(input.terminal),
 			frameType: input.frameType,
 			...usage,
@@ -551,6 +554,7 @@ export function finishRunResult(
 		processExitCode: number | null;
 		frameType: string | null;
 		usage: RunUsageFacts | undefined;
+		stepPipeline?: RunSettled["stepPipeline"];
 	},
 ): FinishedRunResult {
 	if (draft.routingIntent === undefined) throw new Error(`run ${draft.runId} has no routing intent`);

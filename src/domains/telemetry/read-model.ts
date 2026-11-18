@@ -3595,6 +3595,23 @@ export function runTelemetry(
 	};
 }
 
+/**
+ * The finding for a step pipeline that ended before its step tool reported `pipelineDone` (bt-20): every turn of it
+ * can end normally, so without this the last turn's normal end reads as the pipeline's. Null for a finished pipeline.
+ */
+function stepPipelineIncomplete(end: NonNullable<WhyStoppedV1["stepPipeline"]>): string | null {
+	if (end.done) return null;
+	const named = end.template ? `prompt template ${end.template}` : "the step template";
+	switch (end.stoppedBy) {
+		case "cap":
+			return `The step pipeline of ${named} stopped at the continuation cap with a step still running, before ${end.stepTool} reported pipelineDone; the pipeline did not finish.`;
+		case "unreported":
+			return `The step pipeline of ${named} ended on a turn that made no ${end.stepTool} call; ${end.stepTool} never reported pipelineDone, so whether every step ran is not known.`;
+		default:
+			return `The step pipeline of ${named} ended with a turn nothing continued, before ${end.stepTool} reported pipelineDone; the pipeline did not finish.`;
+	}
+}
+
 export function whyStopped(source: SessionSource, options: ReadOptions = {}): WhyStoppedV1 {
 	const view: View = { session: source };
 	const analysis = analyze(source);
@@ -3606,8 +3623,11 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 	const latestQuota = new Map<string, QuotaEntry>();
 	let autonomy: NonNullable<WhyStoppedV1["autonomy"]> | undefined;
 	const decisionKinds = new Map<NonNullable<WhyStoppedV1["autonomy"]>["kinds"][number]["kind"], number>();
+	let pipeline: { at: string; data: NonNullable<WhyStoppedV1["stepPipeline"]> } | null = null;
 	for (const record of source.journal.records) {
 		if (record.k === "turn.settled" && (!last || record.t >= last.at)) last = { at: record.t, record };
+		if (record.k === "step_pipeline.settled" && (!pipeline || record.t >= pipeline.at))
+			pipeline = { at: record.t, data: record.data };
 		if (record.k === "budget.crossed" || record.k === "budget.held") budget.push(budgetEntry(analysis, record));
 		if (record.k.startsWith("autonomy.")) autonomy ??= { halt: null, ended: null, openDecisions: 0, kinds: [] };
 		if (autonomy === undefined) continue;
@@ -3641,6 +3661,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 			a.targetId.localeCompare(b.targetId),
 	);
 	const terminal = last?.record.data;
+	// The pipeline record follows its last turn's turn.settled; one older than the last turn belongs to an earlier turn.
+	const stepPipeline = pipeline !== null && last !== null && pipeline.at >= last.at ? pipeline.data : null;
 	const lastCallIds = new Set(terminal?.terminal.callIds ?? []);
 	const lastCalls = analysis.attempts
 		.filter((attempt) => lastCallIds.has(attempt.started.callId))
@@ -3708,6 +3730,8 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 	}
+	const incomplete = stepPipeline !== null ? stepPipelineIncomplete(stepPipeline) : null;
+	if (incomplete) findings.push(incomplete);
 	if (autonomy?.halt)
 		findings.push(
 			autonomy.halt.kind === "judge"
@@ -3769,6 +3793,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 			: null,
 		lastCalls,
 		...(autonomy !== undefined ? { autonomy } : {}),
+		...(stepPipeline !== null ? { stepPipeline } : {}),
 		causes: causeRows,
 		waits: waitRows,
 		cache,
@@ -4012,6 +4037,13 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	const inWindow = (at: string) => Date.parse(at) >= from && Date.parse(at) <= to + 5_000;
 	const records = accountabilityRecords(journals).filter((record) => inWindow(record.t));
 	const decisions = records.filter((record) => record.k === "tool.decided");
+	// A stalled step pipeline settles its run `completed`, so the run count alone reads it as done (bt-20).
+	const pipelines = source.sessions
+		.flatMap((session) => session.journal.records)
+		.filter(
+			(record): record is TelemetryRecord<"step_pipeline.settled"> =>
+				record.k === "step_pipeline.settled" && inWindow(record.t),
+		);
 	const decided = foldDecisions(records);
 	const approvals = decided.approvals;
 	const runs = new Map<string, JournalSource>(source.runs);
@@ -4026,6 +4058,10 @@ export function usageReport(source: RepoSource, from: number, to: number) {
 	return {
 		sessions: shownCount(source.sessions.filter((session) => session.processId === undefined).length),
 		runs: shownCount(settled.length),
+		stepPipelines: {
+			settled: shownCount(pipelines.length),
+			incomplete: shownCount(pipelines.filter((record) => !record.data.done).length),
+		},
 		decisions: {
 			total: shownCount(decisions.length),
 			blocked: shownCount(decided.tools.blocked + decided.tools.denied),

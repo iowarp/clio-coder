@@ -101,6 +101,12 @@ const QUOTA_WINDOW = {
 	scope: "token",
 	label: "withhold",
 } as const satisfies FieldProjection;
+// A step tool may be an extension's, so it anonymizes with the other tool names; a template name is operator-chosen.
+const STEP_PIPELINE = {
+	...keep("done", "stoppedBy"),
+	stepTool: "tool",
+	template: "name",
+} as const satisfies FieldProjection;
 const SEAL = keep("head", "records", "segments", "objects");
 const LIBRARY = {
 	...keep("sourceId", "actor"),
@@ -152,6 +158,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 	"session.closed": keep("reason"),
 	"journal.segment_closed": keep("reason"),
 	"turn.settled": keep("stopReason", "terminal"),
+	"step_pipeline.settled": STEP_PIPELINE,
 	"run.settled": {
 		...keep(
 			"version",
@@ -229,6 +236,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 			resultContract: { sourceId: "path", validatorDigest: "id", conformance: "keep", quality: "keep" },
 		},
 		validationGrounding: { claimed: "keep", grounded: "keep", ungrounded: "withhold", basis: "keep" },
+		stepPipeline: STEP_PIPELINE,
 	},
 	"run.feed_appended": {
 		seq: "keep",

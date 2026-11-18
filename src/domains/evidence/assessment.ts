@@ -118,7 +118,10 @@ export function assessRun(runId: string, input: AssessRunInput): RunAssessment |
 			version: 1,
 			attempt,
 			firstPassSuccess:
-				settled.outcome === "succeeded" && attempt === 0 && !findings.some((entry) => entry.tag === "no-validation"),
+				settled.outcome === "succeeded" &&
+				attempt === 0 &&
+				settled.stepPipeline?.done !== false &&
+				!findings.some((entry) => entry.tag === "no-validation"),
 			failureCause,
 			// Plain data for the journal: the canonical status hands out readonly artifact lists.
 			trust: JSON.parse(JSON.stringify(trust)) as EvidenceAssessed["trust"],
@@ -170,6 +173,16 @@ function runFindings(settled: RunSettled, trust: CanonicalTrustStatus): Finding[
 		);
 	else if (completion === "limited")
 		add("info", "completion-evidence", "run finished with an explicit limitation instead of validation evidence");
+	// Each turn of a stalled step pipeline ends normally, so the run settles succeeded with the pipeline unfinished (bt-20).
+	const pipeline = settled.stepPipeline;
+	if (pipeline !== undefined && !pipeline.done)
+		add(
+			"warn",
+			"completion-evidence",
+			pipeline.stoppedBy === "unreported"
+				? `step pipeline ended without ${pipeline.stepTool} reporting pipelineDone; whether every step ran is not known`
+				: `step pipeline stopped ${pipeline.stoppedBy === "cap" ? "at the continuation cap" : "with its last turn"} before ${pipeline.stepTool} reported pipelineDone`,
+		);
 	if (settled.exitCode !== null && settled.exitCode !== 0)
 		add(
 			"warn",

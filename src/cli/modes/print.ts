@@ -782,6 +782,7 @@ async function recordHeadlessMainAgentRun(input: {
 	const snapshot = input.chat.lastRunSnapshot?.();
 	if (!snapshot) return;
 	if (!isMainAgentRunKind(snapshot.runtimeKind)) return;
+	const stepPipeline = input.chat.stepPipeline?.() ?? null;
 	// The read model's fold of the run's session calls is its spend; the run's own calls stand without one (#434).
 	const { facts: spend, sums: spendSums } = input.calls ?? runUsageFromCalls(input.stats.calls);
 	const { exitCode, outcome, status } = input.terminal;
@@ -905,6 +906,8 @@ async function recordHeadlessMainAgentRun(input: {
 					frameType: null,
 					// The run's calls live in its session, so its usage facts are the read model's fold of them (#434).
 					usage: input.calls?.facts,
+					// A stalled step pipeline settles `completed` as its turns did; the record says the pipeline stopped (bt-20).
+					...(stepPipeline !== null ? { stepPipeline } : {}),
 				},
 			);
 			await journal.settle(finished.settlement);
