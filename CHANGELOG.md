@@ -507,6 +507,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - On a reasoning route, that capped summary request keeps the reasoning share on top of its stated room, so a summary that runs past its budget no longer stops at the output limit and drops the checkpoint (ContextFold bt-18, bt-47 drv-m3c).
 - An overflow fold cuts protected successful reads instead of paying a summary, journaled `step_overflow`: reads the model has already seen go first, largest first, with a marker that says not to read them again and to recall by ref; reads of the latest step go only while the request still misses the fit line, with a marker advising a narrower read. A long read-heavy turn no longer re-reads consumed parts in slices until paid summaries and the 60-call guard stop it (ContextFold A4, bt-47 drv-cf3a, drv-m3a, drv-f1).
 - On copilot-sdk, a working-set eviction or overflow cut of a tool result the provider already holds reseeds the Copilot conversation in full, so the provider no longer keeps the evicted bodies and the guard no longer stops the turn (ContextFold, bt-47 drv-r4a).
+- One batch of `context(scope="recall")` calls readmits recalled bodies only while they fit under the fit line, in call order; a recall past that room returns a short "not recalled: no room" stub and records no recall, so the post-tool guard no longer stops the run after a batch of recalls (ContextFold, bt-47 drv-f1r).
 
 ## 0.8.3 - 2026-11-16
 
