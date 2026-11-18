@@ -12,6 +12,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Added
 
+- A mutation report's validation may carry `"baseline":true` for a deliberate red run before the change; quality judges only the checks run after the change (bt-17).
 - `models` lists the thinking levels each route offers (`thinkingLevels` in `--json`) (bt-20).
 - The telemetry session read commands accept `--session` (bt-20).
 - `compaction.settled` records `headroomTokens`, the room left below the automatic trigger after a committed checkpoint (bt-18).
@@ -90,6 +91,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A worker's `verify` call that only lists the declared checks no longer seals a passed validation or a verified run (bt-19).
+- A dispatched run's verification takes the host's verdict on the finished tree, with basis `host-verification`, instead of reading `no-validation-tool` beside a host pass (bt-17).
 - Tool containment checks (run-script, store put, artifact, grep paths, task worktree overlay, stray writes and tmpfs parent, dispatch worktree cwd, offload reads, cd display, context-map own files) now treat a child named `..x` as inside its root, sharing `relativePathEscapes`.
 - Automatic compaction on small context windows no longer re-summarizes nearly every turn: the kept suffix now fits below the trigger, and the summary rearm band survives across headless `run` processes (bt-18).
 - `fleet view` and `evidence inspect` now use the same trust reader and agree on completion evidence (bt-20).
