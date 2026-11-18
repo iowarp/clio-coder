@@ -56,6 +56,7 @@ import {
 	renderCompactionSummaryLine,
 } from "../../src/interactive/renderers/compaction-summary.js";
 import { createChatLoop } from "../../src/session-control/chat-loop.js";
+import { createHostInserts } from "../../src/session-control/host-inserts.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/session-control/model-session-replay.js";
 import { createTurnContext, type TurnContextDeps } from "../../src/session-control/turn-context.js";
 import type { TurnMiddleware } from "../../src/session-control/turn-middleware.js";
@@ -748,12 +749,18 @@ describe("production compaction controls", () => {
 		} as unknown as AgentRuntime;
 		state.runtime = runtime;
 		let attempts = 0;
+		const hostInserts = createHostInserts({
+			session: f.session,
+			readSessionEntries: f.entries,
+			leaf: () => state.lastTurnId,
+		});
 		const context = createTurnContext({
 			state,
 			session: f.session,
 			getSettings: () => f.settings,
 			providers: f.providers,
 			readSessionEntries: f.entries,
+			hostInserts,
 			autoCompact: (...args) => {
 				attempts++;
 				return f.run(...args);
@@ -876,11 +883,15 @@ describe("production compaction controls", () => {
 			timestamp: 1,
 		};
 		const beforeReminder = context.liveContextEstimate(runtime).tokens;
-		runtime.agent.state.messages.push(reminder);
+		hostInserts.insert(runtime, "reminder", [reminder]);
 		ok(context.liveContextEstimate(runtime).tokens > beforeReminder, "reminder tokens count before admission");
 		const reminderUpdate = await context.postToolContinuationGuard(runtime, undefined, true);
 		ok(reminderUpdate, "reminder-tail pressure still compacts");
-		strictEqual(reminderUpdate.context.messages.at(-1), reminder, "the rebuilt context retains the pending reminder");
+		deepStrictEqual(reminderUpdate.context.messages.at(-1), reminder, "the rebuilt context retains the pending reminder");
+		strictEqual(
+			reminderUpdate.context.messages.filter((message) => JSON.stringify(message) === JSON.stringify(reminder)).length,
+			1,
+		);
 		ok(context.liveContextEstimate(runtime).tokens < 32768);
 	});
 

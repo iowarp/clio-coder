@@ -11,7 +11,7 @@ import { foldWorkingSet } from "../../src/domains/context/working-set/fold.js";
 import { resolveRecall, resolveRecallByPath } from "../../src/domains/context/working-set/recall.js";
 import { loadClioTraces } from "../../src/domains/context/working-set/replay/load-clio.js";
 import { replayTrace } from "../../src/domains/context/working-set/replay/runner.js";
-import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { isSessionEntry, type SessionEntry } from "../../src/domains/session/entries.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { activePath, filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
 import {
@@ -23,6 +23,7 @@ import {
 	readSessionMeta,
 	sessionPaths,
 } from "../../src/engine/session.js";
+import { buildReplayAgentMessagesFromTurns } from "../../src/session-control/session-replay-messages.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const at = "2026-09-17T00:00:00.000Z";
@@ -291,7 +292,7 @@ describe("session integrity", () => {
 		}
 	}
 
-	for (const version of [2, 3, 4, 5, CURRENT_SESSION_FORMAT_VERSION, CURRENT_SESSION_FORMAT_VERSION + 1]) {
+	for (const version of [2, 3, 4, 5, 6, CURRENT_SESSION_FORMAT_VERSION, CURRENT_SESSION_FORMAT_VERSION + 1]) {
 		it(`preserves version ${version} admission and torn-tail recovery`, async () => {
 			const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 			const old = current.create({ cwd: scratch.dir });
@@ -331,6 +332,27 @@ describe("session integrity", () => {
 			}
 		});
 	}
+
+	it("renders a version 6 ledger the same after the restamp to the current format", async () => {
+		const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
+		current.create({ cwd: scratch.dir });
+		const candidate = createSession({ cwd: scratch.dir });
+		const paths = sessionPaths(candidate.meta);
+		await candidate.writer.close();
+		appendSessionFileEntry(paths.current, entry("v6-user"));
+		appendSessionFileEntry(paths.current, { ...entry("v6-answer"), parentTurnId: "v6-user", role: "assistant" });
+		fs.writeFileSync(paths.meta, JSON.stringify({ ...readSessionMeta(candidate.meta.id), sessionFormatVersion: 6 }));
+		const render = () => buildReplayAgentMessagesFromTurns(readSessionFileEntries(paths.current).filter(isSessionEntry));
+		const before = render();
+		try {
+			current.switchBranch(candidate.meta.id);
+			strictEqual(current.current()?.sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
+			strictEqual(before.length, 2);
+			deepStrictEqual(render(), before);
+		} finally {
+			await current.close();
+		}
+	});
 
 	for (const operation of ["append", "replace", "off-current"] as const) {
 		for (const mode of ["short", "zero", "throw"] as const) {

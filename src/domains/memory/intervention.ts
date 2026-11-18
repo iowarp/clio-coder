@@ -408,7 +408,13 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
 		currentState: MemoryRestorationInput["currentState"],
 		maxTokens: number,
 	): MemoryRestorationOffer | null;
+	/** Read-only: whether acknowledging this offer now would succeed. */
+	canAcknowledgeRestoration(offer: MemoryRestorationOffer): boolean;
 	acknowledgeRestoration(offer: MemoryRestorationOffer): boolean;
+	/** Clear an offer the model already holds earlier restoration text for; no injection, no delivery event. */
+	releaseRestoration(offer: MemoryRestorationOffer): boolean;
+	/** Journal a restoration install an earlier process wrote: it stays as delivered text and nothing is acknowledged. */
+	noteInheritedRestoration?(commitId: string, citedEntryIds: ReadonlyArray<string>): void;
 	/**
 	 * Content authority for buffered memory text. Given the text, the guard also
 	 * revalidates that offer's cited revisions and triggering failures, so a
@@ -638,10 +644,16 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				}) ?? null
 			);
 		},
+		canAcknowledgeRestoration(offer) {
+			return !!commitScope && !!commitState?.canAcknowledgeRestoration(offer, commitScope, generation);
+		},
 		acknowledgeRestoration(offer) {
 			if (!commitScope || !commitState?.acknowledgeRestoration(offer, commitScope, generation)) return false;
 			deps.bank.recordInjection(offer.citedEntryIds);
 			return true;
+		},
+		releaseRestoration(offer) {
+			return !!commitScope && !!commitState?.releaseRestoration(offer, commitScope, generation);
 		},
 		isContentCurrent: captureContentGuard,
 		hasPendingOffers: () => !disposed && pendingOffers.size > 0,

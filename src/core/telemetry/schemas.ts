@@ -2499,6 +2499,7 @@ export const MemoryObservationRecordedSchema = Type.Object(
 			"reminder-entries-submitted",
 			"reminder-outcomes",
 			"restoration-delivered",
+			"restoration-inherited",
 		]),
 		facts: Type.Object(
 			{
