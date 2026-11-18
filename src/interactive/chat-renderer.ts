@@ -814,6 +814,21 @@ function replayEntries(
 		options.readWorkerRunResult ?? readWorkerRunResultFactsForReplay,
 		settledRuns,
 	);
+	// When each worker ran, from its start entry and its receipt's duration, so a replayed turn end can say which were
+	// still working as the live one did. A run whose receipt states no duration is left out rather than guessed.
+	const workerSpans = new Map<string, { startedAtMs: number; endedAtMs: number }>();
+	for (const entry of selected) {
+		if (entry.kind !== "workerRun") continue;
+		const state = workerStates.get(entry.assignmentId);
+		const startedAtMs = Date.parse(entry.timestamp);
+		// The receipt is the assignment's last attempt's, so only that attempt's start dates it.
+		if (state?.result === undefined || state.runId !== entry.runId || !Number.isFinite(startedAtMs)) continue;
+		const { stillRunning, durationMs } = state.result;
+		if (stillRunning === true) workerSpans.set(entry.runId, { startedAtMs, endedAtMs: Number.POSITIVE_INFINITY });
+		else if (durationMs !== undefined) workerSpans.set(entry.runId, { startedAtMs, endedAtMs: startedAtMs + durationMs });
+	}
+	const workersRunningAt = (atMs: number): number =>
+		[...workerSpans.values()].filter((span) => span.startedAtMs <= atMs && span.endedAtMs > atMs).length;
 	const placedAssignments = new Set<string>();
 	// What a settled run spent waiting on the operator, which only the live status clock could measure.
 	const turnHumanWaits = new Map<string, number>();
@@ -926,6 +941,8 @@ function replayEntries(
 								...(Number.isFinite(endedAt) ? { endedAtMs: endedAt } : {}),
 								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
 							};
+							const workersRunning = Number.isFinite(endedAt) ? workersRunningAt(endedAt) : 0;
+							if (workersRunning > 0) replayed.workersRunning = workersRunning;
 							const humanWaitMs = runTurnId === undefined ? undefined : turnHumanWaits.get(runTurnId);
 							if (humanWaitMs !== undefined) replayed.humanWaitMs = humanWaitMs;
 							const messages = runAssistantMessages;

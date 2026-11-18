@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- Standard keeps one row of the reasoning before an action instead of a bare Thinking marker (bt-11 b).
 - Each bash command is scanned once per classification and only checks compute their extra facets; the registry and finish contract ask for the verdict alone; task-board replays within one run share git lookups and per-call readings (x6-7).
 - Tool guard blocks are listed under `safety.guardBlockedAttempts` (receipts, turn_end/run_end, run.settled), no longer under `safety.blockedAttempts`, matching `decisions.guardBlocked`. Receipts and journals written earlier keep guard blocks in `blockedAttempts` (bt-15 c12b).
 - Run records and the headless terminal frame report tool guard blocks as safety.decisions.guardBlocked, and decisions.blocked counts safety refusals only. Run records written earlier keep the mixed count under blocked (bt-15 T3).
@@ -107,6 +108,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A replayed or forked receipt says "Turn ended · N workers running" when its workers outlived the turn, as the live one did (bt-11 a).
+- A worker card replayed by /fork, /resume or /tree while its run is live keeps streaming and settles, and an unfollowed one reads "still running" (bt-11 c).
+- The steer refusal names the session that owns the run, and says when it is the session this one was forked from (bt-11 d).
+- The exit summary counts a settled worker's changed files even after /fork dropped its card (bt-11 e).
 - An autonomy cap or judge halt now settles its turn with the named harness cause `autonomy_stop` instead of null (bt-26 N2d).
 - A side call (memory, compaction, side question) cut off by shutdown now settles with the shutdown cause main calls get (bt-26 N2c).
 - ACP `agent_message_chunk` text from consecutive assistant messages is now separated by a blank line (bt-41).

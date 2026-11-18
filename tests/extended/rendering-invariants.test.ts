@@ -336,15 +336,19 @@ describe("Clio rendering invariants", () => {
 		deepStrictEqual(markerRows(rendered), ["│ Thinking · /view", "│ Thinking · /view · 80 tokens"]);
 	});
 
-	it("shows Standard's reasoning tail before Clio's words and a marker before an action", () => {
+	it("shows Standard's reasoning tail before Clio's words and one excerpt row before an action", () => {
 		const rendered = thinkingTurn("standard", [
 			["read the module", "read"],
 			["the test is next", null],
 			["run it", "bash"],
 		]);
-		doesNotMatch(rendered, /read the module|the test is next|run it/u);
-		// Stretches of reasoning that nothing visible separates are one run and one marker.
-		strictEqual(markerRows(rendered).length, 2, rendered);
+		// Reasoning ahead of an action keeps one row of its words, never the bare marker (bt-11 b).
+		deepStrictEqual(markerRows(rendered), []);
+		match(rendered, /│ Thinking · read the module\n\n▸ read src\/retry\.js/u);
+		// Stretches of reasoning that nothing visible separates are one run and one row.
+		match(rendered, /\n│ Thinking · the test is next run it\n\n\$ Clio ran `npm test`/u);
+		const long = thinkingTurn("standard", [[`Plan first.\n\nI will read ${"the module ".repeat(20)}`, "read"]]);
+		match(long, /\n│ Thinking · I will read the module the module .*…\n\n▸ read/u);
 		match(rendered, /│ Thinking · summarize the cause\n\n✦ The jitter was real randomness\./u);
 		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
 		match(detailed, /│ Thinking · read the module\n\n▸ read src\/retry\.js/u);

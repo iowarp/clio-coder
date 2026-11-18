@@ -5,7 +5,7 @@ export interface TranscriptDetailPolicy {
 	style: OutputStyle;
 	/** Rows of reasoning shown before Clio's words and while reasoning streams; 0 folds it to a marker. */
 	reasoningRows: number;
-	/** Rows of reasoning shown before an action; 0 folds it to a marker. */
+	/** Rows of reasoning shown before an action; 0 folds it to a marker, 1 keeps one line of its last paragraph. */
 	reasoningBeforeActionRows: number;
 	invocationRows: number;
 	resultRows: number;
@@ -39,7 +39,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		style: "standard",
 		invocationRows: 8,
 		reasoningRows: 3,
-		reasoningBeforeActionRows: 0,
+		reasoningBeforeActionRows: 1,
 		resultRows: 0,
 		liveResultRows: 6,
 		bashRows: 3,

@@ -38,10 +38,18 @@ function foreignRunError(
 	const assignment = deps.dispatch.assignments?.getStored(run?.lineage?.rootRunId ?? runId) ?? null;
 	const owned = run ?? (assignment === null ? null : deps.dispatch.getRun(assignment.assignmentId));
 	if (owned !== null) {
-		if (dispatchOwnership(dispatchOwnerOf(deps.dispatch, options?.sessionId)).ownsRun(owned)) return null;
+		const ownership = dispatchOwnership(dispatchOwnerOf(deps.dispatch, options?.sessionId));
+		if (ownership.ownsRun(owned)) return null;
+		// A fork reads its parent's runs, so a bare "another session" reads as this one; naming the owner says where to act.
+		const owner =
+			owned.sessionId === null
+				? "another session"
+				: ownership.inherits(owned)
+					? `session ${owned.sessionId}, which this session was forked from`
+					: `session ${owned.sessionId}`;
 		return {
 			kind: "error",
-			message: `steer: run '${runId}' belongs to another session; only the session that dispatched it can steer or cancel it`,
+			message: `steer: run '${runId}' belongs to ${owner}; only the session that dispatched it can steer or cancel it`,
 		};
 	}
 	const holder = assignment?.status === "running" ? assignment.processOwner : undefined;

@@ -233,6 +233,8 @@ export interface ReplayedRunFacts {
 	humanWaitMs?: number;
 	/** Epoch ms of the run's terminal ledger entry; absent when the ledger recorded no usable time. */
 	endedAtMs?: number;
+	/** Workers whose start entry and receipt place them still running at `endedAtMs`. */
+	workersRunning?: number;
 }
 
 /** What one Markdown layout of the open reply cost and how long the reply was then. */
@@ -721,6 +723,11 @@ export interface ChatPanelOptions {
 	scheduleIdle?: (step: () => boolean) => void;
 	/** Ask for a frame when the panel changes outside an event, as when an edit's diff finishes computing. */
 	requestRender?: () => void;
+	/**
+	 * The live card this process still streams for a run a replay finds underway. A fork or resume taken while a worker
+	 * runs replays its card from the ledger, which knows only that it started; the live one keeps streaming and settles.
+	 */
+	adoptLiveWorker?: (runId: string) => WorkerEntryState | undefined;
 }
 
 /**
@@ -2042,6 +2049,13 @@ function renderProseThinkingRail(
 		"",
 	);
 	if (text.length === 0) return [];
+	// One row before an action costs what the bare marker did, so it carries the last paragraph's opening, where
+	// reasoning says the step it takes next.
+	if (!unbounded && limit === 1) {
+		const last = (text.split(/\n\s*\n/u).at(-1) ?? text).replace(/\s+/gu, " ").trim();
+		const row = truncateToWidth(`${THINKING_LEAD}${last}`, Math.max(1, width - PROSE_GUTTER_WIDTH), GLYPH.ellipsis);
+		return [styleThinkingRow(row, 0)];
+	}
 	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them. The excerpt opens with the word
 	// that says what it is, because the rail alone is the same mark a tool's output wears.
 	const wrapped = wrapTextWithAnsi(`${THINKING_LEAD}${text}`, Math.max(1, width - PROSE_GUTTER_WIDTH));
@@ -2771,7 +2785,7 @@ function renderEntryLines(
 			const key = `${width}|${limit}|${unboundedToolBodies}`;
 			let lines = cached.layouts.get(key);
 			if (lines === undefined) {
-				if (reasoningOpen && !unboundedToolBodies) {
+				if (reasoningOpen && !unboundedToolBodies && limit > 1) {
 					cached.stream ??= {
 						prose: new AssistantProseProjection(),
 						layout: "",
@@ -3559,9 +3573,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 				const callIds = runCallIds(messages);
 				// Workers a turn detached keep running past its end, so the turn ended but the work is not done. A replay
-				// cannot know which of them were still running then.
+				// counts the ones its ledger and their receipts place still running then.
 				const workersRunning =
-					replayed === undefined ? [...workerEntries.values()].filter((entry) => entry.state.pending).length : 0;
+					replayed === undefined
+						? [...workerEntries.values()].filter((entry) => entry.state.pending).length
+						: (replayed.workersRunning ?? 0);
 				const humanWaitMs = replayed === undefined ? (options.getHumanWaitMs?.() ?? 0) : (replayed.humanWaitMs ?? 0);
 				if (replayed === undefined && humanWaitMs > 0 && turnId !== undefined) {
 					options.recordTurnHumanWait?.({ turnId, humanWaitMs });
@@ -4242,7 +4258,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			appendRow({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
-		applyWorkerState(state: WorkerEntryState): void {
+		applyWorkerState(placed: WorkerEntryState): void {
+			const state = placed.result?.stillRunning === true ? (options.adoptLiveWorker?.(placed.runId) ?? placed) : placed;
 			const existing = workerEntries.get(state.assignmentId);
 			if (existing !== undefined) {
 				// The reducer mutated the same state object this entry already holds,
