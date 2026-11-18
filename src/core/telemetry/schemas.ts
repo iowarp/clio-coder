@@ -513,8 +513,14 @@ export const ContextFoldSchema = Type.Object(
 				{
 					stage: vocabulary(["superseded", "working_set", "step_checkpoint", "llm_summary", "stop"]),
 					outcome: vocabulary(["committed", "held", "none", "failed"]),
+					/**
+					 * A worker commit that took a protected read names it: `unseen_overflow` when any read the
+					 * model had not answered left, otherwise `step_overflow` when any read it had seen did.
+					 */
 					reason: vocabulary([
 						"evicted",
+						"step_overflow",
+						"unseen_overflow",
 						"summarized",
 						"step_boundary",
 						"rearm_band",

@@ -4,6 +4,12 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+	createTelemetryForwarder,
+	readWorkerTelemetryFrame,
+	type WorkerTelemetryFrame,
+} from "../../src/core/telemetry/forwarder.js";
+import { telemetryHub } from "../../src/core/telemetry/hub.js";
 import type { ContextFoldPayload } from "../../src/core/telemetry/live-events.js";
 import { parseWorkerContextPolicy } from "../../src/domains/context/worker/contract.js";
 import { createWorkerContextGuard } from "../../src/domains/context/worker/pressure.js";
@@ -320,7 +326,10 @@ test("an old thinking block leaves without a marker while refusals and opaque to
 
 test("the bypass rows: a step short of output room and a rejected later send each commit one record", () => {
 	const archived: string[] = [];
-	const guard = createWorkerContextGuard((alias) => void archived.push(alias));
+	const decisions: ContextFoldPayload[] = [];
+	const guard = createWorkerContextGuard((alias) => void archived.push(alias), {
+		onDecision: (decision) => void decisions.push(decision),
+	});
 	// Under the trigger and the window, but the reserve does not fit: the protected step's read leaves, the refusal stays.
 	// The closing answer means the model has seen the read, so it leaves as step_overflow with the advice.
 	const tight = { systemPrompt: "worker", tools: [], contextWindow: 10_000, outputReserve: () => 4000 };
@@ -341,6 +350,13 @@ test("the bypass rows: a step short of output room and a rejected later send eac
 	ok(text.includes("GATEWAY_REFUSAL"));
 	deepStrictEqual(archived, ["r1"]);
 	equal(guard.records[0]?.policyId, "step_overflow");
+	// The journal tells this commit from an aged one.
+	deepStrictEqual(decisions.at(-1)?.stages.at(-1), {
+		stage: "working_set",
+		outcome: "committed",
+		reason: "step_overflow",
+		recordId: "eviction-1",
+	});
 
 	// An unreported window admits every send; only the server's rejection acts, once, to 0.7 of the failed request.
 	const unknown = { systemPrompt: "worker", tools: [], contextWindow: 0, outputReserve: () => 4000 };
@@ -401,6 +417,7 @@ test("drv-cf1h: short of headroom under the trigger, older reads leave before th
 		],
 	);
 	equal(guard.records[0]?.policyId, "working_set");
+	equal(decisions.at(-1)?.stages.at(-1)?.reason, "evicted");
 	deepStrictEqual(archived, ["r1", "r2"]);
 	const text = JSON.stringify(projected);
 	ok(text.includes("PUMP-3") && text.includes("PUMP-4") && text.includes("PUMP-5"), "pump-3..5 keep their bodies");
@@ -438,9 +455,24 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 	ok(!/Read only the part you need/.test(text), "the model never saw the body; it needs the recall pointer only");
 	ok(text.includes("SMALL") && text.includes("MID "));
 	equal(guard.records[0]?.policyId, "step_overflow");
-	deepStrictEqual(decisions.at(-1)?.stages, [
-		{ stage: "working_set", outcome: "committed", reason: "evicted", recordId: "eviction-1" },
+	// The run journal names the unseen commit, and the worker's forwarder carries it to the parent.
+	const decision = decisions.at(-1);
+	deepStrictEqual(decision?.stages, [
+		{ stage: "working_set", outcome: "committed", reason: "unseen_overflow", recordId: "eviction-1" },
 	]);
+	const run = { sessionId: null, runId: "unseen-run", agent: { role: "worker" as const, id: "unseen-run" } };
+	const frames: WorkerTelemetryFrame[] = [];
+	const forwarder = createTelemetryForwarder(
+		run,
+		{ host: "worker", pid: 1, birthToken: "unseen-birth", monoEpochWallMs: 0 },
+		(frame) => void frames.push(frame),
+	);
+	ok(telemetryHub().emit("context.fold", decision as ContextFoldPayload, run));
+	forwarder.close();
+	deepStrictEqual(
+		(readWorkerTelemetryFrame(frames[0], run)?.data as ContextFoldPayload | undefined)?.stages.at(-1)?.reason,
+		"unseen_overflow",
+	);
 
 	// A seen protected read leaves first on the headroom path and on the server's rejection alike.
 	const seen = [
@@ -448,7 +480,10 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 		call("old", [["old", "read", { path: "src/old.ts" }]]),
 		result("old", "OLD ".repeat(3000)),
 	];
-	const ordered = createWorkerContextGuard(() => {});
+	const orderedDecisions: ContextFoldPayload[] = [];
+	const ordered = createWorkerContextGuard(() => {}, {
+		onDecision: (decision) => void orderedDecisions.push(decision),
+	});
 	ordered({ ...tight, messages: [user("task")] });
 	const fitted = JSON.stringify(ordered({ ...tight, messages: [...seen, ...unseen] }));
 	deepStrictEqual(
@@ -459,6 +494,8 @@ test("only unseen reads can make room: the largest leaves first as unseen_overfl
 		],
 	);
 	ok(fitted.includes("SMALL") && fitted.includes("MID "));
+	// A commit that also took an unseen read is journaled as unseen_overflow.
+	equal(orderedDecisions.at(-1)?.stages.at(-1)?.reason, "unseen_overflow");
 	const unknown = { ...tight, contextWindow: 0 };
 	const rejected = createWorkerContextGuard(() => {});
 	rejected({ ...unknown, messages: [user("task")] });
@@ -559,6 +596,39 @@ test("drv-cf1h: a request the guard fitted after an eviction reaches the provide
 		process.chdir(previousCwd);
 		env.restore();
 	}
+});
+
+test("an uncached worker route short of headroom ages the older read of a re-read path and never runs S0 (A2a, D1)", () => {
+	const decisions: ContextFoldPayload[] = [];
+	const guard = createWorkerContextGuard(() => {}, {
+		route: { modelTier: "small", promptCaching: false },
+		onDecision: (decision) => void decisions.push(decision),
+	});
+	const tight = { systemPrompt: "worker", tools: [], contextWindow: 10_000, outputReserve: () => 4000 };
+	guard({ ...tight, messages: [user("task")] });
+	// The newer read of src/a.ts supersedes the older one, which sits before the protected last two steps.
+	const messages = [
+		user("task"),
+		assistant("old", "src/a.ts"),
+		result("old", "AOLD ".repeat(4000)),
+		assistant("other", "src/b.ts"),
+		result("other", "B"),
+		assistant("new", "src/a.ts"),
+		result("new", "ANEW ".repeat(1000)),
+		assistant(),
+	];
+	const text = JSON.stringify(guard({ ...tight, messages }));
+	const decision = decisions.at(-1);
+	equal(decision?.route.promptCaching, false);
+	ok((decision?.tokensBefore ?? 0) < 8000, "under the trigger: only the headroom check acts");
+	deepStrictEqual(
+		guard.records[0]?.evicted.map(({ ref, reason }) => [ref.entry, reason]),
+		[["2", "age_horizon"]],
+	);
+	ok(guard.records.every((record) => record.evicted.every((item) => (item.reason as string) !== "superseded")));
+	ok(decisions.every((fold) => fold.stages.every((stage) => stage.stage !== "superseded")));
+	match(text, /\[evicted ref=r1 reason=age_horizon tool=read path=src\/a\.ts /);
+	ok(text.includes("ANEW ".repeat(1000)) && !text.includes("AOLD ".repeat(100)), "the newer read keeps its body");
 });
 
 test("capture follows the active branch and preserves existing eviction projection", () => {

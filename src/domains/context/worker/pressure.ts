@@ -401,7 +401,13 @@ export function createWorkerContextGuard(
 		}
 		aliasSequence = planAliases;
 		records.push(record);
-		stages.push({ stage: "working_set", outcome: "committed", reason: "evicted", recordId: record.id });
+		// The journal names a commit that took a protected read; the item reasons stay on the record.
+		const reason = items.some((item) => item.reason === "unseen_overflow")
+			? "unseen_overflow"
+			: items.some((item) => item.reason === "step_overflow")
+				? "step_overflow"
+				: "evicted";
+		stages.push({ stage: "working_set", outcome: "committed", reason, recordId: record.id });
 		return accept();
 	};
 	const guard = (input: WorkerPressureInput): AgentMessage[] =>
