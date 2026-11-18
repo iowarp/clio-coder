@@ -91,6 +91,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A Copilot target switched between the default and long_context tiers now reads the right context window from the cached model listing in a new process, with no wait for the 24 h cache expiry (bt-copilot cache-tier limit).
 - A worker's `verify` call that only lists the declared checks no longer seals a passed validation or a verified run (bt-19).
 - A dispatched run's verification takes the host's verdict on the finished tree, with basis `host-verification`, instead of reading `no-validation-tool` beside a host pass (bt-17).
 - Tool containment checks (run-script, store put, artifact, grep paths, task worktree overlay, stray writes and tmpfs parent, dispatch worktree cwd, offload reads, cd display, context-map own files) now treat a child named `..x` as inside its root, sharing `relativePathEscapes`.
