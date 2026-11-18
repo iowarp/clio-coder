@@ -18,7 +18,7 @@ import { renderAgentLedgerBoard } from "../domains/dispatch/agent-ledger-store.j
  * `--follow` the snapshot goes to stdout and the process exits.
  *
  * Trust rules the render obeys:
- *   - The run record is checked through `inspectRunTrustStatus` before any of
+ *   - The run record is checked through `readRunTrust` before any of
  *     its fields are shown. A record that fails integrity contributes its
  *     failure reason and nothing else.
  *   - Task text is operator-supplied and worker-adjacent, so it is sanitized
@@ -42,8 +42,8 @@ import { type RunFeedLine, readRunFeed, runFeedPath } from "../domains/dispatch/
 import { openLedger, readFleetRun } from "../domains/dispatch/state.js";
 import type { RunEnvelope } from "../domains/dispatch/types.js";
 import { WRITE_BOUNDARY_VIOLATION_REASON } from "../domains/dispatch/write-boundary.js";
+import { readRunGateIndex, readRunTrust } from "../domains/evidence/run-trust.js";
 import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js";
-import { inspectRunTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { loadRunRecord, loadRunTelemetrySource } from "../domains/session/telemetry-source.js";
 import type { SettledRunRecord } from "../domains/telemetry/index.js";
@@ -162,12 +162,13 @@ function evidenceLine(run: RunEnvelope): { text: string; record?: SettledRunReco
 		return {
 			text: run.endedAt === null ? "run pending; it has not settled" : "run record unavailable; it never settled",
 		};
-	const inspection = inspectRunTrustStatus(record);
-	if (inspection.integrity.state === "failed")
-		return { text: `RUN SEAL FAILED: ${inspection.integrity.reason}; its settled facts are untrusted` };
-	if (inspection.integrity.state === "unsealed")
-		return { text: `run record unsealed: ${inspection.integrity.reason}; its settled facts are not yet vouched for` };
-	return { text: formatTrustSummaryLine(inspection.status), record: record as SettledRunRecord };
+	// The same reader `evidence inspect` uses, so the two surfaces cannot disagree on a run's trust (bt-20).
+	const { integrity, trust } = readRunTrust(record, readRunGateIndex(clioStateDir())(run.id));
+	if (integrity.state === "failed")
+		return { text: `RUN SEAL FAILED: ${integrity.reason}; its settled facts are untrusted` };
+	if (integrity.state === "unsealed")
+		return { text: `run record unsealed: ${integrity.reason}; its settled facts are not yet vouched for` };
+	return { text: formatTrustSummaryLine(trust), record: record as SettledRunRecord };
 }
 
 /**

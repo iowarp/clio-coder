@@ -8,6 +8,7 @@ import {
 	modelListNoteForStatus,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
+	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
 import { printError } from "./shared.js";
 
@@ -22,6 +23,8 @@ export interface ModelRow {
 	contextWindow: number;
 	maxTokens: number;
 	reasoning: boolean;
+	/** The thinking levels the route offers, from the resolution ACP advertises; absent when the route does not resolve. */
+	thinkingLevels?: string[];
 	state: string;
 	/** Present when this target's list is not the provider's live answer: what it is instead, and why. */
 	note?: string;
@@ -146,6 +149,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 		for (const candidate of candidates) {
 			const modelId = candidate.id;
 			const caps = resolveRowCapabilities(status, modelId, providers);
+			const thinkingLevels = routeThinkingLevels(status, modelId, providers);
 			rows.push({
 				targetId: status.target.id,
 				runtimeId,
@@ -155,6 +159,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 				source: candidate.source,
 				state: candidate.loadState ?? "-",
 				...formatCapabilities(caps),
+				...(thinkingLevels ? { thinkingLevels } : {}),
 				...(note ? { note } : {}),
 			});
 		}
@@ -166,6 +171,22 @@ function resolveRowCapabilities(status: TargetStatus, modelId: string | null, pr
 	return resolveModelCapabilities(status, modelId, providers.knowledgeBase, {
 		detectedReasoning: modelId ? providers.getDetectedReasoning(status.target.id, modelId) : null,
 	});
+}
+
+/**
+ * The thinking levels a route offers, resolved as ACP resolves its thinking options (bt-20 papercut 1); a target only
+ * dispatch can drive resolves for dispatch.
+ */
+function routeThinkingLevels(
+	status: TargetStatus,
+	modelId: string,
+	providers: ProvidersContract,
+): string[] | undefined {
+	for (const use of ["orchestrator", "dispatch"] as const) {
+		const resolved = resolveRuntimeTarget(providers, { targetId: status.target.id, wireModelId: modelId, use });
+		if (resolved.ok) return [...resolved.target.modelRuntime.thinking.supportedLevels];
+	}
+	return undefined;
 }
 
 function formatCapabilities(
@@ -235,14 +256,30 @@ function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
 	const includeState = rows.some((row) => row.state && row.state !== "-");
 	const includeLabel = rows.some((row) => row.label && row.label !== row.modelId);
 	const headers = includeState
-		? ["target", "runtime", "model", ...(includeLabel ? ["label"] : []), "source", "state", "caps", "ctx", "max"]
-		: ["target", "runtime", "model", ...(includeLabel ? ["label"] : []), "source", "caps", "ctx", "max"];
+		? [
+				"target",
+				"runtime",
+				"model",
+				...(includeLabel ? ["label"] : []),
+				"source",
+				"state",
+				"caps",
+				"ctx",
+				"max",
+				"thinking",
+			]
+		: ["target", "runtime", "model", ...(includeLabel ? ["label"] : []), "source", "caps", "ctx", "max", "thinking"];
 	const cells = rows.map((row) => {
 		const base = [row.targetId, row.runtimeId, truncateModelId(row.modelId)];
 		if (includeLabel) base.push(row.label ?? "-");
 		base.push(row.source);
 		if (includeState) base.push(row.state || "-");
-		base.push(row.caps, compactTokenCount(row.contextWindow), compactTokenCount(row.maxTokens));
+		base.push(
+			row.caps,
+			compactTokenCount(row.contextWindow),
+			compactTokenCount(row.maxTokens),
+			row.thinkingLevels?.join(",") || "-",
+		);
 		return base;
 	});
 	const widths = headers.map((h, col) => Math.max(h.length, ...cells.map((cell) => cell[col]?.length ?? 0)));

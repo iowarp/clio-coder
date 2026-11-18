@@ -105,8 +105,12 @@ function printDiagnostics(diagnostics: ReadonlyArray<ExtensionDiagnostic>): void
 }
 
 function toolSummary(extension: InstalledExtension): string {
-	const tools = extension.capabilities?.tools.map((tool) => tool.name) ?? [];
-	return tools.length > 0 ? tools.join(",") : "-";
+	// An api-2 extension declares its tools on its runtime, not in capabilities (bt-20 papercut 3).
+	const tools = [
+		...(extension.capabilities?.tools.map((tool) => tool.name) ?? []),
+		...(extension.runtimeV2?.tools.map((tool) => tool.name) ?? []),
+	];
+	return tools.length > 0 ? [...new Set(tools)].join(",") : "-";
 }
 
 function stateLabel(extension: InstalledExtension): string {

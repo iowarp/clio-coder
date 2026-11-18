@@ -812,13 +812,23 @@ describe("provider transport boundary", () => {
 
 			process.env.GOOGLE_API_KEY = "gem-test-key";
 			const live = await captureStdout(() => runModelsCommand(["--target", "gem", "--json"]));
-			const rows = JSON.parse(live.output) as Array<{ modelId: string; source: string; note?: string }>;
+			const rows = JSON.parse(live.output) as Array<{
+				modelId: string;
+				source: string;
+				note?: string;
+				thinkingLevels?: string[];
+			}>;
 			deepStrictEqual(
 				rows.map((row) => [row.modelId, row.source, row.note]),
 				[
 					["gemini-a", "live", undefined],
 					["gemini-b", "live", undefined],
 				],
+			);
+			// Each row names the thinking levels its route offers, as ACP advertises them (bt-20 papercut 1).
+			ok(
+				rows.every((row) => (row.thinkingLevels?.length ?? 0) > 0),
+				live.output,
 			);
 
 			// A live list judges the default model too, where the catalog used to excuse it.

@@ -24,6 +24,8 @@ export interface EvidenceDetailSnapshot {
 	readonly verdict: TrustVerdict;
 	/** Every axis, so an absent axis is stated rather than missing. */
 	readonly axes: Readonly<Record<TrustStatusAxis, string>>;
+	/** The result contract's stored verdict and how many reported validations failed; null when the record holds none. */
+	readonly quality: { readonly verdict: "pass" | "fail" | "unmeasured"; readonly failedValidations: number } | null;
 }
 
 export async function evidenceDetailSnapshot(
@@ -43,5 +45,9 @@ export async function evidenceDetailSnapshot(
 			TrustStatusAxis,
 			string
 		>,
+		quality:
+			run.quality === null
+				? null
+				: { verdict: run.quality.verdict, failedValidations: run.quality.failedValidations.length },
 	};
 }

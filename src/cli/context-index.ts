@@ -1,4 +1,4 @@
-import { codemapPath, codewikiPath, structuralCodewikiHash } from "../domains/context/codewiki/artifact.js";
+import { codemapPath, structuralCodewikiHash } from "../domains/context/codewiki/artifact.js";
 import { coordinateCodewikiWrite } from "../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../domains/context/codewiki/schema.js";
 import { readClioState, statePath, writeClioState } from "../domains/context/state.js";
@@ -84,7 +84,6 @@ export async function runContextIndexCommand(args: string[]): Promise<number> {
 		coverage,
 		languageCounts: counts,
 		codemapPath: codemapPath(cwd),
-		codewikiPath: codewikiPath(cwd),
 		statePath: statePath(cwd),
 		structuralHash: structuralCodewikiHash(codewiki),
 	};

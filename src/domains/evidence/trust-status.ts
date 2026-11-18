@@ -673,11 +673,13 @@ export interface RunTrustInspection {
 }
 
 /**
- * A persisted run's trust, from the read model's run DTO: its settled facts and its seal verdict. A scope whose seal
- * fails is failed integrity even when the damage hides its run.settled from the journal reader (#434).
+ * A persisted run's trust, from the read model's run DTO: its settled facts, its seal verdict and, under a seal that
+ * verifies, the assessment the producer sealed with it, so every reader of the DTO sees the same completion, review
+ * and grounding axes (bt-20). A scope whose seal fails is failed integrity even when the damage hides its run.settled
+ * from the journal reader (#434).
  */
 export function inspectRunTrustStatus(
-	record: Pick<RunTelemetryV1, "row" | "settled" | "seal"> | null,
+	record: (Pick<RunTelemetryV1, "row" | "settled" | "seal"> & Partial<Pick<RunTelemetryV1, "assessment">>) | null,
 ): RunTrustInspection {
 	if (record === null || record.settled === null) {
 		if (record?.seal?.status === "failed") {
@@ -703,8 +705,15 @@ export function inspectRunTrustStatus(
 		return { integrity, status: adaptRunTrustStatus(null, integrity) };
 	}
 	const integrity = runIntegrityOfSeal(record.seal);
-	return {
+	const settled = adaptRunTrustStatus(
+		{ ...record.settled, runId: record.row.runId, digest: record.settled.digest },
 		integrity,
-		status: adaptRunTrustStatus({ ...record.settled, runId: record.row.runId, digest: record.settled.digest }, integrity),
-	};
+	);
+	const assessment = integrity.state === "verified" ? (record.assessment ?? null) : null;
+	// The seal now vouches for the record the producer assessed, so its verdict replaces the producer's.
+	const status =
+		assessment === null
+			? settled
+			: composeTrustStatus(normalizeTrustStatus(assessment.trust), { artifactIntegrity: settled.artifactIntegrity });
+	return { integrity, status };
 }

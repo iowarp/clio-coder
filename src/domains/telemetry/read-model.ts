@@ -3698,10 +3698,14 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 			terminal.terminal.retries > 0
 				? ` after ${renderCount(terminal.terminal.retries)} ${terminal.terminal.retries === 1 ? "retry" : "retries"}`
 				: "";
+		// A model that ended its answer reached every stage; naming the last one reads as where a failure struck (bt-20).
+		const normalEnd = !terminal.terminal.cause && (terminal.stopReason === "stop" || terminal.stopReason === "toolUse");
 		findings.push(
 			terminal.terminal.cause
 				? `The last turn stopped (${terminal.stopReason}) on ${terminal.terminal.cause}${stage}${retries}.`
-				: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
+				: normalEnd
+					? `The last turn ended normally (${terminal.stopReason})${retries}.`
+					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 	}
 	if (autonomy?.halt)

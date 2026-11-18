@@ -1,5 +1,6 @@
 import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { RunTelemetryV1 } from "../../src/core/telemetry/dto.js";
 import { makeTelemetryRecord } from "../../src/core/telemetry/envelope.js";
 import {
 	deriveRunVerification,
@@ -12,6 +13,7 @@ import { attributeEvidenceFailure, type EvidenceFailureFacts } from "../../src/d
 import { admitRunProvenance } from "../../src/domains/evidence/provenance.js";
 import { createRedactionTally, redactSecretsDeep } from "../../src/domains/evidence/redact.js";
 import { inspectRunEvidence } from "../../src/domains/evidence/run-evidence.js";
+import { readRunTrust } from "../../src/domains/evidence/run-trust.js";
 import { inspectRunTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { createProtectedArtifactsRegistration } from "../../src/domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder } from "../../src/domains/safety/run-effects.js";
@@ -84,6 +86,15 @@ describe("evidence integrity boundary", () => {
 		match(labels, /completionEvidence:evidenced/u);
 		match(labels, /evidence_verification=verified\/validation-tool/u);
 		strictEqual(run.facts.outcome, "failed");
+		// bt-20: `fleet view` and `evidence inspect` read one sealed run DTO and must agree on its completion axis.
+		const record = {
+			row: { runId: run.runId },
+			settled: { ...settlement.facts, at: draft.endedAt, digest: "a".repeat(64) },
+			seal: { status: "verified" },
+			assessment: { ...assessed.data, at: draft.endedAt, content: null },
+		} as unknown as RunTelemetryV1;
+		strictEqual(inspectRunTrustStatus(record).status.completionEvidence.state, "evidenced");
+		deepStrictEqual(readRunTrust(record).trust, inspectRunTrustStatus(record).status);
 	});
 
 	it("treats run ids as identities, never paths", async () => {
