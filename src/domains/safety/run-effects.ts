@@ -422,6 +422,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				validationOutcomes.clear();
 				checkOutcomes.clear();
 				outcomeSequence.clear();
+				// The calls were disclosed against outcomes the change just retired, so none is left to disclose (x6-6).
+				unclassifiedCalls.length = 0;
 				validationCommands.clear();
 			}
 			settleRan(checkedAfterOwnMutation);

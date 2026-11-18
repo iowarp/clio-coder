@@ -1,3 +1,4 @@
+import { unclassifiedAfterLastCheck } from "../../domains/dispatch/run-findings.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { validationCommandOf } from "../../domains/safety/check-classifier.js";
 import { capabilityEntries, verifyFoundNoChecks } from "../../domains/safety/finish-contract.js";
@@ -59,7 +60,8 @@ export function observeHeadlessRun(input: {
 				)
 			: [];
 	const noChecksDeclared = input.toolCalls > 0 && checks.length === 0 && verifyFoundNoChecks(own);
-	const unclassified = checks.length > 0 ? (input.effects.unclassifiedAfterLastCheck?.length ?? 0) : 0;
+	// The receipt's own rule: the recorder lists a call only while an outcome stands, so both surfaces count one list (x6-6).
+	const unclassified = unclassifiedAfterLastCheck(input.effects)?.count ?? 0;
 	return {
 		toolCalls: input.toolCalls,
 		refused: input.refused,

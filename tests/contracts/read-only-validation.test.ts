@@ -969,6 +969,11 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 		recorder.finish(id, false);
 	}
 	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, ["python scripts/gen.py"]);
+	// A change retires every outcome, so no disclosure is left pointing at a check that no longer stands (x6-6).
+	recorder.start("fix", "edit", { path: "src/a.ts" });
+	recorder.checkOutcome("fix", "ok");
+	recorder.finish("fix", false);
+	deepStrictEqual(recorder.snapshot().unclassifiedAfterLastCheck, []);
 	// The recorder reads the repository's config: a core.fsmonitor hook makes a later git status a mutation.
 	const repo = mkdtempSync(join(tmpdir(), "fsmonitor-"));
 	const env: NodeJS.ProcessEnv = {
