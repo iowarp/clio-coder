@@ -81,6 +81,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-11: the welcome banner's default autonomy row reads `Default · auto in workspace` instead of `reviewed approvals`, matching what default runs without a prompt; `/fleet` shows a coder's sealed mutation report as changed paths, checks and commit message instead of raw JSON.
 - bt-11: Alt+W in a pane too narrow for the workers dock, or under a host that refuses the split, opens the Fleet Runs board and says why, instead of leaving a truncated "cannot open the watch pane" toast.
 - bt-11: the context meter no longer jumps after `/fork` or reads high after `/resume` (tool schemas were counted twice once the live anchor was dropped). `/fork` names the new and original session ids, and `/resume` says which session it opened.
 - bt-11: the exit summary's visit row names its scope ("This visit", workers included when they ran) and flags workers whose file writes were not recorded. An empty Verified row says command checks are not counted.
