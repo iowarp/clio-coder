@@ -237,63 +237,56 @@ export function createRouteHistoryFold(options: { stateDir: string }): RouteHist
 		cache.set(runId, folded);
 		return folded;
 	};
+	/**
+	 * The runs the fold covers, newest first: one lstat per listed run not yet retired, then the newest
+	 * `HISTORY_MAX_RUNS` from the last `HISTORY_MAX_AGE_MS` by directory time. A sealed run outside the bound is retired.
+	 * A symlink is not a directory, so it never enters (#434).
+	 */
+	const boundedScopes = (): Array<{ runId: string; directory: string; stats: Stats }> => {
+		const names = listRuns();
+		const listed = new Set(names);
+		for (const runId of retired) if (!listed.has(runId)) retired.delete(runId);
+		const scopes: Array<{ runId: string; directory: string; stats: Stats }> = [];
+		for (const runId of names) {
+			if (retired.has(runId)) continue;
+			let directory: string;
+			try {
+				directory = telemetryRunDirectory(options.stateDir, runId);
+			} catch {
+				// A name that is not a safe run id is not a run scope.
+				continue;
+			}
+			const stats = statOrNull(directory);
+			if (stats?.isDirectory()) scopes.push({ runId, directory, stats });
+		}
+		const oldest = Date.now() - HISTORY_MAX_AGE_MS;
+		scopes.sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs);
+		const bounded = scopes.filter((scope) => scope.stats.mtimeMs >= oldest).slice(0, HISTORY_MAX_RUNS);
+		const kept = new Set(bounded);
+		for (const scope of scopes)
+			if (!kept.has(scope) && sealedKeyOf(scope.directory, scope.stats) !== null) retired.add(scope.runId);
+		return bounded;
+	};
 	return {
 		async warm(stopped) {
-			for (const runId of listRuns()) {
+			for (const { runId, directory } of boundedScopes()) {
 				if (stopped()) return;
-				if (retired.has(runId)) continue;
-				try {
-					const directory = telemetryRunDirectory(options.stateDir, runId);
-					const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
-					if (identity === null || cache.get(runId)?.identity === identity) continue;
-					foldRun(runId, identity);
-					warmedSinceRead = true;
-				} catch {
-					// A name that is not a safe run id is not a run scope; `read` skips it too.
-					continue;
-				}
+				const identity = withinStateRoot(options.stateDir, directory) ? scopeIdentity(directory) : null;
+				if (identity === null || cache.get(runId)?.identity === identity) continue;
+				foldRun(runId, identity);
+				warmedSinceRead = true;
 				await new Promise<void>((resolve) => setImmediate(resolve).unref());
 			}
 		},
 		read() {
-			const names = listRuns();
 			let changed = warmedSinceRead;
 			warmedSinceRead = false;
 			const seen = new Set<string>();
 			const entries: RouteHistoryEntry[] = [];
 			const runs: SettledRunFacts[] = [];
-			const listed = new Set(names);
-			for (const runId of retired) if (!listed.has(runId)) retired.delete(runId);
-			// One lstat per run not yet retired; a symlink is not a directory, so it never enters (#434).
-			const scopes: Array<{ runId: string; directory: string; stats: Stats }> = [];
-			for (const runId of names) {
-				if (retired.has(runId)) continue;
-				let directory: string;
-				try {
-					directory = telemetryRunDirectory(options.stateDir, runId);
-				} catch {
-					// A name that is not a safe run id is not a run scope.
-					continue;
-				}
-				const stats = statOrNull(directory);
-				if (stats?.isDirectory()) scopes.push({ runId, directory, stats });
-			}
-			const oldest = Date.now() - HISTORY_MAX_AGE_MS;
-			const bounded = new Set(
-				scopes
-					.filter((scope) => scope.stats.mtimeMs >= oldest)
-					.sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs)
-					.slice(0, HISTORY_MAX_RUNS)
-					.map((scope) => scope.runId),
-			);
-			for (const { runId, directory, stats } of scopes) {
-				if (!bounded.has(runId)) {
-					if (sealedKeyOf(directory, stats) !== null) retired.add(runId);
-					continue;
-				}
+			for (const { runId, directory, stats } of boundedScopes()) {
 				const cached = cache.get(runId);
-				// A sealed run whose directory and bundle are unchanged is the run already folded; the runs directory was
-				// bounded above.
+				// A sealed run whose directory and bundle are unchanged is the run already folded.
 				if (cached !== undefined && cached.sealedKey !== null && cached.sealedKey === sealedKeyOf(directory, stats)) {
 					seen.add(runId);
 					if (cached.run !== null) runs.push(cached.run);
