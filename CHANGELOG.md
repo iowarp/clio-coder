@@ -66,6 +66,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - P2D-1: ACP delegation and native worker runs settle through one shared finalizer with byte-identical receipts, ledger rows and events.
 - D2-1: live telemetry keeps cache floors, cache breaks and the session projection incremental across batches instead of re-folding every call (12k calls: about 380 ms to 1.4 ms per batch), and ACP skips unchanged session snapshots.
 - P2S-3..7: safety decisions convert through one `toSafetyDecision`, base rules load through one cached loader (the rule compiler and the `rulePacks` option are gone), the safety barrel drops 21 unread exports, and the dead confirmed scope and `tokenizeShellLike` are removed.
+- P2M-2..8: memory promotion validates once with the shared validators, the memory barrel keeps only names read outside the domain, the runtime stops forwarding unsupplied intervention callbacks, kept lessons are typed as projected values, duplicated helpers live in `memory/util.ts`, and the dead `experimentalRelevance` switch is removed (prompt bytes unchanged).
 - P2D-2: the dispatch barrel re-exports only the names callers import through it, and ten single-file helpers are no longer exported.
 - P2D-3: the dispatch event pump and the assignment event stream share one bounded drop-oldest tee.
 - P2D-6: reservation tests exercise the async release and lock-held transfer that production uses; the test-only twins and unused path helpers are gone.
@@ -78,6 +79,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- P2M-1: memory promotion and task handoff redact a quoted secret even when the text already holds a `[redacted:...]` marker.
+- Lesson evidence treats a repository child named `..x` as inside the repository.
 - P2S-1: containment checks across safety, sandbox and core no longer treat a child whose name starts with `..` (such as `..cache`) as outside its parent; one shared helper replaces the private copies.
 - P2S-2: `git --attr-source <tree>` (and other value-taking global options) no longer hides the git subcommand from the reset, clean and push rails.
 - D2-4: the cached share comes from one fold everywhere, shown as a lower bound (`≥`) when a cache read went unreported and as an estimate (`~`) when derived from a timed prefill; `telemetry cost` and GUI operator metrics now show it.
