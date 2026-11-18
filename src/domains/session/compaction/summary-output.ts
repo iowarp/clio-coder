@@ -9,6 +9,11 @@ export interface SummaryOutputBudget {
 	summaryRoom: number;
 }
 
+/** Tokens a checkpoint summary keeps in the next context: the reserve's room. */
+export function summaryRoomTokens(reserveTokens: number = DEFAULT_RESERVE_TOKENS): number {
+	return Math.max(1024, Math.floor(reserveTokens * 0.8));
+}
+
 /**
  * The summary request's output budget. A route that reports no output limit gets
  * no explicit cap and the server decides; refusing it would leave a reactive
@@ -22,7 +27,7 @@ export function summaryOutputBudget(
 	reserveTokens: number = DEFAULT_RESERVE_TOKENS,
 ): SummaryOutputBudget {
 	const outputLimit = Number.isFinite(model.maxTokens) && model.maxTokens >= 1 ? Math.floor(model.maxTokens) : undefined;
-	const summaryRoom = Math.max(1024, Math.floor(reserveTokens * 0.8));
+	const summaryRoom = summaryRoomTokens(reserveTokens);
 	const reasoningShare = summaryReasoningShare(model);
 	const maxTokens =
 		outputLimit === undefined

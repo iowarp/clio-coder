@@ -128,7 +128,7 @@ import {
 	type CompactInput,
 	type CompactResult,
 	checkpointSkillContext,
-	hostCheckpointSummary,
+	hostCheckpoint,
 } from "../domains/session/compaction/compact.js";
 import { DEFAULT_KEEP_RECENT_TOKENS } from "../domains/session/compaction/defaults.js";
 import { summaryOutputReserve } from "../domains/session/compaction/summary-output.js";
@@ -2519,12 +2519,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	/**
 	 * A step-boundary checkpoint (WTF-P 0.8.3 C5): a compaction summary the host
-	 * writes from `lead` with no summarizer call, cutting every earlier message
+	 * writes from the previous checkpoint and `lead` with no summarizer call, cutting every earlier message
 	 * from replay. The ledger keeps them, so resume, recall and token
 	 * attribution read the same history the next request starts from. After the
 	 * write it does what a native checkpoint does: the on_compaction hook and
 	 * the compaction lifecycle carry trigger `step`, the entry carries the
-	 * verified skill context and the continuity payload, which replay puts
+	 * verified skill context, the previous checkpoint's preserved request and
+	 * the continuity payload, which replay puts
 	 * right after the summary, and the memory bridge learns of the commit, so
 	 * its restoration rides this turn's tail.
 	 */
@@ -2556,7 +2557,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			kind: "compactionSummary",
 			turnId: randomUUID(),
 			parentTurnId: cutCursor,
-			summary: hostCheckpointSummary(active, lead, process.cwd()),
+			...hostCheckpoint(active, lead, process.cwd()),
 			...(skills.skillContext ? { skillContext: skills.skillContext } : {}),
 			...(continuityCarry === null ? {} : { continuity: continuityCarry }),
 			tokensBefore,
