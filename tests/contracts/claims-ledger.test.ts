@@ -10,15 +10,17 @@ import { runCommandVector } from "../../src/core/safe-exec.js";
 import { withStateFileLock } from "../../src/core/state-file-lock.js";
 import { RunResultObjectSchema } from "../../src/core/telemetry/schemas.js";
 import { UNTRUSTED_CONTENT_BANNER } from "../../src/core/untrusted-content.js";
-import { clioDataDir } from "../../src/core/xdg.js";
+import { clioDataDir, clioStateDir } from "../../src/core/xdg.js";
 import { claimLogRecordId } from "../../src/domains/claims/edges.js";
 import { hypothesisSubject } from "../../src/domains/claims/hypotheses.js";
 import {
 	appendClaims,
 	bindHostVerificationHypotheses,
+	type ClaimRecord,
 	claimCheckLabel,
 	claimFromVerifyResult,
 	claimRecordId,
+	claimSealReader,
 	claimStatuses,
 	claimsDeliveryMessage,
 	claimsLogPath,
@@ -48,10 +50,12 @@ import { insertMemoryRecordIfAbsent } from "../../src/domains/memory/store.js";
 import { runGateIn } from "../../src/domains/research/measure.js";
 import { finishIterationRecord } from "../../src/domains/research/record.js";
 import type { ResearchCampaign } from "../../src/domains/research/types.js";
+import { readVerifiedRun } from "../../src/domains/telemetry/run-record.js";
 import type { DeclaredReproduce } from "../../src/tools/verify/reproduce.js";
 import { runProjectCheck } from "../../src/tools/verify/scripts.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+import { writeSettledRun } from "../harness/settled-run.js";
 
 const source = { channel: "verify", sessionId: "s1", toolCallId: "t1", requestedBy: "model" } as const;
 
@@ -137,6 +141,22 @@ describe("claims ledger (#406)", () => {
 		);
 		// A judgement word that contradicts the report is not trusted into a claim.
 		assert.equal(claimFromVerifyResult({ details: numericDetails(false, "passed"), project: "/p", at, source }), null);
+		// D3-4: a comparison that compared nothing (empty arrays, an empty reference) is no disagreement.
+		const unjudged = (keys: Array<{ key: string; passed: boolean; failed: string[] }>) => {
+			const details = numericDetails(false, "failed");
+			const report = { ...(details.report as Record<string, unknown>), keys, failedKeys: keys.map((key) => key.key) };
+			return claimFromVerifyResult({ details: { ...details, report }, project: "/p", at, source });
+		};
+		assert.equal(unjudged([{ key: "std", passed: false, failed: ["unjudgeable"] }]), null);
+		assert.equal(unjudged([{ key: "std", passed: false, failed: ["missing-reference"] }]), null);
+		assert.equal(unjudged([]), null);
+		assert.equal(
+			unjudged([
+				{ key: "mean", passed: true, failed: [] },
+				{ key: "std", passed: false, failed: ["missing-reference"] },
+			])?.verdict,
+			"disagrees",
+		);
 	});
 
 	it("derives contradicts under equal pinned conditions and supersedes under a new commit", () => {
@@ -883,6 +903,85 @@ describe("claims ledger (#406)", () => {
 			assert.equal(read.unlinked, 3);
 			assert.equal(read.hypothesisTests.length, 0);
 			assert.equal(hypothesisStatuses(read.hypotheses, read.hypothesisTests).get(hypothesis.id)?.status, "proposed");
+		} finally {
+			env.restore();
+		}
+	});
+
+	it("reads a host-verification claim as verified only against the sealed check of the run it cites (D3-4)", async () => {
+		const env = await isolateClioEnv("clio-claims-");
+		try {
+			const repo = join(env.dir, "repo");
+			mkdirSync(join(repo, ".git"), { recursive: true });
+			const project = claimsProjectRoot(repo);
+			const checks = [
+				{
+					check: "stats",
+					argv: ["python3", "stats.py"],
+					cwd: repo,
+					exitCode: 0,
+					durationMs: 1,
+					memo: false,
+					outputTail: "",
+					report: numericDetails(true, "passed").report as never,
+					tree: { root: repo, head: "c".repeat(40), fingerprint: "f".repeat(64) },
+				},
+			];
+			await writeSettledRun(clioStateDir(), {
+				...fixtureReceiptDraft(fixtureEnvelope("run1")),
+				hostVerification: { status: "verified", checks },
+			});
+			const digest = readVerifiedRun(clioStateDir(), "run1")?.settled.digest;
+			assert.ok(digest);
+			await recordHostVerificationClaims({ runId: "run1", receiptDigest: digest, checks, projectCwd: repo });
+			const [genuine] = readClaims(project).records;
+			assert.ok(genuine);
+			// Each forgery rehashes, so the log accepts it as a claim; only the sealed run it cites can refuse it.
+			const forge = (changes: Partial<ClaimRecord>): ClaimRecord => {
+				const { id: _id, ...rest } = { ...genuine, ...changes };
+				return { ...rest, id: claimRecordId(rest as never) };
+			};
+			const flipped = forge({ verdict: "disagrees", at: "2099-01-01T00:00:01.000Z" });
+			const ghost = forge({
+				source: { channel: "host-verification", runId: "ghost", receiptDigest: digest },
+				at: "2099-01-01T00:00:02.000Z",
+			});
+			const resettled = forge({
+				source: { channel: "host-verification", runId: "run1", receiptDigest: "0".repeat(64) },
+				at: "2099-01-01T00:00:03.000Z",
+			});
+			appendFileSync(
+				claimsLogPath(project),
+				[flipped, ghost, resettled].map((claim) => `${JSON.stringify(claim)}\n`).join(""),
+			);
+			const read = readClaims(project);
+			assert.equal(read.mismatched, 0);
+			const seal = claimSealReader();
+			assert.deepEqual(
+				read.records.map((claim) => [claim.id, seal(claim).state]),
+				[
+					[genuine.id, "verified"],
+					[flipped.id, "unverified"],
+					[ghost.id, "unverified"],
+					[resettled.id, "unverified"],
+				],
+			);
+			const verifyClaim = claimFromVerifyResult({
+				details: numericDetails(true, "passed"),
+				project,
+				at: "2099-01-01T00:00:04.000Z",
+				source,
+			});
+			assert.ok(verifyClaim);
+			assert.equal(seal(verifyClaim).state, "unbound");
+			// A forged disagreement offered to the agent names that its run never sealed it.
+			const edge = { kind: "contradicts", id: "e".repeat(64), from: flipped.id, to: genuine.id, check: "stats" };
+			const message = claimsDeliveryMessage("stats", { records: [genuine, flipped], edges: [edge as never] }) ?? "";
+			match(
+				message,
+				new RegExp(`claim ${flipped.id.slice(0, 12)} disagrees \\[unverified: the run sealed the opposite verdict`, "u"),
+			);
+			assert.ok(!message.includes(`claim ${genuine.id.slice(0, 12)} agrees [unverified`));
 		} finally {
 			env.restore();
 		}
