@@ -216,7 +216,7 @@ The host records an event that may disturb the cache once, on the next call that
 | `thinking_change` | The thinking level changed on a route that can change effort mid-conversation neither natively nor through a configuration update. | every tier |
 | `tool_surface_change` | The tool signature changed on a route that does not accept both tool and system-message changes mid-conversation. | every tier |
 | `model_changed` | The run's target or wire model differs from the previous run's, or on resume from the last call's request fingerprint. | every tier |
-| `input_changed` | A new operator turn retired the active user instructions a compaction had replayed, after a reply had followed them, so a request already carried them. A steering turn retires them while the running loop keeps its own copy, so that rewrite is recorded on the next run's first call. | every tier |
+| `input_changed` | No longer recorded. A new operator turn retires the user instructions a compaction replayed only while no request has carried them; once a reply followed them they stay in the history, live and on resume, so no sent prefix is rewritten. Journals written earlier may still carry it. | every tier |
 | `tool_choice_change` | The request's tool choice differs from the previous request's on the same target and wire model. A retry after the provider rejected a forced choice compares with the request before the rejected one. | every tier |
 | `transport_reset` | A Codex cooldown reset closed the socket before this call, so its full frame rebuilt the continuation, or an auth reset closed it after the previous call. Only the journal records it; the SSE pin, which no reset measures, records nothing. | every tier |
 | `compaction` | A compaction began or ended. | `local-native` |
@@ -224,7 +224,7 @@ The host records an event that may disturb the cache once, on the next call that
 | `residency` | A residency load or eviction succeeded on this session's own endpoint. | `local-native` |
 | `background_memory` | A memory step completed against the endpoint this session streams to. | `local-native` |
 
-`residency` and `background_memory` also compare endpoint identity, so work on a second server never explains a cold prefix on the first. Every reason in the record's vocabulary has a producer.
+`residency` and `background_memory` also compare endpoint identity, so work on a second server never explains a cold prefix on the first. Every reason in the record's vocabulary except the retired `input_changed` has a producer.
 
 ### Breaks and the cache report
 

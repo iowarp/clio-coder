@@ -703,7 +703,29 @@ export function selectReplayEntries(
 	return dropLegacyToolResultAssistantDuplicates(repairToolResultOrphans(entries, selected, cut.compactionIndex));
 }
 
-/** Retire the exact replay block when a later operator turn is admitted without a replay rebuild. */
+/**
+ * Whether a reply followed a checkpoint's verbatim instructions before another operator turn. A request then carried
+ * the block right after the summary, so it is sent history: retiring it would rewrite the cached prefix there, and a
+ * resume would rebuild a request that diverges at that point (bt-40). Read from ledger order, which the live retirement
+ * and the replay share, so the two cannot disagree.
+ */
+function userContextSent(activeEntries: ReadonlyArray<SessionEntry>, checkpoint: CompactionSummaryEntry): boolean {
+	const start = activeEntries.findIndex((entry) => entry.turnId === checkpoint.turnId);
+	if (start < 0) return false;
+	for (const entry of activeEntries.slice(start + 1)) {
+		if (entry.kind !== "message") continue;
+		if (entry.role === "assistant") return true;
+		if (
+			entry.role === "user" &&
+			(entry.payload as { synthetic?: unknown } | null)?.synthetic !== true &&
+			entry.turnId !== checkpoint.userContext?.turnId
+		)
+			return false;
+	}
+	return false;
+}
+
+/** Retire the exact replay block a later operator turn supersedes, while no request has carried it yet. */
 export function retireActiveUserContextForNextOperator(
 	messages: AgentMessage[],
 	turns: ReadonlyArray<SessionEntry>,
@@ -711,6 +733,7 @@ export function retireActiveUserContextForNextOperator(
 ): AgentMessage[] {
 	const checkpoint = selectReplayEntries(turns, options).find((entry) => entry.kind === "compactionSummary");
 	if (checkpoint?.kind !== "compactionSummary" || !checkpoint.userContext) return messages;
+	if (userContextSent(activeEntriesBeforeCompactionCut(turns, options), checkpoint)) return messages;
 	const text = `Active user instructions (verbatim):\n${checkpoint.userContext.text}`;
 	const timestamp = timestampMillis(checkpoint.timestamp);
 	return messages.filter(
@@ -721,15 +744,6 @@ export function retireActiveUserContextForNextOperator(
 			message.content.length !== 1 ||
 			message.content[0]?.type !== "text" ||
 			message.content[0].text !== text,
-	);
-}
-
-/** Whether a request carried the block `retired` left out: a reply arrived after the checkpoint installed it (#434). */
-export function retiredUserContextWasSent(messages: AgentMessage[], retired: AgentMessage[]): boolean {
-	const kept = new Set(retired);
-	const block = messages.find((message) => !kept.has(message));
-	return (
-		block !== undefined && messages.some((message) => message.role === "assistant" && message.timestamp > block.timestamp)
 	);
 }
 
@@ -944,7 +958,10 @@ export function buildReplayAgentMessagesFromTurns(
 				}
 				const decisions = checkpointIndex < 0 ? null : decisionsAsOfCheckpoint(activeEntries.slice(0, checkpointIndex));
 				if (decisions) out.push(makeTextMessage("user", decisions, entry.timestamp));
-				if (entry.userContext && (!latestOperator || latestOperator.turnId === entry.userContext.turnId))
+				if (
+					entry.userContext &&
+					(!latestOperator || latestOperator.turnId === entry.userContext.turnId || userContextSent(activeEntries, entry))
+				)
 					out.push(
 						makeTextMessage("user", `Active user instructions (verbatim):\n${entry.userContext.text}`, entry.timestamp),
 					);

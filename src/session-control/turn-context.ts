@@ -459,8 +459,6 @@ export interface TurnContext {
 	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
 	noteColdReason(reason: ExpectedColdReason): void;
-	/** Record a disturbance the running loop never sends, for the first request of the next run (#434). */
-	noteNextRunColdReason(reason: ExpectedColdReason): void;
 	/** The tool choice a request sends; `afterRejection` marks the #426 retry of a request the provider rejected. */
 	noteCacheRequestToolChoice(toolChoice: string, afterRejection?: boolean): void;
 	/** Compare the system prompt a request leads with against the session's previous request (bt-10). */
@@ -3715,10 +3713,6 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		noteColdReason,
-
-		noteNextRunColdReason(reason): void {
-			pendingColdReasons.add(reason);
-		},
 
 		consumeExpectedColdReasons(runtimeId: string): void {
 			// Cache-disturbance honesty (T3.3): consume disturbances since
