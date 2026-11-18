@@ -8,7 +8,7 @@ import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js"
 import { resolveClioDirs } from "../../core/xdg.js";
 import { expandPath, normalizeToolPath, runScriptCwd } from "../../tools/path-utils.js";
 import { normalizedGitCommands } from "./git-command-normalization.js";
-import { inertQuotedMatch } from "./literal-exemption.js";
+import { inertQuotedMatch, matchesOnlyCommandText } from "./literal-exemption.js";
 import type { CommandPathEvent } from "./protected-artifacts.js";
 import { extractCommandPathWalks } from "./protected-artifacts.js";
 
@@ -255,9 +255,19 @@ function scanStringOf(args: Record<string, unknown> | undefined): string {
 	return parts.join(" ");
 }
 
-function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string, command = haystack): NamedPattern | null {
+/**
+ * The first pattern the text matches outside what `exempt` proves is never
+ * run. The git patterns keep the quoted-argument exemption damage control
+ * shares; the system patterns read the whole line (Astra r2-8).
+ */
+function matchFirst(
+	patterns: ReadonlyArray<NamedPattern>,
+	haystack: string,
+	command = haystack,
+	exempt: (command: string, pattern: RegExp) => boolean = inertQuotedMatch,
+): NamedPattern | null {
 	for (const p of patterns) {
-		if (p.re.test(haystack) && !inertQuotedMatch(command, p.re)) return p;
+		if (p.re.test(haystack) && !exempt(command, p.re)) return p;
 	}
 	return null;
 }
@@ -836,7 +846,7 @@ export function classify(rawCall: ClassifierCall): Classification {
 		if (gitHit) {
 			return { actionClass: "git_destructive", reasons: [`pattern:${gitHit.name}`] };
 		}
-		const sysHit = matchFirst(SYSTEM_MODIFY_PATTERNS, scan, commandText);
+		const sysHit = matchFirst(SYSTEM_MODIFY_PATTERNS, scan, commandText, matchesOnlyCommandText);
 		if (sysHit) {
 			return { actionClass: "system_modify", reasons: [`pattern:${sysHit.name}`] };
 		}
