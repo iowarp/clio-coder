@@ -1,6 +1,6 @@
 import { ToolNames } from "../../core/tool-names.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
-import { type MiddlewareEffect, metadataNumber, turnCanCallTool } from "./types.js";
+import { type MiddlewareEffect, metadataNumber, metadataString, turnCanCallTool } from "./types.js";
 
 /**
  * Task-board reminder for explicitly enumerated multi-step requests. The
@@ -15,10 +15,17 @@ import { type MiddlewareEffect, metadataNumber, turnCanCallTool } from "./types.
 
 export const TASK_BOARD_REMINDER_REGISTRATION_ID = "observer.task-board-reminder";
 
-export function taskBoardReminderMessage(steps: number): string {
+export function taskBoardReminderMessage(steps: number, placement: "direct" | "gateway" = "direct"): string {
+	// A gateway-only tasks has no attached schema, and a model told to call
+	// tasks concluded the tool did not exist (bt-22), so name the call it can make.
+	const plan =
+		placement === "gateway"
+			? 'gateway(op="call", capability="tasks", args={action:"plan", title:"<board>", tasks:["<one per authorized step>"]}) ' +
+				"(tasks has no attached schema; every tasks action below goes through gateway this way), then "
+			: 'tasks action="plan" with a title and one task per authorized step, then ';
 	return (
-		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ` +
-		'tasks action="plan" with a title and one task per authorized step, then work them one at a time ' +
+		`[Tasks] This request enumerates ${steps} steps. Before the first edit, declare the task board: ${plan}` +
+		"work them one at a time " +
 		'("start", then "done" with an evidence note for observed work and check results, disclosing failed or unrun checks). ' +
 		"Bookkeeping is not a reason to end a model response: when IDs and arguments are known, use gateway op=chain for " +
 		"done -> start -> next read/work, or decide -> authorized implementation, with each dependent step's after naming its predecessor's step id. " +
@@ -97,7 +104,10 @@ export function createTaskBoardReminderRegistration(): MiddlewareHookRegistratio
 			// skill's own workflow; do not compete with it.
 			const pendingSkillRequests = metadataNumber(input, "pendingSkillRequests");
 			if (pendingSkillRequests !== null && pendingSkillRequests > 0) return NO_EFFECTS;
-			return [{ kind: "inject_reminder", severity: "info", message: taskBoardReminderMessage(steps) }];
+			const attached = metadataString(input, "activeToolNames");
+			const placement =
+				attached !== null && !attached.split(",").some((name) => name.trim() === ToolNames.Tasks) ? "gateway" : "direct";
+			return [{ kind: "inject_reminder", severity: "info", message: taskBoardReminderMessage(steps, placement) }];
 		},
 	};
 }

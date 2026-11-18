@@ -37,6 +37,15 @@ describe("reminders gate on the turn's callable tools", () => {
 		const effects = reminder.evaluate(turn(surface(ToolNames.Tasks)));
 		strictEqual(effects.length, 1);
 		ok(effects[0]?.kind === "inject_reminder" && effects[0].message.startsWith("[Tasks]"));
+		ok(effects[0].message.includes('tasks action="plan"'));
+		// A tasks reachable only through gateway is named as the gateway call (bt-22).
+		const hidden = createTaskBoardReminderRegistration().evaluate({
+			...turn(surface(ToolNames.Tasks)),
+			metadata: { activeCapabilityNames: surface(ToolNames.Tasks), activeToolNames: ToolNames.Gateway },
+		});
+		ok(hidden[0]?.kind === "inject_reminder");
+		ok(hidden[0].message.includes('gateway(op="call", capability="tasks", args={action:"plan"'));
+		ok(!hidden[0].message.includes('tasks action="plan"'));
 	});
 
 	it("plan close never teaches ask_user to a turn that cannot call it", () => {
