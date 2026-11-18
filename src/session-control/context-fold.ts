@@ -88,6 +88,11 @@ export interface FoldDecision {
 	stage(entry: FoldStageEntry): void;
 	/** A context size the checkpoint measured: the first is its before figure, the latest its after figure. */
 	measure(tokens: number): void;
+	/**
+	 * A committed stage's own figures, as its `context.pruned` states them. Once one is reported, the event's before
+	 * is the first committed stage's and its after the latest one's; a later re-measure no longer replaces them.
+	 */
+	committed(tokens: { tokensBefore: number; tokensAfter: number }): void;
 	/** Writes the event when a stage was recorded; a checkpoint that reached no stage writes nothing. */
 	close(): void;
 }
@@ -228,15 +233,22 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 		const stages: FoldStageEntry[] = [];
 		let tokensBefore: number | null = null;
 		let tokensAfter = 0;
+		let reported: { tokensBefore: number; tokensAfter: number } | null = null;
 		let closed = false;
+		const figure = (tokens: number): number => Math.max(0, Math.round(tokens));
 		return {
 			stage: (entry) => {
 				stages.push(entry);
 			},
 			measure: (tokens) => {
-				const figure = Math.max(0, Math.round(tokens));
-				tokensBefore ??= figure;
-				tokensAfter = figure;
+				tokensBefore ??= figure(tokens);
+				tokensAfter = figure(tokens);
+			},
+			committed: (tokens) => {
+				reported = {
+					tokensBefore: reported?.tokensBefore ?? figure(tokens.tokensBefore),
+					tokensAfter: figure(tokens.tokensAfter),
+				};
 			},
 			close: () => {
 				if (closed || stages.length === 0) return;
@@ -249,8 +261,7 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 						checkpoint: input.checkpoint,
 						route,
 						stages,
-						tokensBefore: tokensBefore ?? tokensAfter,
-						tokensAfter,
+						...(reported ?? { tokensBefore: tokensBefore ?? tokensAfter, tokensAfter }),
 						...(coldReason !== undefined ? { cause: coldReason } : {}),
 					} satisfies ContextFoldPayload,
 					sessionTelemetryContext(input.sessionId),
@@ -415,8 +426,15 @@ export function createContextFold(port: ContextFoldPort): ContextFold {
 			// projection carry exists to preserve.
 			port.refreshLiveBudget(pendingUserText);
 			const after = port.liveContextEstimate(agentRuntime, pendingUserText);
-			decision.measure(after.tokens);
-			port.recordCompactionTokens({ before: estimate.tokens, after: after.tokens, basis: "runtime-estimate" });
+			// The event and the card state the eviction's own figures, as `context.pruned` does. The live re-estimate the
+			// fit check reads can sit on another basis: after a resume no live anchor carries through the rebuild, and
+			// the replayed usage this eviction invalidated leaves only the structural estimate (bt-47 D1).
+			decision.committed({ tokensBefore: planned.tokensBefore, tokensAfter: planned.tokensAfter });
+			port.recordCompactionTokens({
+				before: planned.tokensBefore,
+				after: planned.tokensAfter,
+				basis: "runtime-estimate",
+			});
 			const fit = requiredFit
 				? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
 				: !input.shouldCompact(after.tokens).shouldCompact;

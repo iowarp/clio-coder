@@ -51,6 +51,7 @@ import {
 	type ApplicationControllerDeps,
 	createApplicationController,
 } from "../../src/interactive/application-controller.js";
+import { tokenRow } from "../../src/interactive/context-operation-view.js";
 import {
 	renderCompactionSummaryEntry,
 	renderCompactionSummaryLine,
@@ -1348,6 +1349,61 @@ describe("production compaction controls", () => {
 		f.settings.context.compaction.threshold = 0.99;
 		strictEqual(await context.runAutoCompact(runtime, false), false);
 		strictEqual(folds.length, 1, "a checkpoint under the trigger writes no event");
+	});
+
+	it("reports a resumed eviction's own figures in context.fold and the card (bt-47 D1)", async () => {
+		const f = fixture();
+		f.settings.context.workingSet.enabled = true;
+		const oldest = f.entries()[0];
+		const leaf = f.entries().at(-1)?.turnId;
+		ok(oldest && leaf);
+		// A resumed turn context has no live anchor, so the pressure figure rests on the replayed usage the eviction
+		// then invalidates. Before the fix the event and the card quoted the structural re-estimate under it.
+		const replayed = estimateAgentContextBreakdown({
+			messages: buildModelReplayAgentMessagesFromTurns(f.entries(), { activeLeafTurnId: leaf }),
+		}).messageTokens;
+		const input = replayed + 10_000;
+		const answer = appendEntry(f.state, {
+			kind: "message",
+			role: "assistant",
+			parentTurnId: leaf,
+			payload: { text: "ack", usage: { input, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: input + 1 } },
+		});
+		f.pinLeaf(answer.turnId);
+		const { runtime, context, bus, activity } = automaticContext(f, f.run, {
+			autoCompact: undefined,
+			planEviction: (_policy, plan) => ({
+				policyId: "structural-v2",
+				tokensBefore: plan.pressure.tokens,
+				tokensAfter: plan.pressure.tokens - 9,
+				items: [{ ref: { entry: oldest.turnId }, reason: "age_horizon", tokensFreed: 9, marker: "[evicted]" }],
+			}),
+		});
+		const folds: ContextFoldPayload[] = [];
+		const pruned: ContextPrunedPayload[] = [];
+		bus.subscribe("context.fold", (event) => {
+			folds.push(event);
+		});
+		bus.subscribe("context.pruned", (event) => {
+			pruned.push(event);
+		});
+		await context.runAutoCompact(runtime, false, undefined, undefined, "next");
+		const [fold] = folds;
+		const [eviction] = pruned;
+		ok(fold && eviction && pruned.length === 1);
+		ok(eviction.tokensBefore > input);
+		deepStrictEqual(
+			[fold.cause, fold.tokensBefore, fold.tokensAfter],
+			["working_set_evict", eviction.tokensBefore, eviction.tokensAfter],
+		);
+		const operation = activity.at(-1)?.operation;
+		ok(operation);
+		deepStrictEqual(operation.tokens, {
+			before: eviction.tokensBefore,
+			after: eviction.tokensAfter,
+			basis: "runtime-estimate",
+		});
+		doesNotMatch(tokenRow(operation) ?? "", /−\d+%/);
 	});
 
 	it("routes a configured dedicated summary model through the production callback", async () => {
