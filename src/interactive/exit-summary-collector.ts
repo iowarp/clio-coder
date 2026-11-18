@@ -186,8 +186,10 @@ function tokenFacts(view: TelemetryView, model?: string): { figures: string[]; t
 		);
 	// In and out are the amounts; the rest earn a place only with something to say, what nobody reported is said once,
 	// and the calls that reported nothing are counted once at the end rather than beside every figure (F4).
+	// `in` is the whole prompt, cached reads included, as the turn receipt, footer and usage report say it; the
+	// provider's uncached remainder alone read `in 8` beside a receipt's `in 17K` for the same calls.
 	const figures = [
-		{ label: "in", quantity: quantity("input") },
+		{ label: "in", quantity: quantity("prompt") },
 		{ label: "out", quantity: quantity("output") },
 		{ label: "cache read", quantity: quantity("cacheRead") },
 		{ label: "cache write", quantity: quantity("cacheWrite") },
