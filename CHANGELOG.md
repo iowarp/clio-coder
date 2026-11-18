@@ -37,6 +37,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 - C4: an extension tool's interview result records the checkpoint ids it put to the author in its details, kept on the session ledger even when the interview is cancelled.
 - Docs: the extension, prompt template, settings, tool and CLI guides and the extension-authoring skill (0.1.3) document the 0.8.4 features (WTF-P 0.8.3 A1, B1 to B6, C1 to C5), `ignorable` and `turnPolicy.when` included. `docs/architecture/context-engine.md` gains an Observation aging section (C3).
 - Amazon Bedrock is hidden from `clio-coder configure` and its provider listings. A target that already names the `bedrock` runtime still resolves and runs.
+- Astra r8-4: the post-tool continuation guard decides on one history observation and does not publish the live budget again when no compaction ran.
+- Astra r8-5: the live budget's handoff and outcome fields share one continuity resolution and reuse the active-branch selection until the ledger or the leaf changes.
+- Astra r8-6: prompt-cache structure recording rehashes only the wire entries whose fields changed.
+- Astra r8-2: telemetry reuses the prepared prompt-structure and tool-schema bytes for an unchanged request surface and still verifies the stored object on disk.
 
 ### Fixed
 
