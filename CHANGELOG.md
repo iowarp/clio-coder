@@ -91,6 +91,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- `evidence inspect` shows a red baseline as a baseline taken before the change, never as a failed validation (bt-17).
+- `evidence inspect --json` now carries the trust summary and the full run evidence (findings, totals, quality, baselines) that the text form prints (bt-20).
+- `config inspect` and the seeded settings.yaml explain the worker thinking level `off`, including the route_warning fallback (bt-20).
 - A continued Copilot SDK session (`run --session`/`--continue`, ACP session load, `/resume`) resumes the same Copilot conversation and sends only the new turn instead of replaying the whole transcript. Resumable conversations are bounded to the newest 32, none idle over 7 days (bt-10).
 - A bash refusal from the raw-text floor now states the 32768-byte raw-text budget instead of the classifier's action class (bt-12).
 - `=>` and other text in a quoted here-document that `cat` or `tee` copies into a file no longer counts as a bash write target (bt-safety).
