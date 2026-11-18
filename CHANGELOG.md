@@ -108,6 +108,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A write that lands outside the workspace (tmp, a scratch root, or outside the cwd) no longer retires standing checks on the receipt or the task board (x7-1).
+- Catalog and `run --verify` checks run through bash are read by the shared check classifier, so the finish gate, the receipt and the board agree on them (x7-5).
+- The finish footer says a check failed, not "checks passed", while a check's last outcome since the last change is red (bt-44).
 - A safety-judge or System One call cut off by shutdown (such as `--timeout`) now settles with the `shutdown` failure cause, as other side calls do (bt-26 N2e).
 - A yolo cap halt's `autonomy.cap_reached` record is journaled when the stop lands and counts the same tool calls as the headless stderr notice. A turn the cap stops at the tool boundary settles with no mid-stream stage, and why-stopped says "at the tool boundary" (bt-26 N2f).
 - A repetition, shutdown or other harness stop no longer reports as `operator_cancel` or `triage_stop` because an earlier turn was stopped with Esc or by triage (x7-3).
