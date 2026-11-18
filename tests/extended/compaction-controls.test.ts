@@ -1147,6 +1147,7 @@ describe("production compaction controls", () => {
 		} as unknown as AgentRuntime;
 		let leaf: string | null = null;
 		const cycles: Array<{ turn: number; summary: number; suffix: number; tokensAfter: number; headroom: number }> = [];
+		const notices: string[] = [];
 		for (let turn = 1; turn <= 16; turn++) {
 			// Each `clio-coder run` turn is a fresh process; the post-tool guard compacts inside the turn, so the cut
 			// splits it and keeps the newest tool batch whole.
@@ -1160,7 +1161,7 @@ describe("production compaction controls", () => {
 				readSessionEntries: f.entries,
 				autoCompact: f.run,
 				middleware: { fireCompactionHook: () => {} } as unknown as TurnMiddleware,
-				emitNotice: () => {},
+				emitNotice: (text) => notices.push(text),
 			});
 			const user = appendEntry(f.state, {
 				kind: "message",
@@ -1233,6 +1234,10 @@ describe("production compaction controls", () => {
 			if (cycle) cycle.headroom = row.headroomTokens ?? 0;
 		}
 		for (const cycle of cycles) t.diagnostic(JSON.stringify(cycle));
+		// Each cut keeps the newest tool batch of the running turn, so each notice says the turn was split.
+		const lines = notices.filter((text) => text.startsWith("Clio compacted "));
+		strictEqual(lines.length, cycles.length);
+		for (const line of lines) ok(line.endsWith(" (the cut fell inside a turn)"), line);
 		// Before this fix the checkpoint outgrew its share each cycle while the kept batch could not shrink, so headroom
 		// fell 2790, 2287, 1242, 213, -750 and the cut landed above the trigger (live: 3336, 1398, 1644 and an overflow).
 		ok(cycles.length >= 3, JSON.stringify(cycles));
@@ -1240,13 +1245,14 @@ describe("production compaction controls", () => {
 		const settled = cycles[1]?.headroom ?? 0;
 		for (const cycle of cycles.slice(2)) ok(cycle.headroom >= settled - 300, JSON.stringify(cycles));
 		for (const [index, cycle] of cycles.entries()) {
-			// The design target keeps 60% of the history space below the trigger, checkpoint and kept batch together.
+			// The design target keeps 60% of the history space below the trigger, checkpoint and kept batch together, and
+			// no cut lands over it, so the next turn never opens over the trigger because a cut stopped short.
 			const trigger = cycle.tokensAfter + cycle.headroom;
 			const fixed = cycle.tokensAfter - cycle.summary - cycle.suffix;
 			const target = fixed + 0.6 * (trigger - fixed);
 			const band = 0.1 * (trigger - fixed);
 			ok(
-				cycle.tokensAfter <= target + band && (index === 0 || cycle.tokensAfter >= target - band),
+				cycle.tokensAfter <= target && (index === 0 || cycle.tokensAfter >= target - band),
 				JSON.stringify({ target, cycles }),
 			);
 		}
@@ -1971,6 +1977,55 @@ describe("compaction cut inside a tool batch", () => {
 		];
 		const cut = findCutPoint(entries, 1000).firstKeptEntryIndex;
 		ok(cut !== 2, "the cut splits the tool batch");
+	});
+
+	it("calls a cut a split turn only when the kept suffix holds a message of that turn (bt-18)", () => {
+		const base = (turnId: string) => ({ turnId, parentTurnId: null, timestamp: "2026-11-10T00:00:00.000Z" });
+		const big = "x".repeat(8000);
+		const user = (turnId: string, text: string): SessionEntry => ({
+			...base(turnId),
+			kind: "message",
+			role: "user",
+			payload: { text },
+		});
+		const call: SessionEntry = {
+			...base("a1"),
+			kind: "message",
+			role: "assistant",
+			payload: { content: [{ type: "toolCall", id: "c1", name: "read", arguments: {} }] },
+		};
+		const result: SessionEntry = {
+			...base("r1"),
+			kind: "message",
+			role: "tool_result",
+			payload: { toolCallId: "c1", content: big },
+		};
+		const outcome: SessionEntry = { ...base("o1"), kind: "custom", customType: "turnOutcome", data: {} };
+		// A cut on the row trailing a finished turn keeps none of it: the whole turn is history.
+		const trailing = findCutPoint([user("u1", big), call, result, outcome, user("u2", "next")], 1000);
+		deepStrictEqual(trailing, { firstKeptEntryIndex: 3, turnStartIndex: -1, isSplitTurn: false });
+		// A shell row opens its own turn, so a cut on it splits nothing.
+		const shell: SessionEntry = {
+			...base("x1"),
+			kind: "bashExecution",
+			command: "ls",
+			output: big,
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+		};
+		const answer: SessionEntry = { ...base("a0"), kind: "message", role: "assistant", payload: { text: big } };
+		deepStrictEqual(findCutPoint([user("u1", big), answer, shell], 1000), {
+			firstKeptEntryIndex: 2,
+			turnStartIndex: -1,
+			isSplitTurn: false,
+		});
+		// Keeping the newest tool batch of a running turn does split it.
+		deepStrictEqual(findCutPoint([user("u1", big), call, result], 1000), {
+			firstKeptEntryIndex: 1,
+			turnStartIndex: 0,
+			isSplitTurn: true,
+		});
 	});
 });
 
