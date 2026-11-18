@@ -530,7 +530,7 @@ function durationMsFromEvent(event: ChatLoopEvent): number | undefined {
 function recordRunEffect(recorder: RunEffectsRecorder, event: ChatLoopEvent): void {
 	const outcome = (event as { outcome?: unknown }).outcome;
 	if (event.type === "tool_execution_end" && (outcome === "ok" || outcome === "error" || outcome === "blocked"))
-		recorder.checkOutcome(event.toolCallId, outcome);
+		recorder.checkOutcome(event.toolCallId, outcome, (event as { unresolved?: unknown }).unresolved === true);
 	recordToolExecutionEffects(recorder, event);
 }
 
