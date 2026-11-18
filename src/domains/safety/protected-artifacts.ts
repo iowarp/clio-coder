@@ -4,6 +4,7 @@ import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-c
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
+import { pythonScriptOnlyReads } from "./python-probe.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -1283,6 +1284,8 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["false", []],
 	["test", []],
 	["[", []],
+	// jq has no way to write a file or run a program.
+	["jq", []],
 ]);
 
 /**
@@ -1871,10 +1874,54 @@ export function shellCommandVerdict(command: string, gitHelpersConfigured: boole
 		}
 		const script = segmentShellScript(step.argv);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
-		verdict = join(verdict, script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script));
+		const inline = script === null ? inlinePythonVerdict(command, step) : null;
+		verdict = join(verdict, inline ?? (script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script)));
 		if (verdict === "mutation") return verdict;
 	}
 	return verdict;
+}
+
+/** Interpreter flags that change neither where a script comes from nor what it may import. */
+const PLAIN_PYTHON_FLAGS: ReadonlySet<string> = new Set(["-B", "-E", "-I", "-O", "-OO", "-P", "-q", "-s", "-S", "-u"]);
+
+/**
+ * The verdict of a step that runs an inline Python script (c17-a): `python3 -c '<script>'`, or `python3 -` / bare
+ * `python3` reading the one quoted here-document its line opens. Inspection when the literal script provably only
+ * reads ({@link pythonScriptOnlyReads}), a change otherwise, so a stdin script no reader can see no longer reads as
+ * unknown. Null for any other step, including one behind an environment prefix that may redirect its imports.
+ */
+function inlinePythonVerdict(command: string, step: ShellStep): CommandVerdict | null {
+	if (step.index !== 0 || !isPythonExecutable(basenameToken(step.argv[0]))) return null;
+	const words = shellCommandWords(step.tokens);
+	let index = 1;
+	while (PLAIN_PYTHON_FLAGS.has(step.argv[index] ?? "")) index += 1;
+	const reads = (script: string) => (pythonScriptOnlyReads(script) ? "inspection" : "mutation");
+	if (step.argv[index] === "-c") {
+		const word = words[index + 1];
+		if (word === undefined) return null;
+		const raw = command.slice(word.start, word.end);
+		const literal =
+			(word.substitutions?.length ?? 0) === 0 &&
+			word.hiddenContent !== true &&
+			word.unterminated !== true &&
+			(/^'[^']*'$/u.test(raw) || !/[$`\\]/u.test(raw));
+		return literal ? reads(word.value) : "mutation";
+	}
+	if (index < step.argv.length && step.argv[index] !== "-") return null;
+	const first = step.tokens[0];
+	const last = step.tokens.at(-1);
+	if (first === undefined || last === undefined || step.tokens.some((token) => token.operator)) return "mutation";
+	const lineEnd = command.indexOf("\n", last.end);
+	const head = /^[ \t]*<<[ \t]*(?:'(\w+)'|"(\w+)"|(\w+))[ \t]*$/u.exec(
+		command.slice(last.end, lineEnd === -1 ? command.length : lineEnd),
+	);
+	const body = cachedShellScan(command, true).bodies.find((candidate) => candidate.start === lineEnd + 1);
+	if (head === null || body === undefined || command.slice(first.start, last.end).includes("<<")) return "mutation";
+	const word = head[1] ?? head[2] ?? head[3] ?? "";
+	const lines = command.slice(body.start, body.end).replace(/\n$/u, "").split("\n");
+	if (lines.pop() !== word) return "mutation";
+	const script = lines.join("\n");
+	return head[3] !== undefined && /[$`\\]/u.test(script) ? "mutation" : reads(script);
 }
 
 /** Writers whose every write is a target {@link extractCommandWriteTargets} or {@link extractCommandDeleteTargets} names. */

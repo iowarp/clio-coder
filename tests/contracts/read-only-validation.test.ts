@@ -1180,6 +1180,36 @@ it("one classifier reads every call as a check, an inspection, a mutation or unk
 	}
 });
 
+it("a read-only inline python script or jq keeps a pass undisclosed; one that writes retires it (c17-a, verify3)", () => {
+	const after = (command: string) => {
+		const recorder = createRunEffectsRecorder(process.cwd());
+		for (const [id, line] of [
+			["test", "npm test"],
+			["probe", command],
+		] as const) {
+			recorder.start(id, "bash", { command: line });
+			recorder.checkOutcome(id, "ok");
+			recorder.finish(id, false);
+		}
+		const { validationCommands, unclassifiedAfterLastCheck } = recorder.snapshot();
+		return { standing: [...validationCommands], unclassifiedAfterLastCheck };
+	};
+	for (const command of [
+		`python3 -c 'import json; print(json.load(open("package.json"))["name"])'`,
+		"python3 - <<'EOF'\nimport json\nwith open('package.json') as f:\n    print(json.load(f)['name'])\nEOF",
+		"jq .name package.json",
+		"cat package.json 2>&1 | tail -n 3",
+		"cd src && sed -n '1,5p' index.ts",
+	])
+		deepStrictEqual(after(command), { standing: ["npm test"], unclassifiedAfterLastCheck: [] }, command);
+	for (const command of [
+		`python3 -c 'open("out.txt", "w").write("x")'`,
+		"python3 - <<'EOF'\nopen('out.txt', 'w').write('x')\nEOF",
+		`python3 -c 'import os; os.remove("a")'`,
+	])
+		deepStrictEqual(after(command), { standing: [], unclassifiedAfterLastCheck: [] }, command);
+});
+
 it("wrapped and alternate spellings of a check read as that check, and a green after an edit settles the gate", () => {
 	const cwd = process.cwd();
 	const read = (command: string) => classifyCall("bash", { command }, { cwd, outputTarget: checkOutputReader(cwd) });
