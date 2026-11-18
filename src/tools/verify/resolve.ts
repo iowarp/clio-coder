@@ -46,26 +46,39 @@ function extraArgs(args: Record<string, unknown>): string[] {
 	return Array.isArray(args.args) ? args.args.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+export type RunnableCheckDiscoveryResult = { ok: true; checks: DeclaredCheck[] } | { ok: false; reason: string };
+
+/**
+ * Every check `verify(check=<id>)` runs by exact id: package scripts and
+ * catalog entries for `cwdArg`, then the available checks derived from the
+ * workspace's toolchain files. Dispatch admits exactly these ids as
+ * intent.verification and seals each one's argv, so a worker's host
+ * verification runs the command verify would.
+ */
+export function runnableChecksAtRoot(workspaceRoot: string, cwdArg: string | undefined): RunnableCheckDiscoveryResult {
+	const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, cwdArg);
+	if (!discovery.ok) return discovery;
+	const declared = discovery.sources.flatMap((source) => source.checks);
+	let derived: ToolchainCheck[] = [];
+	try {
+		derived = availableToolchainChecks(workspaceRoot, declared).filter((check) => check.availability === undefined);
+	} catch {
+		// Derived checks are a convenience; a discovery fault leaves the declared ones.
+	}
+	return { ok: true, checks: [...declared, ...derived] };
+}
+
 /**
  * The ids `verify({})` lists at the workspace root: the project catalog's
  * first (the project wrote them for this), then package scripts, then derived
  * toolchain checks that are available. Empty when discovery fails.
  */
 export function declaredCheckIds(workspaceRoot: string): string[] {
-	const discovery = discoverDeclaredChecksAtRoot(workspaceRoot, undefined);
-	if (!discovery.ok) return [];
-	const declared = discovery.sources.flatMap((source) => source.checks);
-	const rank = (check: DeclaredCheck) => (check.source.kind === "project-catalog" ? 0 : 1);
-	const ordered = [...declared].sort((a, b) => rank(a) - rank(b)).map((check) => check.id);
-	let derived: string[] = [];
-	try {
-		derived = availableToolchainChecks(workspaceRoot, declared)
-			.filter((check) => check.availability === undefined)
-			.map((check) => check.id);
-	} catch {
-		// Derived checks are a convenience; a discovery fault leaves the declared ids.
-	}
-	return [...new Set([...ordered, ...derived])];
+	const runnable = runnableChecksAtRoot(workspaceRoot, undefined);
+	if (!runnable.ok) return [];
+	const rank = (check: DeclaredCheck) =>
+		check.source.kind === "project-catalog" ? 0 : check.source.kind === "toolchain" ? 2 : 1;
+	return [...new Set([...runnable.checks].sort((a, b) => rank(a) - rank(b)).map((check) => check.id))];
 }
 
 /** Derived checks that no package script or catalog entry already owns by id. */
