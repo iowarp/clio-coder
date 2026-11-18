@@ -99,6 +99,7 @@ import { interopOverlaySurface } from "./overlays/interop.js";
 import { paneWatchDecision } from "./pane-policy.js";
 import { describePanesLeftBehind } from "./panes-runtime.js";
 import type { createPeerInbox } from "./peer-inbox.js";
+import { slashDraftUnderApprovalNotice } from "./permission-hint.js";
 import { suspendProcessUntilContinued } from "./process-suspend.js";
 import { projectShadowNotice } from "./project-shadow-notice.js";
 import { createProjectTrustSession } from "./project-trust-session.js";
@@ -2204,6 +2205,10 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 				ttlMs: 2_500,
 			}),
 		hasActiveEditorBash: () => editorSubmit.hasActiveEditorBash(),
+		explainDraftUnderApproval: (draft) => {
+			const notice = slashDraftUnderApprovalNotice(draft);
+			if (notice !== null) notify("info", notice, "permission:slash-draft");
+		},
 		cancelSteerDraft: () => {
 			const agent = editor.dropSteerTarget();
 			if (agent === null) return false;

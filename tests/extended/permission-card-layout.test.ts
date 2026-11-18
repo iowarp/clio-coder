@@ -18,7 +18,7 @@ import {
 	createOverlayPermissionLifecycle,
 	type OverlayPermissionLifecycle,
 } from "../../src/interactive/overlay-permission-lifecycle.js";
-import { permissionHintEntries } from "../../src/interactive/permission-hint.js";
+import { permissionHintEntries, slashDraftUnderApprovalNotice } from "../../src/interactive/permission-hint.js";
 import {
 	type ApprovalRequestView,
 	createPermissionOverlayBody,
@@ -257,6 +257,25 @@ test("Alt+T folds the terms while the card owns the keys and yields while the mu
 	routeOverlayKey("\x1bt", "permission-confirm", deps as never, matches);
 	strictEqual(calls.filter((call) => call === "terms").length, 1, "the key is inert while the mutation is open");
 	ok(calls.includes("confirm"));
+});
+
+test("Enter on a /fork draft under the card allows nothing and names the card and its keys (bt-11 p)", () => {
+	const calls: string[] = [];
+	const deps = {
+		cancelPermission: () => calls.push("cancel"),
+		confirmPermission: () => calls.push("confirm"),
+		stopTurnFromPermission: () => calls.push("stop"),
+		composerHasDraft: () => true,
+		explainHeldDraft: () => calls.push("explain"),
+	};
+	ok(routeOverlayKey("\r", "permission-confirm", deps as never, () => false));
+	deepStrictEqual(calls, ["explain"]);
+	const notice = slashDraftUnderApprovalNotice("/fork");
+	match(
+		notice ?? "",
+		/^\/fork waits for the approval card: Esc denies the call or .+ stops the turn, then Enter runs \/fork\.$/u,
+	);
+	strictEqual(slashDraftUnderApprovalNotice("please fork it"), null);
 });
 
 test("local invocation inspection scrolls complete redacted arguments without adding them to the shared approval view", () => {
