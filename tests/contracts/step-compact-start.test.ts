@@ -447,6 +447,28 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		deepStrictEqual(carried.userContext, userContext);
 		// A later operator turn retires the old request, as native compaction does.
 		strictEqual(hostCheckpoint(entries(true), "Step checkpoint.").userContext, undefined);
+		// After a step checkpoint the next one carries the summarized body once and only its own lead (x2-1).
+		const chained = [...entries(false)];
+		chained.push({
+			...(chained[1] as SessionEntry & { kind: "compactionSummary" }),
+			turnId: "s2",
+			parentTurnId: "next",
+			summary: carried.summary,
+			trigger: "step",
+		});
+		const next = hostCheckpoint(chained, "Step checkpoint two.");
+		strictEqual(next.summary.split("GOAL-MARKER").length, 2, next.summary);
+		strictEqual(next.summary.split("Step checkpoint").length, 2, next.summary);
+		deepStrictEqual(next.userContext, userContext);
+		// An oversized body loses its start, never the newest text.
+		const long = [...entries(false)];
+		long[1] = {
+			...(long[1] as SessionEntry & { kind: "compactionSummary" }),
+			summary: `## Goal\n${"x".repeat(80_000)}TAIL-MARKER`,
+		};
+		const cut = hostCheckpoint(long, "Step checkpoint.").summary;
+		ok(cut.startsWith("[earlier checkpoint start truncated: "), cut.slice(0, 80));
+		ok(cut.includes("TAIL-MARKER\n\n---\n\nStep checkpoint."), cut.slice(-200));
 	});
 
 	it("a settled step leads only the same session standing on the settled leaf", () => {

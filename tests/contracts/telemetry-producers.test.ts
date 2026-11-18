@@ -221,7 +221,7 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 		const compile = {
 			version: 4,
 			at: "2026-10-31T12:00:00.000Z",
-			previousHash: null,
+			previousHash: "c".repeat(64),
 			systemPromptHash: "a".repeat(64),
 			tokenEstimate: 3,
 			thinkingLevel: "off",
@@ -235,12 +235,12 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 			prompt: { sections: compile.sections, fragmentManifest: compile.fragments, compile },
 		});
 		ok(structure?.promptStructure);
-		// A byte-stable recompile keeps the structure id; only its time moves.
+		// A byte-stable recompile keeps the structure id; only its time and predecessor hash move.
 		const recompiled = await lease.storeRequestObjects?.({
 			prompt: {
 				sections: compile.sections,
 				fragmentManifest: compile.fragments,
-				compile: { ...compile, at: "2026-10-31T12:05:00.000Z" },
+				compile: { ...compile, at: "2026-10-31T12:05:00.000Z", previousHash: null },
 			},
 		});
 		deepStrictEqual(recompiled?.promptStructure, structure.promptStructure);
@@ -248,7 +248,13 @@ test("prompt.compiled is recorded once per structure by a writer, under the call
 		for (const callId of ids)
 			lease.recordPromptCompiled?.(
 				structure.promptStructure,
-				{ layoutVersion: 4, tokenEstimate: 3, sections: 1, compiledAt: compile.at },
+				{
+					layoutVersion: 4,
+					tokenEstimate: 3,
+					sections: 1,
+					compiledAt: compile.at,
+					previousHash: compile.previousHash,
+				},
 				{ ...lease.context, callId, attemptId: newAttemptId() },
 			);
 		await lease.release();

@@ -9603,6 +9603,8 @@ export function createDispatchBundle(
 					// stays where a match opens a gate, in the result contract's
 					// measured judgement above.
 					executedCommands: observedRunEffects.verificationCommands,
+					// Only verify runs on the final tree ground a claim by check id or resolved command (bt-9, bt-27c).
+					verifyRuns: runEffects.checkFreshness().verifyRuns,
 					executedCheckingCalls: countCheckingCalls(toolStats, verifyCalls.calls),
 					readOnly: lifecycle.readOnly,
 					// The worker derived the same gates from the same task text.

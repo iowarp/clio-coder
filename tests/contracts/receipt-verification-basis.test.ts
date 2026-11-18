@@ -30,24 +30,28 @@ test("a validation tool that ran and failed is unverified, not absent", () => {
 });
 
 test("a validation tool with both passing and failing calls is still unverified", () => {
-	deepStrictEqual(deriveRunVerification({ toolStats: [stat("npm test", { ok: 1, errors: 1 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("verify", { ok: 1, errors: 1 })] }), {
 		state: "unverified",
 		basis: "validation-tool",
 	});
 });
 
 test("a validation tool that ran and passed stays verified", () => {
-	deepStrictEqual(deriveRunVerification({ toolStats: [stat("pytest", { ok: 2, errors: 0 })] }), {
+	deepStrictEqual(deriveRunVerification({ toolStats: [stat("verify", { ok: 2, errors: 0 })] }), {
 		state: "verified",
 		basis: "validation-tool",
 	});
 });
 
+// x1-2: identity is explicit. `decide` once verified a run because its name
+// contains "ci", and gateway capabilities named like checks ran no check either.
 test("no validation tool at all still reports that none ran", () => {
-	deepStrictEqual(deriveRunVerification({ toolStats: [stat("read", { ok: 3, errors: 0 })] }), {
-		state: "unverified",
-		basis: "no-validation-tool",
-	});
+	for (const tool of ["read", "decide", "tasks", "ci_status", "list_checks", "npm test"]) {
+		deepStrictEqual(deriveRunVerification({ toolStats: [stat(tool, { ok: 3, errors: 0 })] }), {
+			state: "unverified",
+			basis: "no-validation-tool",
+		});
+	}
 	deepStrictEqual(deriveRunVerification({ toolStats: [] }), {
 		state: "unverified",
 		basis: "no-validation-tool",

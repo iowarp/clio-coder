@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { runBashCommand } from "../../core/bash-exec.js";
+import type { RunHostVerification } from "../../domains/dispatch/types.js";
 import type { SessionVerifier } from "../../domains/safety/finish-contract.js";
 import type { RunJsonVerifyResult } from "./run-json-schema.js";
 
@@ -98,4 +99,28 @@ export function formatHeadlessVerifyResult(result: RunJsonVerifyResult): string 
 	const verdict = result.passed ? "passed" : result.timedOut ? "timed out" : "failed";
 	const exit = result.exitCode === null ? "no exit code" : `exit ${result.exitCode}`;
 	return `clio-coder run: verify ${result.id} ${verdict} (${exit}, ${(result.durationMs / 1000).toFixed(1)}s): ${result.command}`;
+}
+
+/**
+ * The acceptance checks as the run's host verdict, sealed the way dispatch seals its declared checks, so the receipt
+ * and `evidence inspect` judge the run by the same checks its output reported (x1-4). Null when no check ran.
+ */
+export function acceptanceHostVerification(
+	results: ReadonlyArray<RunJsonVerifyResult>,
+	cwd: string,
+): RunHostVerification | null {
+	if (results.length === 0) return null;
+	return {
+		status: results.every((result) => result.passed) ? "verified" : "rejected",
+		checks: results.map((result) => ({
+			check: result.id,
+			argv: ["bash", "-c", result.command],
+			cwd,
+			// A check that did not pass never seals exit 0, whether it timed out, was capped or ended by a signal.
+			exitCode: result.passed ? 0 : result.exitCode !== null && result.exitCode !== 0 ? result.exitCode : 1,
+			durationMs: result.durationMs,
+			memo: false,
+			outputTail: "",
+		})),
+	};
 }

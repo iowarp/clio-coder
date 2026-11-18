@@ -466,7 +466,7 @@ export const SHARE_EVENT_PROJECTIONS: { readonly [N in ShareableEventName]: Payl
 		model: "model-id",
 	},
 	"prompt.compiled": {
-		...keep("structure", "layoutVersion", "tokenEstimate", "sections", "contextWindow"),
+		...keep("structure", "layoutVersion", "tokenEstimate", "sections", "contextWindow", "previousHash"),
 		thinkingLevel: "token",
 		contextWindowSource: "token",
 		compiledAt: "id",

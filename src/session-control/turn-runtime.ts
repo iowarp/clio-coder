@@ -96,6 +96,7 @@ import {
 	isEmptyAbortedAssistantMessage,
 	noAnswerReprompt,
 	noteWrittenCalls,
+	rebaseToolMarkupReprompt,
 	sumRunUsage,
 	type ToolMarkupRepromptBudget,
 	terminalFailureFromAssistantMessage,
@@ -998,7 +999,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						layoutVersion: PROMPT_MANIFEST_VERSION,
 						tokenEstimate: Math.max(0, Math.round(compiled.tokenEstimate)),
 						sections: compiled.sections.length,
-						...(compile ? { compiledAt: compile.at } : {}),
+						...(compile ? { compiledAt: compile.at, previousHash: compile.previousHash } : {}),
 						...(localRuntime.agent.state.thinkingLevel
 							? { thinkingLevel: String(localRuntime.agent.state.thinkingLevel) }
 							: {}),
@@ -1628,6 +1629,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		const deliverInRunContinuation = async (signal?: AbortSignal): Promise<boolean> => {
 			if (!state.continuation.takeInRun()) return false;
 			state.turnToolCalls = 0;
+			state.toolMarkupReprompt = rebaseToolMarkupReprompt(state.toolMarkupReprompt);
 			state.turnToolNames = [];
 			middlewareToolChoice.reset();
 			let block: string | null = null;

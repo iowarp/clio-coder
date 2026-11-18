@@ -192,6 +192,7 @@ import {
 	WORKER_REFUSAL_LIMIT,
 	WORKER_REFUSAL_REPORT_BLOCK,
 	WORKER_REFUSAL_REPORT_DIRECTIVE,
+	workerRefusalHelperDirective,
 	workerRefusalLimitReason,
 } from "./worker-refusals.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
@@ -2221,12 +2222,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	/**
 	 * The run still exits permission_required, but finished work keeps its report: the next model round may only
-	 * reply (beforeToolCall refuses every tool), and finishTurn ends the run after it.
+	 * reply (beforeToolCall refuses every tool), and finishTurn ends the run after it. A helper-result worker reports
+	 * only through its result tool, so that round is its terminal handoff, with the tool exposed and named (x2-3).
 	 */
 	const endAtRefusalLimit = (reason: string): void => {
 		permissionFailure = true;
 		refusalReportRound = workerModelRound + 1;
-		registry.cancelParkedCalls(`${reason}\n${WORKER_REFUSAL_REPORT_DIRECTIVE}`);
+		if (helperForcedChoiceAvailable) helperTerminalPhase = true;
+		const directive = helperToolAvailable
+			? workerRefusalHelperDirective(INTERNAL_HELPER_RESULT_TOOL)
+			: WORKER_REFUSAL_REPORT_DIRECTIVE;
+		registry.cancelParkedCalls(`${reason}\n${directive}`);
 		process.stderr.write(`[worker] ${reason}\n`);
 	};
 	const emitGrantExecution = (active: ActiveEscalation, event: GrantExecutionEvent): void => {

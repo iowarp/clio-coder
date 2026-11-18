@@ -44,6 +44,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- `run --agent` exits 1 when the run's sealed result-contract quality is `fail` (a check red after its last edit), as a verifier fail verdict already does; the outcome stays `succeeded`, and a baseline red before any edit stays exit 0 (x1-5).
 - The citation-check nudge asks for the full answer again with corrected citations instead of "keep the rest of the answer as it is" (bt-29).
 - `evidence inspect --json` names the top-level failed-validation count `quality.failedValidationCount`, so it no longer shares a name with the `evidence.quality.failedValidations` array of names (bt-20 P-C).
 - Repetitive test files are consolidated into tables with shared harnesses: loop-guard and template-budget scenarios, one fake ACP transport, both quota providers' error paths, and the damage-control shell segments; constant pins that behaviour already covers are removed (P4-2, P4-5, P4-6, P4-9, P4-10; 214 to 167 tests).
@@ -103,6 +104,11 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Run verification counts only the `verify` tool as a validation tool, so a `decide`, `tasks` or check-named gateway call no longer marks a run verified with no check run (x1-2).
+- `run --verify` acceptance results seal into the run's receipt as its host verification, so the receipt and `evidence inspect` agree with `turn_end.verify`; the exit code is unchanged (x1-4).
+- A byte-stable prompt recompile keeps its prompt-structure object id; the predecessor hash moved from the hashed structure to the `prompt.compiled` record (bt-10).
+- A refused heredoc command, and each entry of the refusal-limit list, appears once in the model-facing rejection, with its reason and remedy intact (bt-28).
+- A claim grounds in a passing `verify` run on the final tree when it or its evidence names the check id, or it names the command the check resolved to (bt-9).
 - Working-set eviction no longer credits the full body of a tool result that observation aging already stubbed, so the plan no longer stops before the request is under target (D1-1).
 - Observation aging records each batch in the session ledger and seeds from it, so a resumed or forked session sends the same stub set instead of a fresh batch that broke the prompt cache (D1-6).
 - `evidence inspect` and the run row now report a headless main-agent run's real token usage, read from its settlement, instead of a measured "tokens: 0" (bt-31).

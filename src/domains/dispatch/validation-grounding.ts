@@ -77,6 +77,13 @@ export interface ValidationGroundingInput {
 	executedCheckingCalls: number;
 	/** The gates a verifier's task declared; `verify <id>` ran the gate's command text. */
 	taskGates?: ReadonlyArray<{ id: string; text: string }>;
+	/** Passing `verify` runs on the run's final tree (`CheckFreshness.verifyRuns`): check id and resolved command. */
+	verifyRuns?: ReadonlyArray<{ check: string; command: string }>;
+}
+
+interface ClaimedValidation {
+	name: string;
+	evidence?: string;
 }
 
 /**
@@ -118,7 +125,7 @@ function claimIdentity(name: string): string {
 	return detected.kind === "validation" ? normalize(detected.matched) : normalize(name);
 }
 
-function claimedValidationNames(output: string | null): string[] {
+function claimedValidations(output: string | null): ClaimedValidation[] {
 	if (output === null) return [];
 	// Read as the verifier contract reads it, so a report it accepted cannot yield
 	// no claims here and seal a fabricated pass as measured.
@@ -127,7 +134,7 @@ function claimedValidationNames(output: string | null): string[] {
 	const record = parsed.value;
 	const entries = record.checks ?? record.validations;
 	if (!Array.isArray(entries)) return [];
-	const names: string[] = [];
+	const names: ClaimedValidation[] = [];
 	for (const entry of entries) {
 		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
 		const check = entry as Record<string, unknown>;
@@ -135,7 +142,8 @@ function claimedValidationNames(output: string | null): string[] {
 		// A baseline ran before the change, so it claims nothing about the changed tree (bt-17).
 		if (check.baseline === true) continue;
 		const name = check.name.trim();
-		if (name.length > 0) names.push(name);
+		if (name.length === 0) continue;
+		names.push(typeof check.evidence === "string" ? { name, evidence: check.evidence } : { name });
 	}
 	return names;
 }
@@ -189,6 +197,30 @@ function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
 }
 
 /**
+ * A verify run on the final tree grounds a claim that names its check id, in the claim or its evidence ("test check",
+ * "verify check 'test'"), or names the command the check resolved to, even inside a parenthetical such as
+ * `test check (python3 -m unittest, after change)`, which the whole-claim reading does not detect (bt-9).
+ */
+function groundedByVerifyRun(
+	claim: ClaimedValidation,
+	runs: ReadonlyArray<{ check: string; command: string }>,
+): boolean {
+	const name = normalize(claim.name);
+	const evidence = claim.evidence === undefined ? "" : normalize(claim.evidence);
+	const named = claim.name
+		.split(/[(),;]/u)
+		.map((part) => detectValidationCommand(part, "grounding"))
+		.flatMap((detected) => (detected.kind === "validation" ? [normalize(detected.matched)] : []));
+	for (const run of runs) {
+		const id = normalize(run.check);
+		if (id.length > 0 && (contains(name, id) || contains(evidence, id))) return true;
+		const ran = detectValidationCommand(run.command, "grounding");
+		if (ran.kind === "validation" && named.includes(normalize(ran.matched))) return true;
+	}
+	return false;
+}
+
+/**
  * Fold a terminal result's passing validation claims against the run's executed
  * commands. Returns null when there is nothing to ground, which is every
  * contract kind that carries no correctness claim and every result that named
@@ -199,7 +231,7 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	// Hoare machine claims use exact native proof records, while argued obligations claim no command execution.
 	if (input.contractKind === "verifier-report" && parseVerifierResult(input.output)?.assurance !== undefined)
 		return null;
-	const claims = claimedValidationNames(input.output).filter((name) => {
+	const claims = claimedValidations(input.output).filter(({ name }) => {
 		if (!input.readOnly || input.contractKind !== "mutation-report") return true;
 		if (detectValidationCommand(name, "grounding").kind === "validation") return true;
 		return !/^(?:read|inspect(?:ed)?|review(?:ed)?|source|file)\b|^checked\s+\S+\.(?:[cm]?[jt]sx?|md|txt|json|yaml|yml)\b/iu.test(
@@ -210,9 +242,9 @@ export function groundClaimedValidations(input: ValidationGroundingInput): Valid
 	const ungrounded: string[] = [];
 	let grounded = 0;
 	const executed = withTypedCheckNames(input.executedCommands, input.taskGates ?? []);
-	for (const name of claims) {
-		if (isExecuted(name, executed)) grounded += 1;
-		else if (!ungrounded.includes(name)) ungrounded.push(name);
+	for (const claim of claims) {
+		if (isExecuted(claim.name, executed) || groundedByVerifyRun(claim, input.verifyRuns ?? [])) grounded += 1;
+		else if (!ungrounded.includes(claim.name)) ungrounded.push(claim.name);
 	}
 	return {
 		claimed: claims.length,

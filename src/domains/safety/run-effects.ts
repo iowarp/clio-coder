@@ -134,6 +134,8 @@ export interface CheckFreshness {
 	verifyCalls: ReadonlySet<string>;
 	/** Tools whose latest executed call ran on the final tree. */
 	tools: ReadonlySet<string>;
+	/** Passing `verify` calls that ran on the final tree: the check id and the command it resolved to (bt-9). */
+	verifyRuns: ReadonlyArray<{ check: string; command: string }>;
 }
 
 export interface RunEffectsRecorderOptions {
@@ -318,6 +320,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 	const inFlight = new Map<string, { tool: string; revision: number; outcome: "ok" | "error" | "blocked" | null }>();
 	const toolsRanAt = new Map<string, number>();
 	const verifyCallsRanAt = new Map<string, number>();
+	const passedVerifyRuns = new Map<string, { check: string; command: string; revision: number }>();
 	const verificationCommands = new Set<string>();
 	const checkingCalls = new Map<string, "ok" | "error" | "blocked" | null>();
 	const writeRecordDowngrades = new Map<string, WriteRecordDowngrade>();
@@ -457,6 +460,19 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 						? null
 						: validationCommandOf(ToolNames.Bash, { command: effects.shellCommand }, "grounding");
 				if (ran !== null) verificationCommands.add(ran);
+				if (
+					effects.proofCheck !== null &&
+					effects.proofCheck.length > 0 &&
+					effects.shellCommand !== null &&
+					effects.outcome !== "blocked" &&
+					effects.outcome !== "error" &&
+					call !== undefined
+				)
+					passedVerifyRuns.set(toolCallId, {
+						check: effects.proofCheck,
+						command: effects.shellCommand,
+						revision: call.revision,
+					});
 			}
 			if (effects.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
 				executedShellCommands.push(effects.shellCommand);
@@ -500,6 +516,9 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				mutationObserved: mutationRevision > 0,
 				verifyCalls: current(verifyCallsRanAt),
 				tools: current(toolsRanAt),
+				verifyRuns: [...passedVerifyRuns.values()]
+					.filter((run) => run.revision === mutationRevision)
+					.map(({ check, command }) => ({ check, command })),
 			};
 		},
 	};

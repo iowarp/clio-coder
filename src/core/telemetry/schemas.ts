@@ -1869,6 +1869,8 @@ export const PromptCompiledSchema = Type.Object(
 		contextWindowSource: Type.Optional(ExistingId),
 		/** When the prompt was compiled; outside the structure object so a byte-stable recompile keeps its id. */
 		compiledAt: Type.Optional(utc),
+		/** The prompt hash this compile replaced, null for a session's first; outside the structure object for the same reason. */
+		previousHash: Type.Optional(Type.Union([sha256Hex, Type.Null()])),
 	},
 	closed,
 );
