@@ -462,7 +462,10 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 			return { ...current, lastNotice: text, error: text, admissionRefused: true };
 		}
 		if (event.key === "turn.interrupted") {
-			return { ...current, lastNotice: text, abortReason: text };
+			// A redirect closes the cut-short run; the run that delivers the new message carries the answer (bt-41).
+			return event.redirect === true
+				? { ...current, lastNotice: text }
+				: { ...current, lastNotice: text, abortReason: text };
 		}
 		if (event.text.startsWith(CITATION_CHECK_PREFIX) && current.text.length > 0) {
 			return { ...current, lastNotice: text, citationCheckedAnswer: current.text };
@@ -1354,6 +1357,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			options.sampling && Object.keys(options.sampling).length > 0 ? { sampling: { ...options.sampling } } : {},
 			async () => {
 				await chat.submit(options.prompt, Object.keys(submitOptions).length > 0 ? submitOptions : undefined);
+				// A triage stop interrupts this submit and delivers its message as a run of its own (bt-41).
+				await chat.whenSettled();
 			},
 		);
 	} finally {

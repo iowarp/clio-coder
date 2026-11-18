@@ -199,6 +199,7 @@ export const NEVER_OFFER_CAUSES: ReadonlySet<FailureCause> = new Set<FailureCaus
 	"operator_cancel",
 	"parent_cancel",
 	"route_moved",
+	"triage_stop",
 	"repetition",
 	"shutdown",
 	"budget_wait_aborted",

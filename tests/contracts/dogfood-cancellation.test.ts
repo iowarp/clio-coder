@@ -1098,6 +1098,29 @@ it("a reply cut off by shutdown is the harness's stop and names no route", { tim
 	}
 });
 
+it("a reply steering triage cuts off to deliver a stop persists triage's cause, not the operator's (bt-41)", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("partial");
+	f.loop.onEvent((event) => {
+		if (event.type === "text_delta") f.loop.cancel({ source: "triage", reason: "[Clio Coder] triage stop." });
+	});
+	try {
+		await f.loop.submit("Start");
+		const closing = f
+			.entries()
+			.map((entry) => (entry.kind === "message" && entry.role === "assistant" ? recordValue(entry.payload) : undefined))
+			.find((payload) => payload?.stopReason === "aborted");
+		ok(closing, JSON.stringify(f.entries()));
+		deepStrictEqual(
+			[recordValue(closing.failure)?.stage, recordValue(closing.failure)?.errorClass],
+			["harness", "triage_stop"],
+		);
+	} finally {
+		await f.close();
+	}
+});
+
 it("a looping stream is stopped and re-prompted once with a nudge, without resending the loop", {
 	timeout: 15_000,
 }, async () => {

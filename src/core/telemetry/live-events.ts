@@ -343,7 +343,7 @@ export interface SafetyBlockedPayload {
 
 /** Where a `run.aborted` event originated. */
 export type RunAbortSource = "dispatch_abort" | "dispatch_drain";
-export type TurnAbortSource = "stream_cancel" | "loop_guard" | "job_clock" | "autonomy";
+export type TurnAbortSource = "stream_cancel" | "loop_guard" | "job_clock" | "autonomy" | "triage";
 
 /**
  * Payload published on `run.aborted` when dispatch cancels (dispatch_abort) or drains (dispatch_drain) a run.
@@ -360,7 +360,8 @@ export interface RunAbortedPayload {
 
 /**
  * Payload published on `turn.aborted`: the chat loop's stream_cancel for an operator Esc/Ctrl+C, loop_guard
- * when the loop guard stops a runaway turn, or job_clock when a scheduled occurrence's bound expires.
+ * when the loop guard stops a runaway turn, job_clock when a scheduled occurrence's bound expires, or triage
+ * when steering triage cut the run short to deliver a message it read as a stop.
  */
 /** Published on `turn.continued` when a stopped turn gets another one at yolo, from a job or from the chat loop (#445). */
 export interface TurnContinuedPayload {
