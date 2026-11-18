@@ -312,12 +312,17 @@ export function renderExitSummary(
 		// A turn is one operator prompt; a model call is one request sent, so a turn that used tools or retried makes
 		// several. Workers' calls count here as /usage counts them, their observed writes count as files, and the key
 		// says so; a worker whose writes went unrecorded is named rather than read as one that changed nothing.
+		// A visit that switched sessions keeps its counts across them, but the call count is the named session's.
 		const unrecorded = snapshot.unrecordedWorkerFiles;
+		const sessions = snapshot.visitSessions ?? 1;
 		add(snapshot.workers.length > 0 ? "This visit, workers included" : "This visit", [
 			countLabel(snapshot.turns, "turn"),
-			...(spend.kind === "ready" ? [countLabel(spend.visitCalls, "model call")] : []),
+			...(spend.kind === "ready"
+				? [`${countLabel(spend.visitCalls, "model call")}${sessions > 1 ? " in this session" : ""}`]
+				: []),
 			`${countLabel(snapshot.files.length, "file")} changed${unrecorded > 0 ? ` (${countLabel(unrecorded, "worker")} kept no write record)` : ""}`,
 			countLabel(snapshot.workers.length, "worker"),
+			...(sessions > 1 ? [countLabel(sessions, "session")] : []),
 		]);
 		add("Time", [
 			visitTime,

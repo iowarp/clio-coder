@@ -1690,7 +1690,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	 */
 	const adoptExistingConversation = (): void => {
 		presentation.resetForNewSession();
-		exitSummary.reset();
+		exitSummary.sessionChanged();
 		presentation.collapseWelcomeDashboard();
 		resetTranscript();
 	};
@@ -1842,7 +1842,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 		unsent.push(...deps.chat.clearQueuedFollowUps());
 		deps.onNewSession();
 		presentation.resetForNewSession();
-		exitSummary.reset();
+		exitSummary.sessionChanged();
 		resetTranscript();
 		deps.chat.resetForSession(null);
 		if (unsent.length > 0) {
