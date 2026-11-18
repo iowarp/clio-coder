@@ -53,7 +53,7 @@ const capabilities = {
 	contextWindow: 131072,
 	maxTokens: 4096,
 };
-type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard" | "repeat";
+type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool" | "guard" | "repeat" | "loop";
 const LOOP =
 	"I should check the outline record first. The outline has seven sections. Let me read it again to be sure. ";
 
@@ -109,7 +109,7 @@ function transport(mode: WireMode) {
 					return;
 				}
 				signal?.addEventListener("abort", abort, { once: true });
-				if (mode === "repeat") {
+				if (mode === "repeat" || mode === "loop") {
 					// Reasoning that cycles three sentences and never ends; only an abort stops it.
 					for (let chunk = 0; chunk < 60; chunk++)
 						send({ ...(chunk === 0 ? { role: "assistant" } : {}), reasoning_content: LOOP });
@@ -650,6 +650,34 @@ it("a tool cancellation persists its result before exactly one closing assistant
 		await f.loop.submit("Next");
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
 	} finally {
+		await f.close();
+	}
+});
+
+it("a reply the repetition guard stops twice fails the headless run on the guard's reason, naming no route", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("loop");
+	const stderr: string[] = [];
+	const write = process.stderr.write;
+	process.stderr.write = ((chunk: string | Uint8Array) => {
+		stderr.push(String(chunk));
+		return true;
+	}) as typeof process.stderr.write;
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Advance the paper.",
+			mode: "text",
+			shutdown: { onDrain() {}, getExitCode: () => 0, isShuttingDown: () => false },
+		});
+		process.stderr.write = write;
+		strictEqual(code, 1);
+		strictEqual(f.wire().calls(), 2);
+		const envelope = [...(readRunJournal(join(env.dir, "state"))?.envelopes.values() ?? [])][0];
+		match(envelope?.outcomeDetail ?? "", /^\[Clio Coder\] stopped a model response that kept repeating itself/u);
+		doesNotMatch(stderr.join(""), /target 'cancellation-fixture'|Request was aborted/u);
+	} finally {
+		process.stderr.write = write;
 		await f.close();
 	}
 });

@@ -3708,8 +3708,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// The repetition check stopped a looping stream. Once per operator
 					// turn the model gets the stopped reply replaced by a nudge and one
 					// more run; an operator's Esc in the same window wins.
+					// The stopped reply already carries the reason (turn-runtime), so a second stop ends the turn on it.
 					if (admissionCurrent() && state.repetitionAbortReason !== null && state.activeInterruptReason === null) {
-						const reason = state.repetitionAbortReason;
 						const turnId = state.activeUserTurnId;
 						if (turnId !== null && state.repetitionRepromptTurnId !== turnId) {
 							state.repetitionRepromptTurnId = turnId;
@@ -3727,9 +3727,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							await agentRuntime.agent.prompt([
 								...repetitionRepromptMessages({ provider: model.provider, api: model.api, model: model.id }),
 							]);
-						} else {
-							const last = agentRuntime.agent.state.messages.at(-1);
-							if (last?.role === "assistant") (last as { errorMessage?: string }).errorMessage = reason;
 						}
 					}
 					// pi-agent-core does NOT throw on provider failures:

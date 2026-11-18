@@ -218,6 +218,8 @@ interface HeadlessMainAgentResult {
 	 * cannot read. Its notice is the failure, and text mode has already printed it.
 	 */
 	admissionRefused: boolean;
+	/** The harness stopped the last reply (a repetition or tool-prose guard), so its error names no route (bt-26). */
+	harnessStopped: boolean;
 	/**
 	 * The answer a citation check sent back for corrected line ranges. The
 	 * reply to that check can hold only the corrections, so the printed answer
@@ -441,6 +443,7 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 		outputExhausted: message.stopReason === "length",
 		sawTerminatingToolResult: false,
 		admissionRefused: false,
+		harnessStopped: (message as { harnessStopped?: unknown }).harnessStopped === true,
 	};
 	const error = assistantError(message);
 	if (error) return { ...current, text: "", error };
@@ -702,12 +705,13 @@ function noopFailureMessage(stats: HeadlessMainAgentRunStats, failOnNoop: boolea
 	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
 }
 
+/** Name the route a failure came from; a refusal before the request or a harness stop came from no route. */
 export function prefixHeadlessFailure(
 	chat: Pick<ChatLoop, "lastRunSnapshot">,
 	message: string,
-	admissionRefused = false,
+	notFromRoute = false,
 ): string {
-	if (admissionRefused || message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return message;
+	if (notFromRoute || message.startsWith(`${SESSION_COST_CEILING_REASON}:`)) return message;
 	const snapshot = chat.lastRunSnapshot?.();
 	if (!snapshot) return message;
 	const route = [snapshot.runtimeId, snapshot.targetUrl].filter(Boolean).join(" ");
@@ -949,6 +953,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		endedQuietly: false,
 		callsNotRun: null,
 		admissionRefused: false,
+		harnessStopped: false,
 		citationCheckedAnswer: null,
 	};
 	const runStats: HeadlessMainAgentRunStats = {
@@ -1359,7 +1364,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage =
 			mode === "text" && result.admissionRefused
 				? null
-				: prefixHeadlessFailure(chat, result.error, result.admissionRefused);
+				: prefixHeadlessFailure(chat, result.error, result.admissionRefused || result.harnessStopped);
 	} else if (result.outputExhausted && !result.sawTerminatingToolResult) {
 		// The provider returned normally, but generation exhausted its budget.
 		// Earlier chatter and partial prose cannot turn that terminal cause into
