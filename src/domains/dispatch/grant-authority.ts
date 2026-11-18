@@ -133,6 +133,18 @@ export function effectiveWorkerPermissionMode(input: {
 	return input.judgeSeated && input.judgeEnabled && input.boundGrants && input.autonomy === "default" ? "judge" : "deny";
 }
 
+/**
+ * Why a dispatch configured for `judge` runs as deny, when the operator can act on the cause; null otherwise. A yolo
+ * operator and a runtime that cannot park a call for a grant run as deny by design, so they get no cause (N2).
+ */
+export function judgeWithheldCause(input: Parameters<typeof effectiveWorkerPermissionMode>[0]): string | null {
+	if (input.mode !== "judge" || input.autonomy !== "default" || !input.boundGrants) return null;
+	if (!input.judgeSeated)
+		return "this process seats no safety judge for worker asks (`run --agent` and the fleet CLI have no main session)";
+	if (!input.judgeEnabled) return "safety.judge.enabled is off";
+	return null;
+}
+
 export type JudgedGrantVerdict =
 	| { kind: "grant"; reason: string }
 	| { kind: "deny"; reason: string }

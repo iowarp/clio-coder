@@ -299,7 +299,7 @@ describe("native worker MCP capabilities", () => {
 		const context = dispatchStubContext({ settings, agentTools: [...TOOLS, ToolNames.Edit, ToolNames.Write] });
 		const notices: Array<{ code: string; message: string }> = [];
 		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
-			notices.push(notice);
+			if (notice.code !== "worker_judge_withheld") notices.push(notice);
 		});
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: () => {
@@ -442,7 +442,7 @@ describe("native worker MCP capabilities", () => {
 		const context = readOnlyCoderContext(settings, agentTools);
 		const notices: Array<{ code: string; message: string }> = [];
 		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
-			notices.push(notice);
+			if (notice.code !== "worker_judge_withheld") notices.push(notice);
 		});
 		let spawned: WorkerSpec | undefined;
 		const bundle = makeDispatchBundle(context, {

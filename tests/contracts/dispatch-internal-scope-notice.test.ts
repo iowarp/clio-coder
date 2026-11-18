@@ -19,7 +19,7 @@ it("operator bootstrap report: internal schema retries keep scope provenance wit
 	const diagnostics: string[] = [];
 	const removeSink = installDiagnosticSink((text) => diagnostics.push(text));
 	const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
-		notices.push(notice);
+		if (notice.code !== "worker_judge_withheld") notices.push(notice);
 	});
 	const bundle = makeDispatchBundle(context);
 	try {
@@ -89,7 +89,7 @@ it("announces withheld checks for narrow roots without an OS sandbox", async () 
 	const context = dispatchStubContext({ settings });
 	const notices: Array<{ code: string; message: string }> = [];
 	const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
-		notices.push(notice);
+		if (notice.code !== "worker_judge_withheld") notices.push(notice);
 	});
 	const tools: Array<ReadonlyArray<string>> = [];
 	const bundle = makeDispatchBundle(context, {
@@ -153,6 +153,56 @@ it("a worker placed on this host expects its sandbox backend even with fleet nod
 		strictEqual(sandboxes[0]?.backendExpected, true, "a timed-out probe in the worker must refuse, not run direct");
 	} finally {
 		await bundle.extension.stop?.();
+		env.restore();
+	}
+});
+
+it("names the deny permit a judge-mode dispatch runs with when no safety judge is seated (N2)", async () => {
+	const env = await isolateClioEnv("judge-withheld-notice-");
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.fleet.permissions.mode = "judge";
+	settings.safety.judge.enabled = true;
+	const notices: Array<{ code: string; message: string }> = [];
+	const permissions: Array<WorkerSpec["onPermission"]> = [];
+	const spawnWorker = (spec: WorkerSpec): never => {
+		permissions.push(spec.onPermission);
+		throw new Error("fixture: admitted");
+	};
+	const dispatchOnce = async (options: Parameters<typeof makeDispatchBundle>[1]) => {
+		const context = dispatchStubContext({ settings });
+		const unsubscribe = context.bus.subscribe("run.scope_notice_raised", (notice) => {
+			notices.push(notice);
+		});
+		const bundle = makeDispatchBundle(context, { ...options, spawnWorker });
+		try {
+			await bundle.extension.start();
+			for (let n = 0; n < 2; n++)
+				await rejects(
+					bundle.contract.dispatch({
+						agentId: "scout",
+						executionRole: "researcher",
+						task: "Read the README.",
+						cwd: env.dir,
+					}),
+					/fixture: admitted/u,
+				);
+		} finally {
+			unsubscribe();
+			await bundle.extension.stop?.();
+		}
+	};
+	try {
+		await dispatchOnce({});
+		strictEqual(notices.length, 1, "raised once per process, not on every dispatch");
+		strictEqual(notices[0]?.code, "worker_judge_withheld");
+		match(
+			notices[0]?.message ?? "",
+			/mode is judge, but this process seats no safety judge.*workers dispatched here run with the deny permit/u,
+		);
+		strictEqual(permissions[0] ?? "deny", "deny");
+		await dispatchOnce({ workerAskJudge: { seat: () => undefined, autonomy: () => "default" } });
+		strictEqual(notices.length, 1, "a seated judge answers the asks, so nothing is announced");
+	} finally {
 		env.restore();
 	}
 });

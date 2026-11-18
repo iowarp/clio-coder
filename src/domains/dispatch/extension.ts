@@ -380,7 +380,12 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
-import { effectiveWorkerPermissionMode, evaluateJudgedGrant, evaluateMainGrant } from "./grant-authority.js";
+import {
+	effectiveWorkerPermissionMode,
+	evaluateJudgedGrant,
+	evaluateMainGrant,
+	judgeWithheldCause,
+} from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
 import {
 	classifyHeartbeat,
@@ -2646,6 +2651,21 @@ function resolveDispatchPermit(
 	return permit;
 }
 
+/** What decides whether the safety judge can answer this dispatch's worker asks. */
+function workerJudgeState(
+	settings: EffectiveSettings,
+	target: ResolvedTarget,
+	judgeSeated: boolean,
+): Parameters<typeof effectiveWorkerPermissionMode>[0] {
+	return {
+		mode: settings?.fleet.permissions.mode ?? "deny",
+		autonomy: operatorAdmissionAutonomy(settings),
+		judgeEnabled: settings?.safety.judge.enabled === true,
+		judgeSeated,
+		boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
+	};
+}
+
 /** True when the main session's safety judge, not the main agent, decides this permit's main-authority asks. */
 function judgeRoutedPermit(permit: WorkerPermit, settings: EffectiveSettings): boolean {
 	return mainGrantsUnavailable(permit.allowance) && settings?.fleet.permissions.mode === "judge";
@@ -2682,13 +2702,7 @@ function resolveDispatchPermitOnce(
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
 		// Contained yolo hands workers default's permit and routes (ob-yolo D1).
 		operatorAutonomy: operatorAdmissionAutonomy(settings),
-		mode: effectiveWorkerPermissionMode({
-			mode: settings?.fleet.permissions.mode ?? "deny",
-			autonomy: operatorAdmissionAutonomy(settings),
-			judgeEnabled: settings?.safety.judge.enabled === true,
-			judgeSeated,
-			boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
-		}),
+		mode: effectiveWorkerPermissionMode(workerJudgeState(settings, target, judgeSeated)),
 		hostHelper,
 		runtime: {
 			id: target.runtime.id,
@@ -4083,6 +4097,8 @@ export function createDispatchBundle(
 	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
+	/** The judge-withheld notice is a process fact, so it is raised once, not on every dispatch. */
+	let judgeWithheldAnnounced = false;
 	// The settings with the operator's live level in place of the configured one,
 	// for the autonomy reads alone: an ACP session's mode can differ from settings.
 	// The live level is the dispatch ceiling. A dispatcher with no live source (a
@@ -6244,6 +6260,17 @@ export function createDispatchBundle(
 			admission.mcp,
 		);
 		if (!judgeRoutedPermit(permit, settings)) assertMainGrantRoutable(req, target.runtime, permit);
+		const judgeWithheld = judgeWithheldCause(
+			workerJudgeState(withLiveAutonomy(settings), target, options?.workerAskJudge !== undefined),
+		);
+		if (judgeWithheld !== null && req.requestOrigin !== "internal" && !judgeWithheldAnnounced) {
+			judgeWithheldAnnounced = true;
+			context.bus.emit("run.scope_notice_raised", {
+				code: "worker_judge_withheld",
+				level: "warning",
+				message: `[dispatch scope] fleet.permissions.mode is judge, but ${judgeWithheld}, so workers dispatched here run with the deny permit and each ask they raise is denied. The safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on.`,
+			});
+		}
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
