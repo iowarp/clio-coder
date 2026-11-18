@@ -116,6 +116,7 @@ import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../..
 import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
+import { INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import {
@@ -8377,6 +8378,11 @@ export function createDispatchBundle(
 		const finishContractEntries: unknown[] = [];
 		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
 		const pendingCapabilities = new Map<string, string>();
+		// The calls that reached a CLIO tool. A native call the engine refused before that, such as one whose arguments
+		// failed the tool's schema, ends in error without a CLIO start or finish, and still counts as an errored call.
+		const reachedTool = new Set<string>();
+		// A producer without call ids cannot tie a start to its end, so such a stream counts only its CLIO finishes.
+		let startsCarryIds = true;
 		// A gateway wrapper's finish waits for its result: a chain's settled steps count as the calls they are, so the
 		// wrapper counts only when none settled. Counting both made an N-step chain N + 1 calls (bt-14).
 		const gatewayFinishes = new Map<string, ToolFinishPayload>();
@@ -8538,9 +8544,12 @@ export function createDispatchBundle(
 				toolCallId?: string;
 				args?: unknown;
 				result?: unknown;
+				isError?: boolean;
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
+				else startsCarryIds = false;
 			}
 			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
@@ -8595,6 +8604,21 @@ export function createDispatchBundle(
 				}
 				recordWorkerRunEffect(runEffects, event);
 				recordWorkerVerifyCall(verifyCalls, event);
+				if (
+					event.type === "tool_execution_end" &&
+					lifecycle.runtimeKind === "http" &&
+					startsCarryIds &&
+					event.isError === true &&
+					event.toolCallId &&
+					!reachedTool.has(event.toolCallId) &&
+					event.toolName !== INTERNAL_HELPER_RESULT_TOOL
+				) {
+					recordToolFinish(toolStats, {
+						tool: pendingCapabilities.get(event.toolCallId) ?? String(event.toolName),
+						outcome: "error",
+					});
+					pendingCapabilities.delete(event.toolCallId);
+				}
 				if (event.type === "tool_execution_end") {
 					const children = gatewayChainReceipts(String(event.toolName), event.result);
 					const wrapper = gatewayFinishes.get(event.toolCallId ?? "");
