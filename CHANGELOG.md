@@ -104,6 +104,9 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- Step checkpoints carry the last summarized checkpoint once, with only the current step lead, and an oversized carry drops its oldest text instead of the newest (x2-1).
+- A continuation no longer refreshes the written-out tool call re-prompt budget of a model that ran tools earlier in the turn (x2-2).
+- A helper-result worker that reaches the permission refusal limit can still submit its result through the result tool in the report round (x2-3).
 - Run verification counts only the `verify` tool as a validation tool, so a `decide`, `tasks` or check-named gateway call no longer marks a run verified with no check run (x1-2).
 - `run --verify` acceptance results seal into the run's receipt as its host verification, so the receipt and `evidence inspect` agree with `turn_end.verify`; the exit code is unchanged (x1-4).
 - A byte-stable prompt recompile keeps its prompt-structure object id; the predecessor hash moved from the hashed structure to the `prompt.compiled` record (bt-10).
