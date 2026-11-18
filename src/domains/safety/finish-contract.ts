@@ -243,6 +243,19 @@ export function assessFinishContract(input: FinishContractInput): FinishContract
 }
 
 /**
+ * The package scripts only the operator's acceptance admits as checks (`npm run custom`), declared to the fold so
+ * their freshness is read with every other check's.
+ */
+function acceptanceScriptChecks(input: FinishContractInput, root: string): DeclaredVerifierCommand[] {
+	return (input.activeAcceptance?.verification ?? []).flatMap(({ check }) => {
+		const words = ["npm", "run", check];
+		if (!/^[a-z0-9][a-z0-9._:-]*$/u.test(check) || callVerdict(ToolNames.Bash, { command: words.join(" ") }) === "check")
+			return [];
+		return [{ id: check, segments: [words], cwd: root, session: true }];
+	});
+}
+
+/**
  * Whether a check's last outcome since the run's last change is red, read by the shared classifier's replay as the
  * run-effects recorder seals it, so the notice never says checks passed beside a red the receipt keeps (bt-44).
  */
@@ -307,7 +320,9 @@ function assessMutationFinishContract(input: FinishContractInput): FinishContrac
 
 	const acceptanceChecks = new Set(input.activeAcceptance?.verification.map((item) => item.check) ?? []);
 	const declared = declaredVerifierCommands(input.workspaceRoot, input.sessionVerifiers);
-	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot, declared);
+	const root = resolve(input.workspaceRoot ?? ".");
+	const standing = runCheckFacts(window, root, [...declared, ...acceptanceScriptChecks(input, root)]).passCalls;
+	const evidence = collectValidationEvidence(window, acceptanceChecks, input.workspaceRoot, declared, standing);
 	const limitations = collectLimitationEvidence(window);
 	let quality: QualityFinding[] = [];
 	if (input.workspaceRoot) {
@@ -844,7 +859,8 @@ function collectValidationEvidence(
 	recent: ReadonlyArray<unknown>,
 	acceptanceChecks: ReadonlySet<string>,
 	workspaceRoot: string | undefined,
-	declared: ReadonlyArray<DeclaredVerifierCommand> = [],
+	declared: ReadonlyArray<DeclaredVerifierCommand>,
+	standing: ReadonlySet<string>,
 ): FinishContractEvidence[] {
 	const evidence: FinishContractEvidence[] = [];
 	const toolCalls = new Map<string, ToolCallEvidenceCandidate>();
@@ -852,12 +868,9 @@ function collectValidationEvidence(
 	const dispatchCalls = new Map<string, ToolCallEvidenceCandidate>();
 	const seen = new Set<string>();
 	const entries = capabilityEntries(recent);
-	// A declared check run through the shell counts only where the shared classifier settled its pass and no later
-	// change retired it, read by the same fold the task board and the recorder's change sequence use (x7-5).
-	const standing =
-		declared.length > 0 && workspaceRoot !== undefined
-			? runCheckFacts(recent, workspaceRoot, declared).passCalls
-			: new Set<string>();
+	// A check run through the shell, `verify` or an operator's `!` counts only where the shared classifier settled its
+	// pass and no later change retired it, read by the same fold the task board and the recorder's change sequence use
+	// (x7-5, x8-1). `standing` keys a call by its id and a `!` run by `#<index>` into these same entries.
 
 	for (const [index, entry] of entries.entries()) {
 		const protectedArtifact = protectedArtifactEvidence(entry);
@@ -898,23 +911,19 @@ function collectValidationEvidence(
 				pushEvidence(evidence, seen, dispatchRunRecord);
 				continue;
 			}
+			if (!standing.has(resultId)) continue;
 			const candidate = toolCalls.get(resultId);
-			if (candidate !== undefined) {
-				pushEvidence(evidence, seen, validationEvidence(candidate, entry));
-			}
-			if (standing.has(resultId)) {
-				for (const declaredCandidate of declaredRuns.get(resultId) ?? [])
-					pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
-			}
+			if (candidate !== undefined) pushEvidence(evidence, seen, validationEvidence(candidate, entry));
+			for (const declaredCandidate of declaredRuns.get(resultId) ?? [])
+				pushEvidence(evidence, seen, validationEvidence(declaredCandidate, entry));
 			continue;
 		}
 
+		if (!standing.has(`#${index}`)) continue;
 		const bashExecution = bashExecutionEvidence(entry, acceptanceChecks, workspaceRoot);
 		if (bashExecution !== null) pushEvidence(evidence, seen, bashExecution);
-		if (standing.has(`#${index}`)) {
-			for (const declaredExecution of bashExecutionDeclaredEvidence(entry, workspaceRoot, declared))
-				pushEvidence(evidence, seen, declaredExecution);
-		}
+		for (const declaredExecution of bashExecutionDeclaredEvidence(entry, workspaceRoot, declared))
+			pushEvidence(evidence, seen, declaredExecution);
 	}
 
 	return evidence;

@@ -389,6 +389,48 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		}
 	});
 
+	it("credits no bash, verify, operator or declared pass a later edit retired, nor the high-rigor gate (x8-1)", (t) => {
+		const root = mkdtempSync(join(tmpdir(), "finish-retired-"));
+		t.after(() => rmSync(root, { recursive: true, force: true }));
+		const edit = (id: string) => [
+			toolCall(id, ToolNames.Write, { path: "src/thing.ts", content: id }),
+			toolResult(id, ToolNames.Write, false),
+		];
+		const ran = (name: string, args: Record<string, unknown>) => [
+			toolCall("check", name, args),
+			toolResult("check", name, false),
+		];
+		const checks: Array<[string, unknown[]]> = [
+			["npm test", ran(ToolNames.Bash, { command: "npm test" })],
+			["verify", ran(ToolNames.Verify, { check: "test" })],
+			["operator !", [{ kind: "bashExecution", turnId: "bang", command: "npm test", exitCode: 0 }]],
+			["declared make check", ran(ToolNames.Bash, { command: "make check" })],
+		];
+		for (const [label, check] of checks)
+			for (const stale of [false, true]) {
+				const assess = (rigor: "normal" | "high") =>
+					assessFinishContract({
+						sessionEntries: [
+							userMessage("user-1"),
+							...edit("edit-1"),
+							...check,
+							...(stale ? edit("edit-2") : []),
+							assistantMessage("assistant-1", "Done."),
+						],
+						assistantTurnId: "assistant-1",
+						workspaceRoot: root,
+						sessionVerifiers: [{ id: "make-check", command: "make check" }],
+						rigor,
+						activeAcceptance: { expectedOutputs: [], verification: [{ check: "test", timeoutMs: 60_000 }] },
+					});
+				const normal = assess("normal");
+				strictEqual(normal.reason, stale ? "unvalidated_mutation" : "validation_evidence", `${label} stale=${stale}`);
+				strictEqual(normal.verificationScope?.passedChecks.length === 0, stale, label);
+				if (label === "npm test" || label === "operator !")
+					strictEqual(assess("high").verificationScope?.acceptance[0]?.state, stale ? "unverified" : "passed", label);
+			}
+	});
+
 	it("names a changed file a later command ran, without counting the run as a check (bt-12)", () => {
 		const assess = (before: unknown[], after: unknown[]) =>
 			assessFinishContract({
