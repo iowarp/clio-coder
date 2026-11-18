@@ -259,7 +259,7 @@ export function detectValidationCommand(
 
 /**
  * The name an observed check's outcome is filed under: the command with trailing output plumbing (`2>&1`, `| tail`,
- * `| head`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
+ * `| head`, `| tee log`, `> log`) removed, so `make test 2>&1 | tail -5` and `make test` settle each other. Under `pipefail` a pipeline exits
  * 0 only when the check did, so a green settles the name however it was piped; `head` can turn a green into a red
  * (SIGPIPE), so a red behind it lands nowhere ({@link checkFailureAttributable}). Tools and arguments stay distinct, so
  * `pytest` never settles `pytest -q` (bt-27).
@@ -268,8 +268,9 @@ export function observedValidationCommand(command: string): string {
 	let current = command.trim();
 	for (;;) {
 		const next = current
-			.replace(/\s*\|&?\s*(?:tail|head)(?:\s+[^|;&<>]*)?$/u, "")
+			.replace(/\s*\|&?\s*(?:tail|head|tee)(?:\s+[^|;&<>]*)?$/u, "")
 			.replace(/\s+2>&1$/u, "")
+			.replace(/\s+(?:[0-9]?>>?|&>>?)\s*[^\s|;&<>"']+$/u, "")
 			.trim();
 		if (next === current) return current;
 		current = next;
@@ -1546,9 +1547,19 @@ function isCheckStep(step: ShellStep): boolean {
 	);
 }
 
-export function checkCommandShape(command: string, gitHelpersConfigured: boolean): CheckCommandShape | null {
+/**
+ * `isOutput` says a redirect or `tee` target is a log the check's output lands in, not part of the tree (x4-2), so
+ * `npm test 2>&1 | tee test.log` stays pure; it is asked only of commands that run a check.
+ */
+export function checkCommandShape(
+	command: string,
+	gitHelpersConfigured: boolean,
+	isOutput: (target: string) => boolean = () => false,
+): CheckCommandShape | null {
 	const tokens = scanShellLike(command);
-	const steps = shellSteps(tokens).map((step) => {
+	const parsed = shellSteps(tokens);
+	if (!parsed.some(isCheckStep)) return null;
+	const steps = parsed.map((step) => {
 		const writes: string[] = [];
 		collectRedirectTargets(step.tokens, writes);
 		const check = isCheckStep(step);
@@ -1557,10 +1568,11 @@ export function checkCommandShape(command: string, gitHelpersConfigured: boolean
 			step.index === null ||
 			(check && !checkWritesTree(argv)) ||
 			SHELL_SETUP_STEPS.has(argv[0] ?? "") ||
+			(basenameToken(argv[0]) === "tee" && pathArgs(argv, 0).every(isOutput)) ||
 			readOnlyInspectionStep(argv, gitHelpersConfigured);
-		return { check, changes: !readOnly || writes.some(isInterestingWriteTarget), joinedBy: step.joinedBy };
+		const changes = !readOnly || writes.some((target) => isInterestingWriteTarget(target) && !isOutput(target));
+		return { check, changes, joinedBy: step.joinedBy };
 	});
-	if (!steps.some((step) => step.check)) return null;
 	const opaque =
 		tokens.some((token) => token.substitutions !== undefined || token.hiddenContent === true || token.unterminated) ||
 		hasUnparsedShellScript(command);
@@ -1606,7 +1618,7 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 function drainsInput(step: ShellStep): boolean {
 	if (step.index === null) return false;
 	const [executable, ...args] = step.argv.slice(step.index);
-	if (executable === "cat") return true;
+	if (executable === "cat" || executable === "tee") return true;
 	return (
 		executable === "tail" &&
 		!args.some((arg) => /^-[^-]*[fF]/u.test(arg) || arg.startsWith("--follow") || arg === "--retry")
@@ -1616,7 +1628,7 @@ function drainsInput(step: ShellStep): boolean {
 /**
  * Whether a red exit of a command running a recognized check is the check's own red (x3-2). Under `pipefail` a stage
  * after the check fails a green check: `head` closes the pipe so the check dies of SIGPIPE or EPIPE, and `grep`
- * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail` or `cat`, which read to
+ * exits 1 when a clean run prints no match. So a check piped onward into anything but `tail`, `cat` or `tee`, which read to
  * the end and exit 0, settles no failure. Its clean exit still speaks for it, since every stage then exited 0.
  */
 export function checkFailureAttributable(command: string): boolean {

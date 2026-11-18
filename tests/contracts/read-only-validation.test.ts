@@ -775,6 +775,15 @@ it("a check sharing its bash call with a change judges the final tree only when 
 	deepStrictEqual(seal("npm test", "cd pkg && npm test 2>&1 | tail -5"), green);
 	// A read-only stdout filter is plumbing too (x3-4).
 	deepStrictEqual(seal("npm test", "npm test 2>&1 | sed -n 1,80p"), green);
+	// A log the check's output lands in is output, not a change, so its green verifies and a red behind it stands (x4-2).
+	deepStrictEqual(seal("npm test 2>&1 | tee /tmp/t.log"), green);
+	deepStrictEqual(seal("npm test > test.log 2>&1"), green);
+	deepStrictEqual(seal("!pytest", "!pytest 2>&1 | tee /tmp/pytest.log", "pytest tests/test_one.py"), [
+		["pytest"],
+		"unverified",
+		["pytest"],
+	]);
+	deepStrictEqual(seal("npm test", "npm test | tee src/a.ts"), stale);
 	// Shell setup changes no tree, so a standing red stands beside a narrower green (x3-1).
 	for (const setup of ["source .venv/bin/activate", "export CI=1"])
 		deepStrictEqual(seal("!npm test", `${setup} && npm test -- unit.js`), [["npm test"], "unverified", ["npm test"]]);

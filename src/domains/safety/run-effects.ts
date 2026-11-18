@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ObservedProof } from "../../core/hoare.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -10,6 +11,7 @@ import { resolveVerifyCall, verifyResolutionArgv } from "../../tools/verify/reso
 import { isVerifyListing } from "../../tools/verify/surface.js";
 import { classify } from "./action-classifier.js";
 import { typedValidationSummary } from "./finish-contract.js";
+import { isSameOrDescendant } from "./path-policy.js";
 import {
 	type CheckCommandShape,
 	checkCommandShape,
@@ -174,6 +176,8 @@ interface PendingEffects {
 	tool: string;
 	toolCallId: string;
 	paths: ReadonlyArray<string>;
+	/** `paths` less the logs a check's output was written to, which change no tree the check judged (x4-2). */
+	changedPaths: ReadonlyArray<string>;
 	validationCommand: string | null;
 	validationName: string | null;
 	/** False when a bash call's exit status is only its last command's, so it settles nothing about the check. */
@@ -367,6 +371,37 @@ function gitRunsConfiguredHelpers(cwd: string, env: NodeJS.ProcessEnv = process.
 export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorderOptions = {}): RunEffectsRecorder {
 	const pending = new Map<string, PendingEffects>();
 	const gitHelpers = gitRunsConfiguredHelpers(cwd, options.env);
+	const ignored = new Map<string, boolean>();
+	const gitIgnores = (target: string): boolean => {
+		let answer = ignored.get(target);
+		if (answer === undefined) {
+			try {
+				execFileSync("git", ["check-ignore", "-q", "--", target], {
+					cwd,
+					env: options.env ?? process.env,
+					stdio: "ignore",
+					timeout: 5000,
+				});
+				answer = true;
+			} catch {
+				answer = false;
+			}
+			ignored.set(target, answer);
+		}
+		return answer;
+	};
+	// Where a check's output lands (x4-2): a `*.log`, outside the workspace, under the temp dir, or git-ignored. A tracked
+	// source path stays a change, and a target this cannot resolve is one too.
+	const outputTarget =
+		(base: string) =>
+		(target: string): boolean => {
+			if (/\.log$/u.test(target)) return true;
+			if (/^~|[$`]/u.test(target)) return false;
+			const resolved = path.resolve(base, target);
+			if (!isSameOrDescendant(resolved, cwd)) return true;
+			if (isSameOrDescendant(resolved, tmpdir()) && !isSameOrDescendant(cwd, tmpdir())) return true;
+			return gitIgnores(resolved);
+		};
 	const mutatedPaths = new Set<string>();
 	const failedMutationPaths = new Set<string>();
 	const validationCommands = new Set<string>();
@@ -404,6 +439,23 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			const opaque = toolWritesOpaquely(toolName);
 			const command = toolName === ToolNames.Bash ? commandOf(args) : null;
 			const shellCommand = command ?? verifyCommandOf(toolName, args, base);
+			const isOutput = outputTarget(base);
+			// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
+			const checkShape =
+				command !== null
+					? checkCommandShape(command, gitHelpers, isOutput)
+					: shellCommand !== null && checkWritesTree(shellCommand.split(" "))
+						? "mixed"
+						: null;
+			const outputs =
+				command !== null && checkShape !== null
+					? new Set(
+							extractCommandWriteTargets(command)
+								.filter(isOutput)
+								.map((target) => path.resolve(base, target)),
+						)
+					: new Set<string>();
+			const resolvedPaths = paths.map((target) => path.resolve(base, target));
 			// A listing names no check and runs none, so it is not a checking call (bt-19).
 			if ((toolName === ToolNames.Verify && !isVerifyListing(args)) || verificationCommand !== null)
 				checkingCalls.set(toolCallId, null);
@@ -415,7 +467,8 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				proofCheck,
 				tool: toolName,
 				toolCallId,
-				paths: paths.map((target) => path.resolve(base, target)),
+				paths: resolvedPaths,
+				changedPaths: resolvedPaths.filter((target) => !outputs.has(target)),
 				validationCommand,
 				validationName:
 					toolName === ToolNames.Bash && validationCommand !== null
@@ -428,13 +481,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				verificationCommand,
 				opaque,
 				inspection: command !== null && isReadOnlyInspectionCommand(command, gitHelpers),
-				// A verify check whose argv rewrites the tree (`npm run format`) is a change, as in bash (x3-3).
-				checkShape:
-					command !== null
-						? checkCommandShape(command, gitHelpers)
-						: shellCommand !== null && checkWritesTree(shellCommand.split(" "))
-							? "mixed"
-							: null,
+				checkShape,
 				shellCommand,
 				outcome: null,
 			});
@@ -481,7 +528,7 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 				effects.opaque &&
 				!effects.inspection &&
 				(checkChangedTree || (effects.tool !== ToolNames.Verify && effects.validationCommand === null));
-			const mutation = !refused && (effects.paths.length > 0 || opaqueMutation);
+			const mutation = !refused && (effects.changedPaths.length > 0 || opaqueMutation);
 			if (mutation) {
 				mutationRevision += 1;
 				validationOutcomes.clear();
