@@ -197,13 +197,33 @@ export function memoryRecordStanding(record: MemoryRecord | undefined): MemoryRe
 	return memoryRecordEligible(record) ? "eligible" : "withdrawn";
 }
 
+const withdrawalLine = (id: string): string => `- [${id}] withdrawn. Do not use this memory record.`;
+
 /**
- * The records a live section carries that the session's frozen `# Memory`
- * section lacks and no earlier host-framed reminder in the history delivered.
- * A memory approval between turns then reaches the model as tail text instead
- * of recompiling the system prompt and re-billing the conversation (#423).
- * Records that only dropped out of the live selection say nothing: ranking is
- * not withdrawal.
+ * What the model last received for each record id: its text, or null for a
+ * withdrawal. The frozen `# Memory` section comes first, then each host-framed
+ * `# Memory update` in `framed` order, which is history order, so a later
+ * revision or withdrawal replaces an earlier one for the same id.
+ */
+function lastDeliveredMemory(frozen: string, framed: readonly string[]): Map<string, string | null> {
+	const delivered = new Map<string, string | null>();
+	for (const block of memorySectionBlocks(frozen)) delivered.set(block.id, block.text);
+	for (const text of framed) {
+		const at = text.indexOf(MEMORY_UPDATE_HEADING);
+		if (at < 0) continue;
+		for (const block of memorySectionBlocks(text.slice(at)))
+			delivered.set(block.id, block.text === withdrawalLine(block.id) ? null : block.text);
+	}
+	return delivered;
+}
+
+/**
+ * The records whose live text differs from what the model last received for
+ * that id, and the lapsed records it last received as text. A memory approval
+ * or revision between turns then reaches the model as tail text instead of
+ * recompiling the system prompt and re-billing the conversation (#423); an
+ * unchanged session yields the empty string. Records that only dropped out of
+ * the live selection say nothing: ranking is not withdrawal.
  */
 export function memorySectionDelta(
 	frozen: string,
@@ -215,15 +235,9 @@ export function memorySectionDelta(
 		const standing = standings.get(id);
 		return standing === "withdrawn" || standing === "deleted";
 	};
-	const known = memorySectionBlocks(frozen).map((block) => block.text);
-	const delivered = [frozen, ...framed.filter((text) => text.includes(MEMORY_UPDATE_HEADING))];
-	const withdrawn = [...new Set(delivered.flatMap((text) => memorySectionBlocks(text).map((block) => block.id)))]
-		.filter(lapsed)
-		.map((id) => `- [${id}] withdrawn. Do not use this memory record.`)
-		.filter((line) => !framed.some((text) => text.includes(line)));
-	const fresh = memorySectionBlocks(live).filter(
-		(block) => !lapsed(block.id) && !known.includes(block.text) && !framed.some((text) => text.includes(block.text)),
-	);
+	const delivered = lastDeliveredMemory(frozen, framed);
+	const withdrawn = [...delivered].filter(([id, text]) => text !== null && lapsed(id)).map(([id]) => withdrawalLine(id));
+	const fresh = memorySectionBlocks(live).filter((block) => !lapsed(block.id) && delivered.get(block.id) !== block.text);
 	if (fresh.length === 0 && withdrawn.length === 0) return "";
 	return [
 		MEMORY_UPDATE_HEADING,

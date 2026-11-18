@@ -9,7 +9,12 @@ import { createTelemetryHub } from "../../src/core/telemetry/hub.js";
 import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import { createContextBundle } from "../../src/domains/context/extension.js";
-import { buildMemoryPromptSection, memoryRecordStanding } from "../../src/domains/memory/prompt-section.js";
+import {
+	buildMemoryPromptSection,
+	memoryRecordStanding,
+	memorySectionBlocks,
+	memorySectionDelta,
+} from "../../src/domains/memory/prompt-section.js";
 import type { MemoryRecord } from "../../src/domains/memory/types.js";
 import type { MiddlewareContract } from "../../src/domains/middleware/contract.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
@@ -547,4 +552,26 @@ describe("frozen session prompt across mid-session changes", { concurrency: fals
 			turn.dispose();
 		}
 	});
+});
+
+it("a memory delta answers what the model last received per record, in delivery order", () => {
+	const frozen = memorySection(["Use command A."]);
+	const a = memorySectionBlocks(frozen)[0]?.text ?? "";
+	const b = a.replace("command A", "command B");
+	const eligible = new Map([["mem-1", "eligible" as const]]);
+	strictEqual(memorySectionDelta(frozen, frozen, [], eligible), "", "an unchanged session sends nothing");
+	const revised = memorySectionDelta(frozen, memorySection(["Use command B."]), [], eligible);
+	ok(revised.includes(b), revised);
+	strictEqual(memorySectionDelta(frozen, memorySection(["Use command B."]), [revised], eligible), "");
+	// The operator restores A: the frozen section has it, but the model's latest word is B.
+	ok(memorySectionDelta(frozen, frozen, [revised], eligible).includes(a));
+	const withdrawal = memorySectionDelta(frozen, frozen, [revised], new Map([["mem-1", "withdrawn" as const]]));
+	strictEqual(withdrawal, "# Memory update\n- [mem-1] withdrawn. Do not use this memory record.");
+	strictEqual(memorySectionDelta(frozen, "", [revised, withdrawal], new Map([["mem-1", "withdrawn" as const]])), "");
+	ok(memorySectionDelta(frozen, frozen, [revised, withdrawal], eligible).includes(a), "a reapproved record goes again");
+	strictEqual(
+		memorySectionDelta(frozen, "", [revised], eligible),
+		"",
+		"dropping out of the selection is not withdrawal",
+	);
 });
