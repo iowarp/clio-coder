@@ -1245,6 +1245,23 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["printf", []],
 	["cut", []],
 	["tr", []],
+	// `file -C` compiles a magic file into the working directory.
+	["file", ["-C", "--compile"]],
+	["diff", []],
+	["cmp", []],
+	["du", []],
+	["df", []],
+	["tree", ["-o"]],
+	["basename", []],
+	["dirname", []],
+	["realpath", []],
+	["readlink", []],
+	["date", ["-s", "--set"]],
+	["sleep", []],
+	["true", []],
+	["false", []],
+	["test", []],
+	["[", []],
 ]);
 
 /**
@@ -1479,27 +1496,6 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
 }
 
 /**
- * True when every step of a shell command is an exact leading-command match on a small read-only inspection
- * allowlist (`git diff`, `cat`, `grep`, ...), joined only by `;`, `&&`, `||` or `|`, with no redirect, no
- * substitution, no inline script and no write or delete target. `gitHelpersConfigured` says the repository's git
- * config names a helper program, which narrows the git steps that count. Run effects read such a call as no
- * workspace mutation; anything this cannot prove stays one, so the answer fails closed.
- */
-export function isReadOnlyInspectionCommand(command: string, gitHelpersConfigured: boolean): boolean {
-	const tokens = scanShellLike(command);
-	if (tokens.length === 0) return false;
-	for (const token of tokens) {
-		if (token.operator ? !["&&", "||", ";", "|"].includes(token.value) : token.substitutions !== undefined) return false;
-		if (token.hiddenContent === true || token.unterminated === true) return false;
-	}
-	if (hasUnparsedShellScript(command)) return false;
-	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0) return false;
-	return splitSegments(tokens).every((segment) =>
-		readOnlyInspectionStep(shellCommandArguments(segment), gitHelpersConfigured),
-	);
-}
-
-/**
  * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
  * that check, read-only inspection, shell setup (`cd`, `source`, `.`, `export`, `set`, a bare assignment) or output
  * plumbing, so the command changed no tree. `after-change`: every step that may change the tree runs before every
@@ -1566,9 +1562,220 @@ function shellSteps(tokens: ReadonlyArray<ShellToken>): ShellStep[] {
 }
 
 function isCheckStep(step: ShellStep): boolean {
-	return (
-		step.index !== null && validationMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1)) !== null
-	);
+	return step.index !== null && checkStepMatch(basenameToken(step.argv[step.index]), step.argv.slice(step.index + 1));
+}
+
+function checkStepMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	return validationMatch(executable, args) !== null || readOnlyCheckMatch(executable, args);
+}
+
+/**
+ * What one command, or one step of a shell command, does to the tree, as the call classifier
+ * (`check-classifier.ts`) reads it: `check` runs a recognized check, `inspection` only reads, `mutation` provably or
+ * plausibly writes, and `unknown` cannot be told apart.
+ */
+export type CommandVerdict = "check" | "inspection" | "mutation" | "unknown";
+
+/** Package-manager subcommands that install, remove or rewrite the project's dependencies or manifest. */
+const PACKAGE_WRITES: ReadonlySet<string> = new Set([
+	"install",
+	"i",
+	"ci",
+	"add",
+	"remove",
+	"rm",
+	"uninstall",
+	"un",
+	"update",
+	"up",
+	"upgrade",
+	"link",
+	"unlink",
+	"rebuild",
+	"dedupe",
+	"prune",
+	"init",
+	"create",
+	"version",
+	"import",
+	"patch",
+]);
+
+/** Commands whose run writes, moves, removes or re-permissions files whatever their operands. */
+const FILE_WRITERS: ReadonlySet<string> = new Set([
+	"cp",
+	"mv",
+	"rm",
+	"rmdir",
+	"mkdir",
+	"touch",
+	"ln",
+	"chmod",
+	"chown",
+	"chgrp",
+	"truncate",
+	"patch",
+	"dd",
+	"install",
+	"rsync",
+	"unzip",
+	"tar",
+	"shred",
+	"unlink",
+	"tee",
+	"wget",
+]);
+
+/** Toolchain subcommands that write the tree: dependency edits, generators and in-place formatters. */
+const TOOLCHAIN_WRITES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["cargo", new Set(["add", "remove", "fix", "install", "update", "generate-lockfile"])],
+	["go", new Set(["generate", "get", "mod", "install", "work"])],
+	["uv", new Set(["add", "remove", "sync", "lock", "pip"])],
+	["poetry", new Set(["add", "remove", "install", "update", "lock"])],
+	["pip", new Set(["install", "uninstall"])],
+	["pip3", new Set(["install", "uninstall"])],
+]);
+
+/** Formatters that rewrite what they read unless told only to check or diff. */
+const CHECKABLE_FORMATTERS: ReadonlySet<string> = new Set(["black", "isort", "rustfmt"]);
+
+/** Interpreter flags that run a script given on the command line. */
+const INLINE_SCRIPT_FLAGS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+	["node", ["-e", "--eval", "-p", "--print"]],
+	["bun", ["-e", "--eval", "-p", "--print"]],
+	["perl", ["-e", "-E", "-i", "-pi", "-pie"]],
+	["ruby", ["-e", "-i"]],
+]);
+
+/**
+ * A step outside the check and inspection sets that provably or plausibly writes: git beyond read-only inspection
+ * (hooks and helpers included), an install, a file writer, a read-only filter or inspection command its own options
+ * turned into a writer or runner, an emitting `tsc`, a runner updating snapshots or fixing, an inline script
+ * (`node -e`, `python -c`), a formatter in write mode, or a check whose name or flags rewrite the tree
+ * ({@link checkWritesTree}). Anything else is unknown.
+ */
+function writerStep(executable: string, args: ReadonlyArray<string>): boolean {
+	if (executable === "git" || FILE_WRITERS.has(executable)) return true;
+	if (READ_ONLY_FILTERS.has(executable) || READ_ONLY_INSPECTION_REFUSALS.has(executable)) return true;
+	if (executable === "tsc" || READ_ONLY_RUNNERS.has(executable)) return true;
+	if (executable === "npx") {
+		if (args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) return true;
+		const inner = npxInvocation(args);
+		return inner !== null && writerStep(inner.executable, inner.args);
+	}
+	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
+		if ((args[0] === "exec" || args[0] === "dlx") && typeof args[1] === "string" && !args[1].startsWith("-"))
+			return writerStep(basenameToken(args[1]), args.slice(2));
+		if (args[0] !== undefined && PACKAGE_WRITES.has(args[0])) return true;
+	}
+	if (TOOLCHAIN_WRITES.get(executable)?.has(args[0] ?? "") === true) return true;
+	if (isPythonExecutable(executable))
+		return args.includes("-c") || (moduleArg(args) === "pip" && args.some((arg) => PACKAGE_WRITES.has(arg)));
+	const inline = INLINE_SCRIPT_FLAGS.get(executable);
+	if (inline?.some((flag) => args.some((arg) => arg === flag || arg.startsWith(`${flag}=`))) === true) return true;
+	const checksOnly = args.some((arg) => arg === "--check" || arg === "--diff" || arg.startsWith("--check="));
+	if (CHECKABLE_FORMATTERS.has(executable)) return !checksOnly;
+	if ((executable === "cargo" || executable === "go") && args[0] === "fmt") return !checksOnly;
+	if (executable === "ruff" && args[0] === "format") return !checksOnly;
+	if (executable === "clang-format" || executable === "autopep8")
+		return args.some((arg) => arg === "-i" || arg === "--in-place");
+	if (executable === "curl")
+		return args.some((arg) => /^-[a-zA-Z]*[oO]/u.test(arg) || arg.startsWith("--output") || arg === "--remote-name");
+	return checkWritesTree([executable, ...args]);
+}
+
+/** A step outside any recognized check: setup and inspection only read, a known writer writes, the rest is unknown. */
+function stepVerdict(argv: ReadonlyArray<string>, gitHelpersConfigured: boolean): CommandVerdict {
+	const [first] = argv;
+	if (first === undefined) return "inspection";
+	if (SHELL_SETUP_STEPS.has(first)) return first === "source" || first === "." ? "unknown" : "inspection";
+	if (readOnlyInspectionStep(argv, gitHelpersConfigured)) return "inspection";
+	return writerStep(basenameToken(first), argv.slice(1)) ? "mutation" : "unknown";
+}
+
+/**
+ * The verdict of one shell command, the bash half of the call classifier: `check` when any step runs a recognized
+ * check (its {@link checkCommandShape} then says whether the call also changed the tree), `mutation` when it names a
+ * write or delete target or any step is a known writer, `inspection` when every step, substitution and inline script
+ * only reads, and `unknown` otherwise. A check inside a substitution or an inline shell is not this call's check, so
+ * there it reads as unknown.
+ */
+export function shellCommandVerdict(command: string, gitHelpersConfigured: boolean, depth = 0): CommandVerdict {
+	const tokens = scanShellLike(command);
+	const steps = shellSteps(tokens);
+	if (steps.length === 0) return "unknown";
+	if (steps.some(isCheckStep)) return "check";
+	if (extractCommandWriteTargets(command).length > 0 || extractCommandDeleteTargets(command).length > 0)
+		return "mutation";
+	const nested = (script: string | undefined): CommandVerdict => {
+		if (script === undefined || depth >= INNER_SHELL_MAX_DEPTH) return "unknown";
+		const verdict = shellCommandVerdict(script, gitHelpersConfigured, depth + 1);
+		return verdict === "check" ? "unknown" : verdict;
+	};
+	const join = (a: CommandVerdict, b: CommandVerdict): CommandVerdict =>
+		a === "mutation" || b === "mutation" ? "mutation" : a === "unknown" || b === "unknown" ? "unknown" : "inspection";
+	let verdict: CommandVerdict = "inspection";
+	for (const step of steps) {
+		for (const token of step.tokens) {
+			if (token.hiddenContent === true || token.unterminated === true) verdict = join(verdict, "unknown");
+			for (const script of token.substitutions ?? []) verdict = join(verdict, nested(script));
+		}
+		const script = segmentShellScript(step.argv);
+		const argv = step.index === null ? [] : step.argv.slice(step.index);
+		verdict = join(verdict, script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script));
+		if (verdict === "mutation") return verdict;
+	}
+	return verdict;
+}
+
+/** Runners that read the tree and write none of it, unless told to update snapshots or fix what they find. */
+const READ_ONLY_RUNNERS: ReadonlySet<string> = new Set(["vitest", "jest", "mocha", "eslint"]);
+
+/**
+ * The closed read-only half of the check vocabulary (x5-1): `tsc --noEmit`, `node --check`, `node --test`, and
+ * vitest, jest, mocha or eslint, bare or behind `npx` or `pnpm exec`. A snapshot update, `--fix`, `node -e` and a
+ * bare `tsc` that emits stay outside it, so they remain changes that retire earlier passes.
+ */
+function readOnlyCheckMatch(executable: string, args: ReadonlyArray<string>): boolean {
+	if (executable === "npx") {
+		if (args.some((arg) => arg === "-c" || arg === "--call" || arg.startsWith("--call="))) return false;
+		const inner = npxInvocation(args);
+		return inner !== null && inner.executable !== "node" && readOnlyCheckMatch(inner.executable, inner.args);
+	}
+	if (executable === "pnpm")
+		return (
+			args[0] === "exec" &&
+			typeof args[1] === "string" &&
+			!args[1].startsWith("-") &&
+			basenameToken(args[1]) !== "node" &&
+			readOnlyCheckMatch(basenameToken(args[1]), args.slice(2))
+		);
+	if (executable === "tsc") return args.some((arg) => arg.toLowerCase() === "--noemit");
+	if (executable === "node")
+		return (
+			args.some((arg) => arg === "--test" || arg === "--check" || arg === "-c") &&
+			!args.some((arg) => isRuntimeLoaderFlag(arg) || arg === "-p" || arg.startsWith("--print") || writesSnapshots(arg))
+		);
+	if (!READ_ONLY_RUNNERS.has(executable)) return false;
+	return !args.some((arg) => writesSnapshots(arg) || arg.startsWith("--fix"));
+}
+
+/** Runtime options that load or evaluate code of their own beside the check they ride on. */
+const RUNTIME_LOADER_FLAGS: ReadonlyArray<string> = [
+	"--import",
+	"--require",
+	"--loader",
+	"--experimental-loader",
+	"--eval",
+];
+
+function isRuntimeLoaderFlag(arg: string): boolean {
+	return arg === "-r" || arg === "-e" || RUNTIME_LOADER_FLAGS.some((flag) => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+/** A test runner's option that rewrites its snapshots: `-u`, `--update*`, node's `--test-update-snapshots`. */
+function writesSnapshots(arg: string): boolean {
+	return arg === "-u" || arg.startsWith("--update") || arg === "--test-update-snapshots";
 }
 
 /**
@@ -1641,9 +1848,9 @@ const W_FLAG_WRITERS: ReadonlySet<string> = new Set(["prettier", "gofmt", "goimp
 
 /**
  * Whether a check command may rewrite the tree it checks (x3-3): a package script, make or just target named as a
- * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, or a formatter's `-w`. A heuristic on names and
- * flags: a writer spelled otherwise reads as a check, and a read-only script named `format` reads as a change, which
- * only clears passes the run must then earn again.
+ * writer ({@link isWriteCapableScriptName}), `--fix` or `--write`, a formatter's `-w`, or a snapshot update passed to a
+ * package script or `node --test`. A heuristic on names and flags: a writer spelled otherwise reads as a check, and a
+ * read-only script named `format` reads as a change, which only clears passes the run must then earn again.
  */
 export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	const index = commandTokenIndex(argv);
@@ -1652,8 +1859,12 @@ export function checkWritesTree(argv: ReadonlyArray<string>): boolean {
 	const args = argv.slice(index + 1);
 	if (args.some((arg) => TREE_WRITING_FLAGS.has(arg) || arg.startsWith("--fix="))) return true;
 	if (W_FLAG_WRITERS.has(executable) && args.includes("-w")) return true;
+	if (executable === "node") return args.includes("--test-update-snapshots");
 	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
 		const script = args[0] === "run" ? args[1] : args[0];
+		const separator = args.indexOf("--");
+		// `npm test -- -u` is a check that rewrites its snapshots (x5-2).
+		if (separator >= 0 && args.slice(separator + 1).some(writesSnapshots)) return true;
 		return script !== undefined && isWriteCapableScriptName(script);
 	}
 	if (executable === "make" || executable === "just")
@@ -2391,14 +2602,12 @@ function validationMatch(
 	args: ReadonlyArray<string>,
 ): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
 	if (executable === "node" && args[0] === "--test") return "node --test";
-	if (executable === "npm" || executable === "pnpm" || executable === "yarn" || executable === "bun") {
-		// An option after `--` reaches the script's runtime (`--import`, `--require`), so it is not the project's check.
+	const script = packageScriptMatch(executable, args);
+	if (script !== null) {
+		// A runtime loader after `--` (`--import`, `--require`) runs code beside the script, so it is not the project's
+		// check. A runner's own flag (`--run`, `-t name`) is, filed under its full command (x5-2).
 		const separator = args.indexOf("--");
-		if (separator >= 0 && args.slice(separator + 1).some((arg) => arg.startsWith("-"))) return null;
-		if (args[0] === "test") return `${executable} test`;
-		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
-		if (script === "test") return `${executable} test`;
-		if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
+		return separator >= 0 && args.slice(separator + 1).some(isRuntimeLoaderFlag) ? null : script;
 	}
 	if (executable === "uv") {
 		const invocation = args.join(" ");
@@ -2421,6 +2630,18 @@ function validationMatch(
 	if (executable === "meson" && args[0] === "test") return "meson test";
 	if (executable === "mvn" && args[0] === "test") return "mvn test";
 	if ((executable === "gradle" || executable === "gradlew") && args[0] === "test") return "gradle test";
+	return null;
+}
+
+function packageScriptMatch(
+	executable: string,
+	args: ReadonlyArray<string>,
+): ValidationCommandLabel | `${"npm" | "pnpm" | "yarn" | "bun"} run ${string}` | null {
+	if (executable !== "npm" && executable !== "pnpm" && executable !== "yarn" && executable !== "bun") return null;
+	if (args[0] === "test") return `${executable} test`;
+	const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
+	if (script === "test") return `${executable} test`;
+	if (script !== null && isVerificationScriptName(script)) return `${executable} run ${script}`;
 	return null;
 }
 

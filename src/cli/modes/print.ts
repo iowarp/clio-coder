@@ -24,6 +24,7 @@ import {
 	settledVerifyCall,
 	typedValidationFactsFromObservedEffects,
 	typedValidationFactsFromVerifyCalls,
+	unclassifiedAfterLastCheck,
 	type VerifyCallOutcome,
 	type VerifyCallStart,
 	verificationWithHostVerdict,
@@ -897,6 +898,7 @@ async function recordHeadlessMainAgentRun(input: {
 		...typedValidationFactsFromVerifyCalls(toolStats, input.stats.verifyCalls, checkFreshness),
 		...typedValidationFactsFromObservedEffects(input.stats.runEffects.snapshot()),
 	];
+	const unclassified = unclassifiedAfterLastCheck(input.stats.runEffects.snapshot());
 	const hostVerification = acceptanceHostVerification(input.acceptance ?? [], snapshot.cwd);
 	const verification = deriveRunVerification({ toolStats, typedValidations }, { checkFreshness });
 	const draft: RunResultDraft = {
@@ -956,6 +958,7 @@ async function recordHeadlessMainAgentRun(input: {
 				: {}),
 		},
 		noop: headlessNoop(input.stats),
+		...(unclassified !== null ? { unclassifiedAfterLastCheck: unclassified } : {}),
 		...(input.costCap !== undefined ? { costCap: input.costCap } : {}),
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
 		terminalReason: mainAgentTerminalReason(outcome).terminalReason,
