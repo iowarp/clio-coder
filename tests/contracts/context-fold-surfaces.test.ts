@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createStdioTransport } from "../../src/engine/acp/transport.js";
+import { ACP_CONTEXT_LEDGER_METHOD } from "../../src/engine/acp/types.js";
 import {
 	type CapturedRequest,
 	contextElements,
@@ -258,4 +259,84 @@ describe("surface capture", () => {
 			deepStrictEqual(tapped, requests, "the adapter payloads are the captured requests");
 		});
 	}
+
+	it("acp: usage_update and /context read one figure after an eviction and after a reopen", {
+		timeout: 300_000,
+	}, async (t) => {
+		const server = await startCaptureServer((_request, index) =>
+			index < 2
+				? { calls: [{ id: `call_${index + 1}`, name: "read", arguments: { path: "notes.txt" } }] }
+				: { text: "done" },
+		);
+		const scratch = headlessScratch("cf-usage-");
+		t.after(async () => {
+			await server.close();
+			scratch.cleanup();
+		});
+		seedOpenAICompatToolOrchestrator(scratch.configDir, server.url, "yolo");
+		const settingsFile = path.join(scratch.configDir, "settings.yaml");
+		// The uncached route above: the second read supersedes the first, and S0 commits an eviction mid-turn.
+		writeFileSync(
+			settingsFile,
+			readFileSync(settingsFile, "utf8")
+				.replace("contextWindow: 32768", "contextWindow: 262144")
+				.replace(
+					"    wireModels:\n      - mock-model",
+					"    cache:\n      retention: none\n    wireModels:\n      - mock-model",
+				),
+		);
+		const project = path.join(scratch.root, "project");
+		mkdirSync(project);
+		const line = `${"n".repeat(67)}\n`;
+		writeFileSync(path.join(project, "notes.txt"), line.repeat(Math.ceil((34 * 1024) / line.length)));
+		const env = Object.fromEntries(
+			Object.entries(scratch.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+		);
+		const cli = tappedCli(path.join(scratch.root, "session-capture.jsonl"));
+		let sessionId = "";
+		const figures: Array<{ used: number; ledger: number }> = [];
+		for (const reopen of [false, true]) {
+			const acp = createStdioTransport(
+				process.execPath,
+				[...cli.node, cli.cli, "--no-context-files", "--no-skills", "acp"],
+				{
+					cwd: project,
+					env,
+				},
+			);
+			t.signal.addEventListener("abort", () => void acp.forceTerminate(), { once: true });
+			const used: number[] = [];
+			acp.onNotification("session/update", (params) => {
+				const update = (params as { update?: { sessionUpdate?: string; used?: number } }).update;
+				if (update?.sessionUpdate === "usage_update" && typeof update.used === "number") used.push(update.used);
+			});
+			try {
+				await acp.request("initialize", { protocolVersion: 1 });
+				if (!reopen) {
+					({ sessionId } = await acp.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] }));
+					const turn = await acp.request<{ stopReason: string }>("session/prompt", {
+						sessionId,
+						prompt: [{ type: "text", text: "read notes.txt twice" }],
+					});
+					strictEqual(turn.stopReason, "end_turn");
+				} else await acp.request("session/load", { sessionId, cwd: project, mcpServers: [] });
+				await new Promise((resolve) => setImmediate(resolve));
+				const ledger = await acp.request<{ usedTokens: number }>(ACP_CONTEXT_LEDGER_METHOD, { sessionId });
+				ok(used.length > 0, "a usage_update was sent");
+				figures.push({ used: used.at(-1) ?? -1, ledger: ledger.usedTokens });
+			} finally {
+				await acp.forceTerminate();
+			}
+		}
+		const results = wireElements(server.requests.at(-1) as CapturedRequest).filter((element) =>
+			element.startsWith("result:"),
+		);
+		ok(results[0]?.startsWith("result:[evicted ref=r1 reason=superseded_call by="), "the S0 eviction committed");
+		const [live, reopened] = figures;
+		ok(live && reopened && live.used > 0);
+		strictEqual(live.used, live.ledger, "usage_update and /context read one figure after the eviction");
+		// The capture server reports 10 input tokens per call; the view prices the retained 34 KiB read instead.
+		ok(live.used > (34 * 1024) / 4, `usage_update reads the view, not the provider's report: ${live.used}`);
+		strictEqual(reopened.used, reopened.ledger, "and after the reopen");
+	});
 });

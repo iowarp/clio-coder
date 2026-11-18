@@ -528,6 +528,30 @@ type LiveBudgetAccounting = Pick<
 	| "outputReserveTokens"
 >;
 
+/** The newest reduction on `path`, in the shape a live commit notes it. */
+function compactionEventOnPath(
+	path: ReadonlyArray<SessionEntry>,
+): { stage: string; tokensBefore: number; tokensAfter: number; trigger: string } | null {
+	for (let index = path.length - 1; index >= 0; index -= 1) {
+		const entry = path[index];
+		if (entry?.kind === "contextEviction") {
+			const stage = entry.trigger === "superseded" ? "superseded" : "working_set";
+			return { stage, tokensBefore: entry.tokensBefore, tokensAfter: entry.tokensAfter, trigger: entry.trigger };
+		}
+		if (entry?.kind === "compactionSummary") {
+			if (entry.tokensAfter === undefined) return null;
+			const stage = entry.trigger === "step" ? "step_checkpoint" : "llm_summary";
+			return {
+				stage,
+				tokensBefore: entry.tokensBefore,
+				tokensAfter: entry.tokensAfter,
+				trigger: entry.trigger ?? "unknown",
+			};
+		}
+	}
+	return null;
+}
+
 const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 /**
@@ -3809,6 +3833,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const provider = routed?.targetId ?? settings.chat?.target ?? null;
 			const model = routed?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
+			// The total is the published view's, the figure the footer and admission read; the capture only splits it.
+			const view = budgetProducer.current() ?? refreshLiveBudget();
+			const streamingOutput = liveStreamingOutputTokens();
+			// Settled output is already history in the view, so only a response in flight is added, as the footer does.
+			const totalUsed = view.inputTokens === null ? 0 : view.inputTokens + (state.streaming ? streamingOutput : 0);
+			const measured = view.historical
+				? currentContextSnapshot?.sources.total === "reconciled"
+				: view.anchoredInputTokens !== null;
 
 			if (!currentContextSnapshot) {
 				return buildContextLedger({
@@ -3819,15 +3851,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					compactionThreshold: ledgerThreshold,
 					compactionCeilingTokens,
 					compactionAuto,
+					streamingTokens: streamingOutput,
+					liveTotalTokens: totalUsed > 0 ? totalUsed : null,
+					measured,
+					lastCompaction: lastCompactionEvent,
 					promptCache: lastPromptCache,
 					prewarm: lastPrewarm,
 				});
 			}
 
-			const streamingOutput = liveStreamingOutputTokens();
 			const pendingTokens = pendingUserInputTokens();
-			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + streamingOutput;
-			const measured = currentContextSnapshot.sources.total === "reconciled";
 
 			return buildContextLedger({
 				provider,
@@ -4146,6 +4179,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
 			rehydrationMiss = null;
+			// The last reduction /context and ACP name is the one on the path now current, not the branch left.
+			lastCompactionEvent = compactionEventOnPath(activeEntries());
 			// Real branch navigation. The epoch separates two visits to the same
 			// leaf id, so an advisory announced on the branch this session left is
 			// re-armed rather than treated as already said.
@@ -4154,7 +4189,16 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
-			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
+			// The session's latest capture may describe the branch just left; a runtime captures the history now in place.
+			currentContextSnapshot = state.runtime
+				? captureRuntimeContextSnapshot(
+						state.runtime,
+						incomingBranchAnchorTurnId ?? "session",
+						deps.getSettings().context.compaction?.threshold ?? null,
+					)
+				: session
+					? getLatestContextSnapshot(session)
+					: null;
 		},
 
 		dispose(): void {

@@ -476,4 +476,36 @@ describe("live measured context anchor", () => {
 		strictEqual(live.reconciledTokens, s.record.tokensAfter);
 		ok(live.tokens > estimateAgentContextTokens(s.f.runtime.agent.state), "not the structural estimate");
 	});
+
+	for (const navigation of ["branch", "fork", "resume"] as const) {
+		it(`publishes one context figure and the current path's last reduction after a ${navigation}`, async () => {
+			const s = await foldScenario({ evict: ["r1", "r2"] });
+			s.entries.push(entry("b", "u", "user", { text: "Try the other path" }));
+			if (navigation === "branch") s.navigate("b");
+			if (navigation === "fork") {
+				s.setSession("fork-session");
+				s.navigate(s.record.turnId);
+			}
+			if (navigation === "resume") {
+				s.navigate("b");
+				s.navigate(s.record.turnId);
+			}
+			const ledger = s.f.context.contextLedger();
+			const live = s.f.context.liveContextEstimate(s.f.runtime);
+			strictEqual(ledger.usedTokens, live.tokens);
+			strictEqual(ledger.usedTokens, s.f.context.liveBudget().inputTokens);
+			if (navigation === "branch") {
+				strictEqual(ledger.lastCompaction, null);
+				strictEqual(live.reconciledTokens, null);
+				return;
+			}
+			deepStrictEqual(ledger.lastCompaction, {
+				stage: "working_set",
+				tokensBefore: s.record.tokensBefore,
+				tokensAfter: s.record.tokensAfter,
+				trigger: "pressure",
+			});
+			strictEqual(live.reconciledTokens, s.record.anchor?.tokens);
+		});
+	}
 });
