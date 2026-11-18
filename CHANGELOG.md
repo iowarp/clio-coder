@@ -44,6 +44,8 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Changed
 
+- The workers board builds cards only for live runs and the newest 24 finished runs, and folds a finished run's telemetry once per journal change, so a long run history no longer makes each poll slower than the poll period (P3).
+- Live worker spend persists to runs.json at most every 10 s, and a persist skips re-reading runs.json when this process wrote it last (P3).
 - The active session path is memoized per ledger snapshot and leaf and extended on append, so turn context, the chat loop and the safety judge no longer rebuild it from the whole ledger on every call (P3).
 - The stale-edit guard indexes only appended entries per edit, about 19 ms to 0.4 ms per edit at 10K session entries (P3).
 - A dispatched run in the current checkout no longer blocks the event loop to measure its checkout delta. Spawn and settle snapshots run asynchronously, re-read only files whose stat moved (up to 1 MiB; a larger file is identified by its stat), and runs spawned together share one baseline, so a wide fan-out on a dirty checkout no longer freezes the TUI (P3).
