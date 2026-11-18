@@ -81,7 +81,7 @@ describe("evidence integrity boundary", () => {
 		ok(assessed);
 		run.assessment = assessed.data;
 		const labels = runEvidenceLabels(run, PRODUCER_INTEGRITY).join(" ");
-		match(labels, /validation observed passing: python -m pytest/u);
+		match(labels, /validation observed passing: python3 -m pytest -q/u);
 		match(labels, /validationGrounding:validated/u);
 		match(labels, /completionEvidence:evidenced/u);
 		match(labels, /evidence_verification=verified\/host-observed-command/u);

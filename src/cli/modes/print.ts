@@ -1477,6 +1477,8 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 					toolCalls: countToolStats(runStats.toolStats),
 					refused: toolTotals(runStats.toolStats).blocked,
 					writes: runStats.mutatingSucceeded,
+					workspaceRoot: process.cwd(),
+					scratchRoots: options.scratchRoots ?? [],
 				})
 			: null;
 	const endedAt = new Date().toISOString();

@@ -4,6 +4,7 @@ import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-c
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
+import { pythonScriptOnlyReads } from "./python-probe.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -744,7 +745,8 @@ function extractCommandPathWalk(command: string, topLevelHeredocs = true): Comma
  * no shell reads its body, so only the walk without bodies counts: `=>` in a
  * TypeScript body is not a redirect. A body fed to a shell, an interpreter,
  * a pipe, or any other command is still read as commands, and so is one whose
- * file a later command names, since that command may run it.
+ * file a later command names, since that command may run it, or a script
+ * file a step such as `make` may run without naming it.
  */
 export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
 	const { text: withoutBodies, dataOutputs } = removeHeredocBodies(command, false);
@@ -803,13 +805,58 @@ function heredocDataOutputs(tokens: ReadonlyArray<ShellToken>, operatorIndex: nu
 	return [stdout, ...outputs].filter((output) => output !== "/dev/null");
 }
 
+/** Writers that run none of the files they touch, so a data here-document's file stays unrun by them. */
+const NON_RUNNING_WRITERS: ReadonlySet<string> = new Set([
+	"cat",
+	"tee",
+	"cp",
+	"mv",
+	"rm",
+	"rmdir",
+	"mkdir",
+	"touch",
+	"ln",
+	"chmod",
+	"chown",
+	"chgrp",
+	"truncate",
+	"unlink",
+]);
+
+/**
+ * A file name a step may run as a shell script without naming it (bt-low1): a `.sh`, `.bash`, `.zsh` or `.mk` file,
+ * or a name with no extension, such as a Makefile, a git hook, a `bin/` tool or `.envrc`.
+ */
+function shellRunnableOutput(output: string): boolean {
+	const name = basenameToken(output);
+	return /\.(?:sh|bash|zsh|ksh|mk)$/iu.test(name) || !name.slice(1).includes(".");
+}
+
+/**
+ * Whether a step of the command, bodies removed, may run a file it does not name: anything but shell setup, read-only
+ * inspection and {@link NON_RUNNING_WRITERS}, or any step with a substitution (`make`, `npm test`, `git commit`'s
+ * hooks, `for f in *.sh`).
+ */
+function mayRunUnnamedFile(command: string): boolean {
+	return shellSteps(scanShellLike(command)).some((step) => {
+		if (step.tokens.some((token) => (token.substitutions?.length ?? 0) > 0 || token.hiddenContent === true)) return true;
+		if (step.index === null) return false;
+		const argv = step.argv.slice(step.index);
+		const [first = ""] = argv;
+		if (SHELL_SETUP_STEPS.has(first)) return first === "source" || first === ".";
+		return !NON_RUNNING_WRITERS.has(basenameToken(first)) && !readOnlyInspectionStep(argv, true);
+	});
+}
+
 /**
  * Whether the command, bodies removed, may run a file a data here-document
- * wrote: another word names the file, or a function, alias, or PATH change
- * may make `cat` or `tee` something else.
+ * wrote: another word names the file, a function, alias, or PATH change
+ * may make `cat` or `tee` something else, or the file is a script some step
+ * may run unnamed ({@link shellRunnableOutput}, {@link mayRunUnnamedFile}).
  */
 function mayRunHeredocOutputs(command: string, outputs: ReadonlyArray<string>): boolean {
 	if (/\bPATH=|\balias\b|\bfunction\b|\(\s*\)/u.test(command)) return true;
+	if (outputs.some(shellRunnableOutput) && mayRunUnnamedFile(command)) return true;
 	const text = command.toLowerCase();
 	const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
 	for (const output of outputs) {
@@ -1283,6 +1330,8 @@ const READ_ONLY_INSPECTION_REFUSALS: ReadonlyMap<string, ReadonlyArray<string>> 
 	["false", []],
 	["test", []],
 	["[", []],
+	// jq has no way to write a file or run a program.
+	["jq", []],
 ]);
 
 /**
@@ -1585,9 +1634,9 @@ function readOnlyInspectionStep(argv: ReadonlyArray<string>, gitHelpersConfigure
  * How a shell command that runs a recognized check stands against the tree it leaves (x1-1). `pure`: every step is
  * that check, read-only inspection, shell setup (`cd`, `source`, `.`, `export`, `set`, a bare assignment) or output
  * plumbing, so the command changed no tree. `after-change`: every step that may change the tree runs before every
- * check, the last of them hands over through `&&`, and nothing but `&&` and `|` joins the steps, so the check judged
- * the changed tree (`npm ci && npm test`). `mixed`: anything else (`git apply x.patch; npm test`, `npm test && node
- * codemod.mjs`), whose check cannot speak for the tree the command left. A check that rewrites the tree
+ * check, the last of them hands over through `&&`, `;` or a newline, and nothing but those and `|` joins the steps, so
+ * the check judged the changed tree (`npm ci && npm test`, `git apply x.patch; npm test`; bt-46 S2). `mixed`: anything
+ * else (`npm ci | npm test`, `npm test && node codemod.mjs`), whose check cannot speak for the tree the command left. A check that rewrites the tree
  * ({@link checkWritesTree}) is a change as well, so its own outcome never lands as a pass. Null when no step is a
  * recognized check.
  */
@@ -1871,10 +1920,54 @@ export function shellCommandVerdict(command: string, gitHelpersConfigured: boole
 		}
 		const script = segmentShellScript(step.argv);
 		const argv = step.index === null ? [] : step.argv.slice(step.index);
-		verdict = join(verdict, script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script));
+		const inline = script === null ? inlinePythonVerdict(command, step) : null;
+		verdict = join(verdict, inline ?? (script === null ? stepVerdict(argv, gitHelpersConfigured) : nested(script)));
 		if (verdict === "mutation") return verdict;
 	}
 	return verdict;
+}
+
+/** Interpreter flags that change neither where a script comes from nor what it may import. */
+const PLAIN_PYTHON_FLAGS: ReadonlySet<string> = new Set(["-B", "-E", "-I", "-O", "-OO", "-P", "-q", "-s", "-S", "-u"]);
+
+/**
+ * The verdict of a step that runs an inline Python script (c17-a): `python3 -c '<script>'`, or `python3 -` / bare
+ * `python3` reading the one quoted here-document its line opens. Inspection when the literal script provably only
+ * reads ({@link pythonScriptOnlyReads}), a change otherwise, so a stdin script no reader can see no longer reads as
+ * unknown. Null for any other step, including one behind an environment prefix that may redirect its imports.
+ */
+function inlinePythonVerdict(command: string, step: ShellStep): CommandVerdict | null {
+	if (step.index !== 0 || !isPythonExecutable(basenameToken(step.argv[0]))) return null;
+	const words = shellCommandWords(step.tokens);
+	let index = 1;
+	while (PLAIN_PYTHON_FLAGS.has(step.argv[index] ?? "")) index += 1;
+	const reads = (script: string) => (pythonScriptOnlyReads(script) ? "inspection" : "mutation");
+	if (step.argv[index] === "-c") {
+		const word = words[index + 1];
+		if (word === undefined) return null;
+		const raw = command.slice(word.start, word.end);
+		const literal =
+			(word.substitutions?.length ?? 0) === 0 &&
+			word.hiddenContent !== true &&
+			word.unterminated !== true &&
+			(/^'[^']*'$/u.test(raw) || !/[$`\\]/u.test(raw));
+		return literal ? reads(word.value) : "mutation";
+	}
+	if (index < step.argv.length && step.argv[index] !== "-") return null;
+	const first = step.tokens[0];
+	const last = step.tokens.at(-1);
+	if (first === undefined || last === undefined || step.tokens.some((token) => token.operator)) return "mutation";
+	const lineEnd = command.indexOf("\n", last.end);
+	const head = /^[ \t]*<<[ \t]*(?:'(\w+)'|"(\w+)"|(\w+))[ \t]*$/u.exec(
+		command.slice(last.end, lineEnd === -1 ? command.length : lineEnd),
+	);
+	const body = cachedShellScan(command, true).bodies.find((candidate) => candidate.start === lineEnd + 1);
+	if (head === null || body === undefined || command.slice(first.start, last.end).includes("<<")) return "mutation";
+	const word = head[1] ?? head[2] ?? head[3] ?? "";
+	const lines = command.slice(body.start, body.end).replace(/\n$/u, "").split("\n");
+	if (lines.pop() !== word) return "mutation";
+	const script = lines.join("\n");
+	return head[3] !== undefined && /[$`\\]/u.test(script) ? "mutation" : reads(script);
 }
 
 /** Writers whose every write is a target {@link extractCommandWriteTargets} or {@link extractCommandDeleteTargets} names. */
@@ -2155,9 +2248,10 @@ export function checkCommandShape(
 	let lastChange = steps.length - 1;
 	while (lastChange >= 0 && steps[lastChange]?.changes !== true) lastChange -= 1;
 	if (lastChange === -1) return "pure";
+	const sequential = (joinedBy: string | null | undefined) => joinedBy === "&&" || joinedBy === ";";
 	const handsOver =
-		steps[lastChange]?.joinedBy === "&&" &&
-		steps.every((step) => step.joinedBy === null || step.joinedBy === "&&" || step.joinedBy === "|") &&
+		sequential(steps[lastChange]?.joinedBy) &&
+		steps.every((step) => step.joinedBy === null || step.joinedBy === "|" || sequential(step.joinedBy)) &&
 		!steps.slice(0, lastChange + 1).some((step) => step.check);
 	return handsOver ? "after-change" : "mixed";
 }
@@ -2271,6 +2365,61 @@ export function shellStatusMasked(command: string): boolean {
 		if (executable !== "shopt") return false;
 		return args.some((arg) => /^-[A-Za-z]*u/u.test(arg)) && args.some((arg) => arg === "pipefail" || /[$`]/u.test(arg));
 	});
+}
+
+/**
+ * Builtins that end, replace, reconfigure or move the shell, so the status or directory of a later list may not be the
+ * one it reads: after a failed `cd pkg;` the check runs where the shell already was.
+ */
+const LIST_BENDING_BUILTINS: ReadonlySet<string> = new Set([
+	"cd",
+	"pushd",
+	"popd",
+	"exit",
+	"exec",
+	"return",
+	"logout",
+	"trap",
+	"set",
+	"shopt",
+	"eval",
+	"alias",
+	"enable",
+	"hash",
+	"source",
+	".",
+	"kill",
+	"wait",
+]);
+
+/**
+ * The text of a command's last `;` or newline list when the steps before it cannot touch its exit status (bt-46 S2):
+ * none runs a check (`declaredSteps` count as checks), none is grouped or backgrounded, and each is a plain command the
+ * step reader knows, so a write by redirect, heredoc or a known writer may come first. An `exit`, a `trap`, a `set`,
+ * a function or alias definition, a nested shell or any step the reader cannot place returns null, as does a command
+ * with no such list.
+ */
+export function finalListAfterPlainSteps(
+	command: string,
+	declaredSteps: ReadonlySet<number> = new Set(),
+): string | null {
+	const steps = shellSteps(scanShellLike(command, true));
+	let last = -1;
+	for (let position = 1; position < steps.length; position += 1)
+		if (steps[position - 1]?.joinedBy === ";") last = position;
+	const tail = steps[last]?.tokens[0];
+	if (tail === undefined) return null;
+	const plain = (step: ShellStep, position: number): boolean => {
+		if (step.opens > 0 || step.closes > 0 || step.index === null) return false;
+		if (position < last && (step.joinedBy === "&" || step.joinedBy === "")) return false;
+		if (position >= last) return true;
+		if (isCheckStep(step) || declaredSteps.has(position)) return false;
+		if (step.tokens.some((token) => token.hiddenContent === true || token.unterminated === true)) return false;
+		const argv = step.argv.slice(step.index);
+		if (LIST_BENDING_BUILTINS.has(argv[0] ?? "") || segmentShellScript(step.argv) !== null) return false;
+		return (inlinePythonVerdict(command, step) ?? stepVerdict(argv, false)) !== "unknown";
+	};
+	return steps.every(plain) ? command.slice(tail.start) : null;
 }
 
 /**

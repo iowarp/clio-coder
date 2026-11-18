@@ -162,6 +162,9 @@ describe("bash write targets after cd, and links made in the same command", () =
 			`cat <<'EOF' > >(sh)\n${code}\nEOF`,
 			`cat <<'EOF'\n${code}\nEOF`,
 			`cat > run.sh <<'EOF'\n${code}\nEOF\nbash run.sh`,
+			// A script a later step may run without naming it (bt-low1).
+			`cat > build.sh <<'EOF'\n${code}\nEOF\nmake`,
+			`cat > .git/hooks/pre-commit <<'EOF'\n${code}\nEOF\ngit commit -m x`,
 			`cat() { sh; }; cat > n.ts <<'EOF'\n${code}\nEOF`,
 		]) {
 			assertEscalated(command, fromRoot);
