@@ -2,7 +2,7 @@
 	"native": {
 		"receipt": {
 			"runId": "<run>",
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"agentId": "scout",
 			"executionRole": "researcher",
 			"agentAudience": "shadow",
@@ -56,8 +56,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
@@ -65,7 +65,7 @@
 			},
 			"projectContext": {
 				"tier": "none",
-				"chars": 419,
+				"chars": 111,
 				"contentHash": "<sha256>",
 				"sections": ["workspace-root"]
 			},
@@ -399,7 +399,7 @@
 				}
 			},
 			"reproducibility": {
-				"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+				"cwd": "<home>/project",
 				"safetyPolicy": {
 					"version": 1,
 					"rulePackHash": null,
@@ -571,248 +571,7 @@
 					"activation": "shadow",
 					"baselineAgentId": "scout",
 					"recommendedAgentId": "scout",
-					"evaluations": [
-						{
-							"agentId": "architect",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "artifact-write",
-							"rejections": ["authority:artifact-write", "result-contract:architect-plan"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:deep"]
-						},
-						{
-							"agentId": "coder",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "context-bootstrap",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": ["audience:internal", "result-contract:context-handbook"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "debugger",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "verification",
-							"rejections": ["authority:verification", "result-contract:debugger-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "documenter",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "git-master",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "oracle",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": ["result-contract:oracle-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:deep"]
-						},
-						{
-							"agentId": "provenance",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": ["result-contract:provenance-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "researcher",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": ["result-contract:research-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:deep"]
-						},
-						{
-							"agentId": "scout",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": [],
-							"coldPrior": {
-								"qualityMean": 0.605,
-								"firstPassSuccessProbability": 0.57,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.535,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:fast", "bounded-task-feature:code_read"]
-						},
-						{
-							"agentId": "tester",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:mutation-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "verifier",
-							"specFingerprint": "<sha256>",
-							"executionRole": "verifier",
-							"authority": "verification",
-							"rejections": ["authority:verification", "result-contract:verifier-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:fast"]
-						},
-						{
-							"agentId": "wiki-repair",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:artifact-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "wiki-writer",
-							"specFingerprint": "<sha256>",
-							"executionRole": "builder",
-							"authority": "workspace-edit",
-							"rejections": ["authority:workspace-edit", "result-contract:artifact-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:balanced"]
-						},
-						{
-							"agentId": "world-knowledge",
-							"specFingerprint": "<sha256>",
-							"executionRole": "researcher",
-							"authority": "read-only",
-							"rejections": ["result-contract:world-knowledge-report"],
-							"coldPrior": {
-								"qualityMean": 0.5,
-								"firstPassSuccessProbability": 0.5,
-								"costUpperBoundUsd": 1,
-								"expectedEndToEndMs": "<n>",
-								"reliability": 0.5,
-								"queueWaitMs": "<n>"
-							},
-							"priorReasons": ["latency-class:deep"]
-						}
-					],
+					"evaluations": "<agent-evaluations>",
 					"readiness": [
 						{
 							"agentId": "scout",
@@ -942,7 +701,7 @@
 			"pid": null,
 			"heartbeatAt": "<volatile>",
 			"sessionId": null,
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"spend": {
 				"usage": {
 					"input": {
@@ -1100,8 +859,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
@@ -1603,7 +1362,7 @@
 			"pid": null,
 			"heartbeatAt": "<volatile>",
 			"sessionId": null,
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"spend": {
 				"usage": {
 					"input": {
@@ -1761,8 +1520,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
@@ -2143,7 +1902,7 @@
 	"acp": {
 		"receipt": {
 			"runId": "<run>",
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"agentId": "golden-peer",
 			"executionRole": "researcher",
 			"requestOrigin": "internal",
@@ -2162,8 +1921,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
@@ -2201,7 +1960,7 @@
 			},
 			"projectContext": {
 				"tier": "none",
-				"chars": 419,
+				"chars": 111,
 				"contentHash": "<sha256>",
 				"sections": ["workspace-root"]
 			},
@@ -2526,7 +2285,7 @@
 				}
 			},
 			"reproducibility": {
-				"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+				"cwd": "<home>/project",
 				"safetyPolicy": {
 					"version": 1,
 					"rulePackHash": null,
@@ -2538,7 +2297,7 @@
 			},
 			"delegation": {
 				"agentConfigId": "golden-peer",
-				"command": "/home/akougkas/.nvm/versions/node/v24.22.2/bin/node",
+				"command": "<node>",
 				"args": ["-e", ""],
 				"acpSessionId": "golden-session",
 				"acpProtocolVersion": null,
@@ -2734,7 +2493,7 @@
 			"pid": null,
 			"heartbeatAt": "<volatile>",
 			"sessionId": null,
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"spend": {
 				"usage": {
 					"input": {
@@ -2922,8 +2681,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
@@ -3320,7 +3079,7 @@
 			"pid": null,
 			"heartbeatAt": "<volatile>",
 			"sessionId": null,
-			"cwd": "/home/akougkas/iowarp/clio-coder-wt/p2d-ext",
+			"cwd": "<home>/project",
 			"spend": {
 				"usage": {
 					"input": {
@@ -3508,8 +3267,8 @@
 				"depth": 0
 			},
 			"identity": {
-				"host": "zbook",
-				"user": "akougkas"
+				"host": "<host>",
+				"user": "<user>"
 			},
 			"node": {
 				"id": "local",
