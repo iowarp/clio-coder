@@ -66,6 +66,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
+import { pinnedToolMissing } from "../domains/toolchain/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
@@ -3015,10 +3016,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (!panes) {
 				// Inactive by choice, not unavailable: the operations object exists in
 				// every `--with-panes` session, even one where no pane host answered.
-				ctx.notice(
-					"info",
-					"panes are inactive: this session started without them. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
-				);
+				ctx.notice("info", panesInactiveWords("panes are inactive"));
 				return;
 			}
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
@@ -3148,10 +3146,7 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "files") return;
 			const panes = ctx.panes;
 			if (!panes) {
-				ctx.notice(
-					"info",
-					"the files pane is inactive: this session started without panes. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
-				);
+				ctx.notice("info", panesInactiveWords("the files pane is inactive"));
 				return;
 			}
 			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
@@ -3651,6 +3646,17 @@ const CANONICAL_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 ];
+
+/**
+ * Why a pane feature is off in this session. A home without Clio's pane host is told the install, since launch
+ * no longer says it on every start (bt-11 #4); otherwise the ways to start a session with panes.
+ */
+export function panesInactiveWords(lead: string): string {
+	if (pinnedToolMissing("herdr")) {
+		return `${lead}: terminal panes are not installed. Run \`clio-coder panes install\`, then restart \`clio-coder\``;
+	}
+	return `${lead}: this session started without panes. Restart \`clio-coder\` in a plain terminal to open its own pane host, or run \`clio-coder --with-panes\` inside herdr`;
+}
 
 const contextCommand = CANONICAL_SLASH_COMMANDS.find((entry) => entry.name === "context");
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [

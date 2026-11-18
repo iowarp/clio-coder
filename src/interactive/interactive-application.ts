@@ -61,6 +61,7 @@ import type {
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "../session-control/slash-commands.js";
+import { panesInactiveWords } from "../session-control/slash-commands.js";
 import { readWorkerRunResultFacts } from "../session-control/worker-run-results.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
 import { runParkedInterview } from "../tools/extension-interview.js";
@@ -1045,11 +1046,7 @@ export async function createInteractiveApplication(host: InteractiveDeps): Promi
 	const pressFilesKey = (origin: DockKeyOrigin): void => {
 		const panes = deps.panes;
 		if (!panes) {
-			notify(
-				"info",
-				"the files pane is inactive: this session started without panes. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
-				"files:info",
-			);
+			notify("info", panesInactiveWords("the files pane is inactive"), "files:info");
 			return;
 		}
 		void dockKeys.press("files", {

@@ -4,8 +4,10 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { sumFacts, sumPricing } from "../../src/core/telemetry/pricing.js";
 import type { MuxContract } from "../../src/domains/mux/contract.js";
 import { detectMux } from "../../src/domains/mux/detect.js";
+import { currentToolPlatform, findPinnedTool } from "../../src/domains/toolchain/index.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS, type SlashCommandContext } from "../../src/session-control/slash-commands.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 describe("contracts/pane refusal remedies", () => {
 	it("detects no pane host outside one, and no refusal", async () => {
@@ -35,18 +37,28 @@ describe("contracts/pane refusal remedies", () => {
 		});
 	});
 
-	it("names the ways to get panes when slash-command panes were not composed", () => {
+	it("names the install when panes were not composed and the pane host is not installed (bt-11 #4)", async () => {
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "panes");
 		if (!entry) throw new Error("missing panes slash command");
-		let notice = "";
-		entry.handle({ kind: "panes" }, {
-			notice: (_level, text) => {
-				notice = text;
-			},
-		} as SlashCommandContext);
-		strictEqual(
-			notice,
-			"panes are inactive: this session started without them. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
-		);
+		const env = await isolateClioEnv();
+		try {
+			let notice = "";
+			entry.handle({ kind: "panes" }, {
+				notice: (_level, text) => {
+					notice = text;
+				},
+			} as SlashCommandContext);
+			const platform = currentToolPlatform();
+			// A platform with no pinned herdr build has nothing to install, so it keeps the restart words.
+			const pinned = platform !== null && findPinnedTool("herdr")?.downloads[platform] !== undefined;
+			strictEqual(
+				notice,
+				pinned
+					? "panes are inactive: terminal panes are not installed. Run `clio-coder panes install`, then restart `clio-coder`"
+					: "panes are inactive: this session started without panes. Restart `clio-coder` in a plain terminal to open its own pane host, or run `clio-coder --with-panes` inside herdr",
+			);
+		} finally {
+			env.restore();
+		}
 	});
 });

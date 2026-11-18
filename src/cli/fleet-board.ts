@@ -250,36 +250,69 @@ function contractWords(contract: string): string {
 	return `contract ${contract.replace(/-/gu, " ")}`;
 }
 
-/** What a finished worker's record says, in the transcript's words. */
-function verdictText(paint: BoardPaint, card: WorkerCard): string {
+/**
+ * What a finished worker's record says, in the transcript's words, fitted to `width` by whole facts. The row once cut
+ * its tail to `seal unche…` and had no room for a refused call at all (bt-11); the least important fact now leaves
+ * first, and the outcome is the only one ever cut.
+ */
+export function verdictText(paint: BoardPaint, card: WorkerCard, width: number): string {
 	const record = card.record;
 	if (record === null) {
 		const detail = card.ledgerDetail === undefined ? "run record unavailable" : clean(card.ledgerDetail);
-		return `${stateGlyph(paint, card)} ${paint.fg(card.state === "failed" ? "error" : "toolMetadata", `${stateWord(card.state)} · ${detail}`)}`;
+		return cut(
+			`${stateGlyph(paint, card)} ${paint.fg(card.state === "failed" ? "error" : "toolMetadata", `${stateWord(card.state)} · ${detail}`)}`,
+			width,
+		);
 	}
-	const parts: string[] = [];
+	// Shown in this order; `rank` says which leaves first when the row is too narrow, the highest first.
+	const parts: Array<{ text: string; rank: number }> = [];
 	if (record.outcome === "succeeded") {
-		parts.push(card.toolCalls === 0 ? paint.fg("toolMetadata", "◌ ran no tools") : paint.fg("success", "✓ succeeded"));
+		parts.push({
+			text: card.toolCalls === 0 ? paint.fg("toolMetadata", "◌ ran no tools") : paint.fg("success", "✓ succeeded"),
+			rank: 0,
+		});
 	} else if (record.outcome === "canceled") {
-		parts.push(paint.fg("toolMetadata", "⊘ cancelled"));
+		parts.push({ text: paint.fg("toolMetadata", "⊘ cancelled"), rank: 0 });
 	} else {
-		parts.push(paint.fg("error", `✗ ${clean(plainOutcomeLabel(record.outcomeCode ?? record.outcome))}`));
+		parts.push({
+			text: paint.fg("error", `✗ ${clean(plainOutcomeLabel(record.outcomeCode ?? record.outcome))}`),
+			rank: 0,
+		});
+	}
+	if (record.refused !== undefined) parts.push({ text: paint.fg("warning", clean(record.refused)), rank: 2 });
+	// A broken or unchecked seal outranks the verdict built on it.
+	if (record.seal !== undefined && record.seal !== "sealed") {
+		const broken = record.seal === "seal broken";
+		parts.push({ text: paint.fg(broken ? "error" : "warning", clean(record.seal)), rank: broken ? 1 : 3 });
+	} else if (record.verdict !== undefined) {
+		const sound = ["reviewed", "grounded", "unverified", "unknown"].includes(record.verdict);
+		parts.push({
+			text: paint.fg(sound ? "toolMetadata" : "warning", sound ? `trust ${record.verdict}` : clean(record.verdict)),
+			rank: sound ? 4 : 2,
+		});
 	}
 	if (record.contract !== undefined) {
-		parts.push(paint.fg(record.contract === "fail" ? "error" : "toolMetadata", contractWords(record.contract)));
+		const failed = record.contract === "fail";
+		parts.push({
+			text: paint.fg(failed ? "error" : "toolMetadata", contractWords(record.contract)),
+			rank: failed ? 1 : 5,
+		});
 	}
-	// A broken or unchecked seal outranks the verdict built on it.
-	if (record.seal !== undefined && record.seal !== "sealed") parts.push(paint.fg("warning", clean(record.seal)));
-	else if (record.verdict !== undefined) {
-		const sound = ["reviewed", "grounded", "unverified", "unknown"].includes(record.verdict);
-		parts.push(paint.fg(sound ? "toolMetadata" : "warning", sound ? `trust ${record.verdict}` : clean(record.verdict)));
+	const separator = paint.fg("toolMetadata", SEPARATOR);
+	const shown = [...parts];
+	while (shown.length > 1 && visibleWidth(shown.map((part) => part.text).join(separator)) > width) {
+		let drop = shown.length - 1;
+		for (let at = shown.length - 1; at > 0; at -= 1) {
+			if ((shown[at]?.rank ?? 0) > (shown[drop]?.rank ?? 0)) drop = at;
+		}
+		shown.splice(drop, 1);
 	}
-	return parts.join(paint.fg("toolMetadata", SEPARATOR));
+	return cut(shown.map((part) => part.text).join(separator), width);
 }
 
 /** The live row: the call running now, the prose being written, or the phase. */
-function activityText(paint: BoardPaint, card: WorkerCard): string {
-	if (!isLive(card.state)) return verdictText(paint, card);
+function activityText(paint: BoardPaint, card: WorkerCard, width: number): string {
+	if (!isLive(card.state)) return verdictText(paint, card, width);
 	if (card.state === "queued") return paint.fg("toolMetadata", "◌ queued, waiting for a slot");
 	if (card.current !== null) return `${paint.fg("toolGlyph", "⚙")} ${paint.fg("toolTarget", callText(card.current))}`;
 	if (card.phase === "writing" && card.lastText !== undefined) {
@@ -312,13 +345,13 @@ function renderCard(
 	const first = taskRoom >= 4 && task.length > 0 ? `${head}  ${paint.fg("body", cut(task, taskRoom))}` : head;
 	const attempt = card.attempt > 0 ? `↻${card.attempt + 1} ` : "";
 	const facts = `  ${paint.fg("toolMetadata", `${attempt}${factsText(card, inner - 2 - attempt.length)}`)}`;
-	const activity = `  ${cut(activityText(paint, card), inner - 2)}`;
+	const activity = `  ${cut(activityText(paint, card, inner - 2), inner - 2)}`;
 	const lines =
 		options.style === "detailed"
 			? [first, facts, activity]
 			: options.style === "standard"
 				? [first, activity]
-				: [`${head} ${activityText(paint, card)}`];
+				: [`${head} ${activityText(paint, card, inner - visibleWidth(head) - 1)}`];
 	return lines.map((row) => cut(`${gutter}${cut(row, inner)}`, width));
 }
 
@@ -534,7 +567,7 @@ function runRecordLines(paint: BoardPaint, model: TakeoverModel, width: number):
 		"",
 		`${paint.fg("divider", RULE.repeat(2))} ${paint.fg("annotation", "run record")} ${paint.fg("divider", RULE.repeat(Math.max(0, width - 14)))}`,
 	];
-	lines.push(cut(verdictText(paint, card), width));
+	lines.push(verdictText(paint, card, width));
 	const record = card.record;
 	if (record === null) return lines;
 	const spend = [
