@@ -14,6 +14,7 @@ import { resolveSafeCwd } from "../core/safe-exec.js";
 import { mainSandboxWriteHint } from "../core/sandbox/main-session.js";
 import { ToolNames } from "../core/tool-names.js";
 import { CumulativeOutputMask } from "../domains/evidence/output-mask.js";
+import { bashObservedLines } from "./bash-observed-lines.js";
 import { expandPath } from "./path-utils.js";
 import { toolPresentationPolicy } from "./presentation.js";
 import type { ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
@@ -160,6 +161,21 @@ function bashResultDetails(
 		retainedStdoutBytes: result.retainedStdoutBytes,
 		retainedStderrBytes: result.retainedStderrBytes,
 	};
+}
+
+/**
+ * Lines a `grep -n` / `rg -n` printed, for citation grounding, only when the model's context holds the whole output:
+ * `| head` ends grep with SIGPIPE under pipefail, so a nonzero exit still printed them (bt-29).
+ */
+function observedLinesDetail(
+	command: string,
+	rawOutput: string,
+	policy: BashOutputPolicy,
+	cwd: string,
+): { observedLines?: Record<string, number[]> } {
+	if ((policy !== "bounded" && policy !== "full") || byteLength(rawOutput) > BASH_CONTEXT_MAX_BYTES - 1024) return {};
+	const observedLines = bashObservedLines(command, rawOutput, cwd);
+	return observedLines === undefined ? {} : { observedLines };
 }
 
 /** Finalize cap retention before projection so every policy carries the actual outcome. */
@@ -492,14 +508,20 @@ export const bashTool: ToolSpec = {
 				return {
 					kind: "error",
 					message,
-					details: bashResultDetails(result, rawOutput, "nonzero", elapsedMs, args.command),
+					details: {
+						...bashResultDetails(result, rawOutput, "nonzero", elapsedMs, args.command),
+						...observedLinesDetail(args.command, rawOutput, outputPolicy, cwd),
+					},
 				};
 			}
 			const body = shown.length > 0 ? shown : "(no output)";
 			return {
 				kind: "ok",
 				output: `${body}${observeToolsNudge(args.command, options?.sessionId)}${clioIssueNudge(args.command)}`,
-				details: bashResultDetails(result, rawOutput, "success", elapsedMs, args.command),
+				details: {
+					...bashResultDetails(result, rawOutput, "success", elapsedMs, args.command),
+					...observedLinesDetail(args.command, rawOutput, outputPolicy, cwd),
+				},
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
