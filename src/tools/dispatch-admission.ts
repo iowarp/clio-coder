@@ -964,15 +964,7 @@ export function createDispatchAdmissionController(deps: DispatchToolDeps): Dispa
 							...(member.thinking ? { thinkingLevel: member.thinking as NonNullable<DispatchRequest["thinkingLevel"]> } : {}),
 							gate: { role: "member", group: "plan-preview", cycle: round },
 						};
-						let task: ResolvedPlanTask;
-						try {
-							task = resolveTask(memberRequest, "member", (round - 1) * council.members.length + index + 1);
-						} catch (error) {
-							return shapeRejection(
-								args,
-								`council_member_target_unknown: ${member.label}: ${error instanceof Error ? error.message : String(error)}`,
-							);
-						}
+						const task = resolveTask(memberRequest, "member", (round - 1) * council.members.length + index + 1);
 						if (task.node !== "local" || task.nodeKind !== "local") {
 							return shapeRejection(args, `council_member_remote_node: ${member.label}`);
 						}
