@@ -151,15 +151,35 @@ export interface RecallableRefListing {
 	nextOffset?: number;
 }
 
+/** Recallable active-path results context no longer shows, or with `keptFrom` a cut there hides, in ledger order. */
+export function recallableRefs(
+	entries: ReadonlyArray<SessionEntry>,
+	view: WorkingSetView,
+	options: { activeLeafTurnId?: string; keptFrom?: number } = {},
+) {
+	const active = filterEntriesToActivePath(entries, options.activeLeafTurnId);
+	const kept = options.keptFrom === undefined ? compactionCut(active).visible : entries.slice(options.keptFrom);
+	const visible = new Set(kept.map((entry) => entry.turnId));
+	const callPaths = callPathsByToolCallId(active);
+	return active.filter(isToolResultEntry).flatMap((entry) => {
+		const evicted = view.evicted.get(entry.turnId);
+		// An eviction a checkpoint keeps still shows its marker.
+		const shown = visible.has(entry.turnId) && (evicted === undefined || options.keptFrom !== undefined);
+		if (hasLegacyCompactionMarker(entry.payload) || shown) return [];
+		const payload = toolResultPayload(entry.payload);
+		const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
+		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
+		const state = evicted === undefined ? "summarized" : "evicted";
+		return [{ ref: evicted?.alias ?? entry.turnId, toolName: payload.toolName, path, state, entry }];
+	});
+}
+
 /** Stable ledger-order pages for the same active path and query. */
 export function recallableRefListing(
 	entries: ReadonlyArray<SessionEntry>,
 	view: WorkingSetView,
 	options: RecallDiscoveryOptions = {},
 ): RecallableRefListing {
-	const active = filterEntriesToActivePath(entries, options.activeLeafTurnId);
-	const visible = new Set(compactionCut(active).visible.map((entry) => entry.turnId));
-	const callPaths = callPathsByToolCallId(active);
 	const terms = (options.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
 	const limit =
 		typeof options.limit === "number" && Number.isFinite(options.limit)
@@ -167,27 +187,23 @@ export function recallableRefListing(
 			: 8;
 	const offset =
 		typeof options.offset === "number" && Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
-	const refs: string[] = [];
-	let total = 0;
-	for (const entry of active) {
-		if (!isToolResultEntry(entry) || hasLegacyCompactionMarker(entry.payload)) continue;
-		const state = view.evicted.has(entry.turnId) ? "evicted" : visible.has(entry.turnId) ? "visible" : "summarized";
-		if (state === "visible") continue;
-		const payload = toolResultPayload(entry.payload);
-		const toolCallId = typeof payload.obj.toolCallId === "string" ? payload.obj.toolCallId : undefined;
-		const path = primaryPathOf(payload) ?? (toolCallId === undefined ? undefined : callPaths.get(toolCallId));
-		const alias = view.evicted.get(entry.turnId)?.alias;
-		const metadata = `${alias ?? ""} ${entry.turnId} ${payload.toolName} ${path ?? ""}`.toLowerCase();
-		if (!terms.every((term) => metadata.includes(term))) continue;
-		if (total >= offset && refs.length < limit) {
-			// Keep each row bounded even for unusual tool/path metadata.
-			const label = `${payload.toolName}${path === undefined ? "" : ` ${path}`}`.replace(/\s+/g, " ").slice(0, 240);
-			refs.push(`${alias ?? entry.turnId} (${label}) [${state}; ${entry.timestamp}]`);
-		}
-		total += 1;
-	}
-	const remaining = Math.max(0, total - offset - refs.length);
-	return { refs, remaining, total, offset, ...(remaining > 0 ? { nextOffset: offset + refs.length } : {}) };
+	const matches = recallableRefs(entries, view, options).filter((row) => {
+		const metadata = `${row.ref} ${row.entry.turnId} ${row.toolName} ${row.path ?? ""}`.toLowerCase();
+		return terms.every((term) => metadata.includes(term));
+	});
+	// Keep each row bounded even for unusual tool/path metadata.
+	const refs = matches.slice(offset, offset + limit).map((row) => {
+		const label = `${row.toolName}${row.path === undefined ? "" : ` ${row.path}`}`.replace(/\s+/g, " ").slice(0, 240);
+		return `${row.ref} (${label}) [${row.state}; ${row.entry.timestamp}]`;
+	});
+	const remaining = Math.max(0, matches.length - offset - refs.length);
+	return {
+		refs,
+		remaining,
+		total: matches.length,
+		offset,
+		...(remaining > 0 ? { nextOffset: offset + refs.length } : {}),
+	};
 }
 
 function recallableRefMessage(

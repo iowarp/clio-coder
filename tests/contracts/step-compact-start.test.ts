@@ -450,7 +450,8 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		const carried = hostCheckpoint(entries(false), "Step checkpoint.");
 		ok(carried.summary.indexOf("GOAL-MARKER") < carried.summary.indexOf("Step checkpoint."), carried.summary);
 		strictEqual(carried.summary.split("NOTE-MARKER").length, 2, carried.summary);
-		ok(!carried.summary.includes("REF-MARKER"), carried.summary);
+		// A checkpoint written before refs moved into exact-facts carries its old refs block verbatim, once.
+		strictEqual(carried.summary.split("REF-MARKER").length, 2, carried.summary);
 		deepStrictEqual(carried.userContext, userContext);
 		// A later operator turn retires the old request, as native compaction does.
 		strictEqual(hostCheckpoint(entries(true), "Step checkpoint.").userContext, undefined);
@@ -465,6 +466,7 @@ describe("step turns start from a compact state on small or uncached routes", ()
 		});
 		const next = hostCheckpoint(chained, "Step checkpoint two.");
 		strictEqual(next.summary.split("GOAL-MARKER").length, 2, next.summary);
+		strictEqual(next.summary.split("REF-MARKER").length, 2, next.summary);
 		strictEqual(next.summary.split("Step checkpoint").length, 2, next.summary);
 		deepStrictEqual(next.userContext, userContext);
 		// An oversized body loses its start, never the newest text.
