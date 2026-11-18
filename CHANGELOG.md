@@ -111,6 +111,7 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- A check the project catalog or a session declares (such as `make ci`) counts the same when run through bash behind `timeout`, `time` or `nice`, piped to `tail`, or logged with `tee` or a redirect: it settles its pass, satisfies the finish gate and meets an acceptance that requires its id, and a logged run no longer reads as a change that retires standing passes (x10-1).
 - The finish gate no longer credits a dispatched worker's passing run record after a later edit; the shared check fold retires that record like any check, so the edit engages `unvalidated_mutation` (x9-1).
 - A green check behind `timeout`, `nice` or `xvfb-run`, or spelled `python -m mypy|ruff|pylint|flake8`, `pnpm|yarn <runner>`, `npm|yarn|bun exec <runner>`, `npm --prefix <dir>` / `pnpm -C` / `yarn --cwd`, `cargo build` or `php artisan test`, now settles the finish gate after an edit, and `npm exec vitest run` no longer retires standing passes as a change. The safety readers also see through these prefixes, so `timeout 5 rm -rf x` reads as the delete it is (x9-2).
 - A passing check the model ran through the shell now files its typed receipt fact from the shared classifier verdict, under its declared check ids and label, so declared scripts such as `./acceptance.sh` count toward verification (bt-46 S1).
