@@ -1150,6 +1150,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			ruleId: YOLO_FLOOR_RULE_IDS.clioCredentials,
 			reason: `matched ${YOLO_FLOOR_RULE_IDS.clioCredentials}: reads Clio's own credential store (${spelled}), which no task needs`,
 		});
+		const memo = createPathWalkMemo();
 		const lands = (raw: string, wholeDirectory: boolean): boolean => {
 			const home = homedir();
 			let target = raw.replace(/^(?:~(?=\/|$)|\$\{HOME\}|\$HOME(?!\w))/u, home);
@@ -1165,7 +1166,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				target = slash < 0 ? "." : slash === 0 ? "/" : target.slice(0, slash);
 			}
 			const lexical = path.resolve(callCwd, target);
-			const real = canonicalizeRawPath(target, callCwd);
+			const real = canonicalizeRawPath(target, callCwd, memo);
 			return [lexical, ...(real === null ? [] : [real])].some(
 				(landing) => files.has(landing) || (wholeDirectory && dirs.has(landing)),
 			);
@@ -1176,7 +1177,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 		if (command === null) return null;
 		// Naming the directory reads the store unless every step only lists names.
 		const listsOnly = shellCommandSteps(command).every((step) => NAME_LISTERS.has(step.executable));
+		// Each distinct token once: a long heredoc repeats most of its words (x6-7b).
+		const judged = new Set<string>();
 		for (const token of bashPathTokenCandidates(command)) {
+			if (judged.has(token)) continue;
+			judged.add(token);
 			if (lands(token, !listsOnly)) return hit(token);
 		}
 		return null;
@@ -2259,8 +2264,15 @@ function evaluateBashZeroAccessRead(
 	if (remaining === "") return null;
 	if (remaining !== null) command = remaining;
 	const roles = bashOperandRoles(command);
+	// A 130 KB heredoc names ~17,000 read candidates, mostly repeats; each walked
+	// the filesystem afresh, ~1.6 s of synchronous admission (x6-7b). A token's
+	// decision cannot change within one evaluation, so each is judged once.
+	const memo = createPathWalkMemo();
+	const judged = new Set<string>();
 	for (const token of roles.reads) {
-		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd);
+		if (judged.has(token)) continue;
+		judged.add(token);
+		const decision = evaluatePathPolicy(zeroAccessPolicy, "read", token, callCwd, memo);
 		if (decision.kind === "block") {
 			return { verb: "read", token, entrySource: `zeroAccessPaths entry ${decision.matchedPath}` };
 		}
