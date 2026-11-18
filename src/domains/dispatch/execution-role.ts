@@ -218,20 +218,6 @@ export interface DispatchResultContractRequest {
 	gate?: { role?: GateTopologyRole } | undefined;
 	resultContractOverride?: ResultContract;
 	resultSummary?: DispatchResultSummaryAllowance;
-	readOnly?: boolean | undefined;
-}
-
-/**
- * True when a read-only run drops the plan contract its recipe demands. A read-only run cannot write the plan file an
- * architect contract demands, so its answer is the reply. It is offered no artifact tool, runs under a read-only permit,
- * and its persona loses the lines that send the plan to an artifact.
- */
-export function readOnlyDropsPlanContract(
-	req: DispatchResultContractRequest,
-	recipe: { resultContract: ResultContract } | null | undefined,
-): boolean {
-	if (req.readOnly !== true || !appliesRecipeResultContract(req.gate?.role) || req.gate?.role === "member") return false;
-	return (req.resultContractOverride ?? recipe?.resultContract)?.kind === "architect-plan";
 }
 
 /**
@@ -258,7 +244,6 @@ export function dispatchResultContract(
 	// hold there. Only the topology's own override (the vote ballot) applies.
 	if (req.gate?.role === "member") return req.resultContractOverride;
 	const base = req.resultContractOverride ?? recipe?.resultContract;
-	if (readOnlyDropsPlanContract(req, recipe)) return undefined;
 	const allowance = req.resultSummary;
 	if (allowance === undefined) return base;
 	if (base?.kind === "mutation-report") return withResultSummaryAllowance(base, allowance.maxBytes);

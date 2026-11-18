@@ -4,7 +4,6 @@ import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-c
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName, isWriteCapableScriptName } from "../../core/verification-scripts.js";
 import { isSameOrDescendant } from "./path-policy.js";
-import { pythonScriptVerdict } from "./python-probe.js";
 
 export type ProtectedArtifactSource = "validation" | "middleware" | "user" | "session";
 
@@ -1931,22 +1930,26 @@ export function shellCommandVerdict(command: string, gitHelpersConfigured: boole
 	return verdict;
 }
 
+/** A write-mode `open`, a file-writing or deleting call, or a call that runs a program or code. */
+const PYTHON_WRITE_SHAPE =
+	/\bopen\s*\([^)]*,\s*(?:mode\s*=\s*)?[rbuf]*['"][rbt]*[wax+]|\b(?:write_text|write_bytes|remove|unlink|rmdir|rmtree|rename|makedirs|mkdir|touch|truncate|copyfile|copytree|move|chmod|symlink|system|popen|subprocess|exec|eval)\b/u;
+
 /** Interpreter flags that change neither where a script comes from nor what it may import. */
 const PLAIN_PYTHON_FLAGS: ReadonlySet<string> = new Set(["-B", "-E", "-I", "-O", "-OO", "-P", "-q", "-s", "-S", "-u"]);
 
 /**
  * The verdict of a step that runs an inline Python script (c17-a): `python3 -c '<script>'`, or `python3 -` / bare
- * `python3` reading the one quoted here-document its line opens. Inspection when the literal script provably only
- * reads, unknown when it only imports a module outside the allowed set (the workspace's own) with no write in sight,
- * and a change otherwise ({@link pythonScriptVerdict}). A stdin script no reader can see is a change. Null for any
- * other step, including one behind an environment prefix that may redirect its imports.
+ * `python3` reading the one quoted here-document its line opens. A change when the literal script shows a
+ * write-shaped operation ({@link PYTHON_WRITE_SHAPE}), unknown otherwise: it neither settles nor retires a recorded
+ * outcome. A stdin script no reader can see is a change. Null for any other step, including one behind an
+ * environment prefix.
  */
 function inlinePythonVerdict(command: string, step: ShellStep): CommandVerdict | null {
 	if (step.index !== 0 || !isPythonExecutable(basenameToken(step.argv[0]))) return null;
 	const words = shellCommandWords(step.tokens);
 	let index = 1;
 	while (PLAIN_PYTHON_FLAGS.has(step.argv[index] ?? "")) index += 1;
-	const reads = pythonScriptVerdict;
+	const reads = (script: string): CommandVerdict => (PYTHON_WRITE_SHAPE.test(script) ? "mutation" : "unknown");
 	if (step.argv[index] === "-c") {
 		const word = words[index + 1];
 		if (word === undefined) return null;
