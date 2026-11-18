@@ -56,16 +56,17 @@ export interface ScriptedCall {
 }
 
 /**
- * One reply: plain text, tool calls, a reasoning-only reply cut by the output cap (chat completions only), an
- * HTTP error with that status and message, or a connection dropped before any response.
+ * One reply: plain text, tool calls (with leading text on chat completions only), a reasoning-only reply cut by the
+ * output cap (chat completions only), an HTTP error with that status and message, or a connection dropped before any
+ * response.
  */
 export type CaptureReply =
 	| { text: string }
-	| { calls: ScriptedCall[] }
+	| { calls: ScriptedCall[]; text?: string }
 	| { thinkingOnlyLength: string }
 	| { status: number; error: string }
 	| { drop: true };
-type StreamReply = { text: string } | { calls: ScriptedCall[] };
+type StreamReply = { text: string } | { calls: ScriptedCall[]; text?: string };
 
 export type CaptureScript = (request: CapturedRequest, index: number) => CaptureReply;
 
@@ -97,11 +98,12 @@ function completionsFrames(reply: StreamReply | { thinkingOnlyLength: string }, 
 			chunk({ role: "assistant", reasoning_content: reply.thinkingOnlyLength }),
 			{ ...chunk({}, "length"), usage: USAGE },
 		];
-	if ("text" in reply)
+	if (!("calls" in reply))
 		return [chunk({ role: "assistant", content: reply.text }), { ...chunk({}, "stop"), usage: USAGE }];
 	return [
 		chunk({
 			role: "assistant",
+			...(reply.text === undefined ? {} : { content: reply.text }),
 			tool_calls: reply.calls.map((call, index) => ({
 				index,
 				id: call.id,
@@ -114,25 +116,24 @@ function completionsFrames(reply: StreamReply | { thinkingOnlyLength: string }, 
 }
 
 function responsesFrames(reply: StreamReply, model: string): unknown[] {
-	const items: Record<string, unknown>[] =
-		"text" in reply
-			? [
-					{
-						type: "message",
-						id: "msg_capture",
-						role: "assistant",
-						status: "completed",
-						content: [{ type: "output_text", text: reply.text, annotations: [] }],
-					},
-				]
-			: reply.calls.map((call, index) => ({
-					type: "function_call",
-					id: `fc_capture_${index}`,
-					call_id: call.id,
-					name: call.name,
-					arguments: JSON.stringify(call.arguments),
+	const items: Record<string, unknown>[] = !("calls" in reply)
+		? [
+				{
+					type: "message",
+					id: "msg_capture",
+					role: "assistant",
 					status: "completed",
-				}));
+					content: [{ type: "output_text", text: reply.text, annotations: [] }],
+				},
+			]
+		: reply.calls.map((call, index) => ({
+				type: "function_call",
+				id: `fc_capture_${index}`,
+				call_id: call.id,
+				name: call.name,
+				arguments: JSON.stringify(call.arguments),
+				status: "completed",
+			}));
 	const frames: unknown[] = [
 		{ type: "response.created", response: { id: "resp_capture", model, status: "in_progress", output: [] } },
 	];
@@ -176,7 +177,7 @@ function anthropicFrames(reply: StreamReply, model: string): unknown[] {
 			},
 		},
 	];
-	if ("text" in reply) {
+	if (!("calls" in reply)) {
 		frames.push(
 			{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
 			{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: reply.text } },
@@ -202,7 +203,7 @@ function anthropicFrames(reply: StreamReply, model: string): unknown[] {
 	frames.push(
 		{
 			type: "message_delta",
-			delta: { stop_reason: "text" in reply ? "end_turn" : "tool_use", stop_sequence: null },
+			delta: { stop_reason: !("calls" in reply) ? "end_turn" : "tool_use", stop_sequence: null },
 			usage: { output_tokens: 2 },
 		},
 		{ type: "message_stop" },
