@@ -487,6 +487,48 @@ test("ACP replay parts one message's text blocks on a blank line, as the live st
 	}
 });
 
+test("ACP replay parts two assistant messages of one turn on one blank line, as the live stream does", async () => {
+	// bt-session-res J9: live sent "files.\n\nDone:", replay sent "files." and "Done:" with nothing between them.
+	const timestamp = "2026-09-25T12:00:00.000Z";
+	const message = (turnId: string, parentTurnId: string, payload: unknown): SessionEntry => ({
+		kind: "message",
+		role: "assistant",
+		turnId,
+		parentTurnId,
+		timestamp,
+		payload,
+	});
+	const peer = fixture([
+		{ kind: "message", role: "user", turnId: "u1", parentTurnId: null, timestamp, payload: "list files" },
+		message("a1", "u1", { content: [{ type: "text", text: "Plan: read the files." }], stopReason: "toolUse" }),
+		message("a2", "a1", { content: [{ type: "thinking", thinking: "no text here" }], stopReason: "toolUse" }),
+		message("a3", "a2", {
+			content: [
+				{ type: "text", text: "Done:" },
+				{ type: "text", text: "two files." },
+			],
+			stopReason: "stop",
+		}),
+		{ kind: "message", role: "user", turnId: "u2", parentTurnId: "a3", timestamp, payload: "again" },
+		message("a4", "u2", { content: [{ type: "text", text: "Same." }], stopReason: "stop" }),
+	]);
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		await peer.call("session/load", { sessionId: "session-1", cwd: peer.cwd, mcpServers: [] });
+		const byTurn = new Map<number, string>();
+		for (const params of peer.updates) {
+			const update = params.update as { sessionUpdate?: string; content?: { text: string } };
+			if (update.sessionUpdate !== "agent_message_chunk") continue;
+			const turn = (params._meta as Record<string, { turn?: number }> | undefined)?.["clio-coder/replay"]?.turn ?? 0;
+			byTurn.set(turn, (byTurn.get(turn) ?? "") + (update.content?.text ?? ""));
+		}
+		// One separator between messages, the block separator unchanged, and none carried into the next turn.
+		deepStrictEqual([...byTurn.values()], ["Plan: read the files.\n\nDone:\n\ntwo files.", "Same."]);
+	} finally {
+		await peer.stop();
+	}
+});
+
 test("ACP load streams the complete active history beyond the former 64 turn limit", async () => {
 	const timestamp = "2026-09-25T12:00:00.000Z";
 	const entries: SessionEntry[] = [];
@@ -1071,6 +1113,45 @@ test("ACP advertises only slash commands executable from a prompt", async () => 
 			).content.text,
 			"Doctor ready",
 		);
+	} finally {
+		await peer.stop();
+	}
+});
+
+test("a slash command's failure line crosses a prompt once, as reply text, not again as its result", async () => {
+	// bt-session-res J10: `/context compact` failed and the line went out as a notice chunk and again as the result.
+	const failure =
+		"[/context compact] failed; context unchanged at 9.6K tokens. The summary call failed: Connection error.: bad port. /context compact tries again; /model picks another route to summarize on.";
+	let emit: (event: unknown) => void = () => {};
+	const commands: AcpCommandControl = {
+		catalog: () => ({
+			version: 1,
+			commands: [{ name: "context", summary: "Context", usage: "/context compact", group: "help", args: {} }],
+		}),
+		invoke: () => {
+			// The host hears the chat loop's notice and answers with it, as the orchestrator's runCompact does.
+			emit({ type: "notice", surface: "transcript", level: "error", text: failure });
+			return { level: "error", lines: [failure, "Run /doctor if it keeps failing."] };
+		},
+		injectsUserTurn: () => false,
+		capability: {},
+	};
+	const peer = fixture([], undefined, commands);
+	emit = peer.emit;
+	try {
+		await peer.call("initialize", { protocolVersion: 1 });
+		const opened = (await peer.call("session/new", { cwd: peer.cwd, mcpServers: [] })) as { sessionId: string };
+		await peer.call("session/prompt", {
+			sessionId: opened.sessionId,
+			prompt: [{ type: "text", text: "/context compact" }],
+		});
+		const reply = peer.updates
+			.filter((params) => (params.update as { sessionUpdate?: string }).sessionUpdate === "agent_message_chunk")
+			.map((params) => (params.update as { content: { text: string } }).content.text)
+			.join("");
+		strictEqual(reply.split(failure).length - 1, 1, reply);
+		// A result line no notice carried still answers.
+		ok(reply.includes("Run /doctor if it keeps failing."), reply);
 	} finally {
 		await peer.stop();
 	}

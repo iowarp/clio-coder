@@ -61,6 +61,18 @@ export const FailureCause = vocabulary([
 	"internal",
 ]);
 export type FailureCause = Static<typeof FailureCause>;
+/**
+ * Why a turn that stopped normally answered nothing (`classifyTurnEnding`): a call the model only wrote out as text or
+ * into its reasoning, a reply that only announced one, reasoning with no reply, or nothing at all (bt-session-res J1).
+ */
+export const TurnNoAnswerCause = vocabulary([
+	"tool_call_in_reasoning",
+	"tool_call_as_text",
+	"tool_call_announced",
+	"reasoning_only",
+	"empty",
+]);
+export type TurnNoAnswerCause = Static<typeof TurnNoAnswerCause>;
 export const StopReason = vocabulary(["stop", "toolUse", "length", "error", "aborted", "unknown"]);
 export const RoundKind = vocabulary(["normal", "text-only", "required", "tools-removed", "unknown"]);
 export const TransportKind = vocabulary(["websocket", "sse", "http", "local", "subprocess", "unknown"]);

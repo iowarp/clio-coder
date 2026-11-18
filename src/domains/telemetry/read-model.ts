@@ -27,6 +27,7 @@ import type {
 	WhyStoppedV1,
 } from "../../core/telemetry/dto.js";
 import { factRef, parseFactRef, TELEMETRY_DTO_VERSION } from "../../core/telemetry/dto.js";
+import type { TurnNoAnswerCause } from "../../core/telemetry/enums.js";
 import type { ClockOrigin, SegmentHeader, TelemetryRecord } from "../../core/telemetry/envelope.js";
 import type { EventPayload, JournalEventName } from "../../core/telemetry/events.js";
 import type { Fact, FactSum } from "../../core/telemetry/fact.js";
@@ -3668,6 +3669,16 @@ const HARNESS_STOP_CAUSES: ReadonlySet<string> = new Set([
 	"shutdown",
 ]);
 
+/** What a turn that stopped normally yet answered nothing did instead, by its journaled cause (bt-session-res J1). */
+const NO_ANSWER_FINDINGS: Record<TurnNoAnswerCause, string> = {
+	tool_call_as_text: "the model wrote its tool call as plain text (tool-call markup), so nothing ran",
+	tool_call_announced:
+		"the model said what it would do next and wrote the call as plain text (tool-call markup), so nothing ran",
+	tool_call_in_reasoning: "the model wrote its tool call into its reasoning (tool-call markup), so nothing ran",
+	reasoning_only: "the model reasoned but wrote no reply and made no tool call",
+	empty: "the model returned no reply and no tool call",
+};
+
 export function whyStopped(source: SessionSource, options: ReadOptions = {}): WhyStoppedV1 {
 	const view: View = { session: source };
 	const analysis = analyze(source);
@@ -3738,7 +3749,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 			? "closed"
 			: !terminal
 				? "no-turns"
-				: terminal.stopReason === "error"
+				: terminal.stopReason === "error" || terminal.terminal.noAnswer !== undefined
 					? "turn-failed"
 					: terminal.stopReason === "aborted"
 						? "turn-cancelled"
@@ -3794,12 +3805,15 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 				: "";
 		// A model that ended its answer reached every stage; naming the last one reads as where a failure struck (bt-20).
 		const normalEnd = !terminal.terminal.cause && (terminal.stopReason === "stop" || terminal.stopReason === "toolUse");
+		const noAnswer = terminal.terminal.noAnswer;
 		findings.push(
 			terminal.terminal.cause
 				? `The last turn stopped (${terminal.stopReason}) on ${terminal.terminal.cause}${stage}${retries}.`
-				: normalEnd
-					? `The last turn ended normally (${terminal.stopReason})${retries}.`
-					: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
+				: noAnswer !== undefined
+					? `The last turn failed without an answer (${terminal.stopReason}, ${noAnswer}): ${NO_ANSWER_FINDINGS[noAnswer]}${retries}.`
+					: normalEnd
+						? `The last turn ended normally (${terminal.stopReason})${retries}.`
+						: `The last turn stopped (${terminal.stopReason})${stage}${retries}.`,
 		);
 		// A worker that turn dispatched settles in its own run journal, so its stop is named here too (cf1h-D3).
 		const lastTurnId = last?.record.ctx.turnId;
@@ -3876,6 +3890,7 @@ export function whyStopped(source: SessionSource, options: ReadOptions = {}): Wh
 					stage: last.record.data.terminal.stage,
 					retries: last.record.data.terminal.retries,
 					callIds: last.record.data.terminal.callIds as CallRowV1["callId"][],
+					...(last.record.data.terminal.noAnswer !== undefined ? { noAnswer: last.record.data.terminal.noAnswer } : {}),
 				}
 			: null,
 		lastCalls,

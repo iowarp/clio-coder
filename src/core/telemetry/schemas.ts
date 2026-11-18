@@ -12,6 +12,7 @@ import {
 	RunTerminalReason,
 	StopReason,
 	TransportKind,
+	TurnNoAnswerCause,
 	vocabulary,
 } from "./enums.js";
 import { EstimateMethod, FactSumSchema, factSchema } from "./fact.js";
@@ -832,6 +833,11 @@ export const TurnSettledSchema = Type.Object(
 				 * and counts in every total; a reader finds it as a matching turn id missing from this list (#434).
 				 */
 				callIds: Type.Array(CallIdSchema),
+				/**
+				 * Set when the turn stopped normally yet answered nothing, so the run failed: why, as every surface reads
+				 * it. Absent on a turn that answered and in journals before bt-session-res J1.
+				 */
+				noAnswer: Type.Optional(TurnNoAnswerCause),
 			},
 			closed,
 		),
