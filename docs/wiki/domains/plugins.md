@@ -23,7 +23,7 @@ symbols:
   - "enabledPluginResourceRoots"
   - "withPluginDiscoveryPass"
 tests:
-  - "tests/contracts/plugin-walks-per-operation.test.ts"
+  - "tests/contracts/plugin-engine.test.ts"
 invariants:
   - "A plugin manifest must declare the exact $schema, a portable name that is not state.json, and an explicit Semantic Version; parsePluginManifest rejects anything else before any install."
   - "Resource and component paths must be relative and must resolve inside the installed root, including through symbolic links; pluginResourcePath throws otherwise."
@@ -33,7 +33,7 @@ invariants:
   - "Interop-origin packages cannot be replaced by a plain install; the install path refuses them with a message to adopt again."
   - "Outside a discovery pass, each plugin listing re-verifies installed trees; inside withPluginDiscoveryPass, repeated listings in one synchronous body reuse the first verdict."
 validate:
-  - "pnpm run test:file -- tests/contracts/plugin-walks-per-operation.test.ts"
+  - "pnpm run test:file -- tests/contracts/plugin-engine.test.ts"
   - "pnpm run typecheck"
 ---
 
@@ -111,12 +111,12 @@ Precedence is applied by `resolvePluginPrecedence(entries)`. Peers compete only 
 
 ## Callers and dependencies
 
-- Upstream: `src/domains/plugins/index.ts` is the domain's public export surface. `PluginsDomainModule` binds `PluginsManifest` from `manifest.js` and `createPluginsBundle` from `extension.js`; neither file was inspected for this page. The resource accessors are consumed by skill and prompt loading. `tests/contracts/plugin-walks-per-operation.test.ts` imports `reloadPluginResources`, `listInstalledPlugins`, and `installPlugin` from `src/domains/plugins/index.ts`, and exercises `createResourcesLoader` from `src/domains/resources/loader.ts`. Other consumers were not traced in source for this page.
+- Upstream: `src/domains/plugins/index.ts` is the domain's public export surface. `PluginsDomainModule` binds `PluginsManifest` from `manifest.js` and `createPluginsBundle` from `extension.js`; neither file was inspected for this page. The resource accessors are consumed by skill and prompt loading. `tests/contracts/plugin-engine.test.ts` imports `reloadPluginResources`, `listInstalledPlugins`, and `installPlugin` from `src/domains/plugins/index.ts`, and exercises `createResourcesLoader` from `src/domains/resources/loader.ts`. Other consumers were not traced in source for this page.
 - Downstream: `src/domains/plugins/state.ts` imports `clioConfigDir` and `clioProjectRoot` from core configuration helpers, `evaluateClioCompatibility` and `isSemanticVersion` from `src/domains/extensions/compatibility.ts`, `pluginContentDigest` from `integrity.ts`, `safeResourceWrite` for the atomic state write, and the library kind helpers. `src/domains/plugins/discovery.ts` imports `evaluateClioCompatibility` and `isLibraryKind` and the integrity capture function. `src/domains/plugins/catalog.ts` uses `runStagingCommandSync` to run a bounded `git clone --depth 1` for GitHub tree sources.
 
 ## Focused test
 
-`tests/contracts/plugin-walks-per-operation.test.ts` pins how many times a listing re-verifies installed trees. Its fixture installs six project-scope plugins (`PLUGINS = 6`), each with a skill, four reference files, and a prompt template, using `installPlugin` with `{ cwd, scope: "project" }`. The first test's `counted` helper measures `fstatSync` minus `openSync` calls and asserts that a single `listInstalledPlugins(cwd, { all: true })` walk costs at least `PLUGINS * 6`. It then asserts per-operation ceilings, such as `completing a slash command` at zero and `reading the library inventory` at one. The second test installs one plugin, expands `/walk-kit-0-run`, rewrites that prompt file on disk, and asserts that completion still lists the template from the committed snapshot while `expandPromptTemplate` refuses to expand the drifted file. This second case is the observable form of the rule that display uses committed roots and execution re-verifies.
+`tests/contracts/plugin-engine.test.ts` row `revokes drifted resources even while an earlier snapshot remains committed` installs one plugin with a skill and a prompt template, expands `/run`, tampers with the installed copy, and asserts that the plugin's skill roots are revoked while completion still lists the template from the committed snapshot and `expandPromptTemplate` refuses it with a message naming `/reload library`. This is the observable form of the rule that display uses committed roots and execution re-verifies. `tests/contracts/plugin-verified-tree.test.ts` pins when a listing re-hashes a tree versus vouching for it by identity.
 
 No focused test was located for the install writer's `stale_plan` refusal, the `locked` refusal, the interop-origin refusal, or `resolvePluginPrecedence`; the search was a repository-wide grep for the discovery, resource, and install symbols across `tests/`. Those branches are described here from source only.
 
