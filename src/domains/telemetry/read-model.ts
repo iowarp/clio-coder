@@ -112,6 +112,11 @@ export interface SessionSource {
 	/** The fork parent; `source` is null when it could not be read. */
 	parent: { sessionId: string; turnId: string; at: string; source: SessionSource | null } | null;
 	/**
+	 * A fork's own start, the time of the `session.forked` row its journal opens with. A window keeps it after it drops
+	 * `parent`, so a fork still counts only the outcomes it recorded itself.
+	 */
+	forkedAt?: string;
+	/**
 	 * The ledger's own lifecycle: `endedAt` is set by a clean close and cleared by a reopen. Sessions that predate the
 	 * journal, and every session until the journal records its own close, end only here (#434 §6.1).
 	 */
