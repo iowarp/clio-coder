@@ -62,7 +62,8 @@ export interface RunEffects {
 	/**
 	 * The same commands read under the wider `grounding` vocabulary, which adds
 	 * read verification (`git diff`), ad-hoc checks (`node -e`) and the runners
-	 * the strict set omits (`npx vitest`, `tsc --noEmit`). Always a superset of
+	 * the strict set omits (`npx vitest`, `tsc --noEmit`). A verify call adds the
+	 * command its check resolved to, read the same way. Always a superset of
 	 * `validationCommands`, because the grounding scope falls back to the strict
 	 * matcher first.
 	 *
@@ -380,7 +381,15 @@ export function createRunEffectsRecorder(cwd: string, options: RunEffectsRecorde
 			if (effects.validationCommand !== null && effects.checkStatusAttributable)
 				validationCommands.add(effects.validationCommand);
 			if (effects.verificationCommand !== null) verificationCommands.add(effects.verificationCommand);
-			if (effects.tool === ToolNames.Verify) verificationCommands.add("tool:verify");
+			if (effects.tool === ToolNames.Verify) {
+				verificationCommands.add("tool:verify");
+				// The check ran its resolved command, so that command grounds as the same text run through bash would.
+				const ran =
+					effects.shellCommand === null || effects.outcome === "blocked" || effects.outcome === "error"
+						? null
+						: validationCommandOf(ToolNames.Bash, { command: effects.shellCommand }, "grounding");
+				if (ran !== null) verificationCommands.add(ran);
+			}
 			if (effects.shellCommand !== null && effects.outcome !== "blocked" && effects.outcome !== "error")
 				executedShellCommands.push(effects.shellCommand);
 		},

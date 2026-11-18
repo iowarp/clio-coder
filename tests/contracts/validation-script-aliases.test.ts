@@ -138,6 +138,8 @@ it("grounds verifier claims that name a typed check by its id or its task gate c
 	const pytest = [{ id: "gate-1", text: "python3 -m pytest -q tests" }];
 	strictEqual(ground("gate-1 (python3 -m pytest -q tests)", pytest), 1);
 	strictEqual(ground("python3 -m pytest -q tests"), 0);
+	strictEqual(ground("verify gate-1 (python3 -m pytest -q tests)"), 1);
+	strictEqual(ground("verify gate-2 (python3 -m pytest -q tests)"), 0);
 });
 
 it("a receipt names the catalog check verify ran, not an npm script that never did", () => {
@@ -160,6 +162,41 @@ it("a receipt names the catalog check verify ran, not an npm script that never d
 		lint.start("verify-2", "verify", { check: "lint" });
 		lint.finish("verify-2", false);
 		deepStrictEqual([...lint.snapshot().validationCommands], ["npm run lint"]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+it("grounds a verify-only run's claim by its check id or resolved command, and never a failed or absent check", () => {
+	const root = mkdtempSync(join(tmpdir(), "clio-verify-grounding-"));
+	try {
+		mkdirSync(join(root, ".clio-coder"));
+		writeFileSync(
+			join(root, ".clio-coder", "verifiers.yaml"),
+			"version: 2\nchecks:\n  - id: python-unittest\n    description: unittest\n    command: [python3, -m, unittest, discover, -s, tests]\n    cwd: .\n    timeoutMs: 60000\n    tags: [test]\n",
+		);
+		const run = (outcome: "ok" | "error") => {
+			const effects = createRunEffectsRecorder(root);
+			effects.start("verify-1", "verify", { check: "python-unittest" });
+			effects.checkOutcome("verify-1", outcome);
+			effects.finish("verify-1", outcome === "error");
+			return effects.snapshot().verificationCommands;
+		};
+		const ground = (claim: string, executedCommands: ReadonlySet<string>) =>
+			groundClaimedValidations({
+				contractKind: "mutation-report",
+				output: JSON.stringify({ validations: [{ name: claim, passed: true }] }),
+				executedCommands,
+				executedCheckingCalls: 1,
+			});
+		const passed = run("ok");
+		const claim = "verify python-unittest (python3 -m unittest discover -s tests)";
+		deepStrictEqual(ground(claim, passed), { claimed: 1, grounded: 1, ungrounded: [], basis: "unmatched-command" });
+		for (const named of ["verify python-unittest", "python3 -m unittest discover -s tests"])
+			strictEqual(ground(named, passed)?.grounded, 1, named);
+		for (const never of ["verify lint", "pytest -q", "verify python-unittest-integration"])
+			strictEqual(ground(never, passed)?.grounded, 0, never);
+		strictEqual(ground(claim, run("error"))?.grounded, 0);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

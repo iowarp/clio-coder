@@ -39,6 +39,7 @@
 import { parseVerifierPayload } from "../../core/json-payload.js";
 import type { ResultContract } from "../agents/result-contract.js";
 import { parseVerifierResult } from "../agents/result-contract.js";
+import { typedValidationSummary } from "../safety/finish-contract.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 
 /** Contract kinds whose terminal payload carries a correctness claim to ground. */
@@ -136,33 +137,50 @@ function claimedValidationNames(output: string | null): string[] {
 	return names;
 }
 
+function contains(text: string, command: string): boolean {
+	let start = text.indexOf(command);
+	while (start >= 0) {
+		const before = text[start - 1];
+		const end = start + command.length;
+		const after = text[end];
+		const beforeBoundary = before === undefined || !/[\w:-]/u.test(before);
+		const afterBoundary =
+			after === undefined ||
+			!/[\w:-]/u.test(after) ||
+			(after === ":" && (text[end + 1] === undefined || /\s/u.test(text[end + 1] ?? "")));
+		if (beforeBoundary && afterBoundary) return true;
+		start = text.indexOf(command, start + 1);
+	}
+	return false;
+}
+
+/**
+ * The identities of the typed checks a claim names as `verify <id>`, spelled as the run records a verify call.
+ * Read from the claim's own text, because a claim such as `verify python-unittest (python3 -m unittest ...)`
+ * also spells a command, and its canonical identity keeps only that command.
+ */
+function namedVerifyChecks(name: string): string[] {
+	const identities: string[] = [];
+	for (const match of normalize(name).matchAll(/(?:^|[^\w:-])verify ([a-z0-9][a-z0-9._:-]*)/gu)) {
+		const id = match[1]?.replace(/[.:]+$/u, "") ?? "";
+		const identity = typedValidationSummary("verify", { args: { check: id } });
+		if (identity !== null) identities.push(normalize(identity));
+	}
+	return identities;
+}
+
 function isExecuted(name: string, executed: ReadonlySet<string>): boolean {
 	const claim = claimIdentity(name);
 	if (claim.length === 0) return true;
 	// A report may name the typed verifier itself. Its successful tool result
 	// is recorded separately from the resolved shell command it ran.
 	if (claim === "verify" || claim === "tool:verify") return executed.has("tool:verify");
+	const verifyChecks = namedVerifyChecks(name);
 	for (const command of executed) {
 		if (command === "tool:verify") continue;
 		const ran = normalize(command);
 		if (ran.length === 0) continue;
-		const contains = (text: string, command: string) => {
-			let start = text.indexOf(command);
-			while (start >= 0) {
-				const before = text[start - 1];
-				const end = start + command.length;
-				const after = text[end];
-				const beforeBoundary = before === undefined || !/[\w:-]/u.test(before);
-				const afterBoundary =
-					after === undefined ||
-					!/[\w:-]/u.test(after) ||
-					(after === ":" && (text[end + 1] === undefined || /\s/u.test(text[end + 1] ?? "")));
-				if (beforeBoundary && afterBoundary) return true;
-				start = text.indexOf(command, start + 1);
-			}
-			return false;
-		};
-		if (contains(claim, ran) || contains(ran, claim)) return true;
+		if (contains(claim, ran) || contains(ran, claim) || verifyChecks.includes(ran)) return true;
 	}
 	return false;
 }
