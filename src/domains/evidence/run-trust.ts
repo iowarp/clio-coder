@@ -52,10 +52,13 @@ export function compareGates(left: GateReview, right: GateReview): number {
 	);
 }
 
-/** The finding the independent-review axis yields, worded once for the assessment and its later recomposition. */
+/**
+ * The finding the independent-review axis yields, worded once for the assessment and its later recomposition. A run
+ * no review judged yields none: the trust line already says "not independently reviewed", and an
+ * `independent-review` tag on it read as though one had (bt-27).
+ */
 export function reviewFinding(
 	review: CanonicalTrustStatus["independentReview"]["state"],
-	succeeded: boolean,
 ): { severity: EvidenceSeverity; tag: EvidenceTag; message: string } | null {
 	if (review === "failed")
 		return { severity: "warn", tag: "independent-review", message: "independent review failed for this run" };
@@ -67,12 +70,6 @@ export function reviewFinding(
 		};
 	if (review === "inconclusive")
 		return { severity: "info", tag: "independent-review", message: "independent review was inconclusive" };
-	if (succeeded && (review === "absent" || review === "unknown"))
-		return {
-			severity: "info",
-			tag: "independent-review",
-			message: "run was not independently reviewed; its result rests on its own record",
-		};
 	return null;
 }
 
@@ -114,7 +111,7 @@ export function readRunTrust(record: RunTelemetryV1 | null, gates: ReadonlyArray
 		// The sealed finding spoke for the review as it stood at the seal; the later decision replaces it.
 		const prior = findings.find((entry) => entry.tag === "independent-review");
 		findings = findings.filter((entry) => entry.tag !== "independent-review");
-		const finding = reviewFinding(trust.independentReview.state, settled.outcome === "succeeded");
+		const finding = reviewFinding(trust.independentReview.state);
 		if (finding !== null)
 			findings.push({
 				id: prior?.id ?? `finding-${String(assessment.findings.length + 1).padStart(3, "0")}`,
