@@ -105,7 +105,7 @@ function declaredVersion(value: Record<string, unknown>): number | null {
 }
 
 /** Whether an intent-shaped value carries a version this build can interpret. */
-export function isSupportedDispatchIntentVersion(value: unknown): boolean {
+function isSupportedDispatchIntentVersion(value: unknown): boolean {
 	if (!isRecord(value)) return false;
 	const version = declaredVersion(value);
 	return version !== null && DISPATCH_INTENT_SUPPORTED_VERSIONS.includes(version);

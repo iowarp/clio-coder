@@ -311,7 +311,7 @@ export function readRunRecording(
 	return { manifest, cast };
 }
 
-export function parseRecordingManifest(value: unknown): RecordingManifest {
+function parseRecordingManifest(value: unknown): RecordingManifest {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("invalid recording manifest");
 	const v = value as Record<string, unknown>;
 	const node = v.node as Record<string, unknown> | null;
