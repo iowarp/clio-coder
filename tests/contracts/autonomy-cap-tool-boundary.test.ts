@@ -159,15 +159,16 @@ it("a cap halt during a tool call lets the call finish and sends no further mode
 			events.some((event) => event.type === "notice" && (event as { text?: string }).text === CAP_REASON),
 			"the turn closes with the cap's notice",
 		);
-		// The cap is the harness's own stop, named on the turn's settlement (bt-26 N2d).
+		// The cap is the harness's own stop, named on the turn's settlement (bt-26 N2d). It landed at the tool
+		// boundary after the call ended, so no stage of that call reads as cut (bt-26 N2f).
 		await journals.flush();
 		const sessionId = session.current()?.id;
 		ok(sessionId);
 		const journal = await readCallJournal(telemetrySessionDirectory(clioStateDir(), sessionId));
 		const turns = journal.records.flatMap(({ record }) => (record.k === "turn.settled" ? [record.data] : []));
 		deepStrictEqual(
-			turns.map((turn) => [turn.stopReason, turn.terminal.cause]),
-			[["toolUse", "autonomy_stop"]],
+			turns.map((turn) => [turn.stopReason, turn.terminal.cause, turn.terminal.stage]),
+			[["toolUse", "autonomy_stop", null]],
 		);
 	} finally {
 		loop.dispose();

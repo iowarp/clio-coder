@@ -656,7 +656,8 @@ export const TurnSettledSchema = Type.Object(
 			{
 				cause: Type.Union([FailureCause, Type.Null()]),
 				// The last stage the turn's final call reached: `streaming` once it produced output. `firstToken` is the
-				// value journals before bt-26 N2a wrote for that; nothing writes it now.
+				// value journals before bt-26 N2a wrote for that; nothing writes it now. Null when a stop with a cause
+				// landed after that call ended, as a cap does at the tool boundary (bt-26 N2f).
 				stage: Type.Union([vocabulary(["transform", "auth", "admission", "send", "firstToken", "streaming"]), Type.Null()]),
 				retries: count,
 				/**
