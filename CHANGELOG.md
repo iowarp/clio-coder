@@ -104,6 +104,10 @@ This release fixes what a WTF-P 0.8.3 brownfield revision found on the official 
 
 ### Fixed
 
+- bt-32: A catalog row whose rates are all zero, such as Inception mercury-3, now reads as unknown cost (pricedBy none) instead of a catalog-priced ~$0.00, so a paid route no longer looks free to cost caps and telemetry. OpenRouter `:free` models keep their catalog $0.
+- bt-39: Clio Coder stops a response that streams the same tool call five or more times and re-prompts it once to make one call.
+- bt-26 N2: A reply cut off by `run --timeout`, a signal or quitting is recorded as Clio Coder's shutdown, with cause `shutdown`, instead of a failure of the route.
+- bt-40: Resuming a session whose turn compacted mid-turn now sends the same prefix the live turn sent, so the first resumed call reads it from cache instead of rewriting everything after the compaction summary.
 - x4-1: The task board, the headless observed line and run --json turn_end.observed read checks by the receipt's rules, so a masked, chained, outdated or out-of-tree check no longer shows as passed there.
 - x4-6: A headless run's receipt counts a check run through bash after the last write, so editing and then running a green test seals verified.
 - x4-2: A check logged through `tee` or a redirect into a log, temp, outside or git-ignored file keeps its outcome, so its green seals and an earlier red stands.
