@@ -918,7 +918,7 @@ interface StatusMeta {
 	outcome?: ToolExecutionFinished["outcome"];
 	/** Refusal reason, rendered only alongside a non-executed outcome. */
 	blockReason?: string | undefined;
-	/** What an in-flight call has produced so far (`146 lines`, `+12 −3`). */
+	/** What an in-flight call has produced so far (`146 lines`, `3 edits`). */
 	live?: string | undefined;
 }
 
@@ -2326,7 +2326,11 @@ function lineNoun(count: number): string {
 	return `${count} ${count === 1 ? "line" : "lines"}`;
 }
 
-/** Index what has streamed and state it for the row: `146 lines`, `+12 -3`. */
+/**
+ * Index what has streamed and state it for the row: `146 lines`, `3 edits`. An edit states no `+` and `-` counts
+ * here: the old and new text's line counts are not its diff, so `preparing · +5 -3` sat above an applied `+3 -1`.
+ * The applied row's diff is the only count.
+ */
 function livePayloadFact(payload: LivePayload, view: LiveToolView): string | undefined {
 	if (payload.tool === "write") {
 		if (payload.content === undefined) return undefined;
@@ -2334,23 +2338,11 @@ function livePayloadFact(payload: LivePayload, view: LiveToolView): string | und
 		tail.update(payload.content);
 		return tail.lineCount > 0 ? lineNoun(tail.lineCount) : undefined;
 	}
-	let added = 0;
-	let removed = 0;
 	payload.edits.forEach((edit, index) => {
-		if (edit.oldText !== undefined) {
-			const tail = view.tail(`${index}:old`, payload.path);
-			tail.update(edit.oldText);
-			removed += tail.lineCount;
-		}
-		if (edit.newText !== undefined) {
-			const tail = view.tail(`${index}:new`, payload.path);
-			tail.update(edit.newText);
-			added += tail.lineCount;
-		}
+		if (edit.oldText !== undefined) view.tail(`${index}:old`, payload.path).update(edit.oldText);
+		if (edit.newText !== undefined) view.tail(`${index}:new`, payload.path).update(edit.newText);
 	});
-	if (added + removed === 0) return undefined;
-	const replacements = payload.edits.length > 1 ? `${payload.edits.length} edits · ` : "";
-	return `${replacements}+${added} -${removed}`;
+	return payload.edits.length > 1 ? `${payload.edits.length} edits` : undefined;
 }
 
 /**

@@ -2270,9 +2270,9 @@ function renderTurnUsageLine(
 		];
 		const callsFact =
 			calls !== null || retries !== null || moved !== null ? [calls, retries, moved].filter(Boolean).join(", ") : null;
-		// `in` counts the cached part, so the cached share travels with the amounts: a narrow row that dropped it alone
-		// read the whole prompt as fresh input. A route that reports no cache states no cached share; Detailed and /usage
-		// keep that unknown.
+		// `in` is the uncached part, so the cached share travels with the amounts: a narrow row that dropped it alone
+		// read the uncached remainder as the whole prompt. A route that reports no cache states no cached share; Detailed
+		// and /usage keep that unknown.
 		const amounts =
 			[stated?.tokens ?? null, stated?.cached != null ? `cached ${stated.cached}` : null].filter(Boolean).join(" · ") ||
 			null;

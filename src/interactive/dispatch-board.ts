@@ -979,14 +979,15 @@ function dispatchCardBody(
 		row.usage.kind === "unavailable" || row.usage.kind === "pending"
 			? null
 			: usageLineCoverage([
-					{ label: "in", quantity: row.usage.prompt },
+					{ label: "prompt", quantity: row.usage.prompt },
 					{ label: "out", quantity: row.usage.output },
 				]);
 	const tokenUnits = nothingMeasured
 		? [theme.fg("body", row.status === "running" || row.status === "enqueued" ? "not measured yet" : USAGE_NOT_MEASURED)]
 		: [
-				// Label-first words, as the turn receipt says them: `in 321 · out 12 · total 333`.
-				theme.fg("body", `in ${lineFigure("prompt", usage.prompt)}`),
+				// Label-first words, as the turn receipt says them: `prompt 321 · out 12 · total 333`. The whole prompt,
+				// cached reads included, is `prompt`; `in` is the uncached input on every surface (bt-11).
+				theme.fg("body", `prompt ${lineFigure("prompt", usage.prompt)}`),
 				theme.fg(
 					"body",
 					`out ${lineFigure("output", usage.output)}${rate !== null ? (options.expanded === true ? ` (${rate}/s wall avg)` : ` ${rate}/s`) : ""}`,
@@ -1359,7 +1360,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: QuotaP
 				"body",
 				`${cost === USAGE_NOT_MEASURED ? "tokens and cost" : "tokens"} not measured${isTerminalStatus(row.status) ? "" : " yet"}`,
 			)
-		: `${theme.fg("body", `in ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
+		: `${theme.fg("body", `prompt ${upFigure ?? USAGE_NOT_MEASURED}`)}${dot}${theme.fg(
 				"body",
 				`out ${downFigure ?? USAGE_NOT_MEASURED}${rate !== null ? ` (${rate}/s)` : ""}`,
 			)}`;
@@ -1855,7 +1856,7 @@ export function runTableRows(
 		{ label: "agent", priority: 9, max: 30 },
 		...(anyNode ? [{ label: "node", priority: 2, max: 12 }] : []),
 		{ label: "elapsed", align: "right" as const, priority: 6, tone: "muted" as const },
-		{ label: "in", align: "right" as const, priority: 4 },
+		{ label: "prompt", align: "right" as const, priority: 4 },
 		{ label: "out", align: "right" as const, priority: 5 },
 		{ label: "cost", align: "right" as const, priority: 3 },
 		...(anyAccount ? [{ label: "account", priority: 1 }] : []),
@@ -1940,7 +1941,7 @@ export function runTableRows(
 					tone: "muted",
 				}
 			: figure("", usage.cost);
-		cells.push(elapsed, figure("in", usage.prompt), figure("out", usage.output), costCell);
+		cells.push(elapsed, figure("prompt", usage.prompt), figure("out", usage.output), costCell);
 		if (anyAccount)
 			cells.push(
 				weekly === null
@@ -1959,7 +1960,7 @@ export function runTableRows(
 	});
 	if (options.style === "compact") {
 		for (let index = fixed.length - 1; index >= 0; index--) {
-			if (!["in", "out", "cost", "node", "account"].includes(fixed[index]?.label ?? "")) continue;
+			if (!["prompt", "out", "cost", "node", "account"].includes(fixed[index]?.label ?? "")) continue;
 			fixed.splice(index, 1);
 			for (const cells of rows) cells.splice(index, 1);
 		}

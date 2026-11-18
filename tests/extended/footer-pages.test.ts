@@ -207,7 +207,7 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 	const text = plain(scrolled(snapshot, 160, 120));
 	match(text, /Read the interview implementation/);
 	match(text, /Inspect the dashboard telemetry\./);
-	match(text, /in 68,000.*out 2,000/);
+	match(text, /prompt 68,000.*out 2,000/);
 	doesNotMatch(text, /Work.*context 17k \/ 262\.1k/);
 });
 
@@ -278,7 +278,7 @@ test("finished agents collapse into bounded history while retries retain live ca
 	const text = plain(scrolled(snapshot, 160, 120));
 	match(text, /Active retry task/);
 	match(text, /Workers ─.*1 active · 8 done/);
-	match(text, /✓ done.*scout.*in 68,000.*out 2,000.*\/view dispatch:done-0/);
+	match(text, /✓ done.*scout.*prompt 68,000.*out 2,000.*\/view dispatch:done-0/);
 	match(text, /4 more finished runs/);
 	doesNotMatch(text, /Historical verbose task/);
 	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
