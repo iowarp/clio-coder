@@ -67,6 +67,7 @@ Usage:
   clio-coder --autonomy <level>   start this interactive session at default|yolo
   clio-coder --allow-tools <names>     limit this interactive session's tools; none disables all
   clio-coder --delegate-tools <names>  limit the tools this session's workers may hold
+  clio-coder --max-context-tokens <N>  cap this interactive session's context budget, as for clio-coder run
   clio-coder --session-file <path>     keep this session's live state (working, idle, awaiting) in a JSON file; the exit record lands there too
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
@@ -235,6 +236,7 @@ async function main(argv: string[]): Promise<number> {
 		autonomy,
 		toolLimits,
 		sessionFile,
+		maxContextTokens,
 		bootFlags,
 		rootFlags,
 		rest,
@@ -293,6 +295,14 @@ async function main(argv: string[]): Promise<number> {
 		printError("--session-file applies to the interactive session only; start clio-coder without a subcommand.");
 		return 2;
 	}
+	if (maxContextTokens !== undefined && subcommand) {
+		printError(
+			subcommand === "run"
+				? `--max-context-tokens before a subcommand applies to the interactive session only; pass it after it: clio-coder run --max-context-tokens ${maxContextTokens} "<task>"`
+				: `--max-context-tokens applies to the interactive session and clio-coder run; clio-coder ${subcommand} does not honor it.`,
+		);
+		return 2;
+	}
 	// A `dev` command is judged by the command it names, which is the one that
 	// would have received and dropped the options.
 	const refusal = unhonoredBootFlag(subcommand === "dev" ? subArgs[0] : subcommand, bootFlags);
@@ -309,6 +319,7 @@ async function main(argv: string[]): Promise<number> {
 			...(autonomy === undefined ? {} : { autonomy }),
 			...(toolLimits === undefined ? {} : { toolLimits }),
 			...(sessionFile === undefined ? {} : { sessionFile }),
+			...(maxContextTokens === undefined ? {} : { maxContextTokens }),
 		});
 	}
 
