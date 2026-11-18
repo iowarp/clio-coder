@@ -88,12 +88,21 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * The running assignment that owns this row. A hosted worker's published lineage root names the main run, which keys
+ * no assignment, and `attempts` holds only finalized attempts. So a live first attempt is found by its own id, which
+ * is its assignment id, and a live retry by the earlier attempt it continues.
+ */
 function assignmentFor(row: RunEnvelope): DurableAssignmentRecord | null {
 	const rootRunId = row.lineage?.rootRunId ?? row.id;
-	const records = listStoredAssignments();
+	const retriedFrom = row.lineage !== undefined && row.lineage.attempt > 0 ? row.lineage.parentRunId : null;
+	const records = listStoredAssignments().filter((record) => record.status === "running");
 	return (
-		records.find((record) => record.assignmentId === rootRunId && record.status === "running") ??
-		records.find((record) => record.attempts.includes(row.id) && record.status === "running") ??
+		records.find((record) => record.assignmentId === rootRunId) ??
+		records.find((record) => record.assignmentId === row.id) ??
+		records.find(
+			(record) => record.attempts.includes(row.id) || (retriedFrom !== null && record.attempts.includes(retriedFrom)),
+		) ??
 		null
 	);
 }
