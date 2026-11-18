@@ -394,9 +394,10 @@ Every headless main-agent run record carries a `safety` summary and a `noop` fla
 
 `safety.blockedAttempts` keeps the first 50 blocked calls, and clips each reason to 500 characters. When more calls than that were blocked, `safety.blockedAttemptsTruncated` counts the ones left out; the field is absent otherwise. `safety.guardBlockedAttempts` and `safety.permissionRequestedAttempts` keep their first 50 the same way, and `safety.decisions.guardBlocked` and `safety.decisions.permissionRequested` stay their exact counts. The per-tool `blocked` counts in `toolStats` stay exact either way.
 
-`noop` is true when either condition holds:
+`noop` is true when any of these conditions holds:
 
-- at least one block remains unresolved and no mutating call succeeded, or
+- at least one block remains unresolved and no mutating call succeeded,
+- a dispatch call failed before any worker started (an unknown `node`, for example), no later dispatch started one, no other substantive call succeeded after it, and no mutating call succeeded, or
 - the run called tools and none of them succeeded.
 
 A refusal from the operator's `--read-only` ceiling stays in
@@ -421,8 +422,10 @@ recovery. A successful dispatch counts as a write only when its task worktree
 was merged into this workspace; other dispatch work does not, so inspect worker
 run records when assessing delegated changes.
 
-An unresolved block with no successful write exits 1 and seals `failed` with
-`outcomeDetail: "noop"`, even without `--fail-on-noop`. A successful `limitation`
+An unresolved block, or a delegated task that never started, with no successful
+write exits 1 and seals `failed` with `outcomeDetail: "noop"`, even without
+`--fail-on-noop`; stderr reads `clio-coder run: no-op: the delegated task never
+started (<reason>) and no write succeeded` for the second. A successful `limitation`
 call likewise records failure with detail `limitation`. The flag additionally
 fails runs whose attempted tools all failed without a block. Existing errors,
 interruptions, and timeouts retain their outcomes. The model's final prose is

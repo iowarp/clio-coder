@@ -97,6 +97,29 @@ describe("evidence integrity boundary", () => {
 		deepStrictEqual(readRunTrust(record).trust, inspectRunTrustStatus(record).status);
 	});
 
+	it("names an approval timeout as the cause of a refused worker call (bt-11 t)", () => {
+		const draft = fixtureReceiptDraft(fixtureEnvelope("approval-timeout-refusal"));
+		draft.toolStats = [
+			{ tool: "read", count: 1, ok: 1, errors: 0, blocked: 0, totalDurationMs: 1 },
+			{ tool: "bash", count: 1, ok: 0, errors: 0, blocked: 1, totalDurationMs: 1 },
+		];
+		draft.safety = {
+			decisions: {
+				allowed: 1,
+				blocked: 0,
+				permissionRequested: 1,
+				escalationRequested: 1,
+				escalationApproved: 0,
+				escalationDenied: 0,
+				escalationTimedOut: 1,
+			},
+			blockedAttempts: [],
+			permissionRequestedAttempts: [{ tool: "bash", actionClass: "execute" }],
+		};
+		const labels = runEvidenceLabels(finishedRun(draft), PRODUCER_INTEGRITY).join(" ");
+		match(labels, /refused_cause=approval_timeout:1 \(a call waited for approval and no one answered in time\)/u);
+	});
+
 	it("treats run ids as identities, never paths", async () => {
 		for (const id of ["../receipt", "nested/receipt", "/absolute"]) {
 			await rejects(inspectRunEvidence("/state", id), /invalid run id|path separators/);

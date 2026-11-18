@@ -397,6 +397,25 @@ describe("headless no-op contract through the built binary", () => {
 		match(turn.stderr, /no-op under --fail-on-noop: 1 tool call ran and none succeeded/);
 	});
 
+	test("a delegated task that never started fails the run as a no-op (c16-B)", async () => {
+		const { turn, envelope } = await headlessTurn({
+			autonomy: "default",
+			steps: [
+				{
+					id: "call-dispatch",
+					name: "dispatch",
+					arguments: { agent: "coder", task: "Apply the change.", node: "no-such-node" },
+				},
+			],
+			failOnNoop: false,
+			reply: "The worker could not start, so the change was not applied.",
+		});
+		strictEqual(turn.code, 1, turn.stderr);
+		strictEqual(envelope.outcome, "failed");
+		strictEqual(envelope.outcomeDetail, "noop");
+		match(turn.stderr, /no-op: the delegated task never started \([^)]*unknown fleet node 'no-such-node'/u);
+	});
+
 	test("--fail-on-noop is refused on the --agent path", async () => {
 		const scratch = headlessScratch("clio-coder-noop-agent-");
 		scratches.push(scratch);

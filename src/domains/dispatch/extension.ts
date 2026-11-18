@@ -116,6 +116,7 @@ import { DEFAULT_TERMINATION_GRACE_MS, DEFAULT_TERMINATION_WAIT_MS } from "../..
 import { engineRetryDelayMs } from "../../engine/ai.js";
 import { isClaudeSdkTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
+import { INTERNAL_HELPER_RESULT_TOOL } from "../../engine/worker-tools.js";
 import type { AskUserHandler } from "../../tools/ask-user.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import {
@@ -379,7 +380,12 @@ import {
 import { routeFactVerdict } from "./fleet-preflight.js";
 import { assertFleetProjectAuthority, verifyFleetProject } from "./fleet-project-verification.js";
 import { competeStanceLiner, isBoundedGateRolePrompt } from "./gate-role-prompts.js";
-import { effectiveWorkerPermissionMode, evaluateJudgedGrant, evaluateMainGrant } from "./grant-authority.js";
+import {
+	effectiveWorkerPermissionMode,
+	evaluateJudgedGrant,
+	evaluateMainGrant,
+	judgeWithheldCause,
+} from "./grant-authority.js";
 import { createGrantBroker, type GrantRecord, type GrantState } from "./grant-broker.js";
 import {
 	classifyHeartbeat,
@@ -1127,7 +1133,9 @@ function foldAssistantCall(
 
 /**
  * Counts one finished tool call's safety decision, a tool guard's block apart from a safety refusal, and records it as
- * a blocked attempt when it was refused, in the list of the counter that counted it (bt-15 c12b, c13a).
+ * a blocked attempt when it was refused, in the list of the counter that counted it (bt-15 c12b, c13a). A parked ask
+ * the registry denied (`deniedPark`, as when no operator can answer a worker's ask) arrives as a block but is a
+ * permission request, as the headless main run counts it.
  */
 function foldToolDecision(
 	payload: {
@@ -1138,6 +1146,7 @@ function foldToolDecision(
 		reasonCode?: string;
 		policySource?: string;
 		reason?: string;
+		deniedPark?: unknown;
 	},
 	tool: string,
 	counts: { allowed: number; blocked: number; guardBlocked: number; permissionRequested: number },
@@ -1145,11 +1154,13 @@ function foldToolDecision(
 	guardBlockedAttempts: SafetyBlockedAttempt[],
 	permissionRequestedAttempts: SafetyBlockedAttempt[],
 ): void {
-	const guardBlock = payload.decision === "blocked" && payload.reasonCode === TOOL_GUARD_REASON_CODE;
+	const deniedAsk = payload.decision === "blocked" && payload.deniedPark === true;
+	const permissionAsk = payload.decision === "permission_requested" || deniedAsk;
+	const guardBlock = payload.decision === "blocked" && !deniedAsk && payload.reasonCode === TOOL_GUARD_REASON_CODE;
 	if (payload.decision === "allowed") counts.allowed += 1;
+	else if (permissionAsk) counts.permissionRequested += 1;
 	else if (guardBlock) counts.guardBlocked += 1;
 	else if (payload.decision === "blocked") counts.blocked += 1;
-	else if (payload.decision === "permission_requested") counts.permissionRequested += 1;
 	if (payload.outcome !== "blocked" && payload.decision !== "blocked") return;
 	const attempt: SafetyBlockedAttempt = { tool };
 	if (payload.actionClass !== undefined) attempt.actionClass = payload.actionClass;
@@ -1157,12 +1168,8 @@ function foldToolDecision(
 	if (payload.reasonCode !== undefined) attempt.reasonCode = payload.reasonCode;
 	if (payload.policySource !== undefined) attempt.policySource = payload.policySource;
 	if (payload.reason !== undefined) attempt.reason = payload.reason;
-	(guardBlock
-		? guardBlockedAttempts
-		: payload.decision === "permission_requested"
-			? permissionRequestedAttempts
-			: blockedAttempts
-	).push(attempt);
+	if (deniedAsk) attempt.permissionRequired = true;
+	(guardBlock ? guardBlockedAttempts : permissionAsk ? permissionRequestedAttempts : blockedAttempts).push(attempt);
 }
 
 const CALL_STOP_REASONS: ReadonlySet<string> = new Set(["stop", "length", "toolUse", "error", "aborted"]);
@@ -2645,6 +2652,21 @@ function resolveDispatchPermit(
 	return permit;
 }
 
+/** What decides whether the safety judge can answer this dispatch's worker asks. */
+function workerJudgeState(
+	settings: EffectiveSettings,
+	target: ResolvedTarget,
+	judgeSeated: boolean,
+): Parameters<typeof effectiveWorkerPermissionMode>[0] {
+	return {
+		mode: settings?.fleet.permissions.mode ?? "deny",
+		autonomy: operatorAdmissionAutonomy(settings),
+		judgeEnabled: settings?.safety.judge.enabled === true,
+		judgeSeated,
+		boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
+	};
+}
+
 /** True when the main session's safety judge, not the main agent, decides this permit's main-authority asks. */
 function judgeRoutedPermit(permit: WorkerPermit, settings: EffectiveSettings): boolean {
 	return mainGrantsUnavailable(permit.allowance) && settings?.fleet.permissions.mode === "judge";
@@ -2681,13 +2703,7 @@ function resolveDispatchPermitOnce(
 		...(req.inheritedPermitAllowance !== undefined ? { inherited: req.inheritedPermitAllowance } : {}),
 		// Contained yolo hands workers default's permit and routes (ob-yolo D1).
 		operatorAutonomy: operatorAdmissionAutonomy(settings),
-		mode: effectiveWorkerPermissionMode({
-			mode: settings?.fleet.permissions.mode ?? "deny",
-			autonomy: operatorAdmissionAutonomy(settings),
-			judgeEnabled: settings?.safety.judge.enabled === true,
-			judgeSeated,
-			boundGrants: target.runtime.kind === "http" && runtimeEnforcement(target.runtime).grantPauseResume,
-		}),
+		mode: effectiveWorkerPermissionMode(workerJudgeState(settings, target, judgeSeated)),
 		hostHelper,
 		runtime: {
 			id: target.runtime.id,
@@ -4082,6 +4098,8 @@ export function createDispatchBundle(
 	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
+	/** The judge-withheld notice is a process fact, so it is raised once, not on every dispatch. */
+	let judgeWithheldAnnounced = false;
 	// The settings with the operator's live level in place of the configured one,
 	// for the autonomy reads alone: an ACP session's mode can differ from settings.
 	// The live level is the dispatch ceiling. A dispatcher with no live source (a
@@ -6284,6 +6302,17 @@ export function createDispatchBundle(
 			admission.mcp,
 		);
 		if (!judgeRoutedPermit(permit, settings)) assertMainGrantRoutable(req, target.runtime, permit);
+		const judgeWithheld = judgeWithheldCause(
+			workerJudgeState(withLiveAutonomy(settings), target, options?.workerAskJudge !== undefined),
+		);
+		if (judgeWithheld !== null && req.requestOrigin !== "internal" && !judgeWithheldAnnounced) {
+			judgeWithheldAnnounced = true;
+			context.bus.emit("run.scope_notice_raised", {
+				code: "worker_judge_withheld",
+				level: "warning",
+				message: `[dispatch scope] fleet.permissions.mode is judge, but ${judgeWithheld}, so workers dispatched here run with the deny permit and each ask they raise is denied. The safety judge answers worker asks in an interactive session at autonomy default with safety.judge.enabled on.`,
+			});
+		}
 		const workerPermissionMode = workerPermissionModeForPermit(permit.allowance);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, workerPermissionMode);
 		const effectiveAdmission: DispatchAdmissionStage = {
@@ -8418,6 +8447,14 @@ export function createDispatchBundle(
 		const finishContractEntries: unknown[] = [];
 		const verifyCalls: VerifyCallLog = { pending: new Map(), calls: [] };
 		const pendingCapabilities = new Map<string, string>();
+		// The calls that reached a CLIO tool. A native call the engine refused before that, such as one whose arguments
+		// failed the tool's schema, ends in error without a CLIO start or finish, and still counts as an errored call.
+		const reachedTool = new Set<string>();
+		// A producer without call ids cannot tie a start to its end, so such a stream counts only its CLIO finishes.
+		let startsCarryIds = true;
+		// The calls of a reply the output token limit cut off. The engine fails each without running it, so they are
+		// neither refused nor errored and toolStats leaves them out.
+		const outputLimitCalls = new Set<string>();
 		// A gateway wrapper's finish waits for its result: a chain's settled steps count as the calls they are, so the
 		// wrapper counts only when none settled. Counting both made an N-step chain N + 1 calls (bt-14).
 		const gatewayFinishes = new Map<string, ToolFinishPayload>();
@@ -8542,6 +8579,7 @@ export function createDispatchBundle(
 					responseId?: unknown;
 					stopReason?: unknown;
 					errorMessage?: unknown;
+					content?: unknown;
 				};
 				payload?: {
 					callIndex?: number;
@@ -8579,9 +8617,22 @@ export function createDispatchBundle(
 				toolCallId?: string;
 				args?: unknown;
 				result?: unknown;
+				isError?: boolean;
 			};
 			if (event.type === "clio_coder_tool_start" && event.payload && typeof event.payload.tool === "string") {
 				recordToolStart(inFlightTools, event.payload);
+				if (typeof event.payload.toolCallId === "string") reachedTool.add(event.payload.toolCallId);
+				else startsCarryIds = false;
+			}
+			if (
+				event.type === "message_end" &&
+				event.message?.role === "assistant" &&
+				event.message.stopReason === "length" &&
+				Array.isArray(event.message.content)
+			) {
+				for (const block of event.message.content) {
+					if (isRecord(block) && block.type === "toolCall" && typeof block.id === "string") outputLimitCalls.add(block.id);
+				}
 			}
 			if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
 				pendingCapabilities.set(event.toolCallId, effectiveToolCall(event.toolName, event.args).toolName);
@@ -8636,6 +8687,22 @@ export function createDispatchBundle(
 				}
 				recordWorkerRunEffect(runEffects, event);
 				recordWorkerVerifyCall(verifyCalls, event);
+				if (
+					event.type === "tool_execution_end" &&
+					lifecycle.runtimeKind === "http" &&
+					startsCarryIds &&
+					event.isError === true &&
+					event.toolCallId &&
+					!reachedTool.has(event.toolCallId) &&
+					!outputLimitCalls.has(event.toolCallId) &&
+					event.toolName !== INTERNAL_HELPER_RESULT_TOOL
+				) {
+					recordToolFinish(toolStats, {
+						tool: pendingCapabilities.get(event.toolCallId) ?? String(event.toolName),
+						outcome: "error",
+					});
+					pendingCapabilities.delete(event.toolCallId);
+				}
 				if (event.type === "tool_execution_end") {
 					const children = gatewayChainReceipts(String(event.toolName), event.result);
 					const wrapper = gatewayFinishes.get(event.toolCallId ?? "");

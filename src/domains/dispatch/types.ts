@@ -627,7 +627,10 @@ export interface RunResultSafetySummary {
 	 * distinct from the outcome axis (`blockedAttempts`, plus `toolStats`/
 	 * `toolActivity` blocked counts), which records whether a call executed.
 	 * `allowed` + `blocked` + `guardBlocked` + `permissionRequested` equals the
-	 * total tool calls. `blocked` counts only safety refusals, hard denials by a
+	 * tool calls that reached admission; a native call the engine refused first,
+	 * such as one whose arguments failed the tool's schema, counts in `toolStats`
+	 * as an error under no decision. A call in a reply the output token limit cut
+	 * off never ran and counts nowhere. `blocked` counts only safety refusals, hard denials by a
 	 * policy rule; a tool guard holding back a call (reason code `guard_block`,
 	 * such as rule `guard.loop`) counts under `guardBlocked`. Receipts written
 	 * before `guardBlocked` existed lack it and count guard blocks under

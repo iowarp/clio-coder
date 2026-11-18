@@ -20,6 +20,7 @@ const SCOPE_NOTICE_CODES: Record<DispatchScopeNoticePayload["code"], true> = {
 	sister_handbook_pending: true,
 	worker_merged: true,
 	peer_instructions_stale: true,
+	worker_judge_withheld: true,
 };
 
 export const DISPATCH_SCOPE_NOTICE_CODES = Object.keys(SCOPE_NOTICE_CODES) as ReadonlyArray<
