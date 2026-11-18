@@ -2276,15 +2276,22 @@ function renderTurnUsageLine(
 		const amounts =
 			[stated?.tokens ?? null, stated?.cached != null ? `cached ${stated.cached}` : null].filter(Boolean).join(" · ") ||
 			null;
-		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies.
+		// Shown in this order; kept by rank, where a bare call count yields to the amounts it qualifies. Amounts too wide
+		// for the row leave a `…` in their place, so a narrow row never passes its call count off as the whole spend.
 		const ordered = [callsFact, coverageNote, amounts];
 		const rank = retries === null && moved === null ? [2, 1, 0] : [0, 1, 2];
 		const kept = new Set<number>();
-		for (const index of rank) {
-			const fact = ordered[index];
-			if (fact == null) continue;
+		const fits = (index: number) => {
 			const trial = ordered.filter((_, at) => at === index || kept.has(at)) as string[];
-			if (visibleWidth(joinFacts([...rowFacts, ...trial, ...endedFact])) <= room) kept.add(index);
+			return visibleWidth(joinFacts([...rowFacts, ...trial, ...endedFact])) <= room;
+		};
+		for (const index of rank) {
+			if (ordered[index] == null) continue;
+			if (fits(index)) kept.add(index);
+			else if (index === 2) {
+				ordered[2] = GLYPH.ellipsis;
+				if (fits(2)) kept.add(2);
+			}
 		}
 		rowFacts.push(...(ordered.filter((fact, at) => fact != null && kept.has(at)) as string[]));
 		return [`${glyph}${dimLine(releaseSpaces(joinFacts([...rowFacts, ...endedFact])), room)}`, ...noAnswer];
